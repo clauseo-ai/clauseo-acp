@@ -124,9 +124,10 @@ pub use record::{
 };
 pub use set_aside::{
     Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,
-    SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideBookkeeping, SetAsideFailure,
-    forget_set_aside_bookkeeping, set_aside_record_closed,
+    SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure,
 };
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use set_aside::{SetAsideBookkeeping, forget_set_aside_bookkeeping};
 #[cfg(windows)]
 pub use set_aside::{
     after_session, before_launch, before_launch_checked, list_set_aside, restore_set_aside,

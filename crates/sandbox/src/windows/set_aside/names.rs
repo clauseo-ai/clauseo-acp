@@ -8,19 +8,19 @@
 //! stand-in) a name is bytes, read as WTF-8 (UTF-8 that also holds lone surrogates); bytes
 //! that aren't WTF-8 can't be written, and the file's write fails.
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 use super::files::FileId;
 
 /// An item's path below the matter's root, one name per folder and its own name last: its key
 /// in the record.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(super) type Key = Vec<OsString>;
 
 /// One name as the JSON files hold it.
@@ -219,7 +219,7 @@ pub(super) mod path {
 }
 
 /// One of the record's items: its path below the root and its file ID.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Kept<T> {
@@ -230,7 +230,7 @@ struct Kept<T> {
 
 /// The record's names or links, for `#[serde(with)]`: a list of `{"path": [<name>, ...],
 /// "id": ...}`, so a key needs no joining and no escaping.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(super) mod keyed {
     use super::{BTreeMap, Deserialize, Deserializer, Kept, Key, Serialize, Serializer};
 
@@ -262,8 +262,8 @@ pub(super) mod keyed {
 }
 
 /// Only so the record's types are named here, where its JSON is.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(super) type Names = BTreeMap<Key, Option<FileId>>;
 /// See [`Names`].
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(super) type Links = BTreeMap<Key, FileId>;

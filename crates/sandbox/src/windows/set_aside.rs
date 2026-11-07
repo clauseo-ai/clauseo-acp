@@ -103,18 +103,20 @@ pub const SET_ASIDE_BOOKKEEPING: [&str; 2] = ["record.json", "set-aside.lock"];
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;
-pub use bookkeeping::{SetAsideBookkeeping, forget_set_aside_bookkeeping, set_aside_record_closed};
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use bookkeeping::{SetAsideBookkeeping, forget_set_aside_bookkeeping};
 #[cfg(test)]
 pub(crate) use fast::open_session;
 #[cfg(any(windows, test))]
 pub(crate) use fast::under_lock;
 
+#[cfg(any(windows, test, feature = "test-support"))]
 mod bookkeeping;
 #[cfg(any(windows, test))]
 mod check;
 #[cfg(any(windows, test))]
 mod fast;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 mod files;
 #[cfg(any(windows, test))]
 mod moves;

@@ -141,7 +141,9 @@ fn as_the_owner_every_matter_is_forgotten_as_the_owner_then_the_record_goes() {
 }
 
 /// A set-aside record with no open session, as a clean close leaves it.
-pub(super) const CLOSED: &[u8] = br#"{"version": 1, "sessions": [], "names": []}"#;
+pub(super) const CLOSED: &[u8] =
+    b"{\"version\": 1, \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \
+    \"sessions\": [], \"names\": []}";
 
 /// `<data_dir>\sandbox\set-aside\<matter>`, made, holding what every launch leaves there.
 pub(super) fn bookkeeping(data_dir: &Path, matter: MatterId) -> PathBuf {

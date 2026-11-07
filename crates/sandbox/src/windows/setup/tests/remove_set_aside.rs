@@ -16,7 +16,8 @@ use crate::windows::write;
 use crate::windows::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR};
 
 /// A record whose session never had its after-session pass: a crash's changes still unchecked.
-const OPEN: &[u8] = br#"{"version": 1, "sessions": ["s1"], "names": []}"#;
+const OPEN: &[u8] = b"{\"version\": 1, \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \
+    \"sessions\": [\"s1\"], \"names\": []}";
 
 /// Makes `link`, in `machine`'s scratch folder, a link to the folder `target`: a junction on
 /// Windows, a symbolic link elsewhere.
