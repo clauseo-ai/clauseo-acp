@@ -335,23 +335,20 @@ impl HostConfig {
         self
     }
 
-    /// How long an agent with nothing pending stays live before the host stops it (default
-    /// [`IDLE_LIMIT`], 300 s); tests shorten it. `Duration::MAX` never stops one.
+    /// How long an agent with nothing pending stays live (default [`IDLE_LIMIT`], 300 s).
     pub fn with_idle_limit(mut self, limit: std::time::Duration) -> Self {
         self.idle.limit = limit;
         self
     }
 
-    /// How many agents may be live at once on a machine of 8 GB or less (default
-    /// [`LIVE_AGENTS`], 2), the memory from [`Self::with_machine_memory`].
+    /// Agents live at once on a machine of 8 GB or less (default [`LIVE_AGENTS`], 2).
     pub fn with_live_agents(mut self, agents: usize) -> Self {
         self.idle.live_agents = agents;
         self
     }
 
-    /// How long an agent must have been idle before the live-agents cap may stop it to make
-    /// room for another thread's launch (default [`CAP_MIN_IDLE`], 60 s); tests shorten it.
-    /// With no agent idle that long, the launch goes ahead past the cap.
+    /// How long an agent must be idle before the live-agents cap may stop it for another
+    /// thread's launch (default [`CAP_MIN_IDLE`], 60 s); with none, the launch passes the cap.
     pub fn with_cap_min_idle(mut self, min_idle: std::time::Duration) -> Self {
         self.idle.cap_min_idle = min_idle;
         self

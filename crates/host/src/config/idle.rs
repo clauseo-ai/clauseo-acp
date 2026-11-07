@@ -8,6 +8,8 @@ use crate::browser::limits::SMALL_MACHINE_BYTES;
 
 /// How long an agent with nothing pending stays live: 300 s, decided on 2026-11-06 on G3's
 /// proposal (`budgets.toml` `agent_idle_stop`).
+/// [`HostConfig::with_idle_limit`](crate::HostConfig::with_idle_limit) sets another; tests
+/// shorten it, and `Duration::MAX` never stops one.
 pub const IDLE_LIMIT: Duration = Duration::from_secs(300);
 
 /// How many agents may be live at once on a machine of 8 GB or less: 2, the design rule
