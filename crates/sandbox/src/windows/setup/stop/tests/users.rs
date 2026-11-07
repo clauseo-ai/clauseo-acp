@@ -138,7 +138,7 @@ fn a_process_of_unknown_user_marks_every_pool_user_before_anything_is_stopped() 
     assert_eq!(StopExit::NotStopped.as_code(), 48);
     // One mark of all three, in the first pass, before the pool user's process is suspended;
     // the second pass finds no one new to mark.
-    assert_eq!(fake.done[..3], ["snapshot", "mark 3", "suspend 10"]);
+    assert_eq!(fake.done[1..4], ["snapshot", "mark 3", "suspend 10"]);
     assert_eq!(
         fake.done
             .iter()

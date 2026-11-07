@@ -6,9 +6,11 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE};
 
 mod completed;
 mod jobs;
+mod sequence;
 mod users;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
@@ -29,12 +31,14 @@ fn sid(rid: u32) -> Sid {
 enum Marks {
     /// Written.
     Written,
-    /// The set-up lock stays held.
+    /// The set-up lock stays held, once the reservation has taken and given it back.
     LockBusy,
     /// The write fails.
     WriteFails,
     /// The marks are written, but `StopCompleted`'s write fails.
     CompletionFails,
+    /// The set-up lock stays held from the first try, the reservation's.
+    ReserveBusy,
 }
 
 /// The fake: the record, the processes each snapshot sees, and everything done, in order.
@@ -67,8 +71,17 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
-    /// The record's `StopCompleted` and `StopSequence` once written: `None` before.
-    completed: Option<(u64, u64)>,
+    /// The record's `REG_QWORD` values: `StopNext`, `StopCompleted`, `StopSequence`.
+    values: BTreeMap<&'static str, u64>,
+    /// The set-up lock's tries.
+    locks: usize,
+    /// The record's reads (`Stopper::pool`).
+    pool_reads: usize,
+    /// From this read of the record on (0 the first), the pool it gives: `Ok(None)` is the key
+    /// gone, which no write can make again.
+    pool_from: Option<(usize, Result<Option<Pool>, Failed>)>,
+    /// The `Stop*` value whose reads fail.
+    read_fails: Option<&'static str>,
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
@@ -98,7 +111,11 @@ impl Fake {
             marks: Marks::Written,
             held: false,
             resets: Vec::new(),
-            completed: None,
+            values: BTreeMap::new(),
+            locks: 0,
+            pool_reads: 0,
+            pool_from: None,
+            read_fails: None,
             end_at: None,
             done: Vec::new(),
             logged: Vec::new(),
@@ -112,6 +129,28 @@ impl Fake {
             .iter()
             .filter_map(|line| line.strip_prefix("stop "));
         pids.map(|pid| pid.parse().unwrap()).collect()
+    }
+
+    /// `StopCompleted` and `StopSequence`, once both are written.
+    fn completed(&self) -> Option<(u64, u64)> {
+        let at = self.values.get(STOP_COMPLETED)?;
+        Some((*at, *self.values.get(STOP_SEQUENCE)?))
+    }
+
+    /// An earlier run's `StopCompleted` and `StopSequence`, or neither.
+    fn set_completed(&mut self, pair: Option<(u64, u64)>) {
+        for name in [STOP_COMPLETED, STOP_SEQUENCE] {
+            self.values.remove(name);
+        }
+        if let Some((at, sequence)) = pair {
+            self.values.insert(STOP_COMPLETED, at);
+            self.values.insert(STOP_SEQUENCE, sequence);
+        }
+    }
+
+    /// Whether the record's key is gone, as the last read of the record found it.
+    fn gone(&self) -> bool {
+        matches!(&self.pool_from, Some((from, Ok(None))) if self.pool_reads > *from)
     }
 
     /// The snapshots taken.
@@ -148,7 +187,12 @@ impl Stopper for Fake {
     }
 
     fn pool(&mut self) -> Result<Option<Pool>, Failed> {
-        self.pool.clone()
+        let at = self.pool_reads;
+        self.pool_reads += 1;
+        match &self.pool_from {
+            Some((from, pool)) if at >= *from => pool.clone(),
+            _ => self.pool.clone(),
+        }
     }
 
     fn check_pool(&mut self, _pool: &Pool) -> Result<(), Failed> {
@@ -216,7 +260,13 @@ impl Stopper for Fake {
 
     fn lock(&mut self) -> Result<bool, Failed> {
         assert!(!self.held, "taken once");
-        self.held = self.marks != Marks::LockBusy;
+        let busy = match self.marks {
+            Marks::ReserveBusy => true,
+            Marks::LockBusy => self.locks > 0,
+            Marks::Written | Marks::WriteFails | Marks::CompletionFails => false,
+        };
+        self.locks += 1;
+        self.held = !busy;
         Ok(self.held)
     }
 
@@ -238,15 +288,28 @@ impl Stopper for Fake {
         filetime(self.now)
     }
 
-    fn record_completed(&mut self, at: u64) -> Result<u64, Failed> {
+    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
+        assert!(self.held, "read under the set-up lock");
+        if self.read_fails == Some(name) {
+            return Err("the record's value isn't a REG_QWORD".to_owned());
+        }
+        if self.gone() {
+            return Ok(None);
+        }
+        Ok(self.values.get(name).copied())
+    }
+
+    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
         assert!(self.held, "written under the set-up lock");
-        if self.marks == Marks::CompletionFails {
+        if self.gone() {
+            return Err("the record's key is gone, so nothing was written".to_owned());
+        }
+        if self.marks == Marks::CompletionFails && name == STOP_COMPLETED {
             return Err("RegSetValueExW failed (5)".to_owned());
         }
-        let sequence = self.completed.map_or(0, |(_, sequence)| sequence) + 1;
-        self.completed = Some((at, sequence));
-        self.done.push("completed".to_owned());
-        Ok(sequence)
+        self.values.insert(name, value);
+        self.done.push(format!("set {name}"));
+        Ok(())
     }
 
     fn log(&mut self, error: bool, line: &str) {
@@ -282,6 +345,7 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     // Their users marked first, then every one suspended before any is terminated; the second
     // snapshot finds none, and ends.
     let suspend_then_stop = [
+        "set StopNext",
         "snapshot",
         "mark 2",
         "suspend 10",
@@ -292,7 +356,8 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
         "stop 16",
         "snapshot",
         "jobs",
-        "completed",
+        "set StopCompleted",
+        "set StopSequence",
     ];
     assert_eq!(fake.done, suspend_then_stop);
     assert_eq!(fake.resets, [sid(1010), sid(1011)], "1012 wasn't running");
@@ -345,7 +410,7 @@ fn a_pool_that_never_empties_is_left_at_the_time_limit_but_its_users_are_marked(
     // Marked by the first pass, once.
     let marks: Vec<&String> = fake.done.iter().filter(|l| l.starts_with("mark")).collect();
     assert_eq!(marks, ["mark 2"]);
-    assert_eq!(fake.done[1], "mark 2");
+    assert_eq!(fake.done[2], "mark 2");
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     let (error, line) = &fake.logged[0];
     assert!(error);
@@ -376,6 +441,7 @@ fn each_user_is_marked_when_first_found_before_its_processes_are_stopped() {
     fake.jobs = Ok(vec![Some(sid(1011))]);
     assert_eq!(stop(&mut fake), StopExit::Done);
     let order = [
+        "set StopNext",
         "snapshot",
         "mark 1",
         "suspend 10",
@@ -389,7 +455,8 @@ fn each_user_is_marked_when_first_found_before_its_processes_are_stopped() {
         "snapshot",
         "jobs",
         "cancel 0",
-        "completed",
+        "set StopCompleted",
+        "set StopSequence",
     ];
     assert_eq!(fake.done, order);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
@@ -418,7 +485,7 @@ fn the_waits_past_the_time_limit_are_capped_so_the_run_ends_inside_the_tasks_lim
     assert_eq!(total, Duration::from_secs(73));
     assert_eq!(fake.waits.last(), Some(&Duration::ZERO));
     // Its user was marked before the first termination.
-    assert_eq!(fake.done[..2], ["snapshot", "mark 1"]);
+    assert_eq!(fake.done[1..3], ["snapshot", "mark 1"]);
     assert!(fake.logged[0].1.contains("40 left"), "{:?}", fake.logged);
 }
 
@@ -446,15 +513,22 @@ fn nothing_running_marks_no_one_and_takes_the_lock_only_to_record_the_completion
     fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(fake.stopped(), Vec::<u32>::new());
-    assert_eq!(fake.done, ["snapshot", "jobs", "completed"]);
+    let done = [
+        "set StopNext",
+        "snapshot",
+        "jobs",
+        "set StopCompleted",
+        "set StopSequence",
+    ];
+    assert_eq!(fake.done, done);
     assert_eq!(fake.resets, Vec::<Sid>::new());
-    // With the lock held throughout, the completion can't be written: 49, not 0.
+    // With the lock held once reserved, the completion can't be written: 49, not 0.
     let mut fake = Fake::new(&[1010]);
     fake.marks = Marks::LockBusy;
     fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
     assert_eq!(stop(&mut fake), StopExit::NotMarked);
-    assert_eq!(fake.done, ["snapshot", "jobs"]);
-    assert_eq!(fake.completed, None);
+    assert_eq!(fake.done, ["set StopNext", "snapshot", "jobs"]);
+    assert_eq!(fake.completed(), None);
 }
 
 #[test]
@@ -501,9 +575,10 @@ fn the_exit_codes_follow_the_refresh_codes_and_are_never_shared() {
         StopExit::NotPool,
         StopExit::NotStopped,
         StopExit::NotMarked,
+        StopExit::NotReserved,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 45, 46, 47, 48, 49]);
+    assert_eq!(codes, [0, 45, 46, 47, 48, 49, 50]);
     let refresh = RefreshExit::LockHeld.as_code();
     assert_eq!(refresh, 44, "the refresh's last code");
     let mut by_code = BTreeMap::new();
