@@ -8,8 +8,8 @@
 //! ([`relay_stdin`]); or at once on any failure once the launch is read. [`EndSweep::trigger`]
 //! starts it once a session, whichever path comes first; a path that comes while the start is
 //! still going waits for it. First the launch's kill-on-close job is ended and the outer waits,
-//! up to [`EMPTY_WAIT`], until no process is left in it: the sweeper's logon opens a gap in which its
-//! process, thread and token carry the logon's default DACL, and nothing of the agent's may be
+//! up to [`EMPTY_WAIT`], until no process is left in it: the sweeper's logon opens a gap in which
+//! its process, thread and token carry the logon's default DACL, and nothing of the agent's may be
 //! alive then to open them. A job still holding a process by then starts no sweeper; the next
 //! launch's first act is the backstop. Then the sweeper is started (`CreateProcessWithLogonW`,
 //! suspended), its process and thread are shut as the inner's are, and it is resumed: it is never
