@@ -141,23 +141,30 @@ impl Drop for Local {
 /// runs each test in its own process. A token without them is left as it is.
 #[cfg(test)]
 pub(crate) fn drop_privileges() {
+    use windows::core::w;
+
+    remove_privileges(&[
+        w!("SeBackupPrivilege"),
+        w!("SeRestorePrivilege"),
+        w!("SeTakeOwnershipPrivilege"),
+    ]);
+}
+
+/// Removes the privileges `names` from this test process's token; one it lacks is passed over.
+#[cfg(test)]
+pub(crate) fn remove_privileges(names: &[windows::core::PCWSTR]) {
     use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
     use windows::Win32::Security::{
         AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_REMOVED,
         TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
     };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-    use windows::core::w;
 
     let mut token = HANDLE::default();
     // SAFETY: a pseudo-handle and a live out-pointer; the handle is closed below.
     unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
         .unwrap();
-    for name in [
-        w!("SeBackupPrivilege"),
-        w!("SeRestorePrivilege"),
-        w!("SeTakeOwnershipPrivilege"),
-    ] {
+    for &name in names {
         let mut luid = LUID::default();
         // SAFETY: a NUL-terminated literal and a live out-pointer.
         unsafe { LookupPrivilegeValueW(None, name, &raw mut luid) }.unwrap();
