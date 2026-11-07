@@ -6,8 +6,11 @@
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
+use super::super::Entry;
 use super::super::bookkeeping::{SetAsideBookkeeping, forget_bookkeeping};
+use super::super::files::Place;
 use super::super::forget_set_aside_bookkeeping;
+use super::super::run::kept_levels;
 use super::{after, before, exit, launch, list, run, volume, world};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::set_aside::SET_ASIDE_DIR;
@@ -83,6 +86,60 @@ fn a_restore_leaves_a_pass_folder_still_holding_another_item() {
         Ok(SetAsideBookkeeping::Left)
     );
     assert!(kept.to.is_file());
+}
+
+#[test]
+fn an_empty_folder_item_on_a_siblings_way_survives_the_siblings_restore() {
+    // A move reuses a folder already there, so an item that is an empty folder can sit at the
+    // path of a sibling's `within` folder: `<pass>\sub` an item, `<pass>\sub\.git` another.
+    let (w, root, data) = world("aside-restored-folder-item");
+    before(&root, &data, launch()).unwrap();
+    w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
+    let git = after(&root, &data, exit()).unwrap().remove(0);
+    assert_eq!(git.within, [std::ffi::OsString::from("sub")]);
+    let place = Place::new(&data, &matter_one());
+    let mut manifest = place.read_manifest().unwrap();
+    let sub = Entry {
+        id: manifest.next,
+        from: root.join("other"),
+        to: git.to.parent().unwrap().to_owned(),
+        within: Vec::new(),
+        name: "sub".into(),
+        ..git.clone()
+    };
+    manifest.next += 1;
+    manifest.entries.push(sub.clone());
+    place.write_manifest(&manifest).unwrap();
+
+    run::restore(&volume(), &data, &git).unwrap();
+    assert!(sub.to.is_dir(), "{}", sub.to.display());
+    assert_eq!(list(&data), [sub]);
+    assert_eq!(
+        forget_bookkeeping(&data, &matter_one()),
+        Ok(SetAsideBookkeeping::Left)
+    );
+}
+
+#[test]
+fn the_kept_levels_stop_below_the_deepest_listed_folder() {
+    let parts: Vec<std::ffi::OsString> = ["set-aside", "m", "pass", "a", "b"]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    let listed = |item: &[&str]| vec![item.iter().map(Into::into).collect::<Vec<_>>()];
+    assert_eq!(kept_levels(&parts, &[], 2), 2);
+    assert_eq!(
+        kept_levels(&parts, &listed(&["set-aside", "m", "pass", "A"]), 2),
+        4
+    );
+    assert_eq!(
+        kept_levels(&parts, &listed(&["set-aside", "m", "pass", "a", "b"]), 2),
+        5
+    );
+    assert_eq!(
+        kept_levels(&parts, &listed(&["set-aside", "m", "other"]), 2),
+        2
+    );
 }
 
 #[cfg(windows)]
