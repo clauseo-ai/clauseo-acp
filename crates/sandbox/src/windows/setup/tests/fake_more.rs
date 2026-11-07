@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::record_values::CopyOwner;
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -160,6 +161,10 @@ pub(super) struct State {
     pub(super) profiles: BTreeMap<Sid, PathBuf>,
     pub(super) marker: Option<Marker>,
     pub(super) secrets: BTreeMap<Sid, String>,
+    /// The record's `AdminCopyOwner`.
+    pub(super) copy_owner: Option<CopyOwner>,
+    /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
+    pub(super) stop_task: Option<Sid>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -186,6 +191,8 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             profiles: BTreeMap::new(),
             marker: None,
             secrets: BTreeMap::new(),
+            copy_owner: None,
+            stop_task: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),

@@ -23,6 +23,7 @@ use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
 };
 use super::owner::Owner;
+use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
@@ -35,6 +36,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -404,6 +406,15 @@ impl Machine for WindowsMachine {
 
     fn stop_resets_done(&mut self, users: &[Sid]) -> Result<(), MachineError> {
         record_write::remove_reset_sids(&self.names.record_key, users)
+    }
+
+    fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
+        record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
+    }
+
+    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Stop, owner)
+            .map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn held_users(

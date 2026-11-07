@@ -409,7 +409,7 @@ fn a_per_machine_adopt_takes_any_administrators_only_folder_and_sets_nobody_up()
         SetupExit::Done
     );
     // Lock and record only: no task, since a per-machine install doesn't update itself and has
-    // no owner to let start one.
+    // no owner yet (its set-up registers the stop task).
     assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(

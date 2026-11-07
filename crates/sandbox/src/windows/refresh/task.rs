@@ -2,7 +2,8 @@
 //! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
 //! API (`ITaskService`), never `schtasks` text:
 //!
-//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS):
+//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS)
+//!   per user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`):
 //!   the task runs as LOCAL SYSTEM, starts
 //!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
 //!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record
@@ -136,7 +137,8 @@ fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> 
 /// Registers (or updates) the task `spec` names as the module says, for the record owner
 /// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
 /// place, before it writes the record's admin-copy values (a refresh before then exits 33,
-/// changing nothing).
+/// changing nothing). On a per-machine install, the set-up calls it for the stop task once the
+/// record names `owner_sid`; a task already there is replaced, descriptor included.
 pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     let sddl = task_sddl(owner_sid);
@@ -223,7 +225,8 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 }
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
-/// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task.
+/// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
+/// per-machine install's `--remove` for the stop task.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;

@@ -33,6 +33,7 @@ use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
 use super::super::owner::Owner;
+use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
 use super::super::{args, ffi, processes, profile, record_write};
 use super::{Removal, acting_token};
@@ -43,6 +44,7 @@ use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
@@ -207,6 +209,15 @@ impl Removal for WindowsRemoval {
 
     fn delete_record(&mut self) -> Result<(), MachineError> {
         record_write::delete(&self.names.record_key)
+    }
+
+    fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
+        record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
+    }
+
+    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
+        refresh::unregister_task(SystemTask::Stop)
+            .map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn invoker(&self) -> Option<&Sid> {
