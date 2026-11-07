@@ -19,11 +19,17 @@
 //! builds their env); each install try asks for a fresh one first ([`NetworkFollow::refresher`],
 //! `InstallConfig::refresh`), waiting at most the budget, and within the 60 s takes the route as
 //! it is, with no OS lookup.
+//!
+//! A refresh of the same read never turns a proxy into direct on a transient failure: a lookup
+//! that failed, timed out, found no free slot or ran past the budget is no answer, and keeps the
+//! last route's answer for that target; only the OS saying `DIRECT` takes the proxy away. In a
+//! first route, or after the settings changed, no answer goes direct. A lookup that lands late
+//! makes the route again with its answer, unless another route was made since. The thread ends
+//! once the [`NetworkFollow`] and its refreshers are gone.
 
-use std::collections::BTreeMap;
 use std::pin::pin;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 use clauseo_agents::{Clock, Network, SystemClock};
@@ -34,7 +40,8 @@ use futures::future::{Either, Shared, select};
 use url::Url;
 
 use super::{
-    NetworkFacts, NetworkRoute, NetworkSlot, OsLookup, ProxyEnv, ask_all, os_targets, resolve,
+    Answered, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, ProxyEnv, ask_all,
+    kept_over_unknown, os_targets, resolve,
 };
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
@@ -46,7 +53,8 @@ use crate::setup::backend::SetupAgents;
 pub(crate) const FIRST_ROUTE_WAIT: Duration = Duration::from_secs(5);
 
 /// How long one resolve waits for the OS's answers, all asked at once: the budget less a margin
-/// for handing the route on. A lookup past it counts as direct in that route.
+/// for handing the route on. A lookup past it has no answer in that route: direct in a first
+/// route, the earlier answer on a refresh of the same read ([`kept_over_unknown`]).
 pub(crate) const OS_LOOKUP_BUDGET: Duration = Duration::from_millis(4_750);
 
 /// How long a route is used before it is resolved again.
@@ -72,8 +80,8 @@ enum Ask {
 struct LateRoute {
     facts: NetworkFacts,
     env: ProxyEnv,
-    /// Every answer, those in time and those late.
-    answers: BTreeMap<Url, Option<String>>,
+    /// Every answer, those in time and those late (one still unknown keeps the earlier).
+    answers: Answered,
 }
 
 /// When the last route was made, and from what read.
@@ -84,13 +92,34 @@ struct Freshness {
     last: Option<(NetworkFacts, Duration)>,
     /// How many routes have been made: late answers apply only to the resolve that asked.
     made: u64,
+    /// The OS's answers behind the last route, kept over an unknown one by a refresh of the same
+    /// read.
+    answers: Answered,
 }
 
 impl Freshness {
-    /// Notes a route made from `facts` now.
-    fn resolved(&mut self, facts: NetworkFacts) {
+    fn new(clock: Arc<dyn Clock>, fresh_for: Duration) -> Self {
+        Self {
+            clock,
+            fresh_for,
+            last: None,
+            made: 0,
+            answers: Answered::new(),
+        }
+    }
+
+    /// Notes a route made from `facts` and `answers` now.
+    fn resolved(&mut self, facts: NetworkFacts, answers: Answered) {
         self.last = Some((facts, self.clock.monotonic()));
         self.made += 1;
+        self.answers = answers;
+    }
+
+    /// The answers a resolve of `facts` keeps over an unknown one: the last route's, when it
+    /// was made from the same read; none for a first route or after the settings changed.
+    fn prior(&self, facts: &NetworkFacts) -> Option<&Answered> {
+        let (last, _) = self.last.as_ref()?;
+        (last == facts).then_some(&self.answers)
     }
 
     /// The last read, when its route is stale.
@@ -204,9 +233,10 @@ struct Resolver {
 }
 
 impl Resolver {
-    /// The route for `facts`, the OS asked about every target at once, within the budget.
-    fn resolve(&self, facts: &NetworkFacts) -> NetworkRoute {
-        self.resolve_late(facts, |_late| {})
+    /// The route for `facts` and the answers behind it, the OS asked about every target at once
+    /// within the budget, an unknown answer taking `prior`'s.
+    fn resolve(&self, facts: &NetworkFacts, prior: Option<&Answered>) -> (NetworkRoute, Answered) {
+        self.resolve_late(facts, prior, |_late| {})
     }
 
     /// [`Resolver::resolve`]; lookups still running past the budget are handed to `late` with
@@ -214,26 +244,40 @@ impl Resolver {
     fn resolve_late(
         &self,
         facts: &NetworkFacts,
+        prior: Option<&Answered>,
         late: impl FnOnce(Box<dyn FnOnce() -> LateRoute + Send>),
-    ) -> NetworkRoute {
+    ) -> (NetworkRoute, Answered) {
         let env = (self.env)();
         let targets = os_targets(facts, &env, self.os_fallback);
         let answers = ask_all(targets, &self.os, self.budget);
-        let answered = |target: &Url| answers.got.get(target).cloned().flatten();
-        let route = resolve(facts, &env, self.os_fallback, &answered);
+        let got = kept_over_unknown(answers.got, prior);
+        let route = route_from(facts, &env, self.os_fallback, &got);
         if let Some(running) = answers.late {
-            let (facts, mut got) = (facts.clone(), answers.got.clone());
+            let (facts, mut kept) = (facts.clone(), got.clone());
             late(Box::new(move || {
-                got.extend(running.collect(LATE_WAIT));
+                let landed = running.collect(LATE_WAIT);
+                kept.extend(landed.into_iter().filter(|(_, a)| *a != OsAnswer::Unknown));
                 LateRoute {
                     facts,
                     env,
-                    answers: got,
+                    answers: kept,
                 }
             }));
         }
-        route
+        (route, got)
     }
+}
+
+/// The route for `facts` with the OS's `answers`.
+fn route_from(
+    facts: &NetworkFacts,
+    env: &ProxyEnv,
+    os_fallback: bool,
+    answers: &Answered,
+) -> NetworkRoute {
+    resolve(facts, env, os_fallback, &|target: &Url| {
+        answers.get(target).and_then(OsAnswer::proxy)
+    })
 }
 
 /// What resolves each read and hands the route to `Agents` and the slot.
@@ -270,17 +314,18 @@ impl Follower {
         follower
     }
 
-    /// [`Follower::new`] with no `Agents` yet: [`NetworkFollow::bind`] gives it.
-    pub(crate) fn unbound(
+    /// [`Follower::new`] with no `Agents` yet: [`NetworkFollow::bind`] gives it. `os` answers
+    /// an [`OsAnswer`] (the tests' a proxy or none, which is `DIRECT`).
+    pub(crate) fn unbound<A: Into<OsAnswer>>(
         slot: NetworkSlot,
         env: impl Fn() -> ProxyEnv + Send + Sync + 'static,
-        os: impl Fn(&Url) -> Option<String> + Send + Sync + 'static,
+        os: impl Fn(&Url) -> A + Send + Sync + 'static,
         os_fallback: bool,
     ) -> Self {
         Self {
             resolver: Resolver {
                 env: Arc::new(env),
-                os: Arc::new(os),
+                os: Arc::new(move |target: &Url| -> OsAnswer { os(target).into() }),
                 os_fallback,
                 budget: OS_LOOKUP_BUDGET,
             },
@@ -290,12 +335,7 @@ impl Follower {
             last: None,
             logged: None,
             landed: None,
-            fresh: Freshness {
-                clock: Arc::new(SystemClock),
-                fresh_for: ROUTE_FRESH_FOR,
-                last: None,
-                made: 0,
-            },
+            fresh: Freshness::new(Arc::new(SystemClock), ROUTE_FRESH_FOR),
         }
     }
 
@@ -322,8 +362,9 @@ impl Follower {
 
     /// Resolves `facts` and hands the route on ([`Follower::hand`]).
     pub(crate) fn take(&mut self, facts: &NetworkFacts) {
-        let route = self.resolver.resolve(facts);
-        self.fresh.resolved(facts.clone());
+        let prior = self.fresh.prior(facts).cloned();
+        let (route, answers) = self.resolver.resolve(facts, prior.as_ref());
+        self.fresh.resolved(facts.clone(), answers);
         self.hand(route);
     }
 
@@ -389,31 +430,27 @@ impl Follower {
 pub(crate) fn follow(mut follower: Follower, started: Duration) -> NetworkFollow {
     let first = follower.first_signal();
     let resolver = follower.resolver.clone();
-    let fresh = Freshness {
-        clock: Arc::clone(&follower.fresh.clock),
-        fresh_for: follower.fresh.fresh_for,
-        last: None,
-        made: 0,
-    };
+    let fresh = Freshness::new(Arc::clone(&follower.fresh.clock), follower.fresh.fresh_for);
+    // The thread holds only a weak sender (for its late helpers), so it ends once the returned
+    // `NetworkFollow` and its refreshers are gone.
     let (send, receive) = mpsc::channel::<Ask>();
+    let send = Arc::new(send);
+    let late = Arc::downgrade(&send);
     let follower = Arc::new(Mutex::new(follower));
     let on_thread = Arc::clone(&follower);
     let spawned = std::thread::Builder::new()
         .name("clauseo-setup-network".to_owned())
-        .spawn({
-            let late = send.clone();
-            move || serve(&receive, &late, &resolver, fresh, &on_thread)
-        });
+        .spawn(move || serve(&receive, &late, &resolver, fresh, &on_thread));
     let (sink, refresh): (Box<dyn Fn(NetworkFacts) + Send + Sync>, Refresh) = match spawned {
         Ok(_thread) => {
-            let asks = send.clone();
+            let asks = Arc::clone(&send);
             let refresh: Refresh = Arc::new(move |wait| {
                 let (reply, answer) = mpsc::channel();
                 asks.send(Ask::Refresh(reply)).ok()?;
                 answer.recv_timeout(wait).ok()
             });
             let sink = Box::new(move |facts| {
-                // Gone only with the thread, which ends with the app.
+                // Gone only with the thread, which ends once the senders are gone.
                 let _sent = send.send(Ask::Facts(facts));
             });
             (sink, refresh)
@@ -436,13 +473,16 @@ pub(crate) fn follow(mut follower: Follower, started: Duration) -> NetworkFollow
 }
 
 /// Waits, on a thread of its own, for the lookups past the budget, then asks the network thread
-/// to make the route again with their answers.
-fn watch_late(collect: Box<dyn FnOnce() -> LateRoute + Send>, made: u64, send: &mpsc::Sender<Ask>) {
-    let send = send.clone();
+/// to make the route again with their answers. Nothing when the senders are gone (the thread is
+/// ending).
+fn watch_late(collect: Box<dyn FnOnce() -> LateRoute + Send>, made: u64, send: &Weak<Sender>) {
+    let Some(send) = send.upgrade().map(|send| Sender::clone(&send)) else {
+        return;
+    };
     let spawned = std::thread::Builder::new()
         .name("clauseo-proxy-late".to_owned())
         .spawn(move || {
-            // Gone only with the network thread.
+            // Gone once the network thread has ended.
             let _sent = send.send(Ask::Late(made, Box::new(collect())));
         });
     if let Err(err) = spawned {
@@ -453,12 +493,15 @@ fn watch_late(collect: Box<dyn FnOnce() -> LateRoute + Send>, made: u64, send: &
 /// What [`NetworkFollow::refresher`] calls: a fresh route within the given wait.
 type Refresh = Arc<dyn Fn(Duration) -> Option<Network> + Send + Sync>;
 
+/// What reaches the network thread.
+type Sender = mpsc::Sender<Ask>;
+
 /// The network thread's loop, until every sender is gone: each read (the newest of any queued)
 /// is resolved, and the last again once stale, by itself or when a refresh asks; every refresh
 /// gets the network afterwards. Resolved with no lock held, so a bind never waits on the OS.
 fn serve(
     receive: &mpsc::Receiver<Ask>,
-    send: &mpsc::Sender<Ask>,
+    send: &Weak<Sender>,
     resolver: &Resolver,
     mut fresh: Freshness,
     follower: &Mutex<Follower>,
@@ -490,13 +533,16 @@ fn serve(
         }
         if let Some(facts) = newest.or_else(|| fresh.stale().cloned()) {
             let made = fresh.made + 1;
-            let route = resolver.resolve_late(&facts, |collect| watch_late(collect, made, send));
-            fresh.resolved(facts);
+            let prior = fresh.prior(&facts).cloned();
+            let (route, answers) = resolver.resolve_late(&facts, prior.as_ref(), |collect| {
+                watch_late(collect, made, send);
+            });
+            fresh.resolved(facts, answers);
             lock(follower).hand(route);
         } else if let Some((_, late)) = late.filter(|(made, _)| *made == fresh.made) {
             // No route made since they were asked: the route again with their answers, no lookup.
-            let answered = |target: &Url| late.answers.get(target).cloned().flatten();
-            let route = resolve(&late.facts, &late.env, resolver.os_fallback, &answered);
+            let route = route_from(&late.facts, &late.env, resolver.os_fallback, &late.answers);
+            fresh.answers = late.answers;
             lock(follower).hand(route);
         }
         let network = lock(follower).last.clone();
