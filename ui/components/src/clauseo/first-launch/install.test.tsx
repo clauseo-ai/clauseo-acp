@@ -60,3 +60,24 @@ test("install lines: missing with no size says nothing, so no line stands", asyn
   expect(installLine("en", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
   expect(installLine("hi", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
 });
+
+test("install lines: unreachable names the hosts for IT, and offline stays the offline line, in English and Hindi", async () => {
+  await loadHindi();
+  const unreachable: InstallView = {
+    kind: "unreachable",
+    hosts: ["registry.npmjs.org", "nodejs.org"],
+  };
+  const line = installLine("en", unreachable, "Claude", ACTS);
+  expect(line?.kind === "wait" && line.code).toBe("agent.install_unreachable");
+  expect(linesOf("en", unreachable).words).toBe(
+    "Clauseo can't reach its download server (registry.npmjs.org, nodejs.org). If your internet is working, ask your IT team to allow these addresses. Clauseo keeps trying.",
+  );
+  expect(linesOf("hi", unreachable).words).toBe(
+    "Clauseo अपने डाउनलोड सर्वर (registry.npmjs.org, nodejs.org) तक नहीं पहुँच पा रहा है। अगर आपका इंटरनेट चल रहा है, तो अपनी IT टीम से इन पतों को अनुमति देने के लिए कहें। Clauseo कोशिश करता रहेगा।",
+  );
+  const offline = installLine("en", { kind: "offline" }, "Claude", ACTS);
+  expect(offline?.kind === "wait" && offline.code).toBe("agent.install_offline");
+  expect(linesOf("en", { kind: "offline" }).words).toBe(
+    "You're offline. Setting up waits for the connection.",
+  );
+});

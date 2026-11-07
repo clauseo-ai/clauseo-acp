@@ -198,9 +198,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // keeps (decision record 0053)
   "blocklist.notice_expired":
     "This notice has expired. Open the site again, then allow it from the new notice.",
-  // provisional (the Windows VM pass of #664): the app says it with the hosts beside it
+  // provisional (#683): the install line fills {hosts} (errorWordsWith); nothing else shows this code
   "agent.install_unreachable":
-    "Clauseo can't reach its download server. If your internet is working, ask your IT team to allow its addresses.",
+    "Clauseo can't reach its download server ({hosts}). If your internet is working, ask your IT team to allow these addresses. Clauseo keeps trying.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -263,6 +263,13 @@ export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey;
   if (agent.kind === "codex") return { key: planned.chatgpt };
   const name = agent.name?.trim() ?? "";
   return name === "" ? { key: planned.nameless } : { key: planned.named, name };
+}
+
+/** A code's sentence with its slots filled, for the one code whose sentence has its own (`{hosts}` of
+ * agent.install_unreachable, said on the install line). */
+export function errorWordsWith(lang: Lang, code: ErrorCode, slots: Record<string, string>): string {
+  const key = ERROR_WORDS[code];
+  return key === STOPPED ? errorSentence(lang, key) : own(lang, key, slots);
 }
 
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".

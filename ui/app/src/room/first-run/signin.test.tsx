@@ -31,6 +31,9 @@ import {
 } from "./rig.tsx";
 
 const OFFLINE: InstallProgress = { waiting: { code: "agent.install_offline", hosts: [], log: [] } };
+const UNREACHABLE: InstallProgress = {
+  waiting: { code: "agent.install_unreachable", hosts: ["registry.npmjs.org"], log: [] },
+};
 
 /** The room with matter A open, Claude installed, and this sign-in state. */
 const at = (state: SignIn, more: Parameters<typeof info>[0] = true) =>
@@ -70,6 +73,10 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
   expect(text()).not.toMatch(/Sign in at|\d:\d\d/);
   await play(t, install(CLAUDE, OFFLINE));
   expect(text()).toContain("Your browser opens when you reconnect.");
+  // unreachable (#683): the network is up, so the browser waits for Claude, not a reconnect
+  await play(t, install(CLAUDE, UNREACHABLE));
+  expect(text()).toContain("Your browser opens when Claude is ready.");
+  expect(text()).not.toContain("Your browser opens when you reconnect.");
   await press(byId("signin-cancel"));
   expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CLAUDE } });
 });
