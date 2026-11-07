@@ -126,6 +126,26 @@ impl Locations {
         Self::resolve_for(Os::CURRENT, dirs, env)
     }
 
+    /// [`Locations::resolve`] without the Documents folder: it never asks for it, so it never
+    /// waits on it (on Windows, up to 2 s for a share that is down). The default matters folder
+    /// is the one beside a `CLAUSEO_DATA_DIR`, or `None` until [`Locations::with_documents`]
+    /// adds it. For the desktop's main thread before its first window, which needs only the
+    /// data folder.
+    pub fn resolve_without_documents(
+        dirs: &dyn PlatformDirs,
+        env: &dyn Env,
+    ) -> Result<Locations, Error> {
+        Self::without_documents_for(Os::CURRENT, dirs, env)
+    }
+
+    /// These folders with the default matters folder under Documents, as [`Locations::resolve`]
+    /// gives it, when they have none: it asks for the Documents folder, so on Windows it may
+    /// wait up to 2 s (once per process). `env` must be the one these folders came from.
+    #[must_use]
+    pub fn with_documents(self, dirs: &dyn PlatformDirs, env: &dyn Env) -> Locations {
+        self.with_documents_for(Os::CURRENT, dirs, env)
+    }
+
     /// The folders under `root`: the data folder is `root`, and new matters go in
     /// `root/Documents/Clauseo`. Reads nothing; for tests and `cli`.
     pub fn under_root(root: &Path) -> Locations {
@@ -226,6 +246,14 @@ impl Locations {
         dirs: &dyn PlatformDirs,
         env: &dyn Env,
     ) -> Result<Locations, Error> {
+        Ok(Self::without_documents_for(os, dirs, env)?.with_documents_for(os, dirs, env))
+    }
+
+    pub(crate) fn without_documents_for(
+        os: Os,
+        dirs: &dyn PlatformDirs,
+        env: &dyn Env,
+    ) -> Result<Locations, Error> {
         let home = || dirs.home().ok_or(Error::NoFolder { folder: "home" });
         let overridden = match env.var(DATA_DIR_VAR).filter(|value| !value.is_empty()) {
             Some(value) => {
@@ -257,11 +285,26 @@ impl Locations {
                 .join(IDENTIFIER),
             },
         };
-        let default_matters_dir = match overridden.as_deref().and_then(matters_beside) {
-            Some(beside) => Some(beside),
-            None => documents(os, dirs, env).map(|documents| documents.join("Clauseo")),
-        };
-        Ok(Self::with_data_dir(data_dir, default_matters_dir))
+        let beside = overridden.as_deref().and_then(matters_beside);
+        Ok(Self::with_data_dir(data_dir, beside))
+    }
+
+    /// [`Locations::with_documents`] for `os`: a default matters folder already there is the
+    /// one beside `CLAUSEO_DATA_DIR` (or a test's), and is kept.
+    pub(crate) fn with_documents_for(
+        self,
+        os: Os,
+        dirs: &dyn PlatformDirs,
+        env: &dyn Env,
+    ) -> Locations {
+        if self.default_matters_dir.is_some() {
+            return self;
+        }
+        let documents = documents(os, dirs, env);
+        Locations {
+            default_matters_dir: documents.map(|documents| documents.join("Clauseo")),
+            ..self
+        }
     }
 
     fn with_data_dir(data_dir: PathBuf, default_matters_dir: Option<PathBuf>) -> Locations {

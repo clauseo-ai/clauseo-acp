@@ -124,17 +124,28 @@ impl PlatformDirs for HungShare {
     }
 }
 
-/// The desktop's start path, `Locations::resolve`, twice, as before its first window: the
-/// first goes on without Documents after the 2 s wait, and the second does not wait again.
+/// The desktop's start: its main thread's path before the first window,
+/// `Locations::resolve_without_documents`, answers at once while the lookup hangs; the
+/// host-start thread's, `Locations::with_documents`, goes on without Documents after the 2 s
+/// wait; and a later `Locations::resolve` does not wait again.
 #[test]
 fn a_hung_documents_lookup_holds_resolve_for_the_wait_only() {
-    let (first, took) =
-        timed(|| Locations::resolve_for(Os::Windows, &HungShare, &FakeEnv::default()).unwrap());
+    let env = FakeEnv::default();
+    let (early, quick) =
+        timed(|| Locations::without_documents_for(Os::Windows, &HungShare, &env).unwrap());
+    assert_eq!(
+        early.data_dir(),
+        Path::new("/C/Users/ada/AppData/Local/ai.clauseo.desktop")
+    );
+    assert_eq!(early.default_matters_dir(), None);
+    assert!(quick < Duration::from_millis(100), "{quick:?}");
+    let (first, took) = timed(|| early.with_documents_for(Os::Windows, &HungShare, &env));
     assert_eq!(first.default_matters_dir(), None);
     assert_eq!(
         first.data_dir(),
         Path::new("/C/Users/ada/AppData/Local/ai.clauseo.desktop")
     );
+    assert!(took >= super::DOCUMENTS_WAIT, "{took:?}");
     assert!(took < Duration::from_secs(3), "{took:?}");
     let (second, again) =
         timed(|| Locations::resolve_for(Os::Windows, &HungShare, &FakeEnv::default()).unwrap());
