@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use clauseo_host::{EgressProxy, HostConfig, McpServer, ProfileHook, SessionKey};
 use clauseo_protocol::{AgentId, DeliveryRequest, HostCommand, MatterId, PromptBlock, ThreadId};
+use clauseo_sandbox::ports::ListenerFor;
 use clauseo_sandbox::{Allowlist, Denial, DenialSink, ProxyConfig, Upstream};
 use serde_json::{Map, Value, json};
 
@@ -36,6 +37,7 @@ fn config() -> ProxyConfig {
         record: None,
         // The host opens a session's proxy only when it has the browser.
         browser: true,
+        listener: ListenerFor::Other,
     }
 }
 
