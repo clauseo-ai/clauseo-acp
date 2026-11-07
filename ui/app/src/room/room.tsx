@@ -58,6 +58,8 @@ import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
+import { usePickWait } from "./picker-wait.ts";
+import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
@@ -187,6 +189,8 @@ function RoomFrame({
   const { nodes } = room;
   const [railOpen, setRailOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  // the picker's line while a moved folder's Locate waits on the picker
+  const locating = usePickWait();
   // the dialog mounts with its first opening and stays mounted, so it keeps its closing and its state as before
   const [newMounted, setNewMounted] = useState(false);
   const newMatter = useRef<HTMLButtonElement>(null);
@@ -468,9 +472,10 @@ function RoomFrame({
           <>
             <MovedFolder
               {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
-              onLocate={() => void matters.locate(open.matter)}
+              onLocate={() => void matters.locate(open.matter, locating.track)}
             />
-            <LocateGate onLocate={() => void matters.locate(open.matter)} />
+            {locating.opening && <PickerLine />}
+            <LocateGate onLocate={() => void matters.locate(open.matter, locating.track)} />
           </>
         ) : (
           <StoreContext value={store}>

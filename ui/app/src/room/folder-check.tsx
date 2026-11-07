@@ -18,6 +18,7 @@ import { FolderWarning, type Warned } from "./folder-warning.tsx";
 import type { Matters } from "./matters.ts";
 import { ScanLines } from "./scan/scan-lines.tsx";
 import { useScan } from "./scan/use-scan.ts";
+import { usePickWait } from "./picker-wait.ts";
 
 export type Picked = { folder: FolderRefId; display: string };
 /** The check's answer: a warning, create's refusal, or nothing to say (null). */
@@ -60,6 +61,8 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   // undefined while the check runs
   const [answer, setAnswer] = useState<Answer | undefined>(null);
   const scan = useScan(matters);
+  // the picker's line while a pick is slow: Change and Create's picker both wait on it
+  const wait = usePickWait();
   // bumped as Stop drops the pick, so the form drops the folder Change showed (matter-form.tsx's unpick)
   const [unpick, setUnpick] = useState(0);
   // the latest pick's check: an answer for any other is dropped
@@ -89,7 +92,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   };
   /** Change: an existing folder, its display for the form, or null when the lawyer cancelled. */
   const pickExisting = async () => {
-    const picked = await matters.pickFolder();
+    const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return null;
     setExisting(picked);
     setParent(null);
@@ -98,7 +101,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     return picked.display;
   };
   const pickParent = async () => {
-    const picked = await matters.pickFolder();
+    const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return null;
     setParent(picked);
     check({ new_folder: { folder: picked.folder } });
@@ -147,6 +150,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
         <ScanLines scan={scanned} onStop={stop} onGotIt={scan.gotIt} />
       ),
     unpick,
+    opening: wait.opening,
     warning:
       warned === null
         ? undefined

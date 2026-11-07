@@ -32,6 +32,7 @@ export function NewMatterDialog({
   blocked,
   scan,
   unpick,
+  opening,
   testIds,
   finalFocus,
 }: {
@@ -57,6 +58,7 @@ export function NewMatterDialog({
   blocked?: NewMatterFormProps["blocked"];
   scan?: NewMatterFormProps["scan"];
   unpick?: NewMatterFormProps["unpick"];
+  opening?: NewMatterFormProps["opening"];
   testIds?: NewMatterFormProps["testIds"];
   /** Optional: where focus goes when it closes, New matter's button. Left out, the element focused before it opened. */
   finalFocus?: RefObject<HTMLElement | null>;
@@ -89,6 +91,7 @@ export function NewMatterDialog({
             blocked={blocked}
             scan={scan}
             unpick={unpick}
+            opening={opening}
             testIds={testIds}
             {...(name === undefined ? {} : { name })}
             {...(client === undefined ? {} : { client })}

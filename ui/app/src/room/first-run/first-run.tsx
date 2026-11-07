@@ -33,6 +33,7 @@ import {
 } from "../../store/setup.ts";
 import type { Conversations, ConversationsView } from "../conversations.ts";
 import type { Matters } from "../matters.ts";
+import { usePickWait } from "../picker-wait.ts";
 import { clockOf } from "../when.ts";
 import { firstReadMarks, markAdded } from "../first-read/marks.ts";
 
@@ -509,10 +510,11 @@ function FirstScreen({
   const install = installLine(lang, installView(setup), NAME[plan], acts, IDS.install);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
+  const wait = usePickWait();
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
   const openFolder = async () => {
     setRefused(null);
-    const picked = await matters.pickFolder();
+    const picked = await wait.track(() => matters.pickFolder());
     if (picked === null) return;
     store.firstAct("folder_chosen");
     try {
@@ -531,6 +533,7 @@ function FirstScreen({
       ready={setup?.readyHere === true}
       counts={{ ...state.counts, onChange: store.setCounts }}
       onOpenFolder={() => void openFolder()}
+      opening={wait.opening}
       onNewMatter={() => {
         setRefused(null);
         setForm(true);

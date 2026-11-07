@@ -15,6 +15,7 @@ import { Say } from "../say.tsx";
 import { WorkingLine, type WorkingState } from "../working-line.tsx";
 import { WRAP } from "./classes.ts";
 import { Done, DocumentsLine } from "./parts.tsx";
+import { PickerLine } from "../picker-line.tsx";
 import { cn } from "../../lib/cn.ts";
 
 /** The counts switch: on by default; `locked` when the firm's policy keeps counts off: shown off, with no control. */
@@ -29,6 +30,7 @@ export function Welcome({
   onNewMatter,
   form,
   error,
+  opening,
   onWhatsSent,
   testIds = {},
 }: {
@@ -45,6 +47,8 @@ export function Welcome({
   form?: ReactNode;
   /** A folder refused, said under the question in the language. */
   error?: ReactNode;
+  /** The folder picker is on its way (its pick has run 300 ms): its line shows under the button. */
+  opening?: boolean | undefined;
   /** What's sent, where the app can show the privacy settings. */
   onWhatsSent?: (() => void) | undefined;
   testIds?: { counts?: string; open?: string; newMatter?: string };
@@ -89,6 +93,7 @@ export function Welcome({
                     {error}
                   </p>
                 )}
+                {opening && <PickerLine />}
                 <p className="text-small text-muted">
                   <Say>
                     {w(

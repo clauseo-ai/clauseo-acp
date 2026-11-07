@@ -132,6 +132,7 @@ export function NewMatter({
       warning={pick.warning}
       scan={pick.scan}
       unpick={pick.unpick}
+      opening={pick.opening}
       blocked={checked !== null}
       {...(opens === null
         ? {}
@@ -221,6 +222,7 @@ export function FirstMatter({
       warning={pick.warning}
       scan={pick.scan}
       unpick={pick.unpick}
+      opening={pick.opening}
       blocked={pick.refused !== null}
       onCreate={(name, client, _next, nextDate) => create(name, client, nextDate)}
       onCancel={onBack}

@@ -168,5 +168,15 @@
     "at": "2026-11-05",
     "by": "Rohan",
     "note": "the app track's line for the room's notice when the host's folder check couldn't answer (check_failed); not on the approved page; Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "FR-21": {
+    "en": "Opening the folder picker…",
+    "hi": "फ़ोल्डर चुनने की विंडो खुल रही है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

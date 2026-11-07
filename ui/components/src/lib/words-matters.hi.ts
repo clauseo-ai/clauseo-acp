@@ -51,6 +51,8 @@ export const HI = {
   "{path} is the folder Clauseo keeps matters in.": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
   "That folder is where Clauseo keeps matters.": "उस फ़ोल्डर में Clauseo मामले रखता है।",
   "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
+  /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
+  "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
   /* ---------- a matter whose folder has moved ---------- */
   "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
   "It was at {path}. Find it where it is now, and the matter opens as you left it.":

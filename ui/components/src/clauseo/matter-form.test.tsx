@@ -282,3 +282,16 @@ test("the form's words keep the voice: no banned word, and Hindi sentences end i
     if (en.endsWith(".")) expect(hi.endsWith("।")).toBe(true);
   }
 });
+
+test("while the folder picker opens, a polite status line says so under the folder line, and only while it is told", async () => {
+  await mount(<NewMatterForm folder="Documents/Acme" name="Acme" onCreate={() => {}} />);
+  expect(byTestId("picker-opening")).toBeUndefined();
+  await act(async () =>
+    root?.render(<NewMatterForm folder="Documents/Acme" name="Acme" opening onCreate={() => {}} />),
+  );
+  const line = document.querySelector<HTMLElement>('[data-testid="picker-opening"]');
+  expect(line?.getAttribute("role")).toBe("status");
+  expect(line?.textContent).toBe("Opening the folder picker…");
+  expect(line?.closest("button")).toBeNull();
+  expect(line?.closest(".matter-form-folder")).toBeNull();
+});
