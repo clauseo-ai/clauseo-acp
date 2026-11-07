@@ -32,7 +32,8 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetKernelObjectSecurity, OBJECT_SECURITY_INFORMATION,
     OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES, SetKernelObjectSecurity,
+    SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR_CONTROL, SetKernelObjectSecurity,
+    SetSecurityDescriptorControl,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
@@ -44,6 +45,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
+use super::acl_bytes::PROTECTED_DACL_CONTROL;
 use super::record::current_user_sid;
 use super::sids::Sid;
 use super::write::{Found, repair_plan};
@@ -80,7 +82,7 @@ pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
 /// descriptor). `Ok(false)` when something is there already, which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
     let user = current_user_sid()?;
-    let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
+    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
         lpSecurityDescriptor: descriptor.0.0,
@@ -108,7 +110,7 @@ fn secure_existing(path: &Path) -> io::Result<()> {
     let handle =
         Handle::open(path).map_err(|error| named(path, "can't be opened to secure", &error))?;
     let handle = repair(path, handle, &user, true)?;
-    let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
+    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
     handle
         .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))
@@ -136,7 +138,7 @@ pub(crate) fn check_file(path: &Path) -> io::Result<()> {
 fn secure_file(path: &Path, handle: Handle) -> io::Result<Handle> {
     let user = current_user_sid()?;
     let handle = repair(path, handle, &user, false)?;
-    let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
+    let descriptor = Descriptor::protected(&file_sddl(user.as_str()))?;
     handle
         .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))?;
@@ -555,6 +557,20 @@ impl Descriptor {
         }
         .map_err(io::Error::other)?;
         Ok(Descriptor(descriptor))
+    }
+
+    /// The descriptor of `sddl`, a protected DACL, with the control
+    /// `SetSecurityInfo` gave it: `SetKernelObjectSecurity` writes the control as given, and a
+    /// folder whose DACL isn't marked auto-inherited gives what is made inside entries that
+    /// aren't marked inherited (`PROTECTED_DACL_CONTROL`).
+    fn protected(sddl: &str) -> io::Result<Descriptor> {
+        let descriptor = Descriptor::from_sddl(sddl)?;
+        let control = SECURITY_DESCRIPTOR_CONTROL(PROTECTED_DACL_CONTROL);
+        // SAFETY: the descriptor is valid and owned by `descriptor`; only inheritance bits that
+        // `SetSecurityDescriptorControl` allows are set.
+        unsafe { SetSecurityDescriptorControl(descriptor.0, control, control) }
+            .map_err(|e| os_error(&e))?;
+        Ok(descriptor)
     }
 }
 

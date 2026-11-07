@@ -3,7 +3,7 @@
 //! it names are untouched, and what is made inside afterwards inherits the folder's entries.
 
 use crate::windows::acl::descriptor;
-use crate::windows::acl_bytes::INHERITED;
+use crate::windows::acl_bytes::{DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, INHERITED};
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{Place, entries, protected};
 use crate::windows::test_dacl::protect_with;
@@ -54,5 +54,32 @@ fn securing_a_folder_writes_it_alone_and_what_is_made_after_inherits() {
         expected.push("S-1-5-32-544".to_owned());
         expected.sort();
         assert_eq!(inherited, expected, "{}", made.display());
+    }
+}
+
+/// A folder secured (`protect`), one made (`create`) and a record file checked (`check_file`)
+/// each read back with a DACL both protected and auto-inherited, as `SetSecurityInfo` left it.
+#[test]
+fn a_secured_folder_and_record_file_are_protected_and_auto_inherited() {
+    let place = Place::new("private-dir-control");
+    place.dir.file("data/sandbox/record.txt", "kept");
+    let folder = place.at("data/sandbox");
+    let made = place.at("data/made");
+    let record = folder.join("record.txt");
+
+    super::protect(&folder).unwrap();
+    assert!(super::create(&made).unwrap());
+    super::check_file(&record).unwrap();
+
+    let wanted = DACL_PROTECTED | DACL_AUTO_INHERITED;
+    for path in [folder, made, record] {
+        let bytes = descriptor(&path).unwrap();
+        let control = Descriptor::parse(&bytes).unwrap().control;
+        assert_eq!(
+            control & wanted,
+            wanted,
+            "{}: {control:#06x}",
+            path.display()
+        );
     }
 }
