@@ -89,6 +89,8 @@ pub(crate) struct Cancel {
     killed: Level,
     /// A second stop after the first (the lawyer's Cancel again, or the quit after it).
     again: Level,
+    /// Whether the app's quit asked a stop, first or later.
+    quit: AtomicBool,
     /// The graceful stop's kind, when [`Cancel::stop`] set it first.
     how: Mutex<Option<Stop>>,
 }
@@ -100,6 +102,7 @@ impl Cancel {
             stopped: Level::new(),
             killed: Level::new(),
             again: Level::new(),
+            quit: AtomicBool::new(false),
             how: Mutex::new(None),
         }
     }
@@ -115,6 +118,9 @@ impl Cancel {
     /// [`Cancel::is_killed`]. A later stop does not change the first one's kind; it ends
     /// [`Cancel::stopped_again`].
     pub(crate) fn stop(&self, how: Stop) {
+        if how == Stop::Quit {
+            self.quit.store(true, Ordering::SeqCst);
+        }
         let first = {
             let mut set = self
                 .how
@@ -138,6 +144,11 @@ impl Cancel {
             .how
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether the app's quit asked a stop, as the first stop or after the lawyer's Cancel.
+    pub(crate) fn quit_seen(&self) -> bool {
+        self.quit.load(Ordering::SeqCst)
     }
 
     /// Whether any stop is set.
@@ -192,8 +203,10 @@ mod tests {
         assert!(!cancel.is_killed());
         futures::executor::block_on(cancel.cancelled());
         // A later stop keeps the first one's kind.
+        assert!(!cancel.quit_seen());
         cancel.stop(Stop::Quit);
         assert_eq!(cancel.how(), Some(Stop::Lawyer(Duration::from_secs(2))));
+        assert!(cancel.quit_seen(), "the quit after a Cancel is seen");
         // The second stop ends the wait for it.
         futures::executor::block_on(cancel.stopped_again());
         cancel.cancel();

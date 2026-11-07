@@ -24,7 +24,7 @@ const FOLLOW_UP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 /// Whether the job is ending for the app's quit, or was stopped at once (replaced, or killed at
 /// a bound): no new run starts for it then, since none could finish.
 fn ending_now(cancel: &Cancel) -> bool {
-    cancel.is_killed() || cancel.how() == Some(Stop::Quit)
+    cancel.is_killed() || cancel.quit_seen()
 }
 
 /// The end of a login that ran and was cancelled, failed or killed (`failed`, its `Failed`):
@@ -38,7 +38,7 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
     failed: SigninState,
 ) -> SigninState {
     let cancel = &job.ticket.cancel;
-    if cancel.how() == Some(Stop::Quit) {
+    if cancel.quit_seen() {
         drop_unmarked_login(job);
         return failed;
     }
@@ -51,7 +51,7 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
         match confirm(job, &own, kind, &job.home).await {
             Confirmation::Confirmed(identity) => Some(identity),
             Confirmation::SignedOut | Confirmation::Unknown => {
-                let _gone = remove_own_login(job, &own).await;
+                unconfirmed_goes(job, &own).await;
                 None
             }
         }
@@ -60,7 +60,13 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
     // awaited, killed past the grace, and nothing new starts); the stop at once kills it.
     let forward = pin!(async {
         cancel.stopped_again().await;
-        own.stop(Stop::Lawyer(FOLLOW_UP_GRACE));
+        // The quit lets an answer on its way land (a confirmation is recorded); a second Cancel
+        // does not wait for one.
+        own.stop(if cancel.quit_seen() {
+            Stop::Quit
+        } else {
+            Stop::Lawyer(FOLLOW_UP_GRACE)
+        });
         cancel.killed().await;
         own.cancel();
         futures::future::pending::<()>().await;
@@ -68,6 +74,18 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
     match select(check, forward).await {
         Either::Left((Some(identity), _)) => signed_in(job, identity),
         Either::Left((None, _)) | Either::Right(_) => failed,
+    }
+}
+
+/// An unconfirmed login in the home goes: with Codex's `logout` ([`remove_own_login`], under
+/// `cancel`), except once the quit is seen, when no logout could finish inside its bound (and,
+/// cut at the app's exit, would leave the file): then the file is removed directly
+/// ([`drop_unmarked_login`]).
+async fn unconfirmed_goes<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) {
+    if job.ticket.cancel.quit_seen() {
+        drop_unmarked_login(job);
+    } else {
+        let _gone = remove_own_login(job, cancel).await;
     }
 }
 
@@ -101,7 +119,7 @@ pub(super) async fn confirmed_or_failed<T: Timer + Send + Sync>(
     polled: bool,
 ) -> SigninState {
     // The quit's bound leaves no time for a check or a logout: an unconfirmed login goes.
-    if cancel.how() == Some(Stop::Quit) {
+    if cancel.quit_seen() {
         drop_unmarked_login(job);
         return job.failed(SigninCode::Cancelled);
     }
@@ -120,7 +138,7 @@ pub(super) async fn confirmed_or_failed<T: Timer + Send + Sync>(
     }
     // The login ran, so the home may hold its file: unconfirmed, it goes. A removal that failed
     // leaves it; nothing more can be done here.
-    let _gone = remove_own_login(job, &Cancel::new()).await;
+    unconfirmed_goes(job, &Cancel::new()).await;
     if cancel.is_cancelled() {
         job.failed(SigninCode::Cancelled)
     } else {
