@@ -1139,15 +1139,17 @@ only from an exe the updater key signed.
 from `FOLDERID_ProgramFiles` and quoted (it has a space), with `--refresh` and no other argument. It
 starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and never
 runs twice at once. The task and its folder carry
-`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so the owner can read and run the task but
-can't change or delete it. MS-TSCH asks execute access (`FX`, `FILE_GENERIC_EXECUTE`) of
-`SchRpcStop`, so the owner can also end a running task, and "read or execute access" of `SchRpcRun`.
-Whether read alone starts a task isn't documented and hasn't been tried on Windows, so `FX` stays
-(see "Misuse" under the stop). The folder gets that owner and DACL when it is made. A folder already
-there is kept, and given them again, only when its owner is Administrators or SYSTEM, which only an
-administrator can set. Anyone else's (a standard user may be able to make `\Clauseo` first) is
-deleted with every task and folder in it, then made again (`task_folder::prepare`). The app asks for
-a run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). Only
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;<owner>)`: the owner may read the task (`FR`,
+`FILE_GENERIC_READ`), and can't change or delete it. MS-TSCH starts a task for a caller with read or
+execute access (`SchRpcRun`) and ends one only for a caller with execute access (`SchRpcStop`), so
+the owner can start the task but can't end a running one. A required VM row confirms both, as the
+lawyer: `schtasks /run /tn \Clauseo\SandboxStop` starts it and `schtasks /end /tn
+\Clauseo\SandboxStop` is refused (and the same for the refresh). The folder gets that owner and DACL
+when it is made. A folder already there is kept, and given them again, only when its owner is
+Administrators or SYSTEM, which only an administrator can set. Anyone else's (a standard user may be
+able to make `\Clauseo` first) is deleted with every task and folder in it, then made again
+(`task_folder::prepare`). The app asks for a run after an update (`request_admin_refresh`,
+`IRegisteredTask::Run`, unelevated). Only
 `--remove --uninstall` deletes the task and the staging folder ("Two removals"); plain
 `--remove` keeps them with the copy. `--adopt` registers the task before it writes the record's
 admin-copy values, so a failed registration leaves no valid record: `--adopt` exits 3, and the
@@ -1252,7 +1254,7 @@ can stop it whatever its DACL says.
 
 **The task.** `--adopt` registers `\Clauseo\SandboxStop` right after `\Clauseo\SandboxRefresh`
 (`register_task`, `SystemTask::Stop`), the same way: LOCAL SYSTEM, the same descriptor (the
-owner may only read and run it), one instance at a time. Its action is the admin copy with
+owner may only read it, which starts it), one instance at a time. Its action is the admin copy with
 `--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
 registration fails `--adopt` before the record's admin-copy values are written, as for the
 refresh task. `--remove --uninstall` deletes both tasks, after the values and before the admin
@@ -1263,7 +1265,7 @@ neither task. The refresh task stays per-user only: IT updates a per-machine ins
 task is registered by the elevated set-up instead, once it has written the record with the
 owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::stop_task`).
 It is the same registration as `--adopt`'s: same principal, argument, limits and descriptor,
-with `OwnerSid` as the owner who may read and run it. Every set-up of the owner registers it
+with `OwnerSid` as the owner who may read, and so start, it. Every set-up of the owner registers it
 again, replacing the one there. A new owner's set-up, after a removal, replaces the previous
 owner's task, so only the new owner can start it. A failed registration fails the set-up at
 the step "registering the sandbox's stop task", rolled back like any other step. `--remove`
@@ -1327,12 +1329,11 @@ holds, once no session is open (D-B6), then takes it off the list. While a sessi
 the open sessions can't be read, the users stay listed for a later set-up. Keeping a listed
 user from its matter's next launch comes with the runner's wiring (#649).
 
-**Misuse.** The owner's read-and-run entry lets any code running as the lawyer start the task.
+**Misuse.** The owner's read entry lets any code running as the lawyer start the task.
 All it can do is stop the sandboxed agents and mark their users for a reset, which is no more
-than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else. The
-execute right also lets that code end a running stop or refresh (`SchRpcStop`). An ended stop
-leaves a pool user's process running, as not asking for the stop would. An ended refresh is
-picked up by the next one, which clears what an earlier one left in staging.
+than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else. It
+can't end a running stop or refresh: ending a task needs execute access, which the owner doesn't
+have.
 
 **Speed.** The launch path doesn't change. The task runs only when a sweep saw a pool user's
 process it couldn't stop, or once at Clauseo's start after an unclean session

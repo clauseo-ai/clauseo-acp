@@ -63,7 +63,7 @@ pub(super) fn prepare<F: Folders>(folders: &mut F, sddl: &str) -> Result<F::Fold
 mod tests {
     use super::*;
 
-    const SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;S-1-5-21-1-2-3-1001)";
+    const SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;S-1-5-21-1-2-3-1001)";
 
     /// The folder `\Clauseo` as the fake has it: its owner, when it is there.
     #[derive(Default)]

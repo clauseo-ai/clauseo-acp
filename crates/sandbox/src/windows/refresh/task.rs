@@ -2,21 +2,21 @@
 //! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
 //! API (`ITaskService`), never `schtasks` text:
 //!
-//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS)
-//!   per user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`):
-//!   the task runs as LOCAL SYSTEM, starts
+//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
+//!   user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`): the task
+//!   runs as LOCAL SYSTEM, starts
 //!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
-//!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record
-//!   owner's logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never
-//!   runs twice at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by
-//!   Administrators and lets SYSTEM and Administrators do anything and the owner read and run
-//!   it, nothing more; the folder `\Clauseo` gets the same owner and DACL, made with them, or
-//!   set again when an administrator made it; one anyone else made is deleted with what is in
-//!   it and made again (`task_folder.rs`).
+//!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
+//!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice
+//!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
+//!   SYSTEM and Administrators do anything and the owner read it, which is enough to start it but
+//!   not to end a running one, nothing more; the folder `\Clauseo` gets the same owner and DACL,
+//!   made with them, or set again when an administrator made it; one anyone else made is deleted
+//!   with what is in it and made again (`task_folder.rs`).
 //! - [`unregister_task`] and [`remove_staging`], which `--remove --uninstall` calls.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
-//!   (`IRegisteredTask::Run`), which the owner's read-and-run entry allows.
+//!   (`IRegisteredTask::Run`), which the owner's read entry allows.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -391,7 +391,8 @@ pub fn request_pool_stop() -> bool {
     }
 }
 
-/// Runs `task` now, as whoever calls it, through the owner's read-and-run entry.
+/// Runs `task` now, as whoever calls it, through the owner's read entry: `Run` asks no access
+/// of its own, and the Task Scheduler starts a task for a caller with read access.
 fn run_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
