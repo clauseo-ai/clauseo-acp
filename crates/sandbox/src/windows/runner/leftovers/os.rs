@@ -1,7 +1,7 @@
 //! The removal's calls on Windows, made as the pool user: the per-user COM class keys and the
 //! `Run` and `RunOnce` values of its own `HKEY_CURRENT_USER` (its hive, loaded by
-//! `LOGON_WITH_PROFILE`), its Startup folder, and Task Scheduler and BITS (`com.rs`). COM is
-//! initialised only when a kind reached over it is listed, which the inner runner never does.
+//! `LOGON_WITH_PROFILE`), its Startup folder, and Task Scheduler (`com.rs`). COM is initialised
+//! only when a kind reached over it is listed, which the inner runner never does.
 //!
 //! The Startup folder is `FOLDERID_Startup` for this token, which must lie in the token's profile
 //! folder: the known folder's path comes from the user's own registry, which a process of the
@@ -20,7 +20,6 @@ use std::path::Path;
 use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, WIN32_ERROR,
 };
-use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
 use windows::Win32::Security::{LookupAccountSidW, SID_NAME_USE};
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
@@ -73,8 +72,6 @@ pub(in crate::windows::runner) enum Item {
     Class(Vec<u16>),
     /// A scheduled task, by its folder and name.
     Task { folder: ITaskFolder, name: BSTR },
-    /// A BITS job.
-    Bits(IBackgroundCopyJob),
     /// A value of `RUN_KEYS[key]`.
     Value { key: usize, name: Vec<u16> },
     /// An entry of the Startup folder, as its listing gave it.
@@ -193,7 +190,6 @@ impl Leftovers for OsLeftovers<'_> {
                     .ok_or_else(|| io::Error::other("taskschd.dll isn't loaded"))?;
                 com::tasks(&self.me, &self.account, library)
             }
-            Kind::Bits => com::bits_jobs(),
             Kind::RunKeys => run_values(),
             Kind::Startup => self.startup(),
         }
@@ -203,7 +199,6 @@ impl Leftovers for OsLeftovers<'_> {
         match item {
             Item::Class(path) => delete_tree(path),
             Item::Task { folder, name } => com::delete_task(folder, name),
-            Item::Bits(job) => com::cancel_job(job),
             Item::Value { key, name } => delete_value(*key, name),
             Item::Entry {
                 name,

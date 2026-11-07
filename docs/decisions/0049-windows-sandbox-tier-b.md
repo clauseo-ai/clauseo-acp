@@ -852,12 +852,9 @@ for `--reclaim`.
     of its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder.
     The inner makes no COM call. The end sweeper removes the same three, then, over COM (MTA) and
     only when no class key is left, scheduled tasks whose principal or author is the pool user,
-    in every folder it can read, and its BITS jobs, cancelled. It gets Task Scheduler's class
-    object straight from System32's `taskschd.dll` (`DllGetClassObject`), so that creation looks
-    up no class at all. BITS is an out-of-process server with no such route, so its
-    `CoCreateInstance` could in principle consult the per-user classes. The class keys' deletion
-    covers that, and right before BITS they are listed again: any key back, or a list that
-    fails, skips BITS. The Startup folder must lie in the
+    in every folder it can read. It gets Task Scheduler's class object straight from System32's
+    `taskschd.dll` (`DllGetClassObject`), so that creation looks up no class at all. It makes no
+    BITS call (below). The Startup folder must lie in the
     pool user's profile. It is reached one name at a time relative
     to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
     so a link is deleted and never what it names. Each kind is logged by count alone, with no
@@ -923,29 +920,33 @@ for `--reclaim`.
     makes the same cleanup, all on its own 60 s limit. The order is shut, sweep, widen, classes,
     COM (`runner/sweeper_flow.rs`). Its token stays shut to `SYSTEM` while anything of the pool
     user could be alive to open it, through both passes. COM can't work with it shut: Task
-    Scheduler and BITS both failed with `E_OUTOFMEMORY` (14) on every session's end in the
-    harness, as the inner's did when it still made COM calls after its own token's shut (before
-    its threads' and default DACL's). So only once both passes went with no failure, which leaves
-    nothing of the pool user that the sweep could end, does the sweeper widen its own token's
-    DACL for the COM step: its user gets `TOKEN_QUERY`, `TOKEN_DUPLICATE` and
-    `TOKEN_IMPERSONATE` (`token::SWEEPER_COM_TOKEN_RIGHTS`), the rights the calls that read,
+    Scheduler and BITS (which it called then) both failed with `E_OUTOFMEMORY` (14) on every
+    session's end in the harness, as the inner's did when it still made COM calls after its own
+    token's shut (before its threads' and default DACL's). So only once both passes went with no
+    failure, which leaves nothing of the pool user that the sweep could end, does the sweeper
+    widen its own token's DACL for the COM step: its user gets `TOKEN_QUERY`, `TOKEN_DUPLICATE`
+    and `TOKEN_IMPERSONATE` (`token::SWEEPER_COM_TOKEN_RIGHTS`), the rights the calls that read,
     copy and take on a token document, and nothing that adjusts it, assigns it to a process or
     changes its DACL or owner. Then it removes the per-user classes (before any COM, so no class
     registered there runs in it), the `Run` and `RunOnce` values and the Startup entries, then
-    the scheduled tasks and BITS jobs over COM. A sweep that failed, or a widening that did,
-    leaves the token shut and skips COM: the tasks and BITS jobs wait for a later end sweeper.
-    A pool user's BITS job can't run: BITS runs a job with its owner's logon token and holds
-    none for a pool user, who logs on only through `CreateProcessWithLogonW`. The harness's
-    `end-cleanup` row shows BITS refuses a pool user's job outright: the job is made, but
-    `AddFile` fails with `ERROR_NOT_LOGGED_ON` (0x800704dd), so it holds no file and can't
-    transfer or set off its notify command, whose marker never appears. For the same reason the
-    sweeper can't cancel it: `Cancel` fails with `ERROR_NOT_LOGGED_ON` (1245), even
-    with the proxy set to impersonate. Such a job isn't a sweep failure; the sweeper counts it as
-    left for the system stop, logs the count, and exits `RunExit::PoolStop` (`0xE0C15010`) when
-    nothing else failed. The outer logs that exit (`end::needs_pool_stop`), and the session
-    isn't clean, so its marker stays. Any other BITS error is a failure. The `SYSTEM` stop task
-    (PR #668) removes the job; until then it is inert. Once both are merged, the outer asks for
-    that stop when `needs_pool_stop` holds.
+    the scheduled tasks over COM. A sweep that failed, or a widening that did, leaves the token
+    shut and skips COM: the tasks wait for a later end sweeper.
+    **BITS.** The end sweeper makes no BITS call and creates no BITS object. A pool user's BITS
+    jobs are cancelled only by the `SYSTEM` `\Clauseo\SandboxStop` task (PR #668: it enumerates
+    with `BG_JOB_ENUM_ALL_USERS`, as `SYSTEM`, from a clean profile), whenever that task runs.
+    Until then such a job is inert: BITS runs a job with its owner's logon token and holds none
+    for a pool user, who logs on only through `CreateProcessWithLogonW`, so it refuses
+    `AddFile` and `Resume` for a pool user with `ERROR_NOT_LOGGED_ON` (0x800704dd, shown by the
+    harness's `end-cleanup` row). The job holds no file, so it can't transfer or set off its
+    notify command, whose marker never appears. An earlier version cancelled the jobs from the
+    sweeper; `Cancel` failed with 1245 even with the proxy set to impersonate, so that step only
+    signalled `RunExit::PoolStop` (`0xE0C15010`, now reserved and no longer produced), and it
+    left two windows to a Medium pool-user process that the creation-time cutoff spares: a
+    per-user `LocalServer32` or `AppID` entry written between the classes' removal and
+    `CoCreateInstance`, and proxy/stub lookups for `IEnumBackgroundCopyJobs` and
+    `IBackgroundCopyJob` under `HKCU\Software\Classes\Interface`, which load a DLL into the
+    sweeper. With no BITS COM call, no per-user class, `AppID` or proxy/stub registration can
+    load into the sweeper.
     What the sweep spares, a next session's runners and agent started after the sweeper, may be
     alive while the token is widened. Its runners are trusted code of ours, and its agent is Low,
     so a Medium token it opens can't be impersonated past identification, and its token lacks
@@ -1027,8 +1028,8 @@ for `--reclaim`.
     whose marker is left, with their pool users; nothing calls it yet.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
-    `Run` values and Startup entries before the launch is read. A task or BITS job stays until
-    an end sweeper runs (a BITS job until the `SYSTEM` stop, above, and it starts nothing),
+    `Run` values and Startup entries before the launch is read. A task stays until an end
+    sweeper runs, and a BITS job until the `SYSTEM` stop (above; it starts nothing meanwhile),
     and each process it starts lives only until a sweep.
     The residual cases are a job that doesn't empty within 400 ms, and a session end too late
     after the host's stdin end. From the stdin end, the outer starts the sweeper's logon only
@@ -1046,8 +1047,8 @@ for `--reclaim`.
     first act kills it as any process of the pool user outside its job (or reports an escapee),
     with the marker and the `SYSTEM` stop task as the backstop. Then no end sweeper runs, and the
     cleanup waits for the next launch's first act. Only an end sweeper that widened its token
-    removes scheduled tasks and BITS jobs, so a skipped one leaves them for the next session's end
-    sweeper, and a BITS job for the `SYSTEM` stop task. A task or BITS job that the next logon sets off then starts a process
+    removes scheduled tasks, so a skipped one leaves them for the next session's end sweeper. A
+    task that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's
     runs and before the agent exists, and the outer has shut the inner's process and thread by
     then.

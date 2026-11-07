@@ -6,12 +6,12 @@
 //! `wait`, and a resumed BITS job copying a local file, whose notify command writes a marker.
 //! After the session ends it waits until that user has no process left (the sweeper has ended,
 //! up to `checks_pool::SETTLE`), then checks, as that user again, until [`SWEEP_GRACE`] after
-//! the session's end has passed. When the BITS job is still there (the sweeper can't cancel it:
-//! BITS holds no logon token for a pool user), the row runs a second short session of the same
-//! pool user and checks again: the job must still be inert, its marker never written and its
-//! state never transferred. At the row's end it removes whatever is left and notes it. Each
-//! `probe items` run waits that way first. The verdict is in `cleanup_verdict.rs`; once the
-//! `SYSTEM` stop task lands (PR #668) the row will also require the job gone after that stop.
+//! the session's end has passed. The sweeper makes no BITS call (only the `SYSTEM` stop task,
+//! PR #668, cancels a pool user's job), so when the BITS job is still there the row runs a second
+//! short session of the same pool user and checks again: the job must still be inert, its marker
+//! never written and its state never transferred. At the row's end it removes whatever is left
+//! and notes it. Each `probe items` run waits that way first. The verdict is in
+//! `cleanup_verdict.rs`.
 
 use std::time::Duration;
 
@@ -108,7 +108,7 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
                 .collect();
             if lines.iter().any(|l| l.starts_with("item bits error")) {
                 ctx.note(
-                    "the harness couldn't cancel the BITS job either: it is left for the stop",
+                    "the harness couldn't cancel the BITS job: it is left for the system stop",
                 );
             }
             if !removed.is_empty() {
