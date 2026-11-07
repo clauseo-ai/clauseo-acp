@@ -6,7 +6,7 @@ use url::Url;
 
 use super::Scheme::{Http, Https};
 use super::parse::{self, BadProxy, Bypass, NoProxy};
-use super::{CACHE_FOR, Env, Lookup, Route, Upstream, UpstreamAnswer};
+use super::{CACHE_FOR, Env, FailKind, Lookup, Route, Upstream, UpstreamAnswer};
 use crate::{Clock, Error};
 
 mod failed;
@@ -331,7 +331,7 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
             let calls = Arc::clone(&calls);
             move |_: super::Scheme, _: &str, _: u16| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                UpstreamAnswer::Failed
+                UpstreamAnswer::Failed(FailKind::Other)
             }
         },
         clock.clone(),
@@ -339,13 +339,13 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
     .unwrap();
     assert_eq!(
         failing.answer(Https, "example.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     assert_eq!(failing.route(Https, "example.test", 443), Route::Direct);
     clock.advance(Duration::from_secs(59));
     assert_eq!(
         failing.answer(Https, "example.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1, "under 60 s: a hit");
     clock.advance(Duration::from_secs(1));
@@ -356,10 +356,13 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
 #[test]
 fn failed_os_answer_is_failed_and_goes_direct() {
     let answer = Err("the PAC script failed".to_owned());
-    assert_eq!(super::settle(443, answer.clone()), UpstreamAnswer::Failed);
+    assert_eq!(
+        super::settle(443, answer.clone()),
+        UpstreamAnswer::Failed(FailKind::Other)
+    );
     assert_eq!(super::settle(443, answer).route(), Route::Direct);
     assert_eq!(
-        super::settle(443, Ok(http("p", 1))),
+        super::settle(443, Ok::<_, String>(http("p", 1))),
         UpstreamAnswer::Route(http("p", 1))
     );
 }

@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use super::super::Scheme::Https;
 use super::super::{
-    Answer, Env, Failure, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer, bounded,
+    Answer, Env, FailKind, Failure, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer,
+    bounded,
 };
 use super::{FakeClock, http};
 
@@ -119,7 +120,7 @@ fn past_eight_lookups_at_once_a_miss_waits_then_fails_uncached() {
     // apart from an OS `DIRECT`.
     assert_eq!(
         gated.lookup.answer(Https, "ninth.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     assert_eq!(
         gated.calls.load(Ordering::SeqCst),
@@ -154,7 +155,10 @@ fn a_miss_past_the_slots_carries_the_settings_meaning() {
         })
         .collect();
     let decided = gated.lookup.decide(Https, "ninth.test", 443);
-    assert_eq!(decided.answer, Answer::Failed(Failure::MeantProxy));
+    assert_eq!(
+        decided.answer,
+        Answer::Failed(Failure::MeantProxy, FailKind::Other)
+    );
     assert_eq!(decided.got, None);
     for _ in 0..OS_LOOKUPS_MOST {
         gated.release.send(()).unwrap();

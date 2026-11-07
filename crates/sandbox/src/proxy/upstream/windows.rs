@@ -17,19 +17,18 @@ use windows::Win32::Networking::WinHttp::{
 };
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
+use super::os::OsError;
 use super::{Configured, PacSetting, Route};
 
 use super::parse::{
-    self, AUTOPROXY_SERVICE_ERROR, Bypass, PacAnswer, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT,
+    self, AUTOPROXY_SERVICE_ERROR, BAD_AUTO_PROXY_SCRIPT, Bypass, PacAnswer, PacFrom,
+    UNABLE_TO_DOWNLOAD_SCRIPT,
 };
 
-/// `ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`: a PAC script was found and would not run.
-const BAD_AUTO_PROXY_SCRIPT: u32 = 12_166;
-
-/// A failed lookup: the reason, with no URL, and what the settings held (`None` when they could
-/// not be read).
+/// A failed lookup: the reason, with no URL, and its kind ([`parse::pac_kind`] for a PAC
+/// lookup, else [`FailKind::Other`](super::FailKind::Other)), and what the settings held.
 pub(super) struct Failed {
-    pub(super) why: String,
+    pub(super) error: OsError,
     pub(super) configured: Option<Configured>,
 }
 
@@ -60,18 +59,18 @@ const PAC_TIMEOUT_MS: i32 = 5_000;
 /// settings held, and whether a PAC script would not run (12166).
 pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, Failed> {
     let config = IeConfig::current().map_err(|why| Failed {
-        why,
+        error: why.into(),
         configured: Some(UNREADABLE),
     })?;
     let configured = config.configured();
-    let failed = |why: String, configured: Configured| Failed {
-        why,
+    let failed = |error: OsError, configured: Configured| Failed {
+        error,
         configured: Some(configured),
     };
     let auto_config_url = config.auto_config_url.take_string();
     let mut wpad = None;
     if config.auto_detect || auto_config_url.is_some() {
-        let session = Session::open().map_err(|why| failed(why, configured))?;
+        let session = Session::open().map_err(|why| failed(why.into(), configured))?;
         let url = auto_config_url.as_deref().unwrap_or_default();
         let mut broken_script = false;
         let answer = parse::pac_answer(config.auto_detect, auto_config_url.is_some(), |from| {
@@ -87,13 +86,16 @@ pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, Failed
             ..configured
         };
         match answer {
-            PacAnswer::Final(answer) => return answer.map_err(|why| failed(why, configured)),
+            PacAnswer::Final(answer) => return answer.map_err(|error| failed(error, configured)),
             PacAnswer::Fallback(answer) => {
                 match &answer {
                     Ok(_) => tracing::debug!(host, port, "no WPAD file here"),
-                    Err(why) => tracing::warn!(port, %why, "WPAD failed; trying the next setting"),
+                    Err(error) => {
+                        let why = &error.why;
+                        tracing::warn!(port, why, "WPAD failed; trying the next setting");
+                    }
                 }
-                wpad = Some(answer.map_err(|why| failed(why, configured)));
+                wpad = Some(answer.map_err(|error| failed(error, configured)));
             }
             PacAnswer::Unset => {}
         }

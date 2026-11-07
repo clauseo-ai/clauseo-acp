@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::harness::{Rig, Setup, echo, rig, round_trip, upstream};
-use crate::proxy::upstream::{Answer, Configured, Failure, PacSetting, Scheme};
+use crate::proxy::upstream::{Answer, Configured, FailKind, Failure, PacSetting, Scheme};
 use crate::proxy::{Limits, Verdict};
 use crate::{Denial, Route, Upstream};
 
@@ -52,7 +52,7 @@ fn firm_proxy() -> (SocketAddr, Route, Receiver<String>) {
 }
 
 fn meant() -> Answer {
-    Answer::Failed(Failure::MeantProxy)
+    Answer::Failed(Failure::MeantProxy, FailKind::Other)
 }
 
 fn unavailable(host: &str, port: u16) -> Denial {
@@ -122,7 +122,11 @@ fn a_pac_url_a_static_proxy_or_a_broken_script_refuses_with_nothing_to_reuse() {
     ];
     for configured in cases {
         let (rig, answers) = failing_rig();
-        set(&answers, "a.test", Answer::Failed(configured.failure()));
+        set(
+            &answers,
+            "a.test",
+            Answer::Failed(configured.failure(), FailKind::Other),
+        );
         assert_eq!(rig.connect("a.test:443").1, 502, "{configured:?}");
         let answer = rig.exchange("GET http://a.test/ HTTP/1.1\r\n\r\n");
         assert!(
@@ -149,7 +153,7 @@ fn a_failed_lookup_on_a_plain_network_goes_direct() {
     set(
         &answers,
         "a.test",
-        Answer::Failed(Configured::default().failure()),
+        Answer::Failed(Configured::default().failure(), FailKind::Other),
     );
     let (mut tunnel, code) = rig.connect("a.test:443");
     assert_eq!(code, 200);

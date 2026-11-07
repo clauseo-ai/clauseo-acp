@@ -7,8 +7,6 @@ use std::time::Duration;
 #[cfg(any(target_os = "macos", windows, test))]
 use url::Url;
 
-#[cfg(any(target_os = "macos", windows, test))]
-use super::UpstreamAnswer;
 #[cfg(windows)]
 use super::bounded::bounded;
 #[cfg(target_os = "macos")]
@@ -18,6 +16,8 @@ use super::windows;
 use super::{Answer, Failure, Route, Scheme};
 #[cfg(windows)]
 use super::{Configured, OS_LOOKUPS_MOST};
+#[cfg(any(target_os = "macos", windows, test))]
+use super::{FailKind, UpstreamAnswer};
 
 /// The `https://host:port/` or `http://host:port/` the OS is asked about, or `None` for a host
 /// no URL can hold.
@@ -36,15 +36,34 @@ pub(super) fn target_url(scheme: Scheme, host: &str, port: u16) -> Option<String
     url.host_str().is_some().then(|| url.into())
 }
 
-/// An OS answer, or `Failed` when the lookup failed, logged by port only: the host is where the
-/// agent goes, which the log never holds (decision record 0047).
+/// A failed OS lookup: the reason, with no URL, and its kind. A bare reason is
+/// [`FailKind::Other`].
 #[cfg(any(target_os = "macos", windows, test))]
-pub(super) fn settle(port: u16, answer: Result<Route, String>) -> UpstreamAnswer {
-    match answer {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct OsError {
+    pub(super) why: String,
+    pub(super) kind: FailKind,
+}
+
+#[cfg(any(target_os = "macos", windows, test))]
+impl From<String> for OsError {
+    fn from(why: String) -> Self {
+        OsError {
+            why,
+            kind: FailKind::Other,
+        }
+    }
+}
+
+/// An OS answer, or `Failed` with its kind when the lookup failed, logged by port only: the
+/// host is where the agent goes, which the log never holds (decision record 0047).
+#[cfg(any(target_os = "macos", windows, test))]
+pub(super) fn settle(port: u16, answer: Result<Route, impl Into<OsError>>) -> UpstreamAnswer {
+    match answer.map_err(Into::into) {
         Ok(route) => route.into(),
-        Err(why) => {
-            tracing::warn!(port, why, "the OS proxy lookup failed");
-            UpstreamAnswer::Failed
+        Err(OsError { why, kind }) => {
+            tracing::warn!(port, why, ?kind, "the OS proxy lookup failed");
+            UpstreamAnswer::Failed(kind)
         }
     }
 }
@@ -53,12 +72,12 @@ pub(super) fn settle(port: u16, answer: Result<Route, String>) -> UpstreamAnswer
 #[cfg(any(target_os = "macos", windows))]
 pub(super) fn settle_with(
     port: u16,
-    answer: Result<Route, String>,
+    answer: Result<Route, OsError>,
     failure: impl FnOnce() -> Failure,
 ) -> Answer {
     match settle(port, answer) {
         UpstreamAnswer::Route(route) => route.into(),
-        UpstreamAnswer::Failed => Answer::Failed(failure()),
+        UpstreamAnswer::Failed(kind) => Answer::Failed(failure(), kind),
     }
 }
 
@@ -66,7 +85,7 @@ pub(super) fn settle_with(
 #[cfg(target_os = "macos")]
 pub(super) fn os_route(scheme: Scheme, host: &str, port: u16) -> Answer {
     let answer = target_url(scheme, host, port)
-        .ok_or_else(|| "the host is not a URL host".to_owned())
+        .ok_or_else(|| OsError::from("the host is not a URL host".to_owned()))
         .and_then(|target| macos::route(&target));
     settle_with(port, answer, os_intent)
 }
@@ -93,9 +112,9 @@ pub(super) fn os_route(scheme: Scheme, host: &str, port: u16) -> Answer {
         Ok(Ok(route)) => Ok(route),
         Ok(Err(failed)) => {
             configured = failed.configured;
-            Err(failed.why)
+            Err(failed.error)
         }
-        Err(why) => Err(why),
+        Err(why) => Err(OsError::from(why)),
     };
     settle_with(port, answer, || {
         configured.map_or_else(os_intent, Configured::failure)

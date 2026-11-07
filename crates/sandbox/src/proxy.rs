@@ -45,7 +45,7 @@ use futures::future::{AbortHandle, AbortRegistration};
 use serde::Serialize;
 
 pub use allowlist::{Allowlist, LoginKind, builtin_allowlist};
-pub use upstream::{Route, Upstream, UpstreamAnswer, upstream_answer, upstream_for};
+pub use upstream::{FailKind, Route, Upstream, UpstreamAnswer, upstream_answer, upstream_for};
 
 use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;

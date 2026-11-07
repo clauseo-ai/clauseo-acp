@@ -24,6 +24,8 @@ use objc2_core_foundation::{
     CFRunLoopSource, CFStreamClientContext, CFString, CFType, CFURL,
 };
 
+use super::os::OsError;
+use super::parse::{CfPacFailure, cf_pac_kind};
 use super::{Configured, PacSetting, Route};
 
 /// The longest a PAC run may take, in seconds.
@@ -88,12 +90,13 @@ fn names() -> Names {
     }
 }
 
-/// The system's route for `target` (`https://host:port/`). `Err` holds a reason with no URL.
-pub(super) fn route(target: &str) -> Result<Route, String> {
+/// The system's route for `target` (`https://host:port/`). `Err` holds a reason with no URL,
+/// and a PAC run's failure its kind ([`cf_pac_kind`]).
+pub(super) fn route(target: &str) -> Result<Route, OsError> {
     let url = cf_url(target)?;
     // SAFETY: takes no arguments and returns an owned dictionary or null.
     let Some(settings) = (unsafe { CFNetworkCopySystemProxySettings() }) else {
-        return Err("macOS returned no proxy settings".to_owned());
+        return Err(OsError::from("macOS returned no proxy settings".to_owned()));
     };
     // SAFETY: `settings` is the dictionary CFNetwork itself returned, of the key and value types
     // this call expects; `url` is a valid URL.
@@ -149,9 +152,17 @@ fn configured_from(settings: &CFDictionary<CFString, CFType>) -> Configured {
 
 /// The route a PAC script gives `target`, run as for an `AutoConfigurationJavaScript` entry.
 #[cfg(test)]
-pub(super) fn script_route(script: &str, target: &str) -> Result<Route, String> {
+pub(super) fn script_route(script: &str, target: &str) -> Result<Route, OsError> {
     let url = cf_url(target)?;
     run_pac(&Pac::Script(&CFString::from_str(script)), &url)
+}
+
+/// The route the PAC file at `pac` gives `target`, run as for an `AutoConfigurationURL` entry.
+#[cfg(test)]
+pub(super) fn url_route(pac: &str, target: &str) -> Result<Route, OsError> {
+    let url = cf_url(target)?;
+    let pac = cf_url(pac)?;
+    run_pac(&Pac::Url(&pac), &url)
 }
 
 fn cf_url(target: &str) -> Result<CFRetained<CFURL>, String> {
@@ -162,7 +173,7 @@ fn cf_url(target: &str) -> Result<CFRetained<CFURL>, String> {
 /// The first HTTP or HTTPS proxy entry, or a `None` entry (direct), in order. A PAC entry is run
 /// when `target` is given (`CFNetwork`'s list) and skipped when not (a PAC run's own result);
 /// SOCKS, FTP and unknown entries are skipped. No usable entry: direct.
-fn choose(proxies: &CFArray, target: Option<&CFURL>) -> Result<Route, String> {
+fn choose(proxies: &CFArray, target: Option<&CFURL>) -> Result<Route, OsError> {
     let names = names();
     for entry in entries(proxies) {
         let Some(kind) = value::<CFString>(&entry, names.kind) else {
@@ -230,7 +241,9 @@ enum Pac<'a> {
 
 /// What the PAC callback leaves for [`run_pac`].
 struct Outcome {
-    answer: Option<Result<Route, String>>,
+    /// Whether the run is a PAC URL's, for the kind of its failure.
+    url: bool,
+    answer: Option<Result<Route, OsError>>,
 }
 
 /// Called by `CFNetwork`, on the thread running the PAC mode, with the result.
@@ -249,15 +262,18 @@ unsafe extern "C-unwind" fn on_pac_result(
     // SAFETY: CFNetwork passes a valid array, or null on an error; it outlives the call.
     let proxies = unsafe { proxies.as_ref() };
     outcome.answer = Some(match (error, proxies) {
-        (Some(error), _) => Err(format!(
-            "the PAC script failed ({} {})",
-            error
+        (Some(error), _) => {
+            let domain = error
                 .domain()
-                .map_or_else(String::new, |domain| domain.to_string()),
-            error.code()
-        )),
+                .map_or_else(String::new, |domain| domain.to_string());
+            let code = error.code();
+            Err(OsError {
+                why: format!("the PAC script failed ({domain} {code})"),
+                kind: cf_pac_kind(outcome.url, CfPacFailure::Error(&domain, code)),
+            })
+        }
         (None, Some(proxies)) => choose(proxies, None),
-        (None, None) => Err("the PAC script gave no result".to_owned()),
+        (None, None) => Err(OsError::from("the PAC script gave no result".to_owned())),
     });
     if let Some(run_loop) = CFRunLoop::current() {
         run_loop.stop();
@@ -266,9 +282,10 @@ unsafe extern "C-unwind" fn on_pac_result(
 
 /// Runs a PAC script for `target` on this thread's run loop, in [`PAC_MODE`], for at most
 /// [`PAC_TIMEOUT_SECONDS`].
-fn run_pac(pac: &Pac<'_>, target: &CFURL) -> Result<Route, String> {
+fn run_pac(pac: &Pac<'_>, target: &CFURL) -> Result<Route, OsError> {
     let run_loop = CFRunLoop::current().ok_or_else(|| "this thread has no run loop".to_owned())?;
-    let mut outcome = Outcome { answer: None };
+    let url = matches!(pac, Pac::Url(_));
+    let mut outcome = Outcome { url, answer: None };
     let mut context = CFStreamClientContext {
         version: 0,
         info: (&raw mut outcome).cast(),
@@ -305,9 +322,12 @@ fn run_pac(pac: &Pac<'_>, target: &CFURL) -> Result<Route, String> {
     source.invalidate();
     outcome.answer.unwrap_or_else(|| {
         Err(if ran == CFRunLoopRunResult::TimedOut {
-            "the PAC run took over 5 s".to_owned()
+            OsError {
+                why: "the PAC run took over 5 s".to_owned(),
+                kind: cf_pac_kind(url, CfPacFailure::TimedOut),
+            }
         } else {
-            "the PAC run ended with no result".to_owned()
+            OsError::from("the PAC run ended with no result".to_owned())
         })
     })
 }

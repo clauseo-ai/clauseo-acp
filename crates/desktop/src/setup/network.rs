@@ -245,7 +245,7 @@ fn os_answer(answer: Result<UpstreamAnswer, clauseo_sandbox::Error>) -> OsAnswer
         }
         Ok(UpstreamAnswer::Route(Route::Direct)) => OsAnswer::Direct,
         // A failure of any kind, and a refused lookup.
-        _ => OsAnswer::Unknown,
+        Ok(UpstreamAnswer::Failed(_)) | Err(_) => OsAnswer::Unknown,
     }
 }
 

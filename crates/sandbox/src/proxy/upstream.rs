@@ -47,7 +47,7 @@ use crate::{Clock, Error, SystemClock};
 pub(crate) use answer::{Answer, Decided, Failure};
 #[cfg(any(target_os = "macos", windows, test))]
 pub(crate) use answer::{Configured, PacSetting};
-pub use answer::{UpstreamAnswer, upstream_answer, upstream_for};
+pub use answer::{FailKind, UpstreamAnswer, upstream_answer, upstream_for};
 use os::{os_intent, os_route};
 #[cfg(test)]
 use os::{settle, target_url};
@@ -448,7 +448,10 @@ impl OsLookup {
                     tracing::warn!("the OS proxy lookups were all busy; a lookup failed");
                 }
                 drop(flights);
-                return (Answer::Failed((self.intent)()), self.clock.now());
+                return (
+                    Answer::Failed((self.intent)(), FailKind::Other),
+                    self.clock.now(),
+                );
             }
             slot_waited = true;
             let busy =
