@@ -125,8 +125,39 @@ fn a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once() {
 /// failed; a new sign-in lifts the refusal and restarts the agents, and it runs.
 #[test]
 fn an_account_change_holds_a_second_threads_prompt_as_sign_in_until_restart() {
-    let dir = Dir::new(
+    second_thread_held_until_restart(
         "stop_for_account_change",
+        StopFor::SignInAgain,
+        Some(ErrorCode::SigninAccountChanged),
+        QueueHoldReason::SignIn,
+    );
+}
+
+/// R17's own-to-reused Codex switch: desktop stops the agents for a login switch first (the
+/// R20 leave order), then tells the reuse, removes the matter links and restarts. A prompt in
+/// another thread of the same agent, sent meanwhile, is held as `switching`, never failed, and
+/// runs after the restart.
+#[test]
+fn a_login_switch_holds_a_second_threads_prompt_as_switching_until_restart() {
+    second_thread_held_until_restart(
+        "stop_for_own_to_reused",
+        StopFor::LoginSwitch,
+        None,
+        QueueHoldReason::Switching,
+    );
+}
+
+/// A turn running, then desktop's `refused` refusal (if any) and `stop_agents_for(why)`: a
+/// prompt in a second thread of the same matter and agent is held with `reason`, never failed;
+/// the refusal lifted and `restart_agents` run both turns.
+fn second_thread_held_until_restart(
+    test: &str,
+    why: StopFor,
+    refused: Option<ErrorCode>,
+    reason: QueueHoldReason,
+) {
+    let dir = Dir::new(
+        test,
         &[(FAKE, Scenario::Local("account-change-second-thread"))],
     );
     let host = dir.start(0);
@@ -135,22 +166,19 @@ fn an_account_change_holds_a_second_threads_prompt_as_sign_in_until_restart() {
     let (first, _) = host.prompt(thread, ASKED);
     events.until("the turn starts", |events| starts(events, first) == 1);
 
-    // The account changed: desktop refuses new launches, then stops the agents.
-    wait(
-        "set_launch_refused",
-        host.handle
-            .set_launch_refused(fake(), Some(ErrorCode::SigninAccountChanged)),
-    )
-    .unwrap();
-    wait(
-        "stop_agents_for",
-        host.handle.stop_agents_for(fake(), StopFor::SignInAgain),
-    )
-    .unwrap();
+    // Desktop refuses new launches (an account change), then stops the agents.
+    if refused.is_some() {
+        wait(
+            "set_launch_refused",
+            host.handle.set_launch_refused(fake(), refused),
+        )
+        .unwrap();
+    }
+    wait("stop_agents_for", host.handle.stop_agents_for(fake(), why)).unwrap();
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     let again = put_back(&mut events, first);
 
-    // A prompt in a second thread of the same matter and agent: held as sign_in, not failed.
+    // A prompt in a second thread of the same matter and agent: held, not failed.
     let second = host.create_thread(matter, FAKE);
     let mut second_events = host.events(StreamId::Thread(second));
     let (held_turn, _) = host.prompt(second, "Sent while held.");
@@ -158,7 +186,7 @@ fn an_account_change_holds_a_second_threads_prompt_as_sign_in_until_restart() {
     assert!(held(&host, matter, second), "{}", second_events.dump());
     assert_eq!(
         hold_reason(&host, matter, second),
-        Some(QueueHoldReason::SignIn),
+        Some(reason),
         "{}",
         second_events.dump()
     );
@@ -166,12 +194,14 @@ fn an_account_change_holds_a_second_threads_prompt_as_sign_in_until_restart() {
     let failed = second_events.count(|event| matches!(event, DomainEvent::TurnFailed(_)));
     assert_eq!(failed, 0, "{}", second_events.dump());
 
-    // A new sign-in: desktop lifts the refusal and restarts the agents; both turns run.
-    wait(
-        "set_launch_refused",
-        host.handle.set_launch_refused(fake(), None),
-    )
-    .unwrap();
+    // Desktop lifts the refusal and restarts the agents; both turns run.
+    if refused.is_some() {
+        wait(
+            "set_launch_refused",
+            host.handle.set_launch_refused(fake(), None),
+        )
+        .unwrap();
+    }
     wait("restart_agents", host.handle.restart_agents(fake())).unwrap();
     assert_eq!(
         second_events.until_turn_ended(held_turn).stop,

@@ -342,21 +342,38 @@ pub(crate) fn taken_over(backend: &AgentsBackend, agent: &AgentId) -> Option<Ove
     (running || backend.agents.sign_in_going(agent)).then_some(Over::Running)
 }
 
-/// The steps after S18 stopped the reuse: `set_reused_login(false)`, `remove_login_links`
-/// (Codex), the entry rewritten as `Own`. All run; the first error comes back.
+/// The steps after S18 stopped the reuse: [`switch_steps`] to Clauseo's own login.
 pub(crate) async fn after_stop(
     backend: &AgentsBackend,
     agent: &AgentId,
     kind: AgentKind,
 ) -> Option<HostError> {
-    let mut first_error = set_reused(backend, agent, false).await.err();
+    switch_steps(backend, agent, kind, false).await
+}
+
+/// The steps of a login switch once the agents are stopped (the leave order's step 3, and the
+/// own-to-reused switch's, `leave/pump.rs`): `set_reused_login(reused)`, `remove_login_links`
+/// (Codex: no matter keeps a link to the login left), and the entry rewritten for the new
+/// source. All run; the first error comes back. `restart_agents` is the caller's.
+pub(crate) async fn switch_steps(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    kind: AgentKind,
+    reused: bool,
+) -> Option<HostError> {
+    let mut first_error = set_reused(backend, agent, reused).await.err();
     if kind == AgentKind::Codex
         && let Err(error) = backend.host.remove_login_links(agent.clone()).await
     {
         tracing::warn!(%agent, code = error.code().as_str(), "matter links not removed");
         first_error.get_or_insert(error);
     }
-    backend.write_entry_as(agent, SignInSource::Own).await;
+    let source = if reused {
+        SignInSource::Reused
+    } else {
+        SignInSource::Own
+    };
+    backend.write_entry_as(agent, source).await;
     first_error
 }
 

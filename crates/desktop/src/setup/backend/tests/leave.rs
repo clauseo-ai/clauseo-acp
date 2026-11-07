@@ -1,6 +1,7 @@
 //! The leave order on the recording fakes, in exact sequence: `StopUsingLogin` on a reused
 //! Codex login, a stop that times out (the leave stops there with nothing changed),
-//! `UseFoundLogin`'s order, and a split found in temp homes running the leave with its reason.
+//! `UseFoundLogin`'s order (the own-to-reused switch's leave order included), and a split
+//! found in temp homes running the leave with its reason.
 //! The helpers here (a reused login, the leave's sequence) serve `once.rs` and `switching.rs`.
 
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ use std::time::UNIX_EPOCH;
 use clauseo_agents::Found;
 use clauseo_agents::testing::installed;
 use clauseo_agents::{SigninState, Source};
-use clauseo_host::AgentsStopped;
+use clauseo_host::{AgentsStopped, StopFor};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SetupCommand};
 use serde_json::json;
 
@@ -149,7 +150,9 @@ fn use_found_login_tells_the_host_then_writes_the_entry_then_restarts() {
         [
             "readers.hold",
             "agents.use_found_login",
+            "host.stop_agents_for",
             "host.set_reused_login",
+            "host.remove_login_links",
             "host.set_agent_launch",
             "readers.set_entry",
             "readers.release",
@@ -157,7 +160,43 @@ fn use_found_login_tells_the_host_then_writes_the_entry_then_restarts() {
             "host.login_changed",
         ]
     );
-    assert_eq!(rig.host.calls()[0], HostCall::SetReusedLogin(codex(), true));
+    assert_eq!(
+        rig.host.calls()[0],
+        HostCall::StopAgentsFor(codex(), StopFor::LoginSwitch)
+    );
+    assert_eq!(rig.host.calls()[1], HostCall::SetReusedLogin(codex(), true));
+    assert!(rig.backend.wiring.reused.get(&codex()));
+}
+
+/// R17, before PR-C: Clauseo's own Codex login, then the lawyer's found login reused. The
+/// switch follows the leave order: the running agents stopped for a login switch (their held
+/// prompts show `switching`; the host's `stop_for.rs` shows another thread's held, never
+/// failed), the reuse told, the matter links removed, and only then the restart.
+#[test]
+fn own_to_reused_stops_for_a_switch_then_tells_then_removes_the_links_then_restarts() {
+    let rig = rig(true);
+    install(&rig, &codex());
+    rig.s18_was(&codex(), signed_in(Source::Own));
+    lock(&rig.agents.answers).insert("use_found_login", signed_in(Source::Reused));
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, command("use_found_login", &codex(), &json!({})));
+    assert_eq!(rig.pumped(send), Ok(CommandOutcome::Done));
+    let calls = rig.host.calls();
+    let at = |call: &HostCall| calls.iter().position(|made| made == call);
+    let stop = at(&HostCall::StopAgentsFor(codex(), StopFor::LoginSwitch));
+    let told = at(&HostCall::SetReusedLogin(codex(), true));
+    let unlinked = at(&HostCall::RemoveLoginLinks(codex()));
+    let restart = at(&HostCall::RestartAgents(codex()));
+    assert!(stop.is_some(), "{calls:?}");
+    assert!(
+        stop < told && told < unlinked && unlinked < restart,
+        "{calls:?}"
+    );
+    assert!(restart.is_some(), "{calls:?}");
+    assert!(
+        !calls.contains(&HostCall::StopAgents(codex())),
+        "one stop, the switch's"
+    );
     assert!(rig.backend.wiring.reused.get(&codex()));
 }
 

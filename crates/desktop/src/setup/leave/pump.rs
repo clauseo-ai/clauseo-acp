@@ -24,8 +24,10 @@
 //! - A `SignedIn` that is new (none before, or another account or source) ends any automatic
 //!   leave's tries and is handled before it is shown: a source that differs from the one the host
 //!   was told is told and the entry rewritten (a Codex login of Clauseo's own on another account
-//!   has its matter links removed), the reads' hold `UseFoundLogin` took drops, then
-//!   `restart_agents` and `limits_login_changed`.
+//!   has its matter links removed; a Codex login becoming the lawyer's reused one follows the
+//!   leave order: its agents stopped for a login switch, the reuse told, the matter links
+//!   removed), the reads' hold `UseFoundLogin` took drops, then `restart_agents` and
+//!   `limits_login_changed`.
 //! - Clauseo's own login signed out: `restart_agents` and `limits_login_changed` (ruling 3).
 //! - First of all, R17's identity check sees the state (`identity::on_state`): a sign-in or
 //!   reuse through Clauseo records its account before anything else; a `SignedIn` of another
@@ -33,6 +35,7 @@
 //!   never taken as a new sign-in, so nothing restarts on it.
 
 use clauseo_agents::{Found, SigninState, Source};
+use clauseo_host::{AgentsStopped, StopFor};
 use clauseo_protocol::{AgentId, AgentKind, SignInSource};
 
 use super::super::backend::AgentsBackend;
@@ -42,7 +45,7 @@ use super::after::finish;
 use super::hold::Late;
 use super::{
     Ended, Waiter, after_stop, login_changed, restart_for_login, restart_if_usable, set_reused,
-    signin_error, wait_on,
+    signin_error, switch_steps, wait_on,
 };
 
 /// See the module docs.
@@ -221,7 +224,12 @@ async fn ended_by_itself(backend: &AgentsBackend, agent: &AgentId, state: &Signi
 
 /// A new `SignedIn` of `source`: the host told and the entry rewritten when the source differs
 /// from the one it was told; a Codex login of Clauseo's own replacing another has its matter
-/// links removed (unless the steps after a reuse's end just did).
+/// links removed (unless the steps after a reuse's end just did). A Codex login that becomes
+/// the lawyer's reused one follows the leave order (R20, as a reuse's leave does): its agents
+/// stopped for a login switch first ([`stop_for_switch`]), then [`switch_steps`]
+/// (`set_reused_login(true)`, `remove_login_links`, the entry); the caller's
+/// `restart_agents` lifts the stop's hold. The identity check recorded the reused login's
+/// account before this (`identity::on_state`), so the restart is not refused as unknown.
 async fn signed_in(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -230,7 +238,12 @@ async fn signed_in(
     reuse_ended: bool,
 ) {
     let reused = source == Source::Reused;
-    if reused != backend.wiring.reused.get(agent) {
+    let codex = AgentKind::of(agent) == Some(AgentKind::Codex);
+    if reused && codex && !backend.wiring.reused.get(agent) {
+        stop_for_switch(backend, agent).await;
+        // Logged inside; the restart goes on.
+        let _first_error = switch_steps(backend, agent, AgentKind::Codex, true).await;
+    } else if reused != backend.wiring.reused.get(agent) {
         // Logged inside; the entry and the restart go on.
         let _told = set_reused(backend, agent, reused).await;
         let source = if reused {
@@ -246,5 +259,26 @@ async fn signed_in(
         && let Err(error) = backend.host.remove_login_links(agent.clone()).await
     {
         tracing::warn!(%agent, code = error.code().as_str(), "matter links not removed");
+    }
+}
+
+/// The own-to-reused switch's first step: `stop_agents_for(agent, StopFor::LoginSwitch)`, whose
+/// hold queues any prompt to the agent as `switching` until `restart_agents`. S18 has switched
+/// the login already, so a stop that times out or fails is logged and the switch goes on: the
+/// host's launch guard refuses a new launch in a matter whose old session still runs.
+async fn stop_for_switch(backend: &AgentsBackend, agent: &AgentId) {
+    match backend
+        .host
+        .stop_agents_for(agent.clone(), StopFor::LoginSwitch)
+        .await
+    {
+        Ok(AgentsStopped::Exited) => {}
+        Ok(AgentsStopped::TimedOut) => {
+            tracing::warn!(%agent, "an agent outlived the own-to-reused stop; switching anyway");
+        }
+        Err(error) => {
+            let code = error.code().as_str();
+            tracing::warn!(%agent, code, "agents not stopped for the own-to-reused switch");
+        }
     }
 }

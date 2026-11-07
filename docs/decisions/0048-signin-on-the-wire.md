@@ -498,6 +498,17 @@ hold, `stop_agents`, S18's `stop_using_login` and its `SignedOut` (30 s at most)
 `set_reused_login(false)`, `remove_login_links` (Codex) and the entry rewritten `Own`, then the
 reads' hold dropped and `limits_login_changed`.
 
+*The other way, own to reused (R17's follow-up, before PR-C).* A Codex login of Clauseo's own
+that becomes the lawyer's reused one (its new `SignedIn { Reused }`) follows the same order,
+through the same steps (`leave::switch_steps`): `stop_agents_for(codex, StopFor::LoginSwitch)`
+(prompts meanwhile queue held as `switching`), `set_reused_login(true)`, `remove_login_links`,
+the entry rewritten `Reused`, then `restart_agents`. No agent keeps a link to the old login, so
+no token refresh writes the old login's tokens into the lawyer's `~/.codex/auth.json`. S18 has
+switched the login by then, so a stop that times out or fails is logged and the switch goes
+on: PR-C's guard refuses a new launch in a matter whose old session still runs. For a reuse
+made through Clauseo (`UseFoundLogin`) the identity check records the reused login's account
+first, when its `SignedIn` comes, so the restart is not refused as unknown.
+
 - *One leave per agent.* A second leave of an agent while one runs answers `command.conflict`.
   The leave's waiter on S18's next resting state is its own: taking it back never removes a
   waiter put after it, and a state S18 sent before the waiter was put never fills it. A change
