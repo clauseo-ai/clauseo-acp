@@ -5,10 +5,11 @@
 //! - Claude: `auth status --json` with the session's environment ([`RunKind::Own`] for
 //!   Clauseo's own login, [`RunKind::Reused`] for the lawyer's), its `email`, else its
 //!   `accountUuid` (an id is enough).
-//! - Codex: `login status` through the install's Codex CLI ([`crate::state::Installed::codex_cli`];
-//!   exit 0 with its signed-in line is signed in), then `account/read` through the app-server,
-//!   its `ChatGPT` `email` (the pinned schema's account has no id). Exit 0 with no signed-in line, no answer, a missing CLI, or a signed-in
-//!   status whose `account/read` names no account or errs is [`AccountRead::Failed`].
+//! - Codex: `login status` through the install's Codex CLI
+//!   ([`crate::state::Installed::codex_cli`]; exit 0 with its signed-in line is signed in), then
+//!   `account/read` through the app-server, its `ChatGPT` `email` (the pinned schema's account
+//!   has no id). Exit 0 with no signed-in line, no answer, a missing CLI, or a signed-in status
+//!   whose `account/read` names no account or errs is [`AccountRead::Failed`].
 //!
 //! The identity comes only from that output: nothing here opens a credential. The email is
 //! hashed at once ([`AccountHash::of`]) and never kept, logged or shown. A read's runs keep their
@@ -22,9 +23,9 @@ use clauseo_process::Timer;
 use sha2::{Digest as _, Sha256};
 
 use crate::integrity::to_hex;
+use crate::signin::codex::{StatusSaid, identity};
 use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
-use crate::signin::codex::{StatusSaid, identity};
 use crate::signin::{claude, codex, found};
 use crate::status::Identity;
 
@@ -104,16 +105,18 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
             // Exit 0 with no signed-in line is not Codex's CLI answering: never signed in, and
             // the account is not known either way.
             StatusSaid::NoMarker | StatusSaid::NoAnswer => AccountRead::Failed,
-            StatusSaid::LoggedIn => match codex::identity::read_as(job, cancel, kind, &job.home).await {
-                identity::AccountRead::Chatgpt(identity) => named(&identity),
-                // An API-key, Bedrock or unknown kind of account names no email.
-                identity::AccountRead::NotChatgpt => AccountRead::NoAccount,
-                // `login status` said signed in, yet `account/read` named no account or answered
-                // with an error: who is signed in is not known.
-                identity::AccountRead::NoAccount | identity::AccountRead::NoAnswer => {
-                    AccountRead::Failed
+            StatusSaid::LoggedIn => {
+                match codex::identity::read_as(job, cancel, kind, &job.home).await {
+                    identity::AccountRead::Chatgpt(identity) => named(&identity),
+                    // An API-key, Bedrock or unknown kind of account names no email.
+                    identity::AccountRead::NotChatgpt => AccountRead::NoAccount,
+                    // `login status` said signed in, yet `account/read` named no account or
+                    // answered with an error: who is signed in is not known.
+                    identity::AccountRead::NoAccount | identity::AccountRead::NoAnswer => {
+                        AccountRead::Failed
+                    }
                 }
-            },
+            }
         },
     }
 }

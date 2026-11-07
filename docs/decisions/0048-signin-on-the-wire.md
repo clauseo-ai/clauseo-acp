@@ -586,8 +586,8 @@ changes (`setup/identity.rs`).
 
 - *Where the identity comes from.* Only the agents' own status output: S18's `SignedIn {
   email }`, and `Agents::read_account` (Claude's `auth status --json`, Codex's `login status`
-  then `account/read`, under the environment a session of that login sees; it changes no
-  sign-in state). Never a token or a credential file's contents. The email names the account;
+  then `account/read`, both through the install's Codex CLI, `codex.js`, under the
+  environment a session of that login sees; it changes no sign-in state). Never a token or a credential file's contents. The email names the account;
   with none, the account id does, when the status gives one (Claude's `accountUuid`; Codex's
   `account/read` has no id at the pinned schema), so an id is enough. It is kept only as the
   SHA-256 of that identity (trimmed, lower-cased), in `<data_dir>/agents/identity.json` (agent
@@ -648,7 +648,7 @@ changes (`setup/identity.rs`).
   `agent.keys_loading`, up to 2 s, woken when it lifts; a launch meeting it asks desktop through
   the host's launch retry, `HostConfig::with_launch_retry`, which passes the code:
   `agent.key_unreadable` reads the key again, `agent.identity_checking` runs the check; retries
-  queued together ask for one check), then the status, bounded by 20 s. The same account lifts
+  queued together ask for one check), then the status, bounded by 40 s. The same account lifts
   the identity's refusal and no other (a policy's or an unreadable key's stays in force over
   it); a status that failed, timed out or named no account while one is recorded sets
   `agent.identity_unknown` (checked again every 30 s only after a status that failed or timed

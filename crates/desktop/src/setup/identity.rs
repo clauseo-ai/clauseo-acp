@@ -78,9 +78,9 @@ pub(crate) const KEYCHAIN_STALE: Duration = Duration::from_mins(10);
 /// How long after an unknown verdict from a status that failed or timed out the check runs
 /// again by itself.
 pub(crate) const UNKNOWN_AGAIN: Duration = Duration::from_secs(30);
-/// The most one check may take, past the status runs' own limits (5 s each, and 10 s for
-/// Codex's app-server): then it is unknown.
-pub(crate) const CHECK_BOUND: Duration = Duration::from_secs(20);
+/// The most one check may take, past the status runs' own limits (Claude's status 5 s; Codex's
+/// `login status` 15 s, then its app-server 20 s): then it is unknown.
+pub(crate) const CHECK_BOUND: Duration = Duration::from_secs(40);
 
 /// What one login file's stat found: its stamp, none there, or the stat's error kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
