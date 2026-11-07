@@ -364,7 +364,8 @@ pub(crate) async fn chooser_starts(
 
 /// The page's timing of a chooser it showed, for the log alone (`chooser/trace.rs`): the
 /// milliseconds from the click to the desktop's answer, to the chooser's first render and to its
-/// first paint, as the page measured them. Always answers ok; logs no path.
+/// first paint, as the page measured them. Always answers ok; logs no path, and only the first
+/// [`CHOOSER_SHOWN_CAP`] calls of a run.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn chooser_shown(
@@ -372,15 +373,23 @@ pub(crate) async fn chooser_shown(
     render_ms: u32,
     paint_ms: u32,
 ) -> Result<(), HostError> {
-    tracing::info!(
-        at_ms = crate::chooser::trace::at_ms(),
-        answer_ms,
-        render_ms,
-        paint_ms,
-        "folder chooser: the page showed it"
-    );
+    if CHOOSER_SHOWN_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < CHOOSER_SHOWN_CAP {
+        tracing::info!(
+            at_ms = crate::chooser::trace::at_ms(),
+            answer_ms,
+            render_ms,
+            paint_ms,
+            "folder chooser: the page showed it"
+        );
+    }
     Ok(())
 }
+
+/// How many `chooser_shown` lines one run logs, so script in the page can't flood host.log.
+const CHOOSER_SHOWN_CAP: u32 = 20;
+
+/// The `chooser_shown` calls so far this run, logged or not.
+static CHOOSER_SHOWN_LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Goes where `go` says in the chooser session `chooser` and lists the folder there: by a
 /// start point's key, an index into the last listing, up (to a drive or typed share root), a
