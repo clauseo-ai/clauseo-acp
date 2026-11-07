@@ -38,9 +38,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::{BOOL, PCWSTR};
 
-use super::{
-    CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth, path,
-};
+use super::{CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth};
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
@@ -365,16 +363,42 @@ pub(super) fn write_bundle(
     pool: &[Sid],
     pem: &[u8],
 ) -> io::Result<PathBuf> {
+    write_named(data_dir, CA_FILE, desktop, pool, pem)
+}
+
+/// Writes a machine bundle merged with a firm's certificates (`merge`) beside the machine
+/// bundle, as [`merged_name`](super::merged_name) names it, with the same descriptor and the
+/// same atomic write; a file of that name already there is the same bundle for the same pool,
+/// so it is used as it is. Its path.
+pub fn write_merged(
+    data_dir: &Path,
+    desktop: &Sid,
+    pool: &[Sid],
+    pem: &str,
+) -> io::Result<PathBuf> {
+    let name = super::merged_name(pem, pool);
+    let target = data_dir.join(CA_DIR).join(&name);
+    if target.is_file() {
+        return Ok(target);
+    }
+    write_named(data_dir, &name, desktop, pool, pem.as_bytes())
+}
+
+/// [`write_bundle`] for the file `name` in the bundle's folder.
+fn write_named(
+    data_dir: &Path,
+    name: &str,
+    desktop: &Sid,
+    pool: &[Sid],
+    pem: &[u8],
+) -> io::Result<PathBuf> {
     let folder = data_dir.join(CA_DIR);
     crate::windows::write::make_sandbox_dir(&folder)
         .map_err(|error| bare("the CA bundle's folder can't be made or secured", &error))?;
-    let target = path(data_dir);
+    let target = folder.join(name);
     let mut suffix = [0u8; 8];
     getrandom::fill(&mut suffix).map_err(|error| io::Error::other(error.to_string()))?;
-    let temp = folder.join(format!(
-        ".{CA_FILE}.{:016x}.tmp",
-        u64::from_be_bytes(suffix)
-    ));
+    let temp = folder.join(format!(".{name}.{:016x}.tmp", u64::from_be_bytes(suffix)));
     let descriptor = Descriptor::from_sddl(&file_sddl(desktop, pool))?;
     let file = create_new(&temp, &descriptor)
         .map_err(|error| bare("the CA bundle's new file can't be made", &error))?;
