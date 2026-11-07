@@ -1,0 +1,64 @@
+# Throwaway: a Defender bisect of clauseo-sandbox-setup.exe. Builds the setup exe exactly as
+# release.yml's build job does for x86_64-pc-windows-msvc (sidecars.mjs's cargoPackageBin row:
+# `cargo build --release --locked -p clauseo-sandbox --bin clauseo-sandbox-setup --target $TARGET`,
+# with release.yml's workflow env and the leg's RUSTFLAGS), and uploads it with its SHA-256.
+# Only on exp-defender-* branches; never merge this file.
+name: exp-defender-bisect
+
+on:
+  push:
+    branches: ["exp-defender-*"]
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+  CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
+
+jobs:
+  setup-exe:
+    name: setup exe (x86_64-pc-windows-msvc)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      RUSTFLAGS: "-C force-frame-pointers=yes"
+      RELEASE_DIR: target/x86_64-pc-windows-msvc/release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Fetch the crates
+        run: cargo fetch --locked
+
+      - name: Build clauseo-sandbox-setup.exe as sidecars.mjs does
+        run: cargo build --release --locked -p clauseo-sandbox --bin clauseo-sandbox-setup --target "$TARGET"
+
+      - name: SHA-256
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp "$RELEASE_DIR/clauseo-sandbox-setup.exe" out/
+          cd out
+          sha256sum clauseo-sandbox-setup.exe | tee SHA256SUMS
+          echo "commit ${GITHUB_SHA}, branch ${GITHUB_REF_NAME}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: setup-exe-${{ github.ref_name }}
+          path: |
+            out/clauseo-sandbox-setup.exe
+            out/SHA256SUMS
+          if-no-files-found: error
