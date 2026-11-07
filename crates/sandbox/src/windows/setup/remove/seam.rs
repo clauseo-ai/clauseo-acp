@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
+
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
@@ -73,6 +75,13 @@ pub trait Removal {
     ) -> Result<Option<Ledger>, MachineError>;
     /// What `forget_matter`'s walks need, for the folder [`Removal::owners_ledger`] checked.
     fn surroundings(&mut self) -> &mut dyn Surroundings;
+    /// As the owner, inside [`Removal::as_owner`] and only there, once `matter` is forgotten:
+    /// its set-aside bookkeeping deleted in the folder [`Removal::owners_ledger`] checked, and
+    /// the matter's set-aside folder when nothing else is in it (`set_aside::forget_bookkeeping`,
+    /// by handle, never through a link). Called outside it, refused with nothing touched. The
+    /// administrator's path never calls it: an administrator deletes nothing in the owner's
+    /// folders (K1). Nothing checked yet is `Ok`, nothing touched.
+    fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError>;
     /// As this process, for a per-machine removal the owner didn't ask for: the record's
     /// `data_dir` checked as [`Removal::owners_ledger`] checks it, except that the folder and
     /// its `sandbox` folder must be owned by `owner` (the record's), then the ledger read, and

@@ -26,6 +26,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use clauseo_protocol::MatterId;
+
 use super::super::accounts::{self, Kind};
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
@@ -41,6 +43,7 @@ use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
+use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::{FolderSupport, folder_support};
 
@@ -57,6 +60,8 @@ pub struct WindowsRemoval {
     acting: Rc<Cell<bool>>,
     /// Around the owner's matters, once [`Removal::owners_ledger`] checked the data folder.
     around: Around,
+    /// The data folder [`Removal::owners_ledger`] checked, as the owner.
+    checked: Option<PathBuf>,
 }
 
 impl WindowsRemoval {
@@ -72,6 +77,7 @@ impl WindowsRemoval {
             acting: Rc::new(Cell::new(false)),
             // Replaced by the checked data folder before `forget_matter` can use it.
             around: Around::new(PathBuf::new()),
+            checked: None,
         }
     }
 
@@ -285,6 +291,7 @@ impl Removal for WindowsRemoval {
                 return Ok(None);
             };
             m.around = Around::new(folder.clone());
+            m.checked = Some(folder.clone());
             ledger_in(&folder, trusted)
         });
         owned.and_then(|inner| inner)
@@ -292,6 +299,22 @@ impl Removal for WindowsRemoval {
 
     fn surroundings(&mut self) -> &mut dyn Surroundings {
         &mut self.around
+    }
+
+    fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError> {
+        if !self.acting.get() {
+            return Err(MachineError::Other(
+                "a set-aside's bookkeeping is deleted only as its owner".to_owned(),
+            ));
+        }
+        let Some(folder) = &self.checked else {
+            return Ok(());
+        };
+        forget_bookkeeping(folder, matter)
+            .map(drop)
+            .map_err(|failure| {
+                MachineError::Other(format!("a matter's set-aside bookkeeping: {failure}"))
+            })
     }
 
     fn admins_ledger(

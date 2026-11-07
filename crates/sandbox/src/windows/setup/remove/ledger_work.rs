@@ -10,7 +10,9 @@
 //! per-user run stops before this. The record's `DataDir` is checked as `--data-dir` is
 //! (`Removal::owners_ledger`); then every matter with a trusted entry or a hand-back owed is
 //! forgotten (`apply::forget_matter`: its entries taken back, the lawyer's own labels put
-//! back, what its pool users made handed back to the owner, its trees walked). Anything left
+//! back, what its pool users made handed back to the owner, its trees walked), then its set-aside
+//! bookkeeping deleted (`Removal::forget_set_aside`: `record.json` and `set-aside.lock`, and
+//! the matter's set-aside folder if then empty; a failure is logged, never fatal). Anything left
 //! (an entry whose removal failed, a hand-back still owed, a kept entry naming a pool SID) stops
 //! the run, so the record stays and the ledger keeps trusting its entries.
 //!
@@ -121,6 +123,12 @@ fn as_owner(
             let forgotten = forget_matter(&mut ledger, *matter, &mut *acl, m.surroundings())
                 .map_err(|e| e.to_string())?;
             removed += forgotten.removed;
+            // The matter's set-aside bookkeeping, now Clauseo's alone, so the uninstaller keeps
+            // the set-aside only for the lawyer's files. Left, it only means the box says Kept.
+            if let Err(error) = m.forget_set_aside(matter) {
+                let error = cause_of(&error);
+                tracing::warn!(%error, "a forgotten matter's set-aside bookkeeping stays");
+            }
         }
         match left(&ledger, trusted) {
             Some(why) => Err(why),
