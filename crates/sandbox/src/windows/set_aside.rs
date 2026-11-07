@@ -103,12 +103,12 @@ pub const SET_ASIDE_BOOKKEEPING: [&str; 2] = ["record.json", "set-aside.lock"];
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;
+pub use bookkeeping::{SetAsideBookkeeping, forget_set_aside_bookkeeping, set_aside_record_closed};
 #[cfg(test)]
 pub(crate) use fast::open_session;
 #[cfg(any(windows, test))]
 pub(crate) use fast::under_lock;
 
-#[cfg(any(windows, test))]
 mod bookkeeping;
 #[cfg(any(windows, test))]
 mod check;

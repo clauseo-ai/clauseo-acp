@@ -3,7 +3,12 @@
 //! rest, with no Kept box; anything else there keeps the whole set-aside, untouched, and no link
 //! is followed.
 
-use super::{DELETED, KEPT_SET_ASIDE, World, exists, make};
+use super::{DATA, DELETED, KEPT_SET_ASIDE, World, exists, make};
+
+/// A record with no open session, as a clean close leaves it.
+const CLOSED: &[u8] = br#"{"version": 1, "matter": "m", "sessions": [], "names": []}"#;
+/// A record whose session never had its after-session pass: a crash's changes still unchecked.
+const OPEN: &[u8] = br#"{"version": 1, "matter": "m", "sessions": ["s1"], "names": []}"#;
 
 /// Two matters' folders in the set-aside, each holding only the bookkeeping, and the ledger.
 const MATTERS: [&str; 2] = [
@@ -15,7 +20,7 @@ fn bookkeeping_world(test: &str) -> World {
     let world = World::new(test);
     for matter in MATTERS {
         world.data_dir(matter);
-        world.data_file(&format!("{matter}/record.json"));
+        write(&world, &format!("{matter}/record.json"), CLOSED);
         world.data_file(&format!("{matter}/set-aside.lock"));
     }
     world.data_file("sandbox/acl-ledger.json");
@@ -118,4 +123,98 @@ fn a_record_or_a_matter_folder_that_is_a_link_keeps_the_whole_set_aside_and_is_n
     assert!(exists(&linked));
     assert!(exists(&world.at("outside/canary/record.json")));
     world.assert_canary_whole();
+}
+
+/// Writes `bytes` as the file `rel` under `world`'s local data folder (its folder must exist).
+fn write(world: &World, rel: &str, bytes: &[u8]) {
+    world.scratch.file(&format!("Local/{DATA}/{rel}"), bytes);
+}
+
+/// The set-aside is kept with no failure, and `matter`'s bookkeeping is still there.
+fn assert_matter_kept(world: &World, matter: &str) {
+    assert_eq!(world.delete(true), (KEPT_SET_ASIDE, String::new()));
+    assert!(exists(&world.data(&format!("{matter}/record.json"))));
+    assert!(exists(&world.data(&format!("{matter}/set-aside.lock"))));
+    assert!(!exists(&world.data("sandbox/acl-ledger.json")));
+    world.assert_canary_whole();
+}
+
+#[test]
+fn a_record_still_listing_an_open_session_or_unreadable_keeps_its_matter_and_the_set_aside() {
+    // The next launch checks a crashed session's changes only against this record.
+    for (n, bytes) in [OPEN, b"data".as_slice(), b"{\"version\": 1}".as_slice()]
+        .into_iter()
+        .enumerate()
+    {
+        let world = bookkeeping_world(&format!("dad-set-aside-open-{n}"));
+        write(&world, &format!("{}/record.json", MATTERS[0]), bytes);
+        assert_matter_kept(&world, MATTERS[0]);
+        assert_eq!(
+            std::fs::read(world.data(&format!("{}/record.json", MATTERS[0]))).unwrap(),
+            bytes
+        );
+    }
+}
+
+#[test]
+fn a_hard_linked_record_keeps_its_matter_and_the_lawyers_other_link_survives() {
+    let world = bookkeeping_world("dad-set-aside-hard-link");
+    world
+        .scratch
+        .file("outside/canary/record-copy.json", CLOSED);
+    let record = world.data(&format!("{}/record.json", MATTERS[0]));
+    make::remove_file(&record);
+    make::hard_link(&world.at("outside/canary/record-copy.json"), &record);
+    assert_matter_kept(&world, MATTERS[0]);
+    assert_eq!(
+        std::fs::read(world.at("outside/canary/record-copy.json")).unwrap(),
+        CLOSED
+    );
+}
+
+#[test]
+fn an_empty_set_aside_or_empty_matter_folders_go_with_the_rest() {
+    let world = World::new("dad-set-aside-empty-matters");
+    world.data_dir("sandbox/set-aside");
+    world.data_file("sandbox/acl-ledger.json");
+    assert_eq!(world.delete(true), (DELETED, String::new()));
+    world.assert_both_gone();
+    let world = World::new("dad-set-aside-empty-matter-folders");
+    for matter in MATTERS {
+        world.data_dir(matter);
+    }
+    assert_eq!(world.delete(true), (DELETED, String::new()));
+    world.assert_both_gone();
+}
+
+#[test]
+fn names_with_a_trailing_dot_or_space_keep_the_whole_set_aside() {
+    // NTFS opens `record.json.` as `record.json` through a plain path; listed, it is neither.
+    for (n, name) in ["record.json.", "set-aside.lock "].into_iter().enumerate() {
+        let world = bookkeeping_world(&format!("dad-set-aside-trailing-{n}"));
+        let path = world.data(&format!("{}/{name}", MATTERS[1]));
+        make::verbatim_file(&path, CLOSED);
+        assert_kept_whole(&world);
+        assert!(make::verbatim_exists(&path), "{name:?}");
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
+fn bookkeeping_that_cannot_be_deleted_is_reported_and_nothing_above_it_goes() {
+    let world = bookkeeping_world("dad-set-aside-held");
+    let matter = world.data(MATTERS[0]);
+    make::set_mode(&matter, 0o555);
+    if make::can_write_in(&matter) {
+        make::set_mode(&matter, 0o755);
+        eprintln!("skipped: running as root, a mode cannot refuse the deletion");
+        return;
+    }
+    let (code, stderr) = world.delete(true);
+    make::set_mode(&matter, 0o755);
+    assert_eq!(code, super::FAILED);
+    assert!(stderr.contains("could not delete it"), "{stderr}");
+    assert!(exists(&matter.join("record.json")));
+    assert!(exists(&world.data("sandbox/set-aside")));
+    assert!(!exists(&world.data("store.sqlite")));
 }

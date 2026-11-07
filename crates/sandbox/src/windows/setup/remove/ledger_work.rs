@@ -10,7 +10,8 @@
 //! per-user run stops before this. The record's `DataDir` is checked as `--data-dir` is
 //! (`Removal::owners_ledger`); then every matter with a trusted entry or a hand-back owed is
 //! forgotten (`apply::forget_matter`: its entries taken back, the lawyer's own labels put
-//! back, what its pool users made handed back to the owner, its trees walked), then its set-aside
+//! back, what its pool users made handed back to the owner, its trees walked), then, once nothing
+//! of it is left in the ledger, its set-aside
 //! bookkeeping deleted (`Removal::forget_set_aside`: `record.json` and `set-aside.lock`, and
 //! the matter's set-aside folder if then empty; a failure is logged, never fatal). Anything left
 //! (an entry whose removal failed, a hand-back still owed, a kept entry naming a pool SID) stops
@@ -123,9 +124,12 @@ fn as_owner(
             let forgotten = forget_matter(&mut ledger, *matter, &mut *acl, m.surroundings())
                 .map_err(|e| e.to_string())?;
             removed += forgotten.removed;
-            // The matter's set-aside bookkeeping, now Clauseo's alone, so the uninstaller keeps
-            // the set-aside only for the lawyer's files. Left, it only means the box says Kept.
-            if let Err(error) = m.forget_set_aside(matter) {
+            // Only a matter fully forgotten (nothing of it left in the ledger) loses its
+            // set-aside bookkeeping, so the uninstaller keeps the set-aside only for the lawyer's
+            // files. Left, it only means the box says Kept.
+            if forgotten_whole(&ledger, *matter)
+                && let Err(error) = m.forget_set_aside(matter)
+            {
                 let error = cause_of(&error);
                 tracing::warn!(%error, "a forgotten matter's set-aside bookkeeping stays");
             }
@@ -143,6 +147,16 @@ fn as_owner(
         Ok(Err(cause)) => Err((RemoveStep::Ledger, cause)),
         Err(error) => Err((RemoveStep::Ledger, cause_of(&error))),
     }
+}
+
+/// Whether the ledger holds nothing more of `matter`: no entry, no hand-back owed. An entry
+/// whose removal failed stays (`forget_matter`), and so does the matter's set-aside record.
+fn forgotten_whole(ledger: &Ledger, matter: MatterId) -> bool {
+    !ledger.entries().any(|entry| entry.matter == matter)
+        && !ledger
+            .handbacks_owed()
+            .iter()
+            .any(|owed| owed.matter == matter)
 }
 
 /// Every matter the ledger names in a trusted entry or a hand-back owed, each once.

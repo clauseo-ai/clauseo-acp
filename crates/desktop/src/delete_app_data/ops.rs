@@ -21,8 +21,13 @@ pub(super) struct Pinned {
 /// (`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`), and refuses it unless that
 /// handle's own attributes (`GetFileInformationByHandle`, std's `File::metadata`) say a folder
 /// and no reparse point. It shares read access only, so while it is held no one can open the
-/// folder to delete, rename or write it (turning it into a junction needs a write handle), and
-/// Windows refuses to rename a folder above it: its path keeps naming this folder.
+/// folder to delete, rename or write its data, and Windows refuses to rename a folder above it:
+/// its path keeps naming this folder. It does not stop a reparse point being set on it: NTFS
+/// takes `FSCTL_SET_REPARSE_POINT` on a handle with `FILE_WRITE_ATTRIBUTES` too, which share
+/// modes do not govern, so someone with the lawyer's own rights (the sandbox folder's DACL shuts
+/// pool users out) could still turn an empty pinned folder into a junction. Nothing relies on the
+/// pin alone for that: std's `remove_dir_all` opens each entry without following a reparse
+/// point, and the set-aside's bookkeeping goes by handle (`set_aside.rs`).
 #[cfg(windows)]
 pub(super) fn pin_folder(path: &Path) -> io::Result<Pinned> {
     use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};

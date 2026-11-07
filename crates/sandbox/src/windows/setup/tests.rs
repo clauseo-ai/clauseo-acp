@@ -22,6 +22,7 @@ mod remains;
 mod remove;
 mod remove_fake;
 mod remove_ledger;
+mod remove_set_aside;
 mod resets;
 mod rollback;
 mod top_up;
