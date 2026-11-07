@@ -42,12 +42,13 @@ fn with_extra(folder: bool, extra: Entry<'_>) -> Vec<u8> {
 fn a_ready_copy_passes_and_the_path_is_the_admin_copy_alone() {
     let fake = Fake::ready();
     assert!(passes(check(&fake)));
-    // Nothing outside Program Files is ever looked at: the copy beside the app is never built.
+    // Nothing outside Program Files but its volume root is ever looked at: the copy beside the
+    // app is never built.
     let asked = fake.asked.borrow();
     assert!(!asked.is_empty());
     for path in asked.iter() {
         assert!(
-            path.starts_with(r"C:\Program Files"),
+            path.starts_with(r"C:\Program Files") || same_path(path, Path::new(r"C:\")),
             "asked about {}",
             path.display()
         );

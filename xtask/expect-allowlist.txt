@@ -491,9 +491,10 @@ crates/sandbox/src/windows/user_setup.rs - unsafe_code
 # The set-up program's admin copy: its checks' Win32 reads and lock-down, its hash's read-only
 # open, and --remove's deletion of the admin folder (MoveFileExW for the running copy).
 crates/sandbox/src/windows/admin_copy/os.rs - unsafe_code
-crates/sandbox/src/windows/admin_copy/os.rs open_regular clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/os.rs open_shared clippy::disallowed_methods
 crates/sandbox/src/windows/admin_copy/os.rs lock_down_tree clippy::disallowed_methods
 crates/sandbox/src/windows/admin_copy/os.rs lock_tree clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/ntfs_tests.rs a_held_hash_keeps_the_file_from_changing_until_it_drops clippy::disallowed_methods
 crates/sandbox/src/windows/setup/admin_remove.rs - unsafe_code
 crates/sandbox/src/windows/setup/admin_remove.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/setup/admin_remove.rs unregister_refresh_task clippy::unnecessary_wraps

@@ -15,9 +15,18 @@ use crate::windows::test_dacl::protect_with;
 const PLANTED: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200af;;;BU)";
 
 /// A Program Files stand-in at `root`, read from NTFS, with `recorded` as the record's hash.
+/// The folders above it (the runner's temporary folders and drive) aren't the test's: they read
+/// as a locked folder would, the real ones being what the fakes test.
 struct Rooted {
     root: PathBuf,
     recorded: Option<String>,
+}
+
+impl Rooted {
+    /// Whether `path` is a folder above the stand-in.
+    fn above(&self, path: &Path) -> bool {
+        inside(&self.root, path)
+    }
 }
 
 impl AdminCopyFs for Rooted {
@@ -26,15 +35,25 @@ impl AdminCopyFs for Rooted {
     }
 
     fn found(&self, path: &Path) -> io::Result<Found> {
+        if self.above(path) {
+            return Ok(Found::Folder);
+        }
         os::found(path)
     }
 
     fn security(&self, path: &Path) -> io::Result<Vec<u8>> {
+        if self.above(path) {
+            return Ok(super::fake::locked_dacl(true));
+        }
         os::security(path)
     }
 
     fn sha256(&self, path: &Path) -> io::Result<String> {
         os::sha256(path)
+    }
+
+    fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)> {
+        os::sha256_held(path)
     }
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
@@ -86,6 +105,29 @@ fn the_hash_is_the_files_sha256_and_a_missing_file_is_missing() {
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
     assert_eq!(os::found(&dir.path().join("none")).unwrap(), Found::Missing);
+}
+
+/// A held hash keeps the file from being written, renamed or deleted until the hold drops, and
+/// still lets it be read (as starting it does).
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test's own file: written, renamed and deleted to see the hold refuse each"
+)]
+fn a_held_hash_keeps_the_file_from_changing_until_it_drops() {
+    let dir = TempDir::new("admin-copy-held");
+    let file = dir.file("x.exe", "abc");
+    let (hash, held) = os::sha256_held(&file).unwrap();
+    assert_eq!(hash, os::sha256(&file).unwrap(), "read while held");
+    let write = std::fs::OpenOptions::new().write(true).open(&file);
+    assert!(write.is_err(), "no write while held");
+    assert!(
+        std::fs::rename(&file, dir.path().join("y.exe")).is_err(),
+        "no rename"
+    );
+    assert!(std::fs::remove_file(&file).is_err(), "no delete");
+    drop(held);
+    std::fs::remove_file(&file).unwrap();
 }
 
 #[test]

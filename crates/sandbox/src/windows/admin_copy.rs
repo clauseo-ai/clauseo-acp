@@ -10,19 +10,25 @@
 //!
 //! 1. the copy is there as a regular file, not a link or other reparse point, and the record
 //!    holds a hash: else [`Blocked::AdminCopyMissing`];
-//! 2. each of `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy is not a reparse point, is
-//!    owned by SYSTEM, Administrators or `TrustedInstaller`, and no allow entry that applies to
-//!    it gives any other account write, append, delete (of it or of a child), `WRITE_DAC`,
-//!    `WRITE_OWNER` or a generic right that holds one of those ([`level_safe`]): else
-//!    [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter: they only take rights away;
-//!    The admin folder holds nothing but the copy, its signature and the staging folder
-//!    ([`expected_entry`]): a DLL planted beside the copy is refused too;
+//! 2. each of `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy, and each folder above
+//!    `%ProgramFiles%` up to the volume root, is not a reparse point, is owned by SYSTEM,
+//!    Administrators or `TrustedInstaller`, and no allow entry that applies to it gives any
+//!    other account write, append, delete (of it or of a child), `WRITE_DAC`, `WRITE_OWNER` or
+//!    a generic right that holds one of those ([`level_safe`]); the volume root itself, where
+//!    every account may add a folder, is held only to the rights that could replace what is in
+//!    it ([`root_safe`]): else [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter:
+//!    they only take rights away. The admin folder holds nothing but the copy, its signature and
+//!    the staging folder ([`expected_entry`]): a DLL planted beside the copy is refused too;
 //! 3. the copy's SHA-256 is the recorded one: else [`Blocked::AdminCopyChanged`].
 //!
 //! The folder check comes before the hash: a copy in a folder others can change proves nothing
 //! by its hash, and naming the folder tells IT what to fix. `%ProgramFiles%` comes from
 //! `FOLDERID_ProgramFiles`, never from the environment. Every check reads through
 //! [`AdminCopyFs`], so the rules are tested on every OS; `os.rs` is the Windows one.
+//!
+//! An elevated start goes through [`launch_checked`]: the copy is hashed through a handle that
+//! shares read only, and that handle stays open until the start has returned, so the file
+//! started is the file hashed: nobody can write, rename or delete it in between.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -33,7 +39,11 @@ use super::sids::Sid;
 use crate::{Blocked, SetupState};
 
 #[cfg(test)]
+mod chain_tests;
+#[cfg(test)]
 pub(crate) mod fake;
+#[cfg(test)]
+mod launch_tests;
 #[cfg(test)]
 #[cfg(windows)]
 mod ntfs_tests;
@@ -41,6 +51,9 @@ mod ntfs_tests;
 pub(crate) mod os;
 #[cfg(test)]
 mod tests;
+mod version;
+
+pub use version::version_not_older;
 
 /// The admin copy's folder under `%ProgramFiles%`, one part at a time.
 pub const ADMIN_DIR: [&str; 2] = ["Clauseo", "Sandbox"];
@@ -94,6 +107,11 @@ pub const CHANGE_RIGHTS: u32 = WRITE_DATA
     | MAXIMUM_ALLOWED
     | GENERIC_ALL
     | GENERIC_WRITE;
+/// The rights that could replace what is in a volume root: delete a child, or give oneself that
+/// (`WRITE_DAC`, `WRITE_OWNER`, the generic ones that hold them). Adding a file or folder there,
+/// which every account may, and deleting the root itself, which nobody can, change nothing.
+pub const ROOT_CHANGE_RIGHTS: u32 =
+    DELETE_CHILD | WRITE_DAC | WRITE_OWNER | MAXIMUM_ALLOWED | GENERIC_ALL;
 
 /// `FILE_ALL_ACCESS`.
 pub const FULL_ACCESS: u32 = 0x1F_01FF;
@@ -136,6 +154,10 @@ pub trait AdminCopyFs {
     /// The SHA-256 of the regular file at `path`, as 64 lowercase hex digits; refused when
     /// `path` is a reparse point.
     fn sha256(&self, path: &Path) -> io::Result<String>;
+    /// As [`AdminCopyFs::sha256`], read through a handle the [`Held`] keeps open, sharing read
+    /// only (no write, no delete), so the file can't be changed, renamed or deleted until it
+    /// drops.
+    fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)>;
     /// The record's `AdminCopySha256`, when it holds one.
     fn recorded_sha256(&self) -> io::Result<Option<String>>;
     /// The names of what is in the folder `dir`.
@@ -145,20 +167,59 @@ pub trait AdminCopyFs {
     fn another_owner(&self) -> io::Result<bool>;
 }
 
+/// What keeps a hashed admin copy unchanged ([`AdminCopyFs::sha256_held`]): on Windows the
+/// handle it was hashed through. Dropping it lets the file change again.
+pub struct Held {
+    _keeps: Box<dyn std::any::Any>,
+}
+
+impl Held {
+    /// A hold that lasts as long as `keeps`.
+    pub fn new(keeps: impl std::any::Any) -> Held {
+        Held {
+            _keeps: Box::new(keeps),
+        }
+    }
+}
+
 /// What a tier-B launch (`check_launch`) and every elevated start (`UserSetup`) check first:
 /// a pool owned by another Windows user is [`Blocked::OtherAccount`] (D5's one owner), then
-/// [`check`]. A record that can't be read is left to the checks after it: the set-up itself
-/// enforces the owner.
+/// [`check`]. A record whose owners can't be read fails closed, as a recorded hash that can't
+/// be read does: [`Blocked::AdminCopyMissing`], never "no other owner".
 pub fn check_launchable(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
+    owner_check(fs)?;
+    check(fs)
+}
+
+/// [`check_launchable`] for an elevated start: the copy is hashed through
+/// [`AdminCopyFs::sha256_held`], then `start` is given its path while that handle is still
+/// open, and the handle closes only once `start` has returned, with the process started (or
+/// not). Nothing starts when a check fails.
+pub fn launch_checked<T>(
+    fs: &dyn AdminCopyFs,
+    start: impl FnOnce(&Path) -> T,
+) -> Result<T, Blocked> {
+    owner_check(fs)?;
+    let (exe, held) = checked(fs, |exe| fs.sha256_held(exe))?;
+    let started = start(&exe);
+    drop(held);
+    Ok(started)
+}
+
+/// The record's owners: another Windows user's is [`Blocked::OtherAccount`]; owners that can't
+/// be read are [`Blocked::AdminCopyMissing`], as the copy's own record values are.
+fn owner_check(fs: &dyn AdminCopyFs) -> Result<(), Blocked> {
     match fs.another_owner() {
+        Ok(false) => Ok(()),
         Ok(true) => {
             tracing::warn!("tier B is set up for another account on this computer");
-            return Err(Blocked::OtherAccount);
+            Err(Blocked::OtherAccount)
         }
-        Ok(false) => {}
-        Err(error) => tracing::warn!(%error, "the record's owner can't be read"),
+        Err(error) => {
+            tracing::warn!(%error, "the record's owner can't be read");
+            Err(Blocked::AdminCopyMissing)
+        }
     }
-    check(fs)
 }
 
 /// Whether `name` may be in the admin folder: the copy, its signature, the staging folder.
@@ -184,6 +245,14 @@ pub fn admin_exe(program_files: &Path) -> PathBuf {
 /// The admin copy's path once it passes the module's three rules, else the first rule it
 /// breaks. The path is the one to start: nothing else is ever started elevated.
 pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
+    checked(fs, |exe| fs.sha256(exe).map(|hash| (hash, ()))).map(|(exe, ())| exe)
+}
+
+/// [`check`], the copy hashed by `hash`, which also gives what it holds for the caller.
+fn checked<H>(
+    fs: &dyn AdminCopyFs,
+    hash: impl FnOnce(&Path) -> io::Result<(String, H)>,
+) -> Result<(PathBuf, H), Blocked> {
     let program_files = fs.program_files().map_err(|error| {
         tracing::warn!(%error, "Windows gave no Program Files folder");
         Blocked::AdminCopyMissing
@@ -220,8 +289,8 @@ pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
         tracing::warn!("the admin copy's recorded hash isn't a SHA-256");
         return Err(Blocked::AdminCopyChanged);
     }
-    match fs.sha256(&exe) {
-        Ok(actual) if actual == recorded => Ok(exe),
+    match hash(&exe) {
+        Ok((actual, held)) if actual == recorded => Ok((exe, held)),
         Ok(_) => {
             tracing::warn!("the admin copy's SHA-256 isn't the recorded one");
             Err(Blocked::AdminCopyChanged)
@@ -233,10 +302,20 @@ pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
     }
 }
 
-/// Rule 2 over `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy: each a folder (the copy a
-/// file) that is no link, with a [`level_safe`] owner and DACL.
+/// Rule 2 from the volume root down: the root, any folder between it and `%ProgramFiles%`, then
+/// `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy; each a folder (the copy a file) that is
+/// no link, the root with a [`root_safe`] owner and DACL, every other level [`level_safe`]. A
+/// `%ProgramFiles%` that isn't on a drive letter (`above` gives nothing) is unsafe.
 fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result<(), Blocked> {
-    let mut levels = vec![(program_files.to_path_buf(), Found::Folder)];
+    let Some(above) = above(program_files) else {
+        tracing::warn!("Program Files isn't a folder on a drive letter");
+        return Err(Blocked::AdminCopyUnsafe);
+    };
+    let mut levels: Vec<(PathBuf, Found)> = above
+        .into_iter()
+        .map(|path| (path, Found::Folder))
+        .collect();
+    levels.push((program_files.to_path_buf(), Found::Folder));
     let mut at = program_files.to_path_buf();
     for part in ADMIN_DIR {
         at = at.join(part);
@@ -245,8 +324,9 @@ fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result
     levels.push((exe.to_path_buf(), Found::File));
     for (depth, (path, want)) in levels.iter().enumerate() {
         let found = fs.found(path);
-        let secured = found.as_ref().ok() == Some(want)
-            && fs.security(path).is_ok_and(|bytes| level_safe(&bytes));
+        let rule = if depth == 0 { root_safe } else { level_safe };
+        let secured =
+            found.as_ref().ok() == Some(want) && fs.security(path).is_ok_and(|bytes| rule(&bytes));
         if !secured {
             tracing::warn!(
                 depth,
@@ -259,12 +339,51 @@ fn check_chain(fs: &dyn AdminCopyFs, program_files: &Path, exe: &Path) -> Result
     Ok(())
 }
 
+/// The folders above `program_files`, from its volume root down: `C:\` alone for
+/// `C:\Program Files`. `None` unless it is a path on a drive letter, below its root, with no
+/// `.` or `..` part.
+pub fn above(program_files: &Path) -> Option<Vec<PathBuf>> {
+    let text = normal(program_files);
+    let mut parts = text.split('\\');
+    let drive = parts.next()?;
+    let lettered = drive.len() == 2
+        && drive.starts_with(|c: char| c.is_ascii_alphabetic())
+        && drive.ends_with(':');
+    let rest: Vec<&str> = parts.collect();
+    let plain = rest
+        .iter()
+        .all(|part| !part.is_empty() && *part != "." && *part != "..");
+    let (_last, between) = rest.split_last()?;
+    if !lettered || !plain {
+        return None;
+    }
+    let mut at = format!("{drive}\\");
+    let mut folders = vec![PathBuf::from(&at)];
+    for part in between {
+        at.push_str(part);
+        folders.push(PathBuf::from(&at));
+        at.push('\\');
+    }
+    Some(folders)
+}
+
 /// Whether the self-relative descriptor `bytes` keeps its object to [`TRUSTED`] accounts: an
 /// owner among them, a DACL (none would allow everyone everything), and no allow entry that
 /// applies to the object itself (inherit-only ones don't) giving any [`CHANGE_RIGHTS`] to
 /// another SID. An allow entry whose SID can't be read (object and compound entries) counts as
 /// another SID's. Deny, audit and label entries are skipped.
 pub fn level_safe(bytes: &[u8]) -> bool {
+    safe_against(bytes, CHANGE_RIGHTS)
+}
+
+/// [`level_safe`] for a volume root: only [`ROOT_CHANGE_RIGHTS`] count, so the entry every
+/// Windows install has there (Authenticated Users may add a folder) passes.
+pub fn root_safe(bytes: &[u8]) -> bool {
+    safe_against(bytes, ROOT_CHANGE_RIGHTS)
+}
+
+/// [`level_safe`] with `rights` as the rights that count.
+fn safe_against(bytes: &[u8], rights: u32) -> bool {
     let trusted = |sid: &str| TRUSTED.contains(&sid);
     let Some(owner) = acl_bytes::owner_sid(bytes) else {
         return false;
@@ -290,7 +409,7 @@ pub fn level_safe(bytes: &[u8]) -> bool {
         let Some(mask) = acl_bytes::mask(ace) else {
             return false;
         };
-        if mask & CHANGE_RIGHTS == 0 {
+        if mask & rights == 0 {
             return true;
         }
         acl_bytes::sid(ace)
@@ -403,7 +522,7 @@ pub fn inside(child: &Path, parent: &Path) -> bool {
 /// `combined` (the marker and record's state with the last set-up's result, `marker` without
 /// it) stands, except that a recorded admin-copy cause the copy no longer has gives way to
 /// `marker`, and a pool to set up (`Needed`) whose copy another user's install placed is
-/// `Blocked::OtherAccount`.
+/// `Blocked::OtherAccount` (`Blocked::AdminCopyMissing` when the owners can't be read).
 pub fn protection_state(
     fs: &dyn AdminCopyFs,
     marker: SetupState,
@@ -419,8 +538,10 @@ pub fn protection_state(
         )
     );
     let state = if stale { marker } else { combined };
-    if state == SetupState::Needed && fs.another_owner().unwrap_or(false) {
-        return SetupState::Blocked(Blocked::OtherAccount);
+    if state == SetupState::Needed
+        && let Err(blocked) = owner_check(fs)
+    {
+        return SetupState::Blocked(blocked);
     }
     state
 }
@@ -454,76 +575,5 @@ pub fn copy_removable(
         Some(CopyOwner::Machine) => removal.per_machine,
         Some(CopyOwner::User(owner)) => !removal.per_machine && removal.invoker == Some(owner),
         None => false,
-    }
-}
-
-/// Whether `candidate` is no older than `recorded`, both versions as `tauri.conf.json` writes
-/// them (`1.2.3`, `1.2.3-beta.1`; build metadata after `+` ignored): `--adopt` and the refresh
-/// task (PR 3) never replace a copy with an older one. The numeric parts compare first, up to
-/// four (a missing one is 0); with equal parts a release beats a pre-release, and two
-/// pre-releases compare part by part as semver does (numbers below words). A version that
-/// doesn't parse is never "not older": the safe side.
-pub fn version_not_older(recorded: &str, candidate: &str) -> bool {
-    match (Version::parse(recorded), Version::parse(candidate)) {
-        (Some(recorded), Some(candidate)) => candidate >= recorded,
-        _ => false,
-    }
-}
-
-/// A version as [`version_not_older`] compares it.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Version {
-    core: [u64; 4],
-    /// `true` for a release, so it sorts above any pre-release of the same core.
-    release: bool,
-    pre: Vec<PreId>,
-}
-
-/// One dot-separated pre-release identifier; numbers sort below words.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum PreId {
-    Number(u64),
-    Word(String),
-}
-
-impl Version {
-    fn parse(text: &str) -> Option<Version> {
-        let text = text.split('+').next().unwrap_or_default();
-        let (core_text, pre_text) = match text.split_once('-') {
-            Some((core, pre)) => (core, Some(pre)),
-            None => (text, None),
-        };
-        let parts: Vec<u64> = core_text
-            .split('.')
-            .map(|part| {
-                part.bytes()
-                    .all(|b| b.is_ascii_digit())
-                    .then(|| part.parse().ok())
-                    .flatten()
-            })
-            .collect::<Option<_>>()?;
-        if parts.is_empty() || parts.len() > 4 {
-            return None;
-        }
-        let mut core = [0; 4];
-        for (slot, part) in core.iter_mut().zip(parts) {
-            *slot = part;
-        }
-        let pre = match pre_text {
-            Some(pre) => pre
-                .split('.')
-                .map(|id| match id.parse() {
-                    _ if id.is_empty() => None,
-                    Ok(n) if id.bytes().all(|b| b.is_ascii_digit()) => Some(PreId::Number(n)),
-                    _ => Some(PreId::Word(id.to_owned())),
-                })
-                .collect::<Option<Vec<_>>>()?,
-            None => Vec::new(),
-        };
-        Some(Version {
-            core,
-            release: pre_text.is_none(),
-            pre,
-        })
     }
 }

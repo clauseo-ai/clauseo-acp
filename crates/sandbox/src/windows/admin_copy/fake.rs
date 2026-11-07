@@ -5,8 +5,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use super::{ADMIN_DIR, AdminCopyFs, FULL_ACCESS, Found, READ_EXECUTE, SETUP_EXE};
+use super::{ADMIN_DIR, AdminCopyFs, FULL_ACCESS, Found, Held, READ_EXECUTE, SETUP_EXE};
 use crate::windows::acl_bytes::{self, AceSpec, Acl};
 use crate::windows::sids::Sid;
 
@@ -73,6 +74,26 @@ pub(crate) fn program_files_dacl() -> Vec<u8> {
     )
 }
 
+/// What a stock `C:\` holds: `TrustedInstaller` owns it; SYSTEM and Administrators have full
+/// control and Users read and run, each inherited; Authenticated Users may add a folder there,
+/// and their modify right is inherit-only.
+pub(crate) fn volume_root_dacl() -> Vec<u8> {
+    descriptor(
+        super::TRUSTED_INSTALLER,
+        Some(&[
+            (0, 0x3, FULL_ACCESS, super::SYSTEM),
+            (0, 0x3, FULL_ACCESS, super::ADMINISTRATORS),
+            (0, 0x3, READ_EXECUTE, super::USERS),
+            (0, 0xB, 0x1_301BF, AUTHENTICATED_USERS),
+            (0, 0, super::APPEND_DATA, AUTHENTICATED_USERS),
+        ]),
+        false,
+    )
+}
+
+/// `NT AUTHORITY\Authenticated Users`.
+pub(crate) const AUTHENTICATED_USERS: &str = "S-1-5-11";
+
 /// The admin folder or copy as `--adopt` locks it.
 pub(crate) fn locked_dacl(folder: bool) -> Vec<u8> {
     let inherit = if folder { 0x3 } else { 0 };
@@ -98,8 +119,22 @@ pub(crate) struct Fake {
     pub(crate) recorded: Option<String>,
     /// Whether the record names another pool owner.
     pub(crate) another: bool,
+    /// Whether the record's owners can't be read.
+    pub(crate) owner_unreadable: bool,
     /// Every path asked about, in order.
     pub(crate) asked: RefCell<Vec<PathBuf>>,
+    /// What a launch did, in order: `held` when the copy is hashed through a held handle,
+    /// `released` when that handle closes (the tests add what they start).
+    pub(crate) events: Rc<RefCell<Vec<&'static str>>>,
+}
+
+/// A held handle: says `released` when it drops.
+struct Release(Rc<RefCell<Vec<&'static str>>>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.borrow_mut().push("released");
+    }
 }
 
 impl Fake {
@@ -112,8 +147,11 @@ impl Fake {
             hash: HASH.to_owned(),
             recorded: Some(HASH.to_owned()),
             another: false,
+            owner_unreadable: false,
             asked: RefCell::new(Vec::new()),
+            events: Rc::new(RefCell::new(Vec::new())),
         };
+        fake.set(Path::new(r"C:\"), Found::Folder, volume_root_dacl());
         fake.set(&program_files, Found::Folder, program_files_dacl());
         let mut at = program_files;
         for part in ADMIN_DIR {
@@ -162,11 +200,20 @@ impl AdminCopyFs for Fake {
         }
     }
 
+    fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)> {
+        let hash = self.sha256(path)?;
+        self.events.borrow_mut().push("held");
+        Ok((hash, Held::new(Release(Rc::clone(&self.events)))))
+    }
+
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         Ok(self.recorded.clone())
     }
 
     fn another_owner(&self) -> io::Result<bool> {
+        if self.owner_unreadable {
+            return Err(io::Error::other("the record can't be read"));
+        }
         Ok(self.another)
     }
 

@@ -38,7 +38,7 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
-use super::{AdminCopyFs, Found, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
+use super::{AdminCopyFs, Found, Held, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
 use crate::windows::record::{
     admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_owner_sid,
 };
@@ -65,6 +65,10 @@ impl AdminCopyFs for WindowsAdminCopy {
 
     fn sha256(&self, path: &Path) -> io::Result<String> {
         sha256(path)
+    }
+
+    fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)> {
+        sha256_held(path)
     }
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
@@ -170,6 +174,10 @@ impl AdminCopyFs for StateAdminCopy {
         sha256_cached(path)
     }
 
+    fn sha256_held(&self, path: &Path) -> io::Result<(String, Held)> {
+        WindowsAdminCopy.sha256_held(path)
+    }
+
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         WindowsAdminCopy.recorded_sha256()
     }
@@ -225,11 +233,6 @@ fn identity(file: &File) -> io::Result<Identity> {
     ))
 }
 
-/// The admin copy's path once this machine passes [`super::check_launchable`].
-pub(crate) fn check_here() -> Result<PathBuf, crate::Blocked> {
-    super::check_launchable(&WindowsAdminCopy)
-}
-
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment,
 /// which whoever started this process could have set.
 pub(crate) fn program_files() -> io::Result<PathBuf> {
@@ -265,16 +268,30 @@ pub(crate) fn sha256(path: &Path) -> io::Result<String> {
     hash_file(&mut open_regular(path)?)
 }
 
+/// [`sha256`] through a handle that shares read only (no `FILE_SHARE_WRITE`, no
+/// `FILE_SHARE_DELETE`), kept open in the [`Held`]: until it drops, no one can open the file
+/// to write it, rename it or delete it. Starting it is a read, which the share allows.
+pub(crate) fn sha256_held(path: &Path) -> io::Result<(String, Held)> {
+    let mut file = open_shared(path, FILE_SHARE_READ.0)?;
+    let hash = hash_file(&mut file)?;
+    Ok((hash, Held::new(file)))
+}
+
 /// `path` opened as itself to read (`FILE_FLAG_OPEN_REPARSE_POINT`), refused unless the handle
 /// is a regular file and no reparse point.
+fn open_regular(path: &Path) -> io::Result<File> {
+    open_shared(path, (FILE_SHARE_READ | FILE_SHARE_DELETE).0)
+}
+
+/// [`open_regular`] sharing only `share` with other handles.
 #[expect(
     clippy::disallowed_methods,
     reason = "opens the admin copy to read it, never to write; std's open is the one with flags"
 )]
-fn open_regular(path: &Path) -> io::Result<File> {
+fn open_shared(path: &Path, share: u32) -> io::Result<File> {
     let file = File::options()
         .read(true)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_DELETE).0)
+        .share_mode(share)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
         .open(path)?;
     let meta = file.metadata()?;

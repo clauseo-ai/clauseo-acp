@@ -6,12 +6,14 @@
 //! parent's recorded parent: D-B2's rule taken one hop further.
 //!
 //! The outer instance also names its own user (`--owner-sid`). [`installer_owner`] takes the
-//! lawyer as the outer instance's token user, and only when the tree is the installer's:
-//! created strictly in order (the elevated instance before `--adopt`, the outer one before
-//! that; a later one is a reused process ID), both instances running the same image, the outer
-//! one's token not elevated, and its user the SID it named. The elevated instance's own user
-//! is never used. Anything else refuses. Pure: tested on every OS; `Owner::of_installer` reads
-//! the facts.
+//! lawyer as the outer instance's token user, and checks the tree's shape and that user, not that
+//! the processes are the installer: created strictly in order (the elevated instance before
+//! `--adopt`, the outer one before that; a later one is a reused process ID), both instances
+//! running the same image, the outer one's token not elevated, and its user the SID it named.
+//! Any two processes of one image pass, the middle one elevated or not; that grants nothing, since
+//! the owner it gives is the outer process's own unelevated user, who named themselves. The
+//! elevated instance's own user is never used. Anything else refuses. Pure: tested on every OS;
+//! `Owner::of_installer` reads the facts.
 
 use std::path::PathBuf;
 
