@@ -2,35 +2,63 @@
 //! transaction: the provider and the sublayer; every filter already in our sublayer deleted
 //! (ours, and any foreign one); the block filters and one static permit per pool user added.
 //! So a re-run or an extend replaces the filters with no moment where a pool user is
-//! unfiltered. Each object's owner is read back before the commit: it must be Administrators or
-//! SYSTEM ([`owner_allowed`]), or the transaction aborts and the set-up fails. Then the owner's
+//! unfiltered. Every object is created owned by Administrators, one an earlier run left owned by
+//! another account is recreated, and each owner is read back before the commit (`writes.rs`):
+//! one still wrong aborts the transaction and fails the set-up. Then the owner's
 //! read-only grants; then the firewall rules, which never fail the set-up
 //! ([`FirewallOutcome`]). Any WFP failure, the Base Filtering Engine down included, fails it.
 
-use super::check::{ERROR_INVALID_OWNER, Kind, OWNER_CHECK, WfpError, classify, owner_allowed};
+use super::check::{FoundFilter, WfpError};
 use super::engine::{Engine, filters_in, grant, owner_of};
 use super::firewall;
 use super::spec::{
-    FirewallOutcome, Namespace, NetworkReport, NetworkSetup, Object, revocations, rule_names,
+    FilterSpec, FirewallOutcome, Namespace, NetworkReport, NetworkSetup, Object, revocations,
+    rule_names,
 };
+use super::writes::{SetupWriter, remove_objects, write_objects};
 use crate::windows::sids::Sid;
 
-/// Deletes every filter in `ns`'s sublayer and every key set-up has ever written; how many of
-/// those deleted weren't set-up's own.
-fn clear_sublayer(engine: &Engine, ns: &Namespace) -> Result<usize, WfpError> {
-    let found = filters_in(engine, ns).map_err(|(call, code)| WfpError { call, code })?;
-    let mut foreign = 0;
-    for filter in &found {
-        if classify(ns, filter) == Kind::Foreign {
-            foreign += 1;
-            tracing::warn!(name = %filter.name, "set-up deletes a filter it didn't write");
-        }
-        engine.delete_by_id(filter.id)?;
+impl SetupWriter for Engine {
+    fn add_provider(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
+        Engine::add_provider(self, ns, sddl)
     }
-    for key in ns.removal_keys() {
-        engine.delete_filter(key)?;
+
+    fn add_sublayer(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
+        Engine::add_sublayer(self, ns, sddl)
     }
-    Ok(foreign)
+
+    fn add_filter(
+        &self,
+        ns: &Namespace,
+        spec: &FilterSpec,
+        sddl: Option<&str>,
+    ) -> Result<u64, WfpError> {
+        Engine::add_filter(self, ns, spec, sddl)
+    }
+
+    fn filters_in(&self, ns: &Namespace) -> Result<Vec<FoundFilter>, WfpError> {
+        filters_in(self, ns).map_err(|(call, code)| WfpError { call, code })
+    }
+
+    fn delete_by_id(&self, id: u64) -> Result<bool, WfpError> {
+        Engine::delete_by_id(self, id)
+    }
+
+    fn delete_filter(&self, key: u128) -> Result<bool, WfpError> {
+        Engine::delete_filter(self, key)
+    }
+
+    fn delete_sublayer(&self, key: u128) -> Result<bool, WfpError> {
+        Engine::delete_sublayer(self, key)
+    }
+
+    fn delete_provider(&self, key: u128) -> Result<bool, WfpError> {
+        Engine::delete_provider(self, key)
+    }
+
+    fn owner_of(&self, ns: &Namespace, object: Object) -> Result<String, WfpError> {
+        owner_of(self, ns, object)
+    }
 }
 
 /// Writes set-up's network objects in `ns` for `setup`. Idempotent: the sublayer is emptied and
@@ -40,29 +68,9 @@ pub fn install(ns: &Namespace, setup: &NetworkSetup) -> Result<NetworkReport, Wf
     let engine = Engine::open(false, &ns.display)?;
     let filters = setup.filters(ns);
     let transaction = engine.transaction()?;
-    engine.add_provider(ns)?;
-    engine.add_sublayer(ns)?;
-    let foreign_removed = clear_sublayer(&engine, ns)?;
-    for spec in &filters {
-        engine.add_filter(ns, spec)?;
-    }
-    // Read back inside the transaction: a failure aborts it, so nothing the lawyer owns is left
-    // committed (an object an earlier run left keeps its owner, and is checked too).
-    let mut objects = vec![Object::Provider, Object::Sublayer];
-    objects.extend(filters.iter().map(|spec| Object::Filter(spec.key)));
-    for object in objects {
-        let owner = owner_of(&engine, ns, object)?;
-        if !owner_allowed(&owner) {
-            tracing::warn!(
-                ?object,
-                "one of set-up's WFP objects isn't owned by Administrators"
-            );
-            return Err(WfpError {
-                call: OWNER_CHECK,
-                code: ERROR_INVALID_OWNER,
-            });
-        }
-    }
+    // Owners are read back inside the transaction: a wrong one aborts it, so nothing another
+    // account owns is left committed.
+    let foreign_removed = write_objects(&engine, ns, &filters)?;
     transaction.commit()?;
     for each in setup.grants(ns) {
         grant(&engine, ns, each.object, setup.owner(), each.mask, false)?;
@@ -97,9 +105,7 @@ pub struct NetworkRemoved {
 pub fn remove(ns: &Namespace, owner: Option<&Sid>) -> Result<NetworkRemoved, WfpError> {
     let engine = Engine::open(false, &ns.display)?;
     let transaction = engine.transaction()?;
-    let foreign_removed = clear_sublayer(&engine, ns)?;
-    engine.delete_sublayer(ns.sublayer)?;
-    engine.delete_provider(ns.provider)?;
+    let foreign_removed = remove_objects(&engine, ns)?;
     transaction.commit()?;
     if let Some(owner) = owner {
         for object in revocations() {

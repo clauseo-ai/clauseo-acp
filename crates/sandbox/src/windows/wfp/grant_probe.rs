@@ -65,11 +65,13 @@ pub fn foreign_test_filter(ns: &Namespace, remove: bool) -> Result<(), WfpError>
     if remove {
         engine.delete_filter(spec.key).map(drop)
     } else {
-        engine.add_filter(ns, &spec).map(drop)
+        engine.add_filter(ns, &spec, None).map(drop)
     }
 }
 
-/// Runs the probes in `ns` as the calling user.
+/// Runs the probes in `ns` as the calling user. Its adds pass no descriptor: one naming
+/// Administrators as owner could be refused for the owner, not for the missing add right. The
+/// foreign test filter takes WFP's default too: it stands for a filter set-up didn't write.
 pub fn probe_owner_grants(ns: &Namespace) -> Vec<GrantProbe> {
     let engine = match Engine::open(true, &ns.display) {
         Ok(engine) => engine,
@@ -86,10 +88,10 @@ pub fn probe_owner_grants(ns: &Namespace) -> Vec<GrantProbe> {
         .map(drop)
         .map_err(|(call, code)| WfpError { call, code });
     let add = engine
-        .add_filter(ns, &stray(ns, Layer::ConnectV4, 0))
+        .add_filter(ns, &stray(ns, Layer::ConnectV4, 0), None)
         .map(drop);
     let link = engine
-        .add_filter(ns, &stray(ns, Layer::ConnectV6, 1))
+        .add_filter(ns, &stray(ns, Layer::ConnectV6, 1), None)
         .map(drop);
     // A DACL written with no read first needs WRITE_DAC alone, which the owner lacks.
     let write_dac = set_dacl(

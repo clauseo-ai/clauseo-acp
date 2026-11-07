@@ -48,6 +48,8 @@ mod port_check;
 pub mod rules;
 mod sddl;
 pub mod spec;
+#[cfg(any(windows, test))]
+mod writes;
 
 pub use check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, WfpError, check_setup, classify,

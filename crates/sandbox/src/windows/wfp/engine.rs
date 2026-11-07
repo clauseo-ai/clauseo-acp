@@ -39,6 +39,7 @@ mod conditions;
 mod read;
 mod security;
 
+use security::Descriptor;
 pub(super) use security::{SET_SECURITY, grant, owner_of, set_dacl};
 
 /// Every filter in `ns`'s sublayer the caller may enumerate.
@@ -107,6 +108,11 @@ fn layer_key(layer: Layer) -> GUID {
     }
 }
 
+/// `sddl` as a descriptor for an add call, when given.
+fn descriptor(sddl: Option<&str>) -> Result<Option<Descriptor>, WfpError> {
+    sddl.map(Descriptor::from_sddl).transpose()
+}
+
 /// The layer whose key is `key`, when it is one of ours.
 fn layer_of(key: GUID) -> Option<Layer> {
     [
@@ -166,8 +172,10 @@ impl Engine {
         })
     }
 
-    /// Adds the persistent provider of `ns`; one already there is kept.
-    pub(super) fn add_provider(&self, ns: &Namespace) -> Result<(), WfpError> {
+    /// Adds the persistent provider of `ns`, with the descriptor `sddl` (`None`: WFP's
+    /// default); one already there is kept, with its own.
+    pub(super) fn add_provider(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
+        let sd = descriptor(sddl)?;
         let name = wide(&ns.display);
         let provider = FWPM_PROVIDER0 {
             providerKey: GUID::from_u128(ns.provider),
@@ -179,13 +187,16 @@ impl Engine {
             providerData: empty_blob(),
             serviceName: PWSTR::null(),
         };
-        // SAFETY: `provider` and its name live through the call; no descriptor is passed.
-        let code = unsafe { FwpmProviderAdd0(self.handle, &raw const provider, None) };
+        // SAFETY: `provider`, its name and `sd` live through the call.
+        let code =
+            unsafe { FwpmProviderAdd0(self.handle, &raw const provider, sd.as_ref().map(|d| d.0)) };
         check("FwpmProviderAdd0", code, &[FWP_E_ALREADY_EXISTS])
     }
 
-    /// Adds the persistent sublayer of `ns` under its provider; one already there is kept.
-    pub(super) fn add_sublayer(&self, ns: &Namespace) -> Result<(), WfpError> {
+    /// Adds the persistent sublayer of `ns` under its provider, with the descriptor `sddl`
+    /// (`None`: WFP's default); one already there is kept, with its own.
+    pub(super) fn add_sublayer(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
+        let sd = descriptor(sddl)?;
         let name = wide(&ns.display);
         let mut provider = GUID::from_u128(ns.provider);
         let sublayer = FWPM_SUBLAYER0 {
@@ -199,14 +210,21 @@ impl Engine {
             providerData: empty_blob(),
             weight: SUBLAYER_WEIGHT,
         };
-        // SAFETY: `sublayer`, its name and the provider key live through the call.
-        let code = unsafe { FwpmSubLayerAdd0(self.handle, &raw const sublayer, None) };
+        // SAFETY: `sublayer`, its name, the provider key and `sd` live through the call.
+        let code =
+            unsafe { FwpmSubLayerAdd0(self.handle, &raw const sublayer, sd.as_ref().map(|d| d.0)) };
         check("FwpmSubLayerAdd0", code, &[FWP_E_ALREADY_EXISTS])
     }
 
-    /// Adds `spec` in our sublayer, under our provider, with its flags ([`FilterSpec::flags`]);
-    /// its WFP id.
-    pub(super) fn add_filter(&self, ns: &Namespace, spec: &FilterSpec) -> Result<u64, WfpError> {
+    /// Adds `spec` in our sublayer, under our provider, with its flags ([`FilterSpec::flags`])
+    /// and the descriptor `sddl` (`None`: WFP's default); its WFP id.
+    pub(super) fn add_filter(
+        &self,
+        ns: &Namespace,
+        spec: &FilterSpec,
+        sddl: Option<&str>,
+    ) -> Result<u64, WfpError> {
+        let sd = descriptor(sddl)?;
         let name = wide(&spec.name);
         let mut built = conditions::build(&spec.conditions)?;
         let mut provider = GUID::from_u128(ns.provider);
@@ -244,10 +262,10 @@ impl Engine {
             ..FWPM_FILTER0::default()
         };
         let mut id = 0u64;
+        let sd = sd.as_ref().map(|d| d.0);
         // SAFETY: `filter`, its name, its conditions and what they point at (held by `built`)
-        // all live through the call; `id` is a live out-pointer.
-        let code =
-            unsafe { FwpmFilterAdd0(self.handle, &raw const filter, None, Some(&raw mut id)) };
+        // and `sd` all live through the call; `id` is a live out-pointer.
+        let code = unsafe { FwpmFilterAdd0(self.handle, &raw const filter, sd, Some(&raw mut id)) };
         check("FwpmFilterAdd0", code, &[])?;
         Ok(id)
     }
