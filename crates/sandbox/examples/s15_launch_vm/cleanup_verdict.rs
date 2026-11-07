@@ -10,6 +10,11 @@
 //! absent, or present but inert: still there after a second session of the same pool user, its
 //! notify command never run (no marker) and its state never `TRANSFERRED` or `ACKNOWLEDGED`.
 //! After #668 the row will also require the job to be gone once the system stop has run.
+//!
+//! BITS may refuse the job outright: `AddFile` (or `Resume`) fails with `ERROR_NOT_LOGGED_ON`
+//! (0x800704dd), as it did on the test VMs. That refusal proves the job can't run: no job of the
+//! pool user's can get a file, so none can transfer or set off its notify command. Such a plant
+//! passes, the marker still required absent; any other plant error is INFO.
 
 use super::checks::values;
 use super::pool_verdict::Verdict;
@@ -20,6 +25,23 @@ pub(crate) const KINDS: [&str; 5] = ["run", "runonce", "startup", "task", "bits"
 
 /// The BITS states of a job that ran: its file transferred, which sets off its notify command.
 const RAN: [&str; 2] = ["TRANSFERRED", "ACKNOWLEDGED"];
+
+/// The HRESULT of `ERROR_NOT_LOGGED_ON`, as `bitsadmin` prints it and as its exit code.
+const NOT_LOGGED_ON: [&str; 2] = ["0x800704dd", "-2147023651"];
+
+/// The BITS plant steps whose refusal for want of a logon proves the job can't run.
+const REFUSED_STEPS: [&str; 2] = ["addfile:", "resume:"];
+
+/// Whether `word`, the BITS plant's, is `AddFile` or `Resume` refused with exactly
+/// `ERROR_NOT_LOGGED_ON`.
+fn refused(word: &str) -> bool {
+    let Some(why) = word.strip_prefix("error ") else {
+        return false;
+    };
+    let why = why.to_ascii_lowercase();
+    REFUSED_STEPS.iter().any(|step| why.starts_with(step))
+        && NOT_LOGGED_ON.iter().any(|code| why.contains(code))
+}
 
 /// The word `probe items` printed for `kind` in `lines`.
 fn item<'l>(lines: &'l [String], kind: &str) -> Option<&'l str> {
@@ -73,9 +95,9 @@ fn bits_in(lines: &[String], when: &str) -> Result<Option<String>, (bool, String
 /// `end-cleanup`: `planted`, the lines of the plant before the session; `after`, those of the
 /// last check, `waited_ms` after the session ended; `again`, those of the check after a second
 /// session of the same pool user, when one ran. PASS when the four other kinds were planted and
-/// are now absent, and the BITS job is absent or present but inert (above); FAIL naming the
-/// kinds left (or not planted, or not checked), or when the BITS job ran; INFO when only the BITS
-/// job couldn't be planted (BITS unavailable) and the rest are gone.
+/// are now absent, and the BITS job is absent or present but inert, or BITS refused it (above);
+/// FAIL naming the kinds left (or not planted, or not checked), or when the BITS job ran; INFO
+/// when only the BITS job couldn't be planted otherwise (BITS unavailable) and the rest are gone.
 pub(crate) fn end_cleanup(
     planted: &[String],
     after: &[String],
@@ -109,6 +131,7 @@ pub(crate) fn end_cleanup(
         ));
     }
     let bits_planted = item(planted, "bits") == Some("planted");
+    let bits_refused = item(planted, "bits").is_some_and(refused);
     let mut checks = vec![(after, "after the session")];
     if let Some(again) = again {
         checks.push((again, "after a second session"));
@@ -117,7 +140,7 @@ pub(crate) fn end_cleanup(
     for (lines, when) in checks {
         match bits_in(lines, when) {
             Err((true, ran)) => return Verdict::Fail(ran),
-            Err((false, why)) if bits_planted => unchecked.push(why),
+            Err((false, why)) if bits_planted || bits_refused => unchecked.push(why),
             Err(_) => {}
             Ok(state) => states.push(state),
         }
@@ -156,6 +179,9 @@ pub(crate) fn end_cleanup(
     }
     match item(planted, "bits") {
         Some("planted") => Verdict::Pass(note),
+        _ if bits_refused => Verdict::Pass(format!(
+            "BITS refuses the pool user (0x800704dd), so no job of theirs can run; {note}"
+        )),
         why => Verdict::Info(format!(
             "no BITS job could be planted ({}), so that item proves nothing; {note}",
             why.unwrap_or("no line")
@@ -272,6 +298,46 @@ mod tests {
         );
     }
 
+    /// What the test VMs printed: `AddFile` refused for want of a logon.
+    const REFUSED: &str = "item bits error addfile: bitsadmin.exe exited -2147023651: Unable to \
+                           add file to job - 0x800704dd";
+
+    #[test]
+    fn end_cleanup_passes_when_bits_refuses_the_pool_users_job() {
+        let suspended = with(INERT, &[(4, "item bits present SUSPENDED")]);
+        let resume = "item bits error resume: bitsadmin.exe exited -2147023651: 0x800704DD";
+        for word in [REFUSED, resume] {
+            let planted = with(PLANTED, &[(4, word)]);
+            for (after, again) in [(GONE, None), (suspended, Some(suspended))] {
+                let again = again.as_ref().map(<[&str; 6]>::as_slice);
+                let Verdict::Pass(note) = judged(&planted, &after, again) else {
+                    panic!("not a PASS: {word}");
+                };
+                assert!(
+                    note.starts_with("BITS refuses the pool user (0x800704dd)"),
+                    "{note}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn end_cleanup_fails_a_refused_bits_job_whose_marker_appears_or_isnt_checked() {
+        let planted = with(PLANTED, &[(4, REFUSED)]);
+        let fired = with(GONE, &[(5, "marker bits present")]);
+        let verdict = judged(&planted, &fired, None);
+        assert!(
+            matches!(&verdict, Verdict::Fail(why) if why.contains("notify command ran")),
+            "{verdict:?}"
+        );
+        let unmarked = with(GONE, &[(5, "")]);
+        let verdict = judged(&planted, &unmarked, None);
+        assert!(
+            matches!(&verdict, Verdict::Fail(why) if why.contains("bits marker")),
+            "{verdict:?}"
+        );
+    }
+
     #[test]
     fn end_cleanup_fails_naming_the_kinds_left() {
         let after = with(
@@ -321,7 +387,16 @@ mod tests {
             matches!(&verdict, Verdict::Info(why) if why.contains("BITS")),
             "{verdict:?}"
         );
-        // A job a failed plant left half made is no failure either.
+        // A job a failed plant left half made is no failure either; nor is a refusal by another
+        // step, or with another code.
+        for other in [
+            "item bits error create: bitsadmin.exe exited -2147023651: 0x800704dd",
+            "item bits error addfile: bitsadmin.exe exited 1: Unable to add file - 0x80070005",
+        ] {
+            let planted = with(PLANTED, &[(4, other)]);
+            let verdict = judged(&planted, &INERT, None);
+            assert!(matches!(verdict, Verdict::Info(_)), "{other}: {verdict:?}");
+        }
         let verdict = judged(&planted, &INERT, None);
         assert!(matches!(verdict, Verdict::Info(_)), "{verdict:?}");
         let after = with(GONE, &[(0, "item run present")]);
