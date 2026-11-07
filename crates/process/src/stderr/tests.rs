@@ -391,3 +391,29 @@ fn a_urls_user_name_and_password_are_redacted() {
         assert_eq!(rules.without_cut_secret(cut, true), "proxy:3128 refused");
     }
 }
+
+/// A proxy variable's password is a secret: as written (an unencoded `/` or `#` in it, which
+/// no URL rule finds whole) and percent-decoded, and from a URL with no scheme.
+#[test]
+fn a_proxy_password_is_redacted_raw_decoded_and_without_a_scheme() {
+    let rules = Redactor::new(
+        None,
+        &env(&[
+            ("HTTPS_PROXY", "http://user:pa/ss#w%40rd99@proxy.firm:3128"),
+            ("all_proxy", "admin:s3cretPass123@proxy2.firm:8080"),
+            ("NO_PROXY", "user:notapassword@x"),
+        ]),
+        &[],
+    );
+    let stderr = "raw pa/ss#w%40rd99, decoded pa/ss#w@rd99, bare s3cretPass123, \
+                  url proxy2.firm user admin:s3cretPass123@proxy2.firm:8080";
+    let redacted = rules.redact(stderr);
+    for secret in ["pa/ss#w%40rd99", "pa/ss#w@rd99", "s3cretPass123"] {
+        assert!(!redacted.contains(secret), "{secret}: {redacted}");
+    }
+    assert_eq!(
+        rules.redact("notapassword"),
+        "notapassword",
+        "NO_PROXY holds no proxy"
+    );
+}
