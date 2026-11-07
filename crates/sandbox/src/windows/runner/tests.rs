@@ -404,8 +404,10 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
         assert_eq!(RunExit::from_code(exit.code()), Some(exit));
     }
     assert_eq!(RunExit::from_code(0), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 13), None);
+    assert_eq!(RunExit::Sweep.code(), 0xE0C1_500D);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 14), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
+    assert_eq!(RunExit::Sweep.no_sandbox(), None);
     // An agent exiting with a runner code never passes for a runner failure.
     for code in [
         RunExit::Password.code(),

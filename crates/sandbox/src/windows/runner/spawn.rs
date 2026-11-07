@@ -226,11 +226,15 @@ pub(super) fn system_folder() -> io::Result<String> {
     String::from_utf16(buffer.get(..len).unwrap_or_default()).map_err(io::Error::other)
 }
 
-/// Puts the suspended `process` in `job`, then lets it run.
-pub(super) fn assign_and_resume(job: &Handle, process: &Process) -> io::Result<()> {
+/// Puts the suspended `process` in `job`.
+pub(super) fn assign(job: &Handle, process: &Process) -> io::Result<()> {
     // SAFETY: both handles are live; the process handle has every right (it came from the
     // logon call).
-    unsafe { AssignProcessToJobObject(job.0, process.handle.0) }.map_err(|e| os_error(&e))?;
+    unsafe { AssignProcessToJobObject(job.0, process.handle.0) }.map_err(|e| os_error(&e))
+}
+
+/// Lets the suspended `process` run.
+pub(super) fn resume(process: &Process) -> io::Result<()> {
     // SAFETY: the thread handle is live and the thread suspended once.
     if unsafe { ResumeThread(process.thread.0) } == u32::MAX {
         return Err(io::Error::last_os_error());
