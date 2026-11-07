@@ -273,9 +273,14 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    answers, then the route is made again with its answer, no new lookup, unless another route was
    made since; when the OS is asked about the same hosts as the last route (a refresh, or a
    settings change that leaves them, an entry's variables or a CA file, say) it keeps the last
-   route's answer for up to 10 minutes from when a real lookup last gave it, so within that only
-   the OS answering `DIRECT` turns a proxy off), on desktop's network thread, which starts with the
-   setup thread, beside the keys' load and never on the window's start path. A PAC `DIRECT` is no
+   route's answer for up to 10 minutes from when a real lookup last gave it, as long as a kept
+   proxy still takes a TCP connection: it is probed, its host resolved and connected to and the
+   connection closed with nothing sent, at most 1 s and within the budget, and one that does not
+   answer goes direct at once, so a laptop whose VPN dropped, its PAC on an internal server failing
+   with it, is not left on a dead proxy; one `DIRECT` over a proxy that still answers keeps the
+   proxy for that resolve, and the next `DIRECT` turns it off), on desktop's network thread, which
+   starts with the setup thread, beside the keys' load and never on the window's start path. A PAC
+   `DIRECT` is no
    proxy, and an empty value is unset. The CA files are `network.ca_certs` alone. `Agents` starts
    with the settings' and the environment's route and then takes the OS's, every `SettingsChanged`
    resolves again, and so does the network thread once the route is 60 s old (each install try
@@ -305,8 +310,14 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    one fixed proxy serves a launch's every host, the OS's answer for the agent's primary API host,
    so a PAC script's fallbacks and other per-host answers, and the OS's bypass list, are not
    applied to it; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log
-   says `os` for both; a launch takes the route as the slot holds it and never waits, so after a
-   network change (office, home, VPN) it may take the old proxy for up to about a minute. Chaining
+   says `os` for both; a launch takes the route as the slot holds it and never waits, and the
+   sandbox keeps each OS answer for 60 s, so after a network change (office, home, VPN) a new
+   launch may take the old proxy for up to about 2 minutes (the route's 60 s, then a refresh that
+   may read the sandbox's cached answer). A running agent keeps the proxy it launched with: the
+   refresh reaches new launches, installs and sign-ins. A tier-C agent keeps its launch's
+   `HTTPS_PROXY` for its whole run, while a tier-B agent goes through S16's egress proxy, which
+   resolves the upstream per connection. After changing networks, an agent that stops answering is
+   restarted by ending its thread's turn or reopening the matter. Chaining
    the sandbox's egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives
    it `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
    `https://` setting, which that proxy cannot chain to, is logged once per change.
