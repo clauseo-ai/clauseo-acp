@@ -45,9 +45,23 @@ fn judge(ctx: &Ctx<'_>, verdict: Verdict) -> Result<String, String> {
 }
 
 /// The harness's listing of `sid`'s processes as `pool_verdict.rs` reads it, each checked
-/// against `job` when there is one; noted under the row.
+/// against `job` when there is one; noted under the row. `SeDebugPrivilege` is enabled first,
+/// so an admin harness can open every process and its token.
 fn listing(ctx: &Ctx<'_>, sid: &str, job: Option<&win::Owned>) -> Vec<String> {
-    let lines = match win_pool::pool_processes(sid) {
+    if let Err(why) = win_pool::enable_debug_privilege() {
+        ctx.note(&format!("harness: SeDebugPrivilege not enabled: {why}"));
+    }
+    let lines = lines_of(sid, job);
+    for line in &lines {
+        ctx.note(&format!("harness: {line}"));
+    }
+    lines
+}
+
+/// The listing's lines: `pool` per process of `sid`, `pool-unreadable <pid> <image>` per
+/// process whose user couldn't be read, then `pool-unknown <n>`; or `pool-error`.
+fn lines_of(sid: &str, job: Option<&win::Owned>) -> Vec<String> {
+    match win_pool::pool_processes(sid) {
         Err(code) => vec![format!("pool-error the process snapshot gave {code}")],
         Ok(listing) => {
             let mut lines: Vec<String> = listing
@@ -62,14 +76,13 @@ fn listing(ctx: &Ctx<'_>, sid: &str, job: Option<&win::Owned>) -> Vec<String> {
                     format!("pool {} in-job={in_job} {}", p.pid, p.image)
                 })
                 .collect();
-            lines.push(format!("pool-unknown {}", listing.unknown));
+            for (pid, image) in &listing.unknown {
+                lines.push(format!("pool-unreadable {pid} {image}"));
+            }
+            lines.push(format!("pool-unknown {}", listing.unknown.len()));
             lines
         }
-    };
-    for line in &lines {
-        ctx.note(&format!("harness: {line}"));
     }
-    lines
 }
 
 /// The listing while the session of the outer runner `outer` runs, against its kill-on-close
@@ -119,19 +132,11 @@ pub(crate) fn at_end(ctx: &Ctx<'_>) -> Result<String, String> {
     let running = listing_in_session(ctx, &pool.sid, a.pid());
     end_session(ctx, a, until)?;
     let ended = now();
-    let after = loop {
-        break match win_pool::pool_processes(&pool.sid) {
-            Err(code) => vec![format!("pool-error the process snapshot gave {code}")],
-            Ok(listing) if listing.found.is_empty() => {
-                vec![format!("pool-unknown {}", listing.unknown)]
-            }
-            Ok(_) if ended.elapsed() < END_GRACE => {
-                sleep(Duration::from_millis(500));
-                continue;
-            }
-            Ok(_) => listing(ctx, &pool.sid, None),
-        };
-    };
+    let mut after = listing(ctx, &pool.sid, None);
+    while after.iter().any(|l| l.starts_with("pool ")) && ended.elapsed() < END_GRACE {
+        sleep(Duration::from_millis(500));
+        after = lines_of(&pool.sid, None);
+    }
     let waited = ended.elapsed().as_millis();
     ctx.note(&format!("after the session ended ({waited} ms): {after:?}"));
     judge(ctx, pool_verdict::at_end(&running, agent, &after, waited))
