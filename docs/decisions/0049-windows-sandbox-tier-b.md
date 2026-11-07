@@ -522,13 +522,14 @@ started elevated, by the app or by the uninstall hook.
   between calls; the launch and the elevated start hash it every time.
 - **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
   rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
-  `DataDir`, `Removing`), but the copy, its four values and the refresh task stay, so a later
+  `DataDir`, `Removing`, `ResetSids`), but the copy, its four values and the SYSTEM tasks
+  (refresh and stop) stay, so a later
   in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
   one-owner rule: the same lawyer sets up again, another user is `OtherAccount`. The
   uninstaller's hook runs `--remove --uninstall`: all that, then, once the pool has no owner and
   only for the install that placed the copy (a per-machine removal for `machine`, the lawyer's
-  own for theirs), the four values, the refresh task and staging (`unregister_refresh_task`,
-  `remove_staging`), everything in the folder, then the folder; the key goes once empty. The
+  own for theirs), the four values, the refresh and stop tasks (`unregister_task`), staging
+  (`remove_staging`), everything in the folder, then the folder; the key goes once empty. The
   running copy is renamed in place to a name nothing starts and scheduled for deletion at
   restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; a reinstall before the
   restart keeps its new copy.
@@ -805,10 +806,11 @@ elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without 
 only from an exe the updater key signed.
 
 **The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService`
-(`register_refresh_task`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path,
-resolved from `FOLDERID_ProgramFiles`, with `--refresh` and no other argument. It starts at the
-record owner's logon and on demand, needs no network, stops after 5 minutes, and never runs twice
-at once. The task and its folder carry `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so
+(`register_task`, `SystemTask::Refresh`). It runs as LOCAL SYSTEM. Its one action is the admin
+copy's path, resolved from `FOLDERID_ProgramFiles`, with `--refresh` and no other argument. It
+starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and
+never runs twice at once. The task and its folder carry
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so
 the owner can read and run the task but can't change or delete it. The folder gets that owner and
 DACL when it is made, and again on each registration if it was already there. The app asks for a
 run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). Only
@@ -907,6 +909,69 @@ until then every release build fails. Two things enforce it:
 Each refusal keeps the old copy, writes one Event Log line (source `Clauseo Sandbox`, naming no
 user path beyond the install folder), and exits with its own code. The codes start at 32, clear
 of the set-up's (`RefreshExit`).
+
+### Stopping the pool's processes
+
+The runner's sweeps (#649) stop a matter's processes as its pool user. A process that shut its
+own DACL survives them and can stay alive into the next logon. SYSTEM, with `SeDebugPrivilege`,
+can stop it whatever its DACL says.
+
+**The task.** `--adopt` registers `\Clauseo\SandboxStop` right after `\Clauseo\SandboxRefresh`
+(`register_task`, `SystemTask::Stop`), the same way: LOCAL SYSTEM, the same descriptor (the
+owner may only read and run it), one instance at a time. Its action is the admin copy with
+`--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
+registration fails `--adopt` before the record's admin-copy values are written, as for the
+refresh task. `--remove --uninstall` deletes both tasks, after the values and before the admin
+folder (`refresh::TEARDOWN`). A per-machine install registers neither: it has no owner to name
+in the descriptor.
+
+**The run.** `--stop` (`setup/stop.rs`):
+
+1. refuses unless it runs as LOCAL SYSTEM from the admin copy's path;
+2. reads `PoolSids` and `OwnerSid` from `HKLM\SOFTWARE\Clauseo\Sandbox`, which only the
+   elevated set-up writes. No SID comes from an argument, the environment or the lawyer's data
+   folder. No record, or an empty pool, is nothing to do;
+3. holds every listed SID to the pool-user check before a profile delete (`check_pool_sid`):
+   a local account of this machine, not built in, not SYSTEM, not the owner, named
+   `ClauseoSbNN`. One that fails stops nothing;
+4. takes a Toolhelp snapshot, opens each process with
+   `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`, reads its token user, and
+   terminates it through that same handle when the user is exactly one of the pool's SIDs. It
+   never stops this process, pid 0 or 4, or a process whose user it can't read. Then a second
+   pass, for what started meanwhile or didn't end;
+5. adds each pool user it found running to the record's `ResetSids` (`REG_MULTI_SZ`, a value
+   appended to the set-up's, deleted with them by `--remove`), under the set-up lock with a
+   30 s wait.
+
+It logs one Event Log line with counts only. Its exit codes follow the refresh's (`StopExit`):
+
+| Code | Meaning |
+|---|---|
+| 0 | every pool user's process found was stopped (or none ran), and those users are marked |
+| 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
+| 46 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing stopped |
+| 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
+| 48 | a pool user's process was still there after the second pass, or a snapshot failed |
+| 49 | the processes were stopped, but their users couldn't be added to `ResetSids` |
+
+**The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
+only the owner's `secrets.bin` may hold (DPAPI, as the owner). Its open-session check and its
+`LocalLow` denies also read and write the owner's data folder as the owner, and the task has
+no owner token. So the next set-up resets each user `ResetSids` lists, even one a matter
+holds, once no session is open (D-B6), then takes it off the list. While a session is open, or
+the open sessions can't be read, the users stay listed for a later set-up. Keeping a listed
+user from its matter's next launch comes with the runner's wiring (#649).
+
+**Misuse.** The owner's read-and-run entry lets any code running as the lawyer start the task.
+All it can do is stop the sandboxed agents and mark their users for a reset, which is no more
+than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else.
+
+**Speed.** The launch path doesn't change. The task runs only when a sweep saw a pool user's
+process it couldn't stop, or once at Clauseo's start after an unclean session
+(`request_pool_stop`, which returns whether the run was queued). Both callers land with #649.
+
+**What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
+tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
 
 ## Consequences
 
