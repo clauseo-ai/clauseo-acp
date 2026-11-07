@@ -7,14 +7,16 @@
 //!
 //! It is all or nothing, in two passes. First every name in the matter's folder is checked: each
 //! must be one of those three (matched ignoring case, as NTFS matches), a plain file (no reparse
-//! point, no folder) with one link, and its contents must let it go ([`contents_allow`]): a
-//! record that lists no open session, a manifest with nothing outstanding (no item set aside and
-//! not restored, no move begun), and a manifest only beside such a record. Anything else (a pass
+//! point, no folder) with one link, and its contents must let it go ([`contents_allow`]): a record
+//! that lists no open session, a manifest with nothing outstanding (no item set aside and not
+//! restored, no move begun), and a manifest only beside such a record. Anything else (a pass
 //! folder, another name, a hard-linked file, a record still open or a manifest still listing an
-//! item, either unreadable or of another version) leaves the folder exactly as it is. Only then
-//! is each file deleted, and last the folder, which goes only if empty. A record still open is
-//! kept because the next launch checks a crashed session's changes only against it (`run.rs`):
-//! deleting it would let what an agent planted become the next launch's trusted starting point.
+//! item, either unreadable or of another version) leaves the folder exactly as it is. Only then is
+//! each file deleted, and last the folder, which goes only if empty. On NTFS a mark that fails
+//! partway (a read-only file) takes the marks before it off again, so none goes. A record still
+//! open is kept because the next launch checks a crashed session's changes only against it
+//! (`run.rs`): deleting it would let what an agent planted become the next launch's trusted
+//! starting point.
 //!
 //! On NTFS everything is opened by handle without following a link, each file is read and
 //! checked on the handle that deletes it, and every handle stays open from the check to the

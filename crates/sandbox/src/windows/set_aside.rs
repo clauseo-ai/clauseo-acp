@@ -55,7 +55,9 @@
 //! place drops it. On Windows each part of that folder is opened relative to its parent's
 //! handle, never through a link, and each item is moved by a rename on its own handle
 //! (`ntfs.rs`). `list_set_aside` and `restore_set_aside` show and undo a set-aside; a restore
-//! never overwrites.
+//! never overwrites, and once the manifest lists the item no more, the folders it leaves empty
+//! (its pass folder, the folders within it) go, by handle and only if empty
+//! (`Volume::remove_emptied`), so a matter whose items were all restored holds only bookkeeping.
 //!
 //! A set-aside that can't happen refuses the launch with [`crate::Error::SetAside`], whose
 //! `at` names the item for the running page: an item on another volume than the data folder

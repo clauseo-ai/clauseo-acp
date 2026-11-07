@@ -18,6 +18,13 @@
 //!   handles closed, then the matter's folder marked on its own handle, which NTFS refuses while
 //!   anything is in it (`ERROR_DIR_NOT_EMPTY`): then it stays.
 //!
+//! A restore's emptied pass folder, and the `within` folders in it, go the same way
+//! ([`remove_emptied`]): each opened relative to its parent's handle, refused if a reparse point,
+//! and marked on its own handle, which NTFS refuses while it holds anything.
+//!
+//! Accepted residual: alternate data streams on the matter's folder itself aren't listed and go
+//! with it; only someone with the owner's rights can write them.
+//!
 //! Every open is `OBJ_DONT_REPARSE` (`open_at`), so a reparse point met on the way fails it.
 
 use std::ffi::{OsStr, OsString};
@@ -130,16 +137,62 @@ fn forget_in(
     if !together(&places) {
         return Ok(SetAsideBookkeeping::Left);
     }
-    // Second pass: each marked on the handle checked; closing them completes the deletes.
-    for (_, file) in &checked {
-        mark_deleted(file).map_err(|error| io_failure(&error))?;
+    // Second pass: each marked on the handle checked; closing them completes the deletes. A
+    // mark that fails (a read-only file, say) unmarks the ones before it, so none goes.
+    for (done, (_, file)) in checked.iter().enumerate() {
+        if let Err(error) = set_deleted(file, true) {
+            for (_, marked) in checked.iter().take(done) {
+                if let Err(error) = set_deleted(marked, false) {
+                    tracing::warn!(%error, "a set-aside file stays marked for delete");
+                }
+            }
+            return Err(io_failure(&error));
+        }
     }
     drop(checked);
-    match mark_deleted(&folder) {
+    match set_deleted(&folder, true) {
         Ok(()) => Ok(SetAsideBookkeeping::Gone),
         Err(error) if error.raw_os_error() == Some(DIR_NOT_EMPTY) => Ok(SetAsideBookkeeping::Left),
         Err(error) => Err(io_failure(&error)),
     }
+}
+
+/// A restore's emptied folders (`Volume::remove_emptied`): the folder `parts` below `sandbox`,
+/// then each above it, never one of the first `kept`. Each folder's parent is reached as
+/// [`folder_chain`] reaches it, the folder opened relative to it with `DELETE`
+/// (`FILE_DIRECTORY_FILE`), refused if a reparse point, and marked on that handle, which NTFS
+/// refuses while anything is in it: that ends it, as a folder already gone does.
+pub(in crate::windows::set_aside) fn remove_emptied(
+    sandbox: &Path,
+    parts: &[OsString],
+    kept: usize,
+) -> Result<(), SetAsideFailure> {
+    let options = FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT;
+    for end in (kept + 1..=parts.len()).rev() {
+        let (Some(above), Some(name)) = (parts.get(..end - 1), parts.get(end - 1)) else {
+            return Ok(());
+        };
+        let parent = folder_chain(sandbox, above, FILE_OPEN)?;
+        let folder = match open_at(
+            &parent,
+            &wide_os(name),
+            PARENT | DELETE.0,
+            FILE_OPEN,
+            options,
+        ) {
+            Ok(folder) => folder,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(failure(&error)),
+        };
+        refuse_reparse(&folder)?;
+        match set_deleted(&folder, true) {
+            // Closing the handle at the end of this pass completes the delete.
+            Ok(()) => {}
+            Err(error) if error.raw_os_error() == Some(DIR_NOT_EMPTY) => return Ok(()),
+            Err(error) => return Err(io_failure(&error)),
+        }
+    }
+    Ok(())
 }
 
 /// [`SetAsideFailure::Changed`] when `handle` is open on a reparse point.
@@ -188,9 +241,10 @@ fn read_capped(handle: &Handle) -> io::Result<Vec<u8>> {
     }
 }
 
-/// Marks what `handle` is open on (with `DELETE`) for deletion when its last handle closes.
-fn mark_deleted(handle: &Handle) -> io::Result<()> {
-    let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+/// Marks what `handle` is open on (with `DELETE`) for deletion when its last handle closes
+/// (`delete`), or takes that mark off again.
+fn set_deleted(handle: &Handle, delete: bool) -> io::Result<()> {
+    let info = FILE_DISPOSITION_INFO { DeleteFile: delete };
     let len = u32::try_from(size_of::<FILE_DISPOSITION_INFO>()).map_err(io::Error::other)?;
     // SAFETY: the handle is open with `DELETE`; `info` is a live FILE_DISPOSITION_INFO of `len`
     // bytes.

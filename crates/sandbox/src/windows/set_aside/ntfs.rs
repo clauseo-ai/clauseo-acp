@@ -195,6 +195,15 @@ impl Volume for Ntfs {
         let leaf: Vec<u16> = leaf.encode_wide().collect();
         rename(&item, &parent, &leaf).map_err(|e| failure(&e))
     }
+
+    fn remove_emptied(
+        &self,
+        sandbox: &Path,
+        parts: &[OsString],
+        kept: usize,
+    ) -> Result<(), SetAsideFailure> {
+        forget::remove_emptied(sandbox, parts, kept)
+    }
 }
 
 /// The file ID of the handle's file, folder or link.

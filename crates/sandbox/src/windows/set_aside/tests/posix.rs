@@ -216,6 +216,31 @@ impl Volume for Posix {
             .fold(sandbox.to_owned(), |p, part| p.join(part));
         moved(&self.at(&from.join(name)), to)
     }
+
+    fn remove_emptied(
+        &self,
+        sandbox: &Path,
+        parts: &[OsString],
+        kept: usize,
+    ) -> Result<(), SetAsideFailure> {
+        for end in (kept + 1..=parts.len()).rev() {
+            let folder = parts
+                .iter()
+                .take(end)
+                .fold(sandbox.to_owned(), |path, part| path.join(part));
+            let meta =
+                std::fs::symlink_metadata(&folder).map_err(|e| SetAsideFailure::Io(e.kind()))?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(SetAsideFailure::Changed);
+            }
+            match crate::windows::write::remove_empty_folder(&folder) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => return Ok(()),
+                Err(e) => return Err(SetAsideFailure::Io(e.kind())),
+            }
+        }
+        Ok(())
+    }
 }
 
 fn moved(from: &Path, to: &Path) -> Result<(), SetAsideFailure> {
