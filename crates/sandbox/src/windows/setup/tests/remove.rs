@@ -37,7 +37,6 @@ fn full_removal() -> Vec<String> {
     .map(str::to_owned)
     .to_vec();
     lines.push(format!("stop_strays {}", strays.join(",")));
-    lines.push("remove_network".to_owned());
     for n in users {
         let local_low = format!("Users/ClauseoSb0{n}/AppData/LocalLow");
         lines.extend([
@@ -51,6 +50,8 @@ fn full_removal() -> Vec<String> {
             format!("delete_user ClauseoSb0{n}"),
         ]);
     }
+    // Only once every pool account is gone (a stray that wouldn't stop must stay filtered).
+    lines.push("remove_network".to_owned());
     lines.extend(
         [
             "program_data",
@@ -104,6 +105,40 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
         "{:?}",
         acl.removes
     );
+}
+
+#[test]
+fn a_firewall_failure_doesnt_stop_the_removal() {
+    let (mut machine, mut acl) = pool("remove-firewall", Some(owner()));
+    machine.firewall_failure = Some("the firewall service is stopped");
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert_eq!(machine.lines(), full_removal());
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    assert_eq!(
+        report.firewall.as_deref(),
+        Some("the firewall service is stopped")
+    );
+    assert_all_gone(&machine, &acl);
+}
+
+#[test]
+fn the_network_goes_only_after_every_account() {
+    let lines = full_removal();
+    let network = lines
+        .iter()
+        .position(|line| line == "remove_network")
+        .unwrap();
+    let last_user = lines
+        .iter()
+        .rposition(|line| line.starts_with("delete_user"))
+        .unwrap();
+    let strays = lines
+        .iter()
+        .position(|line| line.starts_with("stop_strays"))
+        .unwrap();
+    assert!(strays < last_user && last_user < network, "{lines:?}");
 }
 
 #[test]
