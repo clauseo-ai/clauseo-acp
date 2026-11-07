@@ -23,7 +23,6 @@ fn the_built_in_key_is_a_key() {
     // Whatever this build embedded (the placeholder, here, unless CLAUSEO_UPDATER_PUBKEY or
     // tauri.conf.json gives one), `build.rs` checked it, and it reads back.
     assert!(key_id(super::UPDATER_KEY).is_ok());
-    assert!(super::OWN_VERSION.split('.').count() >= 3);
 }
 
 #[test]

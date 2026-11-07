@@ -72,6 +72,74 @@ pub(super) fn comment(file: &str, version: &str) -> String {
     format!("timestamp:1762500000\tfile:{file}\tversion:{version}")
 }
 
+/// A minimal PE32+ image whose one section, `.rsrc`, holds a `VERSIONINFO` with `version` as
+/// its `FILEVERSION`, then `tail` past the section (so two images of one version differ).
+pub(super) fn image(version: [u16; 4], tail: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0u8; 0x200];
+    let put = |bytes: &mut Vec<u8>, at: usize, value: &[u8]| {
+        if bytes.len() < at + value.len() {
+            bytes.resize(at + value.len(), 0);
+        }
+        bytes[at..at + value.len()].copy_from_slice(value);
+    };
+    let u16le = |v: u16| v.to_le_bytes();
+    let u32le = |v: u32| v.to_le_bytes();
+    put(&mut bytes, 0, b"MZ");
+    put(&mut bytes, 0x3C, &u32le(0x40));
+    put(&mut bytes, 0x40, b"PE\0\0");
+    put(&mut bytes, 0x44, &u16le(0x8664));
+    put(&mut bytes, 0x46, &u16le(1));
+    put(&mut bytes, 0x54, &u16le(240));
+    let optional = 0x58;
+    put(&mut bytes, optional, &u16le(0x20B));
+    put(&mut bytes, optional + 108, &u32le(16));
+    // The resource section: RVA 0x1000, at 0x200 in the file.
+    let mut rsrc = vec![0u8; 0x58];
+    let table = |rsrc: &mut Vec<u8>, at: usize, id: u32, below: u32| {
+        rsrc[at + 14..at + 16].copy_from_slice(&1u16.to_le_bytes());
+        rsrc[at + 16..at + 20].copy_from_slice(&id.to_le_bytes());
+        rsrc[at + 20..at + 24].copy_from_slice(&below.to_le_bytes());
+    };
+    table(&mut rsrc, 0, 16, 0x8000_0018);
+    table(&mut rsrc, 0x18, 1, 0x8000_0030);
+    table(&mut rsrc, 0x30, 0x409, 0x48);
+    let mut info = Vec::new();
+    info.extend_from_slice(&u16le(92));
+    info.extend_from_slice(&u16le(52));
+    info.extend_from_slice(&u16le(0));
+    info.extend(
+        "VS_VERSION_INFO\0"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    info.extend_from_slice(&[0, 0]);
+    let [a, b, c, d] = version;
+    for word in [
+        0xFEEF_04BD,
+        0x0001_0000,
+        u32::from(a) << 16 | u32::from(b),
+        u32::from(c) << 16 | u32::from(d),
+    ] {
+        info.extend_from_slice(&u32le(word));
+    }
+    info.resize(92, 0);
+    rsrc[0x48..0x4C].copy_from_slice(&u32le(0x1058));
+    rsrc[0x4C..0x50].copy_from_slice(&u32le(92));
+    rsrc.extend_from_slice(&info);
+    let size = u32::try_from(rsrc.len()).unwrap();
+    put(&mut bytes, optional + 112 + 16, &u32le(0x1000));
+    put(&mut bytes, optional + 112 + 20, &u32le(size));
+    let section = optional + 240;
+    put(&mut bytes, section, b".rsrc\0\0\0");
+    put(&mut bytes, section + 8, &u32le(size));
+    put(&mut bytes, section + 12, &u32le(0x1000));
+    put(&mut bytes, section + 16, &u32le(size));
+    put(&mut bytes, section + 20, &u32le(0x200));
+    put(&mut bytes, 0x200, &rsrc);
+    bytes.extend_from_slice(tail);
+    bytes
+}
+
 /// `BLAKE2b`'s initial vector.
 const IV: [u64; 8] = [
     0x6a09_e667_f3bc_c908,

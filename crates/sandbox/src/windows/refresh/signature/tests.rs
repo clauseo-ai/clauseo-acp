@@ -21,11 +21,11 @@ fn a_good_signature_verifies() {
     let key = TestKey::new(0x1122_3344_5566_7788);
     let exe = exe();
     let sig = key.sign(&exe, &good_comment());
-    assert_eq!(verify(&exe, &sig, &key.public(), OWN), Ok(()));
+    assert_eq!(verify(&exe, &sig, &key.public()), Ok(()));
     // A trailing line break, as an editor or the updater may leave, changes nothing.
     let mut with_newline = sig;
     with_newline.extend_from_slice(b"\r\n");
-    assert_eq!(verify(&exe, &with_newline, &key.public(), OWN), Ok(()));
+    assert_eq!(verify(&exe, &with_newline, &key.public()), Ok(()));
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn one_tampered_byte_fails() {
         let mut tampered = exe.clone();
         tampered[at] ^= 0x01;
         assert_eq!(
-            verify(&tampered, &sig, &key.public(), OWN),
+            verify(&tampered, &sig, &key.public()),
             Err(SignatureError::Invalid),
             "byte {at}"
         );
@@ -45,7 +45,7 @@ fn one_tampered_byte_fails() {
     let mut longer = exe;
     longer.push(0);
     assert_eq!(
-        verify(&longer, &sig, &key.public(), OWN),
+        verify(&longer, &sig, &key.public()),
         Err(SignatureError::Invalid)
     );
 }
@@ -63,7 +63,7 @@ fn a_tampered_trusted_comment_fails() {
     assert_ne!(file, edited);
     let edited = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, edited);
     assert_eq!(
-        verify(&exe, edited.as_bytes(), &key.public(), OWN),
+        verify(&exe, edited.as_bytes(), &key.public()),
         Err(SignatureError::Invalid)
     );
 }
@@ -76,13 +76,13 @@ fn another_key_fails() {
     // Another id: refused before the curve math.
     let other = TestKey::new(0x0102_0304_0506_0708);
     assert_eq!(
-        verify(&exe, &sig, &other.public(), OWN),
+        verify(&exe, &sig, &other.public()),
         Err(SignatureError::WrongKey)
     );
     // The same id on another key (a forged id): the signature doesn't verify.
     let impostor = TestKey::new(0x1122_3344_5566_7788);
     assert_eq!(
-        verify(&exe, &sig, &impostor.public(), OWN),
+        verify(&exe, &sig, &impostor.public()),
         Err(SignatureError::Invalid)
     );
 }
@@ -94,7 +94,7 @@ fn the_placeholder_key_verifies_nothing() {
     let exe = exe();
     let sig = signer.sign(&exe, &good_comment());
     assert_eq!(
-        verify(&exe, &sig, PLACEHOLDER_KEY, OWN),
+        verify(&exe, &sig, PLACEHOLDER_KEY),
         Err(SignatureError::PlaceholderKey)
     );
 }
@@ -117,7 +117,7 @@ fn garbage_is_malformed() {
     ] {
         assert!(
             matches!(
-                verify(&exe, &garbage, &key.public(), OWN),
+                verify(&exe, &garbage, &key.public()),
                 Err(SignatureError::Malformed(_))
             ),
             "{garbage:?}"
@@ -131,7 +131,7 @@ fn a_legacy_signature_is_refused() {
     let exe = exe();
     let sig = key.sign_legacy(&exe, &good_comment());
     assert_eq!(
-        verify(&exe, &sig, &key.public(), OWN),
+        verify(&exe, &sig, &key.public()),
         Err(SignatureError::NotPrehashed)
     );
 }
@@ -148,7 +148,7 @@ fn the_comment_must_name_this_exe() {
     ] {
         let sig = key.sign(&exe, &comment_text);
         assert_eq!(
-            verify(&exe, &sig, &key.public(), OWN),
+            verify(&exe, &sig, &key.public()),
             Err(SignatureError::WrongFile),
             "{comment_text:?}"
         );
@@ -156,49 +156,11 @@ fn the_comment_must_name_this_exe() {
 }
 
 #[test]
-fn an_older_version_is_refused_and_a_newer_taken() {
-    let key = TestKey::new(0x1122_3344_5566_7788);
-    let exe = exe();
-    let verdict = |version: &str| {
-        let sig = key.sign(&exe, &comment(SIGNED_FILE, version));
-        verify(&exe, &sig, &key.public(), OWN)
-    };
-    for newer_or_same in [
-        "1.4.0",
-        "v1.4.0",
-        "1.4.0-beta.2",
-        "1.4.1",
-        "1.10.0",
-        "2.0.0",
-    ] {
-        assert_eq!(verdict(newer_or_same), Ok(()), "{newer_or_same}");
-    }
-    for older in ["1.3.9", "0.9.0", "1.3.99-rc.1"] {
-        assert!(
-            matches!(verdict(older), Err(SignatureError::Downgrade { .. })),
-            "{older}"
-        );
-    }
-    for unreadable in ["", "1.4", "1.4.0.1", "one.two.three", "1.-4.0"] {
-        assert_eq!(
-            verdict(unreadable),
-            Err(SignatureError::NoVersion),
-            "{unreadable:?}"
-        );
-    }
-    let sig = key.sign(&exe, &format!("timestamp:1\tfile:{SIGNED_FILE}"));
-    assert_eq!(
-        verify(&exe, &sig, &key.public(), OWN),
-        Err(SignatureError::NoVersion)
-    );
-}
-
-#[test]
 fn a_bad_built_in_key_is_named() {
     let exe = exe();
     let sig = TestKey::new(1).sign(&exe, &good_comment());
     assert!(matches!(
-        verify(&exe, &sig, "not a key", OWN),
+        verify(&exe, &sig, "not a key"),
         Err(SignatureError::BadKey(_))
     ));
 }
