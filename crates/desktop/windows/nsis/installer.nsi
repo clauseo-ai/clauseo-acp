@@ -806,9 +806,13 @@ FunctionEnd
 Function un.onInit
   ; >>> clauseo: un-admin-section
   ; The per-machine uninstaller's protected plug-in folder (safe_temp.nsh), first, before
-  ; SetContext's ${RunningX64} loads System; empty per user.
+  ; SetContext's ${RunningX64} loads System, then its refusal unless it runs in place
+  ; (uninstall_in_place.nsh); both empty per user.
   !ifmacrodef CLAUSEO_MACHINE_START
     !insertmacro CLAUSEO_MACHINE_START
+  !endif
+  !ifmacrodef CLAUSEO_UNINSTALL_IN_PLACE_CHECK
+    !insertmacro CLAUSEO_UNINSTALL_IN_PLACE_CHECK
   !endif
   ; <<< clauseo: un-admin-section
   !insertmacro SetContext
@@ -944,8 +948,9 @@ Section Uninstall
     !insertmacro NSIS_HOOK_POSTUNINSTALL
   !endif
   ; >>> clauseo: uninstall-self-delete
-  ; Per machine, after everything else is removed: the running uninstall.exe renamed, and a
-  ; delayed delete of it and the empty folders (uninstall_in_place.nsh).
+  ; Per machine, after everything else is removed: a delayed delete of the running
+  ; uninstall.exe, unless an install's main exe is back, and of the empty folders
+  ; (uninstall_in_place.nsh).
   !ifmacrodef CLAUSEO_UNINSTALL_SELF_DELETE
     !insertmacro CLAUSEO_UNINSTALL_SELF_DELETE
   !endif

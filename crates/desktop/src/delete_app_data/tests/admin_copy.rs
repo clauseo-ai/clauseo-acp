@@ -362,7 +362,7 @@ fn the_record_is_checked_before_anything_is_written_into_the_admin_folder() {
 }
 
 /// The codes in the first table after `heading` in firm-it.md.
-fn firm_it_codes(firm: &str, heading: &str) -> Vec<u8> {
+pub(super) fn firm_it_codes(firm: &str, heading: &str) -> Vec<u8> {
     let (_, rest) = firm
         .split_once(heading)
         .unwrap_or_else(|| panic!("no {heading:?}"));
