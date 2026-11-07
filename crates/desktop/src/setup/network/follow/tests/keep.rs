@@ -1,6 +1,7 @@
 //! A refresh never turns a proxy into direct on a transient failure (review High): a lookup with
-//! no answer keeps the last route's answer, only `DIRECT` takes it away, and a first route or
-//! new settings with no answer go direct. Late answers apply only to the route that asked for
+//! no answer keeps the last route's answer when the same hosts are asked (whatever else in the
+//! settings changed), only `DIRECT` takes it away, and a first route or other hosts with no
+//! answer go direct. Late answers apply only to the route that asked for
 //! them, and the network thread ends once its `NetworkFollow` is gone.
 
 use std::path::PathBuf;
@@ -79,6 +80,16 @@ fn other_facts() -> NetworkFacts {
     other
 }
 
+/// The same facts but for Claude's API host (a firm plan's endpoint): the OS is asked about
+/// another host.
+fn other_hosts() -> NetworkFacts {
+    let mut other = facts();
+    other
+        .api
+        .insert(claude(), "https://llm.firm.example/".to_owned());
+    other
+}
+
 /// On a refresh of the same read, a lookup that fails (or finds no slot: the sandbox's
 /// `Failed`) or runs past the budget keeps the previous proxy; an explicit `DIRECT` takes it
 /// away.
@@ -112,10 +123,10 @@ fn a_refresh_keeps_the_previous_proxy_when_a_lookup_fails_or_is_late() {
     assert_eq!(hook_env(&hook, &codex()).get("HTTPS_PROXY"), None);
 }
 
-/// A first route with no answer goes direct, as before; so does one after the settings changed,
-/// whatever the last route had.
+/// A first route with no answer goes direct, as before; so does one that asks the OS about
+/// other hosts, whatever the last route had.
 #[test]
-fn a_first_route_or_new_settings_with_no_answer_go_direct() {
+fn a_first_route_or_other_hosts_with_no_answer_go_direct() {
     let os = Os::new(OsAnswer::Unknown);
     let (network, hook) = inline(&os);
     network.update(facts());
@@ -124,8 +135,31 @@ fn a_first_route_or_new_settings_with_no_answer_go_direct() {
     network.update(facts());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
     os.set(OsAnswer::Unknown, Duration::ZERO);
+    network.update(other_hosts());
+    assert_eq!(proxy_of(&hook), None, "another API host");
+}
+
+/// Settings that change only what the OS is not asked about (an agent entry's own variables, a
+/// CA file) keep the proxy over a failed lookup (delta review Low).
+#[test]
+fn an_entry_env_or_ca_changed_with_the_same_hosts_keeps_the_proxy_over_a_failure() {
+    let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
+    let (network, hook) = inline(&os);
+    network.update(facts());
+    assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
+    os.set(OsAnswer::Unknown, Duration::ZERO);
+    let mut entry_env = facts();
+    entry_env
+        .own_vars
+        .insert(claude(), ["ANTHROPIC_LOG".to_owned()].into());
+    network.update(entry_env);
+    assert_eq!(
+        proxy_of(&hook).as_deref(),
+        Some(OS_PROXY),
+        "an entry's own env"
+    );
     network.update(other_facts());
-    assert_eq!(proxy_of(&hook), None, "new settings");
+    assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY), "a CA file");
 }
 
 /// The sandbox's failed lookup (failed, timed out, no slot) is no answer, apart from `DIRECT`.
