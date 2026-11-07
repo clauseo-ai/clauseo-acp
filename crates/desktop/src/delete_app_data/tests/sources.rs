@@ -15,7 +15,7 @@ fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn read(relative: &str) -> String {
+pub(super) fn read(relative: &str) -> String {
     std::fs::read_to_string(manifest_dir().join(relative)).unwrap()
 }
 

@@ -8,7 +8,8 @@
 ; deleteAppDataFailedUnnamed 2026-11-06), then the two the per-machine installer shows about the
 ; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
-; (removeSkippedSilent, 2026-11-07).
+; (removeSkippedSilent, 2026-11-07), then the four the installer shows about the admin copy of
+; S15's set-up program (adminCopy*, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -42,6 +43,17 @@ LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its pro
 ; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
 ; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
 LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
+; The admin copy (windows/hooks.nsh, "The admin copy"): tier B, Clauseo's strongest protection,
+; needs one UAC prompt at install. adminCopyNotSetUp: the prompt was declined, or the set-up failed;
+; Clauseo is installed and works with its other protection. adminCopyOtherAccount: another Windows
+; account on this computer already has tier B. Each in a box and the details list.
+; adminCopySkippedSilent: a silent per-user install (/S) can't ask for the prompt; details list
+; only. adminCopyStillRunning: the set-up outlasted the installer's 5-minute wait and finishes by
+; itself; details list only. Drafts for the app thread and stage F (2026-11-07).
+LangString adminCopyNotSetUp ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up. Clauseo works without it. To set it up, run this installer again and allow it to make changes when Windows asks."
+LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
+LangString adminCopySkippedSilent ${LANG_ENGLISH} "Clauseo's strongest protection isn't set up, because this install is silent. To set it up, run this installer again without /S."
+LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo is still setting up its strongest protection. It finishes on its own."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
