@@ -16,11 +16,8 @@ use windows::Win32::System::Com::{
 };
 use windows::core::{IUnknown, Interface, PCWSTR};
 
-use super::Failed;
+use super::{Failed, JOBS_CAP};
 use crate::windows::sids::Sid;
-
-/// The most BITS jobs read.
-const JOBS_CAP: usize = 10_000;
 /// `RPC_C_AUTHN_WINNT`: NTLM or Kerberos, as for any local COM call.
 const AUTHN_WINNT: u32 = 10;
 /// `RPC_C_AUTHZ_NONE`.
@@ -74,7 +71,9 @@ fn impersonating<T: Interface>(proxy: T) -> Result<T, Failed> {
 }
 
 /// Every BITS job, all users', each impersonating this process, with its owner: `None` when it
-/// couldn't be read. COM must be initialised on this thread ([`Com`]) while the jobs live.
+/// couldn't be read. At most [`JOBS_CAP`]: a list that long may have been cut, which the stop
+/// ends at 48 (`cancel_jobs`). COM must be initialised on this thread ([`Com`]) while the jobs
+/// live.
 pub(super) fn jobs() -> Result<Vec<(IBackgroundCopyJob, Option<Sid>)>, Failed> {
     // SAFETY: a plain out-of-process creation of BITS's manager.
     let manager: IBackgroundCopyManager =
