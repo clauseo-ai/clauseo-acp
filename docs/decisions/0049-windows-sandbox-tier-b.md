@@ -635,11 +635,14 @@ started elevated, by the app or by the uninstall hook.
 
 The uninstaller's hook runs `clauseo-sandbox-setup.exe --remove` elevated (`runas`), the admin
 copy only, once it passes the app's checks done in NSIS: every level from the drive's root to the
-copy admin-only (the rules above), then the copy's SHA-256 (`certutil -hashfile`, run directly
-with its output in the uninstaller's own temporary folder) equal, ignoring case, to
-`AdminCopySha256`. Otherwise, or when anything can't be read, it starts nothing, keeps
-`sandbox\` and the record, and says so: a box, or under `/S` a details line and exit 27. Like the
-app, it looks the verb up in `HKLM\SOFTWARE\Classes\exefile` alone. The
+copy admin-only (the rules above), then the copy's SHA-256, computed in the uninstaller's own
+process (bcrypt through `System::Call`, the file opened sharing read only; no `certutil`, which
+firms' AppLocker, WDAC or ASR rules may block), equal, ignoring case, to `AdminCopySha256`, read
+once more on a mismatch in case a refresh landed in between. Otherwise, or when anything can't be
+read or computed, it starts nothing, keeps `sandbox\` and the record, and under `/S` exits 27. It
+says the hidden accounts are still there (a box unless `/S`) only when the record names an owner,
+per user the uninstalling user; otherwise a details line only. Like the app, it looks the verb up
+in `HKLM\SOFTWARE\Classes\exefile` alone. The
 per-machine installer, already elevated, opens it with `open` and adds `--per-machine`, chosen
 when it is built (the template's `INSTALLMODE`; only `currentUser` and `perMachine` build,
 stage F), never at run time. `--per-machine` runs only in an elevated or SYSTEM process. The exe

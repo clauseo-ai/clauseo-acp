@@ -301,26 +301,26 @@ const SAYS_MISSING: [&str; 9] = [
 fn the_uninstaller_says_nothing_when_the_key_names_no_owner() {
     let code = hook_code();
     let check = exe_missing(preuninstall(&code));
+    // Who to tell (CLAUSEO_OWNER_TO_TELL, which the refusal of a copy that fails its check uses
+    // too), then the message only behind a non-empty $R3.
+    assert_eq!(check[0], format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"));
+    assert_eq!(check[1], "!insertmacro CLAUSEO_OWNER_TO_TELL", "{check:?}");
+    assert_eq!(check[2..], SAYS_MISSING, "{check:?}");
     // OwnerSid read, not the key tested: --adopt --per-machine writes the key with nobody set up,
     // and a removal deletes OwnerSid but leaves the admin copy's values.
-    assert_run(
-        check,
-        &[
-            &format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"),
+    let tell = macro_body(&code, "CLAUSEO_OWNER_TO_TELL");
+    assert_eq!(
+        tell[1..4],
+        [
             "SetRegView 64",
             "ReadRegStr $R3 HKLM \"${CLAUSEO_RECORD_KEY}\" \"${CLAUSEO_RECORD_OWNER_SID}\"",
             "SetRegView lastused",
         ],
+        "{tell:?}"
     );
     assert!(
-        check.iter().all(|line| !line.contains("EnumRegValue")),
-        "{check:?}"
-    );
-    // The message only behind a non-empty $R3, at the block's end.
-    assert_eq!(
-        check[check.len() - SAYS_MISSING.len()..],
-        SAYS_MISSING,
-        "{check:?}"
+        tell.iter().all(|line| !line.contains("EnumRegValue")),
+        "{tell:?}"
     );
     assert_eq!(
         check
@@ -377,18 +377,12 @@ const SAME_USER: [&str; 16] = [
 fn a_per_user_uninstall_by_the_owner_says_so_with_21() {
     let code = hook_code();
     let check = exe_missing(preuninstall(&code));
-    // $R3 keeps OwnerSid when it equals the uninstalling user's SID, then the message and 21.
-    let compare = line_with(check, &["!if \"${INSTALLMODE}\" == \"currentUser\""]);
-    assert_eq!(
-        check[compare..compare + SAME_USER.len()],
-        SAME_USER,
-        "{check:?}"
-    );
-    assert_eq!(
-        check[compare + SAME_USER.len()..],
-        SAYS_MISSING,
-        "{check:?}"
-    );
+    // $R3 keeps OwnerSid when it equals the uninstalling user's SID, last in the macro, then the
+    // message and 21.
+    let tell = macro_body(&code, "CLAUSEO_OWNER_TO_TELL");
+    let compare = line_with(tell, &["!if \"${INSTALLMODE}\" == \"currentUser\""]);
+    assert_eq!(tell[compare..], SAME_USER, "{tell:?}");
+    assert_eq!(check[2..], SAYS_MISSING, "{check:?}");
     // The SID is this process's own token user, read natively through System::Call.
     let admin = admin_code();
     let own = macro_body(&admin, "CLAUSEO_OWN_SID");
@@ -399,13 +393,16 @@ fn a_per_user_uninstall_by_the_owner_says_so_with_21() {
 #[test]
 fn a_per_user_uninstall_by_another_user_says_nothing() {
     let code = hook_code();
-    let check = exe_missing(preuninstall(&code));
-    // Another SID clears $R3, so the message's gate fails; $R5 (the removal's result) is kept.
-    assert_run(check, &["${If} $R2 S!= $R3", "StrCpy $R3 \"\"", "${EndIf}"]);
-    let pushed = line_with(check, &["Push $R5"]);
-    let popped = line_with(check, &["Pop $R5"]);
-    let own = line_with(check, &["!insertmacro CLAUSEO_OWN_SID"]);
-    assert!(pushed < own && own < popped, "{check:?}");
+    // Another SID clears $R3, so the message's gate fails; $R4 (the copy's check) and $R5 (the
+    // removal's result) are kept.
+    let tell = macro_body(&code, "CLAUSEO_OWNER_TO_TELL");
+    assert_run(tell, &["${If} $R2 S!= $R3", "StrCpy $R3 \"\"", "${EndIf}"]);
+    let own = line_with(tell, &["!insertmacro CLAUSEO_OWN_SID"]);
+    for register in ["$R4", "$R5"] {
+        let pushed = line_with(tell, &[&format!("Push {register}")]);
+        let popped = line_with(tell, &[&format!("Pop {register}")]);
+        assert!(pushed < own && own < popped, "{tell:?}");
+    }
 }
 
 #[test]
@@ -414,14 +411,14 @@ fn a_per_machine_uninstall_with_an_owner_says_so() {
     let check = exe_missing(preuninstall(&code));
     // The comparison is the currentUser build's only: per machine, the read goes straight to the
     // message, whoever the owner is.
-    let read_owner = line_with(check, &["ReadRegStr $R3 HKLM"]);
-    assert_eq!(check[read_owner + 1], "SetRegView lastused");
-    assert_eq!(check[read_owner + 2], SAME_USER[0]);
-    let endif = read_owner + 2 + SAME_USER.len() - 1;
-    assert_eq!(check[endif], "!endif");
-    assert_eq!(check[endif + 1..], SAYS_MISSING, "{check:?}");
+    let tell = macro_body(&code, "CLAUSEO_OWNER_TO_TELL");
+    let read_owner = line_with(tell, &["ReadRegStr $R3 HKLM"]);
+    assert_eq!(tell[read_owner + 1], "SetRegView lastused");
+    assert_eq!(tell[read_owner + 2], SAME_USER[0]);
+    assert_eq!(tell.len(), read_owner + 2 + SAME_USER.len(), "{tell:?}");
+    assert_eq!(check[2..], SAYS_MISSING, "{check:?}");
     assert_eq!(
-        check.iter().filter(|line| line.starts_with("!if ")).count(),
+        tell.iter().filter(|line| line.starts_with("!if ")).count(),
         1
     );
 }
@@ -502,7 +499,7 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
         ),
         (
             refused,
-            "| `/S` uninstall: uninstalled, but the protection stays",
+            "| Per-machine `/S` uninstall: uninstalled, but the protection stays",
         ),
     ] {
         let row = format!("| {value} {words}");

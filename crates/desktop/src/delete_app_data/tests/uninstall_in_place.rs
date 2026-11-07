@@ -308,7 +308,7 @@ fn the_uninstaller_refuses_to_run_anywhere_but_its_own_folder_with_26() {
     let firm = read("../../docs/firm-it.md");
     assert_eq!(
         firm_it_codes(&firm, "What a per-machine uninstall can also return"),
-        [25, 26]
+        [25, 26, 27]
     );
     assert!(firm.contains("| 26 | Per-machine uninstall: nothing uninstalled"));
 }

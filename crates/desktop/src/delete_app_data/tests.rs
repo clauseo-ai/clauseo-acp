@@ -10,6 +10,7 @@ mod admin_copy_hook;
 mod admin_copy_record;
 mod make;
 mod nsis_names;
+mod nsis_run;
 mod safe_temp;
 mod sandbox_link;
 mod set_aside;

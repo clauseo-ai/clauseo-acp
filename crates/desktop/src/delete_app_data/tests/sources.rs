@@ -448,7 +448,9 @@ fn the_hook_shows_no_box_when_the_data_folder_is_gone_and_no_path_through_a_link
     );
     // Every box sits under `$R6 <> 0` (no box when gone); a present folder gets a box, the
     // unnamed one first for a link or an unreadable one.
-    let silent = line_with(body, &["${IfNot} ${Silent}"]);
+    // The data folders' step's (the refusal before it has its own).
+    let data = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    let silent = data + line_with(&body[data..], &["${IfNot} ${Silent}"]);
     assert!(attributes < silent, "{body:?}");
     assert_eq!(body[silent + 1], "${AndIf} $R7 <> ${CLAUSEO_DELETED}");
     assert_eq!(body[silent + 2], "${AndIf} $R6 <> 0");
