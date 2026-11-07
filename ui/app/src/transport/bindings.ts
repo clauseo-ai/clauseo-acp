@@ -100,7 +100,10 @@ export const commands = {
 } | null, HostError>(__TAURI_INVOKE("chooser_choose", { chooser })),
 	/**  Closes the chooser session; `command.invalid` when it is not open. */
 	chooserCancel: (chooser: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_cancel", { chooser })),
-	/**  The OS the host runs on, this build's release date, and whether it is a test build. */
+	/**
+	 *  The OS the host runs on, this build's release date, whether it is a test build, and its
+	 *  release mode.
+	 */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 	/**
 	 *  Opens an https, http or mailto `url` in the default browser or mail app, after a native
@@ -1191,6 +1194,13 @@ export type DisplayInfo = {
 	 *  and anyone can install.
 	 */
 	test_build: boolean,
+	/**
+	 *  The build's release mode, from `CLAUSEO_RELEASE_MODE` at compile time. The UI uses it to
+	 *  choose the release page for the installer button: a release opens
+	 *  `…/releases/tag/v{version}`, a test build `…/releases/tag/test-v{version}`, and a dry build
+	 *  shows no button.
+	 */
+	release_mode: ReleaseMode,
 };
 
 /**
@@ -4319,6 +4329,15 @@ export type RefreshWhy =
 "shown" | 
 /**  The lawyer asked again. Reads now, unless a read is in flight. */
 "try_again";
+
+/**  What kind of build this is: a tagged release, a test build (`test-v*`), or a dry run. */
+export type ReleaseMode = 
+/**  A tagged release. */
+"release" | 
+/**  A test build, published as a `test-v*` pre-release. */
+"test" | 
+/**  A dry run: no release page. */
+"dry";
 
 /**  Who renamed a thread. */
 export type RenameSource = 

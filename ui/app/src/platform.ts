@@ -21,6 +21,11 @@ export function guessPlatform(): Platform {
  * never stands in for the host's answer. */
 export async function hostDisplayInfo(transport: HostTransport): Promise<DisplayInfo> {
   if (transport.kind === "null")
-    return { platform: guessPlatform(), release_date: null, test_build: false };
+    return {
+      platform: guessPlatform(),
+      release_date: null,
+      test_build: false,
+      release_mode: "release",
+    };
   return transport.displayInfo();
 }

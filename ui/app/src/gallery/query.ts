@@ -15,5 +15,6 @@ export function displayFromQuery(search: string): Display {
     platform: PLATFORMS.find((p) => p.value === q.get("platform"))?.value ?? guessPlatform(),
     textSize: TEXT_SIZES.find((s) => s === size) ?? DEFAULT_DISPLAY.textSize,
     testBuild: DEFAULT_DISPLAY.testBuild,
+    releaseMode: DEFAULT_DISPLAY.releaseMode,
   };
 }

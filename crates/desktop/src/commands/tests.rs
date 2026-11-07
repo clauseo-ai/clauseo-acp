@@ -15,6 +15,8 @@ use super::*;
 use crate::settings_window::{HashesSet, SETTINGS_WINDOW};
 use crate::test_support::{Scratch, envelope};
 
+mod release_mode;
+
 /// An app on the mock runtime with every command, the app's own context (so its capabilities)
 /// and a bridge, and its `main` window.
 fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) {
@@ -154,9 +156,21 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         "linux"
     };
     // Tests are never a release build, so no release date (release.yml sets one on tags only).
+    // Nor is CLAUSEO_RELEASE_MODE set for them, so an e2e build is a test build and any other a
+    // release.
+    let mode = if cfg!(feature = "e2e") {
+        "test"
+    } else {
+        "release"
+    };
     assert_eq!(
         info,
-        json!({ "platform": platform, "release_date": null, "test_build": cfg!(feature = "e2e") })
+        json!({
+            "platform": platform,
+            "release_date": null,
+            "test_build": cfg!(feature = "e2e"),
+            "release_mode": mode,
+        })
     );
 
     // The same command from a page that is not the app's is refused.

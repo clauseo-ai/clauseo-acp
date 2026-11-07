@@ -105,6 +105,45 @@ pub(crate) struct DisplayInfo {
     /// Whether this is a test build: an `e2e` build, which `test-v*` pre-releases ship with
     /// and anyone can install.
     pub(crate) test_build: bool,
+    /// The build's release mode, from `CLAUSEO_RELEASE_MODE` at compile time. The UI uses it to
+    /// choose the release page for the installer button: a release opens
+    /// `…/releases/tag/v{version}`, a test build `…/releases/tag/test-v{version}`, and a dry build
+    /// shows no button.
+    pub(crate) release_mode: ReleaseMode,
+}
+
+/// The release mode of this build, as release.yml sets `CLAUSEO_RELEASE_MODE` for its cargo build.
+const RELEASE_MODE_ENV: Option<&str> = option_env!("CLAUSEO_RELEASE_MODE");
+
+/// What kind of build this is: a tagged release, a test build (`test-v*`), or a dry run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ReleaseMode {
+    /// A tagged release.
+    Release,
+    /// A test build, published as a `test-v*` pre-release.
+    Test,
+    /// A dry run: no release page.
+    Dry,
+}
+
+/// The release mode from `CLAUSEO_RELEASE_MODE` as compiled in (`env`) and whether the `e2e`
+/// feature is on. `release`, `test` and `dry` are their modes. Unset, an `e2e` build is a test
+/// build and any other a release. Any other value is `Dry`: there is no page to point at.
+pub(crate) fn release_mode(env: Option<&str>, e2e: bool) -> ReleaseMode {
+    let unset = if e2e {
+        ReleaseMode::Test
+    } else {
+        ReleaseMode::Release
+    };
+    match env {
+        Some("release") => ReleaseMode::Release,
+        Some("test") => ReleaseMode::Test,
+        None => unset,
+        // `dry`, and any other value: no page to point at
+        Some(_) => ReleaseMode::Dry,
+    }
 }
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
@@ -343,7 +382,8 @@ pub(crate) async fn chooser_cancel(
     state.close(chooser)
 }
 
-/// The OS the host runs on, this build's release date, and whether it is a test build.
+/// The OS the host runs on, this build's release date, whether it is a test build, and its
+/// release mode.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<DisplayInfo, HostError> {
@@ -351,6 +391,7 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
         platform: Platform::CURRENT,
         release_date: RELEASE_DATE,
         test_build: cfg!(feature = "e2e"),
+        release_mode: release_mode(RELEASE_MODE_ENV, cfg!(feature = "e2e")),
     })
 }
 
