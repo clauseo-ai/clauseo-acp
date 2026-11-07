@@ -9,13 +9,14 @@ use windows::Win32::Networking::BackgroundIntelligentTransferService::{
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, COINIT_MULTITHREADED, CoCreateInstance,
-    CoInitializeEx, CoUninitialize,
+    CoInitializeEx, CoSetProxyBlanket, CoUninitialize, EOAC_NONE, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::TaskScheduler::{
     IRegisteredTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
 };
 use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_I4};
-use windows::core::BSTR;
+use windows::core::{BSTR, IUnknown, Interface, PCWSTR};
 
 use super::super::names_user;
 use super::Item;
@@ -26,6 +27,10 @@ use crate::windows::sids::Sid;
 const FOLDER_DEPTH: usize = 16;
 /// The most BITS jobs read.
 const JOBS_CAP: usize = 10_000;
+/// `RPC_C_AUTHN_WINNT`: NTLM or Kerberos, as for any local COM call.
+const AUTHN_WINNT: u32 = 10;
+/// `RPC_C_AUTHZ_NONE`.
+const AUTHZ_NONE: u32 = 0;
 
 /// COM, initialised for this thread while it lives.
 pub(super) struct Com(bool);
@@ -145,14 +150,48 @@ pub(super) fn delete_task(folder: &ITaskFolder, name: &BSTR) -> io::Result<()> {
     unsafe { folder.DeleteTask(name, 0) }.map_err(|e| os_error(&e))
 }
 
-/// This user's BITS jobs (`EnumJobs(0)`: the caller's own).
-pub(super) fn bits_jobs() -> io::Result<Vec<Item>> {
+/// Lets the server impersonate this user on calls through `proxy`, and returns it. COM's default
+/// level is identify, with which BITS can't act as a job's owner: `Cancel` fails with
+/// `ERROR_NOT_LOGGED_ON`. A proxy reached through another (the enumerator, each job) starts with
+/// the default again, so each is set before its first call. The process's own COM security
+/// (`CoInitializeSecurity`) is left alone: Task Scheduler works with it as it is.
+pub(super) fn impersonating<T: Interface>(proxy: T) -> io::Result<T> {
+    let raw = proxy.as_raw();
+    // SAFETY: `raw` is `proxy`'s live pointer, borrowed for the call while `proxy` lives.
+    let unknown = unsafe { IUnknown::from_raw_borrowed(&raw) }
+        .ok_or_else(|| io::Error::other("a null COM proxy"))?;
+    // SAFETY: a live proxy; no server principal and no auth identity: this process's own.
+    unsafe {
+        CoSetProxyBlanket(
+            unknown,
+            AUTHN_WINNT,
+            AUTHZ_NONE,
+            PCWSTR::null(),
+            RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok(proxy)
+}
+
+/// BITS's manager, impersonating this user.
+pub(super) fn manager() -> io::Result<IBackgroundCopyManager> {
     // SAFETY: a plain out-of-process creation of BITS's manager.
     let manager: IBackgroundCopyManager =
         unsafe { CoCreateInstance(&BackgroundCopyManager, None, CLSCTX_LOCAL_SERVER) }
             .map_err(|e| os_error(&e))?;
+    impersonating(manager)
+}
+
+/// This user's BITS jobs (`EnumJobs(0)`: the caller's own), each impersonating this user.
+pub(super) fn bits_jobs() -> io::Result<Vec<Item>> {
+    let manager = manager()?;
     // SAFETY: a live manager; 0 lists this user's jobs alone.
     let jobs = unsafe { manager.EnumJobs(0) }.map_err(|e| os_error(&e))?;
+    let jobs = impersonating(jobs)?;
     let mut items = Vec::new();
     while items.len() < JOBS_CAP {
         let mut one: [Option<IBackgroundCopyJob>; 1] = [None];
@@ -161,7 +200,7 @@ pub(super) fn bits_jobs() -> io::Result<Vec<Item>> {
         unsafe { jobs.Next(&mut one, &raw mut fetched) }.map_err(|e| os_error(&e))?;
         let [job] = one;
         match job {
-            Some(job) if fetched == 1 => items.push(Item::Bits(job)),
+            Some(job) if fetched == 1 => items.push(Item::Bits(impersonating(job)?)),
             _ => break,
         }
     }
