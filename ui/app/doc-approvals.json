@@ -28,7 +28,11 @@
       "removeSkippedSilent",
       "removeExeMissing",
       "removeAdminCopyRefused",
-      "setupExeRemoved"
+      "setupExeRemoved",
+      "adminCopyNotSetUp",
+      "adminCopyOtherAccount",
+      "adminCopySkippedSilent",
+      "adminCopyStillRunning"
     ],
     "slots": {
       "$R9": "the data folder",

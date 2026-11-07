@@ -9,8 +9,9 @@
 ; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
 ; (removeSkippedSilent, 2026-11-07); then the two drafts about a set-up program Windows security
-; removed (removeExeMissing, setupExeRemoved, 2026-11-07), and the draft for an admin copy the
-; uninstaller won't start (removeAdminCopyRefused, 2026-11-07).
+; removed (removeExeMissing, setupExeRemoved, 2026-11-07), the draft for an admin copy the
+; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the four the installer shows
+; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -56,6 +57,17 @@ LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe wo
 ; A box; under /S a details line and exit code 27. Draft, for the app thread (2026-11-07).
 LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
 LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
+; The admin copy (windows/hooks.nsh, "The admin copy"): tier B, Clauseo's strongest protection,
+; needs one UAC prompt at install. adminCopyNotSetUp: the prompt was declined, or the set-up failed;
+; Clauseo is installed and works with its other protection. adminCopyOtherAccount: another Windows
+; account on this computer already has tier B. Each in a box and the details list.
+; adminCopySkippedSilent: a silent per-user install (/S) can't ask for the prompt; details list
+; only. adminCopyStillRunning: the set-up outlasted the installer's 5-minute wait and finishes by
+; itself; details list only. Drafts for the app thread and stage F (2026-11-07).
+LangString adminCopyNotSetUp ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up. Clauseo works without it. To set it up, run this installer again and allow it to make changes when Windows asks."
+LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
+LangString adminCopySkippedSilent ${LANG_ENGLISH} "Clauseo's strongest protection isn't set up, because this install is silent. To set it up, run this installer again without /S."
+LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo is still setting up its strongest protection. It finishes on its own."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
