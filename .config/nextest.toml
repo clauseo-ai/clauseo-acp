@@ -70,6 +70,14 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & test(/elevated_set_up_/)'
 slow-timeout = { period = "30s", terminate-after = 10 }
 
+# The sandbox's elevated logon tests log a pool user on for real, and a first logon makes the
+# profile: 20 s for one logon on the windows-2025 runner (run 42399836578, log_on_once). The
+# profile reset test logs on twice with a profile delete between, so 30 s killed it on both
+# tries in that run. 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/(^|::)elevated_/) & test(/::logon::tests::/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The sandbox's tier B timing row (ignored; run on a Windows VM with --run-ignored) makes 50,000
 # files, then times three walks over them: about 11 s, 10 s and 10 s each on the S15 PR3 VM run at
 # fca0bf0ca, plus the file creation, so 30 s killed it on 3 of 3 tries. 600 s still ends a hung one.
