@@ -1,0 +1,56 @@
+# Throwaway spike (branch exp-mxc-spike, never merged), G6 part two step 1: can the free GitHub
+# Windows runners run tier A, MXC's process container? spikes/mxc-spike/probe.ps1 prints the OS
+# build and UBR, processmodel.dll and the PSEC exports, `wxc-exec --probe` (MXC v1.0.1), contained
+# cmd and node smoke runs when the tier is base-container, and Codex 0.162.1's strict MXC check.
+# The job always passes; the answer is in the log, the step summary and the probe-*.json artifact.
+name: mxc-spike
+
+on:
+  push:
+    branches: [exp-mxc-spike]
+    paths:
+      - "spikes/mxc-spike/**"
+      - ".github/workflows/mxc-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mxc-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: probe (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-11-arm, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: OS build
+        run: |
+          [Environment]::OSVersion
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "$($cv.ProductName) | $($cv.EditionID) | $($cv.InstallationType) | $($cv.DisplayVersion) | build $($cv.CurrentBuildNumber).$($cv.UBR)"
+          "processmodel.dll in System32: $(Test-Path "$env:SystemRoot\System32\processmodel.dll")"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: spikes/mxc-spike
+
+      - name: Probe
+        run: ./spikes/mxc-spike/probe.ps1 -Out "$env:RUNNER_TEMP/probe-${{ matrix.runner }}.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: probe-${{ matrix.runner }}
+          path: ${{ runner.temp }}/probe-${{ matrix.runner }}.json
+          if-no-files-found: warn
