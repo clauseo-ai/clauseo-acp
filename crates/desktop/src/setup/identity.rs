@@ -44,7 +44,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use clauseo_agents::{AccountHash, AccountRead, FileStamp};
@@ -52,7 +52,8 @@ use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::Files;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
-use self::store::Store;
+use self::entry::{Awaiting, Entry, Window};
+use self::store::{Record, Store};
 use crate::bridge::lock;
 
 pub(crate) use self::check::{Seen, check, expect, on_state};
@@ -66,6 +67,7 @@ pub(crate) use self::watch::{fail_closed, follow_identity};
 pub(crate) use self::watch::{poll_once, stamps};
 
 mod check;
+mod entry;
 mod gate;
 mod store;
 mod verdict;
@@ -93,111 +95,6 @@ pub(crate) enum Stamp {
     Unreadable(std::io::ErrorKind),
 }
 
-/// One agent's state.
-#[derive(Debug, Default)]
-struct Entry {
-    verdict: Verdict,
-    /// A sign-in or reuse made through Clauseo is under way until this time on the clock's
-    /// monotonic time (its run's bound, moved on at each running state): its `SignedIn`
-    /// records. Past it, the agent is checked as any other.
-    expect: Option<Duration>,
-    /// The login files' stamps from before the pending sign-in's last step, so the confirming
-    /// status read comes after them: what its record holds for.
-    pending: Option<Vec<Stamp>>,
-    /// The login files' stamps the verdict holds for, taken before the status read that gave
-    /// it. `None` only when none was taken: with an account recorded, the next look checks.
-    stamps: Option<Vec<Stamp>>,
-    /// When the last check or record was, on the clock's monotonic time.
-    checked_at: Option<Duration>,
-    /// Bumped at each record, sign-out, and key login's start or end, so a check that started
-    /// before is dropped.
-    generation: u64,
-    /// A launch of the agent passed the launch gate: from then on an account with no record is
-    /// never trusted on first use.
-    launched: bool,
-    /// The login files moved from `pending` while the sign-in was pending: the verdict is due
-    /// (`agent.identity_checking`) until the record lands; past the bound, unknown and checked.
-    held: bool,
-    /// An unknown verdict is checked again every [`UNKNOWN_AGAIN`]: it came from a status that
-    /// failed or timed out, or from a panic (`fail_closed`).
-    again: bool,
-    /// The window of a no-email sign-in through Clauseo ([`Identities::forget`]).
-    window: Window,
-}
-
-/// A no-email sign-in's window: while open, a check records the first account it reads (email or
-/// id), launched or not, while the login files are as the sign-in left them. The record shuts it;
-/// a stamp change or its bound breaks it. Trust on first use stays startup-only otherwise.
-#[derive(Debug, Clone, Default)]
-enum Window {
-    #[default]
-    Shut,
-    Open(Awaiting),
-    /// No account is recorded until a sign-in through Clauseo records again, launched or not.
-    Broken,
-}
-
-/// A no-email sign-in's window: until when, and the login files' stamps it left.
-#[derive(Debug, Clone)]
-struct Awaiting {
-    until: Duration,
-    stamps: Vec<Stamp>,
-}
-
-impl Entry {
-    /// Whether a pending sign-in through Clauseo holds at `now`.
-    fn expecting(&self, now: Duration) -> bool {
-        self.expect.is_some_and(|until| now < until)
-    }
-
-    /// Whether a no-email sign-in's window lets a read at `now` record, the login files at
-    /// `stamps` (after the read) and at the entry's (before it) both as the sign-in left them.
-    fn awaiting(&self, now: Duration, stamps: &[Stamp]) -> bool {
-        let Window::Open(awaiting) = &self.window else {
-            return false;
-        };
-        now < awaiting.until && awaiting.stamps == stamps && self.stamps.as_deref() == Some(stamps)
-    }
-
-    /// Breaks a no-email sign-in's window when the login files at `stamps` are not as it left
-    /// them, or `now` is past its bound: nothing is recorded after. Whether it broke now.
-    fn break_window(&mut self, stamps: &[Stamp], now: Duration) -> bool {
-        let broke = matches!(&self.window, Window::Open(awaiting)
-            if awaiting.stamps != stamps || now >= awaiting.until);
-        if broke {
-            self.window = Window::Broken;
-        }
-        broke
-    }
-
-    /// A pending sign-in is no longer under way: whether its files had moved (`held`).
-    fn expect_end(&mut self) -> bool {
-        self.expect = None;
-        self.pending = None;
-        std::mem::take(&mut self.held)
-    }
-
-    /// At a look or a launch while a sign-in is pending, the login files at `stamps`: when
-    /// they differ from those the sign-in took, a verdict that refuses nothing becomes due,
-    /// held until the record lands (R17 review M1). Whether it did now.
-    fn hold_if_moved(&mut self, stamps: &[Stamp]) -> bool {
-        let rests = matches!(
-            self.verdict,
-            Verdict::Idle | Verdict::Same | Verdict::SignedOut
-        );
-        let moved = self
-            .pending
-            .as_deref()
-            .is_none_or(|before| before != stamps);
-        if rests && moved {
-            self.verdict = Verdict::Due;
-            self.held = true;
-            self.generation += 1;
-        }
-        rests && moved
-    }
-}
-
 /// The state behind the lock.
 #[derive(Debug, Default)]
 struct Inner {
@@ -211,7 +108,8 @@ struct Inner {
     /// unknown, not "nothing signed in", even with nothing recorded.
     nameless: BTreeSet<AgentId>,
     /// Signed out through Clauseo since the last record: a status naming no account is
-    /// [`Verdict::SignedOut`], not unknown.
+    /// [`Verdict::SignedOut`], not unknown. Kept in `identity.json` beside the account, so a
+    /// restart restores it.
     signed_out: BTreeSet<AgentId>,
 }
 
@@ -275,7 +173,10 @@ impl Identities {
             inner.agents.insert(agent.clone(), entry);
         }
         match read {
-            Ok(recorded) => inner.recorded = recorded,
+            Ok(record) => {
+                inner.recorded = record.accounts;
+                inner.signed_out = record.signed_out;
+            }
             Err(kind) => tracing::warn!(?kind, "the identity record could not be read"),
         }
         let (asks, asked) = unbounded();
@@ -324,12 +225,34 @@ impl Identities {
     }
 
     /// A sign-out through Clauseo of `agent` starts (`true`), or was refused (`false`).
+    /// The mark is written into the record, so a restart keeps the signed-out state.
     pub(crate) fn signing_out(&self, agent: &AgentId, on: bool) {
         let mut inner = lock(&self.inner);
         if on {
             inner.signed_out.insert(agent.clone());
         } else {
             inner.signed_out.remove(agent);
+        }
+        self.persist(agent, inner);
+    }
+
+    /// Writes the record as `inner` holds it (each recorded account, and the signed-out marks
+    /// of those), the lock dropped first: a write that fails is logged by its kind, and the
+    /// record holds in memory.
+    fn persist(&self, agent: &AgentId, inner: MutexGuard<'_, Inner>) {
+        let signed_out = inner
+            .signed_out
+            .iter()
+            .filter(|marked| inner.recorded.contains_key(*marked))
+            .cloned()
+            .collect();
+        let record = Record {
+            accounts: inner.recorded.clone(),
+            signed_out,
+        };
+        drop(inner);
+        if let Err(error) = self.store.save(&record) {
+            tracing::warn!(%agent, kind = ?error.kind(), "the identity record was not written");
         }
     }
 
@@ -340,7 +263,10 @@ impl Identities {
 
     /// A status named an account for `agent`: a sign-out through Clauseo is over.
     pub(super) fn named(&self, agent: &AgentId) {
-        lock(&self.inner).signed_out.remove(agent);
+        let mut inner = lock(&self.inner);
+        if inner.signed_out.remove(agent) {
+            self.persist(agent, inner);
+        }
     }
 
     /// S18 says `agent` is signed in with no email (`true`), or no longer signed in.
@@ -462,11 +388,7 @@ impl Identities {
         }
         entry.checked_at = Some(now);
         entry.generation += 1;
-        let recorded = inner.recorded.clone();
-        drop(inner);
-        if let Err(error) = self.store.save(&recorded) {
-            tracing::warn!(%agent, kind = ?error.kind(), "the identity record was not written");
-        }
+        self.persist(agent, inner);
         verdict
     }
 
@@ -580,11 +502,7 @@ impl Identities {
         });
         entry.checked_at = Some(now);
         entry.generation += 1;
-        let recorded = inner.recorded.clone();
-        drop(inner);
-        if let Err(error) = self.store.save(&recorded) {
-            tracing::warn!(%agent, kind = ?error.kind(), "the identity record was not written");
-        }
+        self.persist(agent, inner);
     }
 }
 

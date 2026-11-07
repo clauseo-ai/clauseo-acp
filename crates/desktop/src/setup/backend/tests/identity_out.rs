@@ -4,7 +4,8 @@
 //! leaves launches to the agent's own sign-in refusal (M3); followers that panic past their
 //! restarts pin every shared login at `agent.identity_unknown` (L4); and a sign-in through
 //! Clauseo after a launch records its account, by id or by email, while no other path does; and
-//! a firm-managed agent (the e2e build's) is outside the check, the lawyer's own entry never.
+//! a firm-managed agent (the e2e build's) is outside the check, the lawyer's own entry never;
+//! and a sign-out through Clauseo is kept across a restart.
 
 use std::time::UNIX_EPOCH;
 
@@ -456,4 +457,39 @@ fn on_the_keychain_path_a_first_check_overtaken_still_closes_the_window() {
     // A later read records nothing: the window closed with that first check.
     assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);
     assert_eq!(backend.wiring.identity.recorded(&agent), None);
+}
+
+#[test]
+fn a_sign_out_through_clauseo_is_kept_across_a_restart() {
+    let earlier = IdRig::new("identity-sign-out-restart");
+    let agent = codex();
+    let login = earlier.scratch.file("homes/codex-acp/auth.json", b"{}");
+    earlier.signs_in(&agent, ONE);
+    let sign_out = command("sign_out", &agent, &json!({}));
+    assert!(block_on(earlier.rig.setup().run(SETTINGS, sign_out)).is_ok());
+    remove(&login);
+    let record = earlier.scratch.path().join("data/agents/identity.json");
+    let text = std::fs::read_to_string(&record).unwrap();
+    assert!(text.contains(r#""signed_out": true"#), "{text}");
+    // The next start: the startup check finds no account, which reads as signed out.
+    let id = IdRig::over(earlier.scratch, |identity| identity);
+    let (rig, backend) = (&id.rig, &id.rig.backend);
+    // Claude, never signed in, answers no account too: nothing of it is timed.
+    for agent in [claude(), codex()] {
+        rig.agents.accounts.answers(&agent, AccountRead::NoAccount);
+    }
+    id.look(0);
+    assert_eq!(verdict(&id, &agent), Verdict::SignedOut);
+    assert_eq!(gate(backend, &agent), None, "not refused by identity");
+    assert_eq!(wanted(backend, &agent), None);
+    let reads = id.reads();
+    id.look(60);
+    id.look(120);
+    assert_eq!(id.reads(), reads, "no timer");
+    // Another account's file comes back: checked at once, and a change.
+    id.scratch.file("homes/codex-acp/auth.json", b"{ }");
+    rig.agents.accounts.names(&agent, OTHER);
+    id.look(122);
+    assert_eq!(id.reads(), reads + 1);
+    assert_eq!(verdict(&id, &agent), Verdict::Changed);
 }

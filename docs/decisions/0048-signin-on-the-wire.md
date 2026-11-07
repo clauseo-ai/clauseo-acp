@@ -674,7 +674,11 @@ changes (`setup/identity.rs`).
   back reads as changed. Its verdict is signed out: nothing refused by the identity check (a
   launch meets the agent's own sign-in refusal, `agent.auth_required`, never
   `agent.identity_unknown`), no 30 s timer, and the stat watches for a login file coming back,
-  which checks. One status run confirms the file's going.
+  which checks. One status run confirms the file's going. The mark is written into
+  `identity.json` beside the account (`"<id>": { "account": "<hex>", "signed_out": true }`;
+  an agent with no mark stays `"<id>": "<hex>"`), atomically like the record, so after a restart
+  the startup check's "no account" is signed out again, not unknown. A record that cannot be
+  read still makes every agent unknown.
 - *A panic in the setup thread's followers* (debug and test builds only: the workspace's
   `[profile.release]` sets `panic = "abort"`, so in a release build a panic there, or in the
   launch gate, aborts the app, and none of what follows runs; the gate is written not to panic).
@@ -712,7 +716,7 @@ changes (`setup/identity.rs`).
   |---|---|---|---|
   | Idle, an account recorded (signed out outside Clauseo) | yes | macOS Claude, 10 min | no |
   | Idle, nothing recorded (not signed in) | yes | no | no |
-  | Signed out through Clauseo (account still recorded) | yes | macOS Claude, 10 min | no (the agent's own `agent.auth_required`) |
+  | Signed out through Clauseo (account still recorded; the mark kept in `identity.json` across a restart) | yes | macOS Claude, 10 min | no (the agent's own `agent.auth_required`) |
   | Same | yes | macOS Claude, 10 min | no |
   | Unknown | yes | every 30 s after a failed or timed-out status, else no | `agent.identity_unknown` |
   | Due | yes | no (a launch or the startup asks) | `agent.identity_checking` |
