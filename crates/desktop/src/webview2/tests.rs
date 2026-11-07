@@ -220,22 +220,22 @@ fn the_installer_language_files_name_the_product_through_nsis() {
 }
 
 #[test]
-fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_10_once_each() {
-    // Tauri's 27, the seven lines windows/hooks.nsh shows after the app deletes its data or about
+fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_11_once_each() {
+    // Tauri's 27, the eight lines windows/hooks.nsh shows after the app deletes its data or about
     // S15's removal (deleteAppDataFailed, deleteAppDataKept, deleteAppDataKeptFailed,
-    // deleteAppDataFailedUnnamed, removeStillRunning, removeSkippedSilent and removeExeMissing),
-    // which tests there hold to the hook, its two about the firm-policy folder
-    // (policyFolderExists and policyFolderFailed) and the installers' setupExeRemoved.
+    // deleteAppDataFailedUnnamed, removeStillRunning, removeSkippedSilent, removeExeMissing and
+    // removeAdminCopyRefused), which tests there hold to the hook, its two about the firm-policy
+    // folder (policyFolderExists and policyFolderFailed) and the installers' setupExeRemoved.
     let [english, hindi] = language_files();
     let mut orders = Vec::new();
     for (file, constant) in [english, hindi] {
         let strings = lang_strings(&file);
-        assert_eq!(strings.len(), 37, "{file}");
+        assert_eq!(strings.len(), 38, "{file}");
         let order: Vec<String> = strings.iter().map(|(key, _, _)| key.clone()).collect();
         let mut keys = order.clone();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 37, "{file}");
+        assert_eq!(keys.len(), 38, "{file}");
         assert!(
             strings.iter().all(|(_, used, _)| used == constant),
             "{file}: every string is {constant}'s"

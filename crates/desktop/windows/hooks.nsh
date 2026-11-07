@@ -17,6 +17,14 @@
 ;    the hook starts that copy only: a per-user copy beside the app is never started elevated. The
 ;    tool reads its records under the data folder's `sandbox` folder to take its access rules back
 ;    off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
+;    Before starting it the hook checks the copy as the app does (admin_copy.rs): every folder from
+;    the drive's root down to it, and the copy, admin-only; then the copy's SHA-256 (certutil) the
+;    one the machine's record holds (AdminCopySha256). Anything else, or anything it can't read,
+;    and it refuses: nothing is started, `sandbox\` is kept, and it says so
+;    (removeAdminCopyRefused): a box, or under /S a line in the details list and exit code
+;    CLAUSEO_EXIT_ADMIN_COPY_REFUSED.
+;    The start looks its verb up in HKLM\SOFTWARE\Classes\exefile alone (SEE_MASK_CLASSKEY),
+;    never in HKCU\Software\Classes, which the uninstalling user can write.
 ;    Both pass `--uninstall`, which the app's in-app removal never does: it also takes the admin
 ;    copy, its record values and the refresh task away, last, for the install that placed them.
 ;    The per-user installer passes `--remove --uninstall`: only the Windows user who set the
@@ -47,8 +55,8 @@
 ;    the sandbox's records in it; else the whole folder.
 ;
 ; The words are in English.nsh and Hindi.nsh (deleteAppDataFailed, deleteAppDataKept,
-; removeStillRunning, removeSkippedSilent, removeExeMissing, setupExeRemoved); the
-; uninstall-declined line is S15a's.
+; removeStillRunning, removeSkippedSilent, removeExeMissing, removeAdminCopyRefused,
+; setupExeRemoved); the uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -93,6 +101,15 @@
 ; success or retry (1223, 1618, 1641, 1707, 3010).
 !define CLAUSEO_EXIT_SETUP_EXE_REMOVED 20
 !define CLAUSEO_EXIT_REMOVE_EXE_MISSING 21
+; 22 to 26 are kept for the installers' admin-copy steps.
+!define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27
+
+; The rights admin_copy.rs's chain rule counts: CHANGE_RIGHTS on every level below the drive's
+; root, ROOT_CHANGE_RIGHTS on the root (a test holds them equal); and TrustedInstaller's SID,
+; which may own or change a level, as SYSTEM (S-1-5-18) and Administrators (S-1-5-32-544) may.
+!define CLAUSEO_CHANGE_RIGHTS 0x520D0146
+!define CLAUSEO_ROOT_CHANGE_RIGHTS 0x120C0040
+!define CLAUSEO_TRUSTED_INSTALLER "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
 
 ; Sets $R4 to 1 when PATH is a real folder: GetFileAttributesW says a folder (0x10) and no
 ; reparse point (0x400), so a junction or a link is never named as kept and the lawyer is never
@@ -107,6 +124,274 @@
       StrCpy $R4 1
     ${EndIf}
   ${EndIf}
+!macroend
+
+; Sets $1 to 1 when the SID at address SID is SYSTEM's, Administrators' or TrustedInstaller's,
+; read as text (ConvertSidToStringSidW, its string copied out, then freed). Uses $R7 and $R8.
+!macro CLAUSEO_TRUSTED_SID SID
+  StrCpy $1 0
+  StrCpy $R7 0
+  System::Call 'advapi32::ConvertSidToStringSidW(p ${SID}, *p .R7) i .R8'
+  ${If} $R8 <> 0
+  ${AndIf} $R7 <> 0
+    System::Call 'kernel32::lstrcpynW(w .R8, p R7, i ${NSIS_MAX_STRLEN})'
+    System::Call 'kernel32::LocalFree(p R7)'
+    ${If} $R8 == "S-1-5-18"
+    ${OrIf} $R8 == "S-1-5-32-544"
+    ${OrIf} $R8 == "${CLAUSEO_TRUSTED_INSTALLER}"
+      StrCpy $1 1
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; One level of the admin copy's chain, as admin_copy.rs's level_safe and root_safe read it: the
+; path in $4 is a folder ($7 16) or a file ($7 0) and no reparse point, by its own attributes;
+; GetNamedSecurityInfoW (SE_FILE_OBJECT 1, owner and DACL 5) gives a trusted owner and a DACL
+; (a NULL one allows everyone everything); and no allow entry that applies to the level itself
+; (INHERIT_ONLY 8 skipped) gives a right in $6 to an untrusted SID. An allow entry whose SID
+; follows its mask (types 0 and 9) is read; one whose SID isn't (4, 5 and 11) counts as an
+; untrusted SID's. Deny entries are skipped. Clears $5 when the level isn't safe. Uses $1, $8, $9,
+; $R0 to $R2 and $R6 to $R9.
+!macro CLAUSEO_LEVEL_SAFE
+  System::Call 'kernel32::GetFileAttributesW(w r4) i .r1'
+  ${If} $1 = -1
+    StrCpy $5 0
+  ${Else}
+    IntOp $1 $1 & 1040
+    ${If} $1 <> $7
+      StrCpy $5 0
+    ${EndIf}
+  ${EndIf}
+  ${If} $5 = 1
+    StrCpy $R0 0
+    StrCpy $9 0
+    System::Call 'advapi32::GetNamedSecurityInfoW(w r4, i 1, i 5, *p .r8, p 0, *p .r9, p 0, *p .R0) i .r1'
+    ${If} $1 <> 0
+    ${OrIf} $9 = 0
+      StrCpy $5 0
+    ${Else}
+      !insertmacro CLAUSEO_TRUSTED_SID $8
+      ${If} $1 <> 1
+        StrCpy $5 0
+      ${EndIf}
+    ${EndIf}
+    ${If} $5 = 1
+      ; ACL: AclRevision, Sbz1, AclSize, then AceCount. Each ACE: AceType, AceFlags, AceSize,
+      ; then the mask, then (types 0 and 9) the SID.
+      System::Call '*$9(&i1, &i1, &i2, &i2 .R1)'
+      IntOp $R1 $R1 - 1
+      ${For} $R2 0 $R1
+        System::Call 'advapi32::GetAce(p r9, i R2, *p .R6) i .r1'
+        ${If} $1 = 0
+          StrCpy $5 0
+          ${ExitFor}
+        ${EndIf}
+        System::Call '*$R6(&i1 .R7, &i1 .R8, &i2, i .R9)'
+        IntOp $R8 $R8 & 8
+        IntOp $R9 $R9 & $6
+        ${If} $R8 = 0
+        ${AndIf} $R9 <> 0
+          StrCpy $1 0
+          ${If} $R7 = 0
+          ${OrIf} $R7 = 9
+            StrCpy $1 1
+          ${EndIf}
+          ${If} $R7 = 4
+          ${OrIf} $R7 = 5
+          ${OrIf} $R7 = 11
+            StrCpy $5 0
+          ${EndIf}
+          ${If} $1 = 1
+            IntOp $R6 $R6 + 8
+            !insertmacro CLAUSEO_TRUSTED_SID $R6
+            ${If} $1 <> 1
+              StrCpy $5 0
+            ${EndIf}
+          ${EndIf}
+          ${If} $5 = 0
+            ${ExitFor}
+          ${EndIf}
+        ${EndIf}
+      ${Next}
+    ${EndIf}
+    ${If} $R0 <> 0
+      System::Call 'kernel32::LocalFree(p R0)'
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; certutil's SHA-256 of the copy at $0, written to the file at $4 in the uninstaller's own
+; temporary folder ($PLUGINSDIR): certutil started directly (CreateProcessW, no window, never
+; through cmd.exe), its output and errors the file, and waited for up to a minute. $2 is 1 when it
+; ended in time. The file is created anew, inheritable (SECURITY_ATTRIBUTES: nLength 12, no
+; descriptor, bInheritHandle 1), for writing (GENERIC_WRITE), shared for reading, CREATE_ALWAYS
+; (2), FILE_ATTRIBUTE_NORMAL (0x80). A 32-bit STARTUPINFOW is 68 bytes, with STARTF_USESHOWWINDOW
+; | STARTF_USESTDHANDLES (0x101), SW_HIDE and the handles last; a PROCESS_INFORMATION 16
+; (hProcess, hThread, ...). Uses $1 and $R6 to $R9.
+!macro CLAUSEO_CERTUTIL_HASH
+  StrCpy $2 0
+  System::Call '*(i 12, p 0, i 1) p .R6'
+  System::Call 'kernel32::CreateFileW(w r4, i 0x40000000, i 1, p R6, i 2, i 0x80, p 0) p .R7'
+  System::Free $R6
+  ${If} $R7 <> -1
+    StrCpy $1 '"$SYSDIR\certutil.exe" -hashfile "$0" SHA256'
+    System::Call '*(i 68, p 0, p 0, p 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0x101, &i2 0, &i2 0, p 0, p 0, p R7, p R7) p .R8'
+    System::Call '*(&i16) p .R9'
+    ; bInheritHandles 1, for the file; CREATE_NO_WINDOW (0x08000000).
+    System::Call 'kernel32::CreateProcessW(w "$SYSDIR\certutil.exe", w r1, p 0, p 0, i 1, i 0x08000000, p 0, p 0, p R8, p R9) i .r1'
+    System::Call 'kernel32::CloseHandle(p R7)'
+    ${If} $1 <> 0
+      System::Call '*$R9(p .R6, p .R7)'
+      System::Call 'kernel32::CloseHandle(p R7)'
+      System::Call 'kernel32::WaitForSingleObject(p R6, i 60000) i .r1'
+      ${If} $1 = 0
+        StrCpy $2 1
+      ${EndIf}
+      System::Call 'kernel32::CloseHandle(p R6)'
+    ${EndIf}
+    System::Free $R8
+    System::Free $R9
+  ${EndIf}
+!macroend
+
+; Sets $R4 to 1 when a line of certutil's output in the file at $4, spaces, tabs, CR and LF
+; dropped (Windows 7's certutil spaces the bytes), is the recorded hash in $3, compared as NSIS
+; compares (case-insensitively). The output is ANSI text, or UTF-16LE (a NUL or a byte order
+; mark's 0xFE as its second byte). Uses $1, $8, $9 and $R6 to $R8.
+!macro CLAUSEO_HASH_LINE_MATCHES
+  ClearErrors
+  FileOpen $R6 "$4" r
+  ${IfNot} ${Errors}
+    FileReadByte $R6 $1
+    FileReadByte $R6 $1
+    StrCpy $R7 0
+    ${If} $1 = 0
+    ${OrIf} $1 = 254
+      StrCpy $R7 1
+    ${EndIf}
+    FileSeek $R6 0 SET
+    ${Do}
+      ClearErrors
+      ${If} $R7 = 1
+        FileReadUTF16LE $R6 $1
+      ${Else}
+        FileRead $R6 $1
+      ${EndIf}
+      ${If} ${Errors}
+        ${ExitDo}
+      ${EndIf}
+      StrCpy $8 ""
+      StrCpy $9 0
+      ${Do}
+        StrCpy $R8 $1 1 $9
+        ${If} $R8 == ""
+          ${ExitDo}
+        ${EndIf}
+        ${If} $R8 != " "
+        ${AndIf} $R8 != "$\t"
+        ${AndIf} $R8 != "$\r"
+        ${AndIf} $R8 != "$\n"
+          StrCpy $8 "$8$R8"
+        ${EndIf}
+        IntOp $9 $9 + 1
+      ${Loop}
+      ${If} $8 == $3
+        StrCpy $R4 1
+      ${EndIf}
+    ${Loop}
+    FileClose $R6
+  ${EndIf}
+!macroend
+
+; Sets $R4 to 1 when the admin copy may be started elevated, in this order: (1) every level from
+; the drive's root to the copy passes CLAUSEO_LEVEL_SAFE, the root against
+; CLAUSEO_ROOT_CHANGE_RIGHTS and the rest against CLAUSEO_CHANGE_RIGHTS; (2) the machine's record
+; (64-bit view) holds a 64-character AdminCopySha256; (3) certutil hashes the copy; (4) a line of
+; its output is that hash. Anything that fails or can't be read leaves $R4 0. Keeps $0 to $9,
+; $R0 to $R2 and $R6 to $R9.
+!macro CLAUSEO_ADMIN_COPY_VERIFIED
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $9
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $R4 0
+  ; 1. The chain: each prefix of the copy's path that ends before a backslash, the root (C:\)
+  ; first, then the copy itself.
+  StrCpy $0 "${CLAUSEO_ADMIN_EXE}"
+  StrCpy $5 1
+  StrCpy $1 $0 2 1
+  ${If} $1 != ":\"
+    StrCpy $5 0
+  ${EndIf}
+  StrLen $2 $0
+  ${If} $5 = 1
+    ${For} $3 2 $2
+      StrCpy $1 $0 1 $3
+      ${If} $1 == "\"
+      ${OrIf} $3 = $2
+        StrCpy $4 $0 $3
+        StrCpy $6 ${CLAUSEO_CHANGE_RIGHTS}
+        StrCpy $7 16
+        ${If} $3 = 2
+          StrCpy $4 $0 3
+          StrCpy $6 ${CLAUSEO_ROOT_CHANGE_RIGHTS}
+        ${ElseIf} $3 = $2
+          StrCpy $7 0
+        ${EndIf}
+        !insertmacro CLAUSEO_LEVEL_SAFE
+        ${If} $5 = 0
+          ${ExitFor}
+        ${EndIf}
+      ${EndIf}
+    ${Next}
+  ${EndIf}
+  ${If} $5 = 1
+    ; 2. The recorded hash.
+    SetRegView 64
+    ReadRegStr $3 HKLM "SOFTWARE\Clauseo\Sandbox" "AdminCopySha256"
+    SetRegView lastused
+    StrLen $2 $3
+    ${If} $2 = 64
+      ; 3. The copy's hash, then 4. the two compared.
+      InitPluginsDir
+      StrCpy $4 "$PLUGINSDIR\admin-copy-sha256.txt"
+      !insertmacro CLAUSEO_CERTUTIL_HASH
+      ${If} $2 = 1
+        !insertmacro CLAUSEO_HASH_LINE_MATCHES
+      ${EndIf}
+      Delete "$4"
+    ${EndIf}
+  ${EndIf}
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -171,13 +456,31 @@
     !endif
     ${If} $R3 = 1
     ${AndIf} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
+      ; The copy checked first (CLAUSEO_ADMIN_COPY_VERIFIED: the chain, then the hash compared
+      ; with the record's), and started only when it passes. Refused: nothing starts, $R5 stays
+      ; 0 so `sandbox\` is kept, a details line, and a box or under /S the exit code.
+      !insertmacro CLAUSEO_ADMIN_COPY_VERIFIED
+      ${If} $R4 <> 1
+        DetailPrint "$(removeAdminCopyRefused)"
+        ${If} ${Silent}
+          SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}
+        ${Else}
+          MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
+        ${EndIf}
+      ${Else}
+      ; The machine's class for an exe, opened read-only (HKEY_LOCAL_MACHINE 0x80000002, KEY_READ
+      ; 0x20019) into $R4, is the class key (hkeyClass) the start looks its verb up in, with
+      ; SEE_MASK_CLASSKEY (0x3) in fMask: never HKCU\Software\Classes. A key that can't be opened
+      ; starts nothing, as a failed start: $R5 stays 0.
+      System::Call 'advapi32::RegOpenKeyExW(p 0x80000002, w "SOFTWARE\Classes\exefile", i 0, i 0x20019, *p .R4) i .R2'
+      ${If} $R2 = 0
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
       !if ${NSIS_PTR_SIZE} > 4
         !error "hooks.nsh lays out SHELLEXECUTEINFOW for a 32-bit installer; lay it out again"
       !endif
       ; cbSize, fMask, hwnd, lpVerb, lpFile, lpParameters, lpDirectory, nShow (SW_HIDE),
       ; hInstApp, lpIDList, lpClass, hkeyClass, dwHotKey, hIcon, hProcess.
-      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "${CLAUSEO_REMOVE_VERB}", w "${CLAUSEO_ADMIN_EXE}", w "${CLAUSEO_REMOVE}", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
+      System::Call '*(&l4, i 0x443, p $HWNDPARENT, w "${CLAUSEO_REMOVE_VERB}", w "${CLAUSEO_ADMIN_EXE}", w "${CLAUSEO_REMOVE}", p 0, i 0, p 0, p 0, p 0, p R4, i 0, p 0, p 0) p .R6'
       System::Call 'shell32::ShellExecuteExW(p R6) i .R7'
       ${If} $R7 <> 0
         System::Call '*$R6(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
@@ -205,6 +508,9 @@
         ${EndIf}
       ${EndIf}
       System::Free $R6
+      System::Call 'advapi32::RegCloseKey(p R4)'
+      ${EndIf}
+      ${EndIf}
     ${EndIf}
     ; The tool gone (quarantined, say), so nothing was removed: said only when the machine's
     ; record exists, the protection having been set up. The tool is the admin copy, the only one

@@ -27,6 +27,7 @@
       "removeStillRunning",
       "removeSkippedSilent",
       "removeExeMissing",
+      "removeAdminCopyRefused",
       "setupExeRemoved"
     ],
     "slots": {

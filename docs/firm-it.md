@@ -707,6 +707,13 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 - **Uninstalling:** if the file is gone and the protection was set up (the key
   `HKLM\SOFTWARE\Clauseo\Sandbox` exists), the uninstaller says the sandbox's hidden accounts are
   still on the computer; with `/S` it exits 21 instead. The rest of the uninstall carries on.
+- **Uninstalling, the copy refused:** before it starts the copy in
+  `C:\Program Files\Clauseo\Sandbox`, the uninstaller checks it as Clauseo does: the drive's root,
+  `C:\Program Files`, `Clauseo`, `Sandbox` and the file owned by SYSTEM, Administrators or
+  TrustedInstaller and changeable by no one else, and the file's SHA-256 the one recorded in
+  `AdminCopySha256` under that key. If not, it starts nothing and says the hidden accounts are
+  still on the computer; with `/S` it exits 27 instead. Put the folder's permissions back, or run
+  the Clauseo installer again, then uninstall again; or remove the protection by hand (below).
 
 **Exit codes** of both installers and the uninstaller:
 
@@ -717,9 +724,10 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 | 2 | Stopped by an error (NSIS) |
 | 20 | `/S` install: installed, but Windows security removed `clauseo-sandbox-setup.exe` |
 | 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
+| 27 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program in `C:\Program Files\Clauseo\Sandbox` failed its check |
 
 Intune reports 20 as a failed install unless you add it to the app's return codes. `uninstall.exe`
-returns 0 at once (section 1), so it reports 21 only when run as
+returns 0 at once (section 1), so it reports 21 or 27 only when run as
 `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no quotes),
 which leaves `uninstall.exe` and the folder behind; delete them afterwards.
 

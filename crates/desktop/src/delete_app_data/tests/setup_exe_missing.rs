@@ -60,8 +60,18 @@ fn the_uninstaller_says_the_protection_stays_when_the_set_up_program_is_gone() {
     let freed = line_with(body, &["System::Free $R6"]);
     let check = line_with(body, &["${IfNot} ${FileExists}", ADMIN_EXE]);
     let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
-    // After the removal's block, before the data folders.
-    assert_eq!(freed + 2, check, "{body:?}");
+    // After the removal's block (the class key's, the check's and the removal's own ends), before
+    // the data folders.
+    assert_eq!(
+        body[freed + 1..check],
+        [
+            "System::Call 'advapi32::RegCloseKey(p R4)'",
+            "${EndIf}",
+            "${EndIf}",
+            "${EndIf}",
+        ],
+        "{body:?}"
+    );
     let expected = [
         format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"),
         "SetRegView 64".to_owned(),
@@ -120,15 +130,19 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
     let code = hook_code();
     let installed = defined(&code, "CLAUSEO_EXIT_SETUP_EXE_REMOVED");
     let uninstalled = defined(&code, "CLAUSEO_EXIT_REMOVE_EXE_MISSING");
+    let refused = defined(&code, "CLAUSEO_EXIT_ADMIN_COPY_REFUSED");
     assert_ne!(installed, uninstalled);
+    assert!(![installed, uninstalled].contains(&refused));
+    // The installers' admin-copy steps keep 22 to 26.
+    assert!(!(22..=26).contains(&refused), "{refused}");
     // NSIS's own (0, 1, 2), and what Intune and SCCM read as success, a reboot or a retry.
-    for code in [installed, uninstalled] {
+    for code in [installed, uninstalled, refused] {
         assert!(
             ![0, 1, 2, 1223, 1618, 1641, 1707, 3010].contains(&code),
             "{code}"
         );
     }
-    // Only these two set an exit code.
+    // Only these three set an exit code.
     let sets: Vec<&String> = code
         .iter()
         .filter(|line| line.contains("SetErrorLevel"))
@@ -136,6 +150,7 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
     assert_eq!(
         sets,
         [
+            "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}",
             "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
             "SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}",
         ],
@@ -155,6 +170,10 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
         ),
         (
             uninstalled,
+            "| `/S` uninstall: uninstalled, but the protection stays",
+        ),
+        (
+            refused,
             "| `/S` uninstall: uninstalled, but the protection stays",
         ),
     ] {
