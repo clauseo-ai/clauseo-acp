@@ -39,8 +39,9 @@ pub trait Removal {
     /// A process that won't stop is logged, not an error: the profile delete then fails, named.
     fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<(), MachineError>;
     /// Removes the network filters, the owner's read grant on them and the firewall rules
-    /// (S15 PR7, `wfp::remove`); what is already gone counts as removed.
-    fn remove_network(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// (S15 PR7, `wfp::remove`); what is already gone counts as removed. A WFP failure is the
+    /// `Err`; `Some` names a firewall failure, which isn't fatal.
+    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError>;
     /// The name of the account whose SID is `sid`, if one exists.
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
     /// The profile Windows lists for `sid` (`ProfileList`), if any.

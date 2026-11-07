@@ -90,6 +90,8 @@ pub(super) struct Remover {
     pub(super) after_lock: Option<Change>,
     /// The matters whose set-aside bookkeeping was deleted, in order.
     pub(super) forgot: Vec<MatterId>,
+    /// Why the firewall rules' removal fails, when it does (WFP's succeeds).
+    pub(super) firewall_failure: Option<&'static str>,
     base: PathBuf,
 }
 
@@ -109,6 +111,7 @@ impl Remover {
             token: ParentToken::Standard,
             after_lock: None,
             forgot: Vec::new(),
+            firewall_failure: None,
             base,
         }
     }
@@ -205,13 +208,14 @@ impl Removal for Remover {
         self.call(format!("stop_strays {}", rids(pool)))
     }
 
-    fn remove_network(&mut self, owner: &Sid) -> Result<(), MachineError> {
+    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
         assert_eq!(
             owner.as_str(),
             OWNER,
             "the grant taken back is the record's owner's"
         );
-        self.call("remove_network".to_owned())
+        self.call("remove_network".to_owned())?;
+        Ok(self.firewall_failure.map(str::to_owned))
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

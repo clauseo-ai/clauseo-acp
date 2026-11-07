@@ -229,7 +229,7 @@ impl Removal for WindowsRemoval {
         Ok(())
     }
 
-    fn remove_network(&mut self, owner: &Sid) -> Result<(), MachineError> {
+    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
         let removed = wfp::remove(&self.names.wfp, Some(owner))
             .map_err(|error| MachineError::Other(error.cause()))?;
         if removed.foreign_removed > 0 {
@@ -238,7 +238,10 @@ impl Removal for WindowsRemoval {
                 "removal deleted filters set-up didn't write"
             );
         }
-        removed.firewall.map_err(MachineError::Other)
+        if let Err(cause) = &removed.firewall {
+            tracing::warn!(%cause, "the sandbox's firewall rules couldn't be removed");
+        }
+        Ok(removed.firewall.err())
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {
