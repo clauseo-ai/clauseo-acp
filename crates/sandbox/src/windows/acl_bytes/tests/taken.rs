@@ -1,7 +1,8 @@
 //! What `--reclaim` took, cleaned: only the explicit allows of pool users other than the
-//! matter's own go (in a protected DACL, one marked inherited too: that is forged); a broad
-//! group's allow, the matter's own pool user's, inherited entries of an unprotected DACL,
-//! denies and the DACL's protection stay. Nothing else the lawyer owns is touched.
+//! matter's own go, and the explicit denies of the lawyer and its token's groups (in a protected
+//! DACL, one marked inherited too: that is forged); a broad group's allow, the matter's own pool
+//! user's, inherited entries of an unprotected DACL, a pool user's deny and the DACL's
+//! protection stay. Nothing else the lawyer owns is touched.
 
 use super::*;
 
@@ -11,6 +12,11 @@ fn others() -> [Vec<u8>; 1] {
 
 fn me() -> Vec<u8> {
     sid_bytes(&sid(HB_ME))
+}
+
+/// The desktop user and a group of its token, as the hand-back passes them.
+fn mine() -> [Vec<u8>; 2] {
+    [me(), sid_bytes(&sid("S-1-1-0"))]
 }
 
 /// `read_back`'s descriptor with `control` set too.
@@ -31,7 +37,9 @@ fn only_another_pool_users_explicit_allow_goes_and_protection_stays() {
     let all: [&[u8]; 6] = [&deny, &everyone, &users, &own, &other, &inherited];
     let before = with_control(HB_ME, &all, DACL_PROTECTED);
 
-    let after = stripped(&before, &others(), &me()).unwrap().unwrap();
+    let after = stripped(&before, &others(), &me(), &mine())
+        .unwrap()
+        .unwrap();
 
     let read = Descriptor::parse(&after).unwrap();
     // In a protected DACL the "inherited" allow is forged, so it goes too.
@@ -50,7 +58,7 @@ fn nothing_to_strip_or_another_owner_is_left_alone() {
     let own = spec(HB_OWN, Rights::Modify).bytes();
     let other = spec(HB_OTHER, Rights::Modify).bytes();
     let none = |aces: &[&[u8]], owner: &str| {
-        stripped(&read_back(owner, aces), &others(), &me())
+        stripped(&read_back(owner, aces), &others(), &me(), &mine())
             .unwrap()
             .is_none()
     };
@@ -64,7 +72,7 @@ fn nothing_to_strip_or_another_owner_is_left_alone() {
     );
     assert!(none(&[&other], HB_OTHER), "a pool user's: main's hand-back");
     assert!(
-        stripped(&read_back(HB_ME, &[&other]), &others(), &[])
+        stripped(&read_back(HB_ME, &[&other]), &others(), &[], &mine())
             .unwrap()
             .is_none()
     );
@@ -76,19 +84,21 @@ fn nothing_to_strip_or_another_owner_is_left_alone() {
 fn a_shut_item_of_pool_entries_alone_is_left_bare_and_a_colleagues_isnt() {
     let other = spec(HB_OTHER, Rights::Modify).bytes();
     let shut = with_control(HB_ME, &[&other], DACL_PROTECTED);
-    let after = stripped(&shut, &others(), &me()).unwrap().unwrap();
+    let after = stripped(&shut, &others(), &me(), &mine()).unwrap().unwrap();
     assert!(bare(&after).unwrap());
 
     let colleague = spec("S-1-5-21-9-9-9-1500", Rights::ReadAndExecute).bytes();
     let shared = with_control(HB_ME, &[&other, &colleague], DACL_PROTECTED);
-    let after = stripped(&shared, &others(), &me()).unwrap().unwrap();
+    let after = stripped(&shared, &others(), &me(), &mine())
+        .unwrap()
+        .unwrap();
     assert!(
         !bare(&after).unwrap(),
         "a colleague's entry keeps the protection"
     );
 
     let open = with_control(HB_ME, &[&other], 0);
-    let after = stripped(&open, &others(), &me()).unwrap().unwrap();
+    let after = stripped(&open, &others(), &me(), &mine()).unwrap().unwrap();
     assert!(!bare(&after).unwrap(), "not protected: nothing to undo");
 }
 
@@ -99,13 +109,17 @@ fn a_shut_item_of_pool_entries_alone_is_left_bare_and_a_colleagues_isnt() {
 fn a_forged_inherited_allow_in_a_protected_dacl_goes() {
     let forged = inherited(HB_OTHER, Rights::Modify);
     let shut = with_control(HB_ME, &[&forged], DACL_PROTECTED);
-    let after = stripped(&shut, &others(), &me()).unwrap().unwrap();
+    let after = stripped(&shut, &others(), &me(), &mine()).unwrap().unwrap();
     let read = Descriptor::parse(&after).unwrap();
     assert_eq!(read.dacl, Some(empty_acl().as_slice()));
     assert!(bare(&after).unwrap());
 
     let real = with_control(HB_ME, &[&forged], DACL_AUTO_INHERITED);
-    assert!(stripped(&real, &others(), &me()).unwrap().is_none());
+    assert!(
+        stripped(&real, &others(), &me(), &mine())
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// The order, pinned (the orchestrator's request): the strip comes first and the inherited
@@ -125,7 +139,7 @@ fn a_bare_item_inherits_from_its_stripped_self_in_one_write() {
         Ok(with_control(HB_ME, &[&fenced, &given], DACL_AUTO_INHERITED))
     };
 
-    let write = taken_write(&shut, &others(), &me(), &mut fake).unwrap();
+    let write = taken_write(&shut, &others(), &me(), &mine(), &mut fake).unwrap();
 
     assert_eq!(seen.len(), 1, "worked out once");
     let base = Descriptor::parse(&seen[0]).unwrap();
@@ -156,7 +170,7 @@ fn a_stripped_item_with_another_entry_left_inherits_nothing() {
         Ok(Vec::new())
     };
     let shared = with_control(HB_ME, &[&other, &colleague], DACL_PROTECTED);
-    let write = taken_write(&shared, &others(), &me(), &mut fake).unwrap();
+    let write = taken_write(&shared, &others(), &me(), &mine(), &mut fake).unwrap();
     let Some(TakenWrite::Stripped(new)) = write else {
         panic!("expected a strip, got {write:?}");
     };
@@ -166,7 +180,7 @@ fn a_stripped_item_with_another_entry_left_inherits_nothing() {
 
     let clean = with_control(HB_ME, &[&colleague], DACL_PROTECTED);
     assert_eq!(
-        taken_write(&clean, &others(), &me(), &mut fake).unwrap(),
+        taken_write(&clean, &others(), &me(), &mine(), &mut fake).unwrap(),
         None
     );
     assert_eq!(calls, 0);
@@ -192,9 +206,9 @@ fn an_item_left_with_an_inherited_copy_of_the_agents_allow_inherits_again() {
         ))
     };
 
-    let write = taken_write(&below, &others(), &me(), &mut fake).unwrap();
+    let write = taken_write(&below, &others(), &me(), &mine(), &mut fake).unwrap();
     let fresh = with_control(HB_ME, &[&lawyers, &given], DACL_AUTO_INHERITED);
-    let again = taken_write(&fresh, &others(), &me(), &mut fake).unwrap();
+    let again = taken_write(&fresh, &others(), &me(), &mine(), &mut fake).unwrap();
 
     assert_eq!(again, None, "nothing stale: no write");
     assert_eq!(seen.len(), 1, "worked out once, for the stale item only");
@@ -209,4 +223,129 @@ fn an_item_left_with_an_inherited_copy_of_the_agents_allow_inherits_again() {
     };
     let read = Descriptor::parse(&new).unwrap();
     assert_eq!(read.dacl, Some(render(2, &[&lawyers, &given]).as_slice()));
+}
+
+/// `WRITE_OWNER`.
+const WO: u32 = 0x0008_0000;
+
+/// A hijacked agent's denies of the lawyer and of a group of the lawyer's token
+/// (`(D;;WO;;;lawyer)`, `(D;;FA;;;WD)`) go with the other pool user's allow, so the item can't
+/// later refuse the lawyer's label write; a deny naming a pool user (our fence) stays, even when
+/// that SID is passed as the lawyer's too.
+#[test]
+fn the_lawyers_and_its_groups_denies_go_and_a_pool_users_deny_stays() {
+    let lawyer = ace(DENIED, 0, WO, HB_ME);
+    let everyone = ace(DENIED, 0, 0x001f_01ff, "S-1-1-0");
+    let fence = ace(DENIED, 0, 0x001f_01ff, HB_OTHER);
+    let own = spec(HB_OWN, Rights::Modify).bytes();
+    let other = spec(HB_OTHER, Rights::Modify).bytes();
+    let all: [&[u8]; 5] = [&lawyer, &everyone, &fence, &own, &other];
+    let before = with_control(HB_ME, &all, DACL_AUTO_INHERITED);
+
+    let after = stripped(&before, &others(), &me(), &mine())
+        .unwrap()
+        .unwrap();
+
+    let want: [&[u8]; 2] = [&fence, &own];
+    assert_eq!(
+        Descriptor::parse(&after).unwrap().dacl,
+        Some(render(2, &want).as_slice())
+    );
+    let fenced = with_control(HB_ME, &[&fence], DACL_AUTO_INHERITED);
+    let both = [me(), sid_bytes(&sid(HB_OTHER))];
+    assert!(
+        stripped(&fenced, &others(), &me(), &both)
+            .unwrap()
+            .is_none(),
+        "a pool user's deny stays"
+    );
+    let only_lawyer = with_control(HB_ME, &[&lawyer, &own], DACL_AUTO_INHERITED);
+    let after = stripped(&only_lawyer, &others(), &me(), &mine())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        Descriptor::parse(&after).unwrap().dacl,
+        Some(render(2, &[&own]).as_slice()),
+        "a deny alone is reason enough to write"
+    );
+}
+
+/// Below a folder the agent gave an inheritable deny of the lawyer, the inherited copy goes as
+/// the agent's allow copies do: the item inherits again, from its explicit entries alone.
+#[test]
+fn an_inherited_copy_of_the_agents_deny_of_the_lawyer_inherits_again() {
+    let copy = ace(DENIED, INHERITED, WO, HB_ME);
+    let lawyers = spec(HB_ME, Rights::Modify).bytes();
+    let below = with_control(HB_ME, &[&copy, &lawyers], DACL_AUTO_INHERITED);
+    let given = inherited(HB_OWN, Rights::Modify);
+    let mut fake = |_: &[u8]| {
+        Ok(with_control(
+            HB_ME,
+            &[&lawyers, &given],
+            DACL_AUTO_INHERITED,
+        ))
+    };
+
+    let write = taken_write(&below, &others(), &me(), &mine(), &mut fake).unwrap();
+
+    let Some(TakenWrite::Inheriting(new)) = write else {
+        panic!("expected one inheriting write, got {write:?}");
+    };
+    let want: [&[u8]; 2] = [&lawyers, &given];
+    assert_eq!(
+        Descriptor::parse(&new).unwrap().dacl,
+        Some(render(2, &want).as_slice())
+    );
+}
+
+/// A deny object entry (`ACCESS_DENIED_OBJECT_ACE_TYPE`) naming `sid`, with no object type.
+fn denied_object(mask: u32, sid_text: &str) -> Vec<u8> {
+    let sid = sid_bytes(&sid(sid_text));
+    let size = u16::try_from(12 + sid.len()).unwrap();
+    let mut out = vec![6, 0];
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&mask.to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+    out.extend_from_slice(&sid);
+    out
+}
+
+/// On a taken item, `OWNER RIGHTS`' deny goes when the caller lists it as the lawyer's, as the
+/// NTFS writer does (with `CREATOR OWNER` and `CREATOR GROUP`), and so does a deny object entry
+/// naming the lawyer, which an access check without object types applies as a plain deny. With
+/// nothing listed (an item `--reclaim` didn't take) every deny stays.
+#[test]
+fn owner_rights_and_a_deny_object_entry_go_on_a_taken_item_and_nothing_listed_keeps_all() {
+    let owner_rights = ace(DENIED, 0, WO, "S-1-3-4");
+    let creator = ace(DENIED, 0x1 | 0x2 | 0x8, WO, "S-1-3-0");
+    let object = denied_object(WO, HB_ME);
+    let own = spec(HB_OWN, Rights::Modify).bytes();
+    let all: [&[u8]; 4] = [&owner_rights, &creator, &object, &own];
+    let before = with_control(HB_ME, &all, DACL_AUTO_INHERITED);
+    let lawyers = [
+        me(),
+        sid_bytes(&sid("S-1-3-0")),
+        sid_bytes(&sid("S-1-3-1")),
+        sid_bytes(&sid("S-1-3-4")),
+    ];
+
+    let after = stripped(&before, &others(), &me(), &lawyers)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        Descriptor::parse(&after).unwrap().dacl,
+        Some(render(2, &[&own]).as_slice())
+    );
+    let lawyer = ace(DENIED, 0, 0x0001_0000, HB_ME);
+    let everyone = ace(DENIED, 0, 0x0001_0000, "S-1-1-0");
+    let kept = with_control(
+        HB_ME,
+        &[&lawyer, &everyone, &object, &own],
+        DACL_AUTO_INHERITED,
+    );
+    assert!(
+        stripped(&kept, &others(), &me(), &[]).unwrap().is_none(),
+        "not taken: its denies stay"
+    );
 }

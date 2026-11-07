@@ -26,18 +26,27 @@
 //! a pool user owns or the owner can list, so `SeBackupPrivilege` never opens a folder neither
 //! could, and its counts cover only what it reached. What it writes is the owner, and only on
 //! what a pool user owns: the owner holds every pool user's password already (`secrets.bin`).
+//!
+//! The exe reports each item it took, by final path and file ID (`setup/taken_file.rs`, written
+//! as the owner beside its result; it never writes the ledger). [`hand_back_after`], as the
+//! lawyer, records them in the ledger as [`Stuck::Taken`] and strips, on those items alone, the
+//! denies an agent left of the lawyer, its token's groups or an owner's stand-in, so none can
+//! later refuse the lawyer's label write; the record goes once a hand-back refuses nothing. The
+//! lawyer's own files and the matter roots keep their denies: they weren't taken.
 
 use std::collections::BTreeSet;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
+use serde::{Deserialize, Serialize};
 
 use super::acl_plan::{Inherit, in_folder};
 use super::apply::OWN_KINDS;
-use super::ledger::{Ledger, Stuck};
+use super::ledger::{Ledger, ReclaimOwed, Stuck, clear_taken, owe_taken};
 use super::matters::Rows;
 use super::sids::Sid;
-use super::writer::{AclWriter, ApplyFailure};
+use super::writer::{AclWriter, ApplyFailure, DenyStrip, FileId};
 
 pub mod walk;
 
@@ -113,7 +122,7 @@ pub fn targets(ledger: &Ledger, matters: &Rows) -> Vec<ReclaimRoot> {
             tracing::warn!(matter = %stuck.matter, "a clean-up outside every matter is refused");
             continue;
         }
-        let whole = stuck.why != Stuck::PoolOwnedRoot;
+        let whole = !matches!(stuck.why, Stuck::PoolOwnedRoot | Stuck::Taken);
         let own: Vec<Sid> = held.into_iter().cloned().collect();
         found.push((stuck.path, stuck.matter, whole, Why::Stuck(stuck.why), own));
     }
@@ -173,13 +182,16 @@ pub struct HandedBack {
 /// The lawyer's hand-back after `--reclaim`, for each target, with `pool` (the machine
 /// record's pool users) less the target's own pool user: main's hand-back of the root
 /// ([`AclWriter::hand_back`]), [`AclWriter::strip_taken`] on what the lawyer owns now, which
-/// loses only those pool users' explicit allows, our own (`keep`) kept, then main's hand-back
-/// below a root walked whole ([`AclWriter::hand_back_tree`]) of what a pool user still owns. A
-/// refusal is listed and the next target tried.
+/// loses only those pool users' explicit allows, our own (`keep`) kept, and on the items
+/// `denies` lists as taken the denies an agent left of the lawyer; then main's hand-back below
+/// a root walked whole ([`AclWriter::hand_back_tree`]) of what a pool user still owns. A
+/// [`Stuck::Taken`] root, the lawyer's already, gets the strip alone. A refusal is listed and
+/// the next target tried.
 pub fn hand_back_targets(
     acl: &mut dyn AclWriter,
     targets: &[ReclaimRoot],
     pool: &[Sid],
+    denies: &DenyStrip<'_>,
 ) -> HandedBack {
     let mut out = HandedBack::default();
     for target in targets {
@@ -192,15 +204,19 @@ pub fn hand_back_targets(
         // The strip goes before main's hand-back below the root: a folder `--reclaim` took that
         // only its agent could list is the lawyer's to open only once it is stripped (and,
         // left bare, unprotected).
-        let done = acl
-            .hand_back(root, &others)
-            .map(drop)
+        let taken = target.why == Why::Stuck(Stuck::Taken);
+        let done = if taken {
+            Ok(())
+        } else {
+            acl.hand_back(root, &others).map(drop)
+        };
+        let done = done
             .and_then(|()| {
-                acl.strip_taken(root, &others, &target.keep, target.whole)
+                acl.strip_taken(root, &others, &target.keep, target.whole, denies)
                     .map(drop)
             })
             .and_then(|()| {
-                if target.whole {
+                if target.whole && !taken {
                     acl.hand_back_tree(root, &others).map(drop)
                 } else {
                     Ok(())
@@ -217,5 +233,69 @@ pub fn hand_back_targets(
     out
 }
 
+/// One item `--reclaim` took, as its result reports it (`setup/taken_file.rs`): the matter
+/// whose target it was walked for, its final path as its handle gave it, and its file ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TakenItem {
+    /// The matter of the target it was found in.
+    pub matter: MatterId,
+    /// Its final path.
+    pub path: PathBuf,
+    /// Its file ID.
+    pub file: FileId,
+}
+
+/// The lawyer's whole hand-back after `--reclaim`: the items it reported taken (`taken`)
+/// recorded in the ledger as [`Stuck::Taken`] (so one a refused hand-back leaves is tried again
+/// by the next), the targets read again from the ledger and `matters`, each handed back
+/// ([`hand_back_targets`]) with denies stripped on every taken item the ledger lists, keeping
+/// the denies of `kept` (the record's pool users and pool group); then, when nothing was
+/// refused, those taken items cleared. A record that can't be written is logged, and the items
+/// reported are still stripped this time.
+pub fn hand_back_after(
+    acl: &mut dyn AclWriter,
+    ledger: &mut Ledger,
+    matters: &Rows,
+    taken: &[TakenItem],
+    pool: &[Sid],
+    kept: &[Sid],
+) -> io::Result<HandedBack> {
+    let reported: Vec<(MatterId, PathBuf, FileId)> = taken
+        .iter()
+        .map(|t| (t.matter, t.path.clone(), t.file))
+        .collect();
+    if !reported.is_empty()
+        && let Err(error) = owe_taken(ledger, &reported)
+    {
+        tracing::warn!(error = %error.kind(), "the items taken weren't recorded");
+    }
+    let owed: Vec<ReclaimOwed> = ledger
+        .reclaims_owed()
+        .into_iter()
+        .filter(|o| o.why == Stuck::Taken && o.file.is_some())
+        .collect();
+    let mut listed: Vec<(PathBuf, FileId)> = owed
+        .iter()
+        .filter_map(|o| o.file.map(|file| (o.path.clone(), file)))
+        .collect();
+    for (_, path, file) in reported {
+        if !listed.iter().any(|(p, f)| *p == path && *f == file) {
+            listed.push((path, file));
+        }
+    }
+    let found = targets(ledger, matters);
+    let denies = DenyStrip {
+        taken: &listed,
+        kept,
+    };
+    let handed = hand_back_targets(acl, &found, pool, &denies);
+    if handed.refused.is_empty() {
+        clear_taken(ledger, &owed)?;
+    }
+    Ok(handed)
+}
+
+#[cfg(test)]
+mod taken_tests;
 #[cfg(test)]
 mod tests;

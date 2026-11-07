@@ -41,8 +41,8 @@ use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
 use super::ledger::RecordedFile;
-use super::record::current_user_sid;
-use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
+use super::record::{current_token_groups, current_user_sid};
+use super::writer::{AclWriter, Added, ApplyFailure, DenyStrip, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
 use walk::{Foreign, Mode};
 
@@ -51,6 +51,10 @@ pub(in crate::windows) mod privilege;
 pub(in crate::windows) mod take;
 mod taken;
 mod walk;
+
+/// `CREATOR OWNER`, `CREATOR GROUP` and `OWNER RIGHTS`: a deny naming one denies the lawyer on
+/// an item the lawyer owns, or on what the lawyer makes below it.
+const OWNER_STAND_INS: [&str; 3] = ["S-1-3-0", "S-1-3-1", "S-1-3-4"];
 
 /// What every read here asks for: owner, group, DACL and label, all under `READ_CONTROL`.
 const READ_ALL: u32 = OWNER_SECURITY_INFORMATION.0
@@ -260,11 +264,30 @@ impl AclWriter for NtfsAcl {
         others: &[Sid],
         keep: &[(PathBuf, Sid)],
         whole: bool,
+        denies: &DenyStrip<'_>,
     ) -> Result<Walked, ApplyFailure> {
-        let me = sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?);
+        let io = |e: io::Error| ApplyFailure::Io(e.kind());
+        let me = sid_bytes(&current_user_sid().map_err(io)?);
         let others: Vec<Vec<u8>> = others.iter().map(sid_bytes).collect();
+        // The denies a taken item loses: of the desktop user, its token's groups, and the SIDs
+        // that stand for an owner or its group; never of a SID kept (the pool, our fence).
+        let kept: Vec<Vec<u8>> = denies.kept.iter().map(sid_bytes).collect();
+        let mut mine = current_token_groups().map_err(io)?;
+        mine.push(me.clone());
+        mine.extend(
+            OWNER_STAND_INS
+                .iter()
+                .filter_map(|s| Sid::parse(s).ok())
+                .map(|s| sid_bytes(&s)),
+        );
+        mine.retain(|sid| !kept.contains(sid));
         self.refused = None;
-        taken::strip(&self.token, root, &others, &me, keep, whole).map_err(|(failure, at)| {
+        let lawyer = taken::Lawyer {
+            me: &me,
+            mine: &mine,
+            taken: denies.taken,
+        };
+        taken::strip(&self.token, root, &others, &lawyer, keep, whole).map_err(|(failure, at)| {
             self.refused = at.map(|wide| PathBuf::from(OsString::from_wide(&wide)));
             failure
         })

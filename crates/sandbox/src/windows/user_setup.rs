@@ -34,13 +34,14 @@ use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
-use super::reclaim::{hand_back_targets, targets};
+use super::reclaim::hand_back_after;
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::setup::SetupExit;
 use super::setup::args::quote;
 use super::setup::around::Around;
 use super::setup::launch_error;
 use super::setup::result_file::{self, SetupResult};
+use super::setup::taken_file;
 use super::sids::{Reserved, Sid};
 use crate::{SandboxSetup, SetupError, SetupState};
 
@@ -78,14 +79,20 @@ impl UserSetup {
     /// The elevated clean-up (D-B10, S15 `PR4i`): one prompt. `--reclaim` makes this user the
     /// owner of what a sandbox user owns and this user can't hand back, in the trees the ledger
     /// owes a clean-up (`reclaim::targets`), and changes nothing else; then, unelevated, the
-    /// same trees are handed back (`reclaim::hand_back_targets`), which cleans what was taken
-    /// of its old owner's entries. The app then retries each owed `forget_matter` first, then
+    /// same trees are handed back (`reclaim::hand_back_after`), which cleans what was taken of
+    /// its old owner's entries, and the items the exe reports taken of the denies an agent left
+    /// of this user. The app then retries each owed `forget_matter` first, then
     /// the launch that refused.
     ///
     /// The hand-back runs when the exe is done, and also when it failed partway having taken
     /// something (`taken` in its result file), so nothing it took is left uncleaned; the exe's
     /// failure is still what this returns then.
     pub fn reclaim(&self) -> Result<(), SetupError> {
+        taken_file::remove(&self.data_dir).map_err(|error| {
+            SetupError::Failed(format!(
+                "the last clean-up's list can't be cleared: {error}"
+            ))
+        })?;
         let parent = std::process::id();
         let (code, read) = self.run_raw(&format!("--reclaim --parent {parent}"))?;
         let taken = read
@@ -99,18 +106,37 @@ impl UserSetup {
         handed.unwrap_or(Ok(()))
     }
 
-    /// The unelevated half of [`UserSetup::reclaim`]: the ledger read again, as this user, and
-    /// each target handed back with the record's pool users.
+    /// The unelevated half of [`UserSetup::reclaim`]: the ledger read again, as this user, the
+    /// items the exe reported taken (`reclaim-taken.json`) recorded in it, and each target
+    /// handed back with the record's pool users, the taken items' denies of this user stripped
+    /// (`reclaim::hand_back_after`). A list that can't be read is logged, and the hand-back runs
+    /// with what the ledger already lists.
     fn hand_back_reclaimed(&self) -> Result<(), SetupError> {
         let failed =
             |why: String| SetupError::Failed(format!("handing back what was taken: {why}"));
         let (pool, trusted) = pool_and_trusted().map_err(failed)?;
         let reserved = Reserved::of_this_machine()?;
-        let ledger = Ledger::open(ledger_path(&self.data_dir), &trusted, &reserved)
+        let mut ledger = Ledger::open(ledger_path(&self.data_dir), &trusted, &reserved)
             .map_err(|e| failed(format!("the permission ledger: {e}")))?;
-        let found = targets(&ledger, MatterSids::load(&self.data_dir)?.rows());
+        let taken = taken_file::read(&self.data_dir).unwrap_or_else(|_why| {
+            // Its words may name a path: kept out of the log.
+            tracing::warn!("the clean-up's list of items taken can't be read");
+            Vec::new()
+        });
+        let matters = MatterSids::load(&self.data_dir)?;
         let mut acl = NtfsAcl::new().map_err(|e| failed(e.to_string()))?;
-        let handed = hand_back_targets(&mut acl, &found, &pool);
+        let handed = hand_back_after(
+            &mut acl,
+            &mut ledger,
+            matters.rows(),
+            &taken,
+            &pool,
+            &trusted,
+        )
+        .map_err(|e| failed(format!("the permission ledger: {e}")))?;
+        if let Err(error) = taken_file::remove(&self.data_dir) {
+            tracing::warn!(error = %error.kind(), "the clean-up's list of items taken stays");
+        }
         if handed.refused.is_empty() {
             return Ok(());
         }

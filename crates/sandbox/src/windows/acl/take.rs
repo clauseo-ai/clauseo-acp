@@ -6,7 +6,8 @@
 //! Run with `SeBackupPrivilege` and `SeRestorePrivilege` enabled (`privilege.rs`), the opens get
 //! `READ_CONTROL`, the listing and `WRITE_OWNER` whatever the DACL says, as a backup-intent open
 //! does. The one write is the owner (`OWNER_SECURITY_INFORMATION` alone, on that handle), read
-//! back after. Paths are resolved by handle (`resolve`), so a short name, a different case or a
+//! back after; each object re-owned is kept by its final path and file ID, for the result.
+//! Paths are resolved by handle (`resolve`), so a short name, a different case or a
 //! junction on the way is checked as the final path it reaches.
 
 use std::ffi::OsString;
@@ -21,20 +22,31 @@ use super::{READ_ALL, same_path};
 use crate::windows::acl_bytes::{owner_descriptor, owner_sid, sid_bytes};
 use crate::windows::reclaim::walk::{Kind, OwnerTree};
 use crate::windows::sids::Sid;
-use crate::windows::writer::ApplyFailure;
+use crate::windows::writer::{ApplyFailure, FileId};
 
 /// What the desktop user's own token gets on a descriptor (`Owner::granted`).
 pub(in crate::windows) type Granted<'a> = &'a dyn Fn(&[u8]) -> io::Result<u32>;
 
 /// The NTFS objects `--reclaim` walks, with `granted` saying what the desktop user's own token
-/// gets on each.
+/// gets on each; and each object it gave the owner, by its final path and file ID.
 pub(in crate::windows) struct NtfsOwners<'a> {
     granted: Granted<'a>,
+    taken: Vec<(PathBuf, FileId)>,
 }
 
 impl<'a> NtfsOwners<'a> {
     pub(in crate::windows) fn new(granted: Granted<'a>) -> NtfsOwners<'a> {
-        NtfsOwners { granted }
+        NtfsOwners {
+            granted,
+            taken: Vec::new(),
+        }
+    }
+
+    /// The objects given the owner since the last call, by final path and file ID: what the
+    /// result reports, so the hand-back strips denies on those alone. One whose file ID couldn't
+    /// be read isn't listed.
+    pub(in crate::windows) fn drain_taken(&mut self) -> Vec<(PathBuf, FileId)> {
+        std::mem::take(&mut self.taken)
     }
 }
 
@@ -137,6 +149,10 @@ impl OwnerTree for NtfsOwners<'_> {
             return Err(io::Error::other(
                 "the owner read back isn't the one written",
             ));
+        }
+        if let Ok((volume, id)) = node.object.file_id() {
+            let path = PathBuf::from(OsString::from_wide(&node.path));
+            self.taken.push((path, FileId { volume, id }));
         }
         Ok(())
     }

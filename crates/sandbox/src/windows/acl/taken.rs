@@ -3,9 +3,11 @@
 //! implied only `READ_CONTROL | WRITE_DAC`, so each item (the root too) is opened with exactly
 //! those (`Object::open_owned`), relative to its folder's handle, never following a link: no
 //! `SYNCHRONIZE`, no `FILE_READ_ATTRIBUTES`, which a DACL only the agent's user is in doesn't
-//! give. An item the lawyer owns that still allows another pool user by an explicit entry gets,
-//! in one write on that handle, its DACL without those entries; or, when that leaves it
-//! protected with nothing in it, its folder's inherited entries alone, unprotected
+//! give. An item the lawyer owns that still allows another pool user by an explicit entry, or
+//! that `--reclaim` took (its final path and file ID as reported) and denies the lawyer, a group
+//! of the lawyer's token or an owner's stand-in by one, gets, in one write on that handle, its
+//! DACL without those entries; or, when that leaves it protected with nothing in it, its
+//! folder's inherited entries alone, unprotected
 //! (`acl_bytes::taken_write`): the inherited grants are worked out from the stripped item, so
 //! it never holds a pool user's allow and the matter's grants at once. It is read back after.
 //! Only then is a folder opened again to be listed (now that it inherits, the lawyer may), and
@@ -24,15 +26,27 @@ use super::walk::{Refused, inherit};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{Descriptor, TakenWrite, sid_bytes, stripped, taken_write};
 use crate::windows::acl_plan::{Sid, in_folder};
-use crate::windows::writer::{ApplyFailure, Owned, Walked};
+use crate::windows::writer::{ApplyFailure, FileId, Owned, Walked};
 
-/// The strip at `root` and, when `whole`, below it, as the writer's method says. `others` and
-/// `me` as bytes.
+/// Who strips, and where denies go too.
+pub(super) struct Lawyer<'a> {
+    /// The desktop user's SID, as bytes.
+    pub(super) me: &'a [u8],
+    /// The SIDs whose denies a taken item loses, as bytes, none of them kept
+    /// ([`DenyStrip::kept`](crate::windows::writer::DenyStrip::kept)).
+    pub(super) mine: &'a [Vec<u8>],
+    /// The items `--reclaim` took, the only ones that lose denies
+    /// ([`DenyStrip::taken`](crate::windows::writer::DenyStrip::taken)).
+    pub(super) taken: &'a [(PathBuf, FileId)],
+}
+
+/// The strip at `root` and, when `whole`, below it, as the writer's method says. `others` as
+/// bytes.
 pub(super) fn strip(
     token: &Handle,
     root: &Path,
     others: &[Vec<u8>],
-    me: &[u8],
+    lawyer: &Lawyer<'_>,
     keep: &[(PathBuf, Sid)],
     whole: bool,
 ) -> Result<Walked, Refused> {
@@ -69,7 +83,7 @@ pub(super) fn strip(
         path: &path,
         above: &above,
     };
-    one(token, &item, others, me, keep, &mut seen).map_err(at)?;
+    one(token, &item, others, lawyer, keep, &mut seen).map_err(at)?;
     if !whole || !top.folder {
         return Ok(seen);
     }
@@ -106,7 +120,8 @@ pub(super) fn strip(
                 path: &at,
                 above: &above,
             };
-            one(token, &item, others, me, keep, &mut seen).map_err(|f| (f, Some(at.clone())))?;
+            one(token, &item, others, lawyer, keep, &mut seen)
+                .map_err(|f| (f, Some(at.clone())))?;
             if object.folder {
                 match listable(&folder, &child.name, &at) {
                     Ok(Some(listed)) => stack.push((listed, at)),
@@ -148,12 +163,35 @@ struct Item<'a> {
     above: &'a [u8],
 }
 
+impl Lawyer<'_> {
+    /// The SIDs whose denies `object` (at the final path `at`) loses: [`Lawyer::mine`] when it
+    /// is an item `--reclaim` took, by its path (without case, as `in_folder` compares) and its
+    /// file ID both; else none, and it keeps every deny. A file ID that can't be read counts as
+    /// another file's: the item keeps its denies, as it did before they were ever stripped.
+    fn denied(&self, object: &Object, at: &Path) -> &[Vec<u8>] {
+        let named = self
+            .taken
+            .iter()
+            .filter(|(path, _)| in_folder(at, path) && in_folder(path, at));
+        let ids: Vec<FileId> = named.map(|(_, id)| *id).collect();
+        if ids.is_empty() {
+            return &[];
+        }
+        let Ok((volume, id)) = object.file_id() else {
+            tracing::warn!("a taken item's file ID can't be read; its denies stay");
+            return &[];
+        };
+        let taken = ids.iter().any(|f| f.volume == volume && f.id == id);
+        if taken { self.mine } else { &[] }
+    }
+}
+
 /// One item: its one write when it needs one ([`taken_write`]), then read back.
 fn one(
     token: &Handle,
     item: &Item<'_>,
     others: &[Vec<u8>],
-    me: &[u8],
+    lawyer: &Lawyer<'_>,
     keep: &[(PathBuf, Sid)],
     seen: &mut Walked,
 ) -> Result<(), ApplyFailure> {
@@ -177,9 +215,10 @@ fn one(
         .cloned()
         .collect();
     let others = others.as_slice();
+    let (me, mine) = (lawyer.me, lawyer.denied(object, &named));
     let current = object.security(READ_ALL).map_err(io)?;
     let mut worked = |base: &[u8]| inherit(token, item.above, base, object.folder);
-    let Some(write) = taken_write(&current, others, me, &mut worked).map_err(io)? else {
+    let Some(write) = taken_write(&current, others, me, mine, &mut worked).map_err(io)? else {
         return Ok(());
     };
     let (info, new, inheriting) = match write {
@@ -195,7 +234,7 @@ fn one(
     };
     object.set(info, &new).map_err(io)?;
     let after = object.security(READ_ALL).map_err(io)?;
-    let left = stripped(&after, others, me).map_err(io)?.is_some();
+    let left = stripped(&after, others, me, mine).map_err(io)?.is_some();
     if left || (inheriting && Descriptor::parse(&after).map_err(io)?.dacl_protected()) {
         return Err(ApplyFailure::PoolOwned {
             owned: Owned::Child,

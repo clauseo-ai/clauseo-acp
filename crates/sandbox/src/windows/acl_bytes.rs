@@ -30,6 +30,8 @@ pub(crate) const ALLOWED: u8 = 0;
 const ALLOWED_CALLBACK: u8 = 9;
 /// `ACCESS_DENIED_ACE_TYPE`.
 pub(crate) const DENIED: u8 = 1;
+/// `ACCESS_DENIED_CALLBACK_ACE_TYPE`.
+const DENIED_CALLBACK: u8 = 10;
 /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`.
 pub(crate) const LABEL: u8 = 0x11;
 /// `OBJECT_INHERIT_ACE`.

@@ -7,6 +7,10 @@
 //! the owner) to pick what it walks, and never takes a path from its command line. A launch or a
 //! forget of the matter that succeeds clears the matter's list.
 //!
+//! The lawyer also records here each item `--reclaim` reported taken ([`Stuck::Taken`], with its
+//! file ID, [`owe_taken`]), so the hand-back after strips the agent's denies of the lawyer on it;
+//! [`clear_taken`] drops exactly those once a hand-back refuses nothing.
+//!
 //! The file is the lawyer's to write, so nothing here is trusted beyond its shape: one whose
 //! path isn't absolute, or that this version can't read, is kept as it is and never acted on.
 //! What `--reclaim` does with a path is bounded on its own (K1): the owner, and only the owner,
@@ -19,7 +23,9 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::Ledger;
 use super::file::State;
+use crate::windows::writer::FileId;
 
 /// Why a launch left an item for the elevated clean-up. Variants are appended from here on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -31,6 +37,11 @@ pub enum Stuck {
     PoolOwnedChild,
     /// A child the lawyer can't open that couldn't be set aside.
     ChildShut,
+    /// An item `--reclaim` took (its result reported it, with its file ID): the hand-back after
+    /// owes it the strip of the denies an agent left of the lawyer
+    /// ([`DenyStrip`](crate::windows::writer::DenyStrip)). Not a launch's refusal; cleared once a
+    /// hand-back with nothing refused has run.
+    Taken,
 }
 
 /// One clean-up owed: `path`, which `matter`'s launch refused for `why`.
@@ -43,6 +54,10 @@ pub struct ReclaimOwed {
     pub path: PathBuf,
     /// Why.
     pub why: Stuck,
+    /// For [`Stuck::Taken`], the item's file ID, as `--reclaim` read it from the handle it took
+    /// the item through: the hand-back strips denies only on that file at that path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<FileId>,
 }
 
 /// A clean-up owed as read: one this version reads and trusts, with the fields it doesn't know,
@@ -89,7 +104,12 @@ pub(super) fn checked(matter: MatterId, path: PathBuf, why: Stuck) -> io::Result
             "a clean-up's path must be absolute",
         ));
     }
-    Ok(ReclaimOwed { matter, path, why })
+    Ok(ReclaimOwed {
+        matter,
+        path,
+        why,
+        file: None,
+    })
 }
 
 /// The clean-ups owed in `state` this version reads and trusts.
@@ -119,4 +139,41 @@ pub(super) fn clear(state: &mut State, matter: MatterId) -> bool {
         .reclaims
         .retain(|slot| !matches!(slot, ReclaimSlot::Known(known) if known.owed.matter == matter));
     state.reclaims.len() != before
+}
+
+/// Removes from `state` each trusted clean-up owed equal to one of `done`; whether any was.
+fn clear_these(state: &mut State, done: &[ReclaimOwed]) -> bool {
+    let before = state.reclaims.len();
+    state
+        .reclaims
+        .retain(|slot| !matches!(slot, ReclaimSlot::Known(known) if done.contains(&known.owed)));
+    state.reclaims.len() != before
+}
+
+/// Records in `ledger` under the lock, once each, the items `--reclaim` took (`matter`, final
+/// path, file ID), as [`Stuck::Taken`]: what the hand-back after strips denies on. A relative
+/// path is `InvalidInput` and nothing is written.
+pub fn owe_taken(ledger: &mut Ledger, taken: &[(MatterId, PathBuf, FileId)]) -> io::Result<()> {
+    let mut owed = Vec::with_capacity(taken.len());
+    for (matter, path, file) in taken {
+        let mut one = checked(*matter, path.clone(), Stuck::Taken)?;
+        one.file = Some(*file);
+        owed.push(one);
+    }
+    ledger.update(true, |state| {
+        let mut added = false;
+        for one in owed {
+            added |= owe(state, one);
+        }
+        Ok((added, ()))
+    })
+}
+
+/// Clears from `ledger` under the lock exactly the clean-ups owed in `done` (the hand-back's
+/// [`Stuck::Taken`] items once it refused nothing); with none of them listed, touches nothing.
+pub fn clear_taken(ledger: &mut Ledger, done: &[ReclaimOwed]) -> io::Result<()> {
+    if !listed(&ledger.state).any(|owed| done.contains(owed)) {
+        return Ok(());
+    }
+    ledger.update(false, |state| Ok((clear_these(state, done), ())))
 }

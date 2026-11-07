@@ -19,7 +19,10 @@ use windows::Win32::Foundation::{
     LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-use windows::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+use windows::Win32::Security::{
+    GetLengthSid, GetTokenInformation, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+    TOKEN_USER, TokenGroups, TokenUser,
+};
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_MULTI_SZ,
     RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
@@ -201,6 +204,43 @@ fn present(code: WIN32_ERROR) -> Result<bool, RecordError> {
 /// user of its impersonation token when it has one (set-up acting as the owner, S15 `PR4g`), so
 /// the sandbox folder and its files are made for that user; else the process's user.
 pub(crate) fn current_user_sid() -> io::Result<Sid> {
+    let token = current_token()?;
+    let text = user_of(token);
+    // SAFETY: the handle came from `current_token` and is closed once, here. A failed close
+    // leaves nothing to do.
+    drop(unsafe { CloseHandle(token) });
+    Sid::parse(&text?).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+/// The groups of the token [`current_user_sid`] reads that count in an access check, enabled
+/// or deny-only (`TokenGroups`), each SID as bytes: what a deny can name to refuse this user.
+pub(crate) fn current_token_groups() -> io::Result<Vec<Vec<u8>>> {
+    /// `SE_GROUP_ENABLED` and `SE_GROUP_USE_FOR_DENY_ONLY`.
+    const COUNTED: u32 = 0x4 | 0x10;
+    let token = current_token()?;
+    let read = token_info(token, TokenGroups, size_of::<TOKEN_GROUPS>());
+    // SAFETY: the handle came from `current_token` and is closed once, here.
+    drop(unsafe { CloseHandle(token) });
+    let buffer = read?;
+    // SAFETY: GetTokenInformation wrote a TOKEN_GROUPS at the start of `buffer`, aligned for
+    // it, whose `GroupCount` entries and their SIDs lie in `buffer`, which outlives them.
+    let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
+    let count = usize::try_from(groups.GroupCount).map_err(io::Error::other)?;
+    // SAFETY: as above, `Groups` holds `GroupCount` entries.
+    let entries = unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), count) };
+    let counted = entries.iter().filter(|g| g.Attributes & COUNTED != 0);
+    counted
+        .map(|g| {
+            // SAFETY: each entry's SID is valid and lies in `buffer`, `GetLengthSid` bytes long.
+            let len = usize::try_from(unsafe { GetLengthSid(g.Sid) }).map_err(io::Error::other)?;
+            // SAFETY: as above.
+            Ok(unsafe { std::slice::from_raw_parts(g.Sid.0.cast::<u8>(), len) }.to_vec())
+        })
+        .collect()
+}
+
+/// This thread's impersonation token when it has one, else the process's; the caller closes it.
+fn current_token() -> io::Result<HANDLE> {
     let mut token = HANDLE::default();
     // SAFETY: GetCurrentThread returns a pseudo-handle that needs no close; `token` is a live
     // out-pointer for the call. Opened as self: the process's identity checks the open.
@@ -213,38 +253,40 @@ pub(crate) fn current_user_sid() -> io::Result<Sid> {
         }
         Err(error) => return Err(error.into()),
     }
-    let text = user_of(token);
-    // SAFETY: the handle came from OpenThreadToken or OpenProcessToken and is closed once, here.
-    // A failed close leaves nothing to do.
-    drop(unsafe { CloseHandle(token) });
-    Sid::parse(&text?).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    Ok(token)
 }
 
-/// The SID string of `token`'s user.
-pub(crate) fn user_of(token: HANDLE) -> io::Result<String> {
+/// `class` of `token`, in a buffer of at least `least` bytes aligned for pointers.
+fn token_info(token: HANDLE, class: TOKEN_INFORMATION_CLASS, least: usize) -> io::Result<Vec<u64>> {
     let mut needed = 0u32;
     // SAFETY: no buffer and a zero length ask only for the size, written to `needed`.
-    match unsafe { GetTokenInformation(token, TokenUser, None, 0, &raw mut needed) } {
+    match unsafe { GetTokenInformation(token, class, None, 0, &raw mut needed) } {
         Err(error) if error.code() == HRESULT::from_win32(ERROR_INSUFFICIENT_BUFFER.0) => {}
         Err(error) => return Err(error.into()),
         Ok(()) => return Err(io::Error::other("the token gave no size")),
     }
     let bytes = usize::try_from(needed)
         .map_err(io::Error::other)?
-        .max(size_of::<TOKEN_USER>());
-    // u64 words: TOKEN_USER holds a pointer, so the buffer is aligned for it.
+        .max(least);
     let mut buffer = vec![0u64; bytes.div_ceil(size_of::<u64>())];
     let len = u32::try_from(size_of_val(buffer.as_slice())).map_err(io::Error::other)?;
     // SAFETY: `buffer` is live, writable and `len` bytes long for the call.
     unsafe {
         GetTokenInformation(
             token,
-            TokenUser,
+            class,
             Some(buffer.as_mut_ptr().cast()),
             len,
             &raw mut needed,
         )
     }?;
+    Ok(buffer)
+}
+
+/// The SID string of `token`'s user.
+pub(crate) fn user_of(token: HANDLE) -> io::Result<String> {
+    // u64 words: TOKEN_USER holds a pointer, so the buffer is aligned for it.
+    let buffer = token_info(token, TokenUser, size_of::<TOKEN_USER>())?;
     // SAFETY: GetTokenInformation wrote a TOKEN_USER at the start of `buffer`, which is at least
     // that long and aligned for it; its SID points into `buffer`, which outlives `user`.
     let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };

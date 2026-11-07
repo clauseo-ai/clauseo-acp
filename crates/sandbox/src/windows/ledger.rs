@@ -78,7 +78,7 @@ pub(crate) use held::Shares;
 pub(crate) use label::is_our_label;
 pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
 pub use owed::HandbackOwed;
-pub use reclaims::{ReclaimOwed, Stuck};
+pub use reclaims::{ReclaimOwed, Stuck, clear_taken, owe_taken};
 pub use recorded::RecordedFile;
 
 /// The ledger's file name in `<data_dir>\sandbox`.
