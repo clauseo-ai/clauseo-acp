@@ -1,11 +1,11 @@
 //! The end sweeper's order through fakes: shut, sweep, widen, the classes, then COM; no widening
-//! and no COM after a sweep that failed or a widening that did; a BITS job left for the system
-//! stop.
+//! and no COM after a sweep that failed or a widening that did; no BITS call, and no
+//! `RunExit::PoolStop` exit.
 
 use std::io;
 
 use super::*;
-use crate::windows::runner::leftovers::{Leftovers, NOT_LOGGED_ON, Removal, remove_all};
+use crate::windows::runner::leftovers::{Leftovers, remove_all};
 
 /// Each step and each removal call, in order.
 #[derive(Default)]
@@ -14,19 +14,16 @@ struct Fake {
     shut_fails: bool,
     sweep: Option<SweepError>,
     widen_fails: bool,
-    /// The OS error the BITS job's delete fails with.
-    bits_error: Option<i32>,
 }
 
 /// The removal's calls, recorded in the same list: one item of each kind, but no class key once
 /// it was deleted.
-struct Calls<'a>(&'a mut Vec<String>, Option<i32>);
+struct Calls<'a>(&'a mut Vec<String>);
 
 fn key(kind: Kind) -> &'static str {
     match kind {
         Kind::Classes => "classes",
         Kind::Tasks => "tasks",
-        Kind::Bits => "bits",
         Kind::RunKeys => "run",
         Kind::Startup => "startup",
     }
@@ -43,10 +40,7 @@ impl Leftovers for Calls<'_> {
     }
     fn delete(&mut self, kind: Kind, _: &Kind) -> io::Result<()> {
         self.0.push(format!("delete {}", key(kind)));
-        match self.1 {
-            Some(code) if kind == Kind::Bits => Err(io::Error::from_raw_os_error(code)),
-            _ => Ok(()),
-        }
+        Ok(())
     }
 }
 
@@ -69,8 +63,8 @@ impl SweeperActs for Fake {
         }
         Ok(())
     }
-    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> Removal {
-        let mut calls = Calls(&mut self.events, self.bits_error);
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool {
+        let mut calls = Calls(&mut self.events);
         remove_all(&mut calls, kinds, "end sweeper", log)
     }
 }
@@ -100,13 +94,11 @@ fn the_token_is_widened_only_after_the_sweep_and_before_the_classes_and_com() {
     let mut fake = Fake::default();
     let (code, _) = go(&mut fake);
     assert_eq!(code, 0);
-    // The classes are looked at again right before BITS, whose creation looks its class up.
-    let mut want = events(
+    // The tasks are the last kind: no BITS step follows.
+    let want = events(
         &["shut", "sweep", "widen"],
         &["classes", "run", "startup", "tasks"],
     );
-    want.push("list classes".to_owned());
-    want.extend(removal(&["bits"]));
     assert_eq!(fake.events, want);
 }
 
@@ -175,32 +167,10 @@ fn a_shut_that_failed_stops_the_sweeper_first() {
 }
 
 #[test]
-fn a_bits_job_left_for_want_of_a_logon_exits_pool_stop_and_other_errors_fail() {
-    let mut fake = Fake {
-        bits_error: Some(NOT_LOGGED_ON),
-        ..Fake::default()
-    };
-    let (code, lines) = go(&mut fake);
-    assert_eq!(code, RunExit::PoolStop.code());
-    assert_eq!(code, 0xE0C1_5010);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("1 BITS jobs left for the system stop (1245)")),
-        "{lines:?}"
-    );
-    for other in [5, 1058] {
-        let mut fake = Fake {
-            bits_error: Some(other),
-            ..Fake::default()
-        };
-        assert_eq!(go(&mut fake).0, RunExit::Sweep.code(), "{other}");
-    }
-    // A widening that failed lists no BITS job: its code is `Sweep`, never `PoolStop`.
-    let mut fake = Fake {
-        bits_error: Some(NOT_LOGGED_ON),
-        widen_fails: true,
-        ..Fake::default()
-    };
-    assert_eq!(go(&mut fake).0, RunExit::Sweep.code());
+fn a_clean_run_exits_0_never_pool_stop() {
+    // `RunExit::PoolStop` is reserved: no sweeper exit gives it any more.
+    let (code, lines) = go(&mut Fake::default());
+    assert_eq!(code, 0);
+    assert_ne!(code, RunExit::PoolStop.code());
+    assert!(lines.iter().all(|l| !l.contains("BITS")), "{lines:?}");
 }

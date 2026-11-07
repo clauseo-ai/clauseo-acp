@@ -72,7 +72,7 @@ impl Inner for Record {
     }
     fn clean(&mut self) {
         self.done.push("clean".to_owned());
-        self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs");
+        self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values");
     }
     fn log(&mut self, line: &str) {
         self.lines.push((line.to_owned(), self.open));

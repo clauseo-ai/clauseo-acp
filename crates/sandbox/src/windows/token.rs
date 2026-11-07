@@ -227,7 +227,7 @@ pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 pub const SWEEPER_THREAD_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 
 /// The end sweeper's default DACL once shut: [`SWEEPER_THREAD_SDDL`]'s entries, so a thread the
-/// system starts in it later (COM's and RPC's, for the scheduled tasks and BITS jobs) is shut
+/// system starts in it later (COM's and RPC's, for the scheduled tasks) is shut
 /// too, and the pool user, its owner, keeps no implied `WRITE_DAC`.
 pub const SWEEPER_DEFAULT_DACL: &str = "D:(A;;GA;;;SY)(A;;RC;;;OW)";
 
@@ -237,10 +237,10 @@ pub const SWEEPER_DEFAULT_DACL: &str = "D:(A;;GA;;;SY)(A;;RC;;;OW)";
 /// (`GetTokenInformation`: `TOKEN_QUERY`; `DuplicateTokenEx`: `TOKEN_DUPLICATE`;
 /// `ImpersonateLoggedOnUser`: `TOKEN_QUERY` with `TOKEN_DUPLICATE` on a primary token,
 /// `TOKEN_IMPERSONATE` on an impersonation one), which COM and RPC make on the caller's own token
-/// to give a call its identity. With the token shut to `SYSTEM`, Task Scheduler and BITS both
-/// failed with `E_OUTOFMEMORY` (14), as the inner's did when it still made COM calls after its
-/// own token's shut, before its threads' and default DACL's. No `TOKEN_ADJUST_*`,
-/// `TOKEN_ASSIGN_PRIMARY`, `WRITE_DAC` or `WRITE_OWNER`.
+/// to give a call its identity. With the token shut to `SYSTEM`, Task Scheduler and BITS (which
+/// the sweeper no longer calls) both failed with `E_OUTOFMEMORY` (14), as the inner's did when
+/// it still made COM calls after its own token's shut, before its threads' and default DACL's.
+/// No `TOKEN_ADJUST_*`, `TOKEN_ASSIGN_PRIMARY`, `WRITE_DAC` or `WRITE_OWNER`.
 pub const SWEEPER_COM_TOKEN_RIGHTS: u32 = 0x0000_000e;
 
 /// The end sweeper's primary token's DACL for the COM step: [`RUNNER_TOKEN_FIRST_SDDL`]'s

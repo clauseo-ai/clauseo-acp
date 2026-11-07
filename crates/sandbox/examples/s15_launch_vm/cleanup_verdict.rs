@@ -4,12 +4,11 @@
 //! `marker bits <present|absent>`: whether the job's notify command ran. No Win32 call here, so
 //! the rule has a unit test.
 //!
-//! The BITS job may be left: BITS holds no logon token for a pool user, who logs on only through
-//! `CreateProcessWithLogonW`, so the end sweeper's `Cancel` fails with 1245 and the job is left
-//! for the `SYSTEM` stop task (0049). Until that task lands (PR #668) the job passes when it is
-//! absent, or present but inert: still there after a second session of the same pool user, its
-//! notify command never run (no marker) and its state never `TRANSFERRED` or `ACKNOWLEDGED`.
-//! After #668 the row will also require the job to be gone once the system stop has run.
+//! The end sweeper makes no BITS call (0049): only the `SYSTEM` stop task (PR #668) cancels a
+//! pool user's BITS job, so nothing expects the session's end to remove it. Whether the job is
+//! still there is recorded as information. A job BITS accepted passes when it is absent, or
+//! present but inert: still there after a second session of the same pool user, its notify
+//! command never run (no marker) and its state never `TRANSFERRED` or `ACKNOWLEDGED`.
 //!
 //! BITS may refuse the job outright: `AddFile` (or `Resume`) fails with `ERROR_NOT_LOGGED_ON`
 //! (0x800704dd), as it did on the test VMs. That refusal proves the job can't run: no job of the
@@ -145,24 +144,25 @@ pub(crate) fn end_cleanup(
             Ok(state) => states.push(state),
         }
     }
+    // Information alone: the sweeper doesn't touch BITS, so the job's presence decides nothing.
+    let there = match states.first() {
+        Some(None) => Some("the BITS job isn't there after the session".to_owned()),
+        Some(Some(state)) => Some(format!(
+            "the BITS job is still there after the session (state {state}): the sweeper makes no \
+             BITS call, and only the system stop cancels it"
+        )),
+        None => None,
+    };
     let inert = match states.as_slice() {
-        _ if !bits_planted => None,
-        [None, ..] => {
-            gone.push("bits".to_owned());
-            None
-        }
-        [Some(_)] if again.is_none() => {
+        [Some(_)] if bits_planted && again.is_none() => {
             unchecked.push("bits (present, not checked after a second session)".to_owned());
             None
         }
-        [Some(first), Some(second)] => Some(format!(
+        [Some(first), Some(second)] if bits_planted => Some(format!(
             "the BITS job is left but inert (state {first}, then {second} after a second session; \
              its notify command never ran), for the system stop"
         )),
-        [Some(_), None] => {
-            gone.push("bits (after a second session)".to_owned());
-            None
-        }
+        // Not planted, absent, or gone by the second check.
         _ => None,
     };
     if !unplanted.is_empty() || !unchecked.is_empty() {
@@ -174,8 +174,8 @@ pub(crate) fn end_cleanup(
         "{} gone {waited_ms} ms after the session ended",
         gone.join(", ")
     );
-    if let Some(inert) = inert {
-        note = format!("{note}; {inert}");
+    for info in [inert, there].into_iter().flatten() {
+        note = format!("{note}; {info}");
     }
     match item(planted, "bits") {
         Some("planted") => Verdict::Pass(note),
@@ -241,9 +241,16 @@ mod tests {
 
     #[test]
     fn end_cleanup_passes_when_every_planted_item_is_gone() {
-        let verdict = judged(&PLANTED, &GONE, None);
-        assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");
+        let Verdict::Pass(note) = judged(&PLANTED, &GONE, None) else {
+            panic!("not a PASS");
+        };
         assert!(!bits_left(&lines(&GONE)));
+        // The job's absence is information, never counted as the sweeper's removal.
+        assert!(note.contains("the BITS job isn't there"), "{note}");
+        assert!(
+            !note.contains("bits gone") && !note.contains(", bits"),
+            "{note}"
+        );
     }
 
     #[test]
@@ -317,6 +324,13 @@ mod tests {
                     note.starts_with("BITS refuses the pool user (0x800704dd)"),
                     "{note}"
                 );
+                // Whether the job is still there is recorded, and decides nothing.
+                let there = if after == GONE {
+                    "isn't there"
+                } else {
+                    "still there after the session (state SUSPENDED)"
+                };
+                assert!(note.contains(there), "{note}");
             }
         }
     }

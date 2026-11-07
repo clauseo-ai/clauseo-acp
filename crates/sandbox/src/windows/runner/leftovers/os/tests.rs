@@ -1,17 +1,13 @@
 //! The per-user class removal on a real machine (N3): an in-process server planted for the Task
 //! Scheduler's class, in both registry views, is gone before COM starts. The keys are planted
-//! under a scratch root of this user's own `HKEY_CURRENT_USER`, never its real classes. And the
-//! BITS calls let BITS impersonate this user, on the manager and on each job listed, before
-//! `EnumJobs` and `Cancel`: one job of this user's, made here, is found and cancelled.
-#![expect(unsafe_code, reason = "FFI to the registry, COM and BITS in tests")]
+//! under a scratch root of this user's own `HKEY_CURRENT_USER`, never its real classes.
+#![expect(unsafe_code, reason = "FFI to the registry in tests")]
 
-use windows::Win32::Networking::BackgroundIntelligentTransferService::BG_JOB_TYPE_DOWNLOAD;
-use windows::Win32::System::Com::{CoQueryProxyBlanket, RPC_C_IMP_LEVEL_IMPERSONATE};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
     RegCreateKeyExW, RegSetValueExW,
 };
-use windows::core::{GUID, IUnknown, Interface, PCWSTR};
+use windows::core::PCWSTR;
 
 use super::super::{Kind, remove_all};
 use super::*;
@@ -81,8 +77,7 @@ fn a_planted_task_scheduler_server_is_removed_before_com() {
     let mut lines = Vec::new();
     let clean = remove_all(&mut calls, &[Kind::Classes], "test", &mut |line| {
         lines.push(line.to_owned());
-    })
-    .clean;
+    });
     let left: Vec<&String> = planted.iter().filter(|path| exists(path)).collect();
     let com_started = calls.com.is_some();
     drop(calls);
@@ -96,72 +91,4 @@ fn a_planted_task_scheduler_server_is_removed_before_com() {
     );
     assert!(!com_started, "the classes alone never start COM");
     assert!(!exists(&format!("{classes}\\CLSID")));
-}
-
-/// The impersonation level set on `proxy`.
-fn impersonation<T: Interface>(proxy: &T) -> u32 {
-    let raw = proxy.as_raw();
-    // SAFETY: `raw` is `proxy`'s live pointer, borrowed for the call.
-    let unknown = unsafe { IUnknown::from_raw_borrowed(&raw) }.unwrap();
-    let mut level = 0u32;
-    // SAFETY: a live proxy; `level` is a live out-pointer, the rest aren't asked for.
-    unsafe {
-        CoQueryProxyBlanket(
-            unknown,
-            None,
-            None,
-            None,
-            None,
-            Some(&raw mut level),
-            None,
-            None,
-        )
-    }
-    .unwrap();
-    level
-}
-
-/// A job made by the test, cancelled on drop whatever the result.
-struct Made(IBackgroundCopyJob);
-
-impl Drop for Made {
-    fn drop(&mut self) {
-        // SAFETY: a live job; one cancelled already just fails.
-        drop(unsafe { self.0.Cancel() });
-    }
-}
-
-#[test]
-fn the_bits_calls_let_bits_impersonate_before_enum_jobs_and_cancel() {
-    let _com = com::Com::new();
-    let manager = com::manager().unwrap();
-    assert_eq!(impersonation(&manager), RPC_C_IMP_LEVEL_IMPERSONATE.0);
-    let mut id = GUID::zeroed();
-    let mut made = None;
-    // SAFETY: a live manager; `id` and `made` are live out-pointers.
-    unsafe {
-        manager.CreateJob(
-            windows::core::w!("ClauseoTest blanket"),
-            BG_JOB_TYPE_DOWNLOAD,
-            &raw mut id,
-            &raw mut made,
-        )
-    }
-    .unwrap();
-    let _made = Made(made.unwrap());
-    let items = com::bits_jobs().unwrap();
-    let job = items
-        .iter()
-        .find_map(|item| match item {
-            // SAFETY: a live job.
-            Item::Bits(job) if unsafe { job.GetId() }.ok() == Some(id) => Some(job),
-            Item::Bits(_)
-            | Item::Class(_)
-            | Item::Task { .. }
-            | Item::Value { .. }
-            | Item::Entry { .. } => None,
-        })
-        .expect("the job made is listed");
-    assert_eq!(impersonation(job), RPC_C_IMP_LEVEL_IMPERSONATE.0);
-    com::cancel_job(job).unwrap();
 }
