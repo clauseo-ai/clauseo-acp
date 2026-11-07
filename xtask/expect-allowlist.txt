@@ -464,6 +464,7 @@ crates/sandbox/examples/s15_wfp_vm/launch.rs - unsafe_code
 # Its probe's derived-token children and ICMP echo, and the accept loop's pause.
 crates/sandbox/examples/s15_wfp_vm/derived.rs - unsafe_code
 crates/sandbox/examples/s15_wfp_vm/derived.rs pause_tenth clippy::disallowed_methods
+crates/sandbox/examples/s15_wfp_vm/ports_rows.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods

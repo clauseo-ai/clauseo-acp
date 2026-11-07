@@ -32,6 +32,7 @@ mod target;
 mod token;
 pub mod upstream;
 
+use crate::ports::ListenerFor;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
@@ -73,10 +74,16 @@ pub struct ProxyConfig {
     /// the browser (tier B, decision D10) must not open one: another matter's agent could send
     /// traffic through it under this launch's list.
     pub browser: bool,
+    /// Who the agent listener is for: [`ListenerFor::TierB`] for a tier-B launch, whose agent
+    /// reaches only `ports::TIER_B_PORTS` on Windows; [`ListenerFor::Other`] (from
+    /// [`ProxyConfig::new`]) for any other. The browser listener, which takes no token, is
+    /// always bound as `Other`, outside the range every pool user reaches (S15 PR7).
+    pub listener: ListenerFor,
 }
 
 impl ProxyConfig {
-    /// A config with no record callback and no browser listener.
+    /// A config with no record callback, no browser listener, and its agent listener outside
+    /// tier B's range ([`ListenerFor::Other`]).
     pub fn new(
         allow: Allowlist,
         silent: Allowlist,
@@ -90,6 +97,7 @@ impl ProxyConfig {
             denials,
             record: None,
             browser: false,
+            listener: ListenerFor::Other,
         }
     }
 }
@@ -102,6 +110,7 @@ impl fmt::Debug for ProxyConfig {
             .field("upstream", &self.upstream)
             .field("record", &self.record.is_some())
             .field("browser", &self.browser)
+            .field("listener", &self.listener)
             .finish_non_exhaustive()
     }
 }
@@ -249,14 +258,15 @@ pub(crate) fn start_with(
         None => Lookup::new(config.upstream)?,
     });
     let token = Token::generate()?;
-    let bind = || -> Result<(Async<std::net::TcpListener>, u16), Error> {
-        let listener = crate::ports::bind_loopback().map_err(Error::ProxyStart)?;
+    let bind = |whom: ListenerFor| -> Result<(Async<std::net::TcpListener>, u16), Error> {
+        let listener = crate::ports::bind_loopback(whom).map_err(Error::ProxyStart)?;
         let port = listener.local_addr().map_err(Error::ProxyStart)?.port();
         Ok((Async::new(listener).map_err(Error::ProxyStart)?, port))
     };
-    let (agent, port) = bind()?;
+    let (agent, port) = bind(config.listener)?;
     let (browser, browser_port) = if config.browser {
-        let (listener, port) = bind()?;
+        // No token on this one, so never where a pool user's static permit reaches.
+        let (listener, port) = bind(ListenerFor::Other)?;
         (Some(listener), Some(port))
     } else {
         (None, None)
