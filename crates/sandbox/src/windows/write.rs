@@ -44,12 +44,36 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Makes the agent's profile folder `path` and its parents as this process's user: the inner
-/// runner, as the pool user, makes `<state>\AppData\Roaming` and the rest its environment names
-/// (S15 `PR5`), so they are made with the pool user's own rights and nothing else's.
+/// Makes the agent's profile folder `path`, below the folder `base` (which must exist), as this
+/// process's user: the inner runner, as the pool user, makes `<state>\AppData\Roaming` and the
+/// rest its environment names (S15 `PR5`). Each part below `base` is made if missing and
+/// refused if it is a reparse point (a junction an earlier session's agent left), so nothing is
+/// made through a link.
 #[cfg(windows)]
-pub(crate) fn make_agent_folder(path: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(path)
+pub(crate) fn make_agent_folder(base: &Path, path: &Path) -> io::Result<()> {
+    use std::os::windows::fs::MetadataExt as _;
+    /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+    const REPARSE: u32 = 0x400;
+    let below = path
+        .strip_prefix(base)
+        .map_err(|_outside| io::Error::new(io::ErrorKind::InvalidInput, "not below its base"))?;
+    let mut at = base.to_path_buf();
+    for part in below.components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(found) if found.file_attributes() & REPARSE != 0 => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a reparse point",
+                ));
+            }
+            Ok(found) if found.is_dir() => {}
+            Ok(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "not a folder")),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => std::fs::create_dir(&at)?,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 /// Renames `from` (not followed if a link) to `to`, refusing (`AlreadyExists`) when something

@@ -35,11 +35,18 @@ fn the_dacl_names_the_desktop_user_and_the_pool_user_only() {
     let sddl = pipe_sddl(&desktop, &pool);
     assert_eq!(
         sddl,
-        "D:P(A;;GA;;;S-1-5-21-1-2-3-1001)(A;;GA;;;S-1-5-21-1-2-3-1005)"
+        "D:P(A;;0x12019f;;;S-1-5-21-1-2-3-1001)(A;;0x12019f;;;S-1-5-21-1-2-3-1005)\
+         S:(ML;;NWNR;;;ME)"
     );
-    // Protected, and no broad group, logon SID, owner rights or label.
-    for absent in ["WD", "BU", "AU", "S-1-5-5-", "OW", "S:"] {
-        assert!(!sddl.contains(&format!(";{absent}")), "{absent} in {sddl}");
+    // Protected, read and write only, and no broad group, logon SID or owner rights.
+    for absent in [
+        ";GA;", ";WD)", ";BU)", ";AU)", "S-1-5-5-", ";OW)", "WDAC", "0x1f01ff",
+    ] {
+        assert!(!sddl.contains(absent), "{absent} in {sddl}");
     }
-    assert!(!sddl.contains("S:("), "{sddl}");
+    assert_eq!(
+        PIPE_RIGHTS,
+        0x0012_0089 | 0x0012_0116,
+        "FILE_GENERIC_READ | FILE_GENERIC_WRITE"
+    );
 }

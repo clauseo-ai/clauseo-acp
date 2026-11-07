@@ -3,6 +3,7 @@
 #![expect(unsafe_code, reason = "FFI to the profile folder and token calls")]
 
 use std::io::{self, Write as _};
+use std::os::windows::fs::MetadataExt as _;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
@@ -10,13 +11,17 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 use windows::Win32::System::Threading::OpenProcessToken;
 use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
 use windows::core::PWSTR;
 
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
-use super::spawn::{Process, assign_and_resume, kill_on_close_job, log_on};
+use super::spawn::{
+    Process, assign_and_resume, end_job, kill_on_close_job, log_on, restrict_dll_search,
+    system_folder,
+};
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::acl::object::{Handle, Object, os_error};
 use crate::windows::matters::SANDBOX_DIR;
@@ -47,6 +52,7 @@ impl Failure {
 /// The outer runner's whole run; its exit code. `exe` is this program's own path, which the
 /// inner runner runs as the pool user.
 pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
+    restrict_dll_search();
     match outer(launch_file, exe) {
         Ok(code) => code,
         Err(Failure(exit, what)) => {
@@ -86,12 +92,12 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let exe_text = exe
         .to_str()
         .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
-    let state = WinPath::parse(&message.state)
-        .map(|p| p.display())
-        .unwrap_or_default();
+    // The inner runner starts in System32, a folder its Low agent can't write (no DLL planted in
+    // its current folder), and gets the agent's folder over `ctl`.
+    let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
     // `log_on` takes the password and wipes it as it returns.
-    let inner = log_on(&message.pool_name, password, exe_text, set.base(), &state)
-        .map_err(logon_failure)?;
+    let inner =
+        log_on(&message.pool_name, password, exe_text, set.base(), &cwd).map_err(logon_failure)?;
     if let Err(error) = assign_and_resume(&job, &inner) {
         inner.kill(RunExit::Job.code());
         return Err(Failure::new(
@@ -108,8 +114,11 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         cwd: message.cwd.clone(),
         env,
         folders,
+        folder_base: WinPath::parse(&message.state)
+            .map(|state| state.display())
+            .unwrap_or_default(),
     };
-    let result = serve(&inner, &message, pipes, &launch);
+    let result = serve(&inner, &job, &message, pipes, &launch);
     // `job` drops when this returns: the inner runner and the agent's tree end with it.
     drop(job);
     result
@@ -119,6 +128,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
 /// runner exits, and gives its exit code.
 fn serve(
     inner: &Process,
+    job: &Handle,
     message: &LaunchMessage,
     pipes: Vec<ServerPipe>,
     launch: &InnerLaunch,
@@ -147,7 +157,7 @@ fn serve(
         Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    relay(inner, stdin, stdout, stderr)
+    relay(inner, job, stdin, stdout, stderr)
 }
 
 /// The failure the inner runner reported on `ctl`, if it did.
@@ -186,9 +196,12 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 
 /// Relays this process's stdin to the agent's and the agent's stdout and stderr to this
 /// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
-/// closes when this process's stdin ends, so the agent reads the end of its input.
+/// closes when this process's stdin ends, so the agent reads the end of its input. Once the
+/// inner runner exited, the output has [`DRAIN`] to finish; then the job is ended, which closes
+/// what a lingering descendant still holds, and the output gets [`DRAIN`] again.
 fn relay(
     inner: &Process,
+    job: &Handle,
     stdin: ServerPipe,
     stdout: ServerPipe,
     stderr: ServerPipe,
@@ -206,10 +219,12 @@ fn relay(
         let done = done.clone();
         thread::Builder::new()
             .spawn(move || {
+                // Unlocked handles: each write takes the lock alone, so nothing else waits on a
+                // copy blocked in a read.
                 if out {
-                    copy(&from, io::stdout().lock());
+                    copy(&from, io::stdout());
                 } else {
-                    copy(&from, io::stderr().lock());
+                    copy(&from, io::stderr());
                 }
                 let _sent = done.send(());
             })
@@ -220,13 +235,16 @@ fn relay(
         .wait(None)
         .ok()
         .flatten()
-        .unwrap_or(RunExit::Spawn.code());
-    for _ in 0..2 {
-        if drained.recv_timeout(DRAIN).is_err() {
-            break;
+        .map_or(RunExit::Spawn.code(), super::agent_code);
+    let mut left = 2;
+    for ended_job in [false, true] {
+        if ended_job {
+            end_job(job, code);
+        }
+        while left > 0 && drained.recv_timeout(DRAIN).is_ok() {
+            left -= 1;
         }
     }
-    // A copy may still be blocked on a pipe a descendant holds; leaving ends the job's processes.
     exit_now(code)
 }
 
@@ -237,8 +255,7 @@ fn relay(
     reason = "the copy threads may block on pipes; only an exit ends them"
 )]
 fn exit_now(code: u32) -> ! {
-    drop(io::stdout().flush());
-    // Windows takes the exit code as the u32 it is; `as` keeps its bits.
+    // Windows takes the exit code as the u32 it is; `from_ne_bytes` keeps its bits.
     std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()))
 }
 
@@ -329,6 +346,21 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
     let Some(link) = &message.credential_link else {
         return Ok(());
     };
+    // A link that is a reparse point (a symbolic link) would carry another file ID than what it
+    // points at; the credential link must be a hard link (R17), so refuse one.
+    match std::fs::symlink_metadata(link) {
+        Ok(found) if found.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 => {
+            return Err(refused(CodexReuse::LinkedLogin));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(Failure::new(
+                RunExit::CodexReuse,
+                os("credential link check", &error),
+            ));
+        }
+    }
     let auth = profile.join(".codex").join("auth.json").display();
     let id = |path: &str| match Object::open(Path::new(path)) {
         Ok(object) => object.file_id().map(Some),

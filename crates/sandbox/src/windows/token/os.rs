@@ -246,7 +246,7 @@ fn information(token: &Handle, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec
     match unsafe { GetTokenInformation(token.0, class, None, 0, &raw mut needed) } {
         Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => {}
         Err(error) => return Err(os_error(&error)),
-        Ok(()) => return Ok(Vec::new()),
+        Ok(()) => return Err(io::Error::other("the token gave no size")),
     }
     let bytes = usize::try_from(needed).map_err(io::Error::other)?;
     let mut buffer = vec![0u64; bytes.div_ceil(size_of::<u64>()).max(1)];

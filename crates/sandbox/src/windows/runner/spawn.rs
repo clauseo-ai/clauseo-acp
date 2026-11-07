@@ -17,12 +17,20 @@ use windows::Win32::System::Diagnostics::Debug::{
 };
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject,
+    JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
+    JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
+    JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
+    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, SetInformationJobObject,
+    TerminateJobObject,
+};
+use windows::Win32::System::LibraryLoader::{
+    LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories, SetDllDirectoryW,
 };
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, CreateDesktopW, DESKTOP_CONTROL_FLAGS, HDESK,
 };
+use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
@@ -135,8 +143,22 @@ pub(super) fn log_on(
     }
 }
 
-/// A job whose last handle closing ends every process in it, with no breakaway allowed: the
-/// inner runner, the agent and all it starts.
+/// The job's UI limits: `WinSta0`, not the desktop, owns the clipboard and the global atom
+/// table, so the private desktop alone doesn't keep the agent from the lawyer's clipboard or
+/// atoms (Chromium's sandbox sets the same limits). Not `DESKTOP`: the inner runner makes its
+/// private desktop after it joins the job.
+pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
+    JOB_OBJECT_UILIMIT_READCLIPBOARD.0
+        | JOB_OBJECT_UILIMIT_WRITECLIPBOARD.0
+        | JOB_OBJECT_UILIMIT_GLOBALATOMS.0
+        | JOB_OBJECT_UILIMIT_HANDLES.0
+        | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS.0
+        | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS.0
+        | JOB_OBJECT_UILIMIT_EXITWINDOWS.0,
+);
+
+/// A job whose last handle closing ends every process in it, with no breakaway allowed and
+/// [`UI_LIMITS`]: the inner runner, the agent and all it starts.
 pub(super) fn kill_on_close_job() -> io::Result<Handle> {
     // SAFETY: no attributes (an unnamed job no other process can open) and no name.
     let job = Handle(unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|e| os_error(&e))?);
@@ -152,7 +174,50 @@ pub(super) fn kill_on_close_job() -> io::Result<Handle> {
         )
     }
     .map_err(|e| os_error(&e))?;
+    let ui = JOBOBJECT_BASIC_UI_RESTRICTIONS {
+        UIRestrictionsClass: UI_LIMITS,
+    };
+    // SAFETY: the job is live; `ui` is the structure the class names, for its size.
+    unsafe {
+        SetInformationJobObject(
+            job.0,
+            JobObjectBasicUIRestrictions,
+            (&raw const ui).cast::<c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_BASIC_UI_RESTRICTIONS>()).unwrap_or(0),
+        )
+    }
+    .map_err(|e| os_error(&e))?;
     Ok(job)
+}
+
+/// Ends every process in `job` now, with `code`; their pipe ends close with them.
+pub(super) fn end_job(job: &Handle, code: u32) {
+    // SAFETY: the job is live; a failure (nothing left in it) leaves nothing to do.
+    drop(unsafe { TerminateJobObject(job.0, code) });
+}
+
+/// Keeps this process's later DLL loads to System32 and takes the current folder out of the
+/// search: the inner runner (Medium, the pool user) must never load a DLL its Low agent could
+/// plant. Called first in both runners.
+pub(super) fn restrict_dll_search() {
+    // SAFETY: flag- and string-only calls; a failure leaves the default search, and the inner
+    // runner's current folder is System32 anyway.
+    unsafe {
+        drop(SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32));
+        drop(SetDllDirectoryW(&HSTRING::new()));
+    }
+}
+
+/// System32, the inner runner's current folder: one the agent can't write.
+pub(super) fn system_folder() -> io::Result<String> {
+    let mut buffer = [0u16; 260];
+    // SAFETY: `buffer` is writable for its length.
+    let len = unsafe { GetSystemDirectoryW(Some(&mut buffer)) };
+    let len = usize::try_from(len).map_err(io::Error::other)?;
+    if len == 0 || len >= buffer.len() {
+        return Err(io::Error::last_os_error());
+    }
+    String::from_utf16(buffer.get(..len).unwrap_or_default()).map_err(io::Error::other)
 }
 
 /// Puts the suspended `process` in `job`, then lets it run.
@@ -235,8 +300,9 @@ pub(super) struct Agent<'a> {
 /// three pipe handles inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), no window, and its own
 /// environment block.
 pub(super) fn start_agent(agent: &Agent<'_>) -> io::Result<Process> {
-    let mut list = AttributeList::new(1)?;
+    // Declared before the list, so it outlives the list's use and its deletion.
     let handles = agent.stdio;
+    let mut list = AttributeList::new(1)?;
     // SAFETY: the list was initialised for one attribute; `handles` outlives the list's use in
     // CreateProcessAsUserW below.
     unsafe {
@@ -317,15 +383,13 @@ impl AttributeList {
         // SAFETY: no list asks only for the size; that call always fails with
         // ERROR_INSUFFICIENT_BUFFER, which is the expected answer.
         drop(unsafe { InitializeProcThreadAttributeList(None, count, None, &raw mut size) });
-        let mut list = AttributeList {
-            buffer: vec![0u64; size.div_ceil(size_of::<u64>()).max(1)],
-        };
-        // SAFETY: the buffer is at least `size` bytes and aligned for the list.
-        unsafe {
-            InitializeProcThreadAttributeList(Some(list.as_list()), count, None, &raw mut size)
-        }
-        .map_err(|e| os_error(&e))?;
-        Ok(list)
+        let mut buffer = vec![0u64; size.div_ceil(size_of::<u64>()).max(1)];
+        let raw = LPPROC_THREAD_ATTRIBUTE_LIST(buffer.as_mut_ptr().cast());
+        // SAFETY: the buffer is at least `size` bytes and aligned for the list. Only once this
+        // succeeds is the buffer an `AttributeList`, whose drop deletes it.
+        unsafe { InitializeProcThreadAttributeList(Some(raw), count, None, &raw mut size) }
+            .map_err(|e| os_error(&e))?;
+        Ok(AttributeList { buffer })
     }
 
     fn as_list(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {

@@ -1,6 +1,7 @@
 //! The runner pipes on a real machine: the DACL each gets, one instance, the client's pid, data
 //! both ways and the end of the stream; elevated, that another pool user's Low token is refused
-//! every pipe and the named pool user gets past the DACL.
+//! every pipe, the named pool user's Medium token gets past the DACL, and its Low token is
+//! refused by the label.
 #![expect(
     unsafe_code,
     reason = "FFI to the pipes' security and an event in tests"
@@ -16,8 +17,8 @@ use std::time::Duration;
 use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, PSECURITY_DESCRIPTOR,
-    SE_DACL_PROTECTED,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, LABEL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
 };
 use windows::Win32::System::Threading::CreateEventW;
 
@@ -31,8 +32,12 @@ use crate::windows::test_pool::{
     Impersonating, Owned, TestUser, acl_entries, log_on, low_restricted_token,
 };
 
-/// `FILE_ALL_ACCESS`: what the pipe's `GA` entries hold once NPFS maps them.
-const FA: u32 = 0x001F_01FF;
+/// `FILE_GENERIC_READ | FILE_GENERIC_WRITE`: each entry's rights (`pipe::PIPE_RIGHTS`).
+const READ_WRITE: u32 = 0x0012_019F;
+/// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`.
+const LABEL: u8 = 0x11;
+/// `SYSTEM_MANDATORY_LABEL_NO_WRITE_UP | SYSTEM_MANDATORY_LABEL_NO_READ_UP`.
+const NO_WRITE_OR_READ_UP: u32 = 0x3;
 /// `ERROR_PIPE_BUSY`: the one instance is taken, so the open got past the DACL.
 const PIPE_BUSY: i32 = 231;
 
@@ -54,27 +59,32 @@ fn file(handle: Handle) -> File {
     unsafe { File::from_raw_handle(raw.0) }
 }
 
-/// The DACL of the pipe `handle` names, and whether it is protected.
-fn dacl_of(handle: &Handle) -> (Vec<(u8, u8, u32, Sid)>, bool) {
+/// An ACL's entries, as (type, flags, mask, SID).
+type Entries = Vec<(u8, u8, u32, Sid)>;
+
+/// What the pipe `handle` names holds: its DACL's entries, whether the DACL is protected, and
+/// its label's entries.
+fn security_of(handle: &Handle) -> (Entries, bool, Entries) {
     let mut dacl: *mut ACL = null_mut();
+    let mut sacl: *mut ACL = null_mut();
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
     // SAFETY: the handle is open with READ_CONTROL (GENERIC_READ); the out-pointers are live;
-    // `dacl` points into `descriptor`, freed below after both are read.
+    // `dacl` and `sacl` point into `descriptor`, freed below after they are read.
     let status = unsafe {
         GetSecurityInfo(
             handle.0,
             SE_KERNEL_OBJECT,
-            DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
             None,
             None,
             Some(&raw mut dacl),
-            None,
+            Some(&raw mut sacl),
             Some(&raw mut descriptor),
         )
     };
     assert_eq!(status, ERROR_SUCCESS);
-    // SAFETY: `dacl` is valid inside the live descriptor.
-    let entries = unsafe { acl_entries(dacl) };
+    // SAFETY: `dacl` and `sacl` are valid inside the live descriptor.
+    let (entries, label) = unsafe { (acl_entries(dacl), acl_entries(sacl)) };
     let mut control = 0u16;
     let mut revision = 0u32;
     // SAFETY: the descriptor is live; the out-pointers are live.
@@ -82,7 +92,7 @@ fn dacl_of(handle: &Handle) -> (Vec<(u8, u8, u32, Sid)>, bool) {
         .unwrap();
     // SAFETY: allocated by GetSecurityInfo with LocalAlloc, freed once.
     unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
-    (entries, control & SE_DACL_PROTECTED.0 != 0)
+    (entries, control & SE_DACL_PROTECTED.0 != 0, label)
 }
 
 /// Opens `role`'s client end in `set`: `Ok` when past the DACL (opened, or the one instance
@@ -124,9 +134,17 @@ fn a_pipe_has_its_dacl_one_instance_and_carries_data_both_ways() {
     let client = open_client(&set.name(Role::Ctl), Role::Ctl, false).unwrap();
     ctl.connect(watch.0, wait).unwrap();
     assert_eq!(ctl.client_pid().unwrap(), std::process::id());
-    let (entries, protected) = dacl_of(&client);
+    let (entries, protected, label) = security_of(&client);
     assert!(protected);
-    assert_eq!(entries, [(0, 0, FA, desktop), (0, 0, FA, own)]);
+    assert_eq!(
+        entries,
+        [(0, 0, READ_WRITE, desktop), (0, 0, READ_WRITE, own)]
+    );
+    assert_eq!(
+        label,
+        [(LABEL, 0, NO_WRITE_OR_READ_UP, sid("S-1-16-8192"))],
+        "Medium, no write up, no read up"
+    );
     let mut client = file(client);
     client.write_all(b"launch").unwrap();
     let mut got = [0u8; 6];
@@ -190,13 +208,19 @@ fn elevated_another_pool_users_low_token_is_refused_every_pipe() {
     };
     assert_eq!(passed, [Ok(()); 4]);
 
-    // Its Low token: the read end opens; a write end doesn't, the unlabelled pipe being Medium
-    // with no-write-up (pipe.rs).
+    // Its own Low token: refused every pipe, the read end too, by the Medium label's
+    // no-write-up and no-read-up.
     let (set, _pipes) = make_all(&pipe_sddl(&own, &user.sid));
-    let (read_end, write_end) = {
+    let low_refused: Vec<Result<(), i32>> = {
         let _as_pool = Impersonating::start(&low);
-        (past_dacl(&set, Role::In), past_dacl(&set, Role::Out))
+        Role::ALL
+            .iter()
+            .map(|role| past_dacl(&set, *role))
+            .collect()
     };
-    assert_eq!(read_end, Ok(()));
-    assert_eq!(write_end, Err(5));
+    assert_eq!(
+        low_refused,
+        [Err(5); 4],
+        "must refuse: a Low token opens no pipe by name"
+    );
 }
