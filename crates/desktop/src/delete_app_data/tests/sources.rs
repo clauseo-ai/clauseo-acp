@@ -1,4 +1,5 @@
-//! What the sources must keep: the uninstall hook closes the app, runs S15's removal, then runs
+//! What the sources must keep: the uninstall hook closes the app, runs S15's removal (with the
+//! setup exe's own arguments and exit 0, waiting at most two minutes), then runs
 //! `--delete-app-data` with the box cleared before the template's `RmDir /r`, with the exit codes,
 //! folder names and words it names; and nothing a window can reach (commands, the bridge,
 //! capabilities, permissions) names the deletion.
@@ -47,7 +48,7 @@ fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_dele
     let code = hook_code();
     let body = preuninstall(&code);
     let app_check = line_with(body, &["!insertmacro CheckIfAppIsRunning"]);
-    let remove = line_with(body, &["clauseo-sandbox-setup.exe", "--remove"]);
+    let remove = line_with(body, &["clauseo-sandbox-setup.exe", "${CLAUSEO_REMOVE}"]);
     let cleared = line_with(body, &["StrCpy $DeleteAppDataCheckboxState 0"]);
     let exe = "\"$INSTDIR\\${MAINBINARYNAME}.exe\"";
     let runs = line_with(body, &["ExecWait", &format!("{exe} {FLAG}' $R7")]);
@@ -104,6 +105,102 @@ fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_dele
         let lower = line.to_lowercase();
         assert!(!lower.contains("rmdir"), "{line}");
         assert!(!lower.contains("rd /s"), "{line}");
+    }
+}
+
+#[test]
+fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_minutes() {
+    use clauseo_sandbox::windows::setup::args::{Mode, PER_MACHINE, parse};
+    use clauseo_sandbox::windows::setup::{REMOVE_LOCK_WAIT_MS, SetupExit};
+
+    let code = hook_code();
+    let body = preuninstall(&code);
+    // A finished removal is exit 0 (`SetupExit::Removed`), and only that sets $R5.
+    let removed = SetupExit::Removed.as_code();
+    assert_eq!(removed, 0);
+    let exited = line_with(body, &[&format!("${{If}} $R8 = {removed}")]);
+    assert_eq!(body[exited + 1], "StrCpy $R5 1", "{body:?}");
+    // The arguments: exactly `--remove`, and `--per-machine` after it in the per-machine
+    // installer only, chosen when the installer is built (stage F), never at run time. The
+    // per-machine uninstaller is elevated already, so it opens the tool ("open"); the per-user
+    // one asks for elevation ("runas"). Only those two install modes build.
+    let mode = line_with(body, &["!if \"${INSTALLMODE}\" == \"perMachine\""]);
+    let per_machine = format!("!define CLAUSEO_REMOVE \"--remove {PER_MACHINE}\"");
+    let expected = [
+        per_machine.as_str(),
+        "!define CLAUSEO_REMOVE_VERB \"open\"",
+        "!else",
+        "!define CLAUSEO_REMOVE \"--remove\"",
+        "!define CLAUSEO_REMOVE_VERB \"runas\"",
+        "!endif",
+    ];
+    assert_eq!(body[mode + 1..mode + 7], expected, "{body:?}");
+    // Defined once, however often the macro is inserted.
+    assert_eq!(body[mode - 1], "!ifndef CLAUSEO_REMOVE", "{body:?}");
+    assert_eq!(body[mode + 7], "!endif", "{body:?}");
+    let ifndef = line_with(body, &["!ifndef INSTALLMODE"]);
+    assert!(body[ifndef + 1].starts_with("!error "), "{body:?}");
+    let other = line_with(body, &["!if \"${INSTALLMODE}\" != \"perMachine\""]);
+    assert_eq!(
+        body[other + 1],
+        "!if \"${INSTALLMODE}\" != \"currentUser\"",
+        "{body:?}"
+    );
+    assert!(body[other + 2].starts_with("!error "), "{body:?}");
+    let call = line_with(
+        body,
+        &[concat!(
+            "w \"${CLAUSEO_REMOVE_VERB}\", w \"$INSTDIR\\clauseo-sandbox-setup.exe\", ",
+            "w \"${CLAUSEO_REMOVE}\", p 0,"
+        )],
+    );
+    assert!(
+        ifndef < other && other < mode && mode < call && call < exited,
+        "{body:?}"
+    );
+    // The exe takes both forms as they are written, and nothing else from the hook.
+    let words = |line: &str| -> Vec<std::ffi::OsString> {
+        line.split(' ').map(std::ffi::OsString::from).collect()
+    };
+    let parsed = |line: &str| parse(words(line));
+    assert_eq!(parsed("--remove"), Ok(Mode::Remove { per_machine: false }));
+    assert_eq!(
+        parsed(&format!("--remove {PER_MACHINE}")),
+        Ok(Mode::Remove { per_machine: true })
+    );
+    // At most two minutes, then on as after a failure: $R8 starts at 1, and a timeout
+    // (WAIT_TIMEOUT, 258) skips the exit code. The exe's own lock wait fits inside it.
+    let wait = line_with(body, &["kernel32::WaitForSingleObject(p R7, i ", ") i .R3"]);
+    let bound: u32 = body[wait]
+        .split_once("(p R7, i ")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .and_then(|(ms, _)| ms.parse().ok())
+        .unwrap_or_else(|| panic!("no wait in {}", body[wait]));
+    assert_eq!(bound, 120_000, "{}", body[wait]);
+    assert_eq!(body[wait - 1], "StrCpy $R8 1", "{body:?}");
+    assert_eq!(body[wait + 1], "${If} $R3 = 258", "{body:?}");
+    // The timeout's line is English.nsh's, in the details list only.
+    assert_eq!(
+        body[wait + 2],
+        "DetailPrint \"$(removeStillRunning)\"",
+        "{body:?}"
+    );
+    let english = read("windows/nsis/English.nsh");
+    let still = "LangString removeStillRunning ${LANG_ENGLISH} \"Clauseo is still removing its \
+                 protection. It finishes on its own.\"";
+    assert!(english.lines().any(|line| line == still), "{still}");
+    let exit_code = line_with(body, &["kernel32::GetExitCodeProcess(p R7, *i .R8)"]);
+    let close = line_with(body, &["kernel32::CloseHandle(p R7)"]);
+    assert!(
+        wait < exit_code && exit_code < close && close < exited,
+        "{body:?}"
+    );
+    assert!(REMOVE_LOCK_WAIT_MS < bound);
+    // The mode is never read at run time, and the tool is never killed.
+    for line in &code {
+        assert!(!line.contains("MultiUser"), "{line}");
+        assert!(!line.to_lowercase().contains("terminateprocess"), "{line}");
+        assert!(!line.contains("WaitForSingleObject(p R7, i -1)"), "{line}");
     }
 }
 
