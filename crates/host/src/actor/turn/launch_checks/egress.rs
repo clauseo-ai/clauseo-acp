@@ -140,6 +140,9 @@ pub(crate) fn proxy_config(agent: &AgentId, denials: Arc<CountDenials>) -> Proxy
         upstream: Upstream::System,
         denials,
         record: None,
+        // Opened only for a session whose browser was found and claimed (`launch_checks::claim`),
+        // so it has the browser: its listener is the port the `browser` entry gets.
+        browser: true,
     }
 }
 
