@@ -1,8 +1,9 @@
 //! The unclean-session marker: `<data_dir>\sandbox\run\<id>.session`, where `<id>` is the launch
 //! file's 16 hex. The outer writes it as soon as it has read the launch, before anything runs as
-//! the pool user, and removes it only at a clean end: the inner exited (no failure, and no cancel
-//! whose agent outlived its grace), reported the agent's exit, the end sweeper exited 0, and no
-//! sweep found an escapee (`end::EndSweep::clean`). A crash, a cancel whose agent outlived its
+//! the pool user ([`marked`]: a marker that can't be written refuses the launch), and removes it
+//! only at a clean end: the inner exited (no failure, and no cancel whose agent outlived its
+//! grace), reported the agent's exit, the end sweeper exited 0, and no sweep found an escapee
+//! (`end::EndSweep::clean`). A crash, a cancel whose agent outlived its
 //! grace, a failure or an escapee leaves it, and
 //! [`unclean_sessions`] lists what was left, so Clauseo can make sure no process of that pool
 //! user lives on (0049; the `\Clauseo\SandboxStop` task, B's PR 3, is its caller).
@@ -91,6 +92,27 @@ pub fn write_marker(data_dir: &Path, id: &str, pool_user: &Sid) -> io::Result<Pa
     #[cfg(windows)]
     crate::windows::private_dir::own_file(&path)?;
     Ok(path)
+}
+
+/// The outer's order once it read the launch `launch_file`: writes the session's marker for
+/// `pool_user` in `data_dir`, then runs `session` (everything that runs as the pool user) with
+/// its path. A marker that can't be written, or a launch file whose name gives no id, refuses the
+/// launch: `session` never runs, and the error comes back. No session runs unmarked, so none can
+/// leave a process of the pool user that no marker names.
+pub(crate) fn marked<T>(
+    data_dir: &Path,
+    launch_file: &Path,
+    pool_user: &Sid,
+    session: impl FnOnce(PathBuf) -> T,
+) -> io::Result<T> {
+    let id = launch_id(launch_file).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the launch file's name gives no id",
+        )
+    })?;
+    let marker = write_marker(data_dir, id, pool_user)?;
+    Ok(session(marker))
 }
 
 /// Removes the marker at `path`, as the clean end does; one already gone is fine.
