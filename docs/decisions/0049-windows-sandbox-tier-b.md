@@ -44,7 +44,11 @@ build 26100):
     notes folders, the Claude store and the credential link, so the token writes nothing labelled
     higher;
   - a narrow default DACL: the pool user and `SYSTEM` with full access, and the desktop user with
-    `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE` only;
+    `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE` only. The pool user is
+    denied `WRITE_DAC` and `WRITE_OWNER` ahead of its full access, and `OWNER RIGHTS` is held to
+    `READ_CONTROL` (an owner's implied `WRITE_DAC` passes by deny entries; an `OWNER RIGHTS`
+    entry takes it away), so the agent's processes, and those it starts with no descriptor of
+    their own, can't rewrite their DACL to shut the sweep out (M1, below);
   - a private desktop per runner, labelled Low, and `SetErrorMode` in the runner.
 - **Grants** name the matter's pool user: `Modify` on the matter, state and notes folders and the
   credential link, `ReadAndExecute` on runtime and read paths, `CreateFiles` on the Claude store
@@ -980,7 +984,8 @@ leaves that profile, both naming the part.
   only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
   shut to it: the outer reads the inner's token user and gives its process and first thread a
   protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
-  `READ_CONTROL`, while the inner is still suspended (`CreateProcessWithLogonW` takes no
+  `READ_CONTROL` (the process's also grants the lawyer's logon SID wait, query and end, for the
+  sweeps below), while the inner is still suspended (`CreateProcessWithLogonW` takes no
   descriptor, so the pid exists with the logon's default DACL from its return until then, before
   any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
   after reading the launch it adds the lawyer's query and shuts every thread it has; once the
@@ -1010,14 +1015,25 @@ leaves that profile, both naming the part.
     Administrators group to enumerate processes that are running under a different user's
     context"). The outer runs unelevated, and under UAC even an admin lawyer's token has
     Administrators deny-only. So a sweep from the outer would see no pool-user process and pass:
-    it would fail open. CI's elevated runner hid this. The pool user lists every process with a
-    Toolhelp snapshot, which holds every session's, and reads each one's token user by opening it
-    with `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`. Its own processes
-    open for it, because their default DACL grants their user full access. A process it can't
-    open, or whose token it can't open, is another user's, the kernel's or a protected one, and is
-    passed over. Each process found is opened, which pins its pid, and checked against a second
-    list, so a pid reused meanwhile is left alone. Each kill is logged with its pid, image name
-    and sweep point, through `ctl` to the outer's stderr.
+    it would fail open. CI's elevated runner hid this. The pool user lists its processes twice and
+    takes a pid either list gives the pool user as the pool user's:
+    - a Toolhelp snapshot, which holds every session's, each one's token user read by opening it
+      with `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`. Its own
+      processes open for it, because their default DACL grants their user full access, but not
+      one that shut its DACL to its user;
+    - `WTSEnumerateProcessesW`, called as the pool user, whose service reads each token itself,
+      so a process whose DACL shuts its user out still comes with its user. Microsoft's rule
+      quoted above is about a different user's processes; the pool user asks for its own. An
+      entry with no SID (the kernel's and protected processes) is passed over. Only Windows can
+      show that the call gives a non-admin caller its own processes whatever their DACL.
+
+    A process neither list gives a user is another user's, the kernel's or a protected one, and
+    is passed over. Each process found is opened, which pins its pid, and checked against both
+    lists again, so a pid reused meanwhile is left alone. One whose DACL refuses the open is
+    opened with `WRITE_DAC`, which its owner (the pool user) holds unless an `OWNER RIGHTS`
+    entry takes it away, given a DACL that grants the pool user the sweep's rights, and opened
+    again. Each kill is logged with its pid, image name and sweep point, through `ctl` to the
+    outer's stderr.
   - **First act.** The inner's first act once resumed, before it reads the launch or makes
     anything, is that sweep. It keeps only itself: the job is unnamed and its only full handle is
     the outer's, and the inner has started nothing yet, so nothing else can be in it. A list that
@@ -1038,8 +1054,9 @@ leaves that profile, both naming the part.
   - **Mid-session and end.** The outer duplicates a handle to the job into the suspended inner,
     with `JOB_OBJECT_QUERY` alone, and names its value in the launch. While the agent runs, the
     inner sweeps every 30 s and keeps the job's processes (`IsProcessInJob` against that
-    handle); a failure is logged, and the next tick tries again. When the agent exits, the inner
-    sweeps once more before it exits.
+    handle). When the agent exits, the inner sweeps once more before it exits. At both, and in
+    the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
+    goes on with the rest; the sweep's next round and the next tick try it again.
   - **The end sweeper.** The outer's first reaction to any end signal is to start the end
     sweeper. The signals are the host's stdin ending (the host's cancel ladder closes it, then
     gives the outer 2 s before it ends the outer's job), the inner exiting, and any failure once
@@ -1049,12 +1066,35 @@ leaves that profile, both naming the part.
     are, and then it is resumed. It is never assigned to the outer's job. The Secondary Logon
     service starts it as its own child, outside the caller's jobs, in a job of the service's own,
     so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
-    every process of the pool user but itself, with no job exemption because the session is
-    ending, then makes the same cleanup, all on its own 60 s limit. It logs to its stderr, which
+    every process of the pool user but itself that was created before it was (`GetProcessTimes`
+    against its own start), with no job exemption because the session is ending, then makes the
+    same cleanup, all on its own 60 s limit. It logs to its stderr, which
     the outer relays while it lives; on a cancel nobody reads it. Its exit code says whether
     everything went, and the outer logs a failure if it is still alive to see it. It writes no
     result file. The run folder admits only the lawyer, `SYSTEM` and Administrators, and a file
     the pool user could write there would be writable by its other processes too.
+  - **The end sweeper and a next session.** The sweeper may still run when a next launch for the
+    same pool user starts. Its creation-time cutoff leaves the next session's inner and agent
+    alone, since they start later; a process an escaped one starts after the sweeper started is
+    killed by the next session's first act or tick. The other way round, the next inner's first
+    act kills a sweeper still running, a pool-user process outside its job. Nothing is lost: that
+    inner makes the same cleanup itself. For either to open the other, the runners' process DACL
+    (the inner's and the sweeper's, not their threads or token) grants the lawyer's logon SID
+    `SYNCHRONIZE`, `PROCESS_QUERY_LIMITED_INFORMATION` and `PROCESS_TERMINATE`.
+    `CreateProcessWithLogonW` gives both runners that SID, enabled. The agent holds it deny-only,
+    so an allow entry never matches it; the pool user itself is one of the agent's restricting
+    SIDs, so an entry naming the pool user would have reached the agent. A pool-user process a
+    service started outside the job runs in the pool user's own logon session and doesn't hold
+    the SID. Other matters' runners started from the same logon do, and can open these, but
+    their sweeps only kill their own pool user's processes. Accepted: a sweeper from before the
+    lawyer signed out and in again holds the old logon SID, so a launch during its up to 60 s
+    fails `RunExit::Sweep`, and a retry works.
+  - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. When the
+    end began at the host's stdin and the inner's exit code is the sweeper's kill code
+    (`RUN_EXIT_BASE + 0xff`, which would come back as `AgentReserved`), the outer exits as it
+    would have without the sweeper: with the agent's own code when the inner reported the agent's
+    exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in the
+    process crate). The host's shutdown outcome is timed, not read from the code.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes it before the
     launch is read. The residual case is a cancel that kills the outer inside the 2 s before the
@@ -1072,11 +1112,15 @@ leaves that profile, both naming the part.
   (`CreateProcessWithLogonW` with `LOGON_NETCREDENTIALS_ONLY`), WMI (`Win32_Process.Create`),
   Task Scheduler or BITS. Tier B bounds such a process; it doesn't prevent it. The inner's tick
   kills it within about 30 s, and the end sweeper at session end. The pool user can open such a
-  process because its default DACL grants its user, and that holds in session 0 too. The
-  exception is one that shuts its own DACL to its user, with an `OWNER RIGHTS` entry that takes
-  away the owner's implied rights. The sweep can't read that process's user, so it passes over
-  it. The design that closes this is AppContainer, after launch (see "Rejected: AppContainer
-  (spike A)" for what blocks it today).
+  process because its default DACL grants its user, and that holds in session 0 too. A process
+  that shuts its own DACL to its user, with an `OWNER RIGHTS` entry that takes away the owner's
+  implied rights, can't be opened or ended by the pool user, but `WTSEnumerateProcessesW` still
+  names it as the pool user's. At the first act it fails the launch closed (`RunExit::Sweep`, no
+  agent); at the tick and the end it is logged and tried again. While it lives, every launch for
+  that pool user fails closed. The agent can't make one of its own processes so: its
+  default DACL denies it `WRITE_DAC`; but it can start a child with a descriptor of its own, or
+  a service can start one. The design that closes this is AppContainer, after launch (see
+  "Rejected: AppContainer (spike A)" for what blocks it today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
