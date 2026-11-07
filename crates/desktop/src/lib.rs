@@ -110,6 +110,7 @@ mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
+mod navigation;
 mod open;
 mod picked;
 mod pre_write_guard;
@@ -523,8 +524,8 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .center();
     let builder = window_frame::with_frame(builder);
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
-    // get the same policy here (csp.rs).
-    let builder = csp::on_scripts(builder, app);
+    // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
+    let builder = navigation::guard(csp::on_scripts(builder, app), app);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.
