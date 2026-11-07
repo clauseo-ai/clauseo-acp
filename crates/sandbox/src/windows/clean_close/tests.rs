@@ -122,7 +122,8 @@ impl Scene {
     }
 
     pub(super) fn launch(&self) -> LaunchCheck {
-        check_launch(&self.data, &self.ledger, &self.plan, &self.journal).unwrap()
+        let admin = crate::windows::admin_copy::fake::Fake::ready();
+        check_launch_with(&admin, &self.data, &self.ledger, &self.plan, &self.journal).unwrap()
     }
 
     pub(super) fn launch_path(&self) -> LaunchPath {

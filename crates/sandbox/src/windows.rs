@@ -18,7 +18,10 @@
 //! - [`pool`]: the pool users' names (`ClauseoSbNN`) and the machine record's shape.
 //! - `setup` (S15 `PR4d`): the elevated set-up's steps and rollback over its `Machine` seam,
 //!   with the setup exe's exit codes (`SetupExit`), and the exe's own work (`PR4h`).
-//! - `UserSetup` (Windows, `PR4h`): `SandboxSetup` for the app, starting the setup exe.
+//! - `UserSetup` (Windows, `PR4h`): `SandboxSetup` for the app, starting the setup exe's admin
+//!   copy only.
+//! - [`admin_copy`]: the setup exe's admin copy in `%ProgramFiles%\Clauseo\Sandbox\`, the one
+//!   copy ever started elevated, and the checks it passes first (missing, changed, unsafe).
 //! - [`reclaim`] (S15 `PR4i`): the elevated clean-up's targets, picked from the ledger, its
 //!   owner-only walk over a seam (`acl/take.rs` on Windows), and the lawyer's hand-back after.
 //!
@@ -54,6 +57,8 @@ mod acl;
 #[cfg(any(windows, test))]
 mod acl_bytes;
 pub mod acl_plan;
+#[cfg(any(windows, test))]
+pub mod admin_copy;
 pub mod admit;
 pub mod apply;
 pub mod clean_close;

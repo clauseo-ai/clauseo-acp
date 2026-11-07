@@ -86,6 +86,18 @@ pub enum Blocked {
     /// `ERROR_ACCESS_DISABLED_BY_POLICY` (1260) when the app starts the set-up program: a
     /// Windows policy (`AppLocker`, Software Restriction Policies) blocks it.
     Policy,
+    /// The set-up program's admin copy (`%ProgramFiles%\Clauseo\Sandbox\`, `windows::admin_copy`)
+    /// isn't there as a regular file, or the machine's record holds no hash for it: the
+    /// installer places and records it, so re-running the installer puts it back.
+    AdminCopyMissing,
+    /// The admin copy's SHA-256 isn't the one the installer recorded (`AdminCopySha256`).
+    AdminCopyChanged,
+    /// A folder on the way to the admin copy, or the copy itself, has an owner other than
+    /// SYSTEM, Administrators or `TrustedInstaller`, or lets another account change it.
+    AdminCopyUnsafe,
+    /// `--adopt` found tier B set up for another Windows account on this computer (D5's one
+    /// owner), and changed nothing.
+    OtherAccount,
 }
 
 impl std::fmt::Display for Blocked {
@@ -98,6 +110,23 @@ impl std::fmt::Display for Blocked {
             Blocked::Policy => {
                 "a Windows policy blocks clauseo-sandbox-setup.exe, Clauseo's set-up program; \
                  whoever looks after this computer can allow it"
+            }
+            Blocked::AdminCopyMissing => {
+                "Clauseo's protected copy of its set-up program is missing; re-run the Clauseo \
+                 installer, or ask whoever looks after this computer to"
+            }
+            Blocked::AdminCopyChanged => {
+                "Clauseo's protected copy of its set-up program isn't the one its installer \
+                 placed; whoever looks after this computer can re-run the Clauseo installer"
+            }
+            Blocked::AdminCopyUnsafe => {
+                "the folder that holds Clauseo's protected set-up program lets accounts other \
+                 than administrators change it; whoever looks after this computer can restore \
+                 its permissions and re-run the Clauseo installer"
+            }
+            Blocked::OtherAccount => {
+                "Clauseo's protection is set up for another account on this computer; whoever \
+                 looks after this computer can remove it there first"
             }
         })
     }

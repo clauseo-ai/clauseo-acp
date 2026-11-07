@@ -135,6 +135,8 @@ export const HI = {
     "यहाँ उत्तर देने से पहले Clauseo को इस कंप्यूटर पर एक बार संरक्षण सेट अप करना होगा। इसे सेट अप करें, फिर दोबारा पूछें। आपका प्रश्न रखा गया है।",
   "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
     "आपकी फ़र्म संरक्षण अनिवार्य करती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Protection is blocked on this computer: a Windows setting or security tool stopped it, so Clauseo can't answer here. Ask whoever looks after this computer.":
+    "इस कंप्यूटर पर संरक्षण अवरुद्ध है: Windows की किसी सेटिंग या सुरक्षा टूल ने इसे रोक दिया, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -60,6 +60,12 @@ pub enum SetupExit {
     /// 6: the data folder isn't owned by the user who asked (one an elevated run made, owned
     /// by Administrators, for one); no result file is written there.
     DataDirNotOwned,
+    /// 7: `--adopt` ran without an elevated token (per user), or without an elevated or SYSTEM
+    /// one (`--per-machine`); nothing was touched.
+    NotElevated,
+    /// 8: `--adopt` ran from anywhere but the admin copy's own path
+    /// (`%ProgramFiles%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`); nothing was touched.
+    NotAdminCopy,
 }
 
 impl SetupExit {
@@ -74,7 +80,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 7] = [
+    pub const ALL: [SetupExit; 9] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -82,6 +88,8 @@ impl SetupExit {
         SetupExit::RemovedPartly,
         SetupExit::LockHeld,
         SetupExit::DataDirNotOwned,
+        SetupExit::NotElevated,
+        SetupExit::NotAdminCopy,
     ];
 
     /// The process exit code.
@@ -94,6 +102,8 @@ impl SetupExit {
             SetupExit::RemovedPartly => 4,
             SetupExit::LockHeld => 5,
             SetupExit::DataDirNotOwned => 6,
+            SetupExit::NotElevated => 7,
+            SetupExit::NotAdminCopy => 8,
         }
     }
 

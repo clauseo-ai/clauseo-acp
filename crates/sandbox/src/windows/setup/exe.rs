@@ -21,10 +21,21 @@
 //!
 //! `--reclaim` takes its owner from the recorded parent too and its data folder from the
 //! machine's record, resolved the same way (`reclaim_run.rs`, S15 `PR4i`).
+//!
+//! `--adopt` (`adopt.rs`) runs only from the admin copy, which the installer just placed:
+//! it locks the admin folder, records the copy's hash and the install folder, and, per user,
+//! runs `--set-up` for the recorded parent's user in this process.
+//!
+//! After a `--remove` that leaves no tier-B owner on the machine, the admin copy is removed
+//! last (`admin_remove.rs`); a failure there is logged and the exit stays the removal's, as
+//! what is left is only administrators' to change.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use super::admin_remove::remove_admin_copy;
+use super::adopt::Target;
+use super::adopt::windows_adopter::run_adopt;
 use super::args::{self, Mode};
 use super::around::Around;
 use super::ffi::restrict_dll_search;
@@ -74,6 +85,16 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
                 SetupExit::Failed
             }
         },
+        Mode::Adopt {
+            user_install_dir,
+            data_dir,
+        } => {
+            let target = match data_dir {
+                Some(data_dir) => Target::User { data_dir },
+                None => Target::Machine,
+            };
+            run_adopt(Names::production(), &user_install_dir, &target)
+        }
         Mode::Remove { per_machine } => {
             if per_machine && !may_remove_per_machine() {
                 tracing::error!("--per-machine needs an elevated process or LOCAL SYSTEM");
@@ -191,16 +212,32 @@ pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool
             return SetupExit::Failed;
         }
     };
+    let record_key = names.record_key.clone();
     let mut machine = WindowsRemoval::new(names, invoker);
     match remove(&mut machine, &mut acl, per_machine) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
+            remove_admin_copy_if_unowned(&record_key);
             SetupExit::Removed
         }
         Err(failure) => {
             tracing::error!(step = %failure.step, cause = %failure.cause, "the removal stopped");
             failure.exit
         }
+    }
+}
+
+/// The admin copy's removal (`admin_remove.rs`), once the record under `record_key` names no
+/// owner: a per-user removal by someone who isn't the owner keeps the owner's copy.
+fn remove_admin_copy_if_unowned(record_key: &str) {
+    match super::record_write::read(record_key) {
+        Ok(None) => {
+            if let Err(error) = remove_admin_copy(record_key) {
+                tracing::error!(%error, "the admin copy couldn't be removed in full");
+            }
+        }
+        Ok(Some(_)) => tracing::info!("tier B still has an owner; its admin copy stays"),
+        Err(error) => tracing::error!(%error, "the record can't be read; the admin copy stays"),
     }
 }
 

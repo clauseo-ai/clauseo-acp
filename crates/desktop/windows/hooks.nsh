@@ -11,10 +11,12 @@
 ;    CheckIfAppIsRunning (utils.nsh, which installer.nsi includes at line 26) first, so declining
 ;    its prompt aborts the uninstall before S15's removal or any deletion. The template's own call
 ;    at 788 then finds nothing running.
-; 1. When the sandbox's set-up tool (S15, clauseo-sandbox-setup.exe) is beside the app, the
+; 1. When the sandbox's set-up tool (S15, clauseo-sandbox-setup.exe) is installed, the
 ;    uninstaller asks it to remove what it set up, elevated, so a currentUser uninstall raises one
-;    UAC prompt. It reads its records under the data folder's `sandbox` folder to take its access
-;    rules back off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
+;    UAC prompt. The installer places an admin-only copy in `%ProgramFiles%\Clauseo\Sandbox\`, and
+;    the hook starts that copy only: a per-user copy beside the app is never started elevated. The
+;    tool reads its records under the data folder's `sandbox` folder to take its access rules back
+;    off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
 ;    The per-user installer passes `--remove`: only the Windows user who set the protection up
 ;    removes it; anyone else's uninstall exits 0 having touched nothing. The per-machine installer
 ;    passes `--remove --per-machine` (chosen when it is built, from the template's INSTALLMODE):
@@ -109,6 +111,11 @@
         !define CLAUSEO_REMOVE_VERB "runas"
       !endif
     !endif
+    ; The admin-only copy of the set-up tool, in Program Files. The hook starts this copy and never
+    ; the one beside the app. NSIS expands $PROGRAMFILES64 where the path is used, at run time.
+    !ifndef CLAUSEO_ADMIN_EXE
+      !define CLAUSEO_ADMIN_EXE "$PROGRAMFILES64\Clauseo\Sandbox\clauseo-sandbox-setup.exe"
+    !endif
     ; A silent per-user uninstall (/S) never raises UAC: it skips the removal and goes on as after
     ; a declined prompt (1223), $R5 left at 0 so `sandbox\` is kept, with one line in the details
     ; (removeSkippedSilent) and no box. IT removes the set-up from an elevated prompt before such
@@ -117,20 +124,20 @@
     StrCpy $R3 1
     !if "${INSTALLMODE}" == "currentUser"
       ${If} ${Silent}
-      ${AndIf} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+      ${AndIf} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
         StrCpy $R3 0
         DetailPrint "$(removeSkippedSilent)"
       ${EndIf}
     !endif
     ${If} $R3 = 1
-    ${AndIf} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+    ${AndIf} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
       !if ${NSIS_PTR_SIZE} > 4
         !error "hooks.nsh lays out SHELLEXECUTEINFOW for a 32-bit installer; lay it out again"
       !endif
       ; cbSize, fMask, hwnd, lpVerb, lpFile, lpParameters, lpDirectory, nShow (SW_HIDE),
       ; hInstApp, lpIDList, lpClass, hkeyClass, dwHotKey, hIcon, hProcess.
-      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "${CLAUSEO_REMOVE_VERB}", w "$INSTDIR\clauseo-sandbox-setup.exe", w "${CLAUSEO_REMOVE}", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
+      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "${CLAUSEO_REMOVE_VERB}", w "${CLAUSEO_ADMIN_EXE}", w "${CLAUSEO_REMOVE}", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
       System::Call 'shell32::ShellExecuteExW(p R6) i .R7'
       ${If} $R7 <> 0
         System::Call '*$R6(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
@@ -138,7 +145,7 @@
           StrCpy $R8 1
           ; At most 2 minutes (K3). WAIT_TIMEOUT (258): the tool is still running, so $R8 stays
           ; 1 (failed) and the uninstall carries on. Never TerminateProcess: a removal stopped
-          ; midway is worse than one finishing late. Its exe may then stay in $INSTDIR.
+          ; midway is worse than one finishing late. Its admin copy may then stay in place.
           System::Call 'kernel32::WaitForSingleObject(p R7, i 120000) i .R3'
           ${If} $R3 = 258
             DetailPrint "$(removeStillRunning)"

@@ -4,7 +4,7 @@
 use super::*;
 use crate::windows::clean_close::fake::{FakeJournal, found, journal_for};
 use crate::windows::clean_close::{
-    Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch, session_cursor,
+    Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch_with, session_cursor,
     write_clean_close,
 };
 use crate::windows::set_aside::Checked;
@@ -81,7 +81,8 @@ impl Launched {
     }
 
     fn check(&self) -> LaunchCheck {
-        check_launch(
+        check_launch_with(
+            &crate::windows::admin_copy::fake::Fake::ready(),
             &self.w.at("data"),
             &self.ledger,
             &self.plan(),

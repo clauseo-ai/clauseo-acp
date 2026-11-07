@@ -100,6 +100,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
 [target.'cfg(windows)'.dependencies]
+# The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
+sha2 = { workspace = true }
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Wdk_Foundation",
@@ -143,10 +145,6 @@ insta = { workspace = true }
 clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
-
-# The S15 PR4j VM harness (examples/s15_remove_vm) lists each matter file's SHA-256.
-[target.'cfg(windows)'.dev-dependencies]
-sha2 = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).
