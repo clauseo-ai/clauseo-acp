@@ -1,32 +1,30 @@
-//! Tier B's network (S15 PR7): a pool user's agent reaches the launch's egress proxy and its
-//! listed loopback ports, and nothing else.
+//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 61080-61179, where its
+//! launch's egress proxy and listed ports are, and nothing else.
 //!
 //! - **Set-up** (elevated, the setup exe's network step, [`install`]): Clauseo's WFP provider and
-//!   sublayer; block filters naming every pool user (all connects, the 61080-61179 range
-//!   included, ICMP, and inbound that isn't loopback); the owner's three delegation grants from
-//!   PR0 (c) (`ADD_LINK` on the sublayer, `ADD` on the filter container, `ADD_LINK` on the
-//!   permit's layer) and read on the provider and filters; and Windows Firewall rules that block
-//!   what isn't loopback and loopback TCP outside the range. A re-run or an extend rewrites
-//!   them all for the whole pool. Why the range is excepted in the firewall rules and not in the
-//!   block filters: `spec.rs`.
-//! - **Each launch** ([`LaunchPermit`], unelevated, as the desktop user): checks set-up's
-//!   objects ([`check_setup`]) and adds, in a dynamic session, a permit from the matter's pool
-//!   user to `127.0.0.1` on `Policy::proxy_ports` and `Loopback::Ports` (R24's relay port
-//!   included). Dropping it ends the session and WFP deletes the permit. A missing or stale
-//!   set-up refuses the launch ([`NetworkGap`]); no agent runs unfiltered.
+//!   sublayer; block filters that catch every token holding a pool user's or the pool group's
+//!   SID, enabled or deny-only (all connects, the range included, ICMP, and inbound that isn't
+//!   loopback); one static permit per pool user for `127.0.0.1` TCP on the range; read-only
+//!   grants for the owner; and Windows Firewall rules that block what isn't loopback and
+//!   loopback TCP outside the range. A re-run or an extend empties our sublayer and rewrites it
+//!   for the whole pool, deleting any filter set-up didn't write.
+//! - **Each launch** ([`check_launch`], unelevated, as the desktop user) checks set-up's objects
+//!   ([`check_setup`]): exactly set-up's filters in our sublayer, catching the launch's pool user,
+//!   with its static permit. Anything else refuses the launch ([`NetworkGap`]); no agent runs
+//!   unfiltered. Nothing is added per launch: within the range, each listener's per-launch
+//!   secret keeps matters apart.
 //! - **Removal** ([`remove_network`], elevated): S15 `PR4j`'s `--remove` deletes it all.
 //!
 //! The browser is off on tier B (D10), so no listener rule: `Loopback::Any` is refused.
 //!
 //! **For the host (R17 PR-E)**, per tier-B launch, after the policy is built and before the
-//! runner starts: `let permit = LaunchPermit::open(&pool_user_sid, &policy)?;`, then hold
-//! `permit` until the launch's whole process tree has exited, then `permit.close()` (or drop
-//! it). On `Err(Error::NetworkUnfiltered { cause })` the agent must not start;
-//! `cause.needs_setup()` maps to `sandbox.setup_required` (`Error::code` does so already).
+//! runner starts: `check_launch(&pool_user_sid, &policy)?`. On
+//! `Err(Error::NetworkUnfiltered { cause })` the agent must not start; `Error::code` maps
+//! `cause.needs_setup()` to `sandbox.setup_required`, the rest to `agent.launch_failed`.
 //!
-//! **Residual** (0049): name resolution runs in the DNS Client service as NETWORK SERVICE, which
-//! no `ALE_USER_ID` condition sees, so a pool user can still resolve names. Direct DNS on port 53
-//! is blocked like all other traffic.
+//! **Residuals** (0049): name resolution runs in the DNS Client service as `NETWORK SERVICE`, SMB
+//! in the System process and `WebDAV` in the `WebClient` service as `LOCAL SERVICE`, none of which
+//! an `ALE_USER_ID` condition sees. Agent-made listeners in the range are a collusion channel.
 //!
 //! The filter specs, the check and the grants are plain data, built and tested on every OS; the
 //! WFP and firewall calls need Windows.
@@ -37,17 +35,24 @@ mod engine;
 #[cfg(windows)]
 mod firewall;
 #[cfg(windows)]
+mod grant_probe;
+#[cfg(windows)]
 mod install;
 #[cfg(windows)]
 mod permit;
 pub mod rules;
+mod sddl;
 pub mod spec;
 
-pub use check::{FoundFilter, NetworkGap, SetupReader, WfpError, check_setup};
+pub use check::{
+    FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, WfpError, check_setup, classify,
+};
+#[cfg(windows)]
+pub use grant_probe::{GrantProbe, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
-pub use permit::LaunchPermit;
+pub use permit::{check_launch, check_launch_in};
 pub use spec::{FirewallOutcome, FirewallTrouble, Namespace, NetworkReport, NetworkSetup};
 
 /// Removes Clauseo's network set-up ([`remove`] in [`Namespace::production`]), elevated, with

@@ -15,39 +15,39 @@ use std::ptr;
 
 use windows::Win32::Foundation::{
     FWP_E_ALREADY_EXISTS, FWP_E_FILTER_NOT_FOUND, FWP_E_NOT_FOUND, FWP_E_PROVIDER_NOT_FOUND,
-    FWP_E_SUBLAYER_NOT_FOUND, HANDLE, HLOCAL, LocalFree,
+    FWP_E_SUBLAYER_NOT_FOUND, HANDLE,
 };
 use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
-    FWP_ACTION_BLOCK, FWP_ACTION_PERMIT, FWP_BYTE_BLOB, FWP_CONDITION_FLAG_IS_LOOPBACK,
-    FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0, FWP_MATCH_EQUAL, FWP_MATCH_FLAGS_NONE_SET,
-    FWP_SECURITY_DESCRIPTOR_TYPE, FWP_UINT8, FWP_UINT16, FWP_UINT32, FWP_VALUE0, FWP_VALUE0_0,
-    FWPM_ACTION0, FWPM_CONDITION_ALE_USER_ID, FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_PROTOCOL,
-    FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_DISPLAY_DATA0,
-    FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_NONE,
+    FWP_ACTION_BLOCK, FWP_ACTION_PERMIT, FWP_BYTE_BLOB, FWP_UINT8, FWP_VALUE0, FWP_VALUE0_0,
+    FWPM_ACTION0, FWPM_DISPLAY_DATA0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_NONE,
     FWPM_FILTER_FLAG_PERSISTENT, FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4,
     FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
     FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4,
     FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
     FWPM_SESSION_FLAG_DYNAMIC, FWPM_SESSION0, FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0,
-    FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteByKey0, FwpmProviderAdd0,
-    FwpmProviderDeleteByKey0, FwpmSubLayerAdd0, FwpmSubLayerDeleteByKey0, FwpmTransactionAbort0,
-    FwpmTransactionBegin0, FwpmTransactionCommit0,
+    FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0,
+    FwpmFilterDeleteByKey0, FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0,
+    FwpmSubLayerDeleteByKey0, FwpmTransactionAbort0, FwpmTransactionBegin0, FwpmTransactionCommit0,
 };
-use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
-};
-use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 use windows::Win32::System::Rpc::RPC_C_AUTHN_WINNT;
-use windows::core::{GUID, HSTRING, PCWSTR, PWSTR};
+use windows::core::{GUID, PCWSTR, PWSTR};
 
 use super::check::WfpError;
-use super::spec::{Action, Condition, FilterSpec, Layer, Namespace, SUBLAYER_WEIGHT, user_sddl};
-use crate::windows::sids::Sid;
+use super::spec::{Action, FilterSpec, Layer, Namespace, SUBLAYER_WEIGHT};
 
+mod conditions;
 mod read;
 mod security;
 
 pub(super) use security::grant;
+
+/// Every filter in `ns`'s sublayer the caller may enumerate.
+pub(super) fn filters_in(
+    engine: &Engine,
+    ns: &Namespace,
+) -> Result<Vec<super::check::FoundFilter>, (&'static str, u32)> {
+    read::filters_in(engine.handle, GUID::from_u128(ns.sublayer))
+}
 
 /// How long a write waits for another writer's transaction, in milliseconds.
 const TRANSACTION_WAIT_MS: u32 = 10_000;
@@ -119,102 +119,6 @@ fn layer_of(key: GUID) -> Option<Layer> {
     ]
     .into_iter()
     .find(|&layer| layer_key(layer) == key)
-}
-
-/// A self-relative security descriptor from `ConvertStringSecurityDescriptorToSecurityDescriptorW`,
-/// with the blob a condition points at; freed on drop.
-struct Descriptor {
-    sd: PSECURITY_DESCRIPTOR,
-    blob: Box<FWP_BYTE_BLOB>,
-}
-
-impl Descriptor {
-    /// The `ALE_USER_ID` descriptor naming `sids` ([`user_sddl`]).
-    fn users(sids: &[Sid]) -> Result<Descriptor, WfpError> {
-        let mut sd = PSECURITY_DESCRIPTOR::default();
-        let mut len = 0u32;
-        // SAFETY: the string is a live NUL-terminated HSTRING; `sd` and `len` are live
-        // out-pointers. The descriptor is LocalAlloc'd and freed by Drop.
-        unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                &HSTRING::from(user_sddl(sids)),
-                SDDL_REVISION_1,
-                &raw mut sd,
-                Some(&raw mut len),
-            )
-        }
-        .map_err(|error| WfpError {
-            call: "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-            code: code_of(error.code()),
-        })?;
-        Ok(Descriptor {
-            sd,
-            blob: Box::new(FWP_BYTE_BLOB {
-                size: len,
-                data: sd.0.cast(),
-            }),
-        })
-    }
-}
-
-impl Drop for Descriptor {
-    fn drop(&mut self) {
-        // SAFETY: `sd` came from LocalAlloc in the conversion and is freed once, here.
-        unsafe { LocalFree(Some(HLOCAL(self.sd.0))) };
-    }
-}
-
-/// `condition` as WFP's, its descriptor (for [`Condition::Users`]) taken from `users`.
-fn condition(condition: &Condition, users: &mut Option<&Descriptor>) -> FWPM_FILTER_CONDITION0 {
-    let (field, match_type, value) = match condition {
-        Condition::Users(_) => {
-            let blob = users.take().map_or(ptr::null_mut(), |sd| {
-                ptr::from_ref::<FWP_BYTE_BLOB>(&sd.blob).cast_mut()
-            });
-            let value = FWP_CONDITION_VALUE0 {
-                r#type: FWP_SECURITY_DESCRIPTOR_TYPE,
-                Anonymous: FWP_CONDITION_VALUE0_0 { sd: blob },
-            };
-            (FWPM_CONDITION_ALE_USER_ID, FWP_MATCH_EQUAL, value)
-        }
-        Condition::NotLoopback => {
-            let value = FWP_CONDITION_VALUE0 {
-                r#type: FWP_UINT32,
-                Anonymous: FWP_CONDITION_VALUE0_0 {
-                    uint32: FWP_CONDITION_FLAG_IS_LOOPBACK,
-                },
-            };
-            (FWPM_CONDITION_FLAGS, FWP_MATCH_FLAGS_NONE_SET, value)
-        }
-        Condition::Protocol(protocol) => {
-            let value = FWP_CONDITION_VALUE0 {
-                r#type: FWP_UINT8,
-                Anonymous: FWP_CONDITION_VALUE0_0 { uint8: *protocol },
-            };
-            (FWPM_CONDITION_IP_PROTOCOL, FWP_MATCH_EQUAL, value)
-        }
-        Condition::RemoteV4(address) => {
-            let value = FWP_CONDITION_VALUE0 {
-                r#type: FWP_UINT32,
-                Anonymous: FWP_CONDITION_VALUE0_0 {
-                    uint32: u32::from(*address),
-                },
-            };
-            (FWPM_CONDITION_IP_REMOTE_ADDRESS, FWP_MATCH_EQUAL, value)
-        }
-        Condition::RemotePort(port) => {
-            let value = FWP_CONDITION_VALUE0 {
-                r#type: FWP_UINT16,
-                Anonymous: FWP_CONDITION_VALUE0_0 { uint16: *port },
-            };
-            (FWPM_CONDITION_IP_REMOTE_PORT, FWP_MATCH_EQUAL, value)
-        }
-    };
-    FWPM_FILTER_CONDITION0 {
-        fieldKey: field,
-        matchType: match_type,
-        conditionValue: value,
-    }
 }
 
 impl Engine {
@@ -300,52 +204,36 @@ impl Engine {
         check("FwpmSubLayerAdd0", code, &[FWP_E_ALREADY_EXISTS])
     }
 
-    /// Adds `spec` in our sublayer; its WFP id. A keyed filter is persistent, under our
-    /// provider; a block clears its action right.
+    /// Adds `spec` in our sublayer, under our provider, with its flags ([`FilterSpec::flags`]);
+    /// its WFP id.
     pub(super) fn add_filter(&self, ns: &Namespace, spec: &FilterSpec) -> Result<u64, WfpError> {
         let name = wide(&spec.name);
-        let users = spec.conditions.iter().find_map(|c| {
-            if let Condition::Users(sids) = c {
-                Some(sids.as_slice())
-            } else {
-                None
-            }
-        });
-        let descriptor = users.map(Descriptor::users).transpose()?;
-        let mut taken = descriptor.as_ref();
-        let mut conditions: Vec<FWPM_FILTER_CONDITION0> = spec
-            .conditions
-            .iter()
-            .map(|c| condition(c, &mut taken))
-            .collect();
+        let mut built = conditions::build(&spec.conditions)?;
         let mut provider = GUID::from_u128(ns.provider);
+        let wanted = spec.flags();
         let mut flags = FWPM_FILTER_FLAG_NONE;
-        if spec.key.is_some() {
+        if wanted.persistent {
             flags |= FWPM_FILTER_FLAG_PERSISTENT;
         }
-        if spec.action == Action::Block {
+        if wanted.clear_action_right {
             flags |= FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
         }
         let filter = FWPM_FILTER0 {
-            filterKey: spec.key.map_or(GUID::zeroed(), GUID::from_u128),
+            filterKey: GUID::from_u128(spec.key),
             displayData: FWPM_DISPLAY_DATA0 {
                 name: pwstr(&name),
                 description: PWSTR::null(),
             },
             flags,
-            providerKey: if spec.key.is_some() {
-                &raw mut provider
-            } else {
-                ptr::null_mut()
-            },
+            providerKey: &raw mut provider,
             layerKey: layer_key(spec.layer),
             subLayerKey: GUID::from_u128(ns.sublayer),
             weight: FWP_VALUE0 {
                 r#type: FWP_UINT8,
                 Anonymous: FWP_VALUE0_0 { uint8: spec.weight },
             },
-            numFilterConditions: u32::try_from(conditions.len()).unwrap_or(u32::MAX),
-            filterCondition: conditions.as_mut_ptr(),
+            numFilterConditions: u32::try_from(built.conditions.len()).unwrap_or(u32::MAX),
+            filterCondition: built.conditions.as_mut_ptr(),
             action: FWPM_ACTION0 {
                 r#type: match spec.action {
                     Action::Block => FWP_ACTION_BLOCK,
@@ -356,12 +244,21 @@ impl Engine {
             ..FWPM_FILTER0::default()
         };
         let mut id = 0u64;
-        // SAFETY: `filter`, its name, its conditions and the descriptor they point at all live
-        // through the call; `id` is a live out-pointer.
+        // SAFETY: `filter`, its name, its conditions and what they point at (held by `built`)
+        // all live through the call; `id` is a live out-pointer.
         let code =
             unsafe { FwpmFilterAdd0(self.handle, &raw const filter, None, Some(&raw mut id)) };
         check("FwpmFilterAdd0", code, &[])?;
         Ok(id)
+    }
+
+    /// Deletes the filter with WFP id `id`; `false` when it wasn't there.
+    pub(super) fn delete_by_id(&self, id: u64) -> Result<bool, WfpError> {
+        // SAFETY: the handle is open while `self` lives.
+        let code = unsafe { FwpmFilterDeleteById0(self.handle, id) };
+        let missing = [FWP_E_FILTER_NOT_FOUND, FWP_E_NOT_FOUND];
+        check("FwpmFilterDeleteById0", code, &missing)?;
+        Ok(code == 0)
     }
 
     /// Deletes the filter `key`; `false` when it wasn't there.
