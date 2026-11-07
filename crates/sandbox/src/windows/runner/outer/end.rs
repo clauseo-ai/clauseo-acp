@@ -29,6 +29,8 @@ pub(super) struct OsSweeper {
     pub(super) pool_user: Sid,
     pub(super) pool_name: String,
     pub(super) desktop: Sid,
+    /// The desktop user's logon SID, which the runners' process DACL grants.
+    pub(super) logon: Sid,
     pub(super) exe: String,
     pub(super) cwd: String,
     /// The sweeper once running.
@@ -95,9 +97,12 @@ impl SweeperSteps for OsSweeper {
     }
 
     fn shut(&self, sweeper: &Process) -> Result<(), String> {
-        shut_object(sweeper.handle.0, &runner_process_sddl(&self.desktop))
-            .and_then(|()| shut_object(sweeper.thread.0, &runner_thread_sddl(&self.desktop)))
-            .map_err(|e| os("the end sweeper's DACL", &e))
+        shut_object(
+            sweeper.handle.0,
+            &runner_process_sddl(&self.desktop, &self.logon),
+        )
+        .and_then(|()| shut_object(sweeper.thread.0, &runner_thread_sddl(&self.desktop)))
+        .map_err(|e| os("the end sweeper's DACL", &e))
     }
 
     fn resume(&self, sweeper: &Process) -> Result<(), String> {

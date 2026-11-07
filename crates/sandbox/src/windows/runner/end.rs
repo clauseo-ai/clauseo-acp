@@ -7,10 +7,20 @@
 //! once a session, whichever path comes first. It is started (`CreateProcessWithLogonW`,
 //! suspended), its process and thread are shut as the inner's are, and it is resumed: it is never
 //! put in this launch's kill-on-close job, so the host ending the outer leaves it running. It
-//! needs nothing from the outer once running (`--sweep`, its own timeout).
+//! needs nothing from the outer once running (`--sweep`, its own timeout). The guard keeps the
+//! signal that started it, so a cancel exits as it would have without the sweeper
+//! ([`exit_code`]).
 
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+
+use super::agent_code;
+use super::sweep::SWEPT;
+
+/// The exit code the host's own job end gives the outer, `TERMINATED` in
+/// `crates/process/src/os/windows.rs:54` (private there): what a cancel whose agent didn't exit
+/// within the host's 2 s gives without the end sweeper.
+pub(crate) const HOST_ENDED: u32 = 0xC1A0;
 
 /// The calls that start the sweeper; Windows' are `outer/end.rs`'s.
 pub(crate) trait SweeperSteps {
@@ -65,30 +75,55 @@ pub(crate) enum EndSignal {
 /// The guard that starts the sweeper once a session.
 pub(crate) struct EndSweep<S> {
     steps: S,
-    started: AtomicBool,
+    /// The end signal that started it.
+    began: OnceLock<EndSignal>,
 }
 
 impl<S: SweeperSteps> EndSweep<S> {
     pub(crate) fn new(steps: S) -> EndSweep<S> {
         EndSweep {
             steps,
-            started: AtomicBool::new(false),
+            began: OnceLock::new(),
         }
     }
 
     /// Starts the sweeper unless a path did already; whether this call started it.
-    pub(crate) fn trigger(&self, _why: EndSignal) -> bool {
-        if self.started.swap(true, Ordering::SeqCst) {
+    pub(crate) fn trigger(&self, why: EndSignal) -> bool {
+        if self.began.set(why).is_err() {
             return false;
         }
         start_sweeper(&self.steps);
         true
     }
 
+    /// The end signal that started the sweeper, once one did.
+    pub(crate) fn began(&self) -> Option<EndSignal> {
+        self.began.get().copied()
+    }
+
     /// The steps, for the wait at the outer's end.
     pub(crate) fn steps(&self) -> &S {
         &self.steps
     }
+}
+
+/// The outer's exit code once the inner exited with `inner`, the agent having reported `reported`
+/// on `ctl` if it exited first: the agent's code, never one in the runner's own range
+/// ([`agent_code`]).
+///
+/// On a cancel (the session's end began at the host's stdin, [`EndSignal::Stdin`]), the end
+/// sweeper may end the inner, or the agent before it, with its own code ([`SWEPT`]), which would
+/// come back as `AgentReserved`. The run gives what it would have given without the sweeper: the
+/// agent's own code when it exited first, or else [`HOST_ENDED`], the code of the host's job end
+/// that follows a cancel whose agent didn't exit.
+pub(crate) fn exit_code(began: Option<EndSignal>, inner: u32, reported: Option<u32>) -> u32 {
+    if began == Some(EndSignal::Stdin) && inner == SWEPT {
+        return match reported {
+            Some(code) if code != SWEPT => agent_code(code),
+            _ => HOST_ENDED,
+        };
+    }
+    agent_code(inner)
 }
 
 /// Which end of a copy ended it.
