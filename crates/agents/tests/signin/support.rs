@@ -511,6 +511,44 @@ impl Fixture {
     }
 }
 
+/// Linux: kills each run the test started that still runs and waits until it is gone, so a test
+/// that failed or panicked mid-run leaves no fake behind; the folder goes after (`TempDir`). A
+/// run counts while it is still this process's child or its command line names the fixture's
+/// folder, so a pid reused by another process is never hit.
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        for launch in self.launches() {
+            if ours(launch.pid, self.data.path()) {
+                clauseo_process::kill(launch.pid);
+                gone(launch.pid);
+            }
+        }
+    }
+}
+
+/// Whether process `pid` runs as this process's child or with `folder` in its command line.
+#[cfg(target_os = "linux")]
+fn ours(pid: u32, folder: &Path) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    // After the command name's closing parenthesis: the state, then the parent's pid.
+    let mut fields = stat
+        .rsplit(')')
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
+    let state = fields.next().unwrap_or_default();
+    if state.starts_with(['Z', 'X']) {
+        return false;
+    }
+    let parent = fields.next().and_then(|field| field.parse::<u32>().ok());
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    let folder = folder.to_string_lossy();
+    parent == Some(std::process::id()) || String::from_utf8_lossy(&cmdline).contains(&*folder)
+}
+
 /// Whether the process `pid` is gone (or a zombie no one has reaped), after a short wait.
 #[cfg(target_os = "linux")]
 pub(crate) fn gone(pid: u32) -> bool {
