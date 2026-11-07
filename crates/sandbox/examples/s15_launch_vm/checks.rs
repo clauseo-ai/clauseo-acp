@@ -18,9 +18,9 @@ use super::sys::now;
 use super::win;
 
 /// `SE_GROUP_LOGON_ID`.
-const LOGON_ID: u32 = 0xC000_0000;
+pub(crate) const LOGON_ID: u32 = 0xC000_0000;
 /// `SE_GROUP_USE_FOR_DENY_ONLY`.
-const DENY_ONLY: u32 = 0x10;
+pub(crate) const DENY_ONLY: u32 = 0x10;
 /// What another pool user's open must get: `ERROR_ACCESS_DENIED`.
 pub(crate) const DENIED: &str = "5";
 

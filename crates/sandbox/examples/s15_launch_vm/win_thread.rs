@@ -1,7 +1,8 @@
 //! The Toolhelp calls of the `runners` probe: the threads of a pid (`TH32CS_SNAPTHREAD`), the
-//! children of a set of pids by image name (`TH32CS_SNAPPROCESS`), and `OpenThread`. Toolhelp is
-//! declared here against kernel32 directly: the crate's `windows` features don't hold
-//! `Win32_System_Diagnostics_ToolHelp`, and an example shouldn't widen the product's list.
+//! children of a set of pids by image name and every process (`TH32CS_SNAPPROCESS`), and
+//! `OpenThread`. Toolhelp is declared here against kernel32 directly: the crate's `windows`
+//! features don't hold `Win32_System_Diagnostics_ToolHelp`, and an example shouldn't widen the
+//! product's list.
 #![expect(
     unsafe_code,
     reason = "FFI to the Toolhelp snapshot and OpenThread calls"
@@ -103,6 +104,26 @@ pub(crate) fn threads_of(pid: u32) -> Result<Vec<u32>, u32> {
 /// The processes whose parent pid is one of `parents` and whose image is `image` (no case):
 /// each `(parent, pid)`.
 pub(crate) fn children_named(parents: &[u32], image: &str) -> Result<Vec<(u32, u32)>, u32> {
+    Ok(processes()?
+        .into_iter()
+        .filter(|p| parents.contains(&p.parent) && p.image.eq_ignore_ascii_case(image))
+        .map(|p| (p.parent, p.pid))
+        .collect())
+}
+
+/// One process of a system-wide snapshot.
+#[derive(Debug, Clone)]
+pub(crate) struct Listed {
+    /// Its pid.
+    pub(crate) pid: u32,
+    /// Its parent's pid.
+    pub(crate) parent: u32,
+    /// Its image's file name.
+    pub(crate) image: String,
+}
+
+/// Every process of a system-wide process snapshot (nothing is opened).
+pub(crate) fn processes() -> Result<Vec<Listed>, u32> {
     let snap = snapshot(SNAP_PROCESS)?;
     let mut entry = ProcessEntry {
         size: u32::try_from(size_of::<ProcessEntry>()).unwrap_or(0),
@@ -120,17 +141,16 @@ pub(crate) fn children_named(parents: &[u32], image: &str) -> Result<Vec<(u32, u
     // SAFETY: the snapshot is live; `entry` is a live struct whose `size` is set.
     let mut more = unsafe { Process32FirstW(snap.0.0, &raw mut entry) } != 0;
     while more {
-        if parents.contains(&entry.parent) {
-            let end = entry
-                .exe
-                .iter()
-                .position(|unit| *unit == 0)
-                .unwrap_or(entry.exe.len());
-            let name = String::from_utf16_lossy(entry.exe.get(..end).unwrap_or_default());
-            if name.eq_ignore_ascii_case(image) {
-                found.push((entry.parent, entry.pid));
-            }
-        }
+        let end = entry
+            .exe
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(entry.exe.len());
+        found.push(Listed {
+            pid: entry.pid,
+            parent: entry.parent,
+            image: String::from_utf16_lossy(entry.exe.get(..end).unwrap_or_default()),
+        });
         // SAFETY: as above.
         more = unsafe { Process32NextW(snap.0.0, &raw mut entry) } != 0;
     }

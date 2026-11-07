@@ -20,7 +20,8 @@
 //!   then per thread id the harness sent `thread <role> <tid>` and `<right> <code>` for each of
 //!   [`THREAD_RIGHTS`] (0 when it opened).
 //! - `breakaway`: starts `probe wait` suspended with `CREATE_BREAKAWAY_FROM_JOB`; prints
-//!   `breakaway error <code>`, or `breakaway child <pid> in-job <true|false|error N>` and then
+//!   `breakaway error <code>`, or `breakaway child <pid> in-job <true|false|error N>`, then waits
+//!   for one stdin line (or its end) while the harness checks the child's job, then
 //!   `breakaway killed <0 or code>` (the child is killed in every outcome).
 //! - `handles`: `handles method <text>`, `handles count <n>`, `handles table <n>` (or
 //!   `handles table error <why>`), then `handle <hex> pipe <name or ?> end <client|server|?>
@@ -243,6 +244,8 @@ fn breakaway() -> ExitCode {
                 Err(code) => format!("error {code}"),
             };
             say(&format!("breakaway child {} in-job {in_job}", child.id()));
+            // The harness checks the child is in the runner's own job while it lives.
+            drop(std::io::stdin().lock().lines().next());
             let killed = match child.kill() {
                 Ok(()) => "0".to_owned(),
                 Err(error) => error

@@ -9,13 +9,14 @@ use std::time::Duration;
 use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
-use super::launch::{Running, Spec, deadline, launch, pool_of, run_command};
+use super::launch::{Running, Spec, deadline, launch, pool_of, run_command, summary};
+use super::pool_verdict;
 use super::probe_sec::{PIPE_OBJECT_PREFIX, REFUSED, THREAD_RIGHTS, TOKEN_RIGHTS};
 use super::rows::Ctx;
 use super::sys::say;
-use super::win;
 use super::win_desk::{self, UserObject};
 use super::win_thread;
+use super::{win, win_pool};
 
 /// The start of the agent's own window station's name (the outer runner makes it).
 const STATION_PREFIX: &str = "ClauseoRun-";
@@ -268,30 +269,49 @@ fn conhosts(
         .collect()
 }
 
-/// The `breakaway` row: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or the child it made is still
-/// in a job; the child is killed either way.
+/// The `breakaway` row: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or the child it made is
+/// still in the session's own kill-on-close job (`pool_verdict::breakaway`); the child is killed
+/// either way. While the probe waits, the harness duplicates that job's handle from the outer
+/// runner and checks the child with `IsProcessInJob` (or the job's pid list), then closes it.
 pub(crate) fn breakaway(ctx: &Ctx<'_>) -> Result<String, String> {
-    let done = run(ctx, "A", &Spec::probe(ctx.manifest, &["breakaway"]))?;
-    for line in &done.stdout {
-        ctx.note(&format!("A: {line}"));
-    }
-    if let Some(code) = values(&done.stdout, "breakaway error").first() {
-        if *code == DENIED {
-            return Ok("CreateProcess with CREATE_BREAKAWAY_FROM_JOB gave 5".to_owned());
-        }
-        return Err(format!(
-            "CreateProcess with CREATE_BREAKAWAY_FROM_JOB gave {code}, not 5"
+    let mut a = launch(
+        ctx.manifest,
+        "A",
+        &Spec::probe(ctx.manifest, &["breakaway"]),
+    )?;
+    let until = deadline(ctx.limit);
+    let first = a.line_after("breakaway ", until);
+    let pid = first
+        .as_deref()
+        .and_then(|line| line.strip_prefix("child "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|p| p.parse::<u32>().ok());
+    let mut ours = Vec::new();
+    if let Some(pid) = pid {
+        let inside = win_pool::session_job(a.pid()).and_then(|job| {
+            let inside = win_pool::pid_in_job(pid, job.0);
+            // Closed before the session ends, which the job's last handle must do.
+            drop(job);
+            inside
+        });
+        ours.push(format!(
+            "breakaway our-job {}",
+            inside.map_or_else(|why| format!("error {why}"), |inside| inside.to_string())
         ));
     }
-    let child = values(&done.stdout, "breakaway child")
-        .first()
-        .map(|v| (*v).to_owned())
-        .ok_or_else(|| format!("no breakaway line: {:?} {:?}", done.stdout, done.stderr))?;
-    let pid = child
-        .split_whitespace()
-        .next()
-        .and_then(|p| p.parse::<u32>().ok());
-    let killed = values(&done.stdout, "breakaway killed").join(" ");
+    if let Err(why) = a.send("go\n") {
+        ctx.note(&format!(
+            "the line that ends the probe's wait wasn't sent: {why}"
+        ));
+    }
+    let done = a.finish(until)?;
+    ctx.note(&format!("A: probe breakaway: {}", summary(&done)));
+    let mut lines = done.stdout;
+    lines.extend(ours);
+    for line in lines.iter().chain(&done.stderr) {
+        ctx.note(&format!("A: {line}"));
+    }
+    let killed = values(&lines, "breakaway killed").join(" ");
     // The probe killed it; the harness makes sure (it may lack the right to look: then the
     // kill-on-close job, which the child is in when it passes, ends it with the outer).
     if let Some(pid) = pid {
@@ -308,16 +328,7 @@ pub(crate) fn breakaway(ctx: &Ctx<'_>) -> Result<String, String> {
             )),
         }
     }
-    if child.ends_with("in-job true") {
-        Ok(format!(
-            "CREATE_BREAKAWAY_FROM_JOB made a child that is still in a job ({child}); killed \
-             ({killed})"
-        ))
-    } else {
-        Err(format!(
-            "the CREATE_BREAKAWAY_FROM_JOB child left the job: {child}; killed ({killed})"
-        ))
-    }
+    pool_verdict::breakaway(&lines)
 }
 
 /// The `handles` row: the agent holds exactly three runner pipe handles (in, out, err), never
