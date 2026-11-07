@@ -43,32 +43,52 @@ impl UpstreamAnswer {
 /// when a lookup failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Failure {
-    /// Nothing shows it: no PAC URL, no static proxy, no broken PAC script (a plain network,
-    /// or WPAD with nothing found, or settings that could not be read).
+    /// Nothing shows it: the settings were read and name no PAC URL, PAC script or static
+    /// proxy, and no PAC script failed to run (a plain network, or WPAD with nothing found).
     #[default]
     Unmeant,
-    /// A PAC URL or a static proxy is set, or `WinHTTP` found a PAC script it could not run.
+    /// A PAC URL, a PAC script or a static proxy is set, `WinHTTP` found a PAC script it could
+    /// not run, or the settings could not be read (or not in time): refusing is safer than going
+    /// around a proxy the firm may require.
     MeantProxy,
+}
+
+/// A PAC file the settings name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg(any(target_os = "macos", windows, test))]
+pub(crate) enum PacSetting {
+    /// None.
+    #[default]
+    None,
+    /// A PAC URL, or a script held inline (macOS `ProxyAutoConfigJavaScript`, as an MDM profile
+    /// pushes).
+    Named,
 }
 
 /// What a failed lookup's settings held, for [`Configured::failure`].
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg(any(target_os = "macos", windows, test))]
 pub(crate) struct Configured {
-    /// The settings name a PAC URL.
-    pub(crate) pac_url: bool,
+    /// The PAC file the settings name, if any.
+    pub(crate) pac: PacSetting,
     /// The settings name a static HTTP or HTTPS proxy.
     pub(crate) static_proxy: bool,
     /// The lookup failed with `ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT` (12166): a PAC script was
     /// found, WPAD's included, and would not run.
     pub(crate) broken_script: bool,
+    /// The settings could not be read.
+    pub(crate) unreadable: bool,
 }
 
 #[cfg(any(target_os = "macos", windows, test))]
 impl Configured {
-    /// Any of the three means the firm meant a proxy.
+    /// Any of them means the firm meant a proxy, or may have.
     pub(crate) fn failure(self) -> Failure {
-        if self.pac_url || self.static_proxy || self.broken_script {
+        if self.pac != PacSetting::None
+            || self.static_proxy
+            || self.broken_script
+            || self.unreadable
+        {
             Failure::MeantProxy
         } else {
             Failure::Unmeant

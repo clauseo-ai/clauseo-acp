@@ -51,7 +51,7 @@ use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use net::{Network, SystemNetwork};
 use token::Token;
-use upstream::{Env, Failure, Lookup, OsAnswer};
+use upstream::{Env, Intent, Lookup, OsAnswer};
 
 /// What a launch's proxy allows, where it sends traffic, and where its refusals go.
 pub struct ProxyConfig {
@@ -211,7 +211,7 @@ impl Default for Limits {
 pub(crate) struct Options {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) limits: Limits,
-    pub(crate) system: Option<(Env, Box<OsAnswer>, Failure)>,
+    pub(crate) system: Option<(Env, Box<OsAnswer>, Box<Intent>)>,
 }
 
 impl Default for Options {
@@ -248,7 +248,7 @@ pub(crate) fn start_with(
     let lookup = Arc::new(match options.system {
         Some((env, os, intent)) => {
             let clock = SharedClock(Arc::clone(&options.clock));
-            Lookup::with_parts(config.upstream, env, os, clock)?.with_intent(move || intent)
+            Lookup::with_parts(config.upstream, env, os, clock)?.with_intent(intent)
         }
         None => Lookup::new(config.upstream)?,
     });

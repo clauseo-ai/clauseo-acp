@@ -8,7 +8,9 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::Scheme::Https;
-use super::super::{Env, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer, bounded};
+use super::super::{
+    Answer, Env, Failure, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer, bounded,
+};
 use super::{FakeClock, http};
 
 /// A lookup whose OS answer waits for the test: each call reports its host on `arrived` and
@@ -21,6 +23,11 @@ struct Gated {
 }
 
 fn gated() -> Gated {
+    gated_meaning(Failure::Unmeant)
+}
+
+/// [`gated`], with `failure` what the settings show when a lookup fails without asking the OS.
+fn gated_meaning(failure: Failure) -> Gated {
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);
     let (arrived_tx, arrived) = mpsc::channel();
@@ -40,7 +47,8 @@ fn gated() -> Gated {
         },
         FakeClock::default(),
     )
-    .unwrap();
+    .unwrap()
+    .with_intent(move || failure);
     Gated {
         lookup: Arc::new(lookup),
         calls,
@@ -131,6 +139,29 @@ fn past_eight_lookups_at_once_a_miss_waits_then_fails_uncached() {
         http("os-proxy", 1)
     );
     assert_eq!(gated.calls.load(Ordering::SeqCst), OS_LOOKUPS_MOST + 1);
+}
+
+/// A miss failed for want of a slot carries what the settings show, so the egress proxy refuses
+/// rather than going direct when they name a proxy.
+#[test]
+fn a_miss_past_the_slots_carries_the_settings_meaning() {
+    let gated = gated_meaning(Failure::MeantProxy);
+    let running: Vec<_> = (0..OS_LOOKUPS_MOST)
+        .map(|i| {
+            let handle = route_on_thread(&gated.lookup, &format!("h{i}.test"));
+            gated.arrived.recv().unwrap();
+            handle
+        })
+        .collect();
+    let decided = gated.lookup.decide(Https, "ninth.test", 443);
+    assert_eq!(decided.answer, Answer::Failed(Failure::MeantProxy));
+    assert_eq!(decided.got, None);
+    for _ in 0..OS_LOOKUPS_MOST {
+        gated.release.send(()).unwrap();
+    }
+    for handle in running {
+        assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
+    }
 }
 
 /// A miss that finds every slot busy runs once one frees within the wait.
