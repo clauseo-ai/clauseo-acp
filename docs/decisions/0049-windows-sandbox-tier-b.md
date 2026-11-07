@@ -1068,8 +1068,13 @@ for `--reclaim`.
   that pool user fails closed, and it is alive in each logon gap (see "Escapees until
   `\Clauseo\SandboxStop`"). The agent can make one of its own processes so (a process sets its
   own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
-  or one a service starts; only one outside the job outlives the session. The agent can't change
-  its token's default DACL for a service to pass on (its token's DACL, above). The design that closes this is AppContainer, after launch (see
+  or one a service starts; only one outside the job outlives the session. The agent's own token
+  can't change its default DACL (`0x20009`, its token's DACL, above), but a child it starts can:
+  the child's token takes its object DACL from the agent's default DACL, which grants the pool
+  user `GA`, so the child can open its own token with `TOKEN_ADJUST_DEFAULT` and change the
+  default DACL a service passes on. That adds nothing, since any process can shut its own DACL
+  through its pseudo-handle anyway. The harness's `child-token-default-dacl` row records, as
+  information, whether that open works. The design that closes this is AppContainer, after launch (see
   "Rejected: AppContainer (spike A)" for what blocks it today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients

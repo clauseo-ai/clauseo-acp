@@ -14,6 +14,9 @@
 //! to about 60 s after it. So before the harness starts a session, or a process of its own as a
 //! pool user outside a session, it waits until that user has no process left ([`settle`]).
 //!
+//! `child-token-default-dacl` (information only) runs `probe child-token` as A through the
+//! runner: whether the agent's child may open its own token with `TOKEN_ADJUST_DEFAULT`.
+//!
 //! `wts-visibility` (information only) runs `probe wts` as A's pool user, outside any job, and
 //! records what `WTSEnumerateProcessesW` shows that user next to a Toolhelp snapshot.
 
@@ -33,7 +36,7 @@ use super::rows::{Ctx, Outcome};
 use super::sys::{now, sleep};
 use super::win_desk::ControlStation;
 use super::win_logon::{Started, run_with_logon, start_with_logon};
-use super::{win, win_pool};
+use super::{token_verdict, win, win_pool};
 
 /// How long after the session's end `pool-processes-at-end` waits for the listing to empty.
 const END_GRACE: Duration = Duration::from_secs(10);
@@ -403,6 +406,27 @@ pub(crate) fn token_config(ctx: &Ctx<'_>) -> Result<String, String> {
         logon_sids(lines)
     ));
     judge(ctx, pool_verdict::token_config(lines, &pool.sid))
+}
+
+/// The `child-token-default-dacl` row, information only: `probe child-token` as A, whose child
+/// opens its own token with `TOKEN_ADJUST_DEFAULT`. PASS carrying what the child got, also noted
+/// as information (`token_verdict::child_token`); INFO only when no result came, or the probe
+/// didn't run, naming why. Never FAIL.
+pub(crate) fn child_token(ctx: &Ctx<'_>) -> Outcome {
+    let done = match run(ctx, "A", &Spec::probe(ctx.manifest, &["child-token"])) {
+        Ok(done) => done,
+        Err(why) => return Outcome::Info(format!("probe child-token didn't run: {why}")),
+    };
+    for line in &done.stdout {
+        ctx.note(&format!("child-token: {line}"));
+    }
+    match token_verdict::child_token(&done.stdout) {
+        Verdict::Pass(text) | Verdict::Fail(text) => {
+            ctx.note(&format!("information: {text}"));
+            Outcome::Pass(text)
+        }
+        Verdict::Info(why) => Outcome::Info(why),
+    }
 }
 
 /// The `wts-visibility` row, information only: `probe wts` as A's pool user (outside any job, on

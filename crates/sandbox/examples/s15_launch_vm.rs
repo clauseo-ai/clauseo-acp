@@ -100,6 +100,9 @@ mod rows;
 #[path = "s15_launch_vm/sys.rs"]
 mod sys;
 #[cfg(windows)]
+#[path = "s15_launch_vm/token_verdict.rs"]
+mod token_verdict;
+#[cfg(windows)]
 #[path = "s15_launch_vm/ui.rs"]
 mod ui;
 #[cfg(windows)]

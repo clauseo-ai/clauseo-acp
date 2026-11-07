@@ -12,7 +12,7 @@ use super::manifest::Manifest;
 use super::sys::{now, say};
 
 /// Every row, in the order `rows` and `--unattended` run them.
-pub(crate) const ROWS: [&str; 26] = [
+pub(crate) const ROWS: [&str; 27] = [
     "whoami",
     "node-pipes",
     "open-process",
@@ -36,6 +36,7 @@ pub(crate) const ROWS: [&str; 26] = [
     "sweep-before-logon",
     "sweep-mid-session",
     "agent-token-config",
+    "child-token-default-dacl",
     "wts-visibility",
     "end-cleanup",
     "cancel",
@@ -182,6 +183,7 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
         "sweep-before-logon" => super::checks_pool::before_logon(ctx),
         "sweep-mid-session" => super::checks_pool::mid_session(ctx),
         "agent-token-config" => super::checks_pool::token_config(ctx),
+        "child-token-default-dacl" => return super::checks_pool::child_token(ctx),
         "wts-visibility" => return super::checks_pool::wts_visibility(ctx),
         "end-cleanup" => super::checks_cleanup::end_cleanup(ctx),
         "cancel" => super::checks_cancel::cancel(ctx),
