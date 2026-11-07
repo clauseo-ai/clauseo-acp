@@ -400,8 +400,9 @@ pub enum RunExit {
     LogonRight,
     /// The pool user's password was refused (1326): set-up must run again.
     Password,
-    /// Another logon failure, or what the outer needs before its logon failed to be read or
-    /// written: the pool user's secret, System32's path, the session's unclean-session marker.
+    /// Another logon failure, or what the outer needs before its logon failed to be read: the
+    /// pool user's secret, System32's path. A marker that can't be written is
+    /// [`RunExit::MarkerUnwritable`].
     Logon,
     /// M3: the launch would reuse the lawyer's `~\.codex`.
     CodexReuse,
@@ -437,10 +438,14 @@ pub enum RunExit {
     /// (`leftovers.rs`), and the outer takes this code as any failed sweeper's. Kept, with its
     /// number, since the codes are explicit and may be read downstream.
     PoolStop,
+    /// The session's unclean-session marker couldn't be written, or the launch file's name gives
+    /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
+    /// runs that no marker names.
+    MarkerUnwritable,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 17] = [
+    const ALL: [RunExit; 18] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -458,6 +463,7 @@ impl RunExit {
         RunExit::DllSearch,
         RunExit::Escapee,
         RunExit::PoolStop,
+        RunExit::MarkerUnwritable,
     ];
 
     /// The exit code.
@@ -498,7 +504,8 @@ impl RunExit {
             | RunExit::Sweep
             | RunExit::DllSearch
             | RunExit::Escapee
-            | RunExit::PoolStop => None,
+            | RunExit::PoolStop
+            | RunExit::MarkerUnwritable => None,
         }
     }
 }
