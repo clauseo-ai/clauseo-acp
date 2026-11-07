@@ -45,8 +45,11 @@
 //! which verifies nothing, so such a build's refresh fails closed. A key that isn't a minisign
 //! public key fails the build, and so does a release build (`CLAUSEO_RELEASE_MODE=release`, any
 //! profile) whose key isn't the pinned production key, `PRODUCTION_KEY_ID`, or while none is
-//! pinned (`release_guard`). On msvc the exe's `VERSIONINFO` also carries the key's id as the
-//! string `UpdaterKeyId`, so a release's assembly can check it from the file without running it.
+//! pinned (`release_guard`). release.yml's build legs export `CLAUSEO_RELEASE_MODE` as their mode
+//! (`release`, `test` or `dry`); any other value, the empty string included, fails the build, so
+//! a typo can't turn the guard off. On msvc the exe's `VERSIONINFO` also carries the key's id as
+//! the string `UpdaterKeyId`, which release.yml's assemble job checks from the file without
+//! running it.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

@@ -23,18 +23,18 @@ use windows::Win32::System::Registry::{
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{HSTRING, PCWSTR, w};
 
-use super::source::read_capped;
+use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
     SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
 };
-use crate::windows::admin_copy::{self, LOCKED_FILE_SDDL};
+use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::record::read_string;
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::owner::this_process;
 use crate::windows::setup::record_values::{
-    ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, OWNER_SID, USER_INSTALL_DIR,
+    ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, USER_INSTALL_DIR,
 };
 use crate::windows::sids::Sid;
 
@@ -61,6 +61,8 @@ pub fn run() -> RefreshExit {
 pub struct WindowsRefresher {
     /// `<ProgramFiles>\Clauseo\Sandbox`, or why it couldn't be found.
     sandbox: Result<PathBuf, Failed>,
+    /// The admin folder, held through the renames (`hold_admin_folder`).
+    held: Option<Handle>,
 }
 
 impl Default for WindowsRefresher {
@@ -74,6 +76,7 @@ impl WindowsRefresher {
     pub fn new() -> WindowsRefresher {
         WindowsRefresher {
             sandbox: sandbox_dir(),
+            held: None,
         }
     }
 
@@ -141,7 +144,7 @@ impl Refresher for WindowsRefresher {
                 .map_err(|error| format!("the record: {error}"))
         };
         Ok(RefreshRecord {
-            owner_sid: read(OWNER_SID)?,
+            copy_owner: read(ADMIN_COPY_OWNER)?,
             user_install_dir: read(USER_INSTALL_DIR)?,
             admin_copy_sha256: read(ADMIN_COPY_SHA256)?,
             admin_copy_version: read(ADMIN_COPY_VERSION)?,
@@ -151,6 +154,14 @@ impl Refresher for WindowsRefresher {
     fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed> {
         // A temporary profile isn't the owner's own folder: none, so the refresh refuses.
         own_profile(owner).map_err(|error| format!("the owner's profile: {error}"))
+    }
+
+    fn admin_only_dir(&mut self, dir: &Path) -> Result<bool, Failed> {
+        let what = |error: std::io::Error| format!("the install folder: {error}");
+        if os::found(dir).map_err(what)? != Found::Folder {
+            return Ok(false);
+        }
+        Ok(level_safe(&os::security(dir).map_err(what)?))
     }
 
     fn clear_leftovers(&mut self) -> Result<(), Failed> {
@@ -181,6 +192,16 @@ impl Refresher for WindowsRefresher {
     /// launcher's exact check (`admin_copy::locked`) still passes.
     fn secure_staged(&mut self) -> Result<(), Failed> {
         staging::secure_file(&self.staged(STAGED_NAME)?, LOCKED_FILE_SDDL)
+    }
+
+    fn hold_admin_folder(&mut self) -> Result<(), Failed> {
+        let sandbox = self.sandbox.clone()?;
+        self.held = Some(staging::hold_dir(&sandbox)?);
+        Ok(())
+    }
+
+    fn release_admin_folder(&mut self) {
+        self.held = None;
     }
 
     fn set_aside_admin_copy(&mut self) -> Result<(), Failed> {

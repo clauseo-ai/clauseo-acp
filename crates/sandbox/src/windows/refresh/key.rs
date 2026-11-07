@@ -59,9 +59,15 @@ pub const PRODUCTION_KEY_ID: Option<&str> = None;
 /// administrator, so running it would prompt).
 pub const KEY_ID_VERSION_STRING: &str = "UpdaterKeyId";
 
+/// The values `CLAUSEO_RELEASE_MODE` may take: release.yml's three modes, which its build
+/// legs export from `check`'s `mode`. Unset is a local build.
+pub const RELEASE_MODES: [&str; 3] = ["release", "test", "dry"];
+
 /// The release guard: in a release build (`CLAUSEO_RELEASE_MODE=release`, in any cargo profile)
 /// the embedded key must be [`PRODUCTION_KEY_ID`], which must be set. Any other build (a dry or
 /// test run, or a local one) may embed any key; the exe's `UpdaterKeyId` string says which.
+/// A mode outside [`RELEASE_MODES`], the empty string included, fails: a typo must not turn the
+/// guard off.
 pub fn release_guard(release_mode: Option<&str>, key_id: u64) -> Result<(), String> {
     release_guard_with(release_mode, key_id, PRODUCTION_KEY_ID)
 }
@@ -72,10 +78,18 @@ pub fn release_guard_with(
     key_id: u64,
     pinned: Option<&str>,
 ) -> Result<(), String> {
-    if release_mode != Some("release") {
-        return Ok(());
-    }
     let found = format!("{key_id:016X}");
+    match release_mode {
+        Some("release") => {}
+        None => return Ok(()),
+        Some(mode) if RELEASE_MODES.contains(&mode) => return Ok(()),
+        Some(mode) => {
+            return Err(format!(
+                "CLAUSEO_RELEASE_MODE is {mode:?}, not one of {RELEASE_MODES:?} or unset; the \
+                 embedded updater key is {found}"
+            ));
+        }
+    }
     let Some(pinned) = pinned else {
         return Err(format!(
             "a release build (CLAUSEO_RELEASE_MODE=release) needs PRODUCTION_KEY_ID in \

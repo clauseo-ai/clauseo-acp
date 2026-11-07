@@ -1,6 +1,7 @@
 //! The refresh's file effects under Program Files (steps 6 and 9): the staging folder, made or
 //! re-secured with a protected SYSTEM-only DACL and read back; the staged copy, written there
-//! and read back; the admin copy's DACL given to it; and the renames, all write-through.
+//! and read back; the admin copy's DACL given to it; the admin folder held for the renames; and
+//! the renames, all write-through.
 #![expect(
     unsafe_code,
     reason = "FFI to the file, security descriptor and rename calls"
@@ -24,11 +25,13 @@ use windows::Win32::Security::{
     SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{
-    CREATE_NEW, CreateDirectoryW, CreateFileW, DeleteFileW, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH,
-    FILE_SHARE_MODE, FileAttributeTagInfo, FlushFileBuffers, GetFileInformationByHandleEx,
-    MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, RemoveDirectoryW, WriteFile,
+    CREATE_NEW, CreateDirectoryW, CreateFileW, DeleteFileW, FILE_ADD_FILE,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAG_WRITE_THROUGH, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_MODE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_DATA, FileAttributeTagInfo, FlushFileBuffers,
+    GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
+    RemoveDirectoryW, WriteFile,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
@@ -115,7 +118,7 @@ pub(super) fn secure_dir(path: &Path, sddl: &str) -> Result<(), Failed> {
     // SAFETY: `name` is NUL-terminated and `attributes` points at a live descriptor; both
     // outlive the call.
     let made = unsafe { CreateDirectoryW(&name, Some(&raw const attributes)) };
-    let folder = open_dir(path)?;
+    let folder = open_dir(path, SECURITY_ACCESS, FILE_SHARE_MODE(0))?;
     if let Err(error) = made {
         if code_of(&error) != ERROR_ALREADY_EXISTS.0 {
             return Err(failed("CreateDirectoryW", &error));
@@ -131,12 +134,25 @@ pub(super) fn secure_dir(path: &Path, sddl: &str) -> Result<(), Failed> {
     Ok(())
 }
 
-/// The folder `path`, opened for its descriptor without following a reparse point; a reparse
-/// point or a file is refused.
-fn open_dir(path: &Path) -> Result<Handle, Failed> {
+/// The admin folder `path`, opened for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`),
+/// sharing read, write and delete, without following a reparse point, for the refresh to hold
+/// through its renames into the folder. A rename opens its target folder for writing, sharing
+/// read and write; a handle that shares read only, which a user who can read the folder could
+/// open, would fail it. While this handle is open no such handle can be opened, and one already
+/// open fails this open, before anything moves.
+pub(super) fn hold_dir(path: &Path) -> Result<Handle, Failed> {
+    let access = FILE_WRITE_DATA.0 | FILE_ADD_FILE.0 | FILE_READ_ATTRIBUTES.0;
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    open_dir(path, access, share).map_err(|why| format!("the admin folder: {why}"))
+}
+
+/// The folder `path`, opened with `access` and `share` without following a reparse point; a
+/// reparse point or a file is refused.
+fn open_dir(path: &Path, access: u32, share: FILE_SHARE_MODE) -> Result<Handle, Failed> {
     let folder = open(
         path,
-        SECURITY_ACCESS,
+        access,
+        share,
         FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0,
     )?;
     let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
@@ -151,23 +167,23 @@ fn open_dir(path: &Path) -> Result<Handle, Failed> {
     }
     .map_err(|error| failed("GetFileInformationByHandleEx", &error))?;
     if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
-        return Err("the staging folder is a reparse point".to_owned());
+        return Err("the folder is a reparse point".to_owned());
     }
     if tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-        return Err("the staging folder isn't a folder".to_owned());
+        return Err("the folder isn't a folder".to_owned());
     }
     Ok(folder)
 }
 
-/// `path` opened with `access`, sharing nothing, with `flags`.
-fn open(path: &Path, access: u32, flags: u32) -> Result<Handle, Failed> {
+/// `path` opened with `access`, sharing `share`, with `flags`.
+fn open(path: &Path, access: u32, share: FILE_SHARE_MODE, flags: u32) -> Result<Handle, Failed> {
     let name = HSTRING::from(path.as_os_str());
     // SAFETY: `name` is NUL-terminated and outlives the call; the handle is owned at once.
     unsafe {
         CreateFileW(
             &name,
             access,
-            FILE_SHARE_MODE(0),
+            share,
             None,
             OPEN_EXISTING,
             windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(flags),
@@ -296,7 +312,12 @@ pub(super) fn write_new(path: &Path, bytes: &[u8], sddl: &str) -> Result<(), Fai
 /// Gives the file `path` (not followed if a reparse point) the owner and protected DACL `sddl`
 /// describes.
 pub(super) fn secure_file(path: &Path, sddl: &str) -> Result<(), Failed> {
-    let file = open(path, SECURITY_ACCESS, FILE_FLAG_OPEN_REPARSE_POINT.0)?;
+    let file = open(
+        path,
+        SECURITY_ACCESS,
+        FILE_SHARE_MODE(0),
+        FILE_FLAG_OPEN_REPARSE_POINT.0,
+    )?;
     set_security(&file, &Descriptor::from_sddl(sddl)?)
 }
 

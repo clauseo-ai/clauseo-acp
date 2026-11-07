@@ -14,9 +14,10 @@ pub(super) const PROFILE: &str = r"C:\Users\Rohan";
 pub(super) const OWNER: &str = "S-1-5-21-1-2-3-1001";
 
 /// The steps a crash can stop the run at, in the order they run.
-pub(super) const STEPS: [&str; 6] = [
+pub(super) const STEPS: [&str; 7] = [
     "stage",
     "secure_staged",
+    "hold",
     "set_aside",
     "place_staged",
     "write_version",
@@ -29,6 +30,8 @@ pub(super) struct Fake {
     pub(super) exe: PathBuf,
     pub(super) record: RefreshRecord,
     pub(super) profile: Option<PathBuf>,
+    /// What `admin_only_dir` says of the install folder.
+    pub(super) admin_only: bool,
     pub(super) source_exe: Result<Vec<u8>, SourceError>,
     pub(super) source_sig: Result<Vec<u8>, SourceError>,
     /// What `stage` reads back, when it differs from what it was given.
@@ -53,12 +56,13 @@ impl Fake {
             system: true,
             exe: PathBuf::from(ADMIN),
             record: RefreshRecord {
-                owner_sid: Some(OWNER.to_owned()),
+                copy_owner: Some(OWNER.to_owned()),
                 user_install_dir: Some(INSTALL.to_owned()),
                 admin_copy_sha256: Some(sha_hex(old)),
                 admin_copy_version: Some(OLD_VERSION.to_owned()),
             },
             profile: Some(PathBuf::from(PROFILE)),
+            admin_only: false,
             source_exe: Ok(new.to_vec()),
             source_sig: Ok(key.sign(new, sig_comment)),
             staged_reads_back: None,
@@ -86,6 +90,17 @@ impl Fake {
             return Err(format!("{name} failed"));
         }
         Ok(())
+    }
+
+    /// Whether the admin folder is held now: a hold, the last call either way, went through (a
+    /// failed one stops the run before any rename).
+    pub(super) fn holding(&self) -> bool {
+        let last = self
+            .calls
+            .iter()
+            .rev()
+            .find(|call| ["hold", "release"].contains(call));
+        last == Some(&"hold")
     }
 
     /// The invariant: the record never names a hash the admin path doesn't hold, unless it is
@@ -125,6 +140,11 @@ impl Refresher for Fake {
         assert_eq!(owner.as_str(), OWNER, "the record's owner");
         Ok(self.profile.clone())
     }
+    fn admin_only_dir(&mut self, dir: &Path) -> Result<bool, Failed> {
+        assert_eq!(dir, Path::new(INSTALL), "the record's folder");
+        self.calls.push("admin_only_dir");
+        Ok(self.admin_only)
+    }
     fn read_sources(&mut self, dir: &Path) -> Result<Sources, (SourceFile, SourceError)> {
         assert_eq!(dir, Path::new(INSTALL), "the record's folder, nothing else");
         self.calls.push("read_source");
@@ -150,18 +170,27 @@ impl Refresher for Fake {
     fn secure_staged(&mut self) -> Result<(), Failed> {
         self.step("secure_staged")
     }
+    fn hold_admin_folder(&mut self) -> Result<(), Failed> {
+        self.step("hold")
+    }
+    fn release_admin_folder(&mut self) {
+        self.calls.push("release");
+    }
     fn set_aside_admin_copy(&mut self) -> Result<(), Failed> {
+        assert!(self.holding(), "a rename only while the folder is held");
         self.step("set_aside")?;
         self.set_aside = self.admin_file.take();
         Ok(())
     }
     fn place_staged(&mut self) -> Result<(), Failed> {
+        assert!(self.holding(), "a rename only while the folder is held");
         self.step("place_staged")?;
         assert!(self.admin_file.is_none(), "a move never replaces a file");
         self.admin_file = self.staged.take();
         Ok(())
     }
     fn restore_admin_copy(&mut self) -> Result<(), Failed> {
+        assert!(self.holding(), "a rename only while the folder is held");
         self.step("restore")?;
         self.admin_file = self.set_aside.take();
         Ok(())

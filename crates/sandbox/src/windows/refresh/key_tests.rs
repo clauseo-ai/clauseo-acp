@@ -82,7 +82,11 @@ fn a_release_build_needs_the_pinned_production_key() {
         (None, PLACEHOLDER_KEY_ID, None, false),
         (Some("dry"), PLACEHOLDER_KEY_ID, pinned, false),
         (Some("test"), TEST_KEY_ID, pinned, false),
-        (Some(""), TEST_KEY_ID, None, false),
+        // Any other mode, a typo or the empty string, fails: it must not turn the guard off.
+        (Some(""), TEST_KEY_ID, None, true),
+        (Some("Release"), real, pinned, true),
+        (Some("release "), TEST_KEY_ID, pinned, true),
+        (Some("local"), PLACEHOLDER_KEY_ID, None, true),
     ] {
         let verdict = release_guard_with(mode, id, pin);
         assert_eq!(verdict.is_err(), refused, "{mode:?} {id:016X} {pin:?}");
