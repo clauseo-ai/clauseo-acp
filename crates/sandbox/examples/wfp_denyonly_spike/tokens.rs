@@ -489,12 +489,11 @@ pub(crate) fn run_as(
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: the token is open; the line is writable; `startup` and `info` are live.
     unsafe {
-        // LOGON_WITH_PROFILE: the user's profile and HKCU loaded, as a real launch has them;
-        // without them the pool user's child couldn't register an AppContainer profile (run
-        // 42356413018, row 11 not run).
+        // No LOGON_WITH_PROFILE: run 42357105557 showed it breaks the restricted-token rows
+        // (0x80070057) and doesn't make row 11 run.
         CreateProcessWithTokenW(
             token.0,
-            CREATE_PROCESS_LOGON_FLAGS(1),
+            CREATE_PROCESS_LOGON_FLAGS(0),
             &HSTRING::from(exe.as_os_str()),
             Some(PWSTR(line.as_mut_ptr())),
             CREATE_NO_WINDOW,

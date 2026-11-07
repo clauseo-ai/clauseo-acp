@@ -23,18 +23,20 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, GetSecurityDescriptorDacl,
-    GetTokenInformation, ImpersonateAnonymousToken, PSECURITY_DESCRIPTOR, PSID, RevertToSelf,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT,
-    TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS,
-    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenGroups, TokenUser,
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, ImpersonateAnonymousToken,
+    IsTokenRestricted, PSECURITY_DESCRIPTOR, PSID, RevertToSelf, SECURITY_CAPABILITIES,
+    SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
+    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenGroups,
+    TokenIntegrityLevel, TokenUser,
 };
 use windows::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CreateProcessAsUserW, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetCurrentThread, GetExitCodeProcess,
-    INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetCurrentProcessId, GetCurrentThread,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    OpenProcessToken, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION,
+    STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
@@ -53,6 +55,11 @@ unsafe extern "system" {
     ) -> i32;
     fn DeleteAppContainerProfile(name: PCWSTR) -> i32;
     fn FreeSid(sid: PSID) -> *mut c_void;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
 }
 
 #[link(name = "iphlpapi")]
@@ -134,11 +141,45 @@ pub(crate) fn last_error() -> Option<String> {
 pub(crate) fn run(exe: &Path, how: &str, inner: &str) -> Result<u32, String> {
     let ran = start(exe, how, inner);
     if let Err(why) = &ran {
+        let facts = parent_facts();
         *LAST_ERROR
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{how}: {why}"));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(format!("{how}: {why} [parent: {facts}]"));
     }
     ran
+}
+
+/// The parent's token as the `AppContainer` start sees it: its session, integrity RID, and
+/// whether it is restricted, for row 11's diagnosis.
+fn parent_facts() -> String {
+    let mut session = 0u32;
+    // SAFETY: a live out-pointer for this process's own id.
+    let in_session = unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &raw mut session) };
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo-handle needs no close; `token` is closed below.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }.is_err() {
+        return format!("session {session} (read: {in_session}), token unreadable");
+    }
+    // SAFETY: `token` is open.
+    let restricted = unsafe { IsTokenRestricted(token) }.is_ok();
+    let integrity = token_info(token, TokenIntegrityLevel)
+        .ok()
+        .and_then(|buffer| {
+            // SAFETY: the buffer holds the TOKEN_MANDATORY_LABEL just written; its SID's last
+            // sub-authority is the integrity RID.
+            unsafe {
+                let label = &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>();
+                let count = *GetSidSubAuthorityCount(label.Label.Sid);
+                Some(*GetSidSubAuthority(
+                    label.Label.Sid,
+                    u32::from(count.checked_sub(1)?),
+                ))
+            }
+        });
+    // SAFETY: opened above, closed once.
+    drop(unsafe { CloseHandle(token) });
+    format!("session {session}, integrity {integrity:?}, restricted {restricted}")
 }
 
 /// [`run`]'s child.
