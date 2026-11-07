@@ -2,10 +2,10 @@
 //! transaction: the provider and the sublayer; every filter already in our sublayer deleted
 //! (ours, and any foreign one); the block filters and one static permit per pool user added.
 //! So a re-run or an extend replaces the filters with no moment where a pool user is
-//! unfiltered. Then the owner's read-only grants, and each object's owner read back: it must be
-//! Administrators or SYSTEM ([`owner_allowed`]), or the set-up fails; then the firewall rules,
-//! which never fail the set-up ([`FirewallOutcome`]). Any WFP failure, the Base Filtering
-//! Engine down included, fails it.
+//! unfiltered. Each object's owner is read back before the commit: it must be Administrators or
+//! SYSTEM ([`owner_allowed`]), or the transaction aborts and the set-up fails. Then the owner's
+//! read-only grants; then the firewall rules, which never fail the set-up
+//! ([`FirewallOutcome`]). Any WFP failure, the Base Filtering Engine down included, fails it.
 
 use super::check::{ERROR_INVALID_OWNER, Kind, OWNER_CHECK, WfpError, classify, owner_allowed};
 use super::engine::{Engine, filters_in, grant, owner_of};
@@ -46,10 +46,8 @@ pub fn install(ns: &Namespace, setup: &NetworkSetup) -> Result<NetworkReport, Wf
     for spec in &filters {
         engine.add_filter(ns, spec)?;
     }
-    transaction.commit()?;
-    for each in setup.grants(ns) {
-        grant(&engine, ns, each.object, setup.owner(), each.mask, false)?;
-    }
+    // Read back inside the transaction: a failure aborts it, so nothing the lawyer owns is left
+    // committed (an object an earlier run left keeps its owner, and is checked too).
     let mut objects = vec![Object::Provider, Object::Sublayer];
     objects.extend(filters.iter().map(|spec| Object::Filter(spec.key)));
     for object in objects {
@@ -64,6 +62,10 @@ pub fn install(ns: &Namespace, setup: &NetworkSetup) -> Result<NetworkReport, Wf
                 code: ERROR_INVALID_OWNER,
             });
         }
+    }
+    transaction.commit()?;
+    for each in setup.grants(ns) {
+        grant(&engine, ns, each.object, setup.owner(), each.mask, false)?;
     }
     let firewall = firewall::ensure(&setup.rules(ns));
     if let FirewallOutcome::Ineffective(why) = &firewall {
