@@ -30,7 +30,7 @@ fn the_harness_order_assigns_each_matter_and_lets_a_forget_release_it() {
 
     // What the VM run did: assign before any session is marked.
     let open = sids.open_sessions().unwrap();
-    let refused = sids.assign(one, &pool(4), reread(&ledger), &open);
+    let refused = sids.assign(one, "vmr-none", &pool(4), reread(&ledger), &open);
     assert!(matches!(refused, Err(Assign::Records(_))), "{refused:?}");
 
     // The harness's order: one, three, four, then two.
@@ -42,7 +42,7 @@ fn the_harness_order_assigns_each_matter_and_lets_a_forget_release_it() {
         launch_matter_on_test_volume(root, data.path(), matter, &session, tick(at)).unwrap();
         let open = sids.open_sessions().unwrap();
         let got = sids
-            .assign(matter, &pool(4), reread(&ledger), &open)
+            .assign(matter, &session, &pool(4), reread(&ledger), &open)
             .unwrap();
         exit_matter_on_test_volume(root, data.path(), matter, &session, tick(at + 1)).unwrap();
         picked.push(got);
@@ -68,7 +68,7 @@ fn the_harness_order_assigns_each_matter_and_lets_a_forget_release_it() {
     launch_matter_on_test_volume(root_three, data.path(), three, "vmr-again", tick(101)).unwrap();
     let open = sids.open_sessions().unwrap();
     let again = sids
-        .assign(three, &pool(4), reread(&ledger), &open)
+        .assign(three, "vmr-again", &pool(4), reread(&ledger), &open)
         .unwrap();
     assert_eq!(Some(again), held, "kept");
     exit_matter_on_test_volume(root_three, data.path(), three, "vmr-again", tick(102)).unwrap();

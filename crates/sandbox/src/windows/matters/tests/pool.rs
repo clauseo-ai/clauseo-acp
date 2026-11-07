@@ -118,7 +118,7 @@ impl Launch for MatterSids {
     ) -> Result<Sid, Assign> {
         let data_dir = self.data_dir.clone();
         open_session(&data_dir, matter, "launch");
-        let got = self.assign(matter, pool, ledger, open);
+        let got = self.assign(matter, "launch", pool, ledger, open);
         close_sessions(&data_dir, matter);
         got
     }
