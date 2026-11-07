@@ -6,9 +6,11 @@
 //! copy s15_wfp_vm.exe C:\s15\bin\        (a folder the pool users can read and run)
 //! icacls C:\s15\bin /grant *S-1-15-2-1:(OI)(CI)RX   (for the AppContainer row)
 //! C:\s15\bin\s15_wfp_vm.exe status
-//! C:\s15\bin\s15_wfp_vm.exe rows [--foreign <port>] [--share \\host\guest] [--inbound <port>]
-//!     [--smb-host <ip>] [--webdav-host <host>]
-//! C:\s15\bin\s15_wfp_vm.exe listen <port>  (as a second Windows user, for the two-user row)
+//! C:\s15\bin\s15_wfp_vm.exe rows [--share \\host\guest] [--inbound <port>] [--smb-host <ip>]
+//!     [--webdav-host <host>]
+//! C:\s15\bin\s15_wfp_vm.exe listen 46150  (as a second Windows user), then `foreign check`
+//! C:\s15\bin\s15_wfp_vm.exe foreign add    (elevated), `foreign check` (the desktop user),
+//!     then `foreign remove` (elevated)
 //! ```
 //!
 //! `status` runs a launch's check for each pool user the machine record lists. `rows` (`rows.rs`)
@@ -71,6 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "status" => rows::status(),
         "rows" => rows::rows(&exe, rest),
         "listen" => rows::listen(rest),
+        "foreign" => rows::foreign(rest),
         other => Err(format!("unknown command {other:?}").into()),
     }
 }

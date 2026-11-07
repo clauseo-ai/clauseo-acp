@@ -18,19 +18,21 @@ use std::ptr;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0};
 use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, SDDL_REVISION_1,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::{
     ACL, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, GetSecurityDescriptorDacl,
-    GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
-    SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL,
-    TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenUser,
+    GetTokenInformation, ImpersonateAnonymousToken, PSECURITY_DESCRIPTOR, PSID, RevertToSelf,
+    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT,
+    TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenGroups, TokenUser,
 };
 use windows::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CreateProcessAsUserW, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken,
+    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, GetCurrentThread, GetExitCodeProcess,
+    INFINITE, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken,
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
     UpdateProcThreadAttribute, WaitForSingleObject,
 };
@@ -112,8 +114,17 @@ pub(crate) fn run(exe: &Path, how: &str, inner: &str) -> Result<u32, String> {
     let quoted = format!("\"{}\" \"probe\" \"{inner}\"", exe.display());
     let mut line: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
     match how {
-        "denyonly" => deny_only(exe, &mut line),
-        "lowbox" => lowbox(exe, &mut line),
+        "denyonly" => deny_only(exe, &mut line, DenyOnly::User),
+        "denyonlygroups" => deny_only(exe, &mut line, DenyOnly::Groups),
+        "denyonlyall" => deny_only(exe, &mut line, DenyOnly::All),
+        "lowbox" => lowbox(exe, &mut line, None),
+        "lowboxdenyonly" => {
+            let derived = restricted(DenyOnly::User)?;
+            let ran = lowbox(exe, &mut line, Some(derived));
+            // SAFETY: made by `restricted`, closed once.
+            drop(unsafe { CloseHandle(derived) });
+            ran
+        }
         other => Err(format!("no derived token {other:?}")),
     }
 }
@@ -135,83 +146,158 @@ fn wait(info: &PROCESS_INFORMATION) -> Result<u32, String> {
     Ok(code)
 }
 
-/// The child under this process's token with its user SID deny-only.
-fn deny_only(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
+/// Which of the token's SIDs a derived token makes deny-only.
+#[derive(Clone, Copy)]
+enum DenyOnly {
+    /// Its user.
+    User,
+    /// Its local groups (`S-1-5-21-...`; the pool group among them).
+    Groups,
+    /// Both.
+    All,
+}
+
+/// `token`'s information of `class`, in an aligned buffer.
+fn token_info(token: HANDLE, class: TOKEN_INFORMATION_CLASS) -> Result<Vec<u64>, String> {
+    let mut needed = 0u32;
+    // SAFETY: a size query.
+    drop(unsafe { GetTokenInformation(token, class, None, 0, &raw mut needed) });
+    let mut buffer = vec![0u64; usize::try_from(needed).unwrap_or(0).div_ceil(8).max(1)];
+    let len = u32::try_from(buffer.len() * 8).unwrap_or_default();
+    // SAFETY: the buffer holds `len` aligned bytes.
+    unsafe {
+        GetTokenInformation(
+            token,
+            class,
+            Some(buffer.as_mut_ptr().cast()),
+            len,
+            &raw mut needed,
+        )
+    }
+    .map_err(|e| format!("GetTokenInformation: {e}"))?;
+    Ok(buffer)
+}
+
+/// Whether `sid` is a local or domain account's (`S-1-5-21-...`).
+fn is_account(sid: PSID) -> bool {
+    let mut text = PWSTR::null();
+    // SAFETY: `sid` is live; `text` is LocalAlloc'd and freed below.
+    if unsafe { ConvertSidToStringSidW(sid, &raw mut text) }.is_err() {
+        return false;
+    }
+    // SAFETY: the conversion gave a NUL-terminated string, freed once, here.
+    unsafe {
+        let account = text.to_string().is_ok_and(|s| s.starts_with("S-1-5-21-"));
+        LocalFree(Some(HLOCAL(text.0.cast())));
+        account
+    }
+}
+
+/// A primary copy of this process's token with `which` SIDs deny-only and a default DACL its
+/// process can open; the caller closes it.
+fn restricted(which: DenyOnly) -> Result<HANDLE, String> {
     let mut token = HANDLE::default();
     let access = TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT;
     // SAFETY: the pseudo-handle needs no close; `token` is closed below.
     unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut token) }
         .map_err(|e| format!("OpenProcessToken: {e}"))?;
-    let mut buffer = vec![0u64; 64];
-    let mut needed = 0u32;
-    let len = u32::try_from(buffer.len() * 8).unwrap_or_default();
-    // SAFETY: the buffer holds `len` bytes, aligned for TOKEN_USER.
-    let read = unsafe {
-        GetTokenInformation(
-            token,
-            TokenUser,
-            Some(buffer.as_mut_ptr().cast()),
-            len,
-            &raw mut needed,
-        )
-    };
-    let result = read
-        .map_err(|e| format!("GetTokenInformation: {e}"))
-        .and_then(|()| {
+    let made = token_info(token, TokenUser).and_then(|user| {
+        let groups = token_info(token, TokenGroups)?;
+        let mut disable = Vec::new();
+        if matches!(which, DenyOnly::User | DenyOnly::All) {
             // SAFETY: the buffer holds the TOKEN_USER just written.
-            let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
-            let disable = [SID_AND_ATTRIBUTES {
+            let user = unsafe { &*user.as_ptr().cast::<TOKEN_USER>() };
+            disable.push(SID_AND_ATTRIBUTES {
                 Sid: user.User.Sid,
                 Attributes: 0,
-            }];
-            let mut derived = HANDLE::default();
-            // SAFETY: the token is open; the SID lives in `buffer` through the call.
-            unsafe {
-                CreateRestrictedToken(
-                    token,
-                    CREATE_RESTRICTED_TOKEN_FLAGS(0),
-                    Some(&disable),
-                    None,
-                    None,
-                    &raw mut derived,
-                )
-            }
-            .map_err(|e| format!("CreateRestrictedToken: {e}"))?;
-            if let Err(why) = open_default_dacl(derived) {
-                // SAFETY: made above, closed once.
-                drop(unsafe { CloseHandle(derived) });
-                return Err(why);
-            }
-            let startup = STARTUPINFOW {
-                cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or_default(),
-                ..STARTUPINFOW::default()
+            });
+        }
+        if matches!(which, DenyOnly::Groups | DenyOnly::All) {
+            // SAFETY: the buffer holds the TOKEN_GROUPS just written, GroupCount entries.
+            let all = unsafe {
+                let head = &*groups.as_ptr().cast::<TOKEN_GROUPS>();
+                std::slice::from_raw_parts(head.Groups.as_ptr(), head.GroupCount as usize)
             };
-            let mut info = PROCESS_INFORMATION::default();
-            // SAFETY: a restricted copy of this process's own token needs no privilege; the line is
-            // writable; `startup` and `info` are live.
-            let started = unsafe {
-                CreateProcessAsUserW(
-                    Some(derived),
-                    &HSTRING::from(exe.as_os_str()),
-                    Some(PWSTR(line.as_mut_ptr())),
-                    None,
-                    None,
-                    false,
-                    CREATE_NO_WINDOW,
-                    None,
-                    PCWSTR::null(),
-                    &raw const startup,
-                    &raw mut info,
-                )
-            };
+            for group in all.iter().filter(|g| is_account(g.Sid)) {
+                disable.push(SID_AND_ATTRIBUTES {
+                    Sid: group.Sid,
+                    Attributes: 0,
+                });
+            }
+        }
+        let mut derived = HANDLE::default();
+        // SAFETY: the token is open; the SIDs live in `user` and `groups` through the call.
+        unsafe {
+            CreateRestrictedToken(
+                token,
+                CREATE_RESTRICTED_TOKEN_FLAGS(0),
+                Some(&disable),
+                None,
+                None,
+                &raw mut derived,
+            )
+        }
+        .map_err(|e| format!("CreateRestrictedToken: {e}"))?;
+        if let Err(why) = open_default_dacl(derived) {
             // SAFETY: made above, closed once.
             drop(unsafe { CloseHandle(derived) });
-            started.map_err(|e| format!("CreateProcessAsUserW: {e}"))?;
-            wait(&info)
-        });
+            return Err(why);
+        }
+        Ok(derived)
+    });
     // SAFETY: opened above, closed once.
     drop(unsafe { CloseHandle(token) });
-    result
+    made
+}
+
+/// The child under this process's token with `which` SIDs deny-only.
+fn deny_only(exe: &Path, line: &mut [u16], which: DenyOnly) -> Result<u32, String> {
+    let derived = restricted(which)?;
+    let startup = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or_default(),
+        ..STARTUPINFOW::default()
+    };
+    let mut info = PROCESS_INFORMATION::default();
+    // SAFETY: a restricted copy of this process's own token needs no privilege; the line is
+    // writable; `startup` and `info` are live.
+    let started = unsafe {
+        CreateProcessAsUserW(
+            Some(derived),
+            &HSTRING::from(exe.as_os_str()),
+            Some(PWSTR(line.as_mut_ptr())),
+            None,
+            None,
+            false,
+            CREATE_NO_WINDOW,
+            None,
+            PCWSTR::null(),
+            &raw const startup,
+            &raw mut info,
+        )
+    };
+    // SAFETY: made above, closed once.
+    drop(unsafe { CloseHandle(derived) });
+    started.map_err(|e| format!("CreateProcessAsUserW: {e}"))?;
+    wait(&info)
+}
+
+/// Connects to `to` while this thread impersonates the anonymous logon, then reverts.
+pub(crate) fn anonymous(to: &str) -> Got {
+    let Ok(to) = to.parse::<std::net::SocketAddr>() else {
+        return Got::Failed;
+    };
+    // SAFETY: this thread impersonates the anonymous token until RevertToSelf below.
+    if unsafe { ImpersonateAnonymousToken(GetCurrentThread()) }.is_err() {
+        return Got::NotRun;
+    }
+    let result = std::net::TcpStream::connect_timeout(&to, std::time::Duration::from_secs(5));
+    // SAFETY: ends this thread's impersonation.
+    drop(unsafe { RevertToSelf() });
+    match result {
+        Ok(_) => Got::Reached,
+        Err(error) if error.raw_os_error() == Some(10013) => Got::Filtered,
+        Err(_) => Got::Failed,
+    }
 }
 
 /// Gives `token` the default DACL {`Everyone`, `RESTRICTED`, `SYSTEM`}. With the user SID
@@ -251,8 +337,9 @@ fn open_default_dacl(token: HANDLE) -> Result<(), String> {
     set.map_err(|e| format!("SetTokenInformation (default DACL): {e}"))
 }
 
-/// The child as an `AppContainer` process with the internetClient capability.
-fn lowbox(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
+/// The child as an `AppContainer` process with the internetClient capability, of `token` when
+/// given (else of this process's).
+fn lowbox(exe: &Path, line: &mut [u16], token: Option<HANDLE>) -> Result<u32, String> {
     let mut package = PSID::default();
     let name = HSTRING::from("clauseo.s15.spike");
     // SAFETY: a live name and out-pointer; the SID is freed with FreeSid below.
@@ -270,7 +357,7 @@ fn lowbox(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
         unsafe { ConvertStringSidToSidW(&HSTRING::from("S-1-15-3-1"), &raw mut capability) };
     let result = parsed
         .map_err(|e| format!("ConvertStringSidToSidW: {e}"))
-        .and_then(|()| start_in_container(exe, line, package, capability));
+        .and_then(|()| start_in_container(exe, line, package, capability, token));
     // SAFETY: each SID came from its call above and is freed once, here.
     unsafe {
         FreeSid(package);
@@ -285,6 +372,7 @@ fn start_in_container(
     line: &mut [u16],
     package: PSID,
     capability: PSID,
+    token: Option<HANDLE>,
 ) -> Result<u32, String> {
     let mut capabilities = [SID_AND_ATTRIBUTES {
         Sid: capability,
@@ -322,21 +410,40 @@ fn start_in_container(
     startup.lpAttributeList = list;
     let mut info = PROCESS_INFORMATION::default();
     let started = updated.and_then(|()| {
+        let flags = CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT;
+        let start = (&raw const startup).cast::<STARTUPINFOW>();
+        let app = HSTRING::from(exe.as_os_str());
+        let line = Some(PWSTR(line.as_mut_ptr()));
         // SAFETY: the line is writable; `startup` carries the live attribute list; `info` is
-        // live.
+        // live; `token`, when given, is a primary token derived from this process's own.
         unsafe {
-            CreateProcessW(
-                &HSTRING::from(exe.as_os_str()),
-                Some(PWSTR(line.as_mut_ptr())),
-                None,
-                None,
-                false,
-                CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-                None,
-                PCWSTR::null(),
-                (&raw const startup).cast::<STARTUPINFOW>(),
-                &raw mut info,
-            )
+            match token {
+                Some(token) => CreateProcessAsUserW(
+                    Some(token),
+                    &app,
+                    line,
+                    None,
+                    None,
+                    false,
+                    flags,
+                    None,
+                    PCWSTR::null(),
+                    start,
+                    &raw mut info,
+                ),
+                None => CreateProcessW(
+                    &app,
+                    line,
+                    None,
+                    None,
+                    false,
+                    flags,
+                    None,
+                    PCWSTR::null(),
+                    start,
+                    &raw mut info,
+                ),
+            }
         }
     });
     // SAFETY: initialised above, deleted once, after the start.
