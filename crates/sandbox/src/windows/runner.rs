@@ -163,6 +163,71 @@ impl std::fmt::Debug for LaunchMessage {
 }
 
 impl LaunchMessage {
+    /// The message for `spec` run as `pool` under `policy`, with the CA bundle `ca_bundle`:
+    /// the spec's program, arguments, folder and whole environment; the policy's state folder,
+    /// session temp folder, runtime paths, the paths it grants and its credential link. Refused
+    /// when a path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
+    pub fn from_policy(
+        policy: &crate::Policy,
+        pool: &super::pool::PoolUser,
+        spec: &clauseo_process::LaunchSpec,
+        ca_bundle: Option<&Path>,
+    ) -> Result<LaunchMessage, LaunchError> {
+        let path = |field: &'static str, path: &Path| {
+            path.to_str().map(str::to_owned).ok_or(LaunchError::Field {
+                field,
+                rule: "is not UTF-8",
+            })
+        };
+        let text = |field: &'static str, value: &std::ffi::OsStr| {
+            value.to_str().map(str::to_owned).ok_or(LaunchError::Field {
+                field,
+                rule: "is not UTF-8",
+            })
+        };
+        let runtime = policy
+            .runtime()
+            .iter()
+            .map(|p| path("runtime", p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let granted = granted_paths(policy)
+            .into_iter()
+            .map(|p| path("granted", p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let message = LaunchMessage {
+            version: LAUNCH_VERSION,
+            pool_user: pool.sid.clone(),
+            pool_name: pool.name.clone(),
+            matter_sid: None,
+            program: path("program", spec.program())?,
+            args: spec
+                .args()
+                .iter()
+                .map(|arg| text("args", arg))
+                .collect::<Result<_, _>>()?,
+            cwd: path("cwd", spec.cwd())?,
+            env: spec
+                .env()
+                .iter()
+                .map(|(name, value)| Ok((text("env", name)?, text("env", value)?)))
+                .collect::<Result<_, LaunchError>>()?,
+            state: path("state", policy.state())?,
+            tmpdir: policy
+                .session_tmpdir()
+                .map(|p| path("tmpdir", p))
+                .transpose()?,
+            runtime,
+            granted,
+            ca_bundle: ca_bundle.map(|p| path("ca_bundle", p)).transpose()?,
+            credential_link: policy
+                .credential_link()
+                .map(|p| path("credential_link", p))
+                .transpose()?,
+        };
+        message.check()?;
+        Ok(message)
+    }
+
     /// Reads and checks a launch message: [`LaunchMessage::check`]'s rules.
     pub fn parse(bytes: &[u8]) -> Result<LaunchMessage, LaunchError> {
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > LAUNCH_CAP {
@@ -236,6 +301,35 @@ impl LaunchMessage {
     }
 }
 
+/// Every path `policy` lets the agent reach: the matter, state, notes and session temp folders,
+/// the runtime and read paths, the allowed folders, the Claude store's folder and the credential
+/// link.
+pub fn granted_paths(policy: &crate::Policy) -> Vec<&Path> {
+    let mut paths = vec![policy.matter(), policy.state()];
+    paths.extend(policy.notes());
+    paths.extend(policy.session_tmpdir());
+    paths.extend(policy.runtime().iter().map(PathBuf::as_path));
+    paths.extend(policy.read().iter().map(PathBuf::as_path));
+    paths.extend(policy.allowed_folders().iter().map(PathBuf::as_path));
+    paths.extend(policy.claude_store().map(crate::ClaudeStore::dir));
+    paths.extend(policy.credential_link());
+    paths
+}
+
+/// M3 before any entry is applied (for the launcher, PR6 and R17): refuses a policy any of whose
+/// granted paths lies in the lawyer's `<profile>\.codex`. The launcher must also refuse a
+/// credential link that is that folder's `auth.json` by file ID, as the outer runner does.
+pub fn codex_reuse_in_policy(
+    policy: &crate::Policy,
+    profile: &WinPath,
+) -> Result<(), paths::CodexReuse> {
+    let texts: Vec<String> = granted_paths(policy)
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    codex_reuse(profile, texts.iter().map(|t| ("granted", t.as_str())), &[])
+}
+
 /// The launch file's path for `id` (16 lowercase hex): `<data_dir>\sandbox\run\<id>.json`.
 pub fn launch_path(data_dir: &Path, id: &str) -> PathBuf {
     data_dir
@@ -265,13 +359,19 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
     let bytes = message
         .to_bytes()
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-    let run = data_dir.join(super::matters::SANDBOX_DIR).join(RUN_DIR);
-    super::write::make_sandbox_dir(&run)?;
+    let sandbox = data_dir.join(super::matters::SANDBOX_DIR);
+    // The sandbox folder first, so it is never made by the run folder's `create_dir_all`
+    // without its protected DACL.
+    super::write::make_sandbox_dir(&sandbox)?;
+    super::write::make_sandbox_dir(&sandbox.join(RUN_DIR))?;
     let mut bits = [0u8; 8];
     getrandom::fill(&mut bits).map_err(|error| std::io::Error::other(error.to_string()))?;
     let id = super::pipe::hex(&bits);
     let path = launch_path(data_dir, &id);
     super::write::write_atomic(&path, &bytes)?;
+    // The file's own protected DACL (the desktop user, SYSTEM, Administrators), which the outer
+    // runner requires before it reads it (`private_dir::read_unchanged`).
+    super::write::check_owned_file(&path)?;
     Ok(path)
 }
 
@@ -389,5 +489,8 @@ fn is_batch(program: &str) -> bool {
     extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
+#[cfg(test)]
+#[cfg(windows)]
+mod ntfs_tests;
 #[cfg(test)]
 mod tests;
