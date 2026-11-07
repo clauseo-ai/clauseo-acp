@@ -21,9 +21,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # First: parse every spike script, so a syntax error costs a minute, not a Windows run.
+  parse:
+    name: parse the PowerShell scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: spikes/mxc-spike
+      - name: Parse spikes/mxc-spike/*.ps1
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem spikes/mxc-spike -Filter *.ps1) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) {
+              $bad++
+              "::error file=spikes/mxc-spike/$($f.Name),line=$($e.Extent.StartLineNumber),col=$($e.Extent.StartColumnNumber)::$($e.Message)"
+            }
+            "$($f.Name): $($errors.Count) parse error(s)"
+          }
+          if ($bad) { exit 1 }
+
   # Step 1, answered (run 42341399286): on demand only now.
   probe:
     name: probe (${{ matrix.runner }})
+    needs: parse
     if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -62,6 +88,7 @@ jobs:
   # proxy-only egress to proxy-mock.mjs, and a scripted model server instead of a login.
   rows:
     name: rows (windows-11-arm)
+    needs: parse
     runs-on: windows-11-arm
     timeout-minutes: 45
     defaults:

@@ -60,6 +60,23 @@ function Invoke-Timed([string]$exe, [string]$arguments, [int]$timeoutSec = 180, 
     [pscustomobject]@{ Exit = if ($done) { $p.ExitCode } else { $null }; TimedOut = -not $done; Ms = [int]$sw.Elapsed.TotalMilliseconds; Out = $out; Err = $e.Result; Result = $res }
 }
 function Code($r) { if ($r.TimedOut) { 'TIMEOUT' } elseif ($null -eq $r.Exit) { 'NOSTART' } else { '{0}/0x{1:X8}' -f $r.Exit, $r.Exit } }
+# One Windows command line from an argument array (MSVCRT quoting), for the policies' commandLine.
+function Join-CommandLine([string[]]$argv) {
+    $parts = foreach ($a in $argv) {
+        if ($a -and $a -notmatch '[\s"]') { $a; continue }
+        $sb = [System.Text.StringBuilder]::new('"')
+        $bs = 0
+        foreach ($ch in $a.ToCharArray()) {
+            if ($ch -eq [char]92) { $bs++; continue }
+            if ($ch -eq [char]34) { [void]$sb.Append([string]::new([char]92, $bs * 2 + 1)).Append([char]34) }
+            else { [void]$sb.Append([string]::new([char]92, $bs)).Append($ch) }
+            $bs = 0
+        }
+        [void]$sb.Append([string]::new([char]92, $bs * 2)).Append([char]34)
+        $sb.ToString()
+    }
+    $parts -join ' '
+}
 function Tail([string]$s, [int]$n = 3) { (($s -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^\s*$' } | Select-Object -Last $n) -join ' | ') }
 
 # ---------------------------------------------------------------- set-up
@@ -249,7 +266,9 @@ if (-not (Test-Path $Bash)) {
         $f = Join-Path $Matter "gitbash-$c.txt"
         $r = Contained "r2-gitbash-$c" "`"$Bash`" -c `"echo ok > gitbash-$c.txt`"" $Cfg[$c]
         $content = (Get-Content $f -ErrorAction SilentlyContinue) -join ''
-        Row "2-$c" $(if ($content -eq 'ok') { 'PASS' } else { 'FAIL' }) "bash.exe -c 'echo ok > m/x' ($c)" "$(Code $r) $($r.Ms) ms; file=$(if ($content) { $content } else { 'missing' }); $(Tail ($r.Out + "`n" + $r.Err) 3)"
+        $shown = if ($content) { $content } else { 'missing' }
+        $tail = Tail ($r.Out + [Environment]::NewLine + $r.Err) 3
+        Row "2-$c" $(if ($content -eq 'ok') { 'PASS' } else { 'FAIL' }) "bash.exe -c 'echo ok > m/x' ($c)" "$(Code $r) $($r.Ms) ms; file=$shown; $tail"
     }
 }
 
@@ -261,7 +280,8 @@ foreach ($c in 'strict', 'A') {
     $r1 = Contained "r3-del-$c" "`"$env:ComSpec`" /d /c del /q `"$f1`"" $Cfg[$c]
     $r2 = Contained "r3-unlink-$c" (JsE "require('fs').unlinkSync(process.env.MXC_T);console.log('UNLINK_OK')") $Cfg[$c] @{ MXC_T = $f2 }
     $g1 = -not (Test-Path $f1); $g2 = -not (Test-Path $f2)
-    Row "3-$c" $(if ($g1 -and $g2) { 'PASS' } else { 'FAIL' }) "cmd del and fs.unlinkSync in the matter ($c)" "del: $(Code $r1), file gone=$g1 $(Tail ($r1.Out + "`n" + $r1.Err) 1); unlinkSync: $(Code $r2), file gone=$g2 $(Tail $r2.Err 1)"
+    $t1 = Tail ($r1.Out + [Environment]::NewLine + $r1.Err) 1
+    Row "3-$c" $(if ($g1 -and $g2) { 'PASS' } else { 'FAIL' }) "cmd del and fs.unlinkSync in the matter ($c)" "del: $(Code $r1), file gone=$g1 $t1; unlinkSync: $(Code $r2), file gone=$g2 $(Tail $r2.Err 1)"
 }
 
 # ---------------------------------------------------------------- row 4: network (#1666)
@@ -291,7 +311,8 @@ if (Test-Path $curl) {
 # ---------------------------------------------------------------- row 5: isolation, tree, start-up
 Section 'Row 5: isolation, tree kill, start-up'
 $targets = @($DocSecret, (Join-Path $Sibling 'secret.txt'), $Sibling, $Docs, $env:USERPROFILE, (Join-Path $Matter 'real.txt'))
-$r = Contained 'r5-read-A' "`"$Node`" `"$Kit\inside.js`" read $(($targets | ForEach-Object { "`"$_`"" }) -join ' ')" $Cfg.A
+$readLine = Join-CommandLine (@($Node, (Join-Path $Kit 'inside.js'), 'read') + $targets)
+$r = Contained 'r5-read-A' $readLine $Cfg.A
 $o = $r.Result
 if ($o) {
     $v = @{}; foreach ($t in $targets) { $v[$t] = $o.$t }
@@ -334,8 +355,10 @@ $tp.WaitForExit(10000) | Out-Null
 Start-Sleep -Seconds 5
 $alive = @($tree | Where-Object { $q = Get-CimInstance Win32_Process -Filter "ProcessId=$($_.ProcessId)" -ErrorAction SilentlyContinue; $q -and $q.CreationDate -eq $_.CreationDate })
 $names = ($tree | ForEach-Object { "$($_.Name):$($_.ProcessId)" }) -join ' '
-$need = @('cmd.exe', 'node.exe', 'PING.EXE') | Where-Object { ($tree.Name | ForEach-Object { $_.ToUpper() }) -notcontains $_.ToUpper() }
-Row '5c' $(if ($ready -and -not $need -and -not $alive) { 'PASS' } else { 'FAIL' }) 'tree cmd -> node -> ping killed when wxc-exec is killed' "ready=$([bool]$ready) ($ready); tree: $names; missing: $($need -join ','); alive 5 s after kill: $(($alive | ForEach-Object { "$($_.Name):$($_.ProcessId)" }) -join ' ')"
+$aliveNames = ($alive | ForEach-Object { '{0}:{1}' -f $_.Name, $_.ProcessId }) -join ' '
+$treeUpper = @($tree | ForEach-Object { "$($_.Name)".ToUpper() })
+$need = @('CMD.EXE', 'NODE.EXE', 'PING.EXE' | Where-Object { $treeUpper -notcontains $_ })
+Row '5c' $(if ($ready -and -not $need -and -not $alive) { 'PASS' } else { 'FAIL' }) 'tree cmd -> node -> ping killed when wxc-exec is killed' "ready=$([bool]$ready) ($ready); tree: $names; missing: $($need -join ','); alive 5 s after kill: $aliveNames"
 foreach ($x in $alive) { Stop-Process -Id $x.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # Start-up added: the same command outside and inside (A), warm, medians.
@@ -400,7 +423,12 @@ foreach ($ad in @(@{ id = 'claude-acp'; js = $ClaudeAcp; files = @('claude-bash.
     $o = $r.Result
     $files = $ad.files | ForEach-Object { "$_=$(Test-Path (Join-Path $Matter $_))" }
     $ok = $o -and ($o.stop_reason -eq 'end_turn') -and -not ($ad.files | Where-Object { -not (Test-Path (Join-Path $Matter $_)) })
-    Row "6d-$($ad.id)" $(if ($ok) { 'PASS' } else { 'FAIL' }) "ACP turn through $($ad.id) (node + adapter inside)" "$(if ($o) { "outcome=$($o.outcome) steps=$($o.steps -join '; ') non-JSON stdout=$($o.non_json_stdout) permissions=$($o.permissions) tools=$($o.tool_calls -join ',') error=$($o.error)" } else { "driver: $(Code $r) $(Tail $r.Err 3)" }); files: $($files -join ' ')"
+    if ($o) {
+        $detail = 'outcome={0} steps={1} non-JSON stdout={2} permissions={3} tools={4} error={5}' -f $o.outcome, ($o.steps -join '; '), $o.non_json_stdout, $o.permissions, ($o.tool_calls -join ','), $o.error
+    } else {
+        $detail = 'driver: {0} {1}' -f (Code $r), (Tail $r.Err 3)
+    }
+    Row "6d-$($ad.id)" $(if ($ok) { 'PASS' } else { 'FAIL' }) "ACP turn through $($ad.id) (node + adapter inside)" "$detail; files: $($files -join ' ')"
 }
 
 # ---------------------------------------------------------------- summary and clean-up
