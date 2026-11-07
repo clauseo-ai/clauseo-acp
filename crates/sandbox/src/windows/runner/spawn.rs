@@ -204,14 +204,13 @@ pub(super) fn end_job(job: &Handle, code: u32) {
 
 /// Keeps this process's later DLL loads to System32 and takes the current folder out of the
 /// search: the inner runner (Medium, the pool user) must never load a DLL its Low agent could
-/// plant. Called first in both runners.
-pub(super) fn restrict_dll_search() {
-    // SAFETY: flag- and string-only calls; a failure leaves the default search, and the inner
-    // runner's current folder is System32 anyway.
-    unsafe {
-        drop(SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32));
-        drop(SetDllDirectoryW(&HSTRING::new()));
-    }
+/// plant. Called first in both runners, which end at once ([`super::RunExit::DllSearch`]) when
+/// either call fails.
+pub(super) fn restrict_dll_search() -> io::Result<()> {
+    // SAFETY: a flag-only call.
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) }.map_err(|e| os_error(&e))?;
+    // SAFETY: the empty string is a live HSTRING for the call.
+    unsafe { SetDllDirectoryW(&HSTRING::new()) }.map_err(|e| os_error(&e))
 }
 
 /// System32, the inner runner's current folder: one the agent can't write.
