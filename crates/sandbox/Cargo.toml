@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 # The elevated set-up (S15 PR4h): run by the app's UserSetup and the uninstaller's hook. build.rs
-# embeds its requireAdministrator manifest on msvc.
+# embeds its requireAdministrator manifest and its VERSIONINFO on msvc.
 [[bin]]
 name = "clauseo-sandbox-setup"
 path = "src/bin/clauseo-sandbox-setup.rs"
@@ -128,6 +128,13 @@ windows = { workspace = true, features = [
   "Win32_System_WindowsProgramming",
   "Win32_UI_Shell",
 ] }
+
+# build.rs compiles the setup exe's VERSIONINFO on msvc with embed-resource, its values read from
+# crates/desktop/tauri.conf.json with serde_json. Not target-gated: a build script runs on the
+# host and checks TARGET, and both crates are in the tree already (tauri-build, the deps above).
+[build-dependencies]
+embed-resource = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # The Seatbelt profile snapshots.
