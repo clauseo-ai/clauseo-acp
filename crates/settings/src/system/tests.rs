@@ -78,3 +78,65 @@ fn windows_without_documents_child() {
     assert_eq!(at.data_dir(), std::path::Path::new(r"C:\"));
     assert_eq!(at.default_matters_dir(), None);
 }
+
+/// The planted home of [`windows_roaming_unchecked`]'s child.
+#[cfg(windows)]
+const ROAMING_HOME: &str = "CLAUSEO_SETTINGS_TEST_ROAMING_HOME";
+
+/// The roaming app data folder is looked up without Windows' check, which touches the network
+/// when a firm redirects it to a share that may be down: a child whose planted USERPROFILE has no
+/// `AppData\Roaming` still gets the folder's path, for the refused folders.
+#[cfg(windows)]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "makes and removes its own planted home and reruns this test binary in it; nothing \
+              else is launched or written"
+)]
+fn windows_roaming_unchecked() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    let profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let roaming = SystemDirs.known_folder(KnownFolder::RoamingAppData);
+    let under_profile = profile
+        .zip(roaming)
+        .is_some_and(|(profile, roaming)| roaming.starts_with(profile));
+    if !under_profile {
+        eprintln!("Roaming AppData is not under USERPROFILE here; skipped");
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("clauseo-settings-roam-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "system::tests::windows_roaming_unchecked_child",
+            "--exact",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("USERPROFILE", &home)
+        .env(ROAMING_HOME, &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "the child ran: {text}");
+}
+
+/// [`windows_roaming_unchecked`]'s child: run only by it, with the planted home.
+#[cfg(windows)]
+#[test]
+#[ignore = "run by windows_roaming_unchecked with a planted USERPROFILE"]
+fn windows_roaming_unchecked_child() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    let home = std::path::PathBuf::from(std::env::var_os(ROAMING_HOME).unwrap());
+    let roaming = home.join("AppData").join("Roaming");
+    assert!(!roaming.exists());
+    assert_eq!(
+        SystemDirs.known_folder(KnownFolder::RoamingAppData),
+        Some(roaming)
+    );
+}

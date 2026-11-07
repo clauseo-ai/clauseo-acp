@@ -1,5 +1,6 @@
 //! Matters: `CreateMatter` (a new folder, picked or in the default location, or an import), the
-//! Scratch matter on the first start, and each matter's worker thread, started and opened on
+//! Scratch matter's create and commit (its folder scan is in `scratch.rs`), and each matter's
+//! worker thread, started and opened on
 //! first use (relinking a deleted `matter.json` once, when no other matter claims the folder). A
 //! refused folder gets one code per reason (`refusal`), and an import of a forgotten matter's
 //! folder brings that matter back (`matter_details.rs`). `RelocateMatter` is in `relocate.rs`.
@@ -36,9 +37,6 @@ pub(super) mod picked;
 pub(crate) use made::Made;
 use made::matter_commit;
 pub(super) use made::{Stage, discard, recorded, row_checked};
-
-/// The Scratch matter's name.
-const SCRATCH: &str = "Scratch";
 
 /// A matter whose create or import runs on its new worker.
 pub(crate) struct PendingMatter {
@@ -129,8 +127,10 @@ fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
     refused
 }
 
-/// Starts a new matter's worker with its create or import job.
-fn begin_matter(
+/// Starts a new matter's worker with its create or import job. The Scratch matter's job is not
+/// counted in `work.matter_jobs`: `scratch::holds` holds start-up and shutdown for it instead,
+/// so start-up's ready waits for it only so long.
+pub(super) fn begin_matter(
     actor: &mut Actor,
     (name, kind, details): (String, MatterKind, Details),
     folder: PathBuf,
@@ -162,8 +162,11 @@ fn begin_matter(
             check,
         }
     };
+    let counted = !matches!(tag, MatterTag::Scratch);
     worker.send(job, tag)?;
-    actor.work.matter_jobs += 1;
+    if counted {
+        actor.work.matter_jobs += 1;
+    }
     Ok(Box::new(PendingMatter {
         new,
         name,
@@ -380,36 +383,6 @@ impl RefusalNames {
     }
 }
 
-/// Starts creating the Scratch matter in the first free folder of
-/// `<default_matters_dir>/Scratch`, `Scratch 2`, ... With no default matters folder (no
-/// Documents folder, issue #365) there is no Scratch matter this run.
-pub(super) fn create_scratch(actor: &mut Actor) {
-    let Some(base) = actor.effective.default_matters_dir().map(Path::to_path_buf) else {
-        tracing::warn!("no default matters folder: no Scratch matter");
-        return;
-    };
-    let folder = (1_u32..=u32::MAX)
-        .map(|n| match n {
-            1 => base.join(SCRATCH),
-            _ => base.join(format!("{SCRATCH} {n}")),
-        })
-        .find(|folder| !folder.exists());
-    let Some(folder) = folder else {
-        return;
-    };
-    let begun = begin_matter(
-        actor,
-        (SCRATCH.to_owned(), MatterKind::Scratch, (None, None)),
-        folder,
-        None,
-        MatterTag::Scratch,
-    );
-    match begun {
-        Ok(pending) => actor.scratch = Some(pending),
-        Err(error) => tracing::warn!(error = %Cause(&error), "could not start the Scratch matter"),
-    }
-}
-
 /// A matter worker answered.
 pub(super) fn on_matter_reply(
     actor: &mut Actor,
@@ -417,7 +390,10 @@ pub(super) fn on_matter_reply(
     tag: MatterTag,
     reply: MatterReply,
 ) {
-    actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
+    // The Scratch matter's create is not counted (`begin_matter`).
+    if !matches!(tag, MatterTag::Scratch) {
+        actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
+    }
     match tag {
         MatterTag::Create(id) => {
             let pending = actor
@@ -526,14 +502,19 @@ pub(super) fn command_ctx(
     Ok(CommandCtx { id, hash })
 }
 
-/// The Scratch matter's commit returned.
+/// The Scratch matter's commit returned. Once durable it joins the list, and app subscribers
+/// hear of it at the next flush, as of a matter a command created: Scratch can come after
+/// ready (`scratch.rs`).
 pub(super) fn scratch_committed(
     actor: &mut Actor,
     entry: MatterEntry,
     outcome: Result<(), &Failure>,
 ) {
     match outcome {
-        Ok(()) => made::recorded(actor, entry),
+        Ok(()) => {
+            made::recorded(actor, entry);
+            actor.lists.touch_all();
+        }
         Err(failure) => {
             let error = Error::Store(failure.error.clone());
             made::discard(actor, None, entry.row.id, error, made::Stage::Store);

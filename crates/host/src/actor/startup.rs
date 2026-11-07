@@ -1,6 +1,7 @@
 //! Start-up: open the store, load the registry, start the feeder and the snapshot thread and the
 //! limits model (its first reads run on their own), then
-//! (in the loop) create the Scratch matter on the first start and reconcile every thread.
+//! (in the loop) create the Scratch matter on the first start (`scratch.rs`) and reconcile
+//! every thread.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -122,6 +123,8 @@ pub(super) async fn open(
         work: Work::default(),
         phase: HostPhase::Starting(ready),
         scratch: None,
+        scratch_wait: super::scratch::ScratchWait::default(),
+        scratch_scan: parts.scratch_scan,
         made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,
@@ -182,7 +185,7 @@ pub(super) fn begin_startup(actor: &mut Actor) {
         .values()
         .any(|matter| matter.row.kind == MatterKind::Scratch);
     if !has_scratch {
-        super::matters::create_scratch(actor);
+        super::scratch::start(actor);
     }
     let open: Vec<_> = actor
         .threads

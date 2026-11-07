@@ -1,6 +1,9 @@
 //! The OS behind the traits: [`SystemDirs`] and [`SystemEnv`]. Tests never use them, except
 //! the read-only tests of the OS shims.
 
+// Only Windows looks a folder up with a time limit; the tests run it on every OS.
+#[cfg(any(windows, test))]
+mod bounded;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
