@@ -167,10 +167,17 @@ pub fn runner_token_sddl(desktop_user: &Sid) -> String {
 }
 
 /// The inner runner's default DACL once shut: what its later objects (a thread the system starts
-/// in it) get: `SYSTEM` and the desktop user, no pool user.
+/// in it) get: [`runner_thread_sddl`]'s entries, `SYSTEM` full, the desktop user `SYNCHRONIZE`,
+/// `OWNER RIGHTS` held to `READ_CONTROL` (so the pool user, their owner, keeps no implied
+/// `WRITE_DAC`), and no pool user.
 pub fn runner_default_dacl(desktop_user: &Sid) -> String {
-    format!("D:(A;;GA;;;SY)(A;;GA;;;{desktop_user})")
+    format!("D:(A;;GA;;;SY)(A;;0x100000;;;{desktop_user})(A;;RC;;;OW)")
 }
+
+/// The inner runner's primary token's DACL from its first instruction until the launch arrives:
+/// `SYSTEM` full and `OWNER RIGHTS` held to `READ_CONTROL`, nobody else. [`runner_token_sddl`]
+/// adds the desktop user's `TOKEN_QUERY` once the launch names them.
+pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 
 /// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when
 /// the launch restricts with one), labelled Low so the Low agent may draw on it; no logon SID and
