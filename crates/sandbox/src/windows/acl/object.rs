@@ -474,7 +474,12 @@ fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
 /// on the way fails the open ([`reparse_refused`]) rather than being followed. A `synchronous`
 /// handle (`FILE_SYNCHRONOUS_IO_NONALERT`) needs `SYNCHRONIZE` in `access`; one that isn't is
 /// for the security calls alone.
-fn open_at(dir: &Handle, name: &[u16], access: u32, synchronous: bool) -> io::Result<Handle> {
+pub(in crate::windows) fn open_at(
+    dir: &Handle,
+    name: &[u16],
+    access: u32,
+    synchronous: bool,
+) -> io::Result<Handle> {
     let bytes = u16::try_from(name.len() * 2)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let unicode = UNICODE_STRING {

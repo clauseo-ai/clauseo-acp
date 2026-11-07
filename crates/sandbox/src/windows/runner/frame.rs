@@ -1,8 +1,8 @@
 //! What the two runners say to each other on the `ctl` pipe, and the agent's command line.
 //!
 //! A frame is a little-endian `u32` length, then that many bytes of JSON, at most
-//! [`LAUNCH_CAP`](super::LAUNCH_CAP). The outer sends one [`InnerLaunch`]; the inner answers one
-//! [`InnerReport`]. Nothing else crosses `ctl`.
+//! [`LAUNCH_CAP`](super::LAUNCH_CAP). The outer sends one [`InnerLaunch`]; the inner answers with
+//! [`InnerReport`]s. Nothing else crosses `ctl`.
 
 use std::io::{self, Read, Write};
 
@@ -37,6 +37,10 @@ pub struct InnerLaunch {
     pub folder_base: String,
     /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
     pub desktop: String,
+    /// The value, in the inner runner, of the handle to this launch's kill-on-close job the
+    /// outer duplicated into it before resuming it (`JOB_OBJECT_QUERY` alone): the job whose
+    /// processes the inner's tick and end sweeps keep.
+    pub job: u64,
 }
 
 impl std::fmt::Debug for InnerLaunch {
@@ -49,7 +53,8 @@ impl std::fmt::Debug for InnerLaunch {
     }
 }
 
-/// What the inner runner answers.
+/// What the inner runner answers: any number of [`InnerReport::Log`] lines, one `Started` or
+/// `Failed`, and after `Started`, one `Exited`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum InnerReport {
@@ -71,6 +76,12 @@ pub enum InnerReport {
     Exited {
         /// The agent's exit code.
         code: u32,
+    },
+    /// A line for the outer's stderr: a sweep's kill (pid, image name, sweep point), a sweep's
+    /// failure, or a cleanup's counts. Never a path or a value.
+    Log {
+        /// The line.
+        line: String,
     },
 }
 

@@ -1,22 +1,30 @@
 //! The inner runner (Windows): the pool user's half, started by the outer runner through
-//! `CreateProcessWithLogonW` with `--inner <pipe base>`. See `runner.rs` for the whole chain.
+//! `CreateProcessWithLogonW` with `--inner <pipe base>`. See `runner.rs` for the whole chain and
+//! `inner_flow.rs` for its order.
 
+use std::fs::File;
 use std::path::Path;
+use std::time::Duration;
+
+use windows::Win32::Foundation::HANDLE;
 
 use super::RunExit;
 use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
-use super::spawn::{Agent, quiet_errors, restrict_dll_search, start_agent};
+use super::inner_flow::{Failure, Inner, run};
+use super::leftovers::os::OsLeftovers;
+use super::leftovers::remove_all;
+use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
+use super::sweep::os::sweep_own;
+use super::sweep::{Point, SweepError};
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
+use crate::windows::sids::Sid;
 use crate::windows::token::TokenSpec;
 use crate::windows::token::os::{
     logon_sid, make, own_token, shut_later, shut_self, shut_token_first, user,
 };
 use crate::windows::write;
-
-/// A failure before the agent ran: its exit code and what failed (a call and its code).
-struct Failure(RunExit, String);
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str) -> u32 {
@@ -24,78 +32,151 @@ pub fn run_inner(base: &str) -> u32 {
         return RunExit::DllSearch.code();
     }
     quiet_errors();
-    // First of all, before a pipe is opened: shut this runner's own token to all but SYSTEM. The
-    // outer runner read its user while it was suspended; the launch adds the desktop user below.
+    // First of all: shut this runner's own token to all but SYSTEM. The outer runner read its
+    // user while it was suspended; the launch adds the desktop user later. The handle opened
+    // here keeps its rights.
     let Ok(token) = own_token() else {
         return RunExit::Token.code();
     };
     if shut_token_first(&token).is_err() {
         return RunExit::Token.code();
     }
+    let Ok(me) = user(&token) else {
+        return RunExit::Token.code();
+    };
     let Ok(set) = PipeSet::parse(base) else {
         return RunExit::Usage.code();
     };
-    let Ok(ctl) = open_client(&set.name(Role::Ctl), Role::Ctl, false) else {
-        return RunExit::Pipe.code();
+    let mut calls = Calls {
+        set,
+        token,
+        me,
+        held: Vec::new(),
+        ctl: None,
+        launch: None,
     };
-    let ctl = into_file(ctl);
-    let launch: InnerLaunch = match read_frame(&ctl) {
-        Ok(launch) => launch,
-        Err(_) => return RunExit::Pipe.code(),
-    };
-    // Then, before anything else: shut this runner's token (now with the desktop user's query),
-    // process, threads and later objects to the agent (`token::os::shut_self`); the outer shut the
-    // process and first thread while this runner was still suspended.
-    let shut = shut_self(&token, &launch.desktop_user)
-        .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e));
-    if let Err(Failure(exit, what)) = shut {
-        drop(write_frame(
-            &ctl,
-            &InnerReport::Failed {
-                exit: exit.code(),
-                what,
-            },
-        ));
-        return exit.code();
+    run(&mut calls)
+}
+
+/// The inner's calls.
+struct Calls {
+    set: PipeSet,
+    token: Handle,
+    /// This runner's user: the pool user, as the outer checked.
+    me: Sid,
+    /// Lines logged before `ctl` opened.
+    held: Vec<String>,
+    ctl: Option<File>,
+    launch: Option<InnerLaunch>,
+}
+
+impl Inner for Calls {
+    type Job = HANDLE;
+    type Agent = Process;
+
+    fn sweep(&mut self, point: Point, job: Option<&HANDLE>) -> Result<(), SweepError> {
+        let mut lines = Vec::new();
+        let swept = sweep_own(&self.me, job.copied(), point, &mut |line| {
+            lines.push(line.to_owned());
+        });
+        for line in lines {
+            self.log(&line);
+        }
+        swept
     }
-    match start(&set, &launch, &token) {
-        Ok(agent) => {
-            if write_frame(&ctl, &InnerReport::Started { pid: agent.pid }).is_err() {
-                agent.kill(RunExit::Pipe.code());
-            }
-            let code = agent
-                .wait(None)
-                .ok()
-                .flatten()
-                .unwrap_or(RunExit::Spawn.code());
-            // The outer may be gone already; the exit code says it anyway.
-            drop(write_frame(&ctl, &InnerReport::Exited { code }));
-            code
+
+    fn clean(&mut self) {
+        let mut lines = Vec::new();
+        let mut calls = OsLeftovers::new(&self.token, self.me.clone());
+        remove_all(&mut calls, "before launch", &mut |line| {
+            lines.push(line.to_owned());
+        });
+        drop(calls);
+        for line in lines {
+            self.log(&line);
         }
-        Err(Failure(exit, what)) => {
-            // The outer may be gone already; the exit code says it anyway.
-            drop(write_frame(
-                &ctl,
-                &InnerReport::Failed {
-                    exit: exit.code(),
-                    what,
-                },
-            ));
-            exit.code()
+    }
+
+    fn log(&mut self, line: &str) {
+        let report = InnerReport::Log {
+            line: line.to_owned(),
+        };
+        match &self.ctl {
+            // A line that can't be sent is lost; the run goes on.
+            Some(ctl) => drop(write_frame(ctl, &report)),
+            None => self.held.push(line.to_owned()),
         }
+    }
+
+    fn connect(&mut self) -> Result<(), RunExit> {
+        let Ok(ctl) = open_client(&self.set.name(Role::Ctl), Role::Ctl, false) else {
+            return Err(RunExit::Pipe);
+        };
+        self.ctl = Some(into_file(ctl));
+        for line in std::mem::take(&mut self.held) {
+            self.log(&line);
+        }
+        Ok(())
+    }
+
+    fn read_launch(&mut self) -> Result<HANDLE, Failure> {
+        let ctl = self
+            .ctl
+            .as_ref()
+            .ok_or_else(|| (RunExit::Pipe, "ctl isn't open".to_owned()))?;
+        let launch: InnerLaunch =
+            read_frame(ctl).map_err(|e| fail(RunExit::Pipe, "ctl read", &e))?;
+        // Then, before anything else: shut this runner's token (now with the desktop user's
+        // query), process, threads and later objects to the agent (`token::os::shut_self`); the
+        // outer shut the process and first thread while this runner was still suspended.
+        shut_self(&self.token, &launch.desktop_user)
+            .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e))?;
+        let job = usize::try_from(launch.job)
+            .ok()
+            .filter(|job| *job != 0)
+            .ok_or_else(|| (RunExit::Job, "the launch names no job handle".to_owned()))?;
+        self.launch = Some(launch);
+        // A handle is a number in this process's table, never a pointer to memory.
+        Ok(HANDLE(std::ptr::without_provenance_mut(job)))
+    }
+
+    fn start(&mut self) -> Result<Process, Failure> {
+        let launch = self
+            .launch
+            .as_ref()
+            .ok_or_else(|| (RunExit::Pipe, "no launch".to_owned()))?;
+        start(&self.set, launch, &self.token)
+    }
+
+    fn pid(&self, agent: &Process) -> u32 {
+        agent.pid
+    }
+
+    fn wait(&mut self, agent: &Process, interval: Duration) -> Option<u32> {
+        match agent.wait(Some(interval)) {
+            Ok(None) => None,
+            Ok(Some(code)) => Some(code),
+            Err(_) => Some(RunExit::Spawn.code()),
+        }
+    }
+
+    fn kill(&mut self, agent: &Process, code: u32) {
+        agent.kill(code);
+    }
+
+    fn report(&mut self, report: &InnerReport) -> bool {
+        self.ctl
+            .as_ref()
+            .is_some_and(|ctl| write_frame(ctl, report).is_ok())
     }
 }
 
 /// Makes the folders and the token, opens the agent's pipes, and starts it on the desktop the
 /// outer runner made.
-fn start(
-    set: &PipeSet,
-    launch: &InnerLaunch,
-    token: &Handle,
-) -> Result<super::spawn::Process, Failure> {
+fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process, Failure> {
     let me = user(token).map_err(|e| fail(RunExit::Token, "token user", &e))?;
     if me != launch.pool_user {
-        return Err(Failure(
+        return Err((
             RunExit::Token,
             "the inner runner isn't the pool user".to_owned(),
         ));
@@ -107,7 +188,7 @@ fn start(
         &launch.desktop_user,
         launch.matter_sid.as_ref(),
     )
-    .map_err(|e| Failure(RunExit::Token, e.to_string()))?;
+    .map_err(|e| (RunExit::Token, e.to_string()))?;
     for folder in &launch.folders {
         write::make_agent_folder(Path::new(&launch.folder_base), Path::new(folder))
             .map_err(|e| fail(RunExit::Token, "profile folder", &e))?;
@@ -118,7 +199,7 @@ fn start(
         .collect::<std::io::Result<Vec<Handle>>>()
         .map_err(|e| fail(RunExit::Pipe, "open pipe", &e))?;
     let [stdin, stdout, stderr] = stdio.as_slice() else {
-        return Err(Failure(RunExit::Pipe, "three pipes expected".to_owned()));
+        return Err((RunExit::Pipe, "three pipes expected".to_owned()));
     };
     let agent_token =
         make(token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
@@ -143,5 +224,5 @@ fn fail(exit: RunExit, call: &str, error: &std::io::Error) -> Failure {
     let code = error
         .raw_os_error()
         .map_or_else(|| error.kind().to_string(), |c| c.to_string());
-    Failure(exit, format!("{call} failed ({code})"))
+    (exit, format!("{call} failed ({code})"))
 }
