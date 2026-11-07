@@ -37,11 +37,13 @@ use base64::engine::general_purpose::STANDARD;
 use super::sids::Sid;
 
 mod der;
+mod merge;
 #[cfg(windows)]
 mod store;
 
+pub use merge::{Merged, merge, merged_name};
 #[cfg(windows)]
-pub use store::{Bundle, ensure, ensure_with};
+pub use store::{Bundle, ensure, ensure_with, write_merged};
 
 /// The bundle's folder in the data folder.
 pub const CA_DIR: &str = "sandbox-ca";
@@ -153,6 +155,8 @@ pub fn file_sddl(desktop_user: &Sid, pool: &[Sid]) -> String {
     sddl
 }
 
+#[cfg(test)]
+mod merge_tests;
 #[cfg(test)]
 mod tests;
 

@@ -64,6 +64,8 @@ pub(super) fn message_from_policy(
             .credential_link()
             .map(|p| path("credential_link", p))
             .transpose()?,
+        // R17 PR-E: the agent's `network.ca_certs` file goes here.
+        firm_ca: Vec::new(),
     };
     message.check()?;
     Ok(message)

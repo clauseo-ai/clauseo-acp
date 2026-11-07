@@ -71,6 +71,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     refuse_codex_reuse(&message, &profile)?;
     let env = agent_env(&message, &profile)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
+    let env = super::ca::with_firm_ca(&message, &desktop, env, say);
     let folders = super::env::profile_folders(&message)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
     let set = PipeSet::random().map_err(|e| Failure::new(RunExit::Pipe, os("random", &e)))?;
@@ -341,6 +342,7 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
     }
     paths.extend(message.runtime.iter().map(|p| ("runtime", p.as_str())));
     paths.extend(message.granted.iter().map(|p| ("granted", p.as_str())));
+    paths.extend(message.firm_ca.iter().map(|p| ("firm_ca", p.as_str())));
     let refused = |reason: CodexReuse| Failure::new(RunExit::CodexReuse, reason.to_string());
     codex_reuse(profile, paths, &message.env).map_err(refused)?;
     let Some(link) = &message.credential_link else {

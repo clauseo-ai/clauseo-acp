@@ -147,6 +147,7 @@ pub(crate) fn message(
         granted: [vec![matter, state], runtime].concat(),
         ca_bundle: spec.ca_bundle.as_deref().map(text),
         credential_link: None,
+        firm_ca: Vec::new(),
     };
     message.check().map_err(|e| e.to_string())?;
     Ok(message)
