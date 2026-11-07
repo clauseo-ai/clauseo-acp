@@ -247,6 +247,8 @@ crates/process/tests/spawn_options.rs console_processes unsafe_code
 crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_methods
 crates/settings/tests/disk/write.rs - clippy::disallowed_methods
 crates/settings/src/policy/windows.rs - unsafe_code
+# The pause between retries of a held policy.json (#590): Windows only, on a plain thread.
+crates/settings/src/policy/windows/acl.rs pause clippy::disallowed_methods
 crates/settings/src/policy/macos/tests.rs UserDomain::set unsafe_code
 crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_methods
 crates/settings/src/system/windows.rs - unsafe_code

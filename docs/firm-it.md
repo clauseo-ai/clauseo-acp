@@ -222,6 +222,35 @@ Administrators and Users, so the commands work in any Windows language. Check it
 beside `Clauseo`: `BUILTIN\Administrators`. Then put `policy.json` in it from the same elevated
 prompt.
 
+**Who must own `policy.json`.** The file and its folder must be owned by Administrators/SYSTEM
+(root on macOS and Linux) and not writable by users. A file that fails is ignored, as if it were
+not there, and the host log says why ([decision 0009](decisions/0009-policy-layer.md)).
+
+- **Windows:** `C:\ProgramData\Clauseo` must be owned by Administrators, with a protected ACL
+  (SYSTEM and Administrators full control, Users read). A per-machine install creates it that
+  way; the commands to create or repair it by hand are in the section "The policy folder on
+  Windows". A folder a user created first (or an empty one they swapped in) is theirs, and the
+  firm's file in it is ignored. The file must have one name (no hard link) and must stay readable
+  by Users, which the folder's ACL gives it: a file Users cannot read is ignored, since a user
+  could plant one. Its owner must be Administrators or SYSTEM; a file written by the built-in
+  Administrator account, or with UAC off, can be owned by that account's own SID and is then
+  ignored, so set its owner to Administrators.
+- **macOS:** deploy policy through device management (managed preferences, the preferred route),
+  or create the folder as root before any user does:
+  `sudo mkdir -p "/Library/Application Support/Clauseo"`,
+  `sudo chown root:wheel "/Library/Application Support/Clauseo"`,
+  `sudo chmod 755 "/Library/Application Support/Clauseo"`. An admin user can create that folder
+  without a password, and a folder they create is not root's, so the file in it would be
+  ignored. ACLs added with `chmod +a` are not seen by the check.
+- **Linux:** `/etc/clauseo` as root, mode 755, file 644, as usual. On NixOS, files under `/etc`
+  are symlinks into the store, so a policy deployed that way is ignored.
+  To enforce the policy, restrict unprivileged user namespaces
+  (`kernel.unprivileged_userns_clone=0`, or AppArmor's userns restriction, on by default in
+  Ubuntu 24.04): inside one (`unshare -r`) a user's Clauseo sees the policy as ignored or absent.
+- **Every OS:** the policy binds the Clauseo builds you deploy. Clauseo is open source, so a user
+  who can run their own build is not bound by it; enforce which builds run with application
+  allowlisting (MDM, WDAC, Santa).
+
 **What a policy value does.** It replaces the user's value and shows as locked in the app: Settings
 shows the policy's value with its choices greyed out and the line "Managed by your organisation"
 (measured on Windows Server 2025, 2026-11-03, with `ui.theme` = `dark`). A value
