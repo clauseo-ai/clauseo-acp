@@ -22,6 +22,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 use super::TokenSpec;
@@ -61,7 +62,7 @@ impl Drop for LocalSid {
 }
 
 /// A security descriptor made from SDDL, freed on drop.
-pub(in crate::windows) struct LocalDescriptor(pub(crate) PSECURITY_DESCRIPTOR);
+pub(in crate::windows) struct LocalDescriptor(PSECURITY_DESCRIPTOR);
 
 impl LocalDescriptor {
     /// The descriptor `sddl` describes.
@@ -80,6 +81,11 @@ impl LocalDescriptor {
         }
         .map_err(|error| os_error(&error))?;
         Ok(LocalDescriptor(out))
+    }
+
+    /// The descriptor, for a `SECURITY_ATTRIBUTES`; valid while `self` lives.
+    pub(in crate::windows) fn raw(&self) -> *mut c_void {
+        self.0.0
     }
 
     /// Its DACL, valid while `self` lives.
@@ -119,6 +125,20 @@ pub(in crate::windows) fn own_token() -> io::Result<Handle> {
     Ok(Handle(token))
 }
 
+/// The profile folder of `token`'s user (`GetUserProfileDirectoryW`).
+pub(in crate::windows) fn profile_folder(token: &Handle) -> io::Result<String> {
+    let mut buffer = vec![0u16; 1024];
+    let mut len = u32::try_from(buffer.len()).map_err(io::Error::other)?;
+    // SAFETY: the token is live; `buffer` is writable for `len` units.
+    unsafe { GetUserProfileDirectoryW(token.0, Some(PWSTR(buffer.as_mut_ptr())), &raw mut len) }
+        .map_err(|e| os_error(&e))?;
+    let end = buffer
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16(buffer.get(..end).unwrap_or_default()).map_err(io::Error::other)
+}
+
 /// `token`'s user.
 pub(in crate::windows) fn user(token: &Handle) -> io::Result<Sid> {
     let text = user_of(token.0)?;
@@ -128,12 +148,30 @@ pub(in crate::windows) fn user(token: &Handle) -> io::Result<Sid> {
 /// `token`'s logon SID: the group marked `SE_GROUP_LOGON_ID`. Exactly one, or an error.
 pub(in crate::windows) fn logon_sid(token: &Handle) -> io::Result<Sid> {
     let buffer = information(token, TokenGroups)?;
-    // SAFETY: GetTokenInformation wrote a TOKEN_GROUPS at the start of `buffer`, aligned for it
-    // (`information` gives u64 words); its SIDs point into `buffer`, which outlives `groups`.
-    let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
-    let count = usize::try_from(groups.GroupCount).map_err(io::Error::other)?;
-    // SAFETY: `Groups` is a variable-length array of `GroupCount` entries inside `buffer`.
-    let entries = unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), count) };
+    let bytes = size_of_val(buffer.as_slice());
+    if bytes < size_of::<TOKEN_GROUPS>() {
+        return Err(io::Error::other("the token's groups are too short"));
+    }
+    let groups = buffer.as_ptr().cast::<TOKEN_GROUPS>();
+    // SAFETY: `buffer` holds at least a TOKEN_GROUPS, aligned (u64 words), as GetTokenInformation
+    // wrote it.
+    let count = unsafe { (*groups).GroupCount };
+    let count = usize::try_from(count).map_err(io::Error::other)?;
+    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    count
+        .checked_mul(size_of::<SID_AND_ATTRIBUTES>())
+        .and_then(|len| len.checked_add(offset))
+        .filter(|end| *end <= bytes)
+        .ok_or_else(|| io::Error::other("the token's groups overrun their buffer"))?;
+    // SAFETY: the entries start at `Groups`'s offset in `buffer` and `count` of them fit before
+    // its end (checked above); the pointer comes from the whole buffer, so it may cover them all,
+    // and their SIDs point into `buffer`, which outlives `entries`.
+    let entries = unsafe {
+        std::slice::from_raw_parts(
+            (&raw const (*groups).Groups).cast::<SID_AND_ATTRIBUTES>(),
+            count,
+        )
+    };
     let mut found = entries
         .iter()
         .filter(|group| group.Attributes & LOGON_ID == LOGON_ID)

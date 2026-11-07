@@ -6,10 +6,15 @@
 //! the imports whose own imports aren't `KnownDLLs` are delay-loaded (`build.rs`, ADR 0049).
 //! Its `VERSIONINFO` names it, and its one `RT_MANIFEST` is the linker's, `setup.manifest`'s
 //! supported Windows versions merged in. Its `DllCharacteristics` keep ASLR (high-entropy) and DEP.
+//! The runner exe (`clauseo-sandbox-run`, S15 `PR5`) sits beside it and gets the same checks,
+//! but no manifest.
 
 // Used by the msvc tests and the off-Windows one; windows-gnu builds neither.
 #[cfg(any(not(windows), target_env = "msvc"))]
 const EXE: &str = env!("CARGO_BIN_EXE_clauseo-sandbox-setup");
+
+#[cfg(all(windows, target_env = "msvc"))]
+const RUN_EXE: &str = env!("CARGO_BIN_EXE_clauseo-sandbox-run");
 
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
@@ -44,7 +49,7 @@ mod pe {
         bytes.get(at..at + N).and_then(|part| part.try_into().ok())
     }
 
-    /// The exe's PE image as bytes, read without FFI.
+    /// An exe's PE image as bytes, read without FFI.
     pub(crate) struct Pe {
         bytes: Vec<u8>,
         /// The PE32+ optional header's offset.
@@ -55,8 +60,8 @@ mod pe {
     }
 
     impl Pe {
-        pub(crate) fn read() -> Self {
-            let bytes = std::fs::read(super::EXE).unwrap();
+        pub(crate) fn read(exe: &str) -> Self {
+            let bytes = std::fs::read(exe).unwrap();
             let mut pe = Self {
                 bytes,
                 optional: 0,
@@ -206,10 +211,21 @@ use pe::Pe;
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn static_imports_load_from_system32_only() {
-    let pe = Pe::read();
+    assert_static_imports_load_from_system32_only(EXE);
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_runners_static_imports_load_from_system32_only() {
+    assert_static_imports_load_from_system32_only(RUN_EXE);
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+fn assert_static_imports_load_from_system32_only(exe: &str) {
+    let pe = Pe::read(exe);
     // LOAD_CONFIG is the eleventh data directory (index 10).
     let load_config_rva = pe.directory(10);
-    assert_ne!(load_config_rva, 0, "the exe has a load configuration");
+    assert_ne!(load_config_rva, 0, "{exe} has a load configuration");
     let offset = pe.offset(load_config_rva);
     // IMAGE_LOAD_CONFIG_DIRECTORY64: its Size first, DependentLoadFlags (a u16) at 0x4E.
     assert!(
@@ -219,14 +235,14 @@ fn static_imports_load_from_system32_only() {
     assert_eq!(
         pe.u16_at(offset + 0x4E),
         0x800,
-        "LOAD_LIBRARY_SEARCH_SYSTEM32"
+        "{exe}: LOAD_LIBRARY_SEARCH_SYSTEM32"
     );
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn the_exe_has_aslr_with_high_entropy_and_dep() {
-    let pe = Pe::read();
+    let pe = Pe::read(EXE);
     let flags = pe.dll_characteristics();
     for (flag, name) in [
         (0x20, "HIGH_ENTROPY_VA"),
@@ -249,7 +265,7 @@ const DEBUG_TYPES_WITHOUT_A_PDB: [usize; 5] = [12, 13, 14, 16, 20];
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn the_exe_names_no_pdb() {
-    let pe = Pe::read();
+    let pe = Pe::read(EXE);
     let types = pe.debug_types();
     assert!(
         !types.contains(&2),
@@ -267,9 +283,14 @@ fn the_exe_names_no_pdb() {
     }
 }
 
-/// The imports that load after `main` has kept the DLL search to System32 (`build.rs`).
+/// The setup exe's imports that load after `main` has kept the DLL search to System32
+/// (`build.rs`).
 #[cfg(all(windows, target_env = "msvc"))]
 const DELAYED: [&str; 3] = ["netapi32.dll", "userenv.dll", "wtsapi32.dll"];
+
+/// The runner exe's: it makes no `Net*` call, so it doesn't import `netapi32.dll`.
+#[cfg(all(windows, target_env = "msvc"))]
+const RUN_DELAYED: [&str; 1] = ["userenv.dll"];
 
 /// The normal imports the loader may resolve before `main`, when `DependentLoadFlags` covers
 /// only the import itself and not what it imports. Each is a `KnownDLL` on Windows 10 and 11
@@ -310,21 +331,33 @@ const SAFE_BEFORE_MAIN: [&str; 22] = [
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn imports_that_import_beyond_the_known_dlls_are_delay_loaded() {
-    let pe = Pe::read();
+    assert_imports_beyond_the_known_dlls_are_delay_loaded(EXE, &DELAYED);
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_runners_imports_that_import_beyond_the_known_dlls_are_delay_loaded() {
+    assert_imports_beyond_the_known_dlls_are_delay_loaded(RUN_EXE, &RUN_DELAYED);
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+fn assert_imports_beyond_the_known_dlls_are_delay_loaded(exe: &str, delayed_dlls: &[&str]) {
+    let pe = Pe::read(exe);
     // IMAGE_DIRECTORY_ENTRY_IMPORT (index 1): 20-byte descriptors, the name's RVA at 12.
     let imports = pe.dll_names(1, 20, 12);
     // IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT (index 13): 32-byte descriptors, the name's RVA at 4.
     let delayed = pe.dll_names(13, 32, 4);
-    assert!(!imports.is_empty(), "the exe has an import directory");
-    for dll in DELAYED {
+    assert!(!imports.is_empty(), "{exe} has an import directory");
+    for &dll in delayed_dlls {
         assert!(
             !imports.iter().any(|import| import == dll),
-            "{dll} is a normal import, loaded before main with its own imports searched \
+            "{exe}: {dll} is a normal import, loaded before main with its own imports searched \
              beside the exe: {imports:?}"
         );
         assert!(
             delayed.iter().any(|import| import == dll),
-            "{dll} isn't delay-loaded (LNK4199 if the linker saw no import of it): {delayed:?}"
+            "{exe}: {dll} isn't delay-loaded (LNK4199 if the linker saw no import of it): \
+             {delayed:?}"
         );
     }
     let unvetted: Vec<&String> = imports
@@ -335,8 +368,8 @@ fn imports_that_import_beyond_the_known_dlls_are_delay_loaded() {
         .collect();
     assert!(
         unvetted.is_empty(),
-        "new import(s) {unvetted:?}: a DLL loaded before main whose own imports aren't all \
-         KnownDLLs would be searched for beside the elevated exe. Check its imports; delay-load \
+        "{exe}: new import(s) {unvetted:?}: a DLL loaded before main whose own imports aren't \
+         all KnownDLLs would be searched for beside the exe. Check its imports; delay-load \
          it in build.rs, or add it to SAFE_BEFORE_MAIN if they are all KnownDLLs."
     );
 }
@@ -365,7 +398,7 @@ fn version_string(version: &[u8], key: &str) -> Option<String> {
 #[cfg(all(windows, target_env = "msvc"))]
 #[test]
 fn the_exe_carries_version_information_and_one_manifest() {
-    let pe = Pe::read();
+    let pe = Pe::read(EXE);
     let versions = pe.resources(16);
     assert_eq!(versions.len(), 1, "one VERSIONINFO (build.rs)");
     let version = &versions[0];

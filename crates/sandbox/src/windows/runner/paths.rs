@@ -121,6 +121,13 @@ pub enum CodexReuse {
     /// would change that file's own DACL.
     #[error("tier B never grants on the lawyer's .codex\\auth.json: the credential link is it")]
     LinkedLogin,
+    /// The credential link couldn't be checked against `~\.codex\auth.json`, so it is refused.
+    #[error("tier B couldn't check the credential link against the lawyer's .codex ({0})")]
+    Unchecked(std::io::ErrorKind),
+    /// The credential link is a symbolic link or another reparse point: it must be a hard link
+    /// (R17), and a link's own file ID says nothing about what it points at.
+    #[error("tier B refuses a credential link that is a symbolic link")]
+    ReparseLink,
 }
 
 /// M3, the pure part: refuses a launch any of whose `paths` (name, path), or whose `CODEX_HOME`

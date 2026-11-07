@@ -268,6 +268,14 @@ fn folder_chain(
     Ok(folder)
 }
 
+/// Opens or makes each of `parts` below the folder `base` as [`folder_chain`] does, never through
+/// a link: the inner runner's profile folders (`write::make_agent_folder`, S15 `PR5`).
+pub(in crate::windows) fn make_folders(base: &Path, parts: &[OsString]) -> io::Result<()> {
+    folder_chain(base, parts, FILE_OPEN_IF)
+        .map(drop)
+        .map_err(|failure| io::Error::other(failure.to_string()))
+}
+
 /// Renames the item `item` (opened with `DELETE`) to `name` in the folder `folder`, never
 /// replacing what is there. `NtSetInformationFile`, which takes the folder's handle as
 /// `RootDirectory`; `SetFileInformationByHandle` refuses one.

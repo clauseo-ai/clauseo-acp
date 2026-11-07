@@ -1,20 +1,16 @@
 //! The inner runner (Windows): the pool user's half, started by the outer runner through
 //! `CreateProcessWithLogonW` with `--inner <pipe base>`. See `runner.rs` for the whole chain.
-#![expect(unsafe_code, reason = "a pipe handle handed to std as a File")]
 
-use std::fs::File;
-use std::mem::ManuallyDrop;
-use std::os::windows::io::FromRawHandle as _;
 use std::path::Path;
 
 use super::RunExit;
 use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
-use super::spawn::{Agent, Desktop, quiet_errors, restrict_dll_search, start_agent};
+use super::spawn::{Agent, quiet_errors, restrict_dll_search, start_agent};
 use crate::windows::acl::object::Handle;
-use crate::windows::pipe::os::open_client;
+use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
+use crate::windows::token::TokenSpec;
 use crate::windows::token::os::{logon_sid, make, own_token, user};
-use crate::windows::token::{TokenSpec, desktop_sddl};
 use crate::windows::write;
 
 /// A failure before the agent ran: its exit code and what failed (a call and its code).
@@ -36,17 +32,17 @@ pub fn run_inner(base: &str) -> u32 {
         Err(_) => return RunExit::Pipe.code(),
     };
     match start(&set, &launch) {
-        Ok((agent, desktop)) => {
+        Ok(agent) => {
             if write_frame(&ctl, &InnerReport::Started { pid: agent.pid }).is_err() {
                 agent.kill(RunExit::Pipe.code());
             }
-            drop(ctl);
             let code = agent
                 .wait(None)
                 .ok()
                 .flatten()
                 .unwrap_or(RunExit::Spawn.code());
-            drop(desktop);
+            // The outer may be gone already; the exit code says it anyway.
+            drop(write_frame(&ctl, &InnerReport::Exited { code }));
             code
         }
         Err(Failure(exit, what)) => {
@@ -63,8 +59,9 @@ pub fn run_inner(base: &str) -> u32 {
     }
 }
 
-/// Makes the folders, the token and the desktop, opens the agent's pipes, and starts it.
-fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<(super::spawn::Process, Desktop), Failure> {
+/// Makes the folders and the token, opens the agent's pipes, and starts it on the desktop the
+/// outer runner made.
+fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<super::spawn::Process, Failure> {
     let token = own_token().map_err(|e| fail(RunExit::Token, "OpenProcessToken", &e))?;
     let me = user(&token).map_err(|e| fail(RunExit::Token, "token user", &e))?;
     if me != launch.pool_user {
@@ -93,16 +90,11 @@ fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<(super::spawn::Process, 
     let [stdin, stdout, stderr] = stdio.as_slice() else {
         return Err(Failure(RunExit::Pipe, "three pipes expected".to_owned()));
     };
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).map_err(|e| Failure(RunExit::Token, e.to_string()))?;
-    let name = format!("clauseo-{}", crate::windows::pipe::hex(&random));
-    let desktop = Desktop::create(&name, &desktop_sddl(&me, launch.matter_sid.as_ref()))
-        .map_err(|e| fail(RunExit::Token, "CreateDesktopW", &e))?;
     let agent_token =
         make(&token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
     let agent = start_agent(&Agent {
         token: &agent_token,
-        desktop: &desktop.path,
+        desktop: &launch.desktop,
         program: &launch.program,
         command_line: &launch.command_line,
         cwd: &launch.cwd,
@@ -112,7 +104,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<(super::spawn::Process, 
     .map_err(|e| fail(RunExit::Spawn, "CreateProcessAsUserW", &e))?;
     // This runner's copies of the pipes close here, so the agent's exit ends the streams.
     drop(stdio);
-    Ok((agent, desktop))
+    Ok(agent)
 }
 
 fn fail(exit: RunExit, call: &str, error: &std::io::Error) -> Failure {
@@ -120,12 +112,4 @@ fn fail(exit: RunExit, call: &str, error: &std::io::Error) -> Failure {
         .raw_os_error()
         .map_or_else(|| error.kind().to_string(), |c| c.to_string());
     Failure(exit, format!("{call} failed ({code})"))
-}
-
-/// `handle` as a `File`, which owns and closes it from now on.
-fn into_file(handle: Handle) -> File {
-    let handle = ManuallyDrop::new(handle);
-    // SAFETY: the handle is live and owned; `ManuallyDrop` keeps `Handle` from closing it, so the
-    // `File` is its one owner.
-    unsafe { File::from_raw_handle(handle.0.0) }
 }

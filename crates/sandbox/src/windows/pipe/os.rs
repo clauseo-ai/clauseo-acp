@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{
     ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_CONNECTED,
-    ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_PIPE_NOT_CONNECTED, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Storage::FileSystem::{
@@ -28,6 +28,14 @@ use super::Role;
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::token::os::LocalDescriptor;
 
+/// A read end's access, within the pipe's DACL (`PIPE_RIGHTS`, which leaves out
+/// `FILE_CREATE_PIPE_INSTANCE`, the bit `GENERIC_WRITE` would ask for): `FILE_GENERIC_READ` and
+/// `FILE_WRITE_ATTRIBUTES`, so the agent can set the pipe's mode.
+const READ_END: u32 = 0x0012_0089 | 0x0100;
+/// A write end's access: `FILE_GENERIC_WRITE` less `FILE_CREATE_PIPE_INSTANCE`, and
+/// `FILE_READ_ATTRIBUTES`, so the agent can query the pipe.
+const WRITE_END: u32 = (0x0012_0116 & !0x4) | 0x0080;
+
 /// The pipes' buffer size each way.
 const BUFFER: u32 = 64 * 1024;
 
@@ -44,7 +52,7 @@ impl ServerPipe {
         let descriptor = LocalDescriptor::new(sddl)?;
         let attributes = SECURITY_ATTRIBUTES {
             nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
-            lpSecurityDescriptor: descriptor.0.0,
+            lpSecurityDescriptor: descriptor.raw(),
             bInheritHandle: false.into(),
         };
         let access = match role {
@@ -231,6 +239,15 @@ impl Overlapped {
     }
 }
 
+/// `handle` as a `File`, which owns and closes it from now on.
+pub(in crate::windows) fn into_file(handle: Handle) -> std::fs::File {
+    use std::os::windows::io::FromRawHandle as _;
+    let handle = std::mem::ManuallyDrop::new(handle);
+    // SAFETY: the handle is live and owned; `ManuallyDrop` keeps `Handle` from closing it, so
+    // the `File` is its one owner.
+    unsafe { std::fs::File::from_raw_handle(handle.0.0) }
+}
+
 /// Opens the client end of `name`, `role`'s pipe, for the inner runner: synchronous, so the
 /// agent can use it as a standard handle; inheritable when `inherit` (the agent's three); with
 /// identification-only quality of service, so the server can learn the client's identity but
@@ -242,9 +259,9 @@ pub(in crate::windows) fn open_client(name: &str, role: Role, inherit: bool) -> 
         bInheritHandle: inherit.into(),
     };
     let access = match role {
-        Role::Ctl => GENERIC_READ.0 | GENERIC_WRITE.0,
-        Role::In => GENERIC_READ.0,
-        Role::Out | Role::Err => GENERIC_WRITE.0,
+        Role::Ctl => super::PIPE_RIGHTS,
+        Role::In => READ_END,
+        Role::Out | Role::Err => WRITE_END,
     };
     // SAFETY: the name is a live HSTRING and `attributes` outlives the call; the handle
     // returned is owned by `Handle`.

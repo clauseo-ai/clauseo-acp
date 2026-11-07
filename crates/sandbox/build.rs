@@ -51,6 +51,12 @@
 //! a typo can't turn the guard off. On msvc the exe's `VERSIONINFO` also carries the key's id as
 //! the string `UpdaterKeyId`, which release.yml's assemble job checks from the file without
 //! running it.
+//!
+//! The runner exe (`clauseo-sandbox-run`, S15 `PR5`) runs as the user, so it gets no manifest,
+//! but it sits in the same folder and starts the agent under another account: it gets the same
+//! flag, and `userenv.dll` (`GetUserProfileDirectoryW`) delay-loaded, its one direct import
+//! that isn't vetted in `tests/setup_exe.rs`. It reaches no `Net*` call, so it doesn't import
+//! `netapi32.dll`; `/DELAYLOAD` of a DLL it doesn't import would only warn (LNK4199).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -103,6 +109,13 @@ fn main() -> Result<(), Error> {
             manifest.display()
         );
         version_info(Path::new(&dir), key_id)?;
+        for arg in [
+            "/DEPENDENTLOADFLAG:0x800",
+            "/DELAYLOAD:userenv.dll",
+            "delayimp.lib",
+        ] {
+            println!("cargo:rustc-link-arg-bin=clauseo-sandbox-run={arg}");
+        }
     }
     Ok(())
 }

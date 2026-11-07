@@ -49,6 +49,8 @@ use super::sids::Sid;
 
 #[cfg(windows)]
 mod ca;
+#[cfg(windows)]
+mod desktop;
 pub mod env;
 pub mod frame;
 #[cfg(windows)]
@@ -66,6 +68,8 @@ pub use inner::run_inner;
 #[cfg(windows)]
 pub use outer::run_outer;
 pub use paths::{WinPath, codex_reuse};
+#[cfg(windows)]
+pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
