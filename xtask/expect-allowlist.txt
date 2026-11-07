@@ -565,3 +565,4 @@ crates/sandbox/examples/s15_launch_vm/win_desk.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/sys.rs hard_link clippy::disallowed_methods
 crates/sandbox/examples/s15_launch_vm/sys.rs symlink_file clippy::disallowed_methods
 crates/sandbox/examples/s15_launch_vm/win_thread.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_ctl.rs - unsafe_code
