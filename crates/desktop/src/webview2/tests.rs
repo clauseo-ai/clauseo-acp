@@ -112,8 +112,9 @@ fn the_download_link_is_microsofts_bootstrapper_page() {
     );
 }
 
-/// The `LangString` keys of a language file, in order, each with its language constant.
-fn lang_strings(relative: &str) -> Vec<(String, String)> {
+/// The `LangString`s of a language file, in order: each key, its language constant and its text
+/// (inside the quotes).
+fn lang_strings(relative: &str) -> Vec<(String, String, String)> {
     read(relative)
         .lines()
         .filter_map(|line| line.strip_prefix("LangString "))
@@ -123,10 +124,10 @@ fn lang_strings(relative: &str) -> Vec<(String, String)> {
             let constant = parts.next().unwrap().to_owned();
             let text = parts.next().unwrap();
             assert!(
-                text.starts_with('"') && text.ends_with('"'),
+                text.len() >= 2 && text.starts_with('"') && text.ends_with('"'),
                 "{key}: {text}"
             );
-            (key, constant)
+            (key, constant, text[1..text.len() - 1].to_owned())
         })
         .collect()
 }
@@ -170,73 +171,182 @@ fn the_dialog_is_wide_enough_for_the_main_line_and_no_wider_than_a_small_screen(
     assert!(f64::from(WIDTH) * 1.75 * 1.5 < 1366.0);
 }
 
-#[test]
-fn the_installer_english_file_names_the_product_through_nsis() {
-    let text = read(&english_file());
-    // Language files are included, not rendered, so a template mark would show as it is.
-    for line in text.lines().filter(|line| !line.starts_with(';')) {
-        assert!(!line.contains("{{"), "{line}");
-    }
-    for key in ["appRunning", "appRunningOkKill", "failedToKillApp"] {
-        let prefix = format!("LangString {key} ${{LANG_ENGLISH}} ");
-        let line = text
-            .lines()
-            .find_map(|line| line.strip_prefix(prefix.as_str()))
-            .unwrap();
-        assert!(line.contains("${PRODUCTNAME}"), "{key}: {line}");
-    }
-}
-
-/// The installer's English file, as `customLanguageFiles` names it.
-fn english_file() -> String {
+/// The installer's language files, as `customLanguageFiles` names them, each with its NSIS
+/// language constant: English first (NSIS's fallback), then Hindi, which is ours (Tauri 2.12.2
+/// ships no Hindi).
+fn language_files() -> [(String, &'static str); 2] {
     let conf = tauri_conf();
     let nsis = &conf["bundle"]["windows"]["nsis"];
-    assert_eq!(nsis["languages"], serde_json::json!(["English"]));
+    assert_eq!(nsis["languages"], serde_json::json!(["English", "Hindi"]));
+    // No picker: NSIS chooses (windows/hooks.nsh says how).
+    assert_ne!(nsis["displayLanguageSelector"], serde_json::json!(true));
     let files = nsis["customLanguageFiles"].as_object().unwrap();
-    assert_eq!(files.keys().collect::<Vec<_>>(), ["English"]);
-    files["English"].as_str().unwrap().to_owned()
+    let mut names: Vec<&String> = files.keys().collect();
+    names.sort_unstable();
+    assert_eq!(names, ["English", "Hindi"]);
+    [
+        (
+            files["English"].as_str().unwrap().to_owned(),
+            "${LANG_ENGLISH}",
+        ),
+        (files["Hindi"].as_str().unwrap().to_owned(), "${LANG_HINDI}"),
+    ]
+}
+
+/// The installer's English file.
+fn english_file() -> String {
+    let [(english, _), _] = language_files();
+    english
 }
 
 #[test]
-fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_10_once_each() {
+fn the_installer_language_files_sit_beside_each_other() {
+    let [(english, _), (hindi, _)] = language_files();
+    assert_eq!(english, "windows/nsis/English.nsh");
+    assert_eq!(hindi, "windows/nsis/Hindi.nsh");
+}
+
+#[test]
+fn the_installer_language_files_name_the_product_through_nsis() {
+    for (file, constant) in language_files() {
+        let text = read(&file);
+        // Language files are included, not rendered, so a template mark would show as it is.
+        for line in text.lines().filter(|line| !line.starts_with(';')) {
+            assert!(!line.contains("{{"), "{file}: {line}");
+        }
+        for key in ["appRunning", "appRunningOkKill", "failedToKillApp"] {
+            let prefix = format!("LangString {key} {constant} ");
+            let line = text
+                .lines()
+                .find_map(|line| line.strip_prefix(prefix.as_str()))
+                .unwrap_or_else(|| panic!("{file}: no {key}"));
+            assert!(line.contains("${PRODUCTNAME}"), "{file} {key}: {line}");
+        }
+    }
+}
+
+#[test]
+fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_10_once_each() {
     // Tauri's 27, the seven lines windows/hooks.nsh shows after the app deletes its data or about
     // S15's removal (deleteAppDataFailed, deleteAppDataKept, deleteAppDataKeptFailed,
     // deleteAppDataFailedUnnamed, removeStillRunning, removeSkippedSilent and removeExeMissing),
     // which tests there hold to the hook, its two about the firm-policy folder
     // (policyFolderExists and policyFolderFailed) and the installers' setupExeRemoved.
-    let strings = lang_strings(&english_file());
-    assert_eq!(strings.len(), 37);
-    let mut keys: Vec<&str> = strings.iter().map(|(key, _)| key.as_str()).collect();
-    keys.sort_unstable();
-    keys.dedup();
-    assert_eq!(keys.len(), 37);
-    assert!(
-        strings
-            .iter()
-            .all(|(_, constant)| constant == "${LANG_ENGLISH}")
-    );
+    let [english, hindi] = language_files();
+    let mut orders = Vec::new();
+    for (file, constant) in [english, hindi] {
+        let strings = lang_strings(&file);
+        assert_eq!(strings.len(), 37, "{file}");
+        let order: Vec<String> = strings.iter().map(|(key, _, _)| key.clone()).collect();
+        let mut keys = order.clone();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), 37, "{file}");
+        assert!(
+            strings.iter().all(|(_, used, _)| used == constant),
+            "{file}: every string is {constant}'s"
+        );
+        orders.push(order);
+    }
+    // The same keys in the same order, so a Tauri upgrade's new key goes into both.
+    assert_eq!(orders[0], orders[1]);
+}
+
+#[test]
+fn the_installer_hindi_file_is_in_hindi() {
+    // Until the app thread's Hindi lands, Hindi.nsh holds English.nsh's words: this fails, so the
+    // branch can't ship English in the Hindi file. Every value holds a Devanagari character.
+    let [_, (hindi, _)] = language_files();
+    let english: Vec<String> = lang_strings(&hindi)
+        .into_iter()
+        .filter(|(_, _, text)| !text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)))
+        .map(|(key, _, _)| key)
+        .collect();
+    assert!(english.is_empty(), "{hindi}: no Devanagari in {english:?}");
 }
 
 #[test]
 fn the_delete_app_data_box_says_clauseos_words_on_one_line() {
-    let text = read(&english_file());
-    let line = text
-        .lines()
-        .find_map(|line| line.strip_prefix("LangString deleteAppData ${LANG_ENGLISH} "))
-        .unwrap();
-    let words = line.trim_matches('"');
-    assert_eq!(
-        words,
-        "Also delete conversations, saved versions and settings"
-    );
-    // The box is 400 x 25 px, one line.
-    assert!(words.chars().count() <= 60, "{words}");
+    for (file, constant) in language_files() {
+        let text = read(&file);
+        let prefix = format!("LangString deleteAppData {constant} ");
+        let line = text
+            .lines()
+            .find_map(|line| line.strip_prefix(prefix.as_str()))
+            .unwrap_or_else(|| panic!("{file}: no deleteAppData"));
+        let words = line.trim_matches('"');
+        if constant == "${LANG_ENGLISH}" {
+            assert_eq!(
+                words,
+                "Also delete conversations, saved versions and settings"
+            );
+        }
+        // The box is 400 x 25 px, one line.
+        assert!(words.chars().count() <= 60, "{file}: {words}");
+    }
 }
 
 #[test]
-fn the_installer_english_file_has_no_byte_order_mark() {
-    let bytes = std::fs::read(manifest_dir().join(english_file())).unwrap();
-    // The bundler adds the byte order mark when it copies the file; a second would break it.
-    assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
-    String::from_utf8(bytes).unwrap();
+fn the_installer_language_files_have_no_byte_order_mark() {
+    for (file, _) in language_files() {
+        let bytes = std::fs::read(manifest_dir().join(&file)).unwrap();
+        // The bundler adds the byte order mark when it copies the file; a second would break it.
+        assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]), "{file}");
+        String::from_utf8(bytes).unwrap();
+    }
+}
+
+/// `hooks.nsh`'s post-install macro, its code lines trimmed (comments and blank lines left out).
+fn postinstall_code() -> Vec<String> {
+    let code: Vec<String> = read("windows/hooks.nsh")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with(';'))
+        .map(str::to_owned)
+        .collect();
+    let start = code
+        .iter()
+        .position(|line| line == "!macro NSIS_HOOK_POSTINSTALL")
+        .unwrap();
+    let end = start
+        + code[start..]
+            .iter()
+            .position(|line| line == "!macroend")
+            .unwrap();
+    code[start..end].to_vec()
+}
+
+#[test]
+fn every_install_tells_the_uninstaller_the_apps_language_else_its_own() {
+    // MUI_UNGETLANGUAGE in the template's un.onInit reads this value; empty, it shows a picker.
+    let body = postinstall_code();
+    let at = |wanted: &str| {
+        body.iter()
+            .position(|line| line == wanted)
+            .unwrap_or_else(|| panic!("no {wanted:?} in {body:?}"))
+    };
+    let own = at("StrCpy $R1 $LANGUAGE");
+    let read = at(r#"ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage""#);
+    let hindi = at(r#"${If} $R0 S== "hi""#);
+    let english = at(r#"${ElseIf} $R0 S== "en""#);
+    let write = at(r#"WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $R1"#);
+    let per_machine = at(r#"!if "${INSTALLMODE}" == "perMachine""#);
+    assert!(own < read && read < hindi && hindi < english && english < write);
+    assert_eq!(body[hindi + 1], "StrCpy $R1 ${LANG_HINDI}");
+    assert_eq!(body[english + 1], "StrCpy $R1 ${LANG_ENGLISH}");
+    assert_eq!(body[english + 2], "${EndIf}");
+    // Both installers: before the per-machine part, never inside it.
+    assert!(write < per_machine, "{body:?}");
+    // HKCU only, nothing written anywhere else.
+    let writes = body.iter().filter(|line| line.starts_with("WriteReg"));
+    assert_eq!(writes.count(), 1, "{body:?}");
+    // The registers are put back.
+    assert_eq!(
+        body[own - 2..own],
+        ["Push $R0".to_owned(), "Push $R1".to_owned()]
+    );
+    assert_eq!(
+        body[write + 1..write + 3],
+        ["Pop $R1".to_owned(), "Pop $R0".to_owned()]
+    );
 }
