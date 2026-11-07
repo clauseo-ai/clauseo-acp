@@ -202,7 +202,8 @@
 
 ; The branch (header). Per-user installer only; the per-machine one never takes the switch. With
 ; the switch: the record checked, then the copy written and --adopt run (CLAUSEO_ADMIN_COPY), and
-; the instance quits with 100 + its exit code (98 newer copy kept, 99 not run). Quit in .onInit
+; the instance quits with 100 + its exit code (98 newer copy kept, 99 not run, 95 written and then
+; removed, which the outer instance reports as setupExeRemoved). Quit in .onInit
 ; ends the installer at once, no callback run, with SetErrorLevel's code (NSIS Ui.c:396,
 ; Main.c:464). Without it, the registers are put back.
 !macro CLAUSEO_ELEVATED_BRANCH
@@ -249,6 +250,7 @@
         ${Else}
           !insertmacro CLAUSEO_ADMIN_COPY '--owner-sid $R2 --user-install-dir "$INSTDIR" --data-dir "$R3"'
           ${If} $R8 <> ${CLAUSEO_ADMIN_NOT_RUN}
+          ${AndIf} $R8 <> ${CLAUSEO_ADMIN_REMOVED}
             IntOp $R8 $R8 + ${CLAUSEO_ADMIN_EXIT_BASE}
           ${EndIf}
         ${EndIf}

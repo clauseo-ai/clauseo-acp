@@ -68,6 +68,10 @@
 !define CLAUSEO_ADMIN_APP_RUNNING 97
 ; 96: the per-machine installer stopped waiting for --adopt (CLAUSEO_ADMIN_WAIT_MS).
 !define CLAUSEO_ADMIN_TIMED_OUT 96
+; 95: this run wrote the admin copy, --adopt couldn't be started, and the copy is gone: Windows
+; security removed it as it was written. The installers say setupExeRemoved and set hooks.nsh's
+; CLAUSEO_EXIT_SETUP_EXE_REMOVED (20), never under /P. A failed write is 99 instead, never this.
+!define CLAUSEO_ADMIN_REMOVED 95
 ; Clauseo's main window class, set where lib.rs builds the window (MAIN_WINDOW_CLASS; a test holds
 ; them equal), so FindWindow finds Clauseo's main window and no other program's. Hidden and
 ; minimised windows count: FindWindow finds every top-level window on the desktop.
@@ -101,12 +105,6 @@
 ; 1 once a wait for the set-up timed out (outcome 7, or CLAUSEO_ADMIN_TIMED_OUT per machine): the
 ; finish page then unticks and hides its "Run Clauseo" box (CLAUSEO_FINISH_SHOW).
 Var ClauseoAdminTimedOut
-; 1 once the admin section ran in this install: the per-machine installer's admin copy step got
-; past its Clauseo-running check, or the per-user installer's elevated instance started and didn't
-; find Clauseo running (97). Launches then run the admin copy, so hooks.nsh's check for a set-up
-; program Windows security removed (setupExeRemoved) looks at CLAUSEO_ADMIN_DIR's copy; left 0 (a
-; declined prompt, /S, /P, /UPDATE, Clauseo running), it looks at the one in $INSTDIR.
-Var ClauseoAdminSectionRan
 
 ; The elevated installers' protected temporary folder, made first in each elevated path, and the
 ; elevated instance's branch, which the template inserts first in .onInit.
@@ -146,7 +144,8 @@ Var ClauseoAdminSectionRan
 ; The elevated branch's: CLAUSEO_ADMIN_EXTRACT, then `--adopt ARGS` from there with ExecWait,
 ; never through cmd.exe or anything else, as --adopt checks its parents. ExecWait has no time
 ; limit and the branch loads no plug-in, so the outer instance bounds its own wait on this one
-; (CLAUSEO_ADMIN_WAIT_MS). $R8: the exit code, or CLAUSEO_ADMIN_NOT_RUN when nothing ran.
+; (CLAUSEO_ADMIN_WAIT_MS). $R8: the exit code, or CLAUSEO_ADMIN_NOT_RUN when nothing ran, or
+; CLAUSEO_ADMIN_REMOVED when the copy was written but couldn't be started and is gone.
 !macro CLAUSEO_ADMIN_COPY ARGS
   StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
   !insertmacro CLAUSEO_ADMIN_EXTRACT
@@ -154,6 +153,9 @@ Var ClauseoAdminSectionRan
     ExecWait '"${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe" --adopt ${ARGS}' $R8
     ${If} ${Errors}
       StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
+      ${IfNot} ${FileExists} "${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe"
+        StrCpy $R8 ${CLAUSEO_ADMIN_REMOVED}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend
@@ -162,7 +164,8 @@ Var ClauseoAdminSectionRan
 ; (CreateProcessW, no window, in the admin folder, which SetOutPath made current) and waited for
 ; up to CLAUSEO_ADMIN_WAIT_MS. Plug-ins are the template's own there, loaded from the run's own
 ; folder under Program Files (safe_temp.nsh). $R8: the exit code,
-; CLAUSEO_ADMIN_TIMED_OUT past the wait (it finishes by itself), or CLAUSEO_ADMIN_NOT_RUN. A
+; CLAUSEO_ADMIN_TIMED_OUT past the wait (it finishes by itself), CLAUSEO_ADMIN_REMOVED when the
+; copy was written but couldn't be started and is gone, or CLAUSEO_ADMIN_NOT_RUN. A
 ; 32-bit STARTUPINFOW is 68 bytes (cb first), a PROCESS_INFORMATION 16 (hProcess, hThread, ...).
 ; Uses $1, $2, $R5, $R7 and $R9.
 !macro CLAUSEO_ADMIN_COPY_BOUNDED ARGS
@@ -186,6 +189,8 @@ Var ClauseoAdminSectionRan
         ${EndIf}
       ${EndIf}
       System::Call 'kernel32::CloseHandle(p r1)'
+    ${ElseIfNot} ${FileExists} "${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe"
+      StrCpy $R8 ${CLAUSEO_ADMIN_REMOVED}
     ${EndIf}
     System::Free $R5
     System::Free $R7
@@ -314,7 +319,9 @@ Var ClauseoAdminSectionRan
 ; $R6 is the outcome: 0 set up (a details line), 1 failed, 2 another Windows account has it, 4
 ; the prompt declined (each a box and a details line), 5 a newer copy kept (a details line), 6
 ; Clauseo running (a box, a details line and exit code 24, interactive only), 7 still running
-; after 10 minutes (a details line; the finish page hides "Run Clauseo").
+; after 10 minutes (a details line; the finish page hides "Run Clauseo"), 8 the elevated instance
+; wrote the copy and Windows security removed it (CLAUSEO_ADMIN_REMOVED: setupExeRemoved, a box,
+; a details line and exit code 20).
 !macro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
   Push $R2
   Push $R3
@@ -365,7 +372,6 @@ Var ClauseoAdminSectionRan
       System::Call 'shell32::ShellExecuteExW(p R5) i .R7 ?e'
       Pop $R9
       ${If} $R7 <> 0
-        StrCpy $ClauseoAdminSectionRan 1
         DetailPrint "$(adminCopyWorking)"
         System::Call '*$R5(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
         ${If} $R7 <> 0
@@ -390,17 +396,20 @@ Var ClauseoAdminSectionRan
       System::Free $R5
     ${EndIf}
     ; A newer copy kept: this instance's own check (98), or --adopt's (100 + 9). Clauseo running:
-    ; this instance's check (outcome 6 already) or the elevated one's (97).
+    ; this instance's check (outcome 6 already) or the elevated one's (97). The copy written and
+    ; then removed (95).
     ${If} $R8 = ${CLAUSEO_ADMIN_NEWER_KEPT}
       StrCpy $R6 5
     ${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}
       StrCpy $R6 6
-      StrCpy $ClauseoAdminSectionRan 0
+    ${ElseIf} $R8 = ${CLAUSEO_ADMIN_REMOVED}
+      StrCpy $R6 8
     ${EndIf}
     ${If} $R6 <> 4
     ${AndIf} $R6 <> 5
     ${AndIf} $R6 <> 6
     ${AndIf} $R6 <> 7
+    ${AndIf} $R6 <> 8
       ; --adopt's own code from the instance's 100 + code; -1 when --adopt never ran (99, or
       ; NSIS's own 1 or 2). Every code is named: done, another account, and the rest failed.
       StrCpy $R9 -1
@@ -442,6 +451,10 @@ Var ClauseoAdminSectionRan
       SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}
     ${ElseIf} $R6 = 7
       DetailPrint "$(adminCopyStillRunning)"
+    ${ElseIf} $R6 = 8
+      DetailPrint "$(setupExeRemoved)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
+      SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
     ${EndIf}
   ${EndIf}
   Pop $R9
@@ -481,7 +494,6 @@ Var ClauseoAdminSectionRan
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
     ${EndIf}
   ${Else}
-    StrCpy $ClauseoAdminSectionRan 1
     !insertmacro CLAUSEO_RECORD_CHECK ""
     ${If} $R1 = 1
       ; Another user's per-user install placed the copy: --adopt would refuse (2); the copy stays.
@@ -505,7 +517,9 @@ Var ClauseoAdminSectionRan
 !macroend
 
 ; The per-machine outcome of --adopt's code in $R8: done, a newer copy kept (9), still running past
-; the wait (a details line, exit 23 under /S, and no "Run Clauseo"), or failed.
+; the wait (a details line, exit 23 under /S, and no "Run Clauseo"), the copy written and then
+; removed by Windows security (CLAUSEO_ADMIN_REMOVED: a details line, exit 20 unless /P, a box only
+; interactively), or failed (a write that failed included: 23 under /S, never 20).
 !macro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
   ${If} $R8 = ${CLAUSEO_ADOPT_DONE}
     DetailPrint "$(adminCopyDone)"
@@ -516,6 +530,16 @@ Var ClauseoAdminSectionRan
     StrCpy $ClauseoAdminTimedOut 1
     ${If} ${Silent}
       SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}
+    ${EndIf}
+  ${ElseIf} $R8 = ${CLAUSEO_ADMIN_REMOVED}
+    DetailPrint "$(setupExeRemoved)"
+    ${If} $PassiveMode <> 1
+      SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
+    ${EndIf}
+    ${IfNot} ${Silent}
+    ${AndIf} $PassiveMode <> 1
+    ${AndIf} $UpdateMode <> 1
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
     ${EndIf}
   ${Else}
     DetailPrint "$(adminCopyMachineFailed)"
