@@ -1148,6 +1148,15 @@ leaves that profile, both naming the part.
     its own can end, and the exit code is the one thing the host reads. The code the run would
     have had is said on stderr. A process that only can't be checked (its job, its start time) and
     a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
+  - **The unclean-session marker.** Once it has read the launch, before anything runs as the
+    pool user, the outer writes `<data_dir>\sandbox\run\<launch id>.session`, holding the pool
+    user's SID, as the launch file is written: atomically, with the run folder's three entries
+    (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
+    the pool user can neither write nor remove it. It removes it only at a clean end: the inner
+    exited (no cancel, no failure), reported the agent's exit, the end sweeper started and exited
+    0 while the outer waited, and no sweep found an escapee. A crash, a cancel, a failure, a job
+    that didn't empty or an escapee leaves it. `runner::unclean_sessions` lists the sessions
+    whose marker is left, with their pool users; nothing calls it yet.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task or BITS job stays until

@@ -334,3 +334,42 @@ fn the_end_sweepers_escapee_exit_is_the_runs_outcome() {
         assert_eq!(end.outcome(7), 7, "{swept:?}");
     }
 }
+
+#[test]
+fn only_a_clean_end_removes_the_unclean_session_marker() {
+    let ended = |first: Option<EndSignal>, swept: Swept| {
+        let end = EndSweep::new(Record {
+            swept: Some(swept),
+            ..Record::default()
+        });
+        if let Some(first) = first {
+            end.trigger(first);
+        }
+        let swept = end.wait();
+        (end, swept)
+    };
+    // The inner exited, reported the agent's exit, and the sweeper exited 0: clean.
+    let (end, swept) = ended(Some(EndSignal::InnerExited), Swept::Clean);
+    assert!(end.clean(swept, true));
+    // ... but not when the inner never reported, or a sweep found an escapee.
+    assert!(!end.clean(swept, false));
+    end.mark_escapee();
+    assert!(!end.clean(swept, true));
+    // A cancel, a failure, or no end signal at all (the outer never got that far): left.
+    for first in [Some(EndSignal::Stdin), Some(EndSignal::Failed), None] {
+        let (end, swept) = ended(first, Swept::Clean);
+        assert!(!end.clean(swept, true), "{first:?}");
+    }
+    // A sweeper that failed, ran past the wait or never started (the job didn't empty), or
+    // found an escapee: left.
+    for swept in [Swept::Unclean, Swept::Escapee] {
+        let (end, swept) = ended(Some(EndSignal::InnerExited), swept);
+        assert!(!end.clean(swept, true), "{swept:?}");
+    }
+    let end = EndSweep::new(Record {
+        fail: Some("empty job"),
+        ..Record::default()
+    });
+    end.trigger(EndSignal::InnerExited);
+    assert!(!end.clean(end.wait(), true));
+}
