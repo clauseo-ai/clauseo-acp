@@ -89,7 +89,7 @@ test("nothing is read until the first load; then the list is kept per matter for
 test("a failed read is not kept: the next load asks again", async () => {
   let fail = true;
   const { transport, asked } = host(() => {
-    if (fail) throw { code: "matter.folder_missing", message: "gone", retryable: false };
+    if (fail) throw { code: "matter.folder_missing", message: "gone", retryable: true };
     return PAPERS;
   });
   const mentions = paperMentions(transport, MATTER, () => 0)!;

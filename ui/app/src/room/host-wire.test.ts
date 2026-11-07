@@ -234,7 +234,7 @@ test("papers: list_papers names the matter, and the answer's papers come back as
 });
 
 test("papers: another answer rejects as internal, and the host's refusal as itself", async () => {
-  const refused = { code: "matter.folder_missing", message: "gone", retryable: false };
+  const refused = { code: "matter.folder_missing", message: "gone", retryable: true };
   await expect(
     wirePapersHost({ query: async () => ({ matters: [] }) }).listPapers("m-1"),
   ).rejects.toMatchObject({ code: "internal" });
@@ -424,7 +424,7 @@ for (const command of DONE_COMMANDS) {
 }
 
 test("a refused command rejects with the host's error", async () => {
-  const refused = { code: "matter.folder_missing", message: "gone", retryable: false };
+  const refused = { code: "matter.folder_missing", message: "gone", retryable: true };
   const { host } = commanding(() => Promise.reject(refused));
   await expect(host.command({ open_matter: { matter: M1 } })).rejects.toEqual(refused);
 });

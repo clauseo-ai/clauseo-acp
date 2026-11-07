@@ -67,7 +67,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `store.locked` | Another Clauseo process holds the data folder. | no | store |
 | `store.newer_version` | The data came from a newer Clauseo. | no | store |
 | `matter.checkpoint_failed` | Taking a checkpoint of the matter's files failed. | yes | matters |
-| `matter.folder_missing` | The matter's folder is gone: moved, deleted, or its drive is not mounted. | no | matters |
+| `matter.folder_missing` | The matter's folder is gone: moved, deleted, or its drive is not mounted or did not answer in time. | yes | matters |
 | `matter.folder_refused` | The folder may not be a matter: a drive root, the home folder or a system folder. | no | matters |
 | `matter.codex_folder` | The matter folder holds a `.codex` folder, whose settings Codex would load. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
 | `matter.file_locked` | A file the operation needs is locked by another program, such as an open document. | yes | matters |
@@ -118,6 +118,13 @@ Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retry
 launch can work; `store.locked` is not, because the lawyer must close the other Clauseo first;
 `matter.checkpoint_failed` is, because the usual cause (another program holding the repository lock)
 passes; `matter.turn_running` is, as `thread.turn_running` is.
+
+`matter.folder_missing` became retryable, and its meaning gained "or did not answer in time", on
+2026-11-07 for #617, at the orchestrator's request. The widened meaning clarifies "its drive is
+not mounted": a folder on a drive or network share that is not there, or does not answer within
+the host's 10 s bound, comes back once the drive or share does, and the same call then works. It
+changes a code's meaning, which the rule above forbids, but no peer of another version decodes
+this code: the host and the app ship in one bundle.
 
 ## Consequences
 

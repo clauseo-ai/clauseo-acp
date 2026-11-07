@@ -1525,7 +1525,7 @@ export type ErrorCode =
 "store.newer_version" | 
 /** Taking a checkpoint of the matter's files failed. */
 "matter.checkpoint_failed" | 
-/** The matter's folder is gone: moved, deleted, or its drive is not mounted. */
+/** The matter's folder is gone: moved, deleted, or its drive is not mounted or did not answer in time. */
 "matter.folder_missing" | 
 /** The folder may not be a matter: a drive root, the home folder or a system folder. */
 "matter.folder_refused" | 

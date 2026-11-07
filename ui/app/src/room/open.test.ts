@@ -76,7 +76,7 @@ describe("AnswerHost", () => {
         throw declined;
       },
       openFile: () => {
-        throw { code: "matter.folder_missing", message: "gone", retryable: false };
+        throw { code: "matter.folder_missing", message: "gone", retryable: true };
       },
     });
     const host = answerHost(t, "m-1", () => listed);
