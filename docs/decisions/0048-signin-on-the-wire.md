@@ -739,15 +739,21 @@ changes (`setup/identity.rs`).
     recorded account. That stamp is the confirmed one, so Codex's own rewrite forces nothing
     (the change still gets one plain check). Another account there is `signin.account_changed`,
     the agents stopped: the one definite refusal of a forced read.
-  - *Unconfirmed, never refused:* a forced read that rewrote nothing (the refresh refused or
-    skipped), had no answer, timed out, or got any JSON-RPC error but the one below. Its own
-    answer (with no rewrite) or the plain fallback (otherwise) decides this launch as a plain
-    read does: the same account lets it go, another is a change, no answer is unknown. The stamp
-    stays pending and nothing else changes.
+  - *An answer with no rewrite* is a refresh that failed with the network up. Its answer
+    decides this launch as a plain read does (the same account lets it go, another is a
+    change), and one forced retry is due 30 s later, the 60 s rate waived for it. The same again
+    is unknown: launches refused (`agent.identity_unknown`), and the card says sign in again
+    (`SignIn::Failed { code: signin.unconfirmed }`: "Clauseo couldn't confirm your Codex
+    sign-in. Sign in again to carry on."), until a forced read confirms or a sign-in through
+    Clauseo records again. Forcing goes on with the backoff.
+  - *No answer, never refused:* a forced read that had no answer, timed out, or got any JSON-RPC
+    error but the one below falls back to the plain read, which decides this launch as before.
+    The stamp stays pending and nothing else changes.
   - *Codex's refused login.* The one JSON-RPC error mapped as an answer, by
     `codex::identity::rpc_error_kind` for forced and plain reads alike: `-32603` whose message
     starts "workspace routing discovery unauthorized" (0.162.1's `workspace_routing.rs:64`) is
-    `AccountRead::Refused`, unknown (`agent.identity_unknown`), never a change and no teardown.
+    `AccountRead::Refused`, unknown (`agent.identity_unknown`) with the sign-in-again card,
+    never a change and no teardown.
     Every other error is no answer, never no account: an offline app-server answers `-32603`
     "workspace routing discovery failed" (`workspace_routing.rs:62`) to forced and plain reads.
   - *When it forces.* While pending, at most one forced refresh per 60 s, counted from Clauseo's
@@ -756,16 +762,20 @@ changes (`setup/identity.rs`).
     when it is due. A forced read that did not confirm (or Codex's refused login) is tried again
     with a backoff of 30 s, 1 min, 2 min, 5 min, then every 5 min, never sooner than 60 s after
     the last force. The first check since start forces.
-  - *One 40 s bound per check.* The forced read gets 25 s of it, then is given up and its future
-    dropped, which cancels the read and kills its app-server's tree (a stalled network hangs it
-    past 150 s); the plain read after it gets what is left.
+  - *One 40 s bound per check.* The forced read gets 25 s of it, then is let go: its future is
+    dropped, and S18 closes its app-server's stdin and never kills it, since Codex may have
+    rotated the refresh token and not yet saved it. Codex drains the started request for up to
+    30 s, then exits (its own watchdog by 45 s); S18 reads and drops the reply and reaps it, and
+    kills it only at quit or past 60 s. While one drains, no other forced read starts for that
+    home (no answer, backed off on). The plain read after it gets what is left of the bound.
   - One forced refresh runs at a time in the whole process; a second check of the same home
     takes the first one's answer. Logs use fixed words with the agent id ("identity: forced
     refresh", "identity: forced refresh rewrote the login; reading it", "identity: forced
     refresh rewrote nothing; not confirmed", "identity: forced refresh had no answer; unforced
     check used", "identity: forced refresh refused the login", "identity: login confirmed by a
     forced refresh", "identity: refresh held; login pending a forced check", "identity: forced
-    refresh to be tried again"). Claude's checks force nothing.
+    refresh to be tried again", "identity: forced refresh wrote nothing; retried once", and
+    "identity: sign in again" with its cause's kind). Claude's checks force nothing.
 - **Known gap (R17).** The code is public, so assume an attacker knows the check.
   - *Token-only swap: closed for Codex by refresh-on-check.* Codex's plain `account/read` reads
     the email from the stored `id_token` without contacting the server, so swapping the access
@@ -778,8 +788,10 @@ changes (`setup/identity.rs`).
     read, before its reply, can pass for Codex's rewrite (its file's plain read still has to
     name the recorded account). Codex 0.162.1 discards the forced refresh's outcome, so a
     refused or revoked refresh isn't reported; a revoked login shows up only when a turn fails
-    with `agent.auth_required` (#611's re-check path), or once `account/read` itself answers
-    "workspace routing discovery unauthorized".
+    with `agent.auth_required` (#611's re-check path), once `account/read` itself answers
+    "workspace routing discovery unauthorized", or when two forced refreshes write nothing. A
+    Codex that skips a forced refresh while the network is up would be refused falsely (signed
+    in again to carry on); stage B's H1 saw 6/6 forced refreshes rewrite the file.
     Claude is presumed open: its status email likely comes from `.claude.json`, which a swap
     doesn't touch.
   - *The data folder, until the sandbox is enforced.* Until S14/S15's enforcement lands (0051

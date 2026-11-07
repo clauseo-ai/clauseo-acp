@@ -164,6 +164,9 @@ export const HI = {
   // hi: later
   "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped answering so no matter's work goes to the wrong account. Sign in again. Your questions are kept and run once you do.":
     null,
+  // hi: provisional
+  "Clauseo couldn't confirm your Codex sign-in. Sign in again to carry on.":
+    "Clauseo आपके Codex साइन इन की पुष्टि नहीं कर सका। जारी रखने के लिए फिर से साइन इन करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -200,6 +200,35 @@ fn a_rewrite_with_an_unconfirmed_read_waits_only_for_the_rate() {
 }
 
 #[test]
+fn an_answer_with_no_rewrite_is_retried_once_at_thirty_seconds_then_backs_off() {
+    let files = Files::new("refresh-an_answer_with_no_rewrite_is_r");
+    let refresh = Refresh::default();
+    let login = files.stamp(1);
+    assert_eq!(refresh.plan(&codex(), login, secs(0)), Plan::Forced);
+    assert!(!refresh.unwritten_before(&codex()));
+    refresh.forced_ended(&codex(), Ended::Unwritten, secs(0));
+    assert!(!refresh.fire_if_due(&codex(), secs(29)));
+    assert!(
+        refresh.fire_if_due(&codex(), secs(30)),
+        "the rate waived for it"
+    );
+    assert_eq!(refresh.plan(&codex(), login, secs(30)), Plan::Forced);
+    assert!(refresh.unwritten_before(&codex()), "a second is unknown");
+    refresh.forced_ended(&codex(), Ended::Unwritten, secs(30));
+    assert!(
+        !refresh.fire_if_due(&codex(), secs(89)),
+        "then the rate and the backoff"
+    );
+    assert!(refresh.fire_if_due(&codex(), secs(90)));
+    // No answer in between keeps what it held; a sign-in clears it.
+    assert_eq!(refresh.plan(&codex(), login, secs(90)), Plan::Forced);
+    refresh.forced_ended(&codex(), Ended::Missed, secs(90));
+    assert!(refresh.unwritten_before(&codex()));
+    refresh.signed_in(&codex());
+    assert!(!refresh.unwritten_before(&codex()));
+}
+
+#[test]
 fn only_a_stamp_no_later_than_the_reply_can_be_its_rewrite() {
     let files = Files::new("refresh-only_a_stamp_no_later_than_the");
     let written = files.stamp(1);

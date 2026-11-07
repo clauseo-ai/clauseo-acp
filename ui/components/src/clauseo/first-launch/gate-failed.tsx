@@ -41,6 +41,13 @@ export function Failed({
           {instead(true)}
         </>
       );
+    // Codex's refresh-on-check could not confirm the login (R17): sign in again
+    case "signin.unconfirmed":
+      return (
+        <Act act={signIn(w("Sign in"))}>
+          <Say>{errorWords(lang, "signin.unconfirmed")}</Say>
+        </Act>
+      );
     case "signin.link_expired":
       return (
         <>

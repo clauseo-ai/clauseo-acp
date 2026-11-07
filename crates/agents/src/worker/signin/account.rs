@@ -14,7 +14,7 @@ use super::super::{Ticket, Worker};
 use super::{SigninHub, SigninStart};
 use crate::cancel::Cancel;
 use crate::signin::SigninError;
-use crate::signin::account::{self, AccountFuture, AccountRead};
+use crate::signin::account::{self, AccountFuture, AccountRead, ReadOrder};
 use crate::signin::job::{SigninJob, Task};
 use crate::state::Installed;
 
@@ -55,15 +55,27 @@ pub(in crate::worker) fn reserve_read(
     })
 }
 
+/// A read's order for its job, with refresh-on-check's `refresh`, and the let-go its caller's
+/// future sets ([`answer_of`]).
+pub(in crate::worker) fn read_order(hub: &SigninHub, refresh: bool) -> (ReadOrder, Arc<Cancel>) {
+    let let_go = Arc::new(Cancel::new());
+    let order = ReadOrder {
+        refresh,
+        let_go: Arc::clone(&let_go),
+        forced: Arc::clone(&hub.forced_runs),
+    };
+    (order, let_go)
+}
+
 /// The caller's side of a read: the answer `reply` gets, `Failed` if none comes. Dropped before
-/// the answer (R17's check gave a forced read up at its bound), it cancels the read through
-/// `cancel`, so the job's run sees it and its process tree is killed at once rather than at the
-/// run's own limit: hung app-servers do not pile up.
+/// the answer (R17's check gave a forced read up at its bound), it sets `let_go`: a forced
+/// read's app-server then gets its stdin closed and ends on its own, never killed but at quit
+/// (`codex::identity`), since Codex may have rotated the refresh token and not yet saved it.
 pub(in crate::worker) fn answer_of(
     answer: oneshot::Receiver<AccountRead>,
-    cancel: Option<Arc<Cancel>>,
+    let_go: Arc<Cancel>,
 ) -> AccountFuture {
-    let mut guard = CancelOnDrop(cancel);
+    let mut guard = LetGoOnDrop(Some(let_go));
     Box::pin(async move {
         let read = answer.await.unwrap_or(AccountRead::Failed);
         guard.disarm();
@@ -71,25 +83,20 @@ pub(in crate::worker) fn answer_of(
     })
 }
 
-/// The cancel of a reserved read, for [`answer_of`].
-pub(in crate::worker) fn cancel_of(start: &SigninStart) -> Arc<Cancel> {
-    Arc::clone(&start.ticket.cancel)
-}
+/// Lets its read go when dropped.
+struct LetGoOnDrop(Option<Arc<Cancel>>);
 
-/// Cancels its read when dropped.
-struct CancelOnDrop(Option<Arc<Cancel>>);
-
-impl CancelOnDrop {
-    /// Answered: nothing is left to cancel.
+impl LetGoOnDrop {
+    /// Answered: nothing is left to let go.
     fn disarm(&mut self) {
         self.0 = None;
     }
 }
 
-impl Drop for CancelOnDrop {
+impl Drop for LetGoOnDrop {
     fn drop(&mut self) {
-        if let Some(cancel) = &self.0 {
-            cancel.cancel();
+        if let Some(let_go) = &self.0 {
+            let_go.cancel();
         }
     }
 }
@@ -107,7 +114,7 @@ pub(super) fn stop_reads(hub: &SigninHub) {
 pub(in crate::worker) fn start_account<T: Timer + Send + Sync + 'static>(
     worker: &Worker<T>,
     start: SigninStart,
-    refresh: bool,
+    order: ReadOrder,
     reply: oneshot::Sender<AccountRead>,
 ) {
     let job = SigninJob {
@@ -127,7 +134,7 @@ pub(in crate::worker) fn start_account<T: Timer + Send + Sync + 'static>(
     let name = format!("clauseo-account-{}", job.ticket.agent);
     // A thread that did not start dropped `reply` with its closure: the caller reads `Failed`.
     drop(worker.shared.spawn_job(name, move || {
-        let read = futures::executor::block_on(account::read(&job, refresh));
+        let read = futures::executor::block_on(account::read(&job, &order));
         // The caller may have stopped waiting.
         let _gone = reply.send(read);
     }));

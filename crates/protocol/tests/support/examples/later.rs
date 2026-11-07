@@ -113,6 +113,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninAccountChanged,
             "the login's account changed from the one signed in",
         ),
+        failed(
+            ErrorCode::SigninUnconfirmed,
+            "the login's token refresh could not be confirmed",
+        ),
     ]
 }
 

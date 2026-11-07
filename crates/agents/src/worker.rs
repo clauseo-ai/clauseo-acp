@@ -30,7 +30,7 @@ use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
-use crate::signin::account::{AccountFuture, AccountRead};
+use crate::signin::account::{AccountFuture, AccountRead, ReadOrder};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
@@ -59,7 +59,7 @@ enum Command {
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
     /// Start an account read, answering on its sender.
-    Account(Box<SigninStart>, bool, oneshot::Sender<AccountRead>),
+    Account(Box<SigninStart>, ReadOrder, oneshot::Sender<AccountRead>),
 }
 
 /// What the handle, the worker and the jobs share.
@@ -358,25 +358,25 @@ impl Agents {
     /// R17's identity check: the account `agent`'s login names now, from one status run under
     /// the environment its sessions see (`signin/account.rs`), hashed, beside any sign-in job,
     /// changing no state. `Failed` when it could not tell or start (an unknown agent, no home or
-    /// install, the handle shut down). Dropping the future first cancels it, killing its runs.
+    /// install, the handle shut down). Dropping the future first lets the read go (see below).
     pub fn read_account(&self, agent: &AgentId) -> AccountFuture {
         self.start_read(agent, false)
     }
 
     /// [`Agents::read_account`] with Codex's `account/read` sending `refreshToken: true` (the
     /// same request), so Codex refreshes the login with `OpenAI` first. For Claude it is that.
+    /// Dropped before its answer, its app-server gets its stdin closed, and is not killed.
     pub fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
         self.start_read(agent, true)
     }
 
     fn start_read(&self, agent: &AgentId, refresh: bool) -> AccountFuture {
         let (reply, answer) = oneshot::channel();
-        let start = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)).ok();
-        let cancel = start.as_ref().map(signin::cancel_of);
-        if let Some(start) = start {
-            self.send(Command::Account(Box::new(start), refresh, reply));
+        let (order, let_go) = signin::read_order(&self.shared.signin, refresh);
+        if let Ok(start) = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)) {
+            self.send(Command::Account(Box::new(start), order, reply));
         }
-        signin::answer_of(answer, cancel)
+        signin::answer_of(answer, let_go)
     }
 
     /// `agent`'s last sign-in state, or `None` before any.
@@ -435,8 +435,8 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
                 Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
-                Command::Account(start, refresh, reply) => {
-                    signin::start_account(&self, *start, refresh, reply);
+                Command::Account(start, order, reply) => {
+                    signin::start_account(&self, *start, order, reply);
                 }
             }
         }

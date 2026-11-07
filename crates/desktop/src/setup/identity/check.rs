@@ -125,6 +125,8 @@ pub(crate) async fn on_state(
             tracing::info!(%agent, kind = "no_email", "identity");
         }
         backend.compose.set_account_changed(agent, false);
+        backend.compose.set_unconfirmed(agent, false);
+        identity.refresh.signed_in(agent);
         Seen::SignedIn
     } else if exempt(backend, agent) {
         if identity.key_login(agent) {
@@ -216,12 +218,24 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
     };
     refusal::sync(backend, agent).await;
     let read = read_account(backend, agent, begun).await;
+    let unwritten_again =
+        matches!(read, Read::Unwritten(_)) && identity.refresh.unwritten_before(agent);
     let now = backend.compose.monotonic();
-    let verdict = settle(backend, agent, read.account(), Some(ticket), now);
+    let mut verdict = settle(backend, agent, read.account(), Some(ticket), now);
+    if unwritten_again && matches!(verdict, Verdict::Same | Verdict::Idle) {
+        // A second answer with no rewrite: the refresh fails with the network up.
+        verdict = identity.entry(agent, |entry| {
+            entry.verdict = Verdict::Unknown;
+            entry.again = false;
+            entry.verdict
+        });
+    }
     tracing::info!(%agent, kind = verdict.kind(), "identity check");
+    unconfirmed(backend, agent, &read, unwritten_again, verdict);
     let ended = match read {
         Read::Plain(_) => None,
         Read::Missed(_) => Some(Ended::Missed),
+        Read::Unwritten(_) => Some(Ended::Unwritten),
         Read::Rewritten(_, after) if verdict == Verdict::Same => {
             tracing::info!(%agent, "identity: login confirmed by a forced refresh");
             Some(Ended::Confirmed(after))
@@ -243,9 +257,11 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
 enum Read {
     /// Without a refresh.
     Plain(AccountRead),
-    /// A forced read that confirmed nothing, and the read that decides this launch: its own
-    /// answer when it rewrote nothing, the plain fallback after no answer, or a refused login.
+    /// A forced read that confirmed nothing, and the read that decides this launch: the plain
+    /// fallback after no answer, or a refused login.
     Missed(AccountRead),
+    /// A forced read that answered with no rewrite, and its answer.
+    Unwritten(AccountRead),
     /// A forced read that rewrote the login file to this stamp, and the plain read of it.
     Rewritten(AccountRead, Stamp),
 }
@@ -253,14 +269,43 @@ enum Read {
 impl Read {
     fn account(&self) -> &AccountRead {
         match self {
-            Read::Plain(read) | Read::Missed(read) | Read::Rewritten(read, _) => read,
+            Read::Plain(read)
+            | Read::Missed(read)
+            | Read::Unwritten(read)
+            | Read::Rewritten(read, _) => read,
         }
     }
 }
 
+/// Refresh-on-check's unknown (Codex's refused login, or a second forced answer with no
+/// rewrite) shows the sign-in-again card, its cause logged by kind; any verdict but unknown
+/// takes it away.
+fn unconfirmed(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    read: &Read,
+    unwritten_again: bool,
+    verdict: Verdict,
+) {
+    let cause = if verdict != Verdict::Unknown {
+        None
+    } else if *read.account() == AccountRead::Refused {
+        Some("refresh_refused")
+    } else if unwritten_again {
+        Some("refresh_unwritten")
+    } else {
+        return;
+    };
+    if let Some(kind) = cause {
+        tracing::warn!(%agent, kind, "identity: sign in again");
+    }
+    backend.compose.set_unconfirmed(agent, cause.is_some());
+}
+
 /// `agent`'s account, all its reads within one [`super::CHECK_BOUND`] (`Failed` past it): for
 /// Codex with refresh-on-check on, a read with `refreshToken: true` when its plan says so (one
-/// at a time in the process, given up at its share of the bound, which kills its run), then one
+/// at a time in the process, let go at its share of the bound: its app-server's stdin closed, never
+/// killed), then one
 /// plain read of the file if Codex rewrote it, or the plain fallback after no answer.
 async fn read_account(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Read {
     let identity = &backend.wiring.identity;
@@ -288,12 +333,12 @@ async fn read_account(backend: &AgentsBackend, agent: &AgentId, now: Duration) -
         }
         Some(reply) if reply.read != AccountRead::Failed => {
             tracing::info!(%agent, "identity: forced refresh rewrote nothing; not confirmed");
-            return Read::Missed(reply.read);
+            return Read::Unwritten(reply.read);
         }
         answered => {
             if answered.is_none() {
                 // Given up at its share: the next caller starts another, and once the last
-                // one lets go the read is dropped, which kills its run.
+                // one lets go the read is dropped: its app-server's stdin is closed.
                 refresh.abandon(agent);
             }
             tracing::info!(%agent, "identity: forced refresh had no answer; unforced check used");

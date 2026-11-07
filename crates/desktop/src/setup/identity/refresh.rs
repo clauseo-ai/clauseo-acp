@@ -14,20 +14,24 @@
 //!   advanced during it (another stamp just after the reply than just before the request) and
 //!   is no later than the reply ([`confirms`]), and one plain read of the rewritten file then
 //!   names the recorded account; that stamp is the confirmed one, so Clauseo's own rewrite
-//!   forces nothing. Another account there is a change, the one definite answer. A forced read
-//!   with no rewrite (the refresh refused or skipped) confirms nothing, and its answer decides
-//!   this launch as a plain read's would.
+//!   forces nothing. Another account there is a change.
+//! - **An answer with no rewrite is a refresh that failed with the network up.** It confirms
+//!   nothing, its answer decides this launch as a plain read's would, and one forced retry is
+//!   due [`UNWRITTEN_RETRY`] later (the 60 s rate waived for it). The same again is unknown:
+//!   launches refused, and the card says sign in again. No answer in between changes nothing.
 //! - **At most one forced refresh per [`GUARD`].** While pending, a check forces once
 //!   [`GUARD`] has passed since Clauseo's last forced refresh (at once if it has), however
 //!   recently or often the file was written: constant writes delay a force by [`GUARD`] at
 //!   most. Inside it the check reads without a refresh, and a look asks for the forced check
 //!   once it is due ([`Refresh::fire_if_due`]).
 //! - **No answer is not a mismatch.** A forced read with no answer (offline, a timeout at its
-//!   share of the check's bound, after which its app-server is killed, a run that did not
+//!   share of the check's bound, after which it is let go: its app-server's stdin is closed, and
+//!   it drains and exits on its own, one per home at most; a run that did not
 //!   start, or any JSON-RPC error but Codex's refused login) falls back to the plain read,
-//!   which decides this launch. Such a read, or one with no rewrite, leaves the stamp pending
-//!   and forcing goes on with [`backoff`] (30 s, 1 min, 2 min, 5 min, then every 5 min). Codex's
-//!   refused login (`AccountRead::Refused`) is unknown, launches refused, with the same backoff.
+//!   which decides this launch. Such a read leaves the stamp pending and forcing goes on with
+//!   [`backoff`] (30 s, 1 min, 2 min, 5 min, then every 5 min). Codex's refused login
+//!   (`AccountRead::Refused`) is unknown, launches refused and the card saying sign in again,
+//!   with the same backoff.
 //! - **One forced refresh at a time in Clauseo.** Codex 0.162.1 takes no lock across processes
 //!   for a `ChatGPT` login, so two refreshes at once would both send the same refresh token.
 //!   One lock covers every forced refresh of the process (the app has one [`Refresh`], in its
@@ -54,6 +58,8 @@ use crate::bridge::lock;
 
 /// The least time between two of Clauseo's forced refreshes of one login.
 pub(crate) const GUARD: Duration = Duration::from_secs(60);
+/// How long after a forced read answered with no rewrite its one retry is due.
+pub(crate) const UNWRITTEN_RETRY: Duration = Duration::from_secs(30);
 
 /// How long after the `misses`th forced read in a row that did not confirm (no answer, or a
 /// refusal) the next one is due at the earliest: 30 s, 1 min, 2 min, 5 min, then every 5 min.
@@ -91,9 +97,12 @@ pub(crate) enum Ended {
     /// It was rewritten, but its plain read did not confirm (another account, an unknown one,
     /// no answer): still pending, forced again once [`GUARD`] has passed.
     Unconfirmed,
-    /// No rewrite, no answer, or a refused login: still pending, nothing else changed, forced
-    /// again after [`backoff`].
+    /// No answer, or a refused login: still pending, nothing else changed, forced again after
+    /// [`backoff`].
     Missed,
+    /// An answer with no rewrite: still pending; the first is retried after
+    /// [`UNWRITTEN_RETRY`], and a second (unknown) goes on with [`backoff`].
+    Unwritten,
 }
 
 /// A forced read's answer, the login file's stamps just before its request and just after its
@@ -127,20 +136,34 @@ struct State {
     /// Forced reads in a row that did not answer or were refused.
     misses: u32,
     /// The earliest the next forced read may run after the last miss.
-    retry_at: Option<Duration>,
+    retry: Option<Retry>,
+    /// The last forced read that answered did so with no rewrite.
+    unwritten: bool,
     /// A look found the forced check due and asked for it (a look's clock may run ahead of
     /// the check's).
     fired: bool,
+}
+
+/// The next forced read's retry.
+#[derive(Debug, Clone, Copy)]
+struct Retry {
+    at: Duration,
+    /// The retry after an answer with no rewrite: due at `at`, the rate waived.
+    waives_rate: bool,
 }
 
 impl State {
     /// When the next forced read is due: [`GUARD`] after the last one, and not before the
     /// backoff's retry.
     fn due(&self) -> Duration {
+        let retry = self.retry.map_or(Duration::ZERO, |retry| retry.at);
+        if self.retry.is_some_and(|retry| retry.waives_rate) {
+            return retry;
+        }
         let rate = self
             .last_forced
             .map_or(Duration::ZERO, |at| at.saturating_add(GUARD));
-        rate.max(self.retry_at.unwrap_or(Duration::ZERO))
+        rate.max(retry)
     }
 }
 
@@ -207,6 +230,9 @@ impl Refresh {
         state.pending = true;
         if state.fired || now >= state.due() {
             state.fired = false;
+            if let Some(retry) = &mut state.retry {
+                retry.waives_rate = false;
+            }
             state.last_forced = Some(now);
             return Plan::Forced;
         }
@@ -235,21 +261,66 @@ impl Refresh {
         let state = inner.agents.entry(agent.clone()).or_default();
         match ended {
             Ended::Confirmed(stamp) => {
-                state.confirmed = Some(stamp);
-                state.pending = false;
-                state.misses = 0;
-                state.retry_at = None;
+                *state = State {
+                    confirmed: Some(stamp),
+                    last_forced: state.last_forced,
+                    ..State::default()
+                };
             }
             Ended::Unconfirmed => {
                 state.confirmed = None;
                 state.pending = true;
+                state.unwritten = false;
+            }
+            Ended::Unwritten if !state.unwritten => {
+                state.pending = true;
+                state.unwritten = true;
+                state.retry = Some(Retry {
+                    at: now.saturating_add(UNWRITTEN_RETRY),
+                    waives_rate: true,
+                });
+                tracing::info!(%agent, "identity: forced refresh wrote nothing; retried once");
+            }
+            Ended::Unwritten => {
+                state.pending = true;
+                state.misses = state.misses.saturating_add(1);
+                state.retry = Some(Retry {
+                    at: now.saturating_add(backoff(state.misses)),
+                    waives_rate: false,
+                });
             }
             Ended::Missed => {
                 state.pending = true;
                 state.misses = state.misses.saturating_add(1);
-                state.retry_at = Some(now.saturating_add(backoff(state.misses)));
+                state.retry = Some(Retry {
+                    at: now.saturating_add(backoff(state.misses)),
+                    waives_rate: false,
+                });
                 tracing::info!(%agent, "identity: forced refresh to be tried again");
             }
+        }
+    }
+
+    /// Whether `agent`'s last forced read that answered did so with no rewrite: another such
+    /// answer now is unknown.
+    pub(crate) fn unwritten_before(&self, agent: &AgentId) -> bool {
+        lock(&self.inner)
+            .agents
+            .get(agent)
+            .is_some_and(|state| state.unwritten)
+    }
+
+    /// A sign-in through Clauseo recorded `agent`'s account: what refresh-on-check held against
+    /// the login before it (misses, an answer with no rewrite) goes; the rate stays.
+    pub(crate) fn signed_in(&self, agent: &AgentId) {
+        let mut inner = lock(&self.inner);
+        if let Some(state) = inner.agents.get_mut(agent) {
+            *state = State {
+                confirmed: state.confirmed,
+                pending: state.pending,
+                last_forced: state.last_forced,
+                ..State::default()
+            };
         }
     }
 
