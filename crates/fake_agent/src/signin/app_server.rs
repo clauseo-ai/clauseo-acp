@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::{API_KEY_METHOD, EMAIL, marker_method, say};
+use super::{API_KEY_METHOD, EMAIL, NO_EMAIL_METHOD, marker_method, say};
 use crate::EXIT_OK;
 
 /// [`super::Mode::CodexAdapter`]: each JSON-RPC request on stdin gets an error, -32602 for
@@ -79,13 +79,18 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
 }
 
 /// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`, or, when the marker's `authMethod` is `apikey`, an API-key
-/// account, which names no email. Without it, the signed-out reply: `account` null and
-/// `requiresOpenaiAuth` true.
+/// `test@example.com` on `plus`; when the marker's `authMethod` is `apikey`, an API-key
+/// account, which names no email; when it is `chatgpt-no-email`, a `ChatGPT` account whose email
+/// is `null`. Without it, the signed-out reply: `account` null and `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
     let method = marker_method(folder);
     if method.as_deref() == Some(API_KEY_METHOD) {
         json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
+    } else if method.as_deref() == Some(NO_EMAIL_METHOD) {
+        json!({
+            "account": {"type": "chatgpt", "email": null, "planType": "plus"},
+            "requiresOpenaiAuth": false,
+        })
     } else if method.is_some() {
         json!({
             "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},

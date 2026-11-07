@@ -52,6 +52,9 @@ const CODEX_LOGIN_FILE: &str = "auth.json";
 /// The marker `authMethod` for which Codex's `account/read` gives an API-key account, with no
 /// email (a test's dummy marker; no key is ever written).
 const API_KEY_METHOD: &str = "apikey";
+/// The marker `authMethod` for which Codex's `account/read` gives a `ChatGPT` account whose
+/// email is `null` (Codex does not know it).
+const NO_EMAIL_METHOD: &str = "chatgpt-no-email";
 /// The email every marker and every status reply carries.
 const EMAIL: &str = "test@example.com";
 /// The one code `FAKE_SIGNIN=paste` accepts.
@@ -155,7 +158,9 @@ pub(crate) enum Script {
     /// run-time fallback's case). Otherwise as [`Script::OkAfter`] with 0.
     SecureIgnored,
     /// Codex's `app-server` answers every request with a JSON-RPC error, as the adapter does
-    /// ([`Mode::CodexAdapter`]); every other command is as [`Script::OkAfter`] with 0.
+    /// ([`Mode::CodexAdapter`]); every other command is as [`Script::OkAfter`] with 0, except
+    /// that a Codex login writes its marker as Codex's own login file ([`CODEX_LOGIN_FILE`]), as
+    /// Codex does with the file store, so a test sees what a login that did not confirm leaves.
     AppServerError,
     /// `codex.js` behaves as codex-acp's adapter for every command ([`Mode::CodexAdapter`]):
     /// what the engine sees if the adapter sits where it looks for the CLI.
@@ -383,7 +388,14 @@ fn codex(args: &[&str], script: &Script, folder: &Path) -> io::Result<i32> {
         ["login", "status"] => Ok(codex_status(folder)),
         ["login"] => codex_browser_login(script, folder),
         ["login", "--device-auth"] => codex_device_login(script, folder),
-        ["logout"] => logout(folder, CODEX_LOGOUT_LINE),
+        ["logout"] => {
+            // Codex's logout deletes its login file too.
+            let login_file = folder.join(CODEX_LOGIN_FILE);
+            if login_file.is_file() {
+                write::remove_file(&login_file)?;
+            }
+            logout(folder, CODEX_LOGOUT_LINE)
+        }
         ["app-server"] if *script == Script::AppServerError => adapter(),
         ["app-server"] => app_server(folder),
         _ => Ok(usage(Mode::Codex)),
@@ -397,7 +409,18 @@ fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<i32> {
         return Ok(FAILED);
     }
     say(CODEX_CALLBACK_LINE)?;
-    complete(script, || plant(folder, "chatgpt"), CODEX_SUCCESS)
+    complete(script, || codex_plant(script, folder), CODEX_SUCCESS)
+}
+
+/// A Codex login's marker: [`MARKER`], or under `app-server-error` Codex's own login file.
+fn codex_plant(script: &Script, folder: &Path) -> io::Result<()> {
+    if *script == Script::AppServerError {
+        write::create_dir_all(folder)?;
+        let marker = json!({"authMethod": "chatgpt", "email": EMAIL});
+        write::write(folder.join(CODEX_LOGIN_FILE), format!("{marker}\n"))
+    } else {
+        plant(folder, "chatgpt")
+    }
 }
 
 /// Codex's `login --device-auth`: prints the device URL and code, unless `device-off` refuses it.
@@ -407,7 +430,7 @@ fn codex_device_login(script: &Script, folder: &Path) -> io::Result<i32> {
         return Ok(FAILED);
     }
     say(CODEX_DEVICE_LINE)?;
-    complete(script, || plant(folder, "chatgpt"), CODEX_SUCCESS)
+    complete(script, || codex_plant(script, folder), CODEX_SUCCESS)
 }
 
 /// `login status`: exit 0 with the signed-in line when the marker is there, else exit 1 with
