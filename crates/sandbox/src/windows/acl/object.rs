@@ -260,34 +260,7 @@ impl Object {
 
     /// Its security descriptor, self-relative, holding what `info` asks for.
     pub(in crate::windows) fn security(&self, info: u32) -> io::Result<Vec<u8>> {
-        let mut size = 256_u32;
-        for _ in 0..4 {
-            let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
-            let mut needed = 0_u32;
-            // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
-            // `needed` is a live out-pointer.
-            let read = unsafe {
-                GetKernelObjectSecurity(
-                    self.handle.0,
-                    info,
-                    Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
-                    size,
-                    &raw mut needed,
-                )
-            };
-            match read {
-                Ok(()) => {
-                    let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
-                    bytes.truncate(usize::try_from(size).unwrap_or(0));
-                    return Ok(bytes);
-                }
-                Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
-                Err(e) => return Err(os_error(&e)),
-            }
-        }
-        Err(io::Error::other(
-            "a security descriptor kept growing while it was read",
-        ))
+        kernel_security(&self.handle, info)
     }
 
     /// Writes the parts `info` names from the self-relative descriptor `descriptor`, on this
@@ -566,6 +539,39 @@ impl Drop for Handle {
             tracing::debug!(code = error.code().0, "CloseHandle failed");
         }
     }
+}
+
+/// The security descriptor of the kernel object `handle` is open on (a file, a process, a
+/// token), self-relative, holding what `info` asks for; the handle needs `READ_CONTROL`.
+pub(in crate::windows) fn kernel_security(handle: &Handle, info: u32) -> io::Result<Vec<u8>> {
+    let mut size = 256_u32;
+    for _ in 0..4 {
+        let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+        let mut needed = 0_u32;
+        // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+        // `needed` is a live out-pointer.
+        let read = unsafe {
+            GetKernelObjectSecurity(
+                handle.0,
+                info,
+                Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                size,
+                &raw mut needed,
+            )
+        };
+        match read {
+            Ok(()) => {
+                let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                bytes.truncate(usize::try_from(size).unwrap_or(0));
+                return Ok(bytes);
+            }
+            Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+            Err(e) => return Err(os_error(&e)),
+        }
+    }
+    Err(io::Error::other(
+        "a security descriptor kept growing while it was read",
+    ))
 }
 
 /// The Win32 error `error` carries, as an `io::Error` whose kind follows its code.

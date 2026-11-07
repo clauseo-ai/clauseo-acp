@@ -1,9 +1,14 @@
 //! `--stop` through a fake machine, on every OS: the refusals stop nothing, only the record's
-//! pool users' processes are stopped, twice over, and the users found are marked for a reset.
+//! pool users' processes are stopped, pass after pass until one finds none or the time runs out,
+//! and the users found are marked for a reset. How each process's user is read is in
+//! `tests/users.rs`.
 
 use std::collections::BTreeMap;
 
 use super::*;
+
+mod jobs;
+mod users;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -32,8 +37,14 @@ struct Fake {
     /// The pool-user check refuses.
     not_pool: bool,
     /// Each snapshot, in turn; past the last, the last again.
-    snapshots: Vec<Result<Vec<Seen>, Failed>>,
+    snapshots: Vec<Result<Vec<Process>, Failed>>,
     taken: usize,
+    /// The fake clock, one second on for each snapshot.
+    now: Duration,
+    /// The BITS jobs' owners; `Err` when the list can't be read.
+    jobs: Result<Vec<Option<Sid>>, Failed>,
+    /// Indexes of the jobs whose cancel fails.
+    jobs_refuse: Vec<usize>,
     /// Pids whose termination fails.
     refuse: Vec<u32>,
     /// Pids whose first termination fails.
@@ -59,6 +70,9 @@ impl Fake {
             not_pool: false,
             snapshots: Vec::new(),
             taken: 0,
+            now: Duration::ZERO,
+            jobs: Ok(Vec::new()),
+            jobs_refuse: Vec::new(),
             refuse: Vec::new(),
             refuse_once: Vec::new(),
             marks: Marks::Written,
@@ -77,10 +91,24 @@ impl Fake {
             .filter_map(|line| line.strip_prefix("stop "));
         pids.map(|pid| pid.parse().unwrap()).collect()
     }
+
+    /// The snapshots taken.
+    fn snapshots_taken(&self) -> usize {
+        self.done.iter().filter(|line| *line == "snapshot").count()
+    }
 }
 
-fn seen(pid: u32, user: Option<Sid>) -> Seen {
-    Seen { pid, user }
+/// A process the list and the token both say runs as `user`, opened to be stopped; with no
+/// user, one no source could read that can't be opened to be stopped (a protected process).
+fn seen(pid: u32, user: Option<Sid>) -> Process {
+    let can_stop = user.is_some();
+    Process {
+        pid,
+        listed: user.clone(),
+        token: user,
+        owner: None,
+        can_stop,
+    }
 }
 
 impl Stopper for Fake {
@@ -107,8 +135,9 @@ impl Stopper for Fake {
         Ok(())
     }
 
-    fn snapshot(&mut self) -> Result<Vec<Seen>, Failed> {
+    fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.done.push("snapshot".to_owned());
+        self.now += Duration::from_secs(1);
         let at = self.taken.min(self.snapshots.len().saturating_sub(1));
         self.taken += 1;
         self.snapshots.get(at).cloned().unwrap_or(Ok(Vec::new()))
@@ -116,6 +145,11 @@ impl Stopper for Fake {
 
     fn own_pid(&mut self) -> u32 {
         OWN_PID
+    }
+
+    fn suspend(&mut self, pid: u32) -> Result<(), Failed> {
+        self.done.push(format!("suspend {pid}"));
+        Ok(())
     }
 
     fn terminate(&mut self, pid: u32) -> Result<(), Failed> {
@@ -127,6 +161,27 @@ impl Stopper for Fake {
             return Err("access denied".to_owned());
         }
         self.done.push(format!("stop {pid}"));
+        Ok(())
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        self.now
+    }
+
+    fn pause(&mut self) {
+        self.done.push("pause".to_owned());
+    }
+
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.done.push("jobs".to_owned());
+        self.jobs.clone()
+    }
+
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        if self.jobs_refuse.contains(&at) {
+            return Err("IBackgroundCopyJob::Cancel failed (0x80070005)".to_owned());
+        }
+        self.done.push(format!("cancel {at}"));
         Ok(())
     }
 
@@ -156,8 +211,8 @@ impl Stopper for Fake {
 }
 
 /// A machine where pool users 1010 and 1011 run, beside the owner, SYSTEM, another local
-/// account, an unreadable process, this process, and the kernel's two.
-fn busy() -> Vec<Seen> {
+/// account, a protected process no source could read, this process, and the kernel's two.
+fn busy() -> Vec<Process> {
     vec![
         seen(0, None),
         seen(4, Some(Sid::parse("S-1-5-18").unwrap())),
@@ -180,31 +235,47 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     // 1013 runs as a local account the record doesn't list: left alone, as are the owner,
     // SYSTEM, the unreadable process, this one and the kernel's.
     assert_eq!(fake.stopped(), [10, 12, 16]);
-    assert_eq!(
-        fake.done.iter().filter(|line| *line == "snapshot").count(),
-        2
-    );
+    // Every one suspended before any is terminated; the second snapshot finds none, and ends.
+    let suspend_then_stop = [
+        "snapshot",
+        "suspend 10",
+        "suspend 12",
+        "suspend 16",
+        "stop 10",
+        "stop 12",
+        "stop 16",
+        "snapshot",
+        "jobs",
+        "mark 2",
+    ];
+    assert_eq!(fake.done, suspend_then_stop);
     assert_eq!(fake.resets, [sid(1010), sid(1011)], "1012 wasn't running");
     assert!(!fake.held, "the lock is given back");
     let (error, line) = &fake.logged[0];
     assert!(!error);
     assert_eq!(
         line,
-        "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped, 0 left; \
-         2 users marked for a profile reset (0 retried)"
+        "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped in 2 passes, \
+         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; 2 users marked for a profile reset \
+         (0 retried)"
     );
     assert!(!line.contains("S-1-5"), "counts only: {line}");
 }
 
 #[test]
-fn the_second_pass_stops_what_the_first_left_or_what_started_since() {
+fn the_next_pass_stops_what_the_last_left_or_what_started_since() {
     let mut fake = Fake::new(&[1010, 1011]);
-    // 10 is refused once in the first pass; the second finds it again, with 20, new since.
+    // 10 is refused once in the first pass; the second finds it again, with 20, new since; the
+    // third finds 21, started by 20 before it ended; the fourth finds none.
     fake.refuse_once = vec![10];
     let second = vec![seen(10, Some(sid(1010))), seen(20, Some(sid(1011)))];
-    fake.snapshots = vec![Ok(busy()), Ok(second)];
+    let third = vec![seen(21, Some(sid(1011)))];
+    fake.snapshots = vec![Ok(busy()), Ok(second), Ok(third), Ok(Vec::new())];
     assert_eq!(stop(&mut fake), StopExit::Done);
-    assert_eq!(fake.stopped(), [12, 16, 10, 20]);
+    assert_eq!(fake.stopped(), [12, 16, 10, 20, 21]);
+    assert_eq!(fake.snapshots_taken(), 4);
+    // Only the pass with a refusal pauses before the next.
+    assert_eq!(fake.done.iter().filter(|line| *line == "pause").count(), 1);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     assert!(
         fake.logged[0].1.contains("(1 retried)"),
@@ -214,17 +285,23 @@ fn the_second_pass_stops_what_the_first_left_or_what_started_since() {
 }
 
 #[test]
-fn a_process_still_there_after_the_second_pass_is_not_stopped_but_its_user_is_marked() {
+fn a_pool_that_never_empties_is_left_at_the_time_limit_but_its_users_are_marked() {
     let mut fake = Fake::new(&[1010, 1011]);
+    // 12 refuses every time, and 10 and 16 come back in every snapshot (the last, again).
     fake.refuse = vec![12];
     fake.snapshots = vec![Ok(busy())];
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
     assert_eq!(StopExit::NotStopped.as_code(), 48);
-    assert_eq!(fake.stopped(), [10, 16, 10, 16]);
+    // One snapshot a second on the fake clock: the 60th is at the limit, and stops nothing.
+    let limit = usize::try_from(PASS_LIMIT.as_secs()).unwrap();
+    assert_eq!(fake.snapshots_taken(), limit);
+    assert_eq!(fake.stopped().len(), 2 * (limit - 1));
+    assert_eq!(fake.done.last().map(String::as_str), Some("mark 2"));
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     let (error, line) = &fake.logged[0];
     assert!(error);
-    assert!(line.contains("1 left"), "{line}");
+    assert!(line.contains("3 left"), "{line}");
+    assert!(line.contains("time ran out"), "{line}");
     // A snapshot that can't be taken is the same exit; what the other pass found is marked.
     let mut fake = Fake::new(&[1010, 1011]);
     fake.snapshots = vec![
@@ -260,7 +337,7 @@ fn nothing_running_takes_no_lock_and_marks_no_one() {
     fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(fake.stopped(), Vec::<u32>::new());
-    assert_eq!(fake.done, ["snapshot", "snapshot"]);
+    assert_eq!(fake.done, ["snapshot", "jobs"]);
 }
 
 #[test]

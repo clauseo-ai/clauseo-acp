@@ -13,8 +13,8 @@
 
 use windows::Win32::Foundation::{HANDLE, LUID, WAIT_OBJECT_0};
 use windows::Win32::Security::{
-    AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_DEBUG_NAME,
-    SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, OWNER_SECURITY_INFORMATION,
+    SE_DEBUG_NAME, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::Threading::{
@@ -28,7 +28,8 @@ use super::ffi::{code_of, os, token_user};
 use super::machine::MachineError;
 use super::preflight::{account_name, machine_domain};
 use super::strays::{Seen, check_pool_sid, to_stop};
-use crate::windows::acl::object::Handle;
+use crate::windows::acl::object::{Handle, kernel_security};
+use crate::windows::acl_bytes::owner_sid;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
@@ -155,6 +156,15 @@ pub(super) fn user_of(process: &Handle) -> Option<Sid> {
     unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &raw mut token) }.ok()?;
     let token = Handle(token);
     token_user(token.0).ok().flatten()
+}
+
+/// The owner of the process object `process` is open on; `None` when it can't be read (the
+/// handle needs `READ_CONTROL`, which `SeDebugPrivilege` grants). The stop reads it when the
+/// token can't be: a pool user can shut its token's DACL to SYSTEM, but can't make another
+/// account the owner of its process.
+pub(super) fn owner_of(process: &Handle) -> Option<Sid> {
+    let bytes = kernel_security(process, OWNER_SECURITY_INFORMATION.0).ok()?;
+    owner_sid(&bytes)
 }
 
 /// Every running process's pid (`EnumProcesses`), the buffer grown until the list fits.
