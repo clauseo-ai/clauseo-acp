@@ -48,8 +48,8 @@ fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
         fn open(&mut self, pid: u32) -> io::Result<Option<u32>> {
             self.0.open(pid)
         }
-        fn in_job(&mut self, process: &u32) -> io::Result<bool> {
-            self.0.in_job(process)
+        fn job_pids(&mut self) -> io::Result<Vec<u32>> {
+            self.0.job_pids()
         }
         fn started(&mut self, process: &u32) -> io::Result<u64> {
             self.0.started(process)
@@ -205,11 +205,7 @@ fn a_process_that_cant_be_opened_or_ended_is_an_escapee_and_one_that_cant_be_che
     };
     assert_eq!(open.escapees(), one("hidden.exe"));
     assert_eq!(kill.escapees(), one("hidden.exe"));
-    let job = SweepError::Job {
-        pid,
-        image: image.clone(),
-        code: code.clone(),
-    };
+    let job = SweepError::JobList(code.clone());
     let started = SweepError::Started { pid, image, code };
     for plain in [
         job,
@@ -236,7 +232,6 @@ fn a_process_that_cant_be_opened_or_ended_is_an_escapee_and_one_that_cant_be_che
 fn a_later_sweep_counts_its_escapees_and_names_each_image_once_up_to_the_cap() {
     for point in [Point::Tick, Point::End, Point::Sweeper] {
         let mut fake = machine();
-        fake.job = point != Point::Sweeper;
         // Two hidden copies of one image, nine others, and one that only can't be checked.
         for pid in 20..22 {
             fake.procs.insert(

@@ -1,7 +1,7 @@
 //! The runners' process calls (Windows): the outer's `CreateProcessWithLogonW` of the inner
-//! runner and of the end sweeper, the kill-on-close job and the query-only handle to it given to
-//! the inner, and the inner's private desktop, error mode and `CreateProcessAsUserW` of the agent
-//! with only its three pipes inherited.
+//! runner and of the end sweeper, the kill-on-close job (whose one handle is the outer's), and the
+//! inner's private desktop, error mode and `CreateProcessAsUserW` of the agent with only its three
+//! pipes inherited.
 #![expect(
     unsafe_code,
     reason = "FFI to the logon, job, desktop and process calls"
@@ -12,8 +12,7 @@ use std::io;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS,
-    SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::{SECURITY_ATTRIBUTES, TOKEN_QUERY};
 use windows::Win32::System::Diagnostics::Debug::{
@@ -35,11 +34,10 @@ use windows::Win32::System::LibraryLoader::{
 };
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
-use windows::Win32::System::SystemServices::JOB_OBJECT_QUERY;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
     LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
     PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
     STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
@@ -116,8 +114,7 @@ pub(super) struct Job(pub(super) Handle);
 // drops at this process's exit.
 unsafe impl Send for Job {}
 // SAFETY: as above; the calls made through a shared one (`TerminateJobObject`,
-// `QueryInformationJobObject`, `AssignProcessToJobObject`, `DuplicateHandle`) may run on two
-// threads at once.
+// `QueryInformationJobObject`, `AssignProcessToJobObject`) may run on two threads at once.
 unsafe impl Sync for Job {}
 
 /// The outer's call: starts `exe <args>` (`--inner <base>`, or `--sweep`) as the pool user
@@ -276,33 +273,12 @@ pub(super) fn system_folder() -> io::Result<String> {
     String::from_utf16(buffer.get(..len).unwrap_or_default()).map_err(io::Error::other)
 }
 
-/// Puts the suspended `process` in `job`.
-pub(super) fn assign(job: &Handle, process: &Process) -> io::Result<()> {
-    // SAFETY: both handles are live; the process handle has every right (it came from the
-    // logon call).
-    unsafe { AssignProcessToJobObject(job.0, process.handle.0) }.map_err(|e| os_error(&e))
-}
-
-/// Duplicates a handle to `job` into the suspended `process` with `JOB_OBJECT_QUERY` alone, not
-/// inheritable; the value it has there. Enough for `IsProcessInJob`, and for nothing that changes
-/// the job.
-pub(super) fn give_job(job: &Handle, process: &Process) -> io::Result<u64> {
-    let mut target = HANDLE::default();
-    // SAFETY: the job's handle and the process's (every right, from the logon call) are live;
-    // `target` is a live out-pointer naming a handle in the other process, never closed here.
-    unsafe {
-        DuplicateHandle(
-            GetCurrentProcess(),
-            job.0,
-            process.handle.0,
-            &raw mut target,
-            JOB_OBJECT_QUERY,
-            false,
-            DUPLICATE_HANDLE_OPTIONS(0),
-        )
-    }
-    .map_err(|e| os_error(&e))?;
-    u64::try_from(target.0.addr()).map_err(io::Error::other)
+/// Puts `process` (the suspended inner runner's handle) in `job`.
+pub(super) fn assign(job: &Handle, process: HANDLE) -> io::Result<()> {
+    // SAFETY: the job is live with every right (this process made it); the caller passes a live
+    // process handle with `PROCESS_SET_QUOTA` and `PROCESS_TERMINATE` (the logon call's has
+    // every right).
+    unsafe { AssignProcessToJobObject(job.0, process) }.map_err(|e| os_error(&e))
 }
 
 /// An anonymous pipe for the end sweeper's output: the read end, not inheritable, as a `File`,

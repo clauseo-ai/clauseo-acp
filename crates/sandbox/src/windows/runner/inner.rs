@@ -6,8 +6,6 @@ use std::fs::File;
 use std::path::Path;
 use std::time::Duration;
 
-use windows::Win32::Foundation::HANDLE;
-
 use super::RunExit;
 use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
 use super::inner_flow::{Failure, Inner, run};
@@ -71,12 +69,11 @@ struct Calls {
 }
 
 impl Inner for Calls {
-    type Job = HANDLE;
     type Agent = Process;
 
-    fn sweep(&mut self, point: Point, job: Option<&HANDLE>) -> Result<(), SweepError> {
+    fn sweep(&mut self, point: Point) -> Result<(), SweepError> {
         let mut lines = Vec::new();
-        let swept = sweep_own(&self.me, job.copied(), point, &mut |line| {
+        let swept = sweep_own(&self.me, point, &mut |line| {
             lines.push(line.to_owned());
         });
         for line in lines {
@@ -122,7 +119,7 @@ impl Inner for Calls {
         Ok(())
     }
 
-    fn read_launch(&mut self) -> Result<HANDLE, Failure> {
+    fn read_launch(&mut self) -> Result<(), Failure> {
         let ctl = self
             .ctl
             .as_ref()
@@ -135,13 +132,8 @@ impl Inner for Calls {
         let logon = logon_sid(&self.token).map_err(|e| fail(RunExit::Token, "logon SID", &e))?;
         shut_self(&self.token, &launch.desktop_user, &logon)
             .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e))?;
-        let job = usize::try_from(launch.job)
-            .ok()
-            .filter(|job| *job != 0)
-            .ok_or_else(|| (RunExit::Job, "the launch names no job handle".to_owned()))?;
         self.launch = Some(launch);
-        // A handle is a number in this process's table, never a pointer to memory.
-        Ok(HANDLE(std::ptr::without_provenance_mut(job)))
+        Ok(())
     }
 
     fn start(&mut self) -> Result<Process, Failure> {

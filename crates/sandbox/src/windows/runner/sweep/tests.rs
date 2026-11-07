@@ -1,6 +1,7 @@
-//! The sweep through a fake process list: who is killed, what fails closed, the job's
-//! processes kept only by a sweep given the job, the second listing, and the end sweeper's
-//! creation-time cutoff, the children of what it killed, and its second pass.
+//! The sweep through a fake process list: who is killed, what fails closed, the job's processes
+//! kept past the first act by the job's pid list and the creation-time rule, the second listing,
+//! and the end sweeper's creation-time cutoff, the children of what it killed, and its second
+//! pass.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,6 +19,7 @@ fn sid(text: &str) -> Sid {
 struct Proc {
     owner: Owner,
     image: &'static str,
+    /// Its pid is in the job's pid list.
     in_job: bool,
     /// Its creation time.
     started: u64,
@@ -59,9 +61,10 @@ struct Fake {
     killed: Vec<u32>,
     /// A process that starts another each time it is killed.
     forever: Option<u32>,
-    /// Whether this sweep was given the job (the inner's tick and end); without it, nothing is
-    /// in the job.
-    job: bool,
+    /// How many times the job's pid list was read.
+    job_reads: usize,
+    /// Reading the job's pid list fails.
+    job_list_fails: bool,
     /// The sweeping process's own creation time.
     own_start: u64,
     /// Opening a hidden process with `WRITE_DAC` and granting itself works (no `OWNER RIGHTS`
@@ -129,8 +132,17 @@ impl Processes for Fake {
         }
         Ok(self.procs.contains_key(&pid).then_some(pid))
     }
-    fn in_job(&mut self, process: &u32) -> io::Result<bool> {
-        Ok(self.job && self.procs.get(process).is_some_and(|p| p.in_job))
+    fn job_pids(&mut self) -> io::Result<Vec<u32>> {
+        self.job_reads += 1;
+        if self.job_list_fails {
+            return Err(io::Error::from_raw_os_error(6));
+        }
+        Ok(self
+            .procs
+            .iter()
+            .filter(|(_, p)| p.in_job)
+            .map(|(pid, _)| *pid)
+            .collect())
     }
     fn started(&mut self, process: &u32) -> io::Result<u64> {
         self.procs
@@ -174,6 +186,15 @@ fn machine() -> Fake {
     fake
 }
 
+/// The agent: in the job, created after the inner (`machine`'s `own_start`).
+fn agent() -> Proc {
+    Proc {
+        in_job: true,
+        started: 1_100,
+        ..pool_proc("agent.exe")
+    }
+}
+
 fn run(fake: &mut Fake, keep: &[u32], point: Point) -> (Result<Vec<u32>, SweepError>, Vec<String>) {
     let mut lines = Vec::new();
     let got = sweep(fake, &sid(POOL), keep, point, &mut |l| {
@@ -186,16 +207,9 @@ fn run(fake: &mut Fake, keep: &[u32], point: Point) -> (Result<Vec<u32>, SweepEr
 fn only_the_pool_users_processes_outside_the_job_are_killed() {
     let mut fake = machine();
     fake.procs.insert(10, pool_proc("inner.exe"));
-    fake.procs.insert(
-        11,
-        Proc {
-            in_job: true,
-            ..pool_proc("agent.exe")
-        },
-    );
+    fake.procs.insert(11, agent());
     fake.procs.insert(12, pool_proc("stray.exe"));
     fake.procs.insert(13, pool_proc("bits-job.exe"));
-    fake.job = true;
     let (got, lines) = run(&mut fake, &[10], Point::Tick);
     assert_eq!(got, Ok(vec![12, 13]));
     assert_eq!(fake.killed, [12, 13]);
@@ -291,18 +305,13 @@ fn what_a_killed_process_started_is_killed_in_the_next_round() {
 }
 
 #[test]
-fn a_sweep_without_the_job_keeps_only_its_own_pid() {
-    // The inner's first act and the end sweeper: a process marked in the job is killed too,
-    // since nothing but the inner can be in it yet, or the job is gone.
+fn the_first_act_and_the_end_sweeper_keep_only_their_own_pid() {
+    // The inner's first act: a process in the job is killed too. Nothing but the inner should
+    // be in it yet, and one there would have been started from the inner's process by one that
+    // opened it before the shut. The end sweeper reads no job.
     let mut fake = machine();
     fake.procs.insert(10, pool_proc("inner.exe"));
-    fake.procs.insert(
-        11,
-        Proc {
-            in_job: true,
-            ..pool_proc("agent.exe")
-        },
-    );
+    fake.procs.insert(11, agent());
     let (got, lines) = run(&mut fake, &[10], Point::Start);
     assert_eq!(got, Ok(vec![11]));
     assert_eq!(
@@ -349,7 +358,6 @@ fn a_process_that_shut_its_dacl_is_found_by_the_service_list_and_fails_the_first
 fn past_the_first_act_a_failure_is_logged_once_and_the_rest_are_swept() {
     for point in [Point::Tick, Point::End, Point::Sweeper] {
         let mut fake = machine();
-        fake.job = point != Point::Sweeper;
         fake.procs.insert(
             12,
             Proc {
@@ -378,6 +386,94 @@ fn past_the_first_act_a_failure_is_logged_once_and_the_rest_are_swept() {
             "{point}"
         );
     }
+}
+
+#[test]
+fn the_job_keeps_a_listed_pid_created_no_earlier_than_the_inner() {
+    let job = [11, 12];
+    assert!(
+        job_kept(&job, 11, 1_100, 1_000),
+        "listed, created after the inner"
+    );
+    assert!(
+        job_kept(&job, 11, 1_000, 1_000),
+        "listed, created in the inner's tick"
+    );
+    assert!(
+        !job_kept(&job, 12, 999, 1_000),
+        "listed, created before: a reused pid"
+    );
+    assert!(!job_kept(&job, 13, 1_100, 1_000), "not listed");
+    assert!(!job_kept(&[], 11, 1_100, 1_000), "no list");
+}
+
+#[test]
+fn past_the_first_act_the_job_is_its_pid_list_read_each_round_after_the_opens() {
+    for point in [Point::Tick, Point::End] {
+        let mut fake = machine();
+        fake.procs.insert(10, pool_proc("inner.exe"));
+        fake.procs.insert(11, agent());
+        // Listed, but created before the inner: no process of the job can be; killed.
+        fake.procs.insert(
+            12,
+            Proc {
+                in_job: true,
+                started: 500,
+                ..pool_proc("old.exe")
+            },
+        );
+        fake.procs.insert(13, pool_proc("stray.exe"));
+        // Killing 13 lets the agent's child 40 appear: the next round's list holds it.
+        fake.spawns.insert(
+            13,
+            (
+                40,
+                Proc {
+                    in_job: true,
+                    started: 1_200,
+                    ..pool_proc("agent-child.exe")
+                },
+            ),
+        );
+        let (got, _) = run(&mut fake, &[10], point);
+        assert_eq!(got, Ok(vec![12, 13]), "{point}");
+        assert!(fake.procs.contains_key(&11) && fake.procs.contains_key(&40));
+        // Once a round that opened something: the first, then the one that found 40.
+        assert_eq!(fake.job_reads, 2, "{point}");
+    }
+    // Nothing to open: no read.
+    let mut fake = machine();
+    fake.procs.insert(10, pool_proc("inner.exe"));
+    assert_eq!(run(&mut fake, &[10], Point::Tick).0, Ok(vec![]));
+    assert_eq!(fake.job_reads, 0);
+}
+
+#[test]
+fn a_job_list_that_cant_be_read_fails_the_sweep() {
+    // The first act reads it before anything, even with nothing to kill, and fails closed.
+    let mut fake = machine();
+    fake.job_list_fails = true;
+    let got = run(&mut fake, &[10], Point::Start).0;
+    assert_eq!(got, Err(SweepError::JobList("6".to_owned())));
+    assert_eq!(got.unwrap_err().escapees(), None);
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("stray.exe"));
+    fake.job_list_fails = true;
+    assert!(run(&mut fake, &[], Point::Start).0.is_err());
+    assert_eq!(fake.killed, Vec::<u32>::new(), "nothing killed before it");
+    // A tick fails without killing on a guess; the next tick tries again.
+    let mut fake = machine();
+    fake.procs.insert(11, agent());
+    fake.job_list_fails = true;
+    let got = run(&mut fake, &[], Point::Tick).0;
+    assert_eq!(got, Err(SweepError::JobList("6".to_owned())));
+    assert_eq!(fake.killed, Vec::<u32>::new());
+    // The end sweeper never reads one.
+    let mut fake = machine();
+    fake.procs.insert(31, pool_proc("task.exe"));
+    fake.job_list_fails = true;
+    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![31]));
+    assert_eq!(fake.job_reads, 0);
 }
 
 mod end;
