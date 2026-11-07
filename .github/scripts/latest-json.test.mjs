@@ -469,6 +469,21 @@ test("release.yml's build tells the sandbox's build.rs the mode and, for release
   const sidecars = build.findIndex((line) => line.startsWith("node .github/scripts/sidecars.mjs"));
   assert.ok(written !== -1 && written < sidecars, "CLAUSEO_UPDATER_PUBKEY is set before sidecars.mjs builds the sandbox tool");
   assert.ok(build.includes("release) key=$(jq -r .plugins.updater.pubkey crates/desktop/tauri.conf.json) ;;"));
+  // Both branches give plugins.updater.pubkey's format: release reads that field, test the file
+  // as stored, which already is that format (one base64 line of the whole .pub text).
+  assert.ok(build.includes("test) key=$(tr -d '\\r\\n' < crates/desktop/release/updater-test.pub) ;;"));
+  const stored = readFileSync(join(here, "..", "..", "crates", "desktop", "release", "updater-test.pub"), "utf8").trim();
+  assert.match(stored, /^[A-Za-z0-9+/]+=*$/, "updater-test.pub is one base64 line");
+  const pubFormat = (key) => {
+    const lines = Buffer.from(key, "base64").toString("utf8").split("\n");
+    return /^untrusted comment: minisign public key: [0-9A-F]{16}$/.test(lines[0]) && /^RW[A-Za-z0-9+/]{54}$/.test(lines[1]);
+  };
+  assert.ok(pubFormat(stored), "updater-test.pub decodes to a minisign public key file");
+  // The same format tauri signer writes and tauri.conf.json holds (REAL_PUB is a .pub as written).
+  assert.ok(pubFormat(REAL_PUB));
+  const conf = JSON.parse(readFileSync(join(here, "..", "..", "crates", "desktop", "tauri.conf.json"), "utf8"));
+  const release = conf.plugins.updater.pubkey;
+  assert.ok(release === "" || pubFormat(release), "tauri.conf.json's pubkey, once set, is that format");
 });
 
 test("the workflow lint fails each broken rule", () => {
