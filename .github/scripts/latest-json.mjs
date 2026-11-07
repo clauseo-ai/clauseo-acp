@@ -2,7 +2,7 @@
 // `assemble` job runs this file; latest-json.test.mjs tests it and lints release.yml.
 //
 //   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>
-//   node .github/scripts/latest-json.mjs --verify <file> <public-key-file>
+//   node .github/scripts/latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]
 //
 // <dir> holds the release's assets with their final names (the Mac archives already renamed to
 // Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
@@ -16,8 +16,9 @@
 // check a copy against the release. Exit status: 0 when latest.json is written, 1 when an asset or
 // a signature is wrong, 2 on a usage error.
 // --verify checks <file>.sig (tauri signer's format: base64 of minisign's text) against <file>
-// and the base64 public key in <public-key-file>, trusted comment included: 0 when it holds, 1 when
-// not. Plain Node: no package to install.
+// and the base64 public key in <public-key-file>, trusted comment included, and with <signed-name>
+// and <version> that the trusted comment holds the fields file:<signed-name> and
+// version:<version>: 0 when it holds, 1 when not. Plain Node: no package to install.
 //
 // The manifest is the plugin's static format: { version, notes, pub_date, platforms }, each
 // platform keyed `<os>-<arch>-<bundle>` (the plugin tries that key, then `<os>-<arch>`). The
@@ -83,9 +84,11 @@ export function assets(version, sandboxExe = null) {
  * Every way <signature> (a `.sig` file's text: base64 of minisign's signature text) fails to sign
  * <data> (a Buffer) under <publicKey> (a `.pub` file's text, as tauri signer writes both): the
  * file's signature, prehashed with BLAKE2b-512 (`ED`) or not (`Ed`), and the global signature
- * over it and the trusted comment. Empty when it holds.
+ * over it and the trusted comment. With <expect> ({ file, version }), the trusted comment must also
+ * hold the tab-separated fields file:<file> and version:<version>, as tauri signer writes them
+ * (`timestamp:<unix>\tfile:<base name of the signed file>\tversion:<v>`). Empty when it holds.
  */
-export function signatureCheck(data, signature, publicKey) {
+export function signatureCheck(data, signature, publicKey, expect = null) {
   const decode = (text) => Buffer.from(String(text).trim(), "base64").toString("utf8").split("\n");
   const sig = decode(signature);
   const pub = decode(publicKey);
@@ -118,6 +121,14 @@ export function signatureCheck(data, signature, publicKey) {
   const comment = Buffer.from(sig[2].slice(prefix.length), "utf8");
   if (!verify(null, Buffer.concat([raw.subarray(10), comment]), pk, global)) {
     problems.push("the trusted comment is not signed by the key");
+  }
+  if (expect !== null) {
+    const fields = sig[2].slice(prefix.length).split("\t");
+    for (const [key, want] of [["file", expect.file], ["version", expect.version]]) {
+      if (!fields.includes(`${key}:${want}`)) {
+        problems.push(`the trusted comment holds no ${key}:${want}`);
+      }
+    }
   }
   return problems;
 }
@@ -271,9 +282,15 @@ export function buildManifest(dir, version, baseUrl, pubDate, sandboxExe = null)
 }
 
 function main(argv) {
-  if (argv[0] === "--verify" && argv.length === 3) {
-    const [, file, publicKeyFile] = argv;
-    const problems = signatureCheck(readFileSync(file), readFileSync(`${file}.sig`, "utf8"), readFileSync(publicKeyFile, "utf8"));
+  if (argv[0] === "--verify" && (argv.length === 3 || argv.length === 5)) {
+    const [, file, publicKeyFile, signedName, version] = argv;
+    const expect = argv.length === 5 ? { file: signedName, version } : null;
+    const problems = signatureCheck(
+      readFileSync(file),
+      readFileSync(`${file}.sig`, "utf8"),
+      readFileSync(publicKeyFile, "utf8"),
+      expect,
+    );
     for (const problem of problems) {
       process.stderr.write(`${file}.sig: ${problem}\n`);
     }
@@ -282,7 +299,7 @@ function main(argv) {
   if (argv.length !== 5 || !SANDBOX_EXE.test(argv[4])) {
     process.stderr.write(
       "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
-        "       node latest-json.mjs --verify <file> <public-key-file>\n",
+        "       node latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]\n",
     );
     return 2;
   }

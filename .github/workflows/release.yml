@@ -707,7 +707,15 @@ jobs:
             export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
-          pnpm -C ui tauri signer sign --app-version "$VERSION" "$GITHUB_WORKSPACE/$exe"
+          # tauri signer puts the signed file's base name in the trusted comment (file:<name>), and
+          # the sandbox's verifier wants the installed name: sign a copy named SANDBOX_EXE, the
+          # same bytes, and put its .sig where the bundle overlay expects it.
+          dir=$RUNNER_TEMP/sign-$TARGET
+          mkdir -p "$dir"
+          cp "$exe" "$dir/$SANDBOX_EXE"
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"
+          cmp "$exe" "$dir/$SANDBOX_EXE"
+          mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"
 
       # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
       # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
@@ -888,10 +896,12 @@ jobs:
             pub=$RUNNER_TEMP/updater-$arch.pub
             updater_pub "$target" > "$pub" || true
             [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $arch in a $MODE run"; exit 1; }
-            for signed in "$exe" "${files[0]}"; do
-              node .github/scripts/latest-json.mjs --verify "$signed" "$pub" ||
-                { echo "::error::$(basename "$signed").sig does not hold under the $MODE updater key"; exit 1; }
-            done
+            # Each signed for this version, under the name it was signed as (the trusted comment's
+            # file:): the sandbox tool as installed, the installer as published.
+            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
+              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
+            node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||
+              { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
             for installer in "${files[0]}" "${files[1]}"; do
               listing=$(7z l -slt -ba "$installer" | sed -n 's/^Path = //p')
               for inner in "$SANDBOX_EXE" "$SANDBOX_EXE.sig"; do
