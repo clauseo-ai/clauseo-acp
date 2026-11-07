@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use super::{Adopter, Records, Target, adopt};
 use crate::windows::admin_copy::{Found, os};
 use crate::windows::setup::exe::run_set_up;
+use crate::windows::setup::lock::{Held, try_lock};
 use crate::windows::setup::outcome::SetupExit;
 use crate::windows::setup::owner::{Owner, this_process};
 use crate::windows::setup::profile::profile_of;
@@ -19,12 +20,18 @@ use crate::windows::sids::Sid;
 pub(crate) struct WindowsAdopter {
     names: Names,
     user: Option<Owner>,
+    /// The set-up lock, while `--adopt` holds it.
+    held: Option<Held>,
 }
 
 impl WindowsAdopter {
     /// The machine with the names `names` (`Names::production()` for a real install).
     pub(crate) fn new(names: Names) -> WindowsAdopter {
-        WindowsAdopter { names, user: None }
+        WindowsAdopter {
+            names,
+            user: None,
+            held: None,
+        }
     }
 }
 
@@ -94,6 +101,15 @@ impl Adopter for WindowsAdopter {
 
     fn sha256(&mut self, exe: &Path) -> Result<String, String> {
         os::sha256(exe).map_err(|error| error.to_string())
+    }
+
+    fn lock(&mut self) -> Result<bool, String> {
+        self.held = try_lock(&self.names.mutex).map_err(|error| error.to_string())?;
+        Ok(self.held.is_some())
+    }
+
+    fn unlock(&mut self) {
+        self.held = None;
     }
 
     fn write_values(&mut self, values: &AdminValues) -> Result<(), String> {

@@ -90,7 +90,7 @@ pub mod journal;
 pub mod journal_plan;
 mod late_steps;
 #[cfg(windows)]
-mod lock;
+pub(crate) mod lock;
 #[cfg(test)]
 #[cfg(windows)]
 mod lock_tests;

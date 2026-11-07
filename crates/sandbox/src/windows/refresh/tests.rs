@@ -158,3 +158,24 @@ fn the_folder_is_held_before_the_set_aside_and_a_failed_hold_moves_nothing() {
     assert!(!fake.calls.contains(&"set_aside") && !fake.calls.contains(&"place_staged"));
     assert_eq!(RefreshExit::FolderBusy.as_code(), 43);
 }
+
+#[test]
+fn a_held_set_up_lock_reads_and_moves_nothing_and_a_run_holds_it_throughout() {
+    let key = key();
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.fail = Some("lock");
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::LockHeld);
+    assert_eq!(RefreshExit::LockHeld.as_code(), 44);
+    assert_eq!(fake.calls, ["is_system", "lock"]);
+    assert_eq!(fake.admin_file, Some(old()));
+    assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&old())));
+    // Taken before the record is read, given back after its last write, failed or not.
+    for fail in [None, Some("place_staged"), Some("write_sha256")] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.fail = fail;
+        let _exit = run_fake(&mut fake, &key);
+        let at = |name| fake.calls.iter().position(|call| *call == name).unwrap();
+        assert!(at("lock") < at("record"), "{fail:?}");
+        assert_eq!(fake.calls.last(), Some(&"unlock"), "{fail:?}");
+    }
+}

@@ -56,7 +56,7 @@ use super::shared::{Claim, Shared};
 use crate::windows::sids::Sid;
 
 /// The set-up lock's name inside [`NAMESPACE`].
-pub(super) const SETUP_MUTEX: &str = "SetupLock";
+pub(crate) const SETUP_MUTEX: &str = "SetupLock";
 
 /// The private namespace's alias prefix; objects in it are named `ClauseoSandbox\<name>`.
 pub(super) const NAMESPACE: &str = "ClauseoSandbox";
@@ -161,9 +161,25 @@ impl SetupMutex {
     }
 }
 
+/// The set-up lock `name`, tried without waiting, for `--adopt` and the admin copy's refresh,
+/// which share it with the set-up so neither changes the copy or its record while the other
+/// is between reading and writing them: `Ok(None)` while another thread or process holds it.
+pub(crate) fn try_lock(name: &str) -> Result<Option<Held>, MachineError> {
+    match SetupMutex::open(name)?.acquire(0) {
+        Ok((held, acquired)) => {
+            if acquired == Acquired::Abandoned {
+                tracing::warn!("an earlier holder ended without giving the set-up lock back");
+            }
+            Ok(Some(held))
+        }
+        Err(MachineError::LockHeld) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// The set-up lock, held by this thread; released (`ReleaseMutex`) and closed on drop.
 #[derive(Debug)]
-pub(super) struct Held {
+pub(crate) struct Held {
     mutex: SetupMutex,
     /// A mutex is released by the thread that owns it: `*const ()` keeps `Held` off other
     /// threads.

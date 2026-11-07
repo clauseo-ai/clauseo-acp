@@ -32,6 +32,7 @@ use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::record::read_string;
 use crate::windows::setup::adopt::windows_adopter::own_profile;
+use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
 use crate::windows::setup::owner::this_process;
 use crate::windows::setup::record_values::{
     ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, USER_INSTALL_DIR,
@@ -63,6 +64,8 @@ pub struct WindowsRefresher {
     sandbox: Result<PathBuf, Failed>,
     /// The admin folder, held through the renames (`hold_admin_folder`).
     held: Option<Handle>,
+    /// The set-up lock, held through the run.
+    lock: Option<Held>,
 }
 
 impl Default for WindowsRefresher {
@@ -77,6 +80,7 @@ impl WindowsRefresher {
         WindowsRefresher {
             sandbox: sandbox_dir(),
             held: None,
+            lock: None,
         }
     }
 
@@ -134,6 +138,15 @@ impl Refresher for WindowsRefresher {
 
     fn admin_copy(&mut self) -> Result<PathBuf, Failed> {
         self.at(EXE_NAME)
+    }
+
+    fn lock(&mut self) -> Result<bool, Failed> {
+        self.lock = try_lock(SETUP_MUTEX).map_err(|error| format!("the set-up lock: {error}"))?;
+        Ok(self.lock.is_some())
+    }
+
+    fn unlock(&mut self) {
+        self.lock = None;
     }
 
     fn record(&mut self) -> Result<RefreshRecord, Failed> {
