@@ -43,7 +43,7 @@ Developer ID.
 - **Workflow rules:** every action pinned by commit SHA; `permissions:` on every job (none at the
   top); each secret on the one step that uses it; `pnpm install --frozen-lockfile` and `cargo fetch
   --locked` before any secret; no cache restored or saved. The updater key is present only in the
-  step that bundles the Mac `.app` and the step that signs the Windows installer, never while
+  step that bundles the Mac `.app` and the steps that sign the Windows sandbox tool and installer, never while
   third-party build scripts run. Only the macOS legs of `build` take an environment, since only they
   sign there. `.github/scripts/latest-json.test.mjs` fails on a pull request trigger, an unpinned
   action, a job without `permissions:` or a secret outside a step, and runs in CI's fast lane.
@@ -141,6 +141,21 @@ Developer ID.
 
 - One commit gives every asset, and `sha256sum -c SHA256SUMS.txt` checks a download. Every asset has
   a build provenance attestation.
+- S15's sandbox tool (release.yml's `SANDBOX_EXE`, `clauseo-sandbox-setup.exe`) is signed in `sign-windows` with the mode's updater key, after
+  SignPath and before NSIS, the same key and per-mode handling as the currentUser installer. A
+  generated `bundle.resources` overlay puts its `.sig` beside it in the install folder of both
+  installers (NSIS installs resources and `externalBin` alike under `$INSTDIR`), and both go on the
+  Release as `<name>-<arch>.exe` and `.exe.sig`, in `SHA256SUMS.txt` like every asset. `assemble`
+  checks the `.sig` (and the currentUser installer's) against the mode's updater public key (a dry
+  run's comes from each Windows leg as the artifact `dry-updater-pub-<target>`), opens both
+  installers with 7-Zip (`p7zip-full`) and fails unless each holds exactly the published exe and
+  `.sig` at the install folder's root. It also reads the tool's VERSIONINFO string `UpdaterKeyId` (stage C)
+  by parsing its PE resources and fails unless it is the mode's key ID: test's `updater-test.pub`,
+  release's `tauri.conf.json` pubkey, dry's the same when set, else `build.rs`'s placeholder
+  `AC986E7C6BA67AB9`. Until stage C's PR 3 merges an exe without it only warns. The release notes list its SHA-256 per architecture under
+  "Inside the Windows installers", for IT to check a copy restored from quarantine (firm-it §10).
+- The `build` job sets `CLAUSEO_RELEASE_MODE` and, for a release or a test run, `CLAUSEO_UPDATER_PUBKEY`
+  (public keys only) for the sandbox's `build.rs`; a dry run sets no key, so its refresh fails closed.
 - A release builds cold on every leg (no cache), about the slowest a build can be; a release is rare.
 - Dry runs cost no secret and can be started by anyone with write access, from any branch, and their
   signatures prove the pipeline, not trust: each leg signs with its own throwaway key.

@@ -1,5 +1,9 @@
 # Release builds: one commit becomes every installer, the updater's files, latest.json and
 # SHA256SUMS.txt. docs/decisions/0035-release-builds.md records why it is built this way.
+# SHA256SUMS.txt covers every asset. Those include S15's sandbox tool (SANDBOX_EXE below) per
+# Windows architecture with its updater-key .sig: the same exe and .sig both installers place in
+# the install folder, which assemble checks, and the release notes repeat its SHA-256 for IT to
+# compare a copy Defender restored from quarantine.
 #
 # Three modes, which `check` decides from what started the run:
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
@@ -61,6 +65,10 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
+  # S15's sandbox tool as the Windows installers place it beside Clauseo.exe (sidecars.mjs builds
+  # it as crates/desktop/binaries/<name>-<target>.exe). The one place its name is written here and
+  # in latest-json.test.mjs.
+  SANDBOX_EXE: clauseo-sandbox-setup.exe
 
 jobs:
   # What started the run, and whether it may: the mode, the version, the environment of the jobs
@@ -284,6 +292,8 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       MODE: ${{ needs.check.outputs.mode }}
+      # Read by the sandbox's build.rs (stage C) with CLAUSEO_UPDATER_PUBKEY below.
+      CLAUSEO_RELEASE_MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
       FEATURES: ${{ needs.check.outputs.features }}
       RELEASE_DATE: ${{ needs.check.outputs.release_date }}
@@ -338,6 +348,33 @@ jobs:
       # release/sidecars.generated.json: bundle.externalBin for exactly those. Every tauri build
       # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
       # target's whole list). S15 adds its rows to the script's table.
+      # The updater public key the sandbox's build.rs builds in (stage C), before sidecars.mjs
+      # compiles it, always in plugins.updater.pubkey's format (base64 of the whole minisign .pub
+      # text): a release's from tauri.conf.json, a test run's updater-test.pub, which is stored in
+      # that format (the scan below base64-decodes it). A dry run sets none, nor a release while tauri.conf.json has none, so
+      # build.rs falls back to tauri.conf.json's placeholder and the refresh fails closed. Public
+      # keys only: no secret.
+      - name: The updater public key for the sandbox's build
+        run: |
+          set -euo pipefail
+          key=""
+          case "$MODE" in
+            release) key=$(jq -r .plugins.updater.pubkey crates/desktop/tauri.conf.json) ;;
+            test) key=$(tr -d '\r\n' < crates/desktop/release/updater-test.pub) ;;
+          esac
+          if [ -n "$key" ]; then
+            decoded=$(printf '%s' "$key" | base64 -d | tr -d '\r')
+            [ "$(printf '%s\n' "$decoded" | sed -n 1p | cut -c 1-38)" = "untrusted comment: minisign public key" ] &&
+              printf '%s\n' "$decoded" | sed -n 2p | grep -q '^RW' ||
+              { echo "::error::the $MODE updater key is not base64 of a minisign public key file"; exit 1; }
+          fi
+          if [ -n "$key" ]; then
+            echo "CLAUSEO_UPDATER_PUBKEY=$key" >> "$GITHUB_ENV"
+            echo "CLAUSEO_UPDATER_PUBKEY is the $MODE key"
+          else
+            echo "CLAUSEO_UPDATER_PUBKEY is unset ($MODE)"
+          fi
+
       - name: Sidecars for this target
         run: |
           set -euo pipefail
@@ -645,32 +682,6 @@ jobs:
           echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
           exit 1
 
-      # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
-      # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
-      # step. Both installers ship the same exe, and the sidecars the overlay lists, beside it.
-      - name: Bundle the currentUser and perMachine installers
-        run: |
-          set -euo pipefail
-          mkdir -p "$OUT"
-          nsis=$RELEASE_DIR/bundle/nsis
-          bundle() {
-            rm -rf "$nsis"
-            pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
-              --no-binary-patching --no-sign --config release/release.conf.json --config release/windows.conf.json "$@" \
-              --config release/sidecars.generated.json
-          }
-          bundle
-          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
-          bundle --config release/machine.conf.json
-          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
-          ls -l "$OUT"
-
-      - name: SignPath, the installers (S20a)
-        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
-        run: |
-          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
-          exit 1
-
       - name: Make a throwaway updater key (dry run)
         if: env.MODE == 'dry'
         run: |
@@ -678,6 +689,69 @@ jobs:
           head -c 32 /dev/urandom | base64 > "$RUNNER_TEMP/dry-updater.password"
           pnpm -s -C ui tauri signer generate --ci -p "$(cat "$RUNNER_TEMP/dry-updater.password")" \
             -w "$RUNNER_TEMP/dry-updater.key" > /dev/null
+
+      # S15's sandbox tool, with the updater key the currentUser installer is signed with below,
+      # after SignPath (which changes its bytes) and before NSIS: its .sig is over the bytes that
+      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release.
+      - name: Sign the sandbox tool for the updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          exe=crates/desktop/binaries/${SANDBOX_EXE%.exe}-$TARGET.exe
+          [ -f "$exe" ] || { echo "::error::no $exe in windows-exe-$TARGET"; exit 1; }
+          if [ "$MODE" = dry ]; then
+            TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/dry-updater.key")
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$RUNNER_TEMP/dry-updater.password")
+            export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
+          # tauri signer puts the signed file's base name in the trusted comment (file:<name>), and
+          # the sandbox's verifier wants the installed name: sign a copy named SANDBOX_EXE, the
+          # same bytes, and put its .sig where the bundle overlay expects it.
+          dir=$RUNNER_TEMP/sign-$TARGET
+          mkdir -p "$dir"
+          cp "$exe" "$dir/$SANDBOX_EXE"
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"
+          cmp "$exe" "$dir/$SANDBOX_EXE"
+          mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"
+
+      # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
+      # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
+      # step. Both installers ship the same exe, and the sidecars the overlay lists, beside it. A
+      # generated bundle.resources overlay puts the sandbox tool's .sig beside it too: NSIS installs
+      # resources and externalBin alike under $INSTDIR, each at its target name. That exe and .sig
+      # also go on the Release as <name>-<arch>.exe and .exe.sig.
+      - name: Bundle the currentUser and perMachine installers
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          nsis=$RELEASE_DIR/bundle/nsis
+          sig=binaries/${SANDBOX_EXE%.exe}-$TARGET.exe.sig
+          [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
+            "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
+          bundle() {
+            rm -rf "$nsis"
+            pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+              --no-binary-patching --no-sign --config release/release.conf.json --config release/windows.conf.json "$@" \
+              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
+          }
+          bundle
+          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
+          bundle --config release/machine.conf.json
+          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
+          asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
+          cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
+          cp "crates/desktop/$sig" "$OUT/$asset.sig"
+          ls -l "$OUT"
+
+      - name: SignPath, the installers (S20a)
+        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
+        run: |
+          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
+          exit 1
 
       # Last, over the installer as it ships: the currentUser one, the one that updates itself.
       - name: Sign the currentUser installer for the updater
@@ -698,6 +772,15 @@ jobs:
         with:
           name: release-${{ matrix.target }}
           path: ${{ env.OUT }}
+          if-no-files-found: error
+
+      # A dry run's throwaway public key, for assemble to check this leg's signatures with. Never
+      # on a Release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.MODE == 'dry'
+        with:
+          name: dry-updater-pub-${{ matrix.target }}
+          path: ${{ runner.temp }}/dry-updater.key.pub
           if-no-files-found: error
 
       - name: Sizes to the job summary
@@ -744,6 +827,18 @@ jobs:
           pattern: release-*
           path: ${{ runner.temp }}/legs
 
+      # A dry run signs each Windows leg with that leg's throwaway key; a release or a test run
+      # takes its public key from the repo.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: env.MODE == 'dry'
+        with:
+          pattern: dry-updater-pub-*
+          path: ${{ runner.temp }}/pub
+
+      # 7-Zip reads NSIS installers: the next step looks inside them.
+      - name: Install 7-Zip
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends p7zip-full
+
       - name: Name the assets, write latest.json and SHA256SUMS.txt
         run: |
           set -euo pipefail
@@ -762,12 +857,12 @@ jobs:
           done
           # A dry run publishes nothing; its URLs point at a tag that does not exist.
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/${TAG:-dry-run}"
-          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > missing.txt
+          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SANDBOX_EXE" > missing.txt
           # Nothing but the table's assets, their .sig and latest.json.
           known=$(node --input-type=module -e "
             import { assets } from './.github/scripts/latest-json.mjs';
-            for (const a of assets(process.argv[1])) console.log(a.platforms ? a.name + '\n' + a.name + '.sig' : a.name);
-          " "$VERSION")
+            for (const a of assets(process.argv[1], process.argv[2])) console.log(a.platforms || a.signed ? a.name + '\n' + a.name + '.sig' : a.name);
+          " "$VERSION" "$SANDBOX_EXE")
           for file in dist/*; do
             name=$(basename "$file")
             [ "$name" = latest.json ] || grep -qxF "$name" <<< "$known" ||
@@ -775,15 +870,87 @@ jobs:
           done
           (cd dist && sha256sum -- * > ../SHA256SUMS.txt) && mv SHA256SUMS.txt dist/
           (cd dist && sha256sum -c SHA256SUMS.txt)
+          # S15's sandbox tool: per architecture, both installers must place exactly the published
+          # exe and its .sig at the install folder's root, and the .sig (and the currentUser
+          # installer's) must hold under this mode's updater public key. A tier 2 leg that failed
+          # left none of these files; latest-json.mjs has already required the tier 1 ones.
+          updater_pub() {
+            case "$MODE" in
+              dry) cat "$RUNNER_TEMP/pub/dry-updater-pub-$1/dry-updater.key.pub" ;;
+              test) cat crates/desktop/release/updater-test.pub ;;
+              release) jq -r .plugins.updater.pubkey crates/desktop/tauri.conf.json ;;
+            esac
+          }
+          inside=()
+          for arch in x64 arm64; do
+            case $arch in
+              x64) target=x86_64-pc-windows-msvc label="Windows x64" ;;
+              arm64) target=aarch64-pc-windows-msvc label="Windows ARM64" ;;
+            esac
+            exe=dist/${SANDBOX_EXE%.exe}-$arch.exe
+            files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe" "$exe" "$exe.sig")
+            present=0
+            for file in "${files[@]}"; do [ ! -f "$file" ] || present=$((present + 1)); done
+            [ "$present" != 0 ] || continue
+            [ "$present" = 4 ] || { echo "::error::the $arch leg left only some of ${files[*]}"; exit 1; }
+            pub=$RUNNER_TEMP/updater-$arch.pub
+            updater_pub "$target" > "$pub" || true
+            [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $arch in a $MODE run"; exit 1; }
+            # Each signed for this version, under the name it was signed as (the trusted comment's
+            # file:): the sandbox tool as installed, the installer as published.
+            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
+              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
+            node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||
+              { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
+            # The updater key ID the tool was built with (its VERSIONINFO string UpdaterKeyId, stage
+            # C) must be this mode's: test's updater-test.pub, release's tauri.conf.json pubkey, dry's
+            # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId).
+            status=0
+            node .github/scripts/latest-json.mjs --key-id "$exe" "$MODE" || status=$?
+            case $status in
+              0) ;;
+              3)
+                # TODO(sandbox-admin-refresh): a failure once stage C's PR 3, which puts UpdaterKeyId
+                # in the tool's VERSIONINFO, merges.
+                echo "::warning::$(basename "$exe") has no UpdaterKeyId; not compared with the $MODE key"
+                echo "- $label: \`$(basename "$exe")\` has no UpdaterKeyId yet, so its updater key ID was not compared." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              *) echo "::error::$(basename "$exe") does not carry the $MODE updater key ID (see above)"; exit 1 ;;
+            esac
+            for installer in "${files[0]}" "${files[1]}"; do
+              listing=$(7z l -slt -ba "$installer" | sed -n 's/^Path = //p')
+              for inner in "$SANDBOX_EXE" "$SANDBOX_EXE.sig"; do
+                published=$exe; [ "$inner" = "$SANDBOX_EXE" ] || published=$exe.sig
+                grep -qxF "$inner" <<< "$listing" ||
+                  { echo "::error::$(basename "$installer") has no $inner at the install folder's root"; exit 1; }
+                7z e -so -spd "$installer" "$inner" | cmp - "$published" ||
+                  { echo "::error::$inner in $(basename "$installer") is not the published $(basename "$published")"; exit 1; }
+              done
+            done
+            inside+=("| $label | \`$(basename "$exe")\` | \`$(sha256sum < "$exe" | cut -d ' ' -f 1)\` |")
+          done
           {
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
             echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            echo
+            echo "## Which Windows installer"
+            echo
+            echo "- **For your own Windows account** (most people): \`Clauseo_${VERSION}_x64-setup.exe\`, or \`Clauseo_${VERSION}_arm64-setup.exe\` on Windows on ARM."
+            echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
               sed 's/^missing /- /' missing.txt
             fi
+            echo
+            echo "## Inside the Windows installers"
+            echo
+            echo "Both Windows installers of an architecture, per-user and per-machine, place the same \`$SANDBOX_EXE\`, Clauseo's sandbox tool, and its signature \`$SANDBOX_EXE.sig\` in the install folder. Both are on this release too, under the asset name below. IT can compare a copy restored from quarantine with this SHA-256 (\`Get-FileHash\` in PowerShell)."
+            echo
+            echo "| architecture | asset | SHA-256 of $SANDBOX_EXE |"
+            echo "|---|---|---|"
+            printf '%s\n' "${inside[@]}"
           } > notes.md
           {
             echo "### Release assets, $MODE"
