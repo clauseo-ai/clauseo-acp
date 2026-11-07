@@ -23,7 +23,7 @@ import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts"
 import { say } from "@clauseo/components/lib/words-ui.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { clockOf, localZone } from "../../room/when.ts";
-import { gateView, installView, refusalView } from "../../room/first-run/views.ts";
+import { aboutMb, gateView, installView, refusalView } from "../../room/first-run/views.ts";
 import { CODEX, isReady, type AgentSetup, type SetupStore } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
@@ -60,7 +60,7 @@ function standOf(agent: AgentId, setup: AgentSetup | undefined, adding: boolean)
   const install = setup?.install;
   if (install !== undefined && install !== "managed" && !isReady(install)) {
     if (agent === CODEX && !adding && typeof install === "object" && install.missing !== undefined)
-      return { kind: "add", mb: setup?.mb ?? 0 };
+      return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
     if (installView(setup) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
@@ -228,12 +228,15 @@ export function PlanBlock({
         body = (
           <>
             {line(s("Uses your ChatGPT plan."))}
+            {/* the card's quiet line under Add: the download's size, about, then what to expect; with no
+                size known, what to expect alone */}
             <p className="set-plan-fine">
               {say(
-                s(
-                  "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.",
-                  { mb: stand.mb },
-                ),
+                stand.mb > 0
+                  ? s("Needs a download of about {mb} MB. Signing in happens in your browser.", {
+                      mb: stand.mb,
+                    })
+                  : s("Signing in happens in your browser."),
               )}
             </p>
             <div className="set-plan-acts">

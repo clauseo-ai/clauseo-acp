@@ -87,6 +87,10 @@ const START: SetupState = {
 
 const MB = 1_000_000;
 
+/** A byte count as the first run says a size: whole MB, 10^6 bytes, rounded. The one MB
+ * formatter the install lines use (the download's size, and its done and total). */
+export const mbOf = (bytes: number): number => Math.round(bytes / MB);
+
 /** Whether an install state is a failure on screen, and its code. */
 function installCode(state: InstallProgress): ErrorCode | null {
   if (typeof state === "string") return null;
@@ -154,13 +158,13 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       const was = state.agents[id];
       const patch: AgentSetup = { install };
       if (typeof install === "object" && "missing" in install && install.missing !== undefined)
-        patch.mb = Math.round(install.missing.download_bytes / MB);
+        patch.mb = mbOf(install.missing.download_bytes);
       if (
         typeof install === "object" &&
         "downloading" in install &&
         install.downloading !== undefined
       )
-        patch.mb = Math.round(install.downloading.total / MB);
+        patch.mb = mbOf(install.downloading.total);
       if (isReady(install) && was?.install !== undefined && !isReady(was.install)) {
         patch.readyHere = true;
         count({ onboarding_step: { step: "agent_ready" } });

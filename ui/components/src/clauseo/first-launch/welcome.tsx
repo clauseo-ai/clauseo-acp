@@ -12,7 +12,7 @@ import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
 import { Lockup } from "../lockup.tsx";
 import { Say } from "../say.tsx";
-import { WorkingLine, type WorkingState } from "../working-line.tsx";
+import { WorkingLine, WorkingSaid, type WorkingState } from "../working-line.tsx";
 import { WRAP } from "./classes.ts";
 import { Done, DocumentsLine } from "./parts.tsx";
 import { PickerLine } from "../picker-line.tsx";
@@ -119,6 +119,12 @@ export function Welcome({
       </div>
       <div className="fl-foot">
         <div className="fl-foot-col">
+          {/* the install's live region, mounted as the foot is, so each state change is said once,
+              in place; the bytes on the line are seen, not read at every tick (the composer's
+              region, room-entry, does the same) */}
+          <span className="sr-only" role="status" data-testid="install-said">
+            {install !== null && <WorkingSaid state={install} />}
+          </span>
           {install !== null ? (
             <div className="room-entry fl-foot-well" data-working="">
               <WorkingLine state={install} />

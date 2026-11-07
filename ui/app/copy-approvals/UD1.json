@@ -63,11 +63,14 @@
     "by": "design"
   },
   "UD1-11": {
-    "en": "Getting {name} ready. About {mb} MB.",
-    "hi": "{name} तैयार हो रहा है। लगभग {mb} MB।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "en": "Needs a download of about {mb} MB",
+    "hi": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-12": {
     "en": "{name} is ready",
@@ -77,15 +80,14 @@
     "by": "design"
   },
   "UD1-13": {
-    "en": "Setting up {name} on this computer.",
-    "hi": "इस कंप्यूटर पर {name} सेट अप हो रहा है।",
+    "en": "Setting up {name}…",
+    "hi": "{name} सेट अप हो रहा है…",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-14": {
     "en": "Use the system proxy",
@@ -754,6 +756,16 @@
     "hi": "सिस्टम की proxy इस्तेमाल करें",
     "status": "provisional",
     "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-88": {
+    "en": "Getting {name} ready… {done} MB of {total} MB",
+    "hi": "{name} तैयार हो रहा है… {total} MB में से {done} MB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   }
 }

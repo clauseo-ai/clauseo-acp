@@ -420,13 +420,13 @@
     "by": "design"
   },
   "UD2-44": {
-    "en": "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.",
-    "hi": "केवल ChatGPT वाला हिस्सा डाउनलोड होता है, लगभग {mb} MB। साइन इन आपके ब्राउज़र में होता है।",
+    "en": "Needs a download of about {mb} MB. Signing in happens in your browser.",
+    "hi": "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UD2-45": {
@@ -568,5 +568,15 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
+  },
+  "UD2-59": {
+    "en": "Signing in happens in your browser.",
+    "hi": "साइन इन आपके ब्राउज़र में होता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

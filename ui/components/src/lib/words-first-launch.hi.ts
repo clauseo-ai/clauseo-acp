@@ -17,8 +17,12 @@ export const HI = {
     "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
   "What's sent": "क्या भेजा जाता है",
 
-  // getting the agent ready, on the working line (design)
-  "Getting {name} ready. About {mb} MB.": "{name} तैयार हो रहा है। लगभग {mb} MB।",
+  // getting the agent ready, on the working line (design): its size first, then the download's
+  // bytes, then the set-up
+  "Needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+  "Getting {name} ready… {done} MB of {total} MB": "{name} तैयार हो रहा है… {total} MB में से {done} MB",
+  // the live region's words for the download, which hears no bytes (new)
+  "Getting {name} ready…": "{name} तैयार हो रहा है…",
   "{name} is ready": "{name} तैयार है",
   "Use the system proxy": "सिस्टम की proxy इस्तेमाल करें",
   "Ask your IT team": "अपनी IT टीम से कहें",
@@ -33,7 +37,7 @@ export const HI = {
   "Try again": "फिर से प्रयास करें",
   Details: "विवरण",
   // the download done, while npm puts it together: no bytes to count and no time to promise (new)
-  "Setting up {name} on this computer.": "इस कंप्यूटर पर {name} सेट अप हो रहा है।",
+  "Setting up {name}…": "{name} सेट अप हो रहा है…",
 
   // the fine print, up front (design)
   "Your papers stay on this computer. {name} sees what each question sends it.":

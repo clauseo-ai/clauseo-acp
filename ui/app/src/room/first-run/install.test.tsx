@@ -25,14 +25,33 @@ const HOSTS = ["registry.npmjs.org", "nodejs.org"];
 const foot = () => byId("install-foot");
 const bar = () => foot()?.querySelector('[role="meter"]') ?? null;
 
-test("install: missing says the size and sends nothing (desktop starts the install itself)", async () => {
+test("install: missing says the size, about, and sends nothing (desktop starts the install itself)", async () => {
   const t = await mountFirstRun({
     matters: [],
-    first: [install(CLAUDE, { missing: { download_bytes: 182_400_000 } })],
+    first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
   });
   expect(foot()?.dataset["state"]).toBe("missing");
-  expect(text()).toContain("Getting Claude ready. About 182 MB.");
+  expect(text()).toContain("Needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
+});
+
+test("install: missing with no bytes to download shows no line at all", async () => {
+  await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, { missing: { download_bytes: 0 } })],
+  });
+  expect(foot()).toBeNull();
+  expect(text()).not.toContain("Needs a download");
+});
+
+test("install: downloading says its size and progress in whole MB: 45 MB of 160 MB", async () => {
+  await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, { downloading: { received: 45_000_000, total: 160_000_000 } })],
+  });
+  expect(foot()?.dataset["state"]).toBe("downloading");
+  expect(text()).toContain("Getting Claude ready… 45 MB of 160 MB");
+  expect(bar()?.getAttribute("aria-valuenow")).toBe("28.1");
 });
 
 test("install: the bar shows received of total with no number and no time, and moves only on events", async () => {
@@ -44,7 +63,7 @@ test("install: the bar shows received of total with no number and no time, and m
   const before = bar()?.getAttribute("aria-valuenow");
   expect(before).toBe("10");
   // the meter speaks the words, never a number; the line shows no percent and no clock time
-  expect(bar()?.getAttribute("aria-valuetext")).toBe("Getting Claude ready. About 200 MB.");
+  expect(bar()?.getAttribute("aria-valuetext")).toBe("Getting Claude ready… 20 MB of 200 MB");
   expect(foot()?.closest(".working")?.textContent ?? "").not.toMatch(/%|\d:\d\d|seconds|minute/);
   // nothing moves it but the host: waiting changes nothing
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -57,7 +76,7 @@ test("install: installing is a calm wait with no bar and no time, the pen writin
   await mountFirstRun({ matters: [], first: [install(CLAUDE, "installing")] });
   expect(foot()?.dataset["state"]).toBe("installing");
   expect(bar()).toBeNull();
-  expect(text()).toContain("Setting up Claude on this computer.");
+  expect(text()).toContain("Setting up Claude…");
   expect(document.querySelector('.working [data-lead="pen"]')).not.toBeNull();
 });
 
@@ -193,10 +212,45 @@ test("install: the foot follows into the room, on the composer's working line, u
   });
   expect(allById("install-foot")).toHaveLength(1);
   expect(foot()?.closest("[data-composer]")).not.toBeNull();
+  // the composer's live region says the state, not the bytes
+  const said = () => foot()?.closest(".room-entry")?.querySelector('[role="status"]')?.textContent;
+  expect(said()).toBe("Getting Claude ready…");
   await play(t, install(CLAUDE, "installing"));
   expect(foot()?.dataset["state"]).toBe("installing");
+  expect(said()).toBe("Setting up Claude…");
   await play(t, install(CLAUDE, READY));
   expect(foot()).toBeNull();
+});
+
+test("install: the live region says each state once and never a byte update", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
+  });
+  const region = byId("install-said");
+  expect(region?.textContent).toBe("Needs a download of about 160 MB");
+  let changes = 0;
+  const watch = new MutationObserver((records) => {
+    changes += records.length;
+  });
+  watch.observe(region!, { childList: true, characterData: true, subtree: true });
+  await play(t, install(CLAUDE, { downloading: { received: 45_000_000, total: 160_000_000 } }));
+  expect(region?.textContent).toBe("Getting Claude ready…");
+  const once = changes;
+  expect(once).toBeGreaterThan(0);
+  // ticks: the bar moves, the words' bytes move, and the region says nothing new
+  await play(
+    t,
+    install(CLAUDE, { downloading: { received: 60_000_000, total: 160_000_000 } }),
+    install(CLAUDE, { downloading: { received: 90_000_000, total: 160_000_000 } }),
+  );
+  expect(bar()?.getAttribute("aria-valuenow")).toBe("56.3");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(changes).toBe(once);
+  expect(region?.textContent).toBe("Getting Claude ready…");
+  await play(t, install(CLAUDE, "installing"));
+  expect(region?.textContent).toBe("Setting up Claude…");
+  watch.disconnect();
 });
 
 test("install: each install code's screen counts error_shown with its code, once", async () => {
