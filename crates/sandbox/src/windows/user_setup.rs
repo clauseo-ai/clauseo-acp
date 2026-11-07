@@ -7,10 +7,14 @@
 //! folder the lawyer's own processes can write. Before every start the copy passes
 //! `admin_copy::check` (there, its recorded SHA-256, a folder chain only administrators can
 //! change), or nothing starts and the run is [`SetupError::Blocked`] with the cause, recorded
-//! for `state` as a policy block is.
+//! for `state` as a policy block is. The handle the copy was hashed through stays open,
+//! sharing read only, until the start returns (`admin_copy::launch_checked`).
 //!
 //! The exe's manifest asks for an administrator (`requireAdministrator`, D-B14), so starting it
-//! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). It runs
+//! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). The verb
+//! is looked up in the machine's class for an exe alone, `HKLM\SOFTWARE\Classes\exefile`, passed
+//! as the class key (`SEE_MASK_CLASSKEY`): never in `HKCU\Software\Classes`, which the lawyer's
+//! own processes can write. It runs
 //! hidden, with no error box from the shell (`SEE_MASK_FLAG_NO_UI`), and the wait has no limit:
 //! R17 calls `run` off the actor thread. A prompt declined (1223) is [`SetupError::Refused`];
 //! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, and a 1385 from
@@ -29,16 +33,20 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use clauseo_protocol::MatterId;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, WAIT_OBJECT_0, WIN32_ERROR};
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_SAM_FLAGS, RegCloseKey, RegOpenKeyExW,
+};
 use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 use windows::Win32::UI::Shell::{
-    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    SEE_MASK_CLASSKEY, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    ShellExecuteExW,
 };
 use windows::core::{PCWSTR, w};
 
 use super::NtfsAcl;
-use super::admin_copy::os::{StateAdminCopy, check_here};
-use super::admin_copy::protection_state;
+use super::admin_copy::os::{StateAdminCopy, WindowsAdminCopy};
+use super::admin_copy::{launch_checked, protection_state};
 use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
@@ -57,6 +65,10 @@ use crate::{SandboxSetup, SetupError, SetupState};
 /// `SW_HIDE`: the exe shows no window.
 const SW_HIDE: i32 = 0;
 
+/// The machine's class for an exe, under `HKEY_LOCAL_MACHINE`: the start's verb is looked up
+/// there alone.
+const EXE_CLASS: PCWSTR = w!(r"SOFTWARE\Classes\exefile");
+
 /// The set-up for the Windows user running the app: `data_dir` is that user's data folder.
 /// The setup exe is always the admin copy, found and checked at each start.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +78,7 @@ pub struct UserSetup {
 
 impl UserSetup {
     /// The set-up for the data folder `data_dir`. No path to an exe is taken: the one started
-    /// is the admin copy (`admin_copy::check_here`).
+    /// is the admin copy (`admin_copy::launch_checked`).
     pub fn new(data_dir: PathBuf) -> UserSetup {
         UserSetup { data_dir }
     }
@@ -277,29 +289,78 @@ impl Drop for Process {
     }
 }
 
+/// A registry key, closed on drop.
+struct ClassKey(HKEY);
+
+impl Drop for ClassKey {
+    fn drop(&mut self) {
+        // SAFETY: the key came from RegOpenKeyExW and is closed once, here. A failed close
+        // leaves nothing to do.
+        let _closed = unsafe { RegCloseKey(self.0) };
+    }
+}
+
+/// `RegOpenKeyExW` of `subkey` under `root` with `access`.
+fn open_key(root: HKEY, subkey: PCWSTR, access: REG_SAM_FLAGS) -> Result<HKEY, WIN32_ERROR> {
+    let mut key = HKEY::default();
+    // SAFETY: `subkey` is a NUL-terminated literal; `key` is a live out-pointer, and the key
+    // it receives is owned by the caller's `ClassKey`.
+    let opened = unsafe { RegOpenKeyExW(root, subkey, None, access, &raw mut key) };
+    if opened == ERROR_SUCCESS {
+        Ok(key)
+    } else {
+        Err(opened)
+    }
+}
+
+/// [`EXE_CLASS`] opened read-only under `HKEY_LOCAL_MACHINE` through `open` (`open_key`; a
+/// recorder in the tests).
+fn exe_class_key(
+    open: impl FnOnce(HKEY, PCWSTR, REG_SAM_FLAGS) -> Result<HKEY, WIN32_ERROR>,
+) -> Result<ClassKey, SetupError> {
+    open(HKEY_LOCAL_MACHINE, EXE_CLASS, KEY_READ)
+        .map(ClassKey)
+        .map_err(|error| {
+            SetupError::Failed(format!(
+                "Windows' settings for starting a program can't be read (error {})",
+                error.0
+            ))
+        })
+}
+
+/// What `start` passes `ShellExecuteExW` for `file` with `parameters` (both NUL-terminated,
+/// outliving the result): the verb `open`, hidden, no error box, the process handle kept, and
+/// `class` as the class key the verb is looked up in (`SEE_MASK_CLASSKEY`).
+fn shell_info(file: &[u16], parameters: &[u16], class: HKEY) -> SHELLEXECUTEINFOW {
+    SHELLEXECUTEINFOW {
+        cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX),
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_CLASSKEY,
+        lpVerb: w!("open"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(parameters.as_ptr()),
+        nShow: SW_HIDE,
+        hkeyClass: class,
+        ..SHELLEXECUTEINFOW::default()
+    }
+}
+
 /// Starts the admin copy with `params` as the module says, once it passes
-/// `admin_copy::check_here` (else [`SetupError::Blocked`], nothing started), waits for it, and
-/// gives its exit code. A launch that fails is `launch_error` of its code.
+/// `admin_copy::launch_checked` (else [`SetupError::Blocked`], nothing started), its hashed
+/// handle held until the start returns; waits for it, and gives its exit code. A launch that
+/// fails is `launch_error` of its code.
 fn launch(params: &str) -> Result<u32, SetupError> {
-    let exe = check_here().map_err(SetupError::Blocked)?;
-    start(&exe, params)
+    launch_checked(&WindowsAdminCopy, |exe| start(exe, params)).map_err(SetupError::Blocked)?
 }
 
 /// Starts `exe`, which [`launch`] checked, with `params`, waits for it and gives its exit code.
 fn start(exe: &Path, params: &str) -> Result<u32, SetupError> {
     let file: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
     let parameters: Vec<u16> = params.encode_utf16().chain([0]).collect();
-    let mut info = SHELLEXECUTEINFOW {
-        cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX),
-        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI,
-        lpVerb: w!("open"),
-        lpFile: PCWSTR(file.as_ptr()),
-        lpParameters: PCWSTR(parameters.as_ptr()),
-        nShow: SW_HIDE,
-        ..SHELLEXECUTEINFOW::default()
-    };
+    let class = exe_class_key(open_key)?;
+    let mut info = shell_info(&file, &parameters, class.0);
     // SAFETY: `info` is live and sized in `cbSize`; its strings are NUL-terminated and outlive
-    // the call. The process handle it returns is owned by `Process` at once.
+    // the call, and its class key is open (`class`) until after it. The process handle it
+    // returns is owned by `Process` at once.
     let started = unsafe { ShellExecuteExW(&raw mut info) };
     if let Err(error) = started {
         let code = u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX);

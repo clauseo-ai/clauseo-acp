@@ -487,7 +487,10 @@ started elevated, by the app or by the uninstall hook.
   elevated installer (an administrator's account, over the shoulder), whose recorded parent is
   the unelevated installer. Both must run the same image, be created in order, the outer one's
   token not elevated and its user `--owner-sid`; the elevated account's user and profile are
-  never used. The install and data folders must lie inside that SID's `ProfileList` profile.
+  never used. That checks the tree's shape, not that it is the installer's: any two processes of
+  one image pass, the middle one elevated or not. Nothing is gained by it, since the owner is the
+  outer process's own unelevated user, who named themselves. The install and data folders must
+  lie inside that SID's `ProfileList` profile.
   Per machine, the install folder may be anywhere, but only SYSTEM, Administrators or
   TrustedInstaller may change it.
 - **One owner, of one kind.** `AdminCopyOwner` records whose install placed the copy: the
@@ -507,14 +510,24 @@ started elevated, by the app or by the uninstall hook.
   does with it (the refresh task reading a new exe from it) must open every component without
   following reparse points, and verify what it read before use.
 - **Before each start, and each tier-B launch** (`UserSetup`, `check_launch`), a pool another
-  user owns is `Blocked::OtherAccount`. Then the copy must be a regular file (else
-  `AdminCopyMissing`); each of `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy must be no
-  reparse point, owned by SYSTEM, Administrators or TrustedInstaller, with no allow entry that
-  applies to it giving anyone else write, append, write-attributes, delete, delete-child,
-  `WRITE_DAC`, `WRITE_OWNER` or a generic right holding one, and `Sandbox` must hold nothing but
-  the copy, its `.sig` and `staging\` (else `AdminCopyUnsafe`; deny entries are ignored); and its
-  SHA-256 must be the recorded one (else `AdminCopyChanged`). Each is `sandbox.blocked`, not
-  retryable, with words for IT. A tier-B launch hashes the copy each time.
+  user owns is `Blocked::OtherAccount`, and owners that can't be read are `AdminCopyMissing`
+  (never "no other owner"). Then the copy must be a regular file (else `AdminCopyMissing`); each
+  of `%ProgramFiles%`, `Clauseo`, `Sandbox` and the copy, and each folder between the volume
+  root and `%ProgramFiles%`, must be no reparse point, owned by SYSTEM, Administrators or
+  TrustedInstaller, with no allow entry that applies to it giving anyone else write, append,
+  write-attributes, delete, delete-child, `WRITE_DAC`, `WRITE_OWNER` or a generic right holding
+  one; the volume root the same, but only delete-child, `WRITE_DAC`, `WRITE_OWNER` and the
+  generic rights that hold them count there, since every Windows install lets Authenticated Users
+  add a folder at the root; `Sandbox` must hold nothing but the copy, its `.sig` and `staging\`
+  (else `AdminCopyUnsafe`; deny entries are ignored); and its SHA-256 must be the recorded one
+  (else `AdminCopyChanged`). Each is `sandbox.blocked`, not retryable, with words for IT. A
+  tier-B launch hashes the copy each time.
+- **The elevated start holds what it hashed.** `UserSetup` hashes the copy through a handle that
+  shares read only (no write, no delete) and keeps it open until `ShellExecuteExW` has returned
+  (`admin_copy::launch_checked`), so the file started is the file hashed. The start looks its
+  verb up in `HKLM\SOFTWARE\Classes\exefile` alone, passed as the class key
+  (`SEE_MASK_CLASSKEY`), never in `HKCU\Software\Classes`, which the lawyer's processes can
+  write.
 - **The state shows the repair first.** `UserSetup::state` checks the copy before the marker
   and record: missing (or no recorded hash), changed or unsafe is `SetupState::Blocked` with that
   cause, at the first open after a declined or silent install; `Needed` only with a verified
@@ -541,7 +554,13 @@ started elevated, by the app or by the uninstall hook.
 
 ### Removal (`--remove`, PR4j)
 
-The uninstaller's hook runs `clauseo-sandbox-setup.exe --remove` elevated (`runas`). The
+The uninstaller's hook runs `clauseo-sandbox-setup.exe --remove` elevated (`runas`), the admin
+copy only, once it passes the app's checks done in NSIS: every level from the drive's root to the
+copy admin-only (the rules above), then the copy's SHA-256 (`certutil -hashfile`, run directly
+with its output in the uninstaller's own temporary folder) equal, ignoring case, to
+`AdminCopySha256`. Otherwise, or when anything can't be read, it starts nothing, keeps
+`sandbox\` and the record, and says so: a box, or under `/S` a details line and exit 27. Like the
+app, it looks the verb up in `HKLM\SOFTWARE\Classes\exefile` alone. The
 per-machine installer, already elevated, opens it with `open` and adds `--per-machine`, chosen
 when it is built (the template's `INSTALLMODE`; only `currentUser` and `perMachine` build,
 stage F), never at run time. `--per-machine` runs only in an elevated or SYSTEM process. The exe
