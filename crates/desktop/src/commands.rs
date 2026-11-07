@@ -256,15 +256,26 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
     chooser: State<'_, Chooser>,
     app_data: State<'_, AppData>,
 ) -> Result<PickAnswer, HostError> {
+    // The e2e build's folder comes first, as `NativePicker::pick` gives it: no check, no session.
+    #[cfg(feature = "e2e")]
+    let fixed = crate::e2e::matter_dir();
+    #[cfg(not(feature = "e2e"))]
+    let fixed: Option<std::path::PathBuf> = None;
     let setting = std::env::var(crate::chooser::PICKER_VAR).ok();
     let stalls = chooser.inner().clone();
+    let has_fixed = fixed.is_some();
     let route = tauri::async_runtime::spawn_blocking(move || {
         // Past the session caps the lawyer sees the native dialog; no check runs then.
         let may_open = cfg!(windows) && stalls.may_open(crate::open::now());
-        crate::chooser::route(may_open, setting.as_deref(), || stalls.would_stall())
+        crate::chooser::route(has_fixed, may_open, setting.as_deref(), || {
+            stalls.would_stall()
+        })
     })
     .await
     .unwrap_or(Route::Native);
+    if let (Route::Fixed, Some(folder)) = (route, fixed) {
+        return crate::chooser::pick_fixed(&bridge, folder, SystemDirs.home().as_deref()).await;
+    }
     if route == Route::Chooser {
         let opener = chooser.inner().clone();
         let (last_pick, data) = (last.get(), app_data.0.clone());

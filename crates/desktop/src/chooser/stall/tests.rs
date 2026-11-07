@@ -131,9 +131,9 @@ fn a_hanging_drive_type_opens_the_chooser_in_about_one_and_a_half_seconds() {
 /// Off Windows the native dialog always; on Windows the variable decides first, then the check.
 #[test]
 fn the_route_follows_the_os_the_variable_then_the_check() {
-    assert_eq!(route(false, Some("app"), || true), Route::Native);
-    assert_eq!(route(true, Some("app"), || false), Route::Chooser);
-    assert_eq!(route(true, Some("native"), || true), Route::Native);
-    assert_eq!(route(true, None, || true), Route::Chooser);
-    assert_eq!(route(true, Some("other"), || false), Route::Native);
+    assert_eq!(route(false, false, Some("app"), || true), Route::Native);
+    assert_eq!(route(false, true, Some("app"), || false), Route::Chooser);
+    assert_eq!(route(false, true, Some("native"), || true), Route::Native);
+    assert_eq!(route(false, true, None, || true), Route::Chooser);
+    assert_eq!(route(false, true, Some("other"), || false), Route::Native);
 }

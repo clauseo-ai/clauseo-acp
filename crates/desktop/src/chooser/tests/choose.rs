@@ -101,3 +101,23 @@ fn choosing_issues_one_ref_only_after_the_confirm() {
         ErrorCode::CommandInvalid
     );
 }
+
+/// The e2e build picks its `E2E_MATTER_DIR` before the variable and the pre-check: `Fixed`
+/// even with `CLAUSEO_FOLDER_PICKER=app` on Windows (the check never runs), then `Picked` with
+/// one ref issued through the bridge's `pick_folder`.
+#[cfg(feature = "e2e")]
+#[test]
+fn the_e2e_folder_comes_before_the_chooser() {
+    let route = route(true, true, Some("app"), || panic!("the pre-check ran"));
+    assert_eq!(route, Route::Fixed);
+    let scratch = Scratch::new("chooser-e2e-fixed", &["work"]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let folder = scratch.path().join("work");
+    let answer = block_on(pick_fixed(&bridge, folder, Some(scratch.path()))).unwrap();
+    let PickAnswer::Picked { folder } = answer else {
+        panic!("{answer:?}");
+    };
+    assert_eq!(folder.display, "work");
+    assert_eq!(bridge.issued(), HashSet::from([folder.folder]));
+}

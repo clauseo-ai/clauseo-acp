@@ -37,15 +37,22 @@ pub(crate) enum Route {
     Native,
     /// The in-app chooser.
     Chooser,
+    /// The e2e build's folder (`E2E_MATTER_DIR`), as its native picker gives it.
+    Fixed,
 }
 
-/// The picker for a pick: the native dialog off Windows, whatever `setting` says; on Windows
+/// The picker for a pick: the e2e build's fixed folder when it has one (`fixed`), before
+/// anything else; then the native dialog off Windows, whatever `setting` says; on Windows
 /// `setting`'s choice ([`PICKER_VAR`]), else the chooser when `stalls` says the dialog would.
 pub(crate) fn route(
+    fixed: bool,
     on_windows: bool,
     setting: Option<&str>,
     stalls: impl FnOnce() -> bool,
 ) -> Route {
+    if fixed {
+        return Route::Fixed;
+    }
     if !on_windows {
         return Route::Native;
     }
