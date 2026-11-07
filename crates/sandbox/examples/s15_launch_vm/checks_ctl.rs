@@ -124,6 +124,17 @@ const G: Variant = Variant {
     low: true,
 };
 
+/// Strict mode's `SwitchDesktop` control: variant (f)'s token on the user's own `WinSta0\Default`.
+const W: Variant = Variant {
+    key: 'w',
+    source: Source::Lawyer(Shape::Plain),
+    sa: false,
+    differs: "in its station as well as the job: variant (f)'s token, the lawyer's own, on the \
+              interactive WinSta0\\Default",
+    restricted: 0,
+    low: false,
+};
+
 /// Whether variant (g) can run: the agent still runs (and its station with it), or why not.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Live<'a> {
@@ -138,6 +149,8 @@ enum Station<'a> {
     Control,
     /// The agent's own, by the name it printed (`ClauseoRun-<hex>`).
     Agent(&'a str),
+    /// The user's interactive `WinSta0` (strict mode's (w)).
+    Interactive,
 }
 
 /// The positive control: (g) when the agent is `live`, then (a) to (f), each run and noted,
@@ -201,11 +214,30 @@ pub(crate) fn controls(
         ctx.note(&format!("control ({}): {said}", variant.key));
         runs.push(run);
     }
+    if strict {
+        let run = one(ctx, &W, &lawyer, Station::Interactive).unwrap_or_else(|why| Control {
+            key: W.key,
+            rank: Rank::Interactive,
+            shape: Err(why),
+            got: gate::EFFECTS.map(|_| Got::Failed("didn't run".to_owned())),
+        });
+        let said = run
+            .shape
+            .as_ref()
+            .map_or_else(Clone::clone, |()| "ran on WinSta0".to_owned());
+        ctx.note(&format!("control (w): {said}"));
+        runs.push(run);
+    }
     let mut judged = gate::gate(&agent, &runs, strict);
     let differs = judged
         .carriers
         .iter()
-        .filter_map(|key| std::iter::once(&G).chain(&VARIANTS).find(|v| v.key == *key))
+        .filter_map(|key| {
+            [&G, &W]
+                .into_iter()
+                .chain(&VARIANTS)
+                .find(|v| v.key == *key)
+        })
         .map(|v| format!("({}) differs from the agent {}", v.key, v.differs))
         .collect::<Vec<_>>();
     let differs = if differs.is_empty() {
@@ -244,6 +276,7 @@ fn one(ctx: &Ctx<'_>, variant: &Variant, lawyer: &str, on: Station<'_>) -> Resul
     ctx.note(&format!("control ({}): {seen}", variant.key));
     let rank = match on {
         Station::Agent(_) => Rank::Agent,
+        Station::Interactive => Rank::Interactive,
         Station::Control if VARIANTS.iter().position(|v| v.key == variant.key) < Some(GATE) => {
             Rank::Close
         }
@@ -271,6 +304,7 @@ fn run_variant(
     let target = match on {
         Station::Control => desktop.clone(),
         Station::Agent(name) => format!("{name}\\Default"),
+        Station::Interactive => "WinSta0\\Default".to_owned(),
     };
     let limit = ctx.limit.min(CONTROL_LIMIT);
     let exe = ctx.manifest.harness_exe();
@@ -300,13 +334,17 @@ fn run_variant(
         }
         Source::Lawyer(shape) => {
             let (token, _) = win_ctl::shaped_token(shape, None)?;
-            let held = open(&[lawyer])?;
+            // (w) runs on the user's own WinSta0, which needs no station of ours.
+            let held = match on {
+                Station::Interactive => None,
+                _ => Some(open(&[lawyer])?),
+            };
             let args: &[&str] = if variant.sa {
                 &["probe", "ui-control", "sa"]
             } else {
                 &["probe", "ui-control"]
             };
-            let ran = win_ctl::run_as(&token, &desktop, &exe, args, &bin, limit);
+            let ran = win_ctl::run_as(&token, &target, &exe, args, &bin, limit);
             drop(held);
             ran?
         }
@@ -369,6 +407,7 @@ fn shape(variant: &Variant, user: &str, lines: &[String], on: Station<'_>) -> Re
     let right = match on {
         Station::Control => station.is_some_and(|s| s.starts_with("ClauseoS15Ctl-")),
         Station::Agent(name) => station == Some(name) && name.starts_with("ClauseoRun-"),
+        Station::Interactive => station == Some("WinSta0"),
     };
     if !right {
         return Err(format!("probe ui-control ran on station {station:?}"));
@@ -400,7 +439,7 @@ fn shape(variant: &Variant, user: &str, lines: &[String], on: Station<'_>) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{G, GATE, Station, VARIANTS, agent_station, shape};
+    use super::{G, GATE, Station, VARIANTS, W, agent_station, shape};
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|l| (*l).to_owned()).collect()
@@ -428,6 +467,25 @@ mod tests {
         assert_eq!(keys, "abcdef");
         assert_eq!(VARIANTS.get(GATE).map(|v| v.key), Some('e'));
         assert_eq!((G.key, G.restricted, G.low), ('g', 4, true));
+    }
+
+    #[test]
+    fn w_counts_only_on_winsta0_as_the_lawyer_unrestricted() {
+        let user = "S-1-5-21-1-1001";
+        let on_winsta0 = lines(&[
+            "ui-control station WinSta0",
+            "ui-control user S-1-5-21-1-1001",
+            "ui-control integrity S-1-16-12288",
+            "ui-control restricted 0",
+            "ui-control desktop-sa default",
+        ]);
+        assert!(shape(&W, user, &on_winsta0, Station::Interactive).is_ok());
+        let mut fresh = on_winsta0.clone();
+        if let Some(line) = fresh.first_mut() {
+            *line = "ui-control station ClauseoS15Ctl-00".to_owned();
+        }
+        assert!(shape(&W, user, &fresh, Station::Interactive).is_err());
+        assert!(shape(&W, "S-1-5-21-1-1002", &on_winsta0, Station::Interactive).is_err());
     }
 
     #[test]
