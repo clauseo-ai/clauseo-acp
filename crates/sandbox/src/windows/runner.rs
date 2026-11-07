@@ -37,9 +37,10 @@
 //!   (`pool::assign::busy`), so none of those processes is another session's.
 //! - At any end (the inner exiting, once the output drained; the host's stdin ending, once the
 //!   agent, its stdin closed, had 1.5 s to finish; a failure, at once) the outer ends the job,
-//!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`, `sweeper.rs`): `--sweep`, the same kills with no job kept and the same
-//!   removal, on its own timeout. A job that doesn't empty starts no sweeper. The sweeper is never
-//!   in the outer's job, so the host ending the outer leaves it running.
+//!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`,
+//!   `sweeper.rs`): `--sweep`, the same kills with no job kept and the same removal, on its
+//!   own timeout. A job that doesn't empty starts no sweeper. The sweeper is never in the outer's
+//!   job, so the host ending the outer leaves it running.
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
