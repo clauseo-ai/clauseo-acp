@@ -209,13 +209,23 @@ already there, create or fix it from an elevated Command Prompt:
 
 ```bat
 mkdir "%ProgramData%\Clauseo"
-icacls "%ProgramData%\Clauseo" /setowner *S-1-5-32-544
-icacls "%ProgramData%\Clauseo" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX
+icacls "%ProgramData%\Clauseo" /setowner "*S-1-5-32-544"
+icacls "%ProgramData%\Clauseo" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
 ```
 
-(`mkdir` says the folder exists when it does; carry on with the rest.) The SIDs are SYSTEM,
+or from an elevated PowerShell, as an Intune script runs (each grant is quoted, since PowerShell
+reads `(OI)` itself otherwise):
+
+```powershell
+New-Item -ItemType Directory -Force "$env:ProgramData\Clauseo" | Out-Null
+icacls "$env:ProgramData\Clauseo" /setowner "*S-1-5-32-544"
+icacls "$env:ProgramData\Clauseo" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
+```
+
+(`mkdir` says the folder exists when it does; carry on with the rest.) Delete anything in an
+existing folder that your IT team didn't put there. The SIDs are SYSTEM,
 Administrators and Users, so the commands work in any Windows language. Check it with
-`icacls "%ProgramData%\Clauseo"`: it lists only `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`,
+`icacls "%ProgramData%\Clauseo"` (PowerShell: `icacls "$env:ProgramData\Clauseo"`): it lists only `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`,
 `BUILTIN\Administrators:(OI)(CI)(F)` and `BUILTIN\Users:(OI)(CI)(RX)`, none marked `(I)`
 (the names are in the system's language). Remove any other entry with
 `icacls "%ProgramData%\Clauseo" /remove:g <name>`. `dir /q "%ProgramData%"` shows the owner
