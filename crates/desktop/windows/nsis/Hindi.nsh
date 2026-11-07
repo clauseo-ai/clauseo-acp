@@ -52,6 +52,8 @@ LangString removeSkippedSilent ${LANG_HINDI} "Clauseo ने सुरक्ष�
 ; installer found that program gone right after writing it; the install stays. A box; under /S a
 ; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
 LangString removeExeMissing ${LANG_HINDI} "Clauseo सुरक्षित कार्यक्षेत्र नहीं हटा सका, क्योंकि Windows सुरक्षा ने उसे सेट अप करने वाला प्रोग्राम हटा दिया। सुरक्षित कार्यक्षेत्र के छिपे हुए Windows खाते अभी भी इस कंप्यूटर पर हैं। इस कंप्यूटर की देखरेख करने वाला व्यक्ति उन्हें हटा सकता है। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
+; Provisional (app thread, 2026-11-07): stage C's admin-copy lines.
+LangString removeAdminCopyRefused ${LANG_HINDI} "Clauseo सुरक्षित कार्यक्षेत्र नहीं हटा सका, क्योंकि वह यह पुष्टि नहीं कर सका कि Program Files में रखा, इसे तैयार करने वाला प्रोग्राम वही है जो Clauseo ने इंस्टॉल किया था, और उसे केवल व्यवस्थापक बदल सकते हैं। सुरक्षित कार्यक्षेत्र के छिपे हुए Windows खाते अभी भी इस कंप्यूटर पर हैं। इस कंप्यूटर की देखरेख करने वाले व्यक्ति उन्हें हटा सकते हैं। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
 LangString setupExeRemoved ${LANG_HINDI} "इंस्टॉल होते समय Windows सुरक्षा ने Clauseo का एक हिस्सा हटा दिया: वह प्रोग्राम जो सुरक्षित कार्यक्षेत्र सेट अप करता है। जब तक इसे वापस नहीं लाया जाता, Clauseo सुरक्षित कार्यक्षेत्र में Claude या ChatGPT शुरू नहीं करेगा। इस कंप्यूटर की देखरेख करने वाला व्यक्ति इसे वापस ला सकता है। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
