@@ -1,9 +1,10 @@
 //! The Win32 calls of the pool rows (`checks_pool.rs`), made by the harness as the lawyer,
 //! outside the runner's job: every process whose token user is a pool user (a Toolhelp snapshot,
 //! then `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` and `OpenProcessToken(TOKEN_QUERY)`),
-//! the session's kill-on-close job (a duplicate of the outer runner's own handle to it),
-//! `IsProcessInJob` against that job, its pid list, and a service's state. Each gives a plain
-//! value or the Win32 code, never a panic.
+//! with `SeDebugPrivilege` enabled first ([`enable_debug_privilege`]); the session's
+//! kill-on-close job (a duplicate of the outer runner's own handle to it), `IsProcessInJob`
+//! against that job, its pid list, and a service's state. Each gives a plain value or the Win32
+//! code, never a panic.
 #![expect(
     unsafe_code,
     reason = "FFI to the process, token, job, handle-duplication and service calls"
@@ -11,8 +12,13 @@
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
-use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Foundation::{
+    DUPLICATE_SAME_ACCESS, DuplicateHandle, GetLastError, HANDLE, LUID,
+};
+use windows::Win32::Security::{
+    AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+    TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+};
 use windows::Win32::System::JobObjects::{
     CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_BASIC_UI_RESTRICTIONS,
@@ -34,6 +40,47 @@ use super::{win_sec, win_thread};
 
 /// `ERROR_MORE_DATA`: the job's pid list didn't fit.
 const MORE_DATA: u32 = 234;
+/// `ERROR_INVALID_PARAMETER` from `OpenProcess`: the process ended after the snapshot.
+const GONE: u32 = 87;
+/// `ERROR_NOT_ALL_ASSIGNED`: the token doesn't hold the privilege.
+const NOT_ALL_ASSIGNED: u32 = 1300;
+
+/// Enables `SeDebugPrivilege` in this process's token, so an admin harness can open every
+/// process (and the tokens its DACL lets it reach). The call that failed and its code otherwise;
+/// a token without the privilege (a `Limited` harness) gives 1300.
+pub(crate) fn enable_debug_privilege() -> Result<(), String> {
+    let mut token = HANDLE::default();
+    let rights = TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY;
+    // SAFETY: the pseudo-handle needs no closing; `token` is a live out-pointer.
+    unsafe { OpenProcessToken(GetCurrentProcess(), rights, &raw mut token) }
+        .map_err(|e| format!("OpenProcessToken gave {}", code_of(&e)))?;
+    let token = Owned(token);
+    let mut luid = LUID::default();
+    // SAFETY: the name is a live HSTRING; `luid` is a live out-pointer.
+    unsafe {
+        LookupPrivilegeValueW(
+            PCWSTR::null(),
+            &HSTRING::from("SeDebugPrivilege"),
+            &raw mut luid,
+        )
+    }
+    .map_err(|e| format!("LookupPrivilegeValueW gave {}", code_of(&e)))?;
+    let wanted = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    // SAFETY: the token is live with TOKEN_ADJUST_PRIVILEGES; `wanted` lives for the call.
+    unsafe { AdjustTokenPrivileges(token.0, false, Some(&raw const wanted), 0, None, None) }
+        .map_err(|e| format!("AdjustTokenPrivileges gave {}", code_of(&e)))?;
+    // SAFETY: plain call, right after the one whose code it reads.
+    match unsafe { GetLastError() }.0 {
+        NOT_ALL_ASSIGNED => Err(format!("AdjustTokenPrivileges gave {NOT_ALL_ASSIGNED}")),
+        _ => Ok(()),
+    }
+}
 
 /// A process the snapshot found whose token user is the pool user, opened.
 pub(crate) struct PoolProcess {
@@ -49,9 +96,9 @@ pub(crate) struct PoolProcess {
 pub(crate) struct Listing {
     /// Every process whose token user is the pool user.
     pub(crate) found: Vec<PoolProcess>,
-    /// How many processes the harness couldn't open, or whose token it couldn't open: their user
-    /// is unknown.
-    pub(crate) unknown: usize,
+    /// The processes the harness couldn't open, or whose token it couldn't read (pid and image):
+    /// their user is unknown. One that ended before it was opened isn't among them.
+    pub(crate) unknown: Vec<(u32, String)>,
 }
 
 /// Every process whose token user is `sid` (no case), and how many couldn't be told; the
@@ -59,7 +106,7 @@ pub(crate) struct Listing {
 pub(crate) fn pool_processes(sid: &str) -> Result<Listing, u32> {
     let mut listing = Listing {
         found: Vec::new(),
-        unknown: 0,
+        unknown: Vec::new(),
     };
     for process in win_thread::processes()? {
         if process.pid == 0 || process.pid == 4 {
@@ -67,14 +114,18 @@ pub(crate) fn pool_processes(sid: &str) -> Result<Listing, u32> {
         }
         // SAFETY: plain call; a handle that comes back is closed by `Owned`.
         let opened = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process.pid) };
-        let Ok(handle) = opened.map(Owned) else {
-            listing.unknown += 1;
-            continue;
+        let handle = match opened {
+            Ok(handle) => Owned(handle),
+            Err(error) if code_of(&error) == GONE => continue,
+            Err(_) => {
+                listing.unknown.push((process.pid, process.image));
+                continue;
+            }
         };
         let mut token = HANDLE::default();
         // SAFETY: the process handle is live; `token` is a live out-pointer.
         if unsafe { OpenProcessToken(handle.0, TOKEN_QUERY, &raw mut token) }.is_err() {
-            listing.unknown += 1;
+            listing.unknown.push((process.pid, process.image));
             continue;
         }
         match token_user(Owned(token).0) {
@@ -84,7 +135,7 @@ pub(crate) fn pool_processes(sid: &str) -> Result<Listing, u32> {
                 handle,
             }),
             Ok(_) => {}
-            Err(_) => listing.unknown += 1,
+            Err(_) => listing.unknown.push((process.pid, process.image)),
         }
     }
     Ok(listing)

@@ -117,7 +117,9 @@ runner resumes, every 30 s and at the session's end). Each session runs `probe h
 ends at its stdin's end, as a host's agent does. The harness lists the pool user's processes
 itself: a Toolhelp snapshot, then `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` and
 `OpenProcessToken(TOKEN_QUERY)` on each, comparing the token's user to the pool SID; the job is
-the outer's, duplicated as in `breakaway`. Processes it can't open are counted as information.
+the outer's, duplicated as in `breakaway`. It enables `SeDebugPrivilege` first (an admin
+harness has it; a `Limited` one doesn't). A process whose user it still can't read may be the
+pool user's, so either listing with one is INFO, naming the count and the images, never PASS.
 
 - `pool-processes-at-start`: once the agent printed its first line, every listed process is in
   the job (`IsProcessInJob`); FAIL names each that isn't, pid and image. INFO when the listing
