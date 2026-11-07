@@ -165,6 +165,41 @@ test("signed in again: the line in each of its three forms, and the window sends
   for (const k of ["restart_agent", "send_prompt", "resume_queue"]) expect(kinds).not.toContain(k);
 });
 
+// the desktop keeps the earlier `at` when a recheck re-confirms the same account (#611), so a same-account sign-in is
+// "signed in again" only when its at is later than the failed step's time (FAILED's ts, 3000)
+const SAME = { method: "plan", source: "own", email: "r@m.in", plan: "Claude Max" } as const;
+const EARLIER = 2000;
+
+test("a same-account sign-in that repeats an earlier at, no later than the failure: the card stays expired", async () => {
+  const t = await mount({ signIn: { signed_in: { ...SAME, at: EARLIER } } });
+  expect(card()?.dataset["state"]).toBe("expired");
+  await play(t, { signed_in: { ...SAME, at: EARLIER } });
+  expect(card()?.dataset["state"]).toBe("expired");
+  expect(words()).toContain("Your Claude sign-in has expired. Your question is kept.");
+  expect(byId("signin-again")).not.toBeNull();
+  expect(document.body.textContent).not.toContain("Signed in again");
+});
+
+test("a same-account sign-in with an at before the failure, or at it: the card stays expired", async () => {
+  const t = await mount({ signIn: { waiting: { since: AT, nudge: false } } });
+  await play(t, { signed_in: { ...SAME, at: 1000 } });
+  expect(card()?.dataset["state"]).toBe("expired");
+  expect(words()).toContain("Your Claude sign-in has expired. Your question is kept.");
+  expect(document.body.textContent).not.toContain("Signed in again");
+  // the boundary: at equal to the failed step's ts (3000, FAILED's order × 1000) is not later, so still expired
+  await play(t, { signed_in: { ...SAME, at: 3000 } });
+  expect(card()?.dataset["state"]).toBe("expired");
+  expect(document.body.textContent).not.toContain("Signed in again");
+});
+
+test("control: the same account with an at after the failure says Signed in again", async () => {
+  const t = await mount({ signIn: { signed_in: { ...SAME, at: EARLIER } } });
+  expect(card()?.dataset["state"]).toBe("expired");
+  await play(t, { signed_in: { ...SAME, at: AT } });
+  expect(card()?.dataset["state"]).toBe("again");
+  expect(words()).toMatch(/^Signed in again at .+ as r@m\.in, Claude Max\.$/);
+});
+
 test("the line goes when the resumed turn starts", async () => {
   const t = await mount({ signIn: { signed_in: { method: "plan", source: "own", at: AT } } });
   expect(card()?.dataset["state"]).toBe("again");
