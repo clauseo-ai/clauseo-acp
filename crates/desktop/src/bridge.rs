@@ -481,6 +481,12 @@ impl Bridge {
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))
     }
+
+    /// Tests: the folder refs issued so far.
+    #[cfg(test)]
+    pub(crate) fn issued(&self) -> HashSet<FolderRefId> {
+        lock(&self.issued).clone()
+    }
 }
 
 #[cfg(test)]

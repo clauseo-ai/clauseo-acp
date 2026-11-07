@@ -67,6 +67,38 @@ export const commands = {
 	 */
 	display: string,
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
+	/**
+	 *  [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
+	 *  (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
+	 *  instead): then it opens an in-app chooser session (closing any other) and answers `choose`
+	 *  with its start points. Never `choose` off Windows.
+	 */
+	pickFolderOrChoose: () => typedError<PickAnswer, HostError>(__TAURI_INVOKE("pick_folder_or_choose")),
+	/**
+	 *  Goes where `go` says in the chooser session `chooser` and lists the folder there: by a
+	 *  start point's key, an index into the last listing, up (to a drive or typed share root), a
+	 *  typed path, or again. At most 2 s: `no_answer` past it. `command.invalid` for an unknown or
+	 *  closed session, an index or key it did not give, and a typed path it refuses;
+	 *  `transport.unauthorized` past 300 listings.
+	 */
+	chooserList: (chooser: number, go: Go) => typedError<Listing, HostError>(__TAURI_INVOKE("chooser_list", { chooser, go })),
+	/**
+	 *  Chooses the folder the chooser session shows, after a native confirm with the full path and
+	 *  Cancel focused; confirmed, it is registered as `pick_folder` registers a pick and the session
+	 *  closes. `None` when the lawyer declines or the folder has gone; the session stays open.
+	 */
+	chooserChoose: (chooser: number) => typedError<{
+	/**  The ref the host issued for the folder. */
+	folder: FolderRefId,
+	/**
+	 *  The path to show: under the home folder, the parts below home joined with the OS
+	 *  separator (`Documents/Acme`, `Documents\Acme` on Windows); otherwise the full path
+	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
+	 */
+	display: string,
+} | null, HostError>(__TAURI_INVOKE("chooser_choose", { chooser })),
+	/**  Closes the chooser session; `command.invalid` when it is not open. */
+	chooserCancel: (chooser: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_cancel", { chooser })),
 	/**  The OS the host runs on, this build's release date, and whether it is a test build. */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 	/**
@@ -554,6 +586,14 @@ export type CheckpointRecorded = {
 	thread?: ThreadId,
 	/**  The turn it was taken around, or the step an undo reverted. */
 	turn?: TurnId,
+};
+
+/**  A chooser session and where it may start. */
+export type ChooserStart = {
+	/**  The session, for `chooser_list`, `chooser_choose` and `chooser_cancel`. */
+	chooser: number,
+	/**  The places to start from. */
+	starts: StartPoint[],
 };
 
 /**  One of Clauseo's own tools. */
@@ -1826,6 +1866,19 @@ export type Freshness =
 /**  Bars from live signals only, while the agent works. */
 "live_only";
 
+/**  Where `chooser_list` goes. */
+export type Go = 
+/**  A start point, by its key. */
+{ kind: "start"; key: number } | 
+/**  A folder of the last listing, by its index. */
+{ kind: "into"; index: number } | 
+/**  The folder above, stopping at a drive or share root. */
+{ kind: "up" } | 
+/**  A path the lawyer typed (`place.rs` says which it takes). */
+{ kind: "typed"; path: string } | 
+/**  The folder shown, read again. */
+{ kind: "again" };
+
 /**  A thread's header. Entry id `header:<thread>`. */
 export type HeaderEntry = {
 	/**  The `seq` of `ThreadCreated`. */
@@ -2649,6 +2702,14 @@ export type InstallWhen =
 /**  Once no thread has a running turn; at once when none runs. */
 "after_turn";
 
+/**  A folder in a listing. */
+export type Item = {
+	/**  Its name. */
+	name: string,
+	/**  Whether Clauseo refuses it (`refused_folders`); it does not open. */
+	refused: boolean,
+};
+
 /**
  *  The TypeScript shape of a [`RawPayload`]: any JSON value. specta has no `unknown` outside
  *  specta-typescript, which this crate may not depend on, so the union says the same thing.
@@ -2897,6 +2958,27 @@ export type LimitWindowView = {
 
 /**  What the UI shows for each signed-in agent: a JSON object keyed by agent kind. */
 export type LimitsView = Partial<{ [key in AgentKind]: AgentLimitsView }>;
+
+/**  What reading a folder gave. */
+export type ListState = 
+/**  Its folders, and whether there were more than shown. */
+{ kind: "folders"; items: Item[]; more: boolean } | 
+/**  It did not answer in time. */
+{ kind: "no_answer" } | 
+/**  It is not there. */
+{ kind: "not_found" } | 
+/**  The chooser does not open it; the folder shown stays. */
+{ kind: "not_allowed" };
+
+/**  A folder as the page shows it. */
+export type Listing = {
+	/**  The folder shown, by the `picked::display` rule; empty for home. */
+	display: string,
+	/**  Its parts from the root (`C:`, `\\server\share`), or from home (shown as an empty one). */
+	crumbs: string[],
+	/**  What reading it gave. */
+	state: ListState,
+};
 
 /**  Whether the app runs light: fewer effects, for slow machines. */
 export type Lite = 
@@ -3725,6 +3807,15 @@ export type PermissionState =
 	/**  Why. */
 	reason: ExpiryReason,
 } }) & { resolved?: never };
+
+/**  What `pick_folder_or_choose` answers. */
+export type PickAnswer = 
+/**  The native dialog picked a folder. */
+{ kind: "picked"; folder: PickedFolder } | 
+/**  The native dialog was cancelled. */
+{ kind: "cancelled" } | 
+/**  The native dialog would stall: choose in the page, starting from these. */
+{ kind: "choose"; start: ChooserStart };
 
 /**  A folder the lawyer picked: the ref `CreateMatter` takes, and the path to show. */
 export type PickedFolder = {
@@ -4709,6 +4800,27 @@ export type StaleReason =
 "aged" | 
 /**  The last refresh failed. */
 "read_failed";
+
+/**  What a start point is. */
+export type StartKind = 
+/**  A fixed or removable drive. */
+"drive" | 
+/**  The home folder. */
+"home" | 
+/**  The Desktop. */
+"desktop" | 
+/**  The folder of the last pick. */
+"last_pick";
+
+/**  A place to start from. */
+export type StartPoint = {
+	/**  What `Go::Start` names it by. */
+	key: number,
+	/**  What it is. */
+	kind: StartKind,
+	/**  How it shows: `C:` for a drive, the `picked::display` rule otherwise, and empty for home. */
+	display: string,
+};
 
 /**
  *  Where a steered message went. `turn` is always the turn that answers the message.

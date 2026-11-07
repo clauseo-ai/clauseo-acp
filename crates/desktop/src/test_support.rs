@@ -261,7 +261,7 @@ impl Scratch {
     /// The launcher the app's own start-up path (`host_config`) gives a host on the folder.
     pub(crate) fn app_launcher(&self) -> Arc<dyn clauseo_process::Launcher> {
         let effective = Effective::load(&Locations::under_home(&self.root), &SystemFiles, &[]);
-        crate::host_config(effective).launcher()
+        crate::host_start::host_config(effective).launcher()
     }
 
     /// The config of a host on the folder, refusing `refused` as a matter.

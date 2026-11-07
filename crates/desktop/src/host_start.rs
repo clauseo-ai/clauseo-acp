@@ -7,8 +7,9 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use clauseo_host::{HostExit, HostHandle, HostJoin};
+use clauseo_host::{HostConfig, HostExit, HostHandle, HostJoin};
 use clauseo_protocol::{ErrorCode, HostError};
+use clauseo_settings::{Effective, Locations, PlatformDirs as _, SystemDirs, SystemFiles};
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared};
 
@@ -121,6 +122,27 @@ pub(crate) fn stop(cell: &HostCell) -> HostExit {
     host.map_or(HostExit::Stopped, |host| {
         futures::executor::block_on(host.exit())
     })
+}
+
+/// The effective settings under `locations`, with the system policy sources.
+pub(crate) fn load_effective(locations: &Locations) -> Effective {
+    let sources = clauseo_settings::system_policy_sources();
+    let sources: Vec<&dyn clauseo_settings::PolicySource> =
+        sources.iter().map(AsRef::as_ref).collect();
+    Effective::load(locations, &SystemFiles, &sources)
+}
+
+/// The host's config: the effective settings, the launcher that clears the environment
+/// (`crate::host_launcher`), and the refused folders.
+pub(crate) fn host_config(effective: Effective) -> HostConfig {
+    let launcher = crate::host_launcher(SystemDirs.home());
+    let config = HostConfig::new(effective, Arc::new(launcher))
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
+    // With no path to this executable no guard hook goes; the permission check remains.
+    match std::env::current_exe() {
+        Ok(exe) => config.with_pre_write_guard(exe),
+        Err(_) => config,
+    }
 }
 
 #[cfg(test)]

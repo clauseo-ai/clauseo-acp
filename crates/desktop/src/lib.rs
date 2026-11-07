@@ -38,7 +38,7 @@
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
 //!   `jailed.rs`): inside, it prints one line and exits with [`SANDBOXED_EXIT`] before `run`,
 //!   so no window, no single-instance hand-off and no settings read.
-//! - Sixteen async commands (`commands.rs`), each granted by its own permission in
+//! - Twenty async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` (`count_ui` in `capabilities/counts.json`, `main` only) and
 //!   listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -77,7 +77,8 @@
 //!   `RefreshLimits { agent: None, why: Shown }` from Rust; the host throttles it.
 //! - Both windows' scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
-//! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
+//! - No command takes a path but `chooser_list`'s typed one (`chooser.rs`, checked there; the
+//!   chooser admits only through a native confirm): folders come from a dialog drawn in Rust,
 //!   files are named by the refs the host issued, and `reveal` names a matter or the app data
 //!   folder (`open.rs`, 0026).
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
@@ -93,6 +94,7 @@
 #[cfg(test)]
 mod agent_browser_pin;
 mod bridge;
+mod chooser;
 mod commands;
 mod connectors;
 mod counts;
@@ -133,10 +135,8 @@ use std::sync::atomic::Ordering;
 use bridge::Bridge;
 use clauseo_host::HostConfig;
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
-use clauseo_settings::{
-    Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
-};
-use host_start::{HostCell, HostStart};
+use clauseo_settings::{Locations, PlatformDirs as _, SystemDirs, SystemEnv};
+use host_start::{HostCell, HostStart, host_config, load_effective};
 pub use jailed::{
     AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Signal, Stages, SystemProbe,
     launch, refusal,
@@ -246,6 +246,10 @@ pub fn run() -> tauri::Result<()> {
             commands::ack,
             commands::answer_permission,
             commands::pick_folder,
+            commands::pick_folder_or_choose,
+            commands::chooser_list,
+            commands::chooser_choose,
+            commands::chooser_cancel,
             commands::display_info,
             commands::open_external,
             commands::open_file,
@@ -297,6 +301,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(Bridge::with_setup(cell, setup));
             app.manage(counts::CountsState::default());
             app.manage(dialogs::LastPick::default());
+            app.manage(chooser::Chooser::system());
             open_main_window(app)?;
             start_host(app.handle().clone(), start, locations, parts)?;
             Ok(())
@@ -424,27 +429,6 @@ fn start_counts<R: Runtime>(app: &AppHandle<R>, counts: clauseo_counts::Counts) 
     state.start(counts.clone());
     let cell = bridge.cell();
     state.run_ticker(|| counts::spawn_ticker(counts, counts::HttpsUpload::new(), cell));
-}
-
-/// The effective settings under `locations`, with the system policy sources.
-fn load_effective(locations: &Locations) -> Effective {
-    let sources = clauseo_settings::system_policy_sources();
-    let sources: Vec<&dyn clauseo_settings::PolicySource> =
-        sources.iter().map(AsRef::as_ref).collect();
-    Effective::load(locations, &SystemFiles, &sources)
-}
-
-/// The host's config: the effective settings, the launcher that clears the environment
-/// (`host_launcher`), and the refused folders.
-fn host_config(effective: Effective) -> HostConfig {
-    let launcher = host_launcher(SystemDirs.home());
-    let config = HostConfig::new(effective, Arc::new(launcher))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
-    // With no path to this executable no guard hook goes; the permission check remains.
-    match std::env::current_exe() {
-        Ok(exe) => config.with_pre_write_guard(exe),
-        Err(_) => config,
-    }
 }
 
 /// The launcher the host starts every agent and plan reader with: it clears the environment
