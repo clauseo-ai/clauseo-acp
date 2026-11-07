@@ -17,10 +17,13 @@
 ;    the hook starts that copy only: a per-user copy beside the app is never started elevated. The
 ;    tool reads its records under the data folder's `sandbox` folder to take its access rules back
 ;    off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
-;    The per-user installer passes `--remove`: only the Windows user who set the protection up
-;    removes it; anyone else's uninstall exits 0 having touched nothing. The per-machine installer
-;    passes `--remove --per-machine` (chosen when it is built, from the template's INSTALLMODE):
-;    every sandbox user goes, whoever uninstalls, LOCAL SYSTEM under Intune's silent /S included.
+;    Both pass `--uninstall`, which the app's in-app removal never does: it also takes the admin
+;    copy, its record values and the refresh task away, last, for the install that placed them.
+;    The per-user installer passes `--remove --uninstall`: only the Windows user who set the
+;    protection up removes it; anyone else's uninstall exits 0 having touched nothing. The
+;    per-machine installer passes `--remove --uninstall --per-machine` (chosen when it is built,
+;    from the template's INSTALLMODE): every sandbox user goes, whoever uninstalls, LOCAL SYSTEM
+;    under Intune's silent /S included.
 ;    A silent per-user uninstall (/S) never raises UAC: it skips the removal, as after a declined
 ;    prompt, and says so in its details list.
 ;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
@@ -99,9 +102,9 @@
     !endif
     !ifndef CLAUSEO_REMOVE
       !if "${INSTALLMODE}" == "perMachine"
-        !define CLAUSEO_REMOVE "--remove --per-machine"
+        !define CLAUSEO_REMOVE "--remove --uninstall --per-machine"
       !else
-        !define CLAUSEO_REMOVE "--remove"
+        !define CLAUSEO_REMOVE "--remove --uninstall"
       !endif
     !endif
     !ifndef CLAUSEO_REMOVE_VERB

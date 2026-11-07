@@ -52,12 +52,12 @@ fn remove_exits_0_when_nothing_was_set_up_and_no_set_up_holds_the_lock() {
     };
     for per_machine in [false, true] {
         assert_eq!(
-            run_remove(names.clone(), None, per_machine),
+            run_remove(names.clone(), None, per_machine, false),
             SetupExit::Removed
         );
         let asker = Owner::of_this_process().unwrap();
         assert_eq!(
-            run_remove(names.clone(), Some(asker), per_machine),
+            run_remove(names.clone(), Some(asker), per_machine, false),
             SetupExit::Removed
         );
     }
@@ -189,7 +189,7 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
         .join("DeviceSync");
     let asker = Owner::of_this_process().unwrap();
     assert_eq!(
-        run_remove(names.clone(), Some(asker), false),
+        run_remove(names.clone(), Some(asker), false, false),
         SetupExit::Removed
     );
     for (n, each) in (1..).zip(&record.pool) {
@@ -205,5 +205,8 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
     }
     // Again: nothing is left, so it ends at once.
     let asker = Owner::of_this_process().unwrap();
-    assert_eq!(run_remove(names, Some(asker), false), SetupExit::Removed);
+    assert_eq!(
+        run_remove(names, Some(asker), false, false),
+        SetupExit::Removed
+    );
 }

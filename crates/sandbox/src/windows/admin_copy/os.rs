@@ -28,17 +28,21 @@ use windows::Win32::Security::{
     PSECURITY_DESCRIPTOR, PSID,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL,
-    VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
+    WRITE_OWNER,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 use super::{AdminCopyFs, Found, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
-use crate::windows::record::{admin_copy_sha256, current_user_sid, sandbox_owner_sid};
+use crate::windows::record::{
+    admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_owner_sid,
+};
+use crate::windows::setup::record_values::MACHINE_OWNER;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
@@ -68,10 +72,11 @@ impl AdminCopyFs for WindowsAdminCopy {
     }
 
     fn another_owner(&self) -> io::Result<bool> {
-        let Some(owner) = sandbox_owner_sid().map_err(io::Error::other)? else {
-            return Ok(false);
-        };
-        Ok(owner != current_user_sid()?.as_str())
+        let me = current_user_sid()?;
+        let pool = sandbox_owner_sid().map_err(io::Error::other)?;
+        let copy = admin_copy_owner().map_err(io::Error::other)?;
+        Ok(pool.is_some_and(|owner| owner != me.as_str())
+            || copy.is_some_and(|owner| owner != MACHINE_OWNER && owner != me.as_str()))
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
@@ -142,6 +147,84 @@ fn lock_tree(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// [`WindowsAdminCopy`] for `UserSetup::state`, which the app asks at every tier query: the
+/// copy's hash is kept for its file identity (volume, file ID, size and last write, read from
+/// the handle it is hashed through) and computed again only when that changes. Every other read
+/// happens each time. The launch's and the elevated start's checks never use it.
+pub(crate) struct StateAdminCopy;
+
+impl AdminCopyFs for StateAdminCopy {
+    fn program_files(&self) -> io::Result<PathBuf> {
+        WindowsAdminCopy.program_files()
+    }
+
+    fn found(&self, path: &Path) -> io::Result<Found> {
+        WindowsAdminCopy.found(path)
+    }
+
+    fn security(&self, path: &Path) -> io::Result<Vec<u8>> {
+        WindowsAdminCopy.security(path)
+    }
+
+    fn sha256(&self, path: &Path) -> io::Result<String> {
+        sha256_cached(path)
+    }
+
+    fn recorded_sha256(&self) -> io::Result<Option<String>> {
+        WindowsAdminCopy.recorded_sha256()
+    }
+
+    fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
+        WindowsAdminCopy.entries(dir)
+    }
+
+    fn another_owner(&self) -> io::Result<bool> {
+        WindowsAdminCopy.another_owner()
+    }
+}
+
+/// A file's identity for [`sha256_cached`]: volume serial, file index, size, last write time.
+type Identity = (u32, u64, u64, u64);
+
+/// The last hash [`sha256_cached`] computed, with the identity of the file it hashed.
+static HASHED: std::sync::Mutex<Option<(Identity, String)>> = std::sync::Mutex::new(None);
+
+/// [`sha256`], kept for the file's [`Identity`] as read from the handle it is hashed through.
+fn sha256_cached(path: &Path) -> io::Result<String> {
+    let mut file = open_regular(path)?;
+    let identity = identity(&file)?;
+    let mut last = HASHED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((seen, hash)) = last.as_ref()
+        && *seen == identity
+    {
+        return Ok(hash.clone());
+    }
+    let hash = hash_file(&mut file)?;
+    *last = Some((identity, hash.clone()));
+    Ok(hash)
+}
+
+/// The identity of the open `file` (`GetFileInformationByHandle`).
+fn identity(file: &File) -> io::Result<Identity> {
+    use std::os::windows::io::AsRawHandle as _;
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is `file`'s, open for the call; `info` is a live, writable struct.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &raw mut info) }
+        .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let pair = |high: u32, low: u32| u64::from(high) << 32 | u64::from(low);
+    Ok((
+        info.dwVolumeSerialNumber,
+        pair(info.nFileIndexHigh, info.nFileIndexLow),
+        pair(info.nFileSizeHigh, info.nFileSizeLow),
+        pair(
+            info.ftLastWriteTime.dwHighDateTime,
+            info.ftLastWriteTime.dwLowDateTime,
+        ),
+    ))
+}
+
 /// The admin copy's path once this machine passes [`super::check_launchable`].
 pub(crate) fn check_here() -> Result<PathBuf, crate::Blocked> {
     super::check_launchable(&WindowsAdminCopy)
@@ -178,12 +261,18 @@ pub(crate) fn found(path: &Path) -> io::Result<Found> {
 
 /// The SHA-256 of the regular file at `path`, read through one handle opened on the name
 /// itself; a reparse point is refused from that handle's own attributes.
+pub(crate) fn sha256(path: &Path) -> io::Result<String> {
+    hash_file(&mut open_regular(path)?)
+}
+
+/// `path` opened as itself to read (`FILE_FLAG_OPEN_REPARSE_POINT`), refused unless the handle
+/// is a regular file and no reparse point.
 #[expect(
     clippy::disallowed_methods,
     reason = "opens the admin copy to read it, never to write; std's open is the one with flags"
 )]
-pub(crate) fn sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::options()
+fn open_regular(path: &Path) -> io::Result<File> {
+    let file = File::options()
         .read(true)
         .share_mode((FILE_SHARE_READ | FILE_SHARE_DELETE).0)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
@@ -192,6 +281,11 @@ pub(crate) fn sha256(path: &Path) -> io::Result<String> {
     if meta.file_attributes() & REPARSE_POINT != 0 || !meta.is_file() {
         return Err(io::Error::other("not a regular file"));
     }
+    Ok(file)
+}
+
+/// The SHA-256 of what `file` holds, as 64 lowercase hex digits.
+fn hash_file(file: &mut File) -> io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];
     loop {

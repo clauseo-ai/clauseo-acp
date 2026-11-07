@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use super::acl_bytes::{self, Acl, Descriptor};
 use super::setup::record_values::CopyOwner;
 use super::sids::Sid;
-use crate::Blocked;
+use crate::{Blocked, SetupState};
 
 #[cfg(test)]
 pub(crate) mod fake;
@@ -140,7 +140,8 @@ pub trait AdminCopyFs {
     fn recorded_sha256(&self) -> io::Result<Option<String>>;
     /// The names of what is in the folder `dir`.
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>>;
-    /// Whether the record names a pool owner (`OwnerSid`) other than this process's user.
+    /// Whether the record names another Windows user than this process's as the pool's owner
+    /// (`OwnerSid`) or as the admin copy's (`AdminCopyOwner`, which an in-app removal keeps).
     fn another_owner(&self) -> io::Result<bool>;
 }
 
@@ -396,23 +397,62 @@ pub fn inside(child: &Path, parent: &Path) -> bool {
             .is_some_and(|tail| tail.starts_with('\\'))
 }
 
-/// Whether `--remove` deletes the admin copy (one owner, of one kind): only once the pool has no
-/// owner left (`pool_owned` false), and only for the install that placed it: a per-machine
-/// removal (`per_machine`) for [`CopyOwner::Machine`], the lawyer's own per-user removal
-/// (`invoker`) for theirs. A copy no one is recorded as owning stays: it is inert, and only
-/// administrators can change it.
+/// The protection state the app shows (`UserSetup::state`), with the admin copy first, so the
+/// repair shows before any set-up is tried: a copy that fails [`check`] is its cause
+/// (`Blocked::AdminCopyMissing` after a declined or silent install, say). With the copy fine,
+/// `combined` (the marker and record's state with the last set-up's result, `marker` without
+/// it) stands, except that a recorded admin-copy cause the copy no longer has gives way to
+/// `marker`, and a pool to set up (`Needed`) whose copy another user's install placed is
+/// `Blocked::OtherAccount`.
+pub fn protection_state(
+    fs: &dyn AdminCopyFs,
+    marker: SetupState,
+    combined: SetupState,
+) -> SetupState {
+    if let Err(blocked) = check(fs) {
+        return SetupState::Blocked(blocked);
+    }
+    let stale = matches!(
+        combined,
+        SetupState::Blocked(
+            Blocked::AdminCopyMissing | Blocked::AdminCopyChanged | Blocked::AdminCopyUnsafe
+        )
+    );
+    let state = if stale { marker } else { combined };
+    if state == SetupState::Needed && fs.another_owner().unwrap_or(false) {
+        return SetupState::Blocked(Blocked::OtherAccount);
+    }
+    state
+}
+
+/// Which `--remove` ran, as [`copy_removable`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Removal<'a> {
+    /// `--uninstall`: the uninstaller's hook. The app's in-app removal never passes it.
+    pub uninstall: bool,
+    /// `--per-machine`.
+    pub per_machine: bool,
+    /// The user who asked, when found.
+    pub invoker: Option<&'a Sid>,
+}
+
+/// Whether `--remove` deletes the admin copy and its record values: only the uninstaller's
+/// (`--uninstall`; the app's plain removal keeps them, so a later set-up runs the verified copy
+/// with no installer), only once the pool has no owner left (`pool_owned` false), and only for
+/// the install that placed it (one owner, of one kind): a per-machine removal for
+/// [`CopyOwner::Machine`], the lawyer's own per-user removal for theirs. A copy no one is
+/// recorded as owning stays: it is inert, and only administrators can change it.
 pub fn copy_removable(
+    removal: &Removal<'_>,
     pool_owned: bool,
     copy_owner: Option<&CopyOwner>,
-    per_machine: bool,
-    invoker: Option<&Sid>,
 ) -> bool {
-    if pool_owned {
+    if !removal.uninstall || pool_owned {
         return false;
     }
     match copy_owner {
-        Some(CopyOwner::Machine) => per_machine,
-        Some(CopyOwner::User(owner)) => !per_machine && invoker == Some(owner),
+        Some(CopyOwner::Machine) => removal.per_machine,
+        Some(CopyOwner::User(owner)) => !removal.per_machine && removal.invoker == Some(owner),
         None => false,
     }
 }

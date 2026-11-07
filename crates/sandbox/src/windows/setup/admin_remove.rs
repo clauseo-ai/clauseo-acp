@@ -1,8 +1,9 @@
 //! `--remove`'s last step (S15 tier B, "Admin copy" in 0049): once no tier-B owner is left on
-//! the machine, the admin copy goes too. In order: the record's `AdminCopySha256` and
-//! `UserInstallDir` (so no launcher trusts the copy from here on), then the refresh task and
-//! its staging ([`remove_refresh_task`], S15 tier B PR 3's hook), then everything in
-//! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder.
+//! the machine, the admin copy goes too. In order: the record's four admin-copy values
+//! (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the refresh task and
+//! its staging ([`unregister_refresh_task`], [`remove_staging`]: S15 tier B PR 3's hooks), then
+//! everything in `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
+//! `--remove --uninstall` runs it: the app's in-app removal keeps all of these.
 //!
 //! The running exe is usually the admin copy itself, which Windows won't delete while it runs.
 //! It is renamed in place to a name nothing starts (`clauseo-sandbox-setup.exe.<pid>.delete`)
@@ -34,7 +35,8 @@ use crate::windows::admin_copy::{self, Found, os, same_path};
 /// stops before any file is touched.
 pub(crate) fn remove_admin_copy(record_key: &str) -> Result<(), MachineError> {
     record_write::delete_admin_values(record_key)?;
-    remove_refresh_task()?;
+    unregister_refresh_task()?;
+    remove_staging()?;
     let program_files = os::program_files().map_err(|e| other(&e))?;
     let dir = admin_copy::admin_dir(&program_files);
     match os::found(&dir).map_err(|e| other(&e))? {
@@ -88,15 +90,24 @@ pub(super) fn clear(
     Ok(())
 }
 
-/// The hook S15 tier B PR 3 fills: deletes the SYSTEM refresh task `\Clauseo\SandboxRefresh`
-/// and its staging folder, `%ProgramFiles%\Clauseo\Sandbox\staging\`, before the admin folder
-/// goes. Nothing yet: this PR makes neither (the staging folder, if any, goes with the rest of
-/// the admin folder's contents).
+/// PR 3's hook: deletes the SYSTEM refresh task `\Clauseo\SandboxRefresh`. Run by the
+/// uninstaller's removal only, before the admin folder goes. Nothing yet: this PR makes no task.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "PR 3 fills it with calls that can fail; the caller already stops on its error"
 )]
-pub(crate) fn remove_refresh_task() -> Result<(), MachineError> {
+pub(crate) fn unregister_refresh_task() -> Result<(), MachineError> {
+    Ok(())
+}
+
+/// PR 3's hook: deletes the refresh task's staging folder,
+/// `%ProgramFiles%\Clauseo\Sandbox\staging\`, its own way (it goes with the rest of the admin
+/// folder's contents after anyway). Nothing yet.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "PR 3 fills it with calls that can fail; the caller already stops on its error"
+)]
+pub(crate) fn remove_staging() -> Result<(), MachineError> {
     Ok(())
 }
 

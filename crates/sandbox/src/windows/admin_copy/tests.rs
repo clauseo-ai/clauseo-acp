@@ -366,18 +366,134 @@ fn a_version_is_not_older_unless_it_sorts_below() {
 }
 
 #[test]
-fn the_copy_goes_only_with_the_install_that_placed_it() {
+fn the_copy_goes_only_with_the_uninstall_of_the_install_that_placed_it() {
     let lawyer = crate::windows::sids::Sid::parse(LAWYER).unwrap();
     let other = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1002").unwrap();
     let mine = CopyOwner::User(lawyer.clone());
     let machine = CopyOwner::Machine;
-    assert!(copy_removable(false, Some(&machine), true, None));
-    assert!(copy_removable(false, Some(&mine), false, Some(&lawyer)));
+    let removal = |uninstall, per_machine, invoker| Removal {
+        uninstall,
+        per_machine,
+        invoker,
+    };
+    assert!(copy_removable(
+        &removal(true, true, None),
+        false,
+        Some(&machine)
+    ));
+    assert!(copy_removable(
+        &removal(true, false, Some(&lawyer)),
+        false,
+        Some(&mine)
+    ));
+    // The app's plain --remove never takes it, whoever asks, whatever the record holds.
+    for (per_machine, invoker, owner) in [
+        (true, None, &machine),
+        (false, Some(&lawyer), &mine),
+        (false, Some(&other), &mine),
+    ] {
+        assert!(!copy_removable(
+            &removal(false, per_machine, invoker),
+            false,
+            Some(owner)
+        ));
+    }
     // Another kind, another user, a pool still owned, or no owner recorded: it stays.
-    assert!(!copy_removable(false, Some(&machine), false, Some(&lawyer)));
-    assert!(!copy_removable(false, Some(&mine), true, Some(&lawyer)));
-    assert!(!copy_removable(false, Some(&mine), false, Some(&other)));
-    assert!(!copy_removable(false, Some(&mine), false, None));
-    assert!(!copy_removable(true, Some(&machine), true, None));
-    assert!(!copy_removable(false, None, true, None));
+    assert!(!copy_removable(
+        &removal(true, false, Some(&lawyer)),
+        false,
+        Some(&machine)
+    ));
+    assert!(!copy_removable(
+        &removal(true, true, Some(&lawyer)),
+        false,
+        Some(&mine)
+    ));
+    assert!(!copy_removable(
+        &removal(true, false, Some(&other)),
+        false,
+        Some(&mine)
+    ));
+    assert!(!copy_removable(
+        &removal(true, false, None),
+        false,
+        Some(&mine)
+    ));
+    assert!(!copy_removable(
+        &removal(true, true, None),
+        true,
+        Some(&machine)
+    ));
+    assert!(!copy_removable(&removal(true, true, None), false, None));
+}
+
+#[test]
+fn the_state_names_the_copy_first_and_needed_only_with_a_verified_copy() {
+    use crate::SetupState;
+    let needed = || (SetupState::Needed, SetupState::Needed);
+    // No copy, or no recorded hash: AdminCopyMissing, whatever the set-up says.
+    let mut fake = Fake::ready();
+    fake.paths.remove(&exe().to_string_lossy().to_lowercase());
+    let (marker, combined) = needed();
+    let missing = SetupState::Blocked(Blocked::AdminCopyMissing);
+    assert_eq!(protection_state(&fake, marker, combined), missing);
+    let mut fake = Fake::ready();
+    fake.recorded = None;
+    assert_eq!(
+        protection_state(&fake, SetupState::Ready, SetupState::Ready),
+        missing
+    );
+    // A bad hash: AdminCopyChanged.
+    let mut fake = Fake::ready();
+    fake.hash = HASH.replace('0', "f");
+    let (marker, combined) = needed();
+    assert_eq!(
+        protection_state(&fake, marker, combined),
+        SetupState::Blocked(Blocked::AdminCopyChanged)
+    );
+    // A verified copy and no set-up (after an in-app removal, say): Needed.
+    let fake = Fake::ready();
+    let (marker, combined) = needed();
+    assert_eq!(
+        protection_state(&fake, marker, combined),
+        SetupState::Needed
+    );
+    assert_eq!(
+        protection_state(&fake, SetupState::Ready, SetupState::Ready),
+        SetupState::Ready
+    );
+    // A recorded copy cause the copy no longer has gives way; another cause stays.
+    let stale = SetupState::Blocked(Blocked::AdminCopyMissing);
+    assert_eq!(
+        protection_state(&fake, SetupState::Needed, stale),
+        SetupState::Needed
+    );
+    let logon = SetupState::Blocked(Blocked::LogonRight);
+    assert_eq!(
+        protection_state(&fake, SetupState::Needed, logon.clone()),
+        logon
+    );
+}
+
+/// After the app's plain `--remove`, the record keeps the admin copy's values and its owner but
+/// no pool: the same lawyer's set-up passes the launcher's checks, another user's doesn't.
+#[test]
+fn after_an_in_app_removal_the_lawyers_set_up_passes_and_another_users_doesnt() {
+    use crate::SetupState;
+    let fake = Fake::ready();
+    assert!(
+        passes(check_launchable(&fake)),
+        "the lawyer: the copy still verifies"
+    );
+    assert_eq!(
+        protection_state(&fake, SetupState::Needed, SetupState::Needed),
+        SetupState::Needed
+    );
+    let mut other = Fake::ready();
+    other.another = true;
+    assert_eq!(check_launchable(&other), Err(Blocked::OtherAccount));
+    assert_eq!(
+        protection_state(&other, SetupState::Needed, SetupState::Needed),
+        SetupState::Blocked(Blocked::OtherAccount)
+    );
 }

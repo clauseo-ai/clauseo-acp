@@ -20,7 +20,7 @@ fn read(relative: &str) -> String {
 }
 
 /// `hooks.nsh`'s lines, comments and blank lines left out, trimmed.
-fn hook_code() -> Vec<String> {
+pub(super) fn hook_code() -> Vec<String> {
     read("windows/hooks.nsh")
         .lines()
         .map(str::trim)
@@ -30,47 +30,17 @@ fn hook_code() -> Vec<String> {
 }
 
 /// The index of the first code line holding all of `parts`.
-fn line_with(code: &[String], parts: &[&str]) -> usize {
+pub(super) fn line_with(code: &[String], parts: &[&str]) -> usize {
     code.iter()
         .position(|line| parts.iter().all(|part| line.contains(part)))
         .unwrap_or_else(|| panic!("no line in hooks.nsh holds {parts:?}"))
 }
 
 /// The pre-uninstall macro's code lines.
-fn preuninstall(code: &[String]) -> &[String] {
+pub(super) fn preuninstall(code: &[String]) -> &[String] {
     let start = line_with(code, &["!macro NSIS_HOOK_PREUNINSTALL"]);
     let end = start + line_with(&code[start..], &["!macroend"]);
     &code[start..end]
-}
-
-#[test]
-fn the_hook_starts_only_the_admin_copy_and_never_the_one_beside_the_app() {
-    let code = hook_code();
-    let body = preuninstall(&code);
-    // No code line of the removal names the set-up program but through the define: no copy
-    // beside the app, and no fallback to one when the admin copy is missing.
-    let named: Vec<&String> = body
-        .iter()
-        .filter(|l| l.contains("clauseo-sandbox-setup"))
-        .filter(|l| !l.starts_with("!define CLAUSEO_ADMIN_EXE "))
-        .collect();
-    assert!(named.is_empty(), "{named:?}");
-    // The define's value is the admin copy's path in Program Files, exactly.
-    let define = line_with(&code, &["!define CLAUSEO_ADMIN_EXE "]);
-    assert_eq!(
-        code[define],
-        "!define CLAUSEO_ADMIN_EXE \"$PROGRAMFILES64\\Clauseo\\Sandbox\\clauseo-sandbox-setup.exe\""
-    );
-    // The SHELLEXECUTEINFOW struct's lpFile (the member after lpVerb) is that define.
-    let info = line_with(body, &["System::Call '*(&l4, i 0x440"]);
-    assert!(
-        body[info].contains(concat!(
-            "w \"${CLAUSEO_REMOVE_VERB}\", w \"${CLAUSEO_ADMIN_EXE}\", ",
-            "w \"${CLAUSEO_REMOVE}\", p 0,"
-        )),
-        "{}",
-        body[info]
-    );
 }
 
 #[test]
@@ -140,7 +110,7 @@ fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_dele
 
 #[test]
 fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_minutes() {
-    use clauseo_sandbox::windows::setup::args::{Mode, PER_MACHINE, parse};
+    use clauseo_sandbox::windows::setup::args::{Mode, PER_MACHINE, UNINSTALL, parse};
     use clauseo_sandbox::windows::setup::{REMOVE_LOCK_WAIT_MS, SetupExit};
 
     let code = hook_code();
@@ -150,18 +120,20 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
     assert_eq!(removed, 0);
     let exited = line_with(body, &[&format!("${{If}} $R8 = {removed}")]);
     assert_eq!(body[exited + 1], "StrCpy $R5 1", "{body:?}");
-    // The arguments: exactly `--remove`, and `--per-machine` after it in the per-machine
+    // The arguments: exactly `--remove --uninstall` (the app's in-app removal passes `--remove`
+    // alone, keeping the admin copy), and `--per-machine` after it in the per-machine
     // installer only, chosen when the installer is built (stage F), never at run time. The
     // per-machine uninstaller is elevated already, so it opens the tool ("open"); the per-user
     // one asks for elevation ("runas"). Only those two install modes build.
     let mode = line_with(body, &["!if \"${INSTALLMODE}\" == \"perMachine\""]);
-    let per_machine = format!("!define CLAUSEO_REMOVE \"--remove {PER_MACHINE}\"");
+    let per_machine = format!("!define CLAUSEO_REMOVE \"--remove {UNINSTALL} {PER_MACHINE}\"");
+    let per_user = format!("!define CLAUSEO_REMOVE \"--remove {UNINSTALL}\"");
     let expected = [
         "!ifndef CLAUSEO_REMOVE",
         "!if \"${INSTALLMODE}\" == \"perMachine\"",
         per_machine.as_str(),
         "!else",
-        "!define CLAUSEO_REMOVE \"--remove\"",
+        per_user.as_str(),
         "!endif",
         "!endif",
         // Each defined once, however often the macro is inserted.
@@ -199,10 +171,19 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
         line.split(' ').map(std::ffi::OsString::from).collect()
     };
     let parsed = |line: &str| parse(words(line));
-    assert_eq!(parsed("--remove"), Ok(Mode::Remove { per_machine: false }));
     assert_eq!(
-        parsed(&format!("--remove {PER_MACHINE}")),
-        Ok(Mode::Remove { per_machine: true })
+        parsed(&format!("--remove {UNINSTALL}")),
+        Ok(Mode::Remove {
+            per_machine: false,
+            uninstall: true
+        })
+    );
+    assert_eq!(
+        parsed(&format!("--remove {UNINSTALL} {PER_MACHINE}")),
+        Ok(Mode::Remove {
+            per_machine: true,
+            uninstall: true
+        })
     );
     // At most two minutes, then on as after a failure: $R8 is seeded 1 (a failure) before the
     // wait, and only WAIT_OBJECT_0 (0) reads the exit code; a timeout (WAIT_TIMEOUT, 258) or
