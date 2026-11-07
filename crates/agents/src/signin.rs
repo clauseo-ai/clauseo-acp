@@ -142,16 +142,24 @@ pub enum Unconfirmed {
     NoAnswer,
     /// `account/read` named no account: an error, `account: null`, or no answer.
     NoAccount,
+    /// `account/read` named an account that is not a `ChatGPT` sign-in (an API key, Amazon
+    /// Bedrock, or a kind this build does not know): not signed in to `ChatGPT`.
+    NotChatgpt,
+    /// A status check confirmed nothing either way, twice: the agent's state is left as it was.
+    Kept,
 }
 
 impl Unconfirmed {
-    /// The log's word: `signed_out`, `no_marker`, `no_answer` or `no_account`.
+    /// The log's word: `signed_out`, `no_marker`, `no_answer`, `no_account`, `not_chatgpt` or
+    /// `state_kept`.
     pub fn word(self) -> &'static str {
         match self {
             Unconfirmed::SignedOut => "signed_out",
             Unconfirmed::NoMarker => "no_marker",
             Unconfirmed::NoAnswer => "no_answer",
             Unconfirmed::NoAccount => "no_account",
+            Unconfirmed::NotChatgpt => "not_chatgpt",
+            Unconfirmed::Kept => "state_kept",
         }
     }
 }

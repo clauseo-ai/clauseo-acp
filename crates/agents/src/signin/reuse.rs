@@ -139,6 +139,14 @@ pub fn unlink_reused_login(codex_home: &Path) -> io::Result<()> {
     crate::write::remove_file(&home_file(codex_home))
 }
 
+/// Removes Clauseo's own login file from `codex_home` with `remove_file`, which never reads it: a
+/// login that ran but did not confirm, or a sign-out with no CLI to run `logout`. A missing file
+/// is fine. The caller has checked the guard ([`codex_login_shared`]), so the name is never the
+/// lawyer's file.
+pub(crate) fn remove_home_login(codex_home: &Path) -> io::Result<()> {
+    crate::write::remove_file(&home_file(codex_home))
+}
+
 /// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
 /// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
 /// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which

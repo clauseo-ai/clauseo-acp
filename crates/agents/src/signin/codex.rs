@@ -23,8 +23,8 @@
 //! `signin.link_expired`. Codex's refusal when device code is off: `signin.device_code_off`.
 //!
 //! While a login runs the state is `Waiting { since, nudge: false }` (no nudge: the screen offers
-//! "Use a code instead" from the start), and `login status` is polled every 1.5 s with a 5 s
-//! limit, as for Claude. The first poll that says signed in kills the login; then [`confirm`]
+//! "Use a code instead" from the start), and `login status` is polled every 1.5 s with its 15 s
+//! limit ([`STATUS_LIMIT`]). The first poll that says signed in kills the login; then [`confirm`]
 //! gives `SignedIn { email, plan, source: Own, at }`, or `signin.failed` when it does not
 //! confirm. It ends otherwise:
 //! - on Cancel or a newer job, killed: `signin.cancelled`;
@@ -35,6 +35,13 @@
 //!   when a line said so, else `signin.failed`.
 //!
 //! The login, its pollers and the app-server are all gone before the last state is sent.
+//!
+//! **A login that ran but did not confirm** (its `signin.failed` or `signin.cancelled` after the
+//! run exited 0 or a poll said signed in) leaves no login behind ([`remove_own_login`]): an
+//! unmarked `auth.json` in the home would read as reused at the next start.
+//!
+//! **Confirmed only for `ChatGPT`**: `account/read` naming an API key, Amazon Bedrock or an
+//! unknown kind of account is not a `ChatGPT` sign-in, so it confirms signed out.
 
 mod device;
 pub(crate) mod identity;
@@ -53,13 +60,17 @@ use futures::future::{Either, select};
 
 use self::device::{CODE_LIFETIME, DeviceLines, is_device_code_off, is_port_busy};
 use crate::cancel::Cancel;
-use crate::signin::claude::{LOGIN_LIMIT, LOGOUT_LIMIT, POLL, STATUS_LIMIT, is_cancel_line};
+use crate::signin::claude::{LOGIN_LIMIT, LOGOUT_LIMIT, POLL, is_cancel_line};
+use crate::signin::codex::identity::AccountRead;
 use crate::signin::env::{RunKind, codex_store_args};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
 use crate::signin::{Method, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
 use crate::status::{Identity, codex_logged_in, codex_says_logged_in};
 
+/// The most one `login status` may take: Codex's cold start measured 3.7 s on a Windows VM, so
+/// Claude's 5 s is too tight here.
+pub(crate) const STATUS_LIMIT: Duration = Duration::from_secs(15);
 /// How often "Try again" probes the callback port.
 pub(crate) const PORT_POLL: Duration = Duration::from_secs(2);
 /// The device-code run's own limit: past the code's 15 minutes, so the code's expiry is what
@@ -254,11 +265,49 @@ async fn confirmed_or_failed<T: Timer + Send + Sync>(
     } else {
         confirm(job, cancel, own, &job.home).await
     };
-    match confirmation {
-        Confirmation::Confirmed(identity) => signed_in(job, identity),
-        _ if cancel.is_cancelled() => job.failed(SigninCode::Cancelled),
-        Confirmation::SignedOut | Confirmation::Unknown => job.failed(SigninCode::Failed),
+    if let Confirmation::Confirmed(identity) = confirmation {
+        return signed_in(job, identity);
     }
+    // The login ran, so the home may hold its file: unconfirmed, it goes. A removal that failed
+    // leaves it; nothing more can be done here.
+    let _gone = remove_own_login(job).await;
+    if cancel.is_cancelled() {
+        job.failed(SigninCode::Cancelled)
+    } else {
+        job.failed(SigninCode::Failed)
+    }
+}
+
+/// Clauseo's own login in the home goes, for a login that ran and did not confirm, and for a
+/// sign-out with no CLI: Codex's `logout` through the CLI when it is there (with a cancel of its
+/// own, so a cancelled sign-in still cleans up), then the home's `auth.json` removed directly
+/// when it is still there (`reuse::remove_home_login`, which never reads it). It is Clauseo's
+/// own home, and the caller holds the lock on Codex's login files. Never while the home's file is
+/// the lawyer's (the guard, [`home_shares_lawyers_login`]): then nothing is touched. `true` when
+/// the home holds no login file afterwards.
+async fn remove_own_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> bool {
+    if home_shares_lawyers_login(job) {
+        return false;
+    }
+    if job.script().is_some() {
+        let kind = RunKind::Own { home: &job.home };
+        let mut args = codex_store_args(kind);
+        args.push(OsString::from("logout"));
+        let spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
+        // Its exit does not matter: the file is checked and removed below either way.
+        drop(
+            run(
+                &*job.launcher,
+                &*job.timer,
+                spec,
+                &Cancel::new(),
+                None,
+                |_: &str| {},
+            )
+            .await,
+        );
+    }
+    super::reuse::remove_home_login(&job.home).is_ok()
 }
 
 /// What [`confirm`] found.
@@ -266,7 +315,8 @@ async fn confirmed_or_failed<T: Timer + Send + Sync>(
 pub(crate) enum Confirmation {
     /// `login status` said signed in and `account/read` named this account.
     Confirmed(Identity),
-    /// `login status` said signed out: it exited non-zero (`Not logged in`, exit 1).
+    /// `login status` said signed out (it exited non-zero: `Not logged in`, exit 1), or
+    /// `account/read` named an account that is not a `ChatGPT` one.
     SignedOut,
     /// Nothing either way: no answer, exit 0 with no signed-in line, or no account read.
     Unknown,
@@ -302,21 +352,30 @@ pub(crate) async fn confirm<T: Timer + Send + Sync>(
 }
 
 /// [`confirm`]'s second half, once `login status` said signed in: `account/read` must name
-/// an account.
+/// a `ChatGPT` account. Any other account is signed out for this card.
 async fn confirm_account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> Confirmation {
-    if let Some(identity) = identity::read_as(job, cancel, kind, cwd).await {
-        job.note(SigninNote::StatusConfirmed);
-        Confirmation::Confirmed(identity)
-    } else {
-        job.note(SigninNote::StatusNotConfirmed {
-            reason: Unconfirmed::NoAccount,
-        });
-        Confirmation::Unknown
+    match identity::read_as(job, cancel, kind, cwd).await {
+        AccountRead::Chatgpt(identity) => {
+            job.note(SigninNote::StatusConfirmed);
+            Confirmation::Confirmed(identity)
+        }
+        AccountRead::NotChatgpt => {
+            job.note(SigninNote::StatusNotConfirmed {
+                reason: Unconfirmed::NotChatgpt,
+            });
+            Confirmation::SignedOut
+        }
+        AccountRead::NoAccount => {
+            job.note(SigninNote::StatusNotConfirmed {
+                reason: Unconfirmed::NoAccount,
+            });
+            Confirmation::Unknown
+        }
     }
 }
 
@@ -358,7 +417,7 @@ pub(crate) fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninStat
 
 /// One `login status` in Clauseo's home, for the login's polls: `Some(true)` signed in (exit 0
 /// with the signed-in line), `Some(false)` not, `None` when it could not tell (no start,
-/// killed past 5 s, cancelled).
+/// killed past [`STATUS_LIMIT`], cancelled).
 pub(crate) async fn status<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
@@ -426,16 +485,29 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
 /// and never while the home shares the lawyer's login file (the guard,
 /// [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and deletes the login. The
 /// job then runs the status check instead.
+///
+/// With no CLI in the install nothing runs: the home's `auth.json` is removed directly
+/// ([`remove_own_login`]) and the state is `SignedOut`; `signin.failed` when that cannot be
+/// done (the file stays, or the login is reused, which only a status check could tell more of).
 pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     // Held from the checks to the logout's end, as for a login.
     let files = job.shared.signin.codex_files().await;
     if !job.shared.signin.is_live(&job.ticket) {
         return None;
     }
-    if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
+    let reused = job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
         || super::found::is_reused(job)
-        || home_shares_lawyers_login(job)
-    {
+        || home_shares_lawyers_login(job);
+    if job.script().is_none() {
+        let gone = !reused && remove_own_login(job).await;
+        drop(files);
+        return Some(if gone {
+            SigninState::SignedOut { found: None }
+        } else {
+            job.failed(SigninCode::Failed)
+        });
+    }
+    if reused {
         drop(files);
         return super::found::check(job).await;
     }
@@ -461,12 +533,11 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         Confirmation::Confirmed(identity) => Some(signed_in(job, identity)),
         Confirmation::SignedOut => Some(SigninState::SignedOut { found: None }),
         // Nothing confirmed: a logout that exited 0 is taken at its word; else the state is
-        // left as it is, unless that is `SignedIn`, which nothing confirms now.
+        // left as it is.
         Confirmation::Unknown => ran
             .ok()
             .filter(|ran| ran.ended == Ended::Exited(Some(0)))
-            .map(|_| SigninState::SignedOut { found: None })
-            .or_else(|| super::found::unconfirmed(job)),
+            .map(|_| SigninState::SignedOut { found: None }),
     }
 }
 

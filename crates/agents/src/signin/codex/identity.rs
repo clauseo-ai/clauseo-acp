@@ -8,7 +8,10 @@
 //! (`crates/limits/src/readers/codex.rs`, `CODEX_OVERRIDES`): with plugins on, an app-server
 //! starts a git sync into its home at start-up (#203). The talk is `initialize`, then
 //! `account/read`; then the client is dropped, so stdin closes, and the run's tree is killed when
-//! it ends, at its 10 s limit, or on Cancel.
+//! it ends, at its 20 s limit, or on Cancel.
+//!
+//! Only a `ChatGPT` account is a sign-in this card shows ([`AccountRead::Chatgpt`]): an API key,
+//! Amazon Bedrock or an account kind this build does not know is not "Signed in to `ChatGPT`".
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -24,8 +27,8 @@ use crate::signin::env::{RunKind, codex_store_args};
 use crate::signin::job::SigninJob;
 use crate::status::{Identity, codex_identity};
 
-/// The most the app-server may take to answer.
-pub(crate) const APP_SERVER_LIMIT: Duration = Duration::from_secs(10);
+/// The most the app-server may take to answer: a cold start measured 3.7 s on a Windows VM.
+pub(crate) const APP_SERVER_LIMIT: Duration = Duration::from_secs(20);
 
 /// The `-c` overrides of `limits`' Codex reader (`CODEX_OVERRIDES`, #160 and #203), kept equal
 /// by hand: `agents` does not depend on `limits`.
@@ -38,23 +41,37 @@ const APP_SERVER_OVERRIDES: [&str; 6] = [
     "skills.include_instructions=false",
 ];
 
+/// What `account/read` said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AccountRead {
+    /// A `ChatGPT` account: its email (`None` when Codex does not know it) and plan.
+    Chatgpt(Identity),
+    /// An account that is not a `ChatGPT` sign-in: an API key, Amazon Bedrock, or a kind this
+    /// build does not know. Never `SignedIn` or `LoginFound` on this card.
+    NotChatgpt,
+    /// No account: the app-server did not start, answered either call with a JSON-RPC error
+    /// (codex-acp's adapter answers `initialize` with -32602), answered `account: null`
+    /// (signed out), or was cut short by its limit or by Cancel.
+    NoAccount,
+}
+
 /// `account/read` with `kind`'s environment and store argument, in `cwd`: Clauseo's own,
 /// detection's (no store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a
-/// reused session's. `Some` only for an answer that names an account: a `ChatGPT` one gives
-/// its email and plan, any other (an API key, say) neither, so "no email" is told apart from
-/// "the read failed". `None` when the app-server did not start, answered either call with a
-/// JSON-RPC error (codex-acp's adapter answers `initialize` with -32602), answered with
-/// `account: null` (signed out), or was cut short by its 10 s limit or by Cancel: never a
-/// login, and detection never takes it for one with no email.
+/// reused session's. A `ChatGPT` account with no email is told apart from a read that failed
+/// (`NoAccount`), which is never a login, and detection never takes it for one with no email.
 pub(crate) async fn read_as<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
-) -> Option<Identity> {
-    let answered = account(job, cancel, kind, cwd).await?;
-    answered.account.as_ref()?;
-    Some(codex_identity(&answered).unwrap_or_default())
+) -> AccountRead {
+    let Some(answered) = account(job, cancel, kind, cwd).await else {
+        return AccountRead::NoAccount;
+    };
+    if answered.account.is_none() {
+        return AccountRead::NoAccount;
+    }
+    codex_identity(&answered).map_or(AccountRead::NotChatgpt, AccountRead::Chatgpt)
 }
 
 /// The arguments after `codex.js`: the store argument, the overrides, then `app-server`.
