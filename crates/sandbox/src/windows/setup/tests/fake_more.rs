@@ -45,6 +45,7 @@ impl Around {
         self.networks.push(setup.clone());
         NetworkReport {
             filters: setup.filters(&Namespace::test()).len(),
+            foreign_removed: 0,
             covered: setup.pool().to_vec(),
             firewall: self.firewall.clone().unwrap_or(FirewallOutcome::Applied),
         }
