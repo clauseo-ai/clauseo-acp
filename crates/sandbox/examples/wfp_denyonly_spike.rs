@@ -31,6 +31,23 @@ fn say(line: &str) {
     drop(writeln!(out, "{line}").and_then(|()| out.flush()));
 }
 
+/// Appends `text` to the probe's log file, when it has one.
+#[cfg(windows)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the throwaway spike's probe notes that it started in its own log file"
+)]
+fn note(file: Option<&str>, text: &str) {
+    if let Some(file) = file
+        && let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file)
+    {
+        drop(writeln!(f, "{text}"));
+    }
+}
+
 #[cfg(not(windows))]
 fn main() {
     say("wfp_denyonly_spike runs on Windows only");
@@ -41,7 +58,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exe = std::env::current_exe()?;
     if let Some(("probe", rest)) = args.split_first().map(|(c, r)| (c.as_str(), r)) {
-        std::process::exit(i32::from_ne_bytes(probe::run(&exe, rest).to_ne_bytes()));
+        // `probe --log <file> <steps>`: the file says the probe started and what it got.
+        let (log, steps) = match rest {
+            [flag, file, steps @ ..] if flag == "--log" => (Some(file.clone()), steps),
+            steps => (None, steps),
+        };
+        let note = |text: &str| note(log.as_deref(), text);
+        note("started");
+        let code = probe::run(&exe, steps);
+        note(&format!("exit {code:#x}"));
+        std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()));
     }
     spike::run(&exe)
 }
@@ -147,7 +173,10 @@ mod spike {
         let user_s = Sid::parse(&user_sid)?;
         let check_pool = check_launch_in(&ns(), &user_s, &[i]).map_err(|e| e.to_string());
         let check_admin = check_launch_in(&ns(), &owner, &[i]).map_err(|e| e.to_string());
+        let desktop = tokens::desktop(&t)?;
+        say(&format!("DESKTOP {}", desktop.name));
         let world = World {
+            desktop,
             pool,
             admin,
             user_sid,
@@ -172,6 +201,7 @@ mod spike {
 
     /// What the rows need.
     struct World {
+        desktop: tokens::Desktop,
         pool: Token,
         admin: Token,
         user_sid: String,
@@ -255,13 +285,15 @@ mod spike {
                 Derive::Plain | Derive::BToken | Derive::NoEveryone | Derive::Low => "reached",
             };
             for (target, port, expect) in [("outside", w.o, "blocked"), ("inside", w.i, inside)] {
-                let (got, pass) = probe(&token, exe, &format!("connect:127.0.0.1:{port}"), expect);
+                let (got, pass) =
+                    probe(&token, w, exe, &format!("connect:127.0.0.1:{port}"), expect);
                 row(t, n, who, target, expect, &got, pass);
             }
         }
-        let lowbox = format!("derived:lowbox:connect:127.0.0.1:{}", w.o);
+        // An AppContainer may not reach loopback at all (loopback isolation), so these go out.
+        let lowbox = "derived:lowbox:connect:1.1.1.1:443".to_owned();
         let token = tokens::derive(&w.pool, Derive::Plain, &w.user_sid, None);
-        let (got, pass) = probe(&token, exe, &lowbox, "blocked");
+        let (got, pass) = probe(&token, w, exe, &lowbox, "blocked");
         row(
             t,
             11,
@@ -293,12 +325,12 @@ mod spike {
         ];
         for (n, who, how, expect) in rows {
             let token = tokens::derive(&w.admin, how, &w.admin_sid, None);
-            let (got, pass) = probe(&token, exe, &outside, expect);
+            let (got, pass) = probe(&token, w, exe, &outside, expect);
             row(t, n, who, "outside", expect, &got, pass);
         }
-        let lowbox = format!("derived:lowbox:{outside}");
+        let lowbox = "derived:lowbox:connect:1.1.1.1:443".to_owned();
         let token = tokens::derive(&w.admin, Derive::Plain, &w.admin_sid, None);
-        let (got, pass) = probe(&token, exe, &lowbox, "reached");
+        let (got, pass) = probe(&token, w, exe, &lowbox, "reached");
         row(
             t,
             12,
@@ -308,22 +340,30 @@ mod spike {
             &got,
             pass,
         );
-        let (got, pass) = probe(&tokens::system(), exe, &outside, "reached");
+        let (got, pass) = probe(&tokens::system(), w, exe, &outside, "reached");
         row(t, 10, "system", "outside", "reached", &got, pass);
     }
 
     /// Runs `step` under `token`; what happened, and whether it matches `expect`.
     fn probe(
         token: &Result<Token, String>,
+        w: &World,
         exe: &Path,
         step_text: &str,
         expect: &str,
     ) -> (String, Option<bool>) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let token = match token {
             Ok(token) => token,
             Err(why) => return (format!("skip:{why}"), None),
         };
-        match tokens::run_as(token, exe, step_text) {
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let log = exe.with_file_name("log").join(format!("probe-{n}.txt"));
+        let log_text = log.display().to_string();
+        let result = tokens::run_as(token, exe, step_text, &w.desktop, &log_text);
+        let noted = std::fs::read_to_string(&log).unwrap_or_else(|_| "no log".to_owned());
+        let noted = noted.lines().collect::<Vec<_>>().join(",");
+        match result {
             Ok(code) => match step(code, 0) {
                 Some(got) => {
                     let reached = got == Got::Reached;
@@ -334,9 +374,11 @@ mod spike {
                     };
                     (format!("{got:?}").to_lowercase(), pass)
                 }
-                None => (format!("nostart:{code:#x}"), None),
+                // STATUS_ACCESS_DENIED at start: such a token can't run a program at all.
+                None if code == 0xC000_0022 => (format!("cant-start:{code:#x}[log:{noted}]"), None),
+                None => (format!("nostart:{code:#x}[log:{noted}]"), None),
             },
-            Err(why) => (format!("nostart:{why}"), None),
+            Err(why) => (format!("nostart:{why}[log:{noted}]"), None),
         }
     }
 }

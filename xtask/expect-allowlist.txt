@@ -465,3 +465,4 @@ crates/sandbox/examples/wfp_denyonly_spike/tokens.rs - unsafe_code
 crates/sandbox/examples/wfp_denyonly_spike/tokens.rs net clippy::disallowed_methods
 crates/sandbox/examples/wfp_denyonly_spike/tokens.rs netsh clippy::disallowed_methods
 crates/sandbox/examples/wfp_denyonly_spike/sids.rs - unsafe_code
+crates/sandbox/examples/wfp_denyonly_spike.rs note clippy::disallowed_methods

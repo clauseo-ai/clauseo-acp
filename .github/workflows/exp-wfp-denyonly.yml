@@ -30,6 +30,9 @@ jobs:
           New-Item -ItemType Directory -Force C:\s15spike | Out-Null
           Copy-Item target\debug\examples\wfp_denyonly_spike.exe C:\s15spike\
           icacls C:\s15spike /grant "*S-1-5-32-545:(OI)(CI)RX" "*S-1-15-2-1:(OI)(CI)RX"
+          New-Item -ItemType Directory -Force C:\s15spike\log | Out-Null
+          icacls C:\s15spike\log /grant "*S-1-1-0:(OI)(CI)M" "*S-1-5-12:(OI)(CI)M" "*S-1-5-32-545:(OI)(CI)M" "*S-1-15-2-1:(OI)(CI)M"
+          icacls C:\s15spike\log /setintegritylevel "(OI)(CI)L"
       - name: Run the spike
         shell: pwsh
         run: C:\s15spike\wfp_denyonly_spike.exe | Tee-Object -FilePath spike-${{ matrix.runner }}.txt

@@ -8,14 +8,16 @@ use std::ffi::c_void;
 use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LUID, LocalFree, WAIT_OBJECT_0};
-use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, SDDL_REVISION_1,
+};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, DuplicateTokenEx,
     LOGON32_LOGON, LOGON32_LOGON_BATCH, LOGON32_LOGON_INTERACTIVE, LOGON32_LOGON_NETWORK_CLEARTEXT,
-    LOGON32_PROVIDER_DEFAULT, LUID_AND_ATTRIBUTES, LogonUserW, LookupPrivilegeValueW, PSID,
-    SE_PRIVILEGE_ENABLED, SID_AND_ATTRIBUTES, SecurityImpersonation, SetTokenInformation,
-    TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY,
-    TokenIntegrityLevel, TokenPrimary,
+    LOGON32_PROVIDER_DEFAULT, LUID_AND_ATTRIBUTES, LogonUserW, LookupPrivilegeValueW,
+    PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED, SECURITY_ATTRIBUTES, SID_AND_ATTRIBUTES,
+    SecurityImpersonation, SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DUPLICATE,
+    TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TokenIntegrityLevel, TokenPrimary,
 };
 use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::SystemServices::SE_GROUP_INTEGRITY;
@@ -315,9 +317,121 @@ pub(crate) fn system() -> Result<Token, String> {
     Err("no winlogon.exe token".to_owned())
 }
 
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn CreateWindowStationW(
+        name: PCWSTR,
+        flags: u32,
+        access: u32,
+        sa: *const SECURITY_ATTRIBUTES,
+    ) -> HANDLE;
+    fn GetProcessWindowStation() -> HANDLE;
+    fn SetProcessWindowStation(station: HANDLE) -> i32;
+    fn CreateDesktopW(
+        name: PCWSTR,
+        device: PCWSTR,
+        mode: *const c_void,
+        flags: u32,
+        access: u32,
+        sa: *const SECURITY_ATTRIBUTES,
+    ) -> HANDLE;
+}
+
+/// A window station and desktop every probe token may use, kept open for the run: the
+/// runner's own (`Service-0x0-3e7$`) grants a throwaway user and a restricted token nothing,
+/// so their probes hung at start. Its name for `STARTUPINFOW::lpDesktop`.
+pub(crate) struct Desktop {
+    pub(crate) name: String,
+    _station: HANDLE,
+    _handle: HANDLE,
+}
+
+/// Makes a [`Desktop`] named for `tag`: `Everyone`, `RESTRICTED`, `Users`, both application
+/// package groups, `SYSTEM` and `Administrators` get full access, with a Low label so a
+/// Low-integrity probe may use it too.
+pub(crate) fn desktop(tag: &str) -> Result<Desktop, String> {
+    let sddl = "D:(A;;GA;;;WD)(A;;GA;;;RC)(A;;GA;;;BU)(A;;GA;;;AC)(A;;GA;;;S-1-15-2-2)\
+                (A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NW;;;LW)";
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a live string and out-pointer; the descriptor is freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from(sddl),
+            SDDL_REVISION_1,
+            &raw mut sd,
+            None,
+        )
+    }
+    .map_err(|e| format!("the desktop's descriptor: {e}"))?;
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or_default(),
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: false.into(),
+    };
+    let station_name = format!("S15Spike{tag}");
+    let full = 0x000F_037F; // WINSTA_ALL_ACCESS
+    // SAFETY: a live name and attributes; the station stays open in `Desktop`.
+    let station = unsafe {
+        CreateWindowStationW(
+            PCWSTR(HSTRING::from(station_name.as_str()).as_ptr()),
+            0,
+            full,
+            &raw const sa,
+        )
+    };
+    let made = if station.is_invalid() {
+        Err(format!(
+            "CreateWindowStationW: {}",
+            std::io::Error::last_os_error()
+        ))
+    } else {
+        // SAFETY: switch to the new station to make its desktop, then back.
+        unsafe {
+            let old = GetProcessWindowStation();
+            SetProcessWindowStation(station);
+            let desktop = CreateDesktopW(
+                PCWSTR(HSTRING::from("Default").as_ptr()),
+                PCWSTR::null(),
+                std::ptr::null(),
+                0,
+                0x000F_01FF, // GENERIC_ALL for desktops (DESKTOP_* and standard rights)
+                &raw const sa,
+            );
+            let error = std::io::Error::last_os_error();
+            SetProcessWindowStation(old);
+            if desktop.is_invalid() {
+                Err(format!("CreateDesktopW: {error}"))
+            } else {
+                Ok(Desktop {
+                    name: format!("{station_name}\\Default"),
+                    _station: station,
+                    _handle: desktop,
+                })
+            }
+        }
+    };
+    // SAFETY: from the conversion, freed once.
+    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    made
+}
+
 /// Runs `exe probe <step>` under `token` (`CreateProcessWithTokenW`); the probe's exit code.
-pub(crate) fn run_as(token: &Token, exe: &Path, step: &str) -> Result<u32, String> {
-    let line = format!("\"{}\" \"probe\" \"{step}\"", exe.display());
+pub(crate) fn run_as(
+    token: &Token,
+    exe: &Path,
+    step: &str,
+    desktop: &Desktop,
+    log: &str,
+) -> Result<u32, String> {
+    let line = format!(
+        "\"{}\" \"probe\" \"--log\" \"{log}\" \"{step}\"",
+        exe.display()
+    );
+    let mut desktop_name: Vec<u16> = desktop
+        .name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let mut line: Vec<u16> = line.encode_utf16().chain(std::iter::once(0)).collect();
     let folder = exe
         .parent()
@@ -325,6 +439,7 @@ pub(crate) fn run_as(token: &Token, exe: &Path, step: &str) -> Result<u32, Strin
         .unwrap_or_default();
     let startup = STARTUPINFOW {
         cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or_default(),
+        lpDesktop: PWSTR(desktop_name.as_mut_ptr()),
         ..STARTUPINFOW::default()
     };
     let mut info = PROCESS_INFORMATION::default();
