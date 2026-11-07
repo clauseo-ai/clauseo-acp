@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use clauseo_host::{Downloaded, HostExit, Opaque};
@@ -92,15 +92,21 @@ fn an_exit_during_a_running_stop_waits_for_it_and_starts_no_second() {
 
     let exit = Arc::new(Exit::default());
     let starts = Arc::new(AtomicUsize::new(0));
+    // Both exits meet in their hide, which comes after the "already stopped" check, so the
+    // stopper (started past the hide) cannot end before the second exit has begun.
+    let both_begun = Arc::new(Barrier::new(2));
     let racers: Vec<_> = (0..2)
         .map(|_| {
             let exit = Arc::clone(&exit);
             let starts = Arc::clone(&starts);
+            let both_begun = Arc::clone(&both_begun);
             std::thread::spawn(move || {
                 stop_on_exit_with(
                     &exit,
                     LONG,
-                    || {},
+                    move || {
+                        both_begun.wait();
+                    },
                     || false,
                     |stopper_exit| {
                         starts.fetch_add(1, Ordering::AcqRel);
