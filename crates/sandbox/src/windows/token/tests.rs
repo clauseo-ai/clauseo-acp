@@ -194,6 +194,17 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
 }
 
 #[test]
+fn the_end_sweepers_threads_and_later_objects_name_system_alone() {
+    // No pool user and no desktop user (the sweeper doesn't know one); the owner held to
+    // READ_CONTROL, so the pool user keeps no implied WRITE_DAC.
+    assert_eq!(SWEEPER_THREAD_SDDL, "D:P(A;;GA;;;SY)(A;;RC;;;OW)");
+    assert_eq!(
+        SWEEPER_DEFAULT_DACL,
+        SWEEPER_THREAD_SDDL.replacen("D:P", "D:", 1)
+    );
+}
+
+#[test]
 fn the_agents_own_token_names_the_pool_user() {
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
     assert_eq!(

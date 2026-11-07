@@ -321,6 +321,15 @@ pub(in crate::windows) fn shut_token_first(token: &Handle) -> io::Result<()> {
     )
 }
 
+/// Shuts the end sweeper (`runner/sweeper.rs`) to every other process of its user, after
+/// [`shut_token_first`]: its default DACL first ([`super::SWEEPER_DEFAULT_DACL`]), so a thread
+/// started after is shut, then every thread it has ([`super::SWEEPER_THREAD_SDDL`]). The outer
+/// shut its process and first thread while it was suspended.
+pub(in crate::windows) fn shut_sweeper(token: &Handle) -> io::Result<()> {
+    set_default_dacl(token, super::SWEEPER_DEFAULT_DACL)?;
+    shut_threads(super::SWEEPER_THREAD_SDDL)
+}
+
 /// Sets the protected DACL of `sddl` on the kernel object `handle` (the outer runner's full-access
 /// handles to the suspended inner runner's process and thread).
 pub(in crate::windows) fn shut_object(handle: HANDLE, sddl: &str) -> io::Result<()> {
