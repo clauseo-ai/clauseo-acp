@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::desktop::AgentDesktop;
-use super::end::{EndSignal, EndSweep, copy, relay_stdin};
+use super::end::{EndSignal, EndSweep, copy, exit_code, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, end_job, kill_on_close_job, restrict_dll_search, system_folder};
@@ -20,7 +20,7 @@ use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
-use crate::windows::token::os::{own_token, profile_folder};
+use crate::windows::token::os::{logon_sid, own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
 use end::OsSweeper;
@@ -82,12 +82,18 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // write (no DLL planted in their current folder); the inner gets the agent's folder over
     // `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
+    // The desktop user's logon SID, which the runners hold too: their process DACL grants it, so
+    // one runner's sweep can end another's (`token::runner_process_sddl`).
+    let logon = own_token()
+        .and_then(|token| logon_sid(&token))
+        .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
     // From here every end path starts the detached end sweeper first (`end.rs`).
     let end: End = Arc::new(EndSweep::new(OsSweeper {
         data_dir,
         pool_user: message.pool_user.clone(),
         pool_name: message.pool_name.clone(),
         desktop,
+        logon,
         exe: exe_text.to_owned(),
         cwd,
         kept: Mutex::new(None),
@@ -160,6 +166,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
         desktop: &desktop,
+        logon: &sweeper.logon,
         password: Some(password),
         exe: &sweeper.exe,
         base: set.base(),
@@ -306,7 +313,8 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// lines (the inner's sweeps) go to stderr meanwhile. The end sweeper starts first when the
 /// host's stdin ends or the inner runner exits. Once the inner exited, the output has [`DRAIN`]
 /// to finish; then the job is ended, which closes what a lingering descendant still holds, and the
-/// output gets [`DRAIN`] again.
+/// output gets [`DRAIN`] again. On a cancel the exit code is the one the run would have had
+/// without the end sweeper (`end::exit_code`).
 fn relay(
     inner: &Process,
     job: &Handle,
@@ -349,12 +357,17 @@ fn relay(
             }
         })
         .map_err(|e| spawned(&e))?;
-    let code = inner
-        .wait(None)
-        .ok()
-        .flatten()
-        .map_or(RunExit::Spawn.code(), super::agent_code);
+    let ended = inner.wait(None).ok().flatten();
     end.trigger(EndSignal::InnerExited);
+    // The inner has exited, so `ctl`'s reader has its last report or none soon.
+    let last = reports.recv_timeout(DRAIN).ok();
+    let reported = match &last {
+        Some(InnerReport::Exited { code }) => Some(*code),
+        _ => None,
+    };
+    let code = ended.map_or(RunExit::Spawn.code(), |inner_code| {
+        exit_code(end.began(), inner_code, reported)
+    });
     let mut left = 2;
     for ended_job in [false, true] {
         if ended_job {
@@ -364,7 +377,7 @@ fn relay(
             left -= 1;
         }
     }
-    tell_status(reports.recv_timeout(DRAIN).ok().as_ref(), code);
+    tell_status(last.as_ref(), code);
     end.steps().wait();
     exit_now(code)
 }

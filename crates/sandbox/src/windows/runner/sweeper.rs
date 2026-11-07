@@ -1,8 +1,10 @@
 //! The detached end sweeper (Windows): `clauseo-sandbox-run --sweep`, started by the outer as
 //! the pool user at a session's end (`end.rs`), outside the launch's job. It takes nothing but
 //! its flag. It kills every process of its own user but itself (no job is kept: the session is
-//! ending), then removes what that user could leave to start at its next logon
-//! (`leftovers.rs`), all on its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name,
+//! ending) that was created before it was: a next session's processes, started later, are left
+//! alone (`sweep.rs`, which also says why a next inner killing this sweeper loses nothing). It
+//! then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
+//! its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name,
 //! sweep point) and each kind's count, which the outer relays while it lives. It exits 0 when
 //! everything went, [`RunExit::Sweep`] when anything failed or the time ran out.
 //!

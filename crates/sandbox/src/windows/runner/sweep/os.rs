@@ -1,38 +1,53 @@
-//! The sweep's calls on Windows, made as the pool user. The list is a Toolhelp snapshot
-//! (`CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`, which "includes all processes in the
-//! system", every session's), and each process's user is read by opening it with
-//! `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`: the pool user's own
-//! processes open for it, since their default DACL grants their user full access. A process it
-//! can't open, or whose token it can't, is [`Owner::None`], passed over. `WTSEnumerateProcessesW`
-//! isn't used: Microsoft documents that "the caller must be a member of the Administrators group
-//! to enumerate processes that are running under a different user's context", and a service's
-//! session-0 process of the pool user's is the one the sweep is for. A process is opened with
-//! `PROCESS_TERMINATE`, `PROCESS_QUERY_LIMITED_INFORMATION` and `SYNCHRONIZE`, checked with
-//! `IsProcessInJob` against the job handle the outer gave the inner (`JOB_OBJECT_QUERY`), and
-//! ended with `TerminateProcess`.
+//! The sweep's calls on Windows, made as the pool user.
+//!
+//! - [`Processes::list`]: a Toolhelp snapshot (`CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`,
+//!   which "includes all processes in the system", every session's), each process's user read by
+//!   opening it with `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`. A
+//!   process it can't open, or whose token it can't, is [`Owner::None`].
+//! - [`Processes::named`]: `WTSEnumerateProcessesW` (level 1), whose service reads each token
+//!   itself, so a process whose DACL shuts its user out still comes with its user. Microsoft
+//!   documents that "the caller must be a member of the Administrators group to enumerate
+//!   processes that are running under a different user's context" (the call's Remarks): the
+//!   rule is about other users' processes, and this call is made as the pool user for the pool
+//!   user's own. An entry with no SID (the kernel's and protected processes) is
+//!   [`Owner::None`]. A list that fails fails the sweep.
+//!
+//! A process is opened with `PROCESS_TERMINATE`, `PROCESS_QUERY_LIMITED_INFORMATION` and
+//! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
+//! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
+//! this user those rights, and opened again; when that fails too, the first error stands. It is
+//! checked with `IsProcessInJob` against the job handle the outer gave the inner
+//! (`JOB_OBJECT_QUERY`), its creation time read with `GetProcessTimes`, and it is ended with
+//! `TerminateProcess`.
 #![expect(
     unsafe_code,
-    reason = "FFI to the process list, process, token and job calls"
+    reason = "FFI to the process lists, process, token and job calls"
 )]
 
 use std::io;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{FILETIME, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::JobObjects::IsProcessInJob;
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
+};
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess, OpenProcessToken,
+    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 use windows::core::BOOL;
 
-use super::{Owner, Point, Processes, Seen, SweepError, sweep};
+use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
+use crate::windows::token::os::{shut_object, sid_text};
 
 /// How long an ended process has to be gone.
 const KILL_WAIT: Duration = Duration::from_secs(5);
@@ -40,14 +55,28 @@ const KILL_WAIT: Duration = Duration::from_secs(5);
 const NO_SUCH_PID: i32 = 87;
 /// `ERROR_NO_MORE_FILES`: the snapshot's end.
 const NO_MORE: i32 = 18;
-/// The exit code a swept process ends with: the runner's `RunExit` range's last code.
-const SWEPT: u32 = super::super::RUN_EXIT_BASE + 0xff;
+/// `ERROR_ACCESS_DENIED`.
+const DENIED: i32 = 5;
 
 /// The calls, against this launch's kill-on-close job when there is one.
-pub(in crate::windows::runner) struct OsProcesses {
+pub(in crate::windows::runner) struct OsProcesses<'a> {
     /// The job handle the outer duplicated into the inner (`JOB_OBJECT_QUERY`), or `None` for
     /// a sweep that keeps no job's processes.
     pub(in crate::windows::runner) job: Option<HANDLE>,
+    /// This process's user, whom a DACL it rewrites grants.
+    pub(in crate::windows::runner) me: &'a Sid,
+}
+
+/// `WTSEnumerateProcessesW`'s list, freed on drop.
+struct WtsList(*mut WTS_PROCESS_INFOW);
+
+impl Drop for WtsList {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: allocated by WTSEnumerateProcessesW and freed once, here.
+            unsafe { WTSFreeMemory(self.0.cast()) };
+        }
+    }
 }
 
 /// Sweeps the processes of `me` (this process's own user) at `point`, keeping this process and,
@@ -60,11 +89,11 @@ pub(in crate::windows::runner) fn sweep_own(
 ) -> Result<(), SweepError> {
     // SAFETY: no arguments.
     let own = unsafe { GetCurrentProcessId() };
-    let mut calls = OsProcesses { job };
+    let mut calls = OsProcesses { job, me };
     sweep(&mut calls, me, &[own], point, log).map(drop)
 }
 
-impl Processes for OsProcesses {
+impl Processes for OsProcesses<'_> {
     type Process = Handle;
 
     fn list(&mut self) -> io::Result<Vec<Seen>> {
@@ -94,14 +123,46 @@ impl Processes for OsProcesses {
         }
     }
 
+    fn named(&mut self) -> io::Result<Vec<Seen>> {
+        let mut info: *mut WTS_PROCESS_INFOW = std::ptr::null_mut();
+        let mut count = 0u32;
+        // SAFETY: version 1 with live out-pointers; the list is freed when `list` drops.
+        unsafe {
+            WTSEnumerateProcessesW(
+                Some(WTS_CURRENT_SERVER_HANDLE),
+                0,
+                1,
+                &raw mut info,
+                &raw mut count,
+            )
+        }
+        .map_err(|e| os_error(&e))?;
+        let list = WtsList(info);
+        if list.0.is_null() {
+            return Err(io::Error::other("the process list is empty"));
+        }
+        let len = usize::try_from(count).map_err(io::Error::other)?;
+        // SAFETY: the call wrote `count` entries at `info`, live until `list` drops.
+        let entries = unsafe { std::slice::from_raw_parts(list.0, len) };
+        entries.iter().map(named).collect()
+    }
+
     fn open(&mut self, pid: u32) -> io::Result<Option<Handle>> {
         let access = PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE;
-        // SAFETY: a plain open by pid; the handle is owned by `Handle`.
-        match unsafe { OpenProcess(access, false, pid) } {
-            Ok(handle) => Ok(Some(Handle(handle))),
-            Err(error) if os_error(&error).raw_os_error() == Some(NO_SUCH_PID) => Ok(None),
-            Err(error) => Err(os_error(&error)),
+        let error = match open(access, pid) {
+            Err(error) if error.raw_os_error() == Some(DENIED) => error,
+            other => return other,
+        };
+        // As its owner: `WRITE_DAC`, unless an `OWNER RIGHTS` entry takes it away.
+        let Ok(Some(writable)) = open(PROCESS_ACCESS_RIGHTS(WRITE_DAC.0), pid) else {
+            return Err(error);
+        };
+        let grant = format!("D:P(A;;GA;;;SY)(A;;0x{:x};;;{})", access.0, self.me);
+        if shut_object(writable.0, &grant).is_err() {
+            return Err(error);
         }
+        drop(writable);
+        open(access, pid)
     }
 
     fn in_job(&mut self, process: &Handle) -> io::Result<bool> {
@@ -114,6 +175,15 @@ impl Processes for OsProcesses {
         unsafe { IsProcessInJob(process.0, Some(job), &raw mut inside) }
             .map_err(|e| os_error(&e))?;
         Ok(inside.as_bool())
+    }
+
+    fn started(&mut self, process: &Handle) -> io::Result<u64> {
+        times(process.0)
+    }
+
+    fn own_start(&mut self) -> io::Result<u64> {
+        // SAFETY: the pseudo-handle of this process needs no close and carries every right.
+        times(unsafe { GetCurrentProcess() })
     }
 
     fn kill(&mut self, process: &Handle) -> io::Result<()> {
@@ -133,6 +203,59 @@ impl Processes for OsProcesses {
             Err(io::Error::from(io::ErrorKind::TimedOut))
         }
     }
+}
+
+/// Opens `pid` with `access`; `None` when no process has that pid any more.
+fn open(access: PROCESS_ACCESS_RIGHTS, pid: u32) -> io::Result<Option<Handle>> {
+    // SAFETY: a plain open by pid; the handle is owned by `Handle`.
+    match unsafe { OpenProcess(access, false, pid) } {
+        Ok(handle) => Ok(Some(Handle(handle))),
+        Err(error) if os_error(&error).raw_os_error() == Some(NO_SUCH_PID) => Ok(None),
+        Err(error) => Err(os_error(&error)),
+    }
+}
+
+/// `process`'s creation time, in 100 ns ticks.
+fn times(process: HANDLE) -> io::Result<u64> {
+    let (mut created, mut exited, mut kernel, mut user) = (
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+        FILETIME::default(),
+    );
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; four live out-pointers.
+    unsafe {
+        GetProcessTimes(
+            process,
+            &raw mut created,
+            &raw mut exited,
+            &raw mut kernel,
+            &raw mut user,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+
+/// One entry of WTS's list; a SID the service gave that isn't one fails the list.
+fn named(entry: &WTS_PROCESS_INFOW) -> io::Result<Seen> {
+    let image = if entry.pProcessName.is_null() {
+        String::from("?")
+    } else {
+        // SAFETY: the service wrote a NUL-terminated name, live while the list is.
+        unsafe { entry.pProcessName.to_string() }.unwrap_or_else(|_| String::from("?"))
+    };
+    // No SID: the kernel's or a protected process, never a pool user's.
+    let owner = if entry.pUserSid.is_invalid() {
+        Owner::None
+    } else {
+        Owner::User(sid_text(entry.pUserSid)?)
+    };
+    Ok(Seen {
+        pid: entry.ProcessId,
+        image,
+        owner,
+    })
 }
 
 /// The image's file name the snapshot gave, up to its NUL.

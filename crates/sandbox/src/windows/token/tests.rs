@@ -20,8 +20,30 @@ fn the_spec_is_design_b() {
     assert_eq!(spec.integrity.as_str(), "S-1-16-4096");
     assert_eq!(
         spec.default_dacl,
-        format!("D:(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})")
+        format!(
+            "D:(D;;0xc0000;;;{POOL})(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})\
+             (A;;RC;;;OW)"
+        )
     );
+}
+
+#[test]
+fn what_the_agent_makes_it_cant_rewrite_the_dacl_of() {
+    // Its processes, and its children's with no descriptor of their own, can't be shut to the
+    // sweep: WRITE_DAC and WRITE_OWNER are denied to the pool user before its GENERIC_ALL, and
+    // OWNER RIGHTS, held to READ_CONTROL, takes away the owner's implied WRITE_DAC (which passes
+    // by deny entries).
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
+    assert_eq!(OWNER_WRITES, 0x0004_0000 | 0x0008_0000);
+    assert!(
+        spec.default_dacl
+            .starts_with(&format!("D:(D;;0x{OWNER_WRITES:x};;;{POOL})")),
+        "the deny comes first: {}",
+        spec.default_dacl
+    );
+    assert!(spec.default_dacl.ends_with("(A;;RC;;;OW)"));
+    assert_eq!(spec.default_dacl.matches(";;;OW)").count(), 1);
+    assert!(!spec.default_dacl.contains("WD;;;OW") && !spec.default_dacl.contains("GA;;;OW"));
 }
 
 #[test]
@@ -144,22 +166,26 @@ fn the_agents_window_station_names_only_system_and_the_pool_user_at_low() {
 
 #[test]
 fn the_inner_runners_own_objects_name_no_pool_user() {
-    let desktop = sid(DESKTOP);
+    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
     for sddl in [
-        runner_process_sddl(&desktop),
+        runner_process_sddl(&desktop, &logon),
         runner_thread_sddl(&desktop),
         runner_token_sddl(&desktop),
         runner_default_dacl(&desktop),
     ] {
         assert!(sddl.contains(DESKTOP) && sddl.contains(";;;SY)"), "{sddl}");
-        for absent in [POOL, LOGON, ";WD)", ";BU)", ";RC)"] {
+        for absent in [POOL, ";WD)", ";BU)", ";RC)"] {
             assert!(!sddl.contains(absent), "{absent} in {sddl}");
         }
     }
-    assert_eq!(
-        runner_process_sddl(&desktop),
-        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)")
-    );
+    // Only the process names the logon SID; the threads and the token don't.
+    for sddl in [
+        runner_thread_sddl(&desktop),
+        runner_token_sddl(&desktop),
+        runner_default_dacl(&desktop),
+    ] {
+        assert!(!sddl.contains(LOGON), "{sddl}");
+    }
     assert!(runner_token_sddl(&desktop).ends_with("(A;;RC;;;OW)"));
     // Later threads get the threads' own entries: the owner held to READ_CONTROL, the desktop
     // user SYNCHRONIZE only.
@@ -178,4 +204,33 @@ fn the_agents_own_token_names_the_pool_user() {
         spec.token_dacl,
         format!("D:P(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x8;;;{DESKTOP})")
     );
+}
+
+#[test]
+fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user_nothing() {
+    // The pool user's sweeps reach the runners (the inner, the end sweeper) through the desktop
+    // user's logon SID, which the agent holds deny-only.
+    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
+    let sddl = runner_process_sddl(&desktop, &logon);
+    assert_eq!(
+        sddl,
+        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;0x101001;;;{LOGON})(A;;RC;;;OW)")
+    );
+    // Every entry, SID by SID: no other SID gains anything, and the pool user isn't one.
+    let entries: Vec<&str> = sddl
+        .trim_start_matches("D:P(")
+        .trim_end_matches(')')
+        .split(")(")
+        .collect();
+    let want = [
+        "A;;GA;;;SY".to_owned(),
+        format!("A;;0x101001;;;{DESKTOP}"),
+        format!("A;;0x{DESKTOP_USER_RIGHTS:x};;;{LOGON}"),
+        "A;;RC;;;OW".to_owned(),
+    ];
+    assert_eq!(entries, want);
+    assert!(!sddl.contains(POOL));
+    // The agent's token holds that logon SID deny-only, so the allow never matches it.
+    let spec = TokenSpec::for_pool(&sid(POOL), &logon, &desktop, None).unwrap();
+    assert_eq!(spec.deny_only, [logon]);
 }

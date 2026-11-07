@@ -17,6 +17,8 @@ pub(super) struct Start<'a> {
     pub(super) pool_name: &'a str,
     pub(super) pool_user: &'a Sid,
     pub(super) desktop: &'a Sid,
+    /// The desktop user's logon SID, which the runners' process DACL grants.
+    pub(super) logon: &'a Sid,
     pub(super) password: Option<Zeroizing<String>>,
     pub(super) exe: &'a str,
     pub(super) base: &'a str,
@@ -71,9 +73,12 @@ impl Steps for Start<'_> {
     /// while it is still suspended; its first act once resumed kills any process of the pool
     /// user's that opened either, or its token, before this.
     fn shut(&mut self, inner: &Process) -> Result<(), Failure> {
-        shut_object(inner.handle.0, &runner_process_sddl(self.desktop))
-            .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(self.desktop)))
-            .map_err(|e| Failure::new(RunExit::Token, os("the inner runner's DACL", &e)))
+        shut_object(
+            inner.handle.0,
+            &runner_process_sddl(self.desktop, self.logon),
+        )
+        .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(self.desktop)))
+        .map_err(|e| Failure::new(RunExit::Token, os("the inner runner's DACL", &e)))
     }
 
     fn resume(&mut self, inner: &Process) -> Result<(), Failure> {
