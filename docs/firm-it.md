@@ -144,7 +144,7 @@ name them then.
 Collect the SIDs before deleting anything: once a user is deleted, its name no longer leads to its
 SID, and its profile can only be found by SID. The key's `PoolSids` lists the users' SIDs too, so
 an earlier removal that stopped partway is finished as well. The block then follows `--remove`'s
-order. Paste it into an elevated Windows PowerShell (64-bit, the default):
+order. Paste it into an elevated Windows PowerShell (64-bit, the default; in Intune, "Run script in 64 bit PowerShell Host"):
 
 ```powershell
 $pool = '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])$'
@@ -157,6 +157,7 @@ $sids = @(@($users | ForEach-Object { $_.SID.Value }) + @($record.PoolSids) |
     Where-Object { $_ } | Sort-Object -Unique)
 $group = Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue
 $groupSids = @(@($group.SID.Value, $record.GroupSid) | Where-Object { $_ } | Sort-Object -Unique)
+"Sandbox account SIDs:"; $sids  # Keep this list: the matter folders' entries name these SIDs.
 # 2. Their processes, so their profiles can be deleted.
 Get-CimInstance Win32_Process | ForEach-Object {
     $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue
@@ -740,6 +741,13 @@ after it. Report the false positive at <https://www.microsoft.com/wdsi/filesubmi
 **Remove the protection by hand**, when the file can't be restored: see
 [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand) in
 section 1.
+
+Then the lawyer's folders: on each matter folder, the two `icacls` commands under "Intune
+(Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs the script
+listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing; remove it with
+`icacls "<folder>" /remove "*<SID>"`. If Clauseo stays uninstalled, the lawyer can then delete the
+`sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
+`sandbox\set-aside`: those are files set aside from a matter.
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
 
