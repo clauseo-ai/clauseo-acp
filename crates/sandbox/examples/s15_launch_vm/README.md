@@ -29,7 +29,7 @@ moves it). Cleanup deletes only the paths listed there, and runs `clauseo-sandbo
 only when prepare ran the set-up.
 
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
-`ca-bundle`, `clipboard`, `atoms`, `runners`, `breakaway`, `handles`, `desktop`,
+`ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`. `clipboard` skips in a session with no clipboard the harness
 can use. `node-pipes` needs `--node`; `codex` needs `--node` and `--codex`, both given to
 prepare, which copies them into `bin\`. Each row has a limit (`--row-timeout`, 120 s by default).
@@ -38,10 +38,14 @@ A row past it fails, and the harness ends every process it started.
 The security rows (`checks_sec.rs`, `checks_m3.rs`):
 
 - `runners`: A's agent is refused `PROCESS_ALL_ACCESS`, `PROCESS_VM_READ`,
-  `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION` and the token (`TOKEN_QUERY`,
-  `TOKEN_DUPLICATE`) on its inner runner (its parent pid) and its outer runner (the harness
-  sends that pid on stdin). What `PROCESS_QUERY_LIMITED_INFORMATION` and `SYNCHRONIZE` get is
-  printed as information.
+  `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION`, `PROCESS_QUERY_LIMITED_INFORMATION` and
+  the token (`TOKEN_QUERY`, `TOKEN_DUPLICATE`) on its inner runner (its parent pid) and its outer
+  runner (the harness sends that pid on stdin). What `SYNCHRONIZE` gets is printed as
+  information.
+- `lawyer-processes`: the same rights, refused on the lawyer's processes: the outer runner, the
+  host (the harness itself, standing in for Clauseo.exe) and the proxy (a `probe wait` the harness
+  starts as the lawyer, standing in for the egress proxy's process). A granted
+  `PROCESS_QUERY_LIMITED_INFORMATION` there fails the row and is named, for a decision.
 - `breakaway`: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or its child is still in a job; the
   child is killed either way.
 - `handles`: the agent's handle table holds exactly the `in`, `out` and `err` runner pipes,
