@@ -171,12 +171,7 @@ impl AgentsBackend {
                     tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
                     return Ok(());
                 }
-                if !pending::keep_press(self, &agent, Press::SignIn(method), switch) {
-                    switch::sign_in(agents, &agent, method, switch)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?method, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(method), switch)?;
             }
             SetupCommand::CancelSignIn { .. } => {
                 self.compose.cancelling(&agent);
@@ -202,12 +197,7 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode), switch) {
-                    switch::sign_in(agents, &agent, Method::DeviceCode, switch)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(Method::DeviceCode), switch)?;
             }
             SetupCommand::OpenSignInPage { .. } => {
                 if let Some(SigninState::DeviceCode { url, .. }) = agents.signin_state(&agent) {
@@ -229,11 +219,7 @@ impl AgentsBackend {
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::DifferentAccount, switch) {
-                    switch::use_different(agents, &agent, switch)
-                        .map_err(|error| signin_error(&error))?;
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::DifferentAccount, switch)?;
             }
             SetupCommand::StopUsingLogin { .. } => {
                 if !self.reused(&agent) {
