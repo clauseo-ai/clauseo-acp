@@ -20,6 +20,7 @@ mod refusals;
 mod retry;
 mod reused;
 mod signin;
+mod switch_account;
 mod switching;
 mod takeover;
 mod timing;

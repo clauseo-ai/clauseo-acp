@@ -3,8 +3,13 @@
 //!
 //! It follows the pattern of `node_version` (`node.rs`) and `Npm::run` (`install/npm.rs`):
 //! stdout read to its end, stderr driven through its pump, and the exit awaited, all joined;
-//! that work raced against the cancel signal and the run's time limit through the `Timer`. On
-//! a cancel or the limit the handle is dropped, which kills the child's tree.
+//! that work raced against the cancel signal and the run's time limit through the `Timer`. At
+//! the limit, or on a stop at once ([`Cancel::cancel`]), the handle is dropped, which kills the
+//! child's tree. On a graceful stop ([`Cancel::stop`]) the run ends as its kind allows
+//! ([`OnStop`], `super::stopping`): it is awaited (a status, a logout), or Codex's browser login
+//! is sent `GET /cancel` when it owns the callback port and is then awaited; it is killed only
+//! when the stop at once follows (the quit's bound) or the lawyer's grace passes. A run whose
+//! job is already stopped is not started at all.
 //!
 //! stdout and stderr go into a 64 KB ring in memory ([`Ring`]) that is never shown or logged,
 //! and each line is offered to a callback as it arrives (the flows look for a device code, a
@@ -19,11 +24,14 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
+use clauseo_protocol::AgentId;
+use futures::FutureExt as _;
 use futures::future::{Either, join3, select};
 use futures::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::cancel::Cancel;
 use crate::signin::PasteCode;
+use crate::signin::stopping::{self, OnStop, Stopping};
 
 /// The ring's size: the last 64 KB of output.
 pub(crate) const RING_BYTES: usize = 64 * 1024;
@@ -49,6 +57,12 @@ pub(crate) struct RunSpec {
     pub(crate) cwd: PathBuf,
     /// Past this the run is killed: 5 s for a status, 10 minutes for a login.
     pub(crate) limit: Duration,
+    /// How it ends on a graceful stop, and what is checked after a kill.
+    pub(crate) on_stop: OnStop,
+    /// The agent it runs for, named in the stop's log lines.
+    pub(crate) agent: AgentId,
+    /// The lawyer's home folder, so a kill never removes the lawyer's own login file.
+    pub(crate) lawyer_home: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for RunSpec {
@@ -60,6 +74,9 @@ impl std::fmt::Debug for RunSpec {
             .field("env", &self.env.keys().collect::<Vec<_>>())
             .field("cwd", &self.cwd)
             .field("limit", &self.limit)
+            .field("on_stop", &self.on_stop)
+            .field("agent", &self.agent)
+            .field("lawyer_home", &self.lawyer_home.is_some())
             .finish()
     }
 }
@@ -71,7 +88,9 @@ pub(crate) enum Ended {
     Exited(Option<i32>),
     /// The limit passed; it was killed.
     TimedOut,
-    /// The cancel signal was set; it was killed.
+    /// The cancel signal was set: it was killed, or it ended on a graceful stop that does not
+    /// wait for its answer (Codex's browser login after `GET /cancel`), or it never started
+    /// because the job was already stopped.
     Cancelled,
 }
 
@@ -175,6 +194,16 @@ pub(crate) async fn run<T: Timer>(
     paste: Option<async_channel::Receiver<PasteCode>>,
     on_line: impl FnMut(&str) + Send,
 ) -> Result<Ran, clauseo_process::Error> {
+    if cancel.is_cancelled() {
+        return Ok(Ran {
+            ended: Ended::Cancelled,
+            output: Ring::default(),
+        });
+    }
+    let on_stop = spec.on_stop;
+    let agent = spec.agent;
+    let lawyer_home = spec.lawyer_home;
+    let env = spec.env.clone();
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
     argv.push(spec.script.into_os_string());
     argv.extend(spec.args);
@@ -186,6 +215,8 @@ pub(crate) async fn run<T: Timer>(
         mut handle,
         ..
     } = launcher.launch(&launch)?;
+    let root = handle.pid();
+    let tree = handle.descendants();
     let ring = Mutex::new(Ring::default());
     let on_line = Mutex::new(on_line);
     let offer = |line: &str| {
@@ -235,18 +266,84 @@ pub(crate) async fn run<T: Timer>(
             }
             futures::future::pending::<Option<i32>>().await
         });
-        let work = select(output, feed);
+        let work = select(output, feed).map(|done| done.factor_first().0);
         let cancelled = pin!(cancel.cancelled());
         let limit = pin!(timer.after(spec.limit));
         match select(work, select(cancelled, limit)).await {
-            Either::Left((done, _)) => Ended::Exited(done.factor_first().0),
-            Either::Right((Either::Left(_), _)) => Ended::Cancelled,
-            Either::Right((Either::Right(_), _)) => Ended::TimedOut,
+            Either::Left((code, _)) => (Ended::Exited(code), false),
+            Either::Right((Either::Right(_), _)) => (Ended::TimedOut, true),
+            Either::Right((Either::Left(((), limit)), work)) => {
+                let stopping = Winding {
+                    launcher,
+                    timer,
+                    cancel,
+                    on_stop,
+                    root,
+                    tree: &tree,
+                };
+                stopping.wind_down(work, limit).await
+            }
         }
     };
+    let (ended, forced) = ended;
     drop(handle);
+    if forced {
+        stopping::after_kill(on_stop, &env, lawyer_home.as_deref(), &agent);
+    }
     let output = ring.into_inner().unwrap_or_else(PoisonError::into_inner);
     Ok(Ran { ended, output })
+}
+
+/// A run's graceful stop, once its job's stop is seen.
+struct Winding<'a, T> {
+    launcher: &'a dyn Launcher,
+    timer: &'a T,
+    cancel: &'a Cancel,
+    on_stop: OnStop,
+    /// The child's pid and its tree, for the callback port's owner.
+    root: u32,
+    tree: &'a clauseo_process::Descendants,
+}
+
+impl<T: Timer> Winding<'_, T> {
+    /// Ends the run as its kind allows: `work` (the run's output, feed and exit) goes on until
+    /// it ends by itself, or the stop at once, the lawyer's grace or `limit` comes first, which
+    /// kills it. How it ended, and whether it was killed.
+    async fn wind_down<W, L>(&self, work: W, limit: L) -> (Ended, bool)
+    where
+        W: Future<Output = Option<i32>> + Unpin,
+        L: Future<Output = ()> + Unpin,
+    {
+        if self.cancel.is_killed() || self.on_stop.how == Stopping::Kill {
+            return (Ended::Cancelled, true);
+        }
+        if let Stopping::Cancel { port } = self.on_stop.how {
+            let mut ours = self.tree.snapshot().pids().unwrap_or_default();
+            ours.push(self.root);
+            if stopping::owner::owns_listener(self.launcher, self.timer, port, &ours).await {
+                stopping::send_cancel(port);
+            }
+        }
+        let grace = self.cancel.how().and_then(crate::cancel::Stop::grace);
+        let killed = pin!(self.cancel.killed());
+        let graced = pin!(async {
+            match grace {
+                Some(grace) => self.timer.after(grace).await,
+                None => futures::future::pending::<()>().await,
+            }
+        });
+        match select(work, select(killed, select(graced, limit))).await {
+            Either::Left((code, _)) => match self.on_stop.how {
+                Stopping::Wait => (Ended::Exited(code), false),
+                Stopping::Kill | Stopping::Cancel { .. } => (Ended::Cancelled, false),
+            },
+            Either::Right(_) => {
+                let why = self.cancel.how().map_or("stop", crate::cancel::Stop::word);
+                tracing::warn!("{why}: {} killed at the bound", self.on_stop.what);
+                (Ended::Cancelled, true)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

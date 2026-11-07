@@ -35,6 +35,7 @@ use crate::signin::env::{RunKind, Shim};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
 use crate::signin::shim::UrlFile;
+use crate::signin::stopping::OnStop;
 use crate::signin::{PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
 use crate::status::{ClaudeStatus, Identity, claude_signed_in, parse_claude_status};
 
@@ -254,6 +255,8 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
 ) -> Option<(Option<i32>, Option<ClaudeStatus>)> {
     let mut spec = job.spec(STATUS, job.env(kind, None), STATUS_LIMIT);
     spec.cwd = cwd.to_path_buf();
+    // Awaited on a graceful stop, as Codex's is: a status writes no login data.
+    spec.on_stop = OnStop::status("claude auth status");
     let ran = run(
         &*job.launcher,
         &*job.timer,

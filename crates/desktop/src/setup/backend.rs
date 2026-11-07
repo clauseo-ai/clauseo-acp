@@ -16,8 +16,9 @@
 //!   for an agent's sign-in (`agent.auth_required`) checks its status again
 //!   (`recheck_sign_in`), one at a time per agent.
 //! - **Confirms.** `InstallAgent` and `SetFirmEndpoint` ask the lawyer first; a decline runs
-//!   nothing and answers `transport.unauthorized`. `RetryAgentInstall` asks nothing, so it is
-//!   `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
+//!   nothing and answers `transport.unauthorized`. So does a Codex sign-in over Clauseo's own
+//!   login (`switch.rs`), whose decline answers `Done`. `RetryAgentInstall` asks nothing, so it
+//!   is `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
 //!   is installed only through `InstallAgent`'s confirm. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
@@ -149,6 +150,9 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => self.retry(&agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
+                if !switch::switch_first(self, &agent, &info.name).await {
+                    return Ok(());
+                }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
@@ -172,6 +176,9 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
+                if !switch::switch_first(self, &agent, &info.name).await {
+                    return Ok(());
+                }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
@@ -586,6 +593,7 @@ mod count;
 mod entry;
 mod parts;
 mod seam;
+mod switch;
 #[cfg(test)]
 mod tests;
 mod write;

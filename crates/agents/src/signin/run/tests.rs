@@ -12,9 +12,13 @@ use clauseo_process::{ManualTimer, PassthroughLauncher, SpawnOptions};
 use futures::executor::block_on;
 use futures::future::join;
 
+use clauseo_protocol::AgentId;
+
 use super::{Ended, RING_BYTES, Ran, RunSpec, run};
-use crate::cancel::Cancel;
+use crate::cancel::{Cancel, Stop};
 use crate::signin::PasteCode;
+use crate::signin::reuse::{login_file_for_tests, write_for_tests};
+use crate::signin::stopping::{OnStop, Stopping};
 use crate::write::TestDir;
 
 /// A launcher that passes the child only the spec's variables, as production's must.
@@ -36,6 +40,9 @@ fn spec(dir: &TestDir, script: &str) -> RunSpec {
         env,
         cwd: dir.0.clone(),
         limit: Duration::from_secs(5),
+        on_stop: OnStop::KILL,
+        agent: AgentId::new("codex-acp").unwrap(),
+        lawyer_home: Some(dir.0.join("lawyer")),
     }
 }
 
@@ -182,4 +189,194 @@ fn run_spec_debug_prints_names_never_values() {
     let printed = format!("{spec:?}");
     assert!(!printed.contains("hunter2"), "{printed}");
     assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}
+
+/// The lawyer's grace in these tests: any duration the `ManualTimer` reports as armed.
+const GRACE: Duration = Duration::from_secs(2);
+
+/// Runs `script` with `on_stop` and `env` added, the paste channel open (so stdin stays open),
+/// and once it prints `started` hands the run to `then` with the timer and the cancel. `then`
+/// runs beside the run and may drive it on; returns how the run ended.
+fn run_with(
+    tag: &str,
+    script: &str,
+    on_stop: OnStop,
+    env: &[(&str, &Path)],
+    then: impl AsyncFnOnce(&ManualTimer, &Cancel, &async_channel::Sender<PasteCode>),
+) -> Ended {
+    let dir = TestDir::new(tag);
+    let mut spec = spec(&dir, script);
+    spec.limit = Duration::from_secs(600);
+    spec.on_stop = on_stop;
+    for (name, value) in env {
+        spec.env
+            .insert(OsString::from(name), value.as_os_str().to_owned());
+    }
+    let timer = ManualTimer::new();
+    let cancel = Cancel::new();
+    let (codes, paste) = async_channel::bounded::<PasteCode>(1);
+    let (started, on_started) = async_channel::bounded(1);
+    let launcher = launcher();
+    let running = run(&launcher, &timer, spec, &cancel, Some(paste), move |line| {
+        if line == "started" {
+            started.try_send(()).unwrap_or_default();
+        }
+    });
+    let driver = async {
+        // The run's limit, armed first.
+        assert_eq!(timer.next_armed().await, Duration::from_secs(600));
+        on_started.recv().await.unwrap();
+        then(&timer, &cancel, &codes).await;
+    };
+    let (ran, ()) = block_on(join(running, driver));
+    drop(codes);
+    ran.unwrap().ended
+}
+
+/// A run that is awaited on a graceful stop (a status, a logout) is not killed: it ends by
+/// itself, and its exit is its answer.
+#[test]
+fn a_waited_run_finishes_after_a_graceful_stop() {
+    let ended = run_with(
+        "run-wait",
+        "echo started\nread code\necho \"got:$code\"\nexit 0\n",
+        OnStop::status("test status"),
+        &[],
+        async |timer, cancel, codes| {
+            cancel.stop(Stop::Lawyer(GRACE));
+            // The grace is armed once the run has seen the stop and chosen to wait.
+            assert_eq!(timer.next_armed().await, GRACE);
+            codes
+                .send(PasteCode::new(zeroize::Zeroizing::new("go".to_owned())))
+                .await
+                .unwrap();
+        },
+    );
+    assert_eq!(ended, Ended::Exited(Some(0)));
+}
+
+/// A waited run still going when the grace passes is killed.
+#[test]
+fn a_waited_run_is_killed_when_the_grace_passes() {
+    let ended = run_with(
+        "run-wait-grace",
+        "echo started\nexec cat\n",
+        OnStop::status("test status"),
+        &[],
+        async |timer, cancel, _| {
+            cancel.stop(Stop::Lawyer(GRACE));
+            assert_eq!(timer.next_armed().await, GRACE);
+            assert!(timer.fire());
+        },
+    );
+    assert_eq!(ended, Ended::Cancelled);
+}
+
+/// A waited run is killed when the stop at once follows the graceful one (the quit's bound).
+#[test]
+fn a_waited_run_is_killed_by_the_stop_at_once() {
+    let ended = run_with(
+        "run-wait-kill",
+        "echo started\nexec cat\n",
+        OnStop::status("test status"),
+        &[],
+        async |_, cancel, _| {
+            cancel.stop(Stop::Quit);
+            cancel.cancel();
+        },
+    );
+    assert_eq!(ended, Ended::Cancelled);
+}
+
+/// `/cancel` goes only to a listener the run's own tree holds: with the callback port held by
+/// another process (this test), nothing connects to it, and the run is killed at the bound.
+#[test]
+fn no_cancel_goes_to_a_listener_another_process_holds() {
+    let other = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    other.set_nonblocking(true).unwrap();
+    let port = other.local_addr().unwrap().port();
+    let on_stop = OnStop {
+        how: Stopping::Cancel { port },
+        what: "codex login",
+        writes: false,
+    };
+    let ended = run_with(
+        "run-not-ours",
+        "echo started\nexec cat\n",
+        on_stop,
+        &[],
+        async |timer, cancel, _| {
+            cancel.stop(Stop::Lawyer(GRACE));
+            // Armed after the owner check and the send it would have made.
+            assert_eq!(timer.next_armed().await, GRACE);
+            assert!(timer.fire());
+        },
+    );
+    assert_eq!(ended, Ended::Cancelled);
+    let accepted = other.accept();
+    assert!(
+        matches!(&accepted, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+        "a connection reached another process's listener: {accepted:?}"
+    );
+}
+
+/// After a kill of a run that may write Codex's login file, that run's own home's file is
+/// removed when it is 0 bytes, and kept when it holds anything; a run that writes nothing, or
+/// another home, is never touched.
+#[test]
+fn a_kill_removes_only_an_empty_login_file_of_the_runs_own_home() {
+    let writes = OnStop {
+        how: Stopping::Wait,
+        what: "codex logout",
+        writes: true,
+    };
+    let cases: [(&str, &[u8], OnStop, bool); 3] = [
+        ("run-kill-empty", b"", writes, false),
+        ("run-kill-full", b"{\"x\":1}", writes, true),
+        (
+            "run-kill-no-write",
+            b"",
+            OnStop::status("test status"),
+            true,
+        ),
+    ];
+    for (tag, contents, on_stop, kept) in cases {
+        let homes = TestDir::new(tag);
+        let home = homes.0.join("home");
+        let file = login_file_for_tests(&home);
+        write_for_tests(&file, contents);
+        let other = login_file_for_tests(&homes.0.join("other"));
+        write_for_tests(&other, b"");
+        let ended = run_with(
+            tag,
+            "echo started\nexec cat\n",
+            on_stop,
+            &[("CODEX_HOME", &home)],
+            async |_, cancel, _| cancel.cancel(),
+        );
+        assert_eq!(ended, Ended::Cancelled);
+        assert_eq!(file.exists(), kept, "{tag}");
+        assert!(other.exists(), "{tag}: another home's file was touched");
+    }
+}
+
+/// A run whose job is already stopped never starts.
+#[test]
+fn a_stopped_job_starts_no_run() {
+    let dir = TestDir::new("run-stopped");
+    let marker = dir.0.join("ran");
+    let spec = spec(&dir, &format!("touch '{}'\n", marker.display()));
+    let cancel = Cancel::new();
+    cancel.stop(Stop::Quit);
+    let ran = block_on(run(
+        &launcher(),
+        &ManualTimer::new(),
+        spec,
+        &cancel,
+        None,
+        |_| {},
+    ))
+    .unwrap();
+    assert_eq!(ran.ended, Ended::Cancelled);
+    assert!(!marker.exists());
 }

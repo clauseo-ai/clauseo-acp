@@ -28,6 +28,10 @@ mod codex_cli;
 mod codex_status;
 
 #[cfg(test)]
+#[path = "signin/graceful.rs"]
+mod graceful;
+
+#[cfg(test)]
 #[path = "signin/queued.rs"]
 mod queued;
 

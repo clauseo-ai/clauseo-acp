@@ -9,8 +9,12 @@
 //!   Every event goes through `SigninHub::emit_job`, which drops it once the job is no
 //!   longer the agent's: a superseded job is silent, and its child is killed by its
 //!   [`Ticket::cancel`].
-//! - `cancel_sign_in` sets the ticket's cancel but keeps the job the agent's, so the job itself
-//!   reports `Failed { code: Cancelled }`, after its child is killed and its URL file removed.
+//! - `cancel_sign_in` stops the ticket's cancel gracefully (`Cancel::stop`, the lawyer's 2 s
+//!   grace) but keeps the job the agent's, so the job itself reports how it ended, after its
+//!   child has ended (by itself, or killed past the grace: `super::stopping`) and its URL file
+//!   is removed: `Failed { code: Cancelled }`, or for Codex what a status check then says.
+//!   The app's quit stops every job the same way (`Cancel::stop(Stop::Quit)`) and kills at its
+//!   bound; a superseded job and the drop of `Agents` kill at once.
 //! - The flow's last state ends the job; `None` ends it with the state unchanged.
 //!
 //! Reuse (piece 5) adds the lawyer's choices about a login they already have as tasks
@@ -35,6 +39,7 @@ use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::marker::{self, LoginSource};
 use crate::signin::queue::{self, Gate, Queue};
 use crate::signin::run::RunSpec;
+use crate::signin::stopping::OnStop;
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
 };
@@ -287,7 +292,8 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
     }
 
     /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`;
-    /// `script` is [`SigninJob::script`].
+    /// `script` is [`SigninJob::script`]. Killed at once on any stop ([`OnStop::KILL`]); a
+    /// caller whose run has a gentler end sets `on_stop`.
     pub(crate) fn spec<A: Into<OsString>>(
         &self,
         args: impl IntoIterator<Item = A>,
@@ -309,6 +315,9 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             env,
             cwd: self.home.clone(),
             limit,
+            on_stop: OnStop::KILL,
+            agent: self.ticket.agent.clone(),
+            lawyer_home: self.config.signin.lawyer_home(),
         }
     }
 }
