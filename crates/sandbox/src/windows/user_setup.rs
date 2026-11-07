@@ -6,7 +6,9 @@
 //! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). It runs
 //! hidden, with no error box from the shell (`SEE_MASK_FLAG_NO_UI`), and the wait has no limit:
 //! R17 calls `run` off the actor thread. A prompt declined (1223) is [`SetupError::Refused`];
-//! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, and a 1385 from
+//! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, as is an exe that
+//! isn't there as a regular file, checked before each start (`bundled::start_present`), or gone
+//! by the start (2 or 3: Windows security can quarantine it), and a 1385 from
 //! the launch (the approving account's sign-in) a failure saying so (`launch_error`). Once the
 //! exe ends, its exit code and `setup-result.json` say how ([`result_file::outcome`]): its
 //! 1385 (a sandbox user's logon right) is [`SetupError::Blocked`] too, and a data folder not
@@ -31,6 +33,7 @@ use windows::core::{PCWSTR, w};
 
 use super::NtfsAcl;
 use super::apply::forget_matter;
+use super::bundled::{SETUP_EXE, bundle_dir, start_present};
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
@@ -68,6 +71,15 @@ impl UserSetup {
             )));
         }
         Ok(UserSetup { data_dir, exe })
+    }
+
+    /// [`UserSetup::new`] with the setup exe bundled beside the running exe
+    /// (`bundled::SETUP_EXE`).
+    pub fn beside_app(data_dir: PathBuf) -> Result<UserSetup, SetupError> {
+        let dir = bundle_dir().ok_or_else(|| {
+            SetupError::Failed("the folder Clauseo runs from can't be found".to_owned())
+        })?;
+        UserSetup::new(data_dir, dir.join(SETUP_EXE))
     }
 
     /// Adds `n` pool users to a pool this user set up (D-B5): one prompt, as [`SandboxSetup::run`]
@@ -271,9 +283,15 @@ impl Drop for Process {
     }
 }
 
-/// Starts `exe` with `params` as the module says, waits for it, and gives its exit code. A
+/// Starts `exe` with `params` as the module says, waits for it, and gives its exit code. An
+/// exe that isn't a regular file is [`crate::Blocked::ToolMissing`] before anything starts; a
 /// launch that fails is `launch_error` of its code.
 fn launch(exe: &Path, params: &str) -> Result<u32, SetupError> {
+    start_present(exe, || start(exe, params))
+}
+
+/// [`launch`]'s start and wait, once the exe was found.
+fn start(exe: &Path, params: &str) -> Result<u32, SetupError> {
     let file: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
     let parameters: Vec<u16> = params.encode_utf16().chain([0]).collect();
     let mut info = SHELLEXECUTEINFOW {

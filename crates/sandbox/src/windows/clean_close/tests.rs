@@ -10,6 +10,7 @@ use super::*;
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, Sid, plan};
 use crate::windows::admit::{PathKind, admit_with};
+use crate::windows::bundled::fake_bundle;
 use crate::windows::fence::Neighbours;
 use crate::windows::ledger::{ByPath, Ledger, Take, ledger_path};
 use crate::windows::set_aside::{self, Checked};
@@ -122,7 +123,8 @@ impl Scene {
     }
 
     pub(super) fn launch(&self) -> LaunchCheck {
-        check_launch(&self.data, &self.ledger, &self.plan, &self.journal).unwrap()
+        let bundle = fake_bundle(&self.w.dir);
+        check_launch_beside(&bundle, &self.data, &self.ledger, &self.plan, &self.journal).unwrap()
     }
 
     pub(super) fn launch_path(&self) -> LaunchPath {
@@ -317,4 +319,26 @@ fn a_nested_instruction_file_made_renamed_in_or_removed_while_closed_never_skips
         let touched = check.touched_in_matter().unwrap();
         assert_eq!(touched, vec![(vec![std::ffi::OsString::from("a")], false)]);
     }
+}
+
+/// A bundled exe missing beside the app (Windows security can quarantine the set-up program)
+/// refuses the launch with `Blocked::ToolMissing`, before the record is read or removed; with
+/// every exe there the check runs as before.
+#[test]
+fn a_missing_bundled_exe_refuses_the_launch_with_tool_missing() {
+    let s = Scene::new("clean-tool-missing");
+    assert_eq!(s.close(), Closed::Written);
+    let bundle = fake_bundle(&s.w.dir);
+    crate::test_support::remove(&bundle.join(crate::windows::bundled::SETUP_EXE));
+    let refused = check_launch_beside(&bundle, &s.data, &s.ledger, &s.plan, &s.journal);
+    assert!(
+        matches!(
+            refused,
+            Err(crate::Error::Blocked(crate::Blocked::ToolMissing))
+        ),
+        "{refused:?}"
+    );
+    assert!(s.record_exists(), "nothing is read or removed");
+    assert_eq!(s.launch_path(), LaunchPath::Skipped);
+    assert!(!s.record_exists());
 }

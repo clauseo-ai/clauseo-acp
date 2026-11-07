@@ -324,8 +324,8 @@ fn exit_codes_round_trip() {
         launch_error(ERROR_ACCESS_DISABLED_BY_POLICY),
         SetupError::Blocked(crate::Blocked::Policy)
     );
-    let SetupError::Failed(other) = launch_error(2) else {
+    let SetupError::Failed(other) = launch_error(5) else {
         panic!("any other code is a failure");
     };
-    assert!(other.contains("error 2"), "{other}");
+    assert!(other.contains("error 5"), "{other}");
 }

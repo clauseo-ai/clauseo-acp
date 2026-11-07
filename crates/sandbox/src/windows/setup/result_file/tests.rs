@@ -190,10 +190,18 @@ fn the_launch_errors_map_as_d_b4_says() {
     );
     assert!(!APPROVER_LOGON_REFUSED.contains("ClauseoSandboxUsers"));
     assert!(APPROVER_LOGON_REFUSED.contains("whoever looks after this computer"));
-    let SetupError::Failed(other) = launch_error(2) else {
-        panic!("2 is a failure");
+    // No file or folder at the exe's path: Windows security can remove it before the start.
+    for gone in [2, 3] {
+        assert_eq!(
+            launch_error(gone),
+            SetupError::Blocked(Blocked::ToolMissing),
+            "{gone}"
+        );
+    }
+    let SetupError::Failed(other) = launch_error(5) else {
+        panic!("5 is a failure");
     };
-    assert!(other.contains("error 2"), "{other}");
+    assert!(other.contains("error 5"), "{other}");
 }
 
 #[test]
@@ -208,7 +216,13 @@ fn each_block_names_the_setting_for_it_and_no_path_or_sid() {
         policy.contains("policy") && policy.contains("clauseo-sandbox-setup.exe"),
         "{policy}"
     );
-    for words in [logon, policy] {
+    let missing = Blocked::ToolMissing.to_string();
+    assert_eq!(
+        missing,
+        "Windows security removed clauseo-sandbox-setup.exe, Clauseo's set-up program; \
+         whoever looks after this computer can restore it"
+    );
+    for words in [logon, policy, missing] {
         assert!(
             words.contains("whoever looks after this computer"),
             "{words}"
@@ -217,6 +231,10 @@ fn each_block_names_the_setting_for_it_and_no_path_or_sid() {
     }
     let text = serde_json::to_string(&Blocked::LogonRight).unwrap();
     assert_eq!(text, "\"logon_right\"");
+    let text = serde_json::to_string(&Blocked::ToolMissing).unwrap();
+    assert_eq!(text, "\"tool_missing\"");
+    let read: Blocked = serde_json::from_str("\"tool_missing\"").unwrap();
+    assert_eq!(read, Blocked::ToolMissing);
 }
 
 #[test]

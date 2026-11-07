@@ -69,8 +69,8 @@ pub enum SetupError {
     #[error("sandbox set-up failed: {0}")]
     Failed(String),
     /// A Windows setting blocks the set-up, which only whoever looks after the computer can
-    /// change (D-B4): a policy blocking the set-up program (1260), or a logon right the sandbox
-    /// users lack (1385).
+    /// change (D-B4): a policy blocking the set-up program (1260), a logon right the sandbox
+    /// users lack (1385), or the set-up program removed by Windows security.
     #[error("sandbox set-up is blocked: {0}")]
     Blocked(Blocked),
 }
@@ -86,6 +86,11 @@ pub enum Blocked {
     /// `ERROR_ACCESS_DISABLED_BY_POLICY` (1260) when the app starts the set-up program: a
     /// Windows policy (`AppLocker`, Software Restriction Policies) blocks it.
     Policy,
+    /// The set-up program, `clauseo-sandbox-setup.exe`, isn't beside the app as a regular file
+    /// (`windows::bundled`), or starting it gave `ERROR_FILE_NOT_FOUND` (2) or
+    /// `ERROR_PATH_NOT_FOUND` (3): Windows security (Defender) can quarantine it. Tier B can't
+    /// top up, reclaim or be removed without it, so it refuses to launch too.
+    ToolMissing,
 }
 
 impl std::fmt::Display for Blocked {
@@ -98,6 +103,10 @@ impl std::fmt::Display for Blocked {
             Blocked::Policy => {
                 "a Windows policy blocks clauseo-sandbox-setup.exe, Clauseo's set-up program; \
                  whoever looks after this computer can allow it"
+            }
+            Blocked::ToolMissing => {
+                "Windows security removed clauseo-sandbox-setup.exe, Clauseo's set-up program; \
+                 whoever looks after this computer can restore it"
             }
         })
     }

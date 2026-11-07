@@ -14,6 +14,10 @@ use crate::windows::shared_writes::SharedWrites;
 use crate::windows::sids::Sid;
 use crate::{Blocked, SetupError};
 
+/// `ERROR_FILE_NOT_FOUND`: the setup exe isn't there (Windows security may have removed it).
+pub const ERROR_FILE_NOT_FOUND: u32 = 2;
+/// `ERROR_PATH_NOT_FOUND`: the setup exe's folder isn't there.
+pub const ERROR_PATH_NOT_FOUND: u32 = 3;
 /// `ERROR_CANCELLED`: the prompt was declined.
 pub const ERROR_CANCELLED: u32 = 1223;
 /// `ERROR_ACCESS_DISABLED_BY_POLICY`: a policy blocks the setup exe.
@@ -107,7 +111,9 @@ impl SetupExit {
 }
 
 /// What a launch error from `ShellExecuteExW` means for the set-up (D-B4): 1223 (the prompt
-/// declined) is [`SetupError::Refused`]; 1260 is [`Blocked::Policy`], named for IT. A 1385 here
+/// declined) is [`SetupError::Refused`]; 1260 is [`Blocked::Policy`], named for IT; 2 and 3 are
+/// [`Blocked::ToolMissing`], since Windows security can remove the exe between the check that
+/// it is there (`bundled::start_present`) and the start. A 1385 here
 /// is the approving account's own sign-in, refused before the set-up program ran, so it is a
 /// failure saying so ([`APPROVER_LOGON_REFUSED`]); [`Blocked::LogonRight`] is the exe's 1385 only,
 /// from a sandbox user's logon. Any other code is a failure naming it.
@@ -115,6 +121,7 @@ pub fn launch_error(code: u32) -> SetupError {
     match code {
         ERROR_CANCELLED => SetupError::Refused,
         ERROR_ACCESS_DISABLED_BY_POLICY => SetupError::Blocked(Blocked::Policy),
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => SetupError::Blocked(Blocked::ToolMissing),
         ERROR_LOGON_TYPE_NOT_GRANTED => SetupError::Failed(APPROVER_LOGON_REFUSED.to_owned()),
         other => SetupError::Failed(format!(
             "Clauseo's set-up program didn't start (error {other})"

@@ -96,6 +96,12 @@ pub enum Error {
         /// for PR6 to show the lawyer.
         at: std::path::PathBuf,
     },
+    /// Windows tier B refuses to launch for a cause only whoever looks after the computer can
+    /// fix (D-B4): a bundled sandbox exe isn't beside the app (`Blocked::ToolMissing`, from
+    /// `windows::clean_close::check_launch`). Nothing was planned or written, and the caller
+    /// shows the cause rather than run on a weaker tier in silence.
+    #[error("the sandbox can't run: {0}")]
+    Blocked(crate::Blocked),
 }
 
 impl Error {
@@ -112,7 +118,8 @@ impl Error {
             | Error::NeighbourUnfenceable { .. }
             | Error::AclApply { .. }
             | Error::SetAside { .. }
-            | Error::CleanClose(_) => ErrorCode::AgentLaunchFailed,
+            | Error::CleanClose(_)
+            | Error::Blocked(_) => ErrorCode::AgentLaunchFailed,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
@@ -141,6 +148,14 @@ mod tests {
         assert_eq!(
             folder.to_string(),
             "the sandbox can't prepare the state folder: it is on a network drive"
+        );
+        let missing = Error::Blocked(crate::Blocked::ToolMissing);
+        assert_eq!(missing.code(), ErrorCode::AgentLaunchFailed);
+        assert!(
+            missing
+                .to_string()
+                .starts_with("the sandbox can't run: Windows security removed"),
+            "{missing}"
         );
     }
 }
