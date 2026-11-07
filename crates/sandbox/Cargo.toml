@@ -13,6 +13,12 @@ publish.workspace = true
 name = "clauseo-sandbox-setup"
 path = "src/bin/clauseo-sandbox-setup.rs"
 
+# Tier B's runner (S15 PR5): the host starts it as the desktop user; it starts itself again as the
+# matter's pool user, which starts the agent under the (B) token.
+[[bin]]
+name = "clauseo-sandbox-run"
+path = "src/bin/clauseo-sandbox-run.rs"
+
 [features]
 # Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
 test-support = []
@@ -105,6 +111,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # tier B's port check (src/windows/wfp/os_ports.rs): the dynamic range from WMI (System_Wmi,
 # System_Ole, System_Variant) and the listeners from GetExtendedTcpTable
 # (NetworkManagement_IpHelper).
+# The runner (S15 PR5, src/windows/{runner,token,pipe}): the named pipes (System_Pipes), its
+# private desktop (System_StationsAndDesktops, whose CreateDesktopW needs Graphics_Gdi), the
+# error mode (System_Diagnostics_Debug) and the kill-on-close job (System_JobObjects).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -113,6 +122,7 @@ windows = { workspace = true, features = [
   "Wdk_System_Threading",
   "Win32_Foundation",
   "Win32_Globalization",
+  "Win32_Graphics_Gdi",
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_NetManagement",
   "Win32_NetworkManagement_WindowsFilteringPlatform",
@@ -125,14 +135,18 @@ windows = { workspace = true, features = [
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
+  "Win32_System_JobObjects",
   "Win32_System_Ioctl",
   "Win32_System_Com",
+  "Win32_System_Diagnostics_Debug",
   "Win32_System_LibraryLoader",
   "Win32_System_Ole",
+  "Win32_System_Pipes",
   "Win32_System_ProcessStatus",
   "Win32_System_Rpc",
   "Win32_System_Registry",
   "Win32_System_Services",
+  "Win32_System_StationsAndDesktops",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
