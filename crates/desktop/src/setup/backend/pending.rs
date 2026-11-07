@@ -53,9 +53,10 @@ fn installed(state: Option<&InstallState>) -> bool {
 }
 
 /// A press for `agent` whose checks passed, with the gate held: when the agent is not
-/// installed, or a press is still kept for it, keeps `press` with `switch`, the lawyer's yes (replacing the one kept before
-/// it), shows `Queued` and starts or joins the install; `true` then. `false` when the agent
-/// is installed and nothing is kept, so the caller starts the sign-in at once.
+/// installed, or a press is still kept for it, keeps `press` with `switch`, the lawyer's yes
+/// (replacing the one kept before it), shows `Queued` and starts or joins the install; `true`
+/// then. `false` when the agent is installed and nothing is kept, so the caller starts the
+/// sign-in at once.
 ///
 /// A kept press is replaced even once the install is `Ready`: S18 says `Ready` before the
 /// pump has handled it (it writes the entry first), and a press started directly then would be
@@ -78,6 +79,23 @@ pub(super) fn keep_press(
     backend.compose.signin(agent, SigninState::Queued);
     backend.agents.install(agent);
     true
+}
+
+/// A press for `agent` whose checks passed, with the gate held: kept ([`keep_press`]), or
+/// started at once with `switch`, the lawyer's yes (`switch.rs`).
+pub(super) fn keep_or_start(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    press: Press,
+    switch: bool,
+) -> Result<(), HostError> {
+    if keep_press(backend, agent, press, switch) {
+        return Ok(());
+    }
+    call(backend, agent, press, switch)?;
+    tracing::info!(%agent, method = ?press, "sign-in started");
+    backend.replaced(agent);
+    Ok(())
 }
 
 /// Whether a `StartSignIn` that went past the sign-in join (`Setup` saw a kept press) finds,
@@ -147,9 +165,19 @@ fn start_press(backend: &AgentsBackend, agent: &AgentId, kept: Kept) -> Result<(
     if !kept.switch && backend.agents.replaces_own_login(agent) {
         return Err(signin_error(&SigninError::OwnLoginPresent(agent.clone())));
     }
-    match kept.press {
-        Press::SignIn(method) => switch::sign_in(&*backend.agents, agent, method, kept.switch),
-        Press::DifferentAccount => switch::use_different(&*backend.agents, agent, kept.switch),
+    call(backend, agent, kept.press, kept.switch)
+}
+
+/// `press`'s S18 call, the confirmed form with `switch`.
+fn call(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    press: Press,
+    switch: bool,
+) -> Result<(), HostError> {
+    match press {
+        Press::SignIn(method) => switch::sign_in(&*backend.agents, agent, method, switch),
+        Press::DifferentAccount => switch::use_different(&*backend.agents, agent, switch),
     }
     .map_err(|error| signin_error(&error))
 }

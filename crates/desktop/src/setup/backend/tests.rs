@@ -17,6 +17,7 @@ mod leave;
 mod network;
 mod once;
 mod pending;
+mod pending_switch;
 mod quit;
 mod races;
 mod refusals;

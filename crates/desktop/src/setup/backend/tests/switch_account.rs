@@ -16,7 +16,7 @@ use crate::bridge::lock;
 use crate::setup::confirm::{Ask, words};
 use crate::test_support::block_on;
 
-fn signed_in(source: Source) -> SigninState {
+pub(super) fn signed_in(source: Source) -> SigninState {
     SigninState::SignedIn {
         email: Some("clauseo@firm.example".to_owned()),
         plan: None,
@@ -26,12 +26,12 @@ fn signed_in(source: Source) -> SigninState {
 }
 
 /// How many times the fake `Agents` was asked `name`.
-fn asked(rig: &Rig, name: &str) -> usize {
+pub(super) fn asked(rig: &Rig, name: &str) -> usize {
     rig.calls().iter().filter(|(call, _)| *call == name).count()
 }
 
 /// Every call that would start a Codex login, confirmed or not.
-fn sign_ins(rig: &Rig) -> usize {
+pub(super) fn sign_ins(rig: &Rig) -> usize {
     [
         "sign_in",
         "sign_in_device_code",
@@ -45,19 +45,19 @@ fn sign_ins(rig: &Rig) -> usize {
     .sum()
 }
 
-fn start(agent: &AgentId) -> SetupCommand {
+pub(super) fn start(agent: &AgentId) -> SetupCommand {
     command("start_sign_in", agent, &json!({}))
 }
 
-fn device(agent: &AgentId) -> SetupCommand {
+pub(super) fn device(agent: &AgentId) -> SetupCommand {
     command("use_device_code", agent, &json!({}))
 }
 
-fn different(agent: &AgentId) -> SetupCommand {
+pub(super) fn different(agent: &AgentId) -> SetupCommand {
     command("use_different_account", agent, &json!({}))
 }
 
-fn switch() -> Ask {
+pub(super) fn switch() -> Ask {
     Ask::SwitchAccount {
         name: "Codex".to_owned(),
     }
