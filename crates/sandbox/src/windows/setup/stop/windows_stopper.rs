@@ -213,7 +213,7 @@ impl Stopper for WindowsStopper {
         u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime)
     }
 
-    fn record_completed(&mut self, at: u64) -> Result<(), Failed> {
+    fn record_completed(&mut self, at: u64) -> Result<u64, Failed> {
         record_write::write_stop_completed(RECORD_KEY, at).map_err(|error| error.to_string())
     }
 

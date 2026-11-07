@@ -102,9 +102,11 @@ pub const RESET_SIDS: &str = "ResetSids";
 /// as it is. Outside [`MachineRecord`]; deleted with the
 /// set-up's values.
 pub const STOP_COMPLETED: &str = "StopCompleted";
-/// `StopLeft` (`REG_DWORD`): the pool users' processes and jobs the completed stop left,
-/// written with [`STOP_COMPLETED`], so always 0.
-pub const STOP_LEFT: &str = "StopLeft";
+/// `StopSequence` (`REG_QWORD`): how many stops have completed, counted up by one with each
+/// [`STOP_COMPLETED`], under the same set-up lock (0 when absent). The follow-up's unclean-session
+/// marker records the sequence it saw and clears only once `StopSequence` is greater, so nothing
+/// trusts the clock; `StopCompleted` is for diagnostics. Deleted with the set-up's values.
+pub const STOP_SEQUENCE: &str = "StopSequence";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
 pub const SETUP_VALUES: [&str; 8] = [
@@ -115,7 +117,7 @@ pub const SETUP_VALUES: [&str; 8] = [
     REMOVING,
     RESET_SIDS,
     STOP_COMPLETED,
-    STOP_LEFT,
+    STOP_SEQUENCE,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -433,8 +435,11 @@ mod tests {
         assert_eq!(RESET_SIDS, "ResetSids");
         assert!(SETUP_VALUES.contains(&RESET_SIDS));
         // So do its completion's.
-        assert_eq!((STOP_COMPLETED, STOP_LEFT), ("StopCompleted", "StopLeft"));
-        assert!(SETUP_VALUES.contains(&STOP_COMPLETED) && SETUP_VALUES.contains(&STOP_LEFT));
+        assert_eq!(
+            (STOP_COMPLETED, STOP_SEQUENCE),
+            ("StopCompleted", "StopSequence")
+        );
+        assert!(SETUP_VALUES.contains(&STOP_COMPLETED) && SETUP_VALUES.contains(&STOP_SEQUENCE));
     }
 
     #[test]

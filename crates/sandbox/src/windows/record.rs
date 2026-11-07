@@ -25,7 +25,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_MULTI_SZ,
-    RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    RRF_RT_REG_QWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
@@ -189,6 +189,27 @@ pub(crate) fn read_dword(subkey: PCWSTR, value: PCWSTR) -> Result<Option<u32>, R
             subkey,
             value,
             RRF_RT_REG_DWORD | RRF_SUBKEY_WOW6464KEY,
+            None,
+            Some((&raw mut answer).cast()),
+            Some(&raw mut size),
+        )
+    };
+    Ok(present(read)?.then_some(answer))
+}
+
+/// The `REG_QWORD` `value` of `HKLM\<subkey>` (64-bit view); `None` when missing.
+pub(crate) fn read_qword(subkey: PCWSTR, value: PCWSTR) -> Result<Option<u64>, RecordError> {
+    let mut answer = 0u64;
+    let mut size = u32::try_from(size_of::<u64>())
+        .map_err(|error| RecordError::Other(io::Error::other(error)))?;
+    // SAFETY: the names are NUL-terminated; `answer` is live, writable and `size` bytes long
+    // for the call.
+    let read = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            subkey,
+            value,
+            RRF_RT_REG_QWORD | RRF_SUBKEY_WOW6464KEY,
             None,
             Some((&raw mut answer).cast()),
             Some(&raw mut size),
