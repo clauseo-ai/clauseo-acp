@@ -14,9 +14,18 @@ import { InstallBar as Bar } from "./parts.tsx";
 
 /** Where the install is, as the line shows it. The app reads it from the host's `InstallProgress`. */
 export type InstallView =
-  /** Not here yet, about to download or paused: the size it will download, in MB. */
+  /** Not here yet, about to download or paused: the size it will download, about, in MB. 0 when
+   * no size is known, and then the line says nothing. */
   | { kind: "missing"; mb: number }
-  | { kind: "downloading"; mb: number; received: number; total: number }
+  /** Downloading: the bytes for the bar, and the whole MB the words say (done never above
+   * total). */
+  | {
+      kind: "downloading";
+      received: number;
+      total: number;
+      doneMb: number;
+      totalMb: number;
+    }
   | { kind: "installing" }
   | { kind: "offline" }
   | { kind: "blocked"; hosts: readonly string[] }
@@ -77,15 +86,27 @@ export function installLine(
     </Button>
   );
   switch (view.kind) {
-    case "missing": {
-      const words = w("Getting {name} ready. About {mb} MB.", { name, mb: view.mb });
-      return { kind: "wait", words, pill: null, actions: wrap(null) };
-    }
+    case "missing":
+      // no size to say (a download of no bytes): no line at all, so the next state is a change
+      // the reader hears
+      if (view.mb === 0) return null;
+      return {
+        kind: "wait",
+        words: w("Needs a download of about {mb} MB", { mb: view.mb }),
+        pill: null,
+        actions: wrap(null),
+      };
     case "downloading": {
-      const words = w("Getting {name} ready. About {mb} MB.", { name, mb: view.mb });
+      const words = w("Getting {name} ready… {done} MB of {total} MB", {
+        name,
+        done: view.doneMb,
+        total: view.totalMb,
+      });
       return {
         kind: "wait",
         words,
+        // the bytes move every 250 ms: the live region hears only that the download goes on
+        said: w("Getting {name} ready…", { name }),
         pill: null,
         actions: wrap(<Bar received={view.received} total={view.total} words={words} />),
       };
@@ -93,7 +114,7 @@ export function installLine(
     case "installing":
       return {
         kind: "wait",
-        words: w("Setting up {name} on this computer.", { name }),
+        words: w("Setting up {name}…", { name }),
         pill: null,
         working: true,
         actions: wrap(null),

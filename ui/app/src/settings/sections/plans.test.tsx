@@ -206,12 +206,12 @@ test("ChatGPT not added: Add ChatGPT with its size, install_agent, then start_si
   });
   expect(words("chatgpt")).toContain("Uses your ChatGPT plan.");
   expect(words("chatgpt")).toContain(
-    "Only ChatGPT's part downloads, about 165 MB. Signing in happens in your browser.",
+    "Needs a download of about 170 MB. Signing in happens in your browser.",
   );
   await press(document.querySelector('[data-testid="plans-add"]'));
   expect(t.setups()).toEqual([{ install_agent: { agent: CODEX } }]);
   await play(t, install(CODEX, { downloading: { received: 10_000_000, total: 165_000_000 } }));
-  expect(words("chatgpt")).toContain("Getting ChatGPT ready. About 165 MB.");
+  expect(words("chatgpt")).toContain("Getting ChatGPT ready… 10 MB of 165 MB");
   await play(
     t,
     install(CODEX, { failed: { code: "agent.install_failed", hosts: [], log: ["x"] } }),
@@ -225,6 +225,18 @@ test("ChatGPT not added: Add ChatGPT with its size, install_agent, then start_si
   ]);
   await play(t, signIn(CODEX, "queued"));
   expect(t.setups().filter((c) => "start_sign_in" in c)).toHaveLength(1);
+});
+
+test("ChatGPT with no size known: the card's line says what to expect, with no size", async () => {
+  await mountPlans({
+    first: [
+      install(CLAUDE, READY),
+      signIn(CLAUDE, signed()),
+      install(CODEX, { missing: { download_bytes: 0 } }),
+    ],
+  });
+  expect(words("chatgpt")).toContain("Signing in happens in your browser.");
+  expect(words("chatgpt")).not.toContain("Needs a download");
 });
 
 test("a declined install confirm leaves Add ChatGPT as it was, and says nothing changed", async () => {

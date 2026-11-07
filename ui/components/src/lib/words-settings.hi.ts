@@ -72,8 +72,9 @@ export const HI = {
   "Look for my {app} sign-in": "मेरा {app} साइन इन खोजें",
   "Uses your ChatGPT plan.": "आपके ChatGPT प्लान का उपयोग करता है।",
   "Add ChatGPT": "ChatGPT जोड़ें",
-  "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.":
-    "केवल ChatGPT वाला हिस्सा डाउनलोड होता है, लगभग {mb} MB। साइन इन आपके ब्राउज़र में होता है।",
+  "Needs a download of about {mb} MB. Signing in happens in your browser.":
+    "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
+  "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
   "Other ways in": "जुड़ने के दूसरे तरीके",
   "Change key": "key बदलें",
   "Remove key": "key हटाएँ",
