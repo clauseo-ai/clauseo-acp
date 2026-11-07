@@ -728,6 +728,91 @@ ownership by hand as an administrator.
 fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
 for `--reclaim`.
 
+### The runner (PR5)
+
+`clauseo-sandbox-run.exe` starts each agent; `windows/runner.rs` holds the chain.
+
+- **Two runners.** The host starts the outer runner as the lawyer through `spawn_in_tree`, so its
+  pipes, job and shutdown ladder are the ones every agent has. The outer reads a launch file from
+  `<data_dir>\sandbox\run\` only if the lawyer owns it and only the lawyer, `SYSTEM` and
+  `Administrators` may open it, and removes it. It reads the pool user's password from
+  `secrets.bin` into a buffer wiped as soon as `CreateProcessWithLogonW` (`LOGON_WITH_PROFILE`)
+  returns, and starts itself again, suspended, as the pool user (the inner runner). The inner
+  goes into a job with `KILL_ON_JOB_CLOSE` and no breakaway before it runs; the job's one handle
+  is the outer's, so ending the outer (the host's job does) ends the inner runner and the agent's
+  whole tree. Error 1058 (Secondary Logon disabled) is `SetUpFailed` with set-up's own cause; a
+  secret that couldn't be read fails that launch only.
+- **DLL loads.** Both runners call `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first
+  in `main`, and the exe is linked as the setup exe is (`build.rs`): its static imports load
+  from System32 (`/DEPENDENTLOADFLAG:0x800`), and `userenv.dll`, whose own imports aren't all
+  KnownDLLs, is delay-loaded; a CI test reads the import directories. The inner runner starts in
+  System32, a folder its Low agent can't write. An agent exit code in the runner's own range
+  comes back as `AgentReserved`, never as a runner or set-up failure. The host removes the
+  launch file if the outer exits without having removed it. If the outer is killed between the
+  logon and the job, a suspended inner runner is left that never runs.
+- **A window station and desktop of the agent's own.** The outer makes a window station,
+  `ClauseoRun-<16 hex>`, holding one desktop, each naming only `SYSTEM` and the pool user,
+  labelled Low, before the inner runner joins the job; the agent starts on it. Neither the
+  lawyer's `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a service
+  window station grants the token anything, and user32 then fails to start the agent
+  (`0xC0000142`; the first Windows runs of the harness). Its own station also keeps the agent's
+  clipboard and global atoms apart from the lawyer's.
+- **UI limits on the job:** reading and writing the clipboard, global atoms, other processes'
+  USER handles, system parameters, display settings, exiting Windows, and making or switching
+  desktops. `WinSta0`, not the desktop, owns the clipboard and the global atom table, so a
+  private desktop alone doesn't keep an agent from the lawyer's; Chromium's sandbox sets the same
+  limits. The desktop limit keeps the agent from making its desktop the one the lawyer sees.
+- **The token** is (B) as above, made by the inner runner from its own token with
+  `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
+  (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
+  only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
+  shut to it: the outer reads the inner's token user and gives its process and first thread a
+  protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
+  `READ_CONTROL`, while the inner is still suspended (`CreateProcessWithLogonW` takes no
+  descriptor, so the pid exists with the logon's default DACL from its return until then, before
+  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
+  after reading the launch it adds the lawyer's query and shuts every thread it has; once the
+  agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
+  gives its default DACL the threads' entries so a thread the system starts in it later is shut
+  too, and shuts every thread again. No
+  agent of the pool user, the new one or one already running, opens its Medium, unrestricted
+  token (the harness's `runners` row first found query and duplicate open). The agent's own
+  token gets an explicit DACL naming the pool user. Both runner exes are GUI-subsystem, so
+  neither gets a console host. It makes the agent's profile folders part by part relative to
+  each parent's handle, never through a link.
+- **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
+  agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
+  only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
+  `WRITE_DAC`, `WRITE_OWNER` or new instance) and no one else anything, so another matter's
+  agent gets error 5, and a Medium label with no-read-up and no-write-up, so a Low agent of the
+  same matter can't open one by name either. Before it sends a byte it checks each client is
+  the inner runner's process, and that process's token user the pool user. The launch goes over
+  `ctl`, never the command line, which `CreateProcessWithLogonW` caps at 1024 characters.
+- **The environment.** `USERPROFILE`, `HOME`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`
+  and `TEMP`/`TMP` point under the state folder (the session's temp folder when the policy has
+  one). A variable that points into the lawyer's profile outside the paths the launch grants is
+  dropped, and so is a `PATH` or `PSModulePath` entry there outside the runtime paths. git uses
+  OpenSSL (`GIT_CONFIG_COUNT=1`, `http.sslBackend=openssl`): Schannel fails under any
+  restricting-SID token. System32's `curl.exe` (`SEC_E_NO_CREDENTIALS`) and PowerShell's web
+  calls fail for the same reason, a known breakage.
+- **The CA bundle.** Codex's rustls loads no roots from the Windows store under the token, so
+  `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` name `<data_dir>\sandbox-ca\roots.pem`: the local
+  machine's and the current user's `Root` stores (group policy and enterprise included), less
+  anything in `Disallowed`, anything not self-issued and roots their store properties limit. It
+  is written once per app start and when the pool changes, atomically, owned by the lawyer,
+  readable by each pool user and writable by none. A firm's CA files (the launch's `firm_ca`,
+  which R17 fills from `network.ca_certs`; never the spec's own `SSL_CERT_FILE`) are appended to
+  it, each certificate once, only a CA's and none in `Disallowed`, into a merged file beside it
+  with the same descriptor. `SSL_CERT_FILE` makes every OpenSSL tool in the sandbox trust exactly
+  the machine's roots and the firm's, which is intended. The egress proxy (S16) tunnels TLS and
+  never terminates it, so it has no CA to add.
+- **M3.** Tier B never grants on, links from or points at the lawyer's `~\.codex`. Before any
+  entry is applied, the launcher (PR6, R17) calls `codex_link_in_policy`: a policy path lying in
+  it is refused, and so is a credential link that is a symbolic link or is `~\.codex\auth.json`
+  by file ID (a hard link to it). The outer runner checks the same again before logon, and also
+  refuses a `CODEX_HOME` in it. The path checks compare text: a short 8.3 name of the lawyer's
+  profile folder isn't caught, a known gap.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

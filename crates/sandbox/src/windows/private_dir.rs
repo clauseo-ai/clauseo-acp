@@ -294,6 +294,11 @@ pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
     Handle::open(path)?.owner()
 }
 
+/// Makes this thread's user the owner of `path` (not followed if a link): S15 `PR5`'s launch file.
+pub(crate) fn own_file(path: &Path) -> io::Result<()> {
+    Handle::open(path)?.set_owner(&current_user_sid()?)
+}
+
 #[cfg(test)]
 /// Makes `sid` the owner of `path`, through a handle opened without following a link. Needs
 /// `WRITE_OWNER`, and `sid` must be one the token may set as owner, unless it holds the restore

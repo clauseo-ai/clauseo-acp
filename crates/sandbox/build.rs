@@ -12,6 +12,12 @@
 //! their first call, after `main` has run `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`,
 //! so they and their own imports come from System32. `tests/setup_exe.rs` checks the exe's
 //! import and delay-import directories.
+//!
+//! The runner exe (`clauseo-sandbox-run`, S15 `PR5`) runs as the user, so it gets no manifest,
+//! but it sits in the same folder and starts the agent under another account: it gets the same
+//! flag, and `userenv.dll` (`GetUserProfileDirectoryW`) delay-loaded, its one direct import
+//! that isn't vetted in `tests/setup_exe.rs`. It reaches no `Net*` call, so it doesn't import
+//! `netapi32.dll`; `/DELAYLOAD` of a DLL it doesn't import would only warn (LNK4199).
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -26,6 +32,13 @@ fn main() {
             "delayimp.lib",
         ] {
             println!("cargo:rustc-link-arg-bin=clauseo-sandbox-setup={arg}");
+        }
+        for arg in [
+            "/DEPENDENTLOADFLAG:0x800",
+            "/DELAYLOAD:userenv.dll",
+            "delayimp.lib",
+        ] {
+            println!("cargo:rustc-link-arg-bin=clauseo-sandbox-run={arg}");
         }
     }
 }

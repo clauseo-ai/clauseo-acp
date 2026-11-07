@@ -44,6 +44,24 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Makes the agent's profile folder `path`, below the folder `base` (which must exist), as this
+/// process's user: the inner runner, as the pool user, makes `<state>\AppData\Roaming` and the
+/// rest its environment names (S15 `PR5`). Each part below `base` is opened or made relative to
+/// its parent's handle, never through a link (`set_aside::folder_chain`, `OBJ_DONT_REPARSE`), and
+/// refused if it is a reparse point: a junction another session's agent swaps in at any moment
+/// is never followed.
+#[cfg(windows)]
+pub(crate) fn make_agent_folder(base: &Path, path: &Path) -> io::Result<()> {
+    let below = path
+        .strip_prefix(base)
+        .map_err(|_outside| io::Error::new(io::ErrorKind::InvalidInput, "not below its base"))?;
+    let parts: Vec<std::ffi::OsString> = below
+        .components()
+        .map(|part| part.as_os_str().to_owned())
+        .collect();
+    super::set_aside::make_folders(base, &parts)
+}
+
 /// Renames `from` (not followed if a link) to `to`, refusing (`AlreadyExists`) when something
 /// is at `to`, since a rename over a file (or, on Unix, an empty folder) would succeed. For the
 /// set-aside's tests: the agent's renames, and the moves of their stand-in for NTFS.

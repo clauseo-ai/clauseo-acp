@@ -56,6 +56,7 @@ mod acl_bytes;
 pub mod acl_plan;
 pub mod admit;
 pub mod apply;
+pub mod ca_bundle;
 pub mod clean_close;
 #[cfg(windows)]
 mod detect;
@@ -65,12 +66,14 @@ mod folder;
 pub mod ledger;
 pub mod marker;
 pub mod matters;
+pub mod pipe;
 pub mod pool;
 #[cfg(windows)]
 mod private_dir;
 pub mod reclaim;
 #[cfg(windows)]
 mod record;
+pub mod runner;
 pub mod secrets;
 mod set_aside;
 // Set-up's engine calls `fence_registered`, which builds where it does.
@@ -83,6 +86,10 @@ pub mod sids;
 mod test_acl;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_dacl;
+#[cfg(test)]
+#[cfg(windows)]
+mod test_pool;
+pub mod token;
 // The host's data folder fence tests make junctions too (`test-support`).
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_junction;

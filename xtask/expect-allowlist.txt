@@ -473,3 +473,39 @@ crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line 
 # named like the variants beside it, so no exit code is used twice.
 crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
 crates/sandbox/src/windows/reclaim/taken_tests.rs timed clippy::disallowed_methods
+# S15 PR5: tier B's runner (clauseo-sandbox-run), the (B) token, the runner pipes and the CA bundle.
+crates/sandbox/src/bin/clauseo-sandbox-run.rs exit_with clippy::exit
+crates/sandbox/src/bin/clauseo-sandbox-run.rs main clippy::print_stderr
+crates/sandbox/src/windows/token/os.rs - unsafe_code
+crates/sandbox/src/windows/pipe/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
+crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
+crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
+crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
+crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code
+crates/sandbox/src/windows/test_pool.rs - unsafe_code
+crates/sandbox/src/windows/test_pool.rs run_powershell clippy::disallowed_methods
+crates/sandbox/src/windows/token/ntfs_tests.rs - unsafe_code
+crates/sandbox/src/windows/pipe/ntfs_tests.rs - unsafe_code
+# S15 PR5: the VM and CI harness for tier B's runner (examples/s15_launch_vm).
+crates/sandbox/examples/s15_launch_vm/win.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/ui.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/probe.rs exit_with clippy::exit
+crates/sandbox/examples/s15_launch_vm/sys.rs make_dir clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs write_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs copy_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs remove_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs remove_tree clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs start clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs output clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs now clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs sleep clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/win_sec.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_desk.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/sys.rs hard_link clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs symlink_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/win_thread.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_ctl.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_logon.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
