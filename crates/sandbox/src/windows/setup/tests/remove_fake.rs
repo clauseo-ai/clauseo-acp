@@ -205,6 +205,15 @@ impl Removal for Remover {
         self.call(format!("stop_strays {}", rids(pool)))
     }
 
+    fn remove_network(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        assert_eq!(
+            owner.as_str(),
+            OWNER,
+            "the grant taken back is the record's owner's"
+        );
+        self.call("remove_network".to_owned())
+    }
+
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {
         self.call(format!("account_name {}", rid(sid)))?;
         Machine::account_name(&mut self.m, sid)
