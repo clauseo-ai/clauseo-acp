@@ -22,8 +22,9 @@ use super::{FolderProbes, PROBE_WAIT, probe_folder, probe_located};
 use crate::pipeline::tests::support::TempDir;
 use crate::{Host, HostConfig, HostHandle, HostJoin, LocatedFile, ManualClock};
 
-/// How long a test waits for the host's threads before it fails.
-const PATIENCE: Duration = Duration::from_secs(30);
+/// How long a test waits for the host's threads before it fails: well inside nextest's 30 s, so
+/// a probe never called fails here, saying which wait it was, rather than timing out.
+const PATIENCE: Duration = Duration::from_secs(10);
 
 /// The new matter's name.
 const NAME: &str = "Smith v Jones";
@@ -49,7 +50,9 @@ fn held_stand_in<A: ?Sized, B: ?Sized, T: Clone + Send + 'static>(
     let stand_in = move |a: &A, b: &B| {
         let early = first.then(|| probe(a, b));
         let _told = enter.lock().map(|enter| enter.send(()));
-        let _released = released.lock().map(|released| released.recv());
+        let _released = released
+            .lock()
+            .map(|released| released.recv_timeout(PATIENCE));
         let found = early.unwrap_or_else(|| probe(a, b));
         let _told = answer.lock().map(|answer| answer.send(found.clone()));
         found
@@ -146,7 +149,14 @@ fn new_folder(dir: &Path) -> PathBuf {
 /// Waits until the probe's [`PROBE_WAIT`] timer is armed.
 fn probe_wait_armed(clock: &ManualClock) {
     let armed = clock.clone();
-    block_on(async move { while armed.next_armed().await != PROBE_WAIT {} });
+    let (told, heard) = mpsc::channel();
+    std::thread::spawn(move || {
+        block_on(async move { while armed.next_armed().await != PROBE_WAIT {} });
+        let _gone = told.send(());
+    });
+    heard
+        .recv_timeout(PATIENCE)
+        .expect("the probe's 10 s timer was never armed");
 }
 
 #[test]
@@ -155,7 +165,9 @@ fn a_create_matter_on_a_hung_share_leaves_the_host_answering() {
     let clock = clock();
     let (host, join, held) = start(dir.path(), &clock);
     let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
 
     // The actor answers while the probe is held.
     assert_eq!(folder_matters(&host), 0);
@@ -177,7 +189,13 @@ fn a_create_matter_on_a_hung_share_leaves_the_host_answering() {
 
     // The probe answers late: nothing is made.
     held.release.send(()).unwrap();
-    assert!(!held.answered.recv_timeout(PATIENCE).unwrap().1);
+    assert!(
+        !held
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered")
+            .1
+    );
     assert_eq!(folder_matters(&host), 0, "a matter was stored");
     assert!(!new_folder(dir.path()).exists());
     block_on(host.shutdown()).unwrap();
@@ -190,7 +208,9 @@ fn a_create_matter_whose_probe_answers_creates_it() {
     let clock = clock();
     let (host, join, held) = start(dir.path(), &clock);
     let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
     held.release.send(()).unwrap();
     let outcome = created.join().unwrap().unwrap();
     assert!(matches!(outcome, CommandOutcome::MatterCreated { .. }));
@@ -207,13 +227,29 @@ fn two_creates_of_the_same_name_while_the_probe_waits_make_one_matter() {
     let (host, join, held) = start(dir.path(), &clock);
     let first = create(&host, 1);
     let second = create(&host, 2);
-    held.entered.recv_timeout(PATIENCE).unwrap();
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
     // Both probes find no folder: neither create has made it yet.
     held.release.send(()).unwrap();
     held.release.send(()).unwrap();
-    assert!(!held.answered.recv_timeout(PATIENCE).unwrap().1);
-    assert!(!held.answered.recv_timeout(PATIENCE).unwrap().1);
+    assert!(
+        !held
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered")
+            .1
+    );
+    assert!(
+        !held
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered")
+            .1
+    );
 
     let answers = [first.join().unwrap(), second.join().unwrap()];
     let made = answers.iter().filter(|answer| answer.is_ok()).count();
@@ -235,7 +271,9 @@ fn a_host_stopping_while_the_probe_waits_drops_its_answer() {
     let clock = clock();
     let (host, join, held) = start(dir.path(), &clock);
     let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
 
     // Shutdown does not wait for the probe, and the create is answered as closed.
     block_on(host.shutdown()).unwrap();
@@ -245,7 +283,13 @@ fn a_host_stopping_while_the_probe_waits_drops_its_answer() {
 
     // The probe answers with the actor gone: nothing is made, and nothing panics.
     held.release.send(()).unwrap();
-    assert!(!held.answered.recv_timeout(PATIENCE).unwrap().1);
+    assert!(
+        !held
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered")
+            .1
+    );
     assert!(!new_folder(dir.path()).exists());
     block_on(async {
         let store = Store::open(StoreOptions::new(dir.path().join("data")))
@@ -265,18 +309,15 @@ fn a_locate_file_on_a_hung_share_leaves_the_host_answering() {
     let dir = TempDir::new("probe-locate");
     let clock = clock();
     let (host, join, held, locate) = start_both(dir.path(), &clock);
-    let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
-    held.release.send(()).unwrap();
-    created.join().unwrap().unwrap();
-    let paper = new_folder(dir.path()).join("brief.txt");
-    crate::write::write_file(&paper, b"x").unwrap();
-    let file = block_on(host.register_file(paper)).unwrap();
+    let (file, paper) = matter_with_a_file(&host, &held);
 
     let asking = host.clone();
     let located =
         std::thread::spawn(move || block_on(asking.locate_file(Principal::LocalDesktop, file)));
-    locate.entered.recv_timeout(PATIENCE).unwrap();
+    locate
+        .entered
+        .recv_timeout(PATIENCE)
+        .expect("the locate probe was never entered");
     // The actor answers while the probe is held.
     assert_eq!(folder_matters(&host), 1);
     assert!(
@@ -294,25 +335,38 @@ fn a_locate_file_on_a_hung_share_leaves_the_host_answering() {
     // The late answer is dropped; a locate whose probe answers finds the file.
     locate.release.send(()).unwrap();
     assert_eq!(
-        locate.answered.recv_timeout(PATIENCE).unwrap(),
+        locate
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered"),
         (true, true)
     );
     locate.release.send(()).unwrap();
     let found = block_on(host.locate_file(Principal::LocalDesktop, file)).unwrap();
-    assert_eq!(found.path, new_folder(dir.path()).join("brief.txt"));
+    assert_eq!(found.path, paper);
     block_on(host.shutdown()).unwrap();
     join.join().unwrap();
 }
 
 /// A matter on the list, made by command 1, with a file in its folder: the file's ref.
-fn matter_with_a_file(host: &HostHandle, held: &Held<(PathBuf, bool)>, dir: &Path) -> FileRefId {
+///
+/// The file is named under the matter's folder as the host stores it (its parent canonicalised
+/// by the probe), as the desktop names a matter's papers: on macOS the temporary folder is
+/// `/var/...`, a link to `/private/var/...`, and a ref under the other spelling is in no
+/// matter's folder (`locate.rs`, `owner`), so its probe would never run.
+fn matter_with_a_file(host: &HostHandle, held: &Held<(PathBuf, bool)>) -> (FileRefId, PathBuf) {
     let created = create(host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
     held.release.send(()).unwrap();
-    created.join().unwrap().unwrap();
-    let paper = new_folder(dir).join("brief.txt");
+    let CommandOutcome::MatterCreated { matter } = created.join().unwrap().unwrap() else {
+        panic!("no matter made");
+    };
+    let folder = block_on(host.matter_folder(Principal::LocalDesktop, matter)).unwrap();
+    let paper = folder.join("brief.txt");
     crate::write::write_file(&paper, b"x").unwrap();
-    block_on(host.register_file(paper)).unwrap()
+    (block_on(host.register_file(paper.clone())).unwrap(), paper)
 }
 
 fn locate_on_a_thread(
@@ -327,7 +381,8 @@ fn locate_on_a_thread(
 fn stopping(host: &HostHandle, told: &mpsc::Receiver<()>) -> JoinHandle<Result<(), HostError>> {
     let stopper = host.clone();
     let stopped = std::thread::spawn(move || block_on(stopper.shutdown()));
-    told.recv_timeout(PATIENCE).unwrap();
+    told.recv_timeout(PATIENCE)
+        .expect("shutdown never waited for the probe");
     stopped
 }
 
@@ -352,7 +407,9 @@ fn a_create_whose_probe_answers_while_the_host_stops_is_closed() {
     let (told, hold) = mpsc::channel();
     let (host, join, held, _locate) = start_with(dir.path(), &clock, false, Some(told));
     let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
     let stopped = stopping(&host, &hold);
 
     // The answer reaches an actor that is still there, stopping.
@@ -371,9 +428,12 @@ fn a_locate_whose_probe_answers_while_the_host_stops_is_closed() {
     let clock = clock();
     let (told, hold) = mpsc::channel();
     let (host, join, held, locate) = start_with(dir.path(), &clock, false, Some(told));
-    let file = matter_with_a_file(&host, &held, dir.path());
+    let (file, _paper) = matter_with_a_file(&host, &held);
     let located = locate_on_a_thread(&host, file);
-    locate.entered.recv_timeout(PATIENCE).unwrap();
+    locate
+        .entered
+        .recv_timeout(PATIENCE)
+        .expect("the locate probe was never entered");
     let stopped = stopping(&host, &hold);
 
     locate.release.send(()).unwrap();
@@ -388,9 +448,12 @@ fn a_matter_forgotten_during_a_locate_is_no_matters_folder() {
     let dir = TempDir::new("probe-locate-forgotten");
     let clock = clock();
     let (host, join, held, locate) = start_both(dir.path(), &clock);
-    let file = matter_with_a_file(&host, &held, dir.path());
+    let (file, _paper) = matter_with_a_file(&host, &held);
     let located = locate_on_a_thread(&host, file);
-    locate.entered.recv_timeout(PATIENCE).unwrap();
+    locate
+        .entered
+        .recv_timeout(PATIENCE)
+        .expect("the locate probe was never entered");
 
     let listed = block_on(host.query(Principal::LocalDesktop, HostQuery::ListMatters)).unwrap();
     let QueryResult::Matters(matters) = listed else {
@@ -423,7 +486,9 @@ fn a_create_racing_an_import_of_its_folder_makes_one_matter() {
     // The probe looks before it is held: it finds no folder, as the import has not begun.
     let (host, join, held, _locate) = start_with(dir.path(), &clock, true, None);
     let created = create(&host, 1);
-    held.entered.recv_timeout(PATIENCE).unwrap();
+    held.entered
+        .recv_timeout(PATIENCE)
+        .expect("the new folder probe was never entered");
 
     // Meanwhile the lawyer makes the folder and imports it.
     crate::write::create_dir_all(&new_folder(dir.path())).unwrap();
@@ -447,7 +512,13 @@ fn a_create_racing_an_import_of_its_folder_makes_one_matter() {
     // The create's probe answers "no folder" late: its create, re-checked on the actor against
     // the matters listed now, is refused, and no second matter has the folder.
     held.release.send(()).unwrap();
-    assert!(!held.answered.recv_timeout(PATIENCE).unwrap().1);
+    assert!(
+        !held
+            .answered
+            .recv_timeout(PATIENCE)
+            .expect("the probe never answered")
+            .1
+    );
     let refused = created.join().unwrap().unwrap_err();
     assert_eq!(
         refused.code(),
