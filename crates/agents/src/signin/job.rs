@@ -34,7 +34,7 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_process::{Launcher, Timer};
 
-use crate::cancel::{Cancel, Stop};
+use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::marker::{self, LoginSource};
@@ -171,10 +171,10 @@ pub(crate) fn run<T: Timer + Send + Sync>(
     }
 }
 
-/// Whether the job was stopped by the app's quit and not killed: its confirmed sign-in still
-/// counts, though the job is no longer the agent's.
+/// Whether the app's quit stopped the job (first, or after the lawyer's Cancel) and did not kill
+/// it: its confirmed sign-in still counts, though the job is no longer the agent's.
 fn stopped_for_quit(cancel: &Cancel) -> bool {
-    cancel.how() == Some(Stop::Quit) && !cancel.is_killed()
+    cancel.quit_seen() && !cancel.is_killed()
 }
 
 /// A script's file name for the log (`codex.js`, `index.js`): one of the two known names, so
