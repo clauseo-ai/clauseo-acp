@@ -1,6 +1,7 @@
 //! More of the set-up's fakes (split from `fake.rs`): the surroundings the fence's walks get,
-//! how the call lines name a folder, the profile faults the reset tests inject, and
-//! [`FakeMachine::new`] (`new_machine`).
+//! how the call lines name a folder, the profile faults the reset tests inject, the
+//! [`FakeMachine`] helpers outside its trait impl (the call recording, the accounts, and
+//! [`FakeMachine::new`] (`new_machine`)).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -14,9 +15,9 @@ use crate::windows::setup::record_values::CopyOwner;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME};
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
 use crate::test_support::TempDir;
-use crate::windows::setup::{LogonRight, ServiceStart};
+use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
 
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
@@ -220,5 +221,78 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+    }
+}
+
+impl FakeMachine {
+    /// A machine with only the owner's account, `DeviceSync`, an empty data folder and a 32 MiB
+    /// journal on [`VOLUME`].
+    pub(super) fn new(test: &str) -> FakeMachine {
+        super::fake_more::new_machine(test)
+    }
+
+    /// The data folder.
+    pub(super) fn data_dir(&self) -> PathBuf {
+        self.dir.path().join("data")
+    }
+
+    /// `%ProgramData%\Microsoft\DeviceSync`.
+    pub(super) fn device_sync(&self) -> PathBuf {
+        // One component at a time: a joined "a/b" keeps its `/` on Windows, so the path would
+        // print with mixed separators and not match the cause text.
+        self.dir
+            .path()
+            .join("ProgramData")
+            .join("Microsoft")
+            .join("DeviceSync")
+    }
+
+    /// The profile folder of the account `name`.
+    pub(super) fn profile_path(&self, name: &str) -> PathBuf {
+        self.dir.path().join("Users").join(name)
+    }
+
+    /// Fails the first call `line` with an injected error.
+    pub(super) fn fail(&mut self, line: &str) {
+        self.fails.push((
+            line.to_owned(),
+            MachineError::Other(format!("injected: {line}")),
+        ));
+    }
+
+    /// The calls since `from`.
+    pub(super) fn calls_since(&self, from: usize) -> Vec<&str> {
+        self.calls[from..].iter().map(String::as_str).collect()
+    }
+
+    /// Records `line`, failing it if told to.
+    pub(super) fn call(&mut self, line: impl Into<String>) -> Result<(), MachineError> {
+        let line = line.into();
+        self.calls.push(line.clone());
+        assert!(self.panic_on.as_ref() != Some(&line), "a crash in {line}");
+        match self.fails.iter().position(|(text, _)| *text == line) {
+            Some(at) => Err(self.fails.remove(at).1),
+            None => Ok(()),
+        }
+    }
+
+    /// Records `line` as a call on the owner's files, and as made outside the owner when it was.
+    pub(super) fn owner_call(&mut self, line: &str) -> Result<(), MachineError> {
+        if !self.acting.get() {
+            self.outside_owner.push(line.to_owned());
+        }
+        self.call(line)
+    }
+
+    pub(super) fn new_sid(&mut self) -> Sid {
+        self.next_rid += 1;
+        sid(self.next_rid - 1)
+    }
+
+    pub(super) fn account(&mut self, name: &str) -> Result<&mut Account, MachineError> {
+        self.state.accounts.get_mut(name).ok_or(MachineError::Os {
+            call: "NetUserGetInfo",
+            code: 2221,
+        })
     }
 }
