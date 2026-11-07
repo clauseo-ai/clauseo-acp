@@ -36,9 +36,10 @@
 //!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
 //!   (`pool::assign::busy`), so none of those processes is another session's.
 //! - The outer's first reaction to any end (the host's stdin ending, the inner exiting, a
-//!   failure) is to start the end sweeper once (`end.rs`, `sweeper.rs`): `--sweep`, the same
-//!   kills with no job kept and the same removal, on its own timeout. It is never in the outer's
-//!   job, so the host ending the outer leaves it running.
+//!   failure) is to end the job, wait up to 1.5 s for it to empty, and then start the end sweeper
+//!   once (`end.rs`, `sweeper.rs`): `--sweep`, the same kills with no job kept and the same
+//!   removal, on its own timeout. A job that doesn't empty starts no sweeper. The sweeper is never
+//!   in the outer's job, so the host ending the outer leaves it running.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
 //!   launch on `ctl` only after it checked the client is the inner runner's pid and that pid's
 //!   token user is the pool user; `CreateProcessWithLogonW` caps the command line at 1024

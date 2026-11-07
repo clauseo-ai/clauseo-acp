@@ -859,13 +859,22 @@ for `--reclaim`.
     handle). When the agent exits, the inner sweeps once more before it exits. At both, and in
     the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
     goes on with the rest; the sweep's next round and the next tick try it again.
-  - **The end sweeper.** The outer's first reaction to any end signal is to start the end
-    sweeper. The signals are the host's stdin ending (the host's cancel ladder closes it, then
-    gives the outer 2 s before it ends the outer's job), the inner exiting, and any failure once
-    the launch is read. A guard starts it once a session. The sweeper is `clauseo-sandbox-run
+  - **The end sweeper.** The outer's first reaction to any end signal is to end its job
+    (`TerminateJobObject`) and wait until no process is left in it (`ActiveProcesses` of
+    `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 1.5 s, inside the
+    host's 2 s), and only then to start the end sweeper. The signals are the host's stdin ending
+    (the host's cancel ladder closes it, then gives the outer 2 s before it ends the outer's job),
+    the inner exiting, and any failure once the launch is read. A guard does this once a session,
+    and a second signal waits until the first one's start is over. The sweeper's logon opens the
+    same gap as the inner's: until the outer's shut, its process, thread and Medium token carry
+    the logon's default DACL. With the job empty first, neither the agent nor anything it started
+    in the job is alive in that gap. A job still holding a process after 1.5 s starts no sweeper,
+    since that process could take a handle in the gap; the outer logs it, and the next launch's
+    first act is the backstop. The sweeper is `clauseo-sandbox-run
     --sweep`, started as the pool user with `CreateProcessWithLogonW` and the password the outer
     reads again from `secrets.bin` (wiped after). Its process and thread are shut as the inner's
-    are, and then it is resumed. It is never assigned to the outer's job. The Secondary Logon
+    are, and then it is resumed. Its first act, like the inner's, is to shut its own primary token
+    to `SYSTEM` alone. It is never assigned to the outer's job. The Secondary Logon
     service starts it as its own child, outside the caller's jobs, in a job of the service's own,
     so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
     every process of the pool user but itself that was created before it was (`GetProcessTimes`
@@ -891,25 +900,34 @@ for `--reclaim`.
     their sweeps only kill their own pool user's processes. Accepted: a sweeper from before the
     lawyer signed out and in again holds the old logon SID, so a launch during its up to 60 s
     fails `RunExit::Sweep`, and a retry works.
-  - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. When the
-    end began at the host's stdin and the inner's exit code is the sweeper's kill code
-    (`RUN_EXIT_BASE + 0xff`, which would come back as `AgentReserved`), the outer exits as it
-    would have without the sweeper: with the agent's own code when the inner reported the agent's
-    exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in the
-    process crate). The host's shutdown outcome is timed, not read from the code.
+  - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. The
+    outer's job end gives the inner and the agent the sweeper's kill code (`RUN_EXIT_BASE +
+    0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
+    and the inner's exit code is that code, the outer exits as it would have without the job's
+    end: with the agent's own code when the inner reported the agent's exit first, else with
+    `0xC1A0`, the code the host's job end gives (`TERMINATED` in the process crate). On a
+    cancel the agent now ends at the stdin end itself, without reading the end of its input
+    first. The host's shutdown outcome is timed, not read from the code. The inner holds a
+    query-only handle to the job, which keeps the job open, and so its processes running, if
+    the outer dies without ending it; on a cancel the outer ends the job at the stdin end, before
+    the host's job end can kill it.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task or BITS job stays until
-    an end sweeper runs, and each process it starts lives only until a sweep. The residual case is a cancel that kills the outer inside the 2 s before the
-    sweeper's logon completes. Then no end sweeper runs, and the cleanup waits for the next
+    an end sweeper runs, and each process it starts lives only until a sweep. The residual cases are a cancel that kills the outer inside the 2 s before the
+    sweeper's logon completes, and a job that doesn't empty within 1.5 s. Then no end sweeper runs, and the cleanup waits for the next
     launch's first act. A task or BITS job that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's
     runs and before the agent exists, and the outer has shut the inner's process and thread by
     then.
 
   The experiment that would lower a duplicated token to Low and impersonate it from the agent
-  was dropped. With one live session per pool user and the first-act sweep, no other process of
-  the pool user is alive to use a handle it took in the gap.
+  was dropped. With one live session per pool user, the first-act sweep and the end sweeper
+  started only once the job is empty, no other process of the pool user is alive to use a handle
+  it took in the gap: the inner's gap comes before its first-act sweep kills every other process
+  of the pool user, and the sweeper's after the job's end killed every process in the job. A
+  process outside the job, one a service started (M2), is alive in the sweeper's gap if no
+  sweep could kill it.
 - **Processes a service starts outside the job (M2).** An agent can ask a Windows service to
   start a process as its pool user, and that process may land outside the job: Secondary Logon
   (`CreateProcessWithLogonW` with `LOGON_NETCREDENTIALS_ONLY`), WMI (`Win32_Process.Create`),
