@@ -64,6 +64,35 @@ pub(crate) const AGENTS_STOP_WAIT: Duration = Duration::from_secs(3);
 /// ends the process with what is left.
 pub(crate) const EXIT_STOP_WAIT: Duration = Duration::from_secs(3 + 10);
 
+/// Windows: how long `RunEvent::Exit` waits instead of [`EXIT_STOP_WAIT`]. There it comes ahead
+/// of a finished stop only when Windows ends the session (logoff or shutdown: tao's
+/// `WM_ENDSESSION`); a closed window and a quit signal come through `ExitRequested`, and an
+/// update's restart marks the stop ended first. Windows ends a process that holds
+/// `WM_ENDSESSION` past about 5 s, and shows "this app is preventing you from signing out" while
+/// it waits (the VM's sign-out rows: 5.2 s with an agent that ignored its cancel), so the wait
+/// stays under that. What the stop leaves running ends with the process: the agents' Job Objects
+/// kill on close (`clauseo-process`), and the next start repairs a stop that did not finish.
+#[cfg(windows)]
+pub(crate) const SESSION_END_WAIT: Duration = Duration::from_millis(3_500);
+
+// The end-session wait is the shorter one.
+#[cfg(windows)]
+const _: () = assert!(SESSION_END_WAIT.as_millis() < EXIT_STOP_WAIT.as_millis());
+
+/// The bound [`stop_on_exit`] waits for the stop: [`SESSION_END_WAIT`] on Windows, else
+/// [`EXIT_STOP_WAIT`]. macOS keeps the long bound: its quit, logout and shutdown all come
+/// through `RunEvent::Exit`, and nothing but the stop ends the agents' process groups there.
+pub(crate) const fn exit_bound() -> Duration {
+    #[cfg(windows)]
+    {
+        SESSION_END_WAIT
+    }
+    #[cfg(not(windows))]
+    {
+        EXIT_STOP_WAIT
+    }
+}
+
 /// The quit's two steps in their order: `agents` shuts `Agents` down (its answer says whether
 /// its jobs ended in time), then `host` stops the host. A job still running is logged, and the
 /// host stops all the same. Returns `agents`' answer.
@@ -214,8 +243,9 @@ fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
 /// `WM_ENDSESSION`, `event_loop.rs:2332-2342`, which then calls `process::exit`). The process
 /// ends when this returns. The windows hide first; then, when nothing runs ([`nothing_runs`]),
 /// it returns at once (the counts saved and the log flushed), so an idle app never holds a
-/// logoff. Else the stop sequence runs on its own thread, waited for at most
-/// [`EXIT_STOP_WAIT`], with no install after it
+/// logoff. Else the stop sequence runs on its own thread, waited for at most [`exit_bound`]
+/// ([`EXIT_STOP_WAIT`]; on Windows [`SESSION_END_WAIT`], under its end-session limit), with no
+/// install after it
 /// ([`Exit::exiting_on_main`]: the plugin saved before this callback, and the OS is ending the
 /// app, which a restart would fight). When a stopper already runs (a quit signal or a closed
 /// window came first), this waits for it the same way.
@@ -228,7 +258,7 @@ pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) -> 
     }
     stop_on_exit_with(
         exit,
-        EXIT_STOP_WAIT,
+        exit_bound(),
         || hide_windows(app),
         || {
             let idle = nothing_runs(app);

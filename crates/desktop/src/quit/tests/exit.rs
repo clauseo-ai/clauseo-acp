@@ -15,7 +15,8 @@ use tauri::test::{MockRuntime, mock_builder};
 use tauri::{Manager as _, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 use super::super::{
-    Exit, ExitWait, after_host_unless_exiting, on_exit_requested, stop_on_exit, stop_on_exit_with,
+    EXIT_STOP_WAIT, Exit, ExitWait, after_host_unless_exiting, exit_bound, on_exit_requested,
+    stop_on_exit, stop_on_exit_with,
 };
 use super::InstallSteps;
 use crate::bridge::lock;
@@ -346,4 +347,17 @@ fn a_second_start_during_the_quit_raises_nothing() {
     exit.stopping.store(true, Ordering::Release);
     assert!(!super::super::on_second_start(app.handle(), &exit));
     assert!(app.get_webview_window(crate::MAIN_WINDOW).is_some());
+}
+
+/// On Windows the exit's wait stays under Windows' end-session limit (about 5 s, past which it
+/// ends the process and shows "preventing you from signing out"); elsewhere it is the full
+/// [`EXIT_STOP_WAIT`], since macOS's own quit comes through `RunEvent::Exit` too.
+#[test]
+fn the_exit_waits_under_windows_end_session_limit_there_and_the_full_bound_elsewhere() {
+    if cfg!(windows) {
+        assert!(exit_bound() < Duration::from_secs(4), "{:?}", exit_bound());
+        assert!(exit_bound() >= Duration::from_secs(3), "{:?}", exit_bound());
+    } else {
+        assert_eq!(exit_bound(), EXIT_STOP_WAIT);
+    }
 }
