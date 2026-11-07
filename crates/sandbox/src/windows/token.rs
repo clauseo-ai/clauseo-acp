@@ -15,8 +15,9 @@
 //!   `SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE` (`0x101001`) only, so
 //!   the host can wait on, query and end the agent's processes (R5) and nothing else; no logon
 //!   SID, so another matter's agent can't `OpenProcess` this one (PR0 (d), spike B). The pool
-//!   user is denied `WRITE_DAC` and `WRITE_OWNER` and `OWNER RIGHTS` is held to `READ_CONTROL`,
-//!   so what the agent makes with no descriptor of its own can't have its DACL changed by it.
+//!   user keeps `GENERIC_ALL` with nothing denied: a console process with no console (the
+//!   agent starts `CREATE_NO_WINDOW`) makes its `\Device\ConDrv\Server` with `GENERIC_ALL`
+//!   under this DACL, and dies at start with `STATUS_DLL_INIT_FAILED` if any right is denied.
 //! - `DISABLE_MAX_PRIVILEGE`, as the traverse spike's (B) row ran it
 //!   (`s15-spikes-traverse/s15.c:183`): every privilege but `SeChangeNotifyPrivilege` goes, and
 //!   that one must stay (§3, "Bypass traverse stays in the token").
@@ -137,22 +138,19 @@ impl fmt::Display for TokenSpec {
     }
 }
 
-/// The agent's default DACL: `D:(D;;0xc0000;;;<pool user>)(A;;GA;;;<pool user>)(A;;GA;;;SY)
-/// (A;;0x101001;;;<desktop user>)(A;;RC;;;OW)`, the spike's `pool` mode
-/// (`s15-spikes-userpool/s15.c:182`) with the pool user kept from changing what it makes:
-/// `WRITE_DAC` and `WRITE_OWNER` denied to it first, so the `GA` after grants neither, and
-/// `OWNER RIGHTS` held to `READ_CONTROL`, so as the owner it keeps no implied `WRITE_DAC` (an
-/// owner's implied rights pass by deny entries). An agent's process, and every process it starts
-/// with no descriptor of its own, can't rewrite its DACL to shut the sweep out (`runner/sweep.rs`).
+/// The agent's default DACL: `D:(A;;GA;;;<pool user>)(A;;GA;;;SY)(A;;0x101001;;;<desktop
+/// user>)`, the spike's `pool` mode (`s15-spikes-userpool/s15.c:182`).
+///
+/// The pool user's `GENERIC_ALL` must stay whole. The agent starts `CREATE_NO_WINDOW`, so
+/// `kernelbase` makes its console's `\Device\ConDrv\Server` with `GENERIC_ALL` as the agent
+/// (`DeviceHandle::CreateServerHandle` in microsoft/terminal), under a descriptor from this DACL;
+/// a deny of `WRITE_DAC` and `WRITE_OWNER` failed that open, and every agent ended at start with
+/// `STATUS_DLL_INIT_FAILED` (the S15 PR5 harness, `b242f2ee9`). Such a deny would hold nothing
+/// back anyway: a process sets its own DACL through its pseudo-handle, whose rights the kernel
+/// grants at creation whatever the DACL (`token::os::shut_self` does just that).
 pub fn default_dacl(pool_user: &Sid, desktop_user: &Sid) -> String {
-    format!(
-        "D:(D;;0x{OWNER_WRITES:x};;;{pool_user})(A;;GA;;;{pool_user})(A;;GA;;;SY)\
-         (A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})(A;;RC;;;OW)"
-    )
+    format!("D:(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})")
 }
-
-/// `WRITE_DAC | WRITE_OWNER`: what the agent's default DACL denies the pool user.
-pub const OWNER_WRITES: u32 = 0x0004_0000 | 0x0008_0000;
 
 /// The agent token object's DACL: the pool user (the agent reads its own token) and `SYSTEM` with
 /// full access, the desktop user `TOKEN_QUERY`.
