@@ -134,3 +134,8 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests;
+
+// Two attributes, not `all(windows, test)`: clippy's test allowances look for `cfg(test)`.
+#[cfg(test)]
+#[cfg(windows)]
+mod ntfs_tests;
