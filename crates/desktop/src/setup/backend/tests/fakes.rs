@@ -9,6 +9,7 @@ use std::time::Duration;
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
     AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    Source,
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
@@ -138,6 +139,24 @@ impl SetupAgents for FakeAgents {
         };
         self.reserve(name, agent, true)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        let name = match method {
+            Method::DeviceCode => "sign_in_device_code_switching",
+            _ => "sign_in_switching",
+        };
+        self.reserve(name, agent, true)
+    }
+    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login.
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        agent.as_str() == "codex-acp"
+            && matches!(
+                lock(&self.signin).get(agent),
+                Some(SigninState::SignedIn {
+                    source: Source::Own,
+                    ..
+                })
+            )
+    }
     /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.answer("cancel_sign_in", agent)?;
@@ -165,6 +184,9 @@ impl SetupAgents for FakeAgents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.reserve("use_different_account", agent, true)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.reserve("use_different_account_switching", agent, true)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()

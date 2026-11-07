@@ -1,6 +1,7 @@
 //! A Codex sign-in over Clauseo's own login: `codex login` signs that account out before it
 //! starts, so `StartSignIn` and `UseDeviceCode` ask first (`Ask::SwitchAccount`). A decline
-//! starts nothing, answers `Done` and leaves no starting mark; an accept starts the sign-in.
+//! starts nothing, answers `Done` and leaves no starting mark; an accept starts the sign-in as
+//! confirmed. `UseDifferentAccount` asks the same.
 //! Signed out, a reused login (refused as before) and Claude ask nothing.
 
 use std::time::UNIX_EPOCH;
@@ -24,11 +25,24 @@ fn signed_in(source: Source) -> SigninState {
     }
 }
 
+/// How many times the fake `Agents` was asked `name`.
+fn asked(rig: &Rig, name: &str) -> usize {
+    rig.calls().iter().filter(|(call, _)| *call == name).count()
+}
+
+/// Every call that would start a Codex login, confirmed or not.
 fn sign_ins(rig: &Rig) -> usize {
-    rig.calls()
-        .iter()
-        .filter(|(call, _)| *call == "sign_in")
-        .count()
+    [
+        "sign_in",
+        "sign_in_device_code",
+        "sign_in_switching",
+        "sign_in_device_code_switching",
+        "use_different_account",
+        "use_different_account_switching",
+    ]
+    .iter()
+    .map(|name| asked(rig, name))
+    .sum()
 }
 
 fn start(agent: &AgentId) -> SetupCommand {
@@ -37,6 +51,10 @@ fn start(agent: &AgentId) -> SetupCommand {
 
 fn device(agent: &AgentId) -> SetupCommand {
     command("use_device_code", agent, &json!({}))
+}
+
+fn different(agent: &AgentId) -> SetupCommand {
+    command("use_different_account", agent, &json!({}))
 }
 
 fn switch() -> Ask {
@@ -52,8 +70,9 @@ fn a_declined_switch_starts_no_codex_login_and_leaves_no_mark() {
     let done = Ok(CommandOutcome::Done);
     assert_eq!(block_on(rig.setup().run(MAIN, start(&codex()))), done);
     assert_eq!(block_on(rig.setup().run(MAIN, device(&codex()))), done);
+    assert_eq!(block_on(rig.setup().run(MAIN, different(&codex()))), done);
     assert_eq!(sign_ins(&rig), 0, "no codex login started");
-    assert_eq!(*lock(&rig.confirm.asked), [switch(), switch()]);
+    assert_eq!(*lock(&rig.confirm.asked), [switch(), switch(), switch()]);
     // The decline left no starting mark: a later start is not joined to a start that never ran.
     assert!(
         rig.events.begin_start(&codex()),
@@ -61,14 +80,23 @@ fn a_declined_switch_starts_no_codex_login_and_leaves_no_mark() {
     );
 }
 
+/// A yes starts the sign-in with the switch confirmed, so S18 lets it replace the login; the
+/// "different account" action asks too.
 #[test]
-fn an_accepted_switch_starts_the_sign_in() {
-    let rig = rig(true);
-    rig.s18_was(&codex(), signed_in(Source::Own));
+fn an_accepted_switch_starts_the_sign_in_as_confirmed() {
     let done = Ok(CommandOutcome::Done);
-    assert_eq!(block_on(rig.setup().run(MAIN, start(&codex()))), done);
-    assert_eq!(sign_ins(&rig), 1);
-    assert_eq!(*lock(&rig.confirm.asked), [switch()]);
+    for (command, call) in [
+        (start(&codex()), "sign_in_switching"),
+        (device(&codex()), "sign_in_device_code_switching"),
+        (different(&codex()), "use_different_account_switching"),
+    ] {
+        let rig = rig(true);
+        rig.s18_was(&codex(), signed_in(Source::Own));
+        assert_eq!(block_on(rig.setup().run(MAIN, command)), done, "{call}");
+        assert_eq!(asked(&rig, call), 1, "{call}");
+        assert_eq!(sign_ins(&rig), 1, "{call}");
+        assert_eq!(*lock(&rig.confirm.asked), [switch()], "{call}");
+    }
 }
 
 #[test]
@@ -93,7 +121,8 @@ fn the_switch_words_name_the_agent() {
     assert_eq!(title, "Sign in with a different account?");
     assert_eq!(
         message,
-        "This signs you out of Codex first, in every matter. Then you can sign in again."
+        "This signs you out of Codex first, in every matter. Then you can sign in with the account \
+         you want."
     );
     assert_eq!(ok, "Sign out and continue");
 }
