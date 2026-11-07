@@ -85,13 +85,13 @@ export function ProtectionNote({
     if (gone && open) onClose();
   }, [gone, open, onClose]);
   if (cause === null) return null;
-  const repair = needsInstaller(state.view, cause);
+  const repair = needsInstaller(cause);
   const retry = !repair && canRetry(cause);
   const block = blockLine(lang, cause);
-  const page = repair && !firmInstall(state.view) ? repairPage(display) : null;
+  const page = repair && !firmInstall(state.view, state.managedBy) ? repairPage(display) : null;
   const extra = [
     ...(block === null ? [] : [block]),
-    ...(repair ? [repairLine(lang, state.view)] : []),
+    ...(repair ? [repairLine(lang, state.view, state.managedBy)] : []),
   ];
   return (
     <>

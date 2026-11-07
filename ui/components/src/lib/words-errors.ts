@@ -176,7 +176,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (app track, Rohan's batch review): the sandbox's four (decision record 0051), in
   // design B's "Safe workspace" words
   "sandbox.setup_refused":
-    "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
+    "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
   "sandbox.setup_failed":
     "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
   "sandbox.setup_required":

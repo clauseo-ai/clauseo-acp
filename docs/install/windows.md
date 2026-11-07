@@ -110,8 +110,8 @@ one's name and password; someone who is can type theirs.
 
 If you click **No**, Clauseo still installs and works, but without the Safe workspace: it asks
 before changing anything outside a matter's folder. To set the Safe workspace up later, run the
-Clauseo installer again. Clauseo's Settings, under Safe workspace, has a button that opens the
-download page for your version.
+Clauseo installer again. On the usual installer, Clauseo's Settings, under Safe workspace, has a
+button that opens the download page for your version; on the per-machine one, ask your IT team.
 
 Check on the laptop pass: the prompt's wording.
 

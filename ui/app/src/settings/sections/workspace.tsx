@@ -142,8 +142,8 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
                       "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
                     )
                   : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
-  const repair = needsInstaller(view, cause);
-  const page = repair && !firmInstall(view) ? repairPage(display) : null;
+  const repair = needsInstaller(cause);
+  const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
   const block = blockLine(lang, cause);
   const failed = failedWords(lang, state);
   const act = repair ? (
@@ -192,7 +192,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           )}
           {repair && (
             <p className="set-note" data-testid="protection-repair">
-              {w.say(repairLine(lang, view))}
+              {w.say(repairLine(lang, view, state.managedBy))}
             </p>
           )}
           {cause !== null && named1385(cause) && (

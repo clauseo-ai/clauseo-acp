@@ -18,7 +18,6 @@ import {
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
-import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
@@ -51,43 +50,7 @@ import {
 } from "../../store/protection.ts";
 import { loadProtectionNote } from "../protection/note-load.ts";
 
-/** UC: the Safe workspace step's parts, from the note's chunk (note-load.ts), so the two share no chunk of their own. */
-type StepParts = Pick<
-  Awaited<ReturnType<typeof loadProtectionNote>>,
-  | "WorkspaceOff"
-  | "WorkspaceStep"
-  | "failedWords"
-  | "retryProtection"
-  | "pw"
-  | "computerCause"
-  | "blockOf"
-  | "blockLine"
-  | "needsInstaller"
-  | "firmInstall"
-  | "repairLine"
-  | "repairPage"
-  | "openInstallerPage"
->;
-
-/** The step's words: the first run's own, and protection's from the chunk. */
-const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
-  notNow: fl(lang, "Not now"),
-  wait: pw(lang, "Setting up the Safe workspace."),
-  tryAgain: fl(lang, "Try again"),
-  settings: fl(lang, "Settings"),
-  getInstaller: pw(lang, "Get the installer"),
-});
-
-/** UC, design B: the repair's lines (the cause's, then what to do) and its page, null for no
- * button: a firm install, a test build, or a version with no release page. */
-function repairOf(state: ProtectionState, parts: StepParts, lang: Lang, display: object) {
-  const cause = parts.computerCause(state.view);
-  const block = parts.blockLine(lang, cause);
-  return {
-    lines: [...(block === null ? [] : [block]), parts.repairLine(lang, state.view)],
-    page: parts.firmInstall(state.view) ? null : parts.repairPage(display),
-  };
-}
+import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, refusalView } from "./views.ts";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
@@ -213,11 +176,7 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
     setUp: () =>
       void parts.retryProtection(transport, store).then(() => store.set({ step: "done" })),
     notNow: () => store.set({ step: "done" }),
-    // Try again sends the set-up once more, with no prompt; the step is its wait
-    retry: () => {
-      store.set({ step: "ask", failed: null });
-      void parts.retryProtection(transport, store).then(() => store.set({ step: "done" }));
-    },
+    retry: () => store.set({ step: "ask", failed: null }),
     settings:
       transport.openSettings === undefined
         ? undefined
@@ -279,7 +238,10 @@ function holdOf(
   const signedHere =
     typeof signedIn === "object" && signedIn.signed_in !== undefined && setup?.signedHere === true;
   const step = signedHere ? workspaceStep(shield?.state ?? null, shield?.parts ?? null) : null;
-  if (shield !== null && (step === "repair" || step === "wait")) {
+  if (
+    shield !== null &&
+    (step === "repair" || step === "ask" || step === "waiting" || step === "wait")
+  ) {
     const acts = stepActs(transport, shield.store, shield.parts);
     const { WorkspaceStep } = shield.parts;
     const repair = repairOf(shield.state, shield.parts, lang, { testBuild: room.testBuild });
@@ -293,6 +255,7 @@ function holdOf(
           onGetInstaller={
             page === null ? undefined : () => shield.parts.openInstallerPage(transport, page)
           }
+          onSetUp={acts.setUp}
           onNotNow={acts.notNow}
         />
       ),
@@ -310,10 +273,7 @@ function holdOf(
           words={stepWords(lang, shield.parts.pw)}
           failed={shield.parts.failedWords(lang, shield.state)}
           onRetry={
-            shield.parts.needsInstaller(
-              shield.state.view,
-              shield.parts.computerCause(shield.state.view),
-            )
+            shield.parts.needsInstaller(shield.parts.computerCause(shield.state.view))
               ? undefined
               : acts.retry
           }
@@ -431,9 +391,9 @@ export function FirstRun({
       notify();
     };
   }, [transport, store, shields, parts, agent, zone, lang, platform, testBuild]);
-  // UC: the Safe workspace step is entered once, after the first sign-in here; where a set-up with
-  // no Windows prompt fixes it, it is sent at once and the step is its wait; where the repair is
-  // the installer, nothing is sent
+  // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
+  // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
+  // repair is the installer, nothing is sent
   const chosenSetup = state.agents[state.chosen];
   const enter =
     shields !== null &&
@@ -445,7 +405,7 @@ export function FirstRun({
     if (!enter || shields === null || parts === null) return;
     shields.set({ step: "ask" });
     const view = shields.state().view;
-    if (!parts.needsInstaller(view, parts.computerCause(view)))
+    if (!parts.needsInstaller(parts.computerCause(view)) && !parts.asksAdmin(view))
       stepActs(transport, shields, parts).setUp();
   }, [enter, shields, parts, transport]);
   // a matter made from the rail while the first screen stood is the first act too; the matter it opens is the one

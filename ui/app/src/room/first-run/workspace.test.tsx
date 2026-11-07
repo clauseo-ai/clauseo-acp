@@ -1,13 +1,15 @@
-// @vitest-environment happy-dom UC's Safe workspace step in the first run, over a FakeTransport
-// with the setup and protection wires. Design B: the installer sets the Safe workspace up, so a
-// computer protected when the app first opens, or a refused protection query, has no step, and the
-// first read starts at once. The app never raises Windows' prompt for the set-up: where it would
-// (an older host's needs_set_up) or the installer's set-up didn't happen (admin_copy_missing), the
-// step is the repair, with "Get the installer" on a personal install. Where a set-up with no prompt
-// fixes it, it is sent once on entering, with the wait. "Not now", a refusal and a failure each
+// @vitest-environment happy-dom
+// UC's Safe workspace step in the first run, over a FakeTransport with the setup and protection
+// wires. Design B: the installer sets the Safe workspace up, so a computer protected when the app
+// first opens, or a refused protection query, has no step, and the first read starts at once. Where
+// the installer's admin copy is missing (admin_copy_missing), the step is the repair, with "Get the
+// installer" on a per-user install. needs_set_up (the copy there, after an in-app Remove) keeps the
+// app's set-up: the Windows screen, which is itself the confirm, where it asks an administrator;
+// sent once on entering, with the wait, where it doesn't. "Not now", a refusal and a failure each
 // count as the step's outcome, the room's line then says Not protected, and UD2's first read starts
 // after it, once.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
 import { APP_VERSION } from "../../settings/version.ts";
 import { installerPage } from "../protection/installer.ts";
@@ -215,18 +217,35 @@ test("admin_copy_missing on a firm install: ask IT to install Clauseo again, wit
   expect(t.protectionCommands()).toEqual([]);
 });
 
-test("needs_set_up whose set-up would bring Windows' prompt (an older host): the repair, never the prompt", async () => {
-  const s = scripted(PROT.needs);
+test("needs_set_up with retry_asks_admin true (the admin copy there, after an in-app Remove): the Windows screen, which is the confirm", async () => {
+  const s = scripted(PROT.needs, { retry_asks_admin: true } as Partial<ProtectionView>);
   const t = await mount(s.host);
   await signInNow(t);
-  expect(step()?.dataset["state"]).toBe("repair");
-  expect(byId("protection-repair")?.textContent).toBe(
-    pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+  expect(step()?.dataset["state"]).toBe("ask");
+  expect(step()?.textContent).toContain(
+    fl("en", "Windows asks once for permission to set up the Safe workspace."),
   );
-  expect(step()?.textContent).not.toContain("the publisher is unknown");
-  expect(byId("protection-setup")).toBeNull();
+  expect(step()?.textContent).toContain(
+    pw(
+      "en",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    ),
+  );
+  expect(byId("protection-repair")).toBeNull();
   expect(t.protectionCommands()).toEqual([]);
   expect(reads(t)).toBe(0);
+  await press(byId("protection-setup"));
+  await settle();
+  expect(t.protectionCommands()).toEqual(["retry_protection"]);
+  expect(step()?.dataset["state"]).toBe("waiting");
+  expect(byId("protection-wait")?.textContent).toBe(
+    pw("en", "Choose Yes in the window Windows shows."),
+  );
+  s.state.computer = PROT.b;
+  await act(async () => s.answers[0]!.resolve());
+  for (let i = 0; i < 3; i += 1) await settle();
+  expect(step()).toBeNull();
+  expect(reads(t)).toBe(1);
 });
 
 test("any other block: no step; the room's line and note say it", async () => {
@@ -259,8 +278,11 @@ test("Not now is an outcome: the line says Not protected in Claude's words, and 
   );
   expect(byId("protection-failed")).toBeNull();
   expect(reads(t)).toBe(1);
-  // the repair is the installer, so there is no Try again
-  expect(byId("workspace-retry")).toBeNull();
+  // Try again goes back to the Windows screen; the first read isn't started again
+  await press(byId("workspace-retry"));
+  await settle();
+  expect(step()?.dataset["state"]).toBe("ask");
+  expect(reads(t)).toBe(1);
 });
 
 test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
@@ -278,11 +300,11 @@ test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
     expect(reads(t)).toBe(1);
     await signInNow(t);
     expect(reads(t)).toBe(1);
-    // Try again sends the set-up once more, with no prompt, and the step is its wait
+    // Try again goes back to the set-up's screen, sending nothing until it is pressed
     await press(byId("workspace-retry"));
     await settle();
-    expect(t.protectionCommands()).toEqual(["retry_protection", "retry_protection"]);
-    expect(step()?.dataset["state"]).toBe("wait");
+    expect(step()?.dataset["state"]).toBe("ask");
+    expect(t.protectionCommands()).toEqual(["retry_protection"]);
     expect(reads(t)).toBe(1);
   },
 );

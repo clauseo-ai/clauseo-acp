@@ -1,10 +1,12 @@
-// @vitest-environment happy-dom UC's Safe workspace in the settings window
-// (settings.html#workspace), over FakeTransport with the protection wire: one test per row of the
-// brief's Settings table; the quiet unavailable state while the query answers command.invalid
-// (before R17 PR-B admits this window), never an error; no section without the wire; "Remove
-// set-up" always through its confirm, Cancel sending nothing; a set-up with no Windows prompt sent
-// at once, and design B's repair in the button's place where it would bring one; a block's reason
-// line; the wait and a refusal; no account name or SID for any fixture; and no timer at rest.
+// @vitest-environment happy-dom
+// UC's Safe workspace in the settings window (settings.html#workspace), over FakeTransport with the
+// protection wire: one test per row of the brief's Settings table; the quiet unavailable state
+// while the query answers command.invalid (before R17 PR-B admits this window), never an error; no
+// section without the wire; "Remove set-up" always through its confirm, Cancel sending nothing; the
+// set-up's confirm by the same rule as the room's, after a Remove too; design B's repair, only for
+// a missing admin copy, with Get the installer on a per-user install and IT's line on a per-machine
+// one; a block's reason line; the wait and a refusal; no account name or SID for any fixture; and
+// no timer at rest.
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
@@ -24,6 +26,8 @@ import { SettingsApp } from "../settings-app.tsx";
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 let store: DisplayStore | null = null;
+/** The updater's view `get_update` answers; undefined: not scripted (refused). */
+let update: unknown = undefined;
 
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -34,6 +38,7 @@ afterEach(async () => {
   store = null;
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  update = undefined;
 });
 
 async function settle() {
@@ -56,6 +61,7 @@ async function mount(
     platform,
     query: (query) => {
       if (query === "get_settings") return { settings: settings as never };
+      if (query === "get_update" && update !== undefined) return { update: update as never };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     next: { query: () => ({ settings }) as never },
@@ -284,23 +290,57 @@ test("Set up again with no Windows prompt sends at once, with no confirm, and a 
 });
 
 test.each([
-  ["needs_set_up", PROT.needs],
-  ["set_up_refused", PROT.refused],
+  ["needs_set_up", PROT.needs, "Set up the Safe workspace"],
+  ["set_up_refused", PROT.refused, "Set up again"],
+  ["set_up_failed (a re-run)", PROT.failed, "Set up again"],
 ] as const)(
-  "%s whose set-up would bring Windows' prompt (an older host): the repair stands in the button's place",
-  async (state, p) => {
-    const t = await mount({ view: () => view(p) });
-    expect(block()?.dataset["state"]).toBe(state);
-    expect(one("protection-setup")).toBeNull();
-    expect(one("protection-repair")?.textContent).toBe(
-      pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+  "%s with retry_asks_admin true keeps the app's button, through the set-up's confirm; no repair",
+  async (_c, p, label) => {
+    const s = held(p, { retry_asks_admin: true } as Partial<ProtectionView>);
+    const t = await mount(s.host);
+    expect(one("protection-repair")).toBeNull();
+    expect(one("protection-installer")).toBeNull();
+    expect(one("protection-setup")?.textContent).toBe(label);
+    await press(one("protection-setup"));
+    expect(one("protection-confirm")?.dataset["act"]).toBe("setup");
+    expect(one("protection-confirm")?.textContent).toContain(
+      pw("en", "Set up the Safe workspace?"),
     );
-    expect(one("protection-installer")).not.toBeNull();
     expect(t.protectionCommands()).toEqual([]);
+    await press(one("protection-confirm-ok"));
+    expect(t.protectionCommands()).toEqual(["retry_protection"]);
   },
 );
 
-test("admin_copy_missing: not set up yet, the repair, and Get the installer opens the installed version's page", async () => {
+test("after a finished in-app Remove, the app offers Set up, with the announce line before Windows' prompt", async () => {
+  const s = held(PROT.b, { retry_asks_admin: true } as Partial<ProtectionView>);
+  const t = await mount(s.host);
+  await press(one("protection-remove"));
+  await press(one("protection-confirm-ok"));
+  expect(t.protectionCommands()).toEqual(["remove_sandbox_setup"]);
+  // the admin copy stays after an in-app Remove, so the host says needs_set_up, not
+  // admin_copy_missing
+  s.state.computer = PROT.needs;
+  await act(async () => s.answers[0]!.resolve());
+  await settle();
+  expect(block()?.dataset["state"]).toBe("needs_set_up");
+  expect(one("protection-repair")).toBeNull();
+  expect(one("protection-installer")).toBeNull();
+  await press(one("protection-setup"));
+  const confirm = one("protection-confirm");
+  expect(confirm?.dataset["act"]).toBe("setup");
+  expect(confirm?.textContent).toContain(
+    pw(
+      "en",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    ),
+  );
+  await press(one("protection-confirm-ok"));
+  expect(t.protectionCommands()).toEqual(["remove_sandbox_setup", "retry_protection"]);
+});
+
+test("admin_copy_missing on a per-user install: not set up yet, the repair, and Get the installer opens the installed version's page", async () => {
+  update = { current: "0.1.0", mode: "auto", state: "idle" };
   const t = await mount({ view: () => view(PROT.missing) });
   expect(block()?.dataset["state"]).toBe("blocked");
   expect(text()).toContain(
@@ -323,11 +363,14 @@ test("admin_copy_missing: not set up yet, the repair, and Get the installer open
 });
 
 test.each([
-  ["required", { required: true }],
-  ["no unprotected auto mode", { unprotected_auto_allowed: false }],
+  ["per machine, by the updater", {}, "per_machine"],
+  ["update.mode none by policy", {}, "policy"],
+  ["required", { required: true }, null],
+  ["no unprotected auto mode", { unprotected_auto_allowed: false }, null],
 ] as const)(
   "admin_copy_missing on a firm install (%s): ask IT, with no button",
-  async (_c, over) => {
+  async (_c, over, by) => {
+    if (by !== null) update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
     await mount({ view: () => view(PROT.missing, over) });
     expect(one("protection-repair")?.textContent).toBe(
       pw("en", "Ask your IT team to install Clauseo again."),

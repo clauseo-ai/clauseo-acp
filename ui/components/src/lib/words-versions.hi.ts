@@ -1,8 +1,9 @@
 // The Hindi of words-versions.ts, keyed by its English. Loaded only for a Hindi display: words-hi.ts gathers every words
 // file's Hindi into one lazy chunk, and words-versions.ts imports this file's type alone.
-// Design B's terminology sweep (safe-workspace-installer-setup): every line naming the protection says
-// "Safe workspace", सुरक्षित कार्यक्षेत्र in Hindi; those lines, English and Hindi, are provisional for Rohan's
-// batch review and a Hindi-speaking lawyer, listed in the PR (no copy-approvals entry registers them).
+// Design B's terminology sweep (safe-workspace-installer-setup): every line naming the protection
+// says "Safe workspace", सुरक्षित कार्यक्षेत्र in Hindi; those lines, English and Hindi, are
+// provisional for Rohan's batch review and a Hindi-speaking lawyer, listed in the PR (no
+// copy-approvals entry registers them).
 import { HI as TOOLBAR } from "./words-toolbar.hi.ts";
 
 const OWN = {

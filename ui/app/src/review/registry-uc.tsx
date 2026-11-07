@@ -183,7 +183,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-93, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-95, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -217,13 +217,12 @@ export const UC: Entry[] = [
     { protection: P.off },
   ),
   room("UC-06", toolbarWords("Not protected"), "room/protection-mark", { protection: P.refused }),
-  room(
+  first("UC-10", fw("Windows asks once for permission to set up the Safe workspace.")),
+  first(
     "UC-11",
     pw(
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
-    "room/protection-confirm",
-    { protection: P.pool, press: [LINE, SETUP] },
   ),
   room("UC-12", pw("Set up the Safe workspace"), "room/np-note", {
     protection: P.needs,
@@ -345,8 +344,8 @@ export const UC: Entry[] = [
     "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
     held(np({ unsupported: { why: "not_built" } })),
   ),
-  room("UC-40", pw("Add room for 4 more?"), "room/protection-confirm", {
-    protection: P.pool,
+  room("UC-40", pw("Set up the Safe workspace?"), "room/protection-confirm", {
+    protection: P.needs,
     press: [LINE, SETUP],
   }),
   settings("UC-41", pw("Remove the Safe workspace from this computer?"), held(P.b), [
@@ -534,5 +533,17 @@ export const UC: Entry[] = [
       command: () => Promise.reject({ code: "sandbox.blocked", message: "", retryable: false }),
     },
     [SETUP],
+  ),
+  room("UC-94", pw("Add room for 4 more?"), "room/protection-confirm", {
+    protection: P.pool,
+    press: [LINE, SETUP],
+  }),
+  room(
+    "UC-95",
+    pw(
+      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    ),
+    "room/protection-confirm",
+    { protection: P.pool, press: [LINE, SETUP] },
   ),
 ];

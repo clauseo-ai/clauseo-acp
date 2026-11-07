@@ -1,14 +1,18 @@
-// UC: protection in a window (decision record 0051). Each matter's `Protection`, as `ListMatters` and `matters_changed`
-// give it and `protection_changed` changes it; this computer's `ProtectionView` from the `protection` query, read when
-// the store is made (a window opening), after each protection command answers and on each `protection_changed`, and
-// replaced whole by R17 PR-B's `protection_view_changed` (read loosely: it isn't in bindings.ts yet). The view is null
-// while the query is refused (`command.invalid` before PR-B admits it), which hides or quiets every line that needs it.
-// One store per transport, for either window. It sends no command: each window's live with it (room/protection/
-// commands.ts, settings/sections/workspace-commands.ts), run through protection-run.ts, which marks `running` here. No
-// timers and no polling: the host publishes, the store hears.
+// UC: protection in a window (decision record 0051). Each matter's `Protection`, as `ListMatters`
+// and `matters_changed` give it and `protection_changed` changes it; this computer's
+// `ProtectionView` from the `protection` query, read when the store is made (a window opening),
+// after each protection command answers and on each `protection_changed`, and replaced whole by R17
+// PR-B's `protection_view_changed` (read loosely: it isn't in bindings.ts yet). The view is null
+// while the query is refused (`command.invalid` before PR-B admits it), which hides or quiets every
+// line that needs it. The updater's view (`get_update`, both windows may read it) gives who manages
+// this install, which tells a per-machine install from a per-user one for design B's repair; read
+// once, with the view (the install kind doesn't change while the app runs). One store per
+// transport, for either window. It sends no command: each window's live with it (room/protection/
+// commands.ts, settings/sections/workspace-commands.ts), run through protection-run.ts, which marks
+// `running` here. No timers and no polling: the host publishes, the store hears.
 import { nextHostOf, type AppEvent } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import type { ProtectionView } from "../transport/protocol.ts";
+import type { ManagedBy, ProtectionView, UpdateView } from "../transport/protocol.ts";
 
 /** A protection command running from this window: the one-time set-up (`retry_protection`) or its removal. */
 export type ProtectionAct = "set_up" | "remove";
@@ -23,6 +27,9 @@ export type ProtectionState = {
   /** The first run's Safe workspace step (first-run/workspace.ts), for this run: not entered, asking, or with its
    * outcome (set up, refused, failed or Not now). */
   step: "ask" | "done" | null;
+  /** Who manages this install, by the updater's view: undefined until read, null for nobody else (a
+   * per-user install) or while the query is refused. */
+  managedBy: ManagedBy | null | undefined;
 };
 
 export type ProtectionStore = {
@@ -38,6 +45,15 @@ const EMPTY: ProtectionState = {
   running: null,
   failed: null,
   step: null,
+  managedBy: undefined,
+};
+
+/** The updater's `managed.by`, or null when the updater manages itself. */
+const managedOf = (update: UpdateView | undefined): ManagedBy | null => {
+  const state = update?.state;
+  return typeof state === "object" && state !== null && "managed" in state
+    ? (state.managed?.by ?? null)
+    : null;
 };
 
 /** Whether the transport carries the protection wire: the desktop's does, a fake only when its test scripts it. */
@@ -65,6 +81,15 @@ export function createProtectionStore(transport: HostTransport): ProtectionStore
     }
     if (n === asked) set({ view });
   };
+  const readManaged = async (): Promise<void> => {
+    let managedBy: ManagedBy | null = null;
+    try {
+      managedBy = managedOf((await transport.query("get_update")).update);
+    } catch {
+      // refused or not scripted: a per-user install, as the repair reads it
+    }
+    set({ managedBy });
+  };
   const hear = (event: AppEvent) => {
     if ("protection_changed" in event) {
       // the matter's row takes it (matters.ts); the wait ends on the command's answer or the first protection_changed,
@@ -79,6 +104,7 @@ export function createProtectionStore(transport: HostTransport): ProtectionStore
   };
   nextHostOf(transport).app?.subscribeApp(hear);
   void read();
+  if (wired) void readManaged();
   return {
     subscribe: (listener) => {
       listeners.add(listener);
