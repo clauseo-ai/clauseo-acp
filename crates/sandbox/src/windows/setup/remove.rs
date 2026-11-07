@@ -46,7 +46,8 @@
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
-//! 8. the record key.
+//! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
+//!    key.
 //!
 //! The first failure stops the run there: [`SetupExit::RemovedPartly`], the record kept with
 //! `Removing = 1` and every pool SID (so a later run still trusts the ledger's entries), and the
@@ -60,6 +61,7 @@ use std::path::PathBuf;
 
 use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
+use super::record_values::CopyOwner;
 use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
@@ -136,6 +138,8 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
+    /// A per-machine install's stop task, deleted before the record.
+    StopTask,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -154,6 +158,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
+            RemoveStep::StopTask => "deleting the sandbox's stop task",
         })
     }
 }
@@ -368,6 +373,7 @@ fn steps(
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
+    remove_stop_task(machine)?;
     machine
         .delete_record()
         .map_err(|e| (RemoveStep::Record, cause_of(&e)))?;
@@ -466,6 +472,18 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
             RemoveStep::Group,
             format!("the group ClauseoSandboxUsers still has {members} members"),
         )),
+    }
+}
+
+/// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
+/// the task `\Clauseo\SandboxStop` set-up registered for the record's owner is deleted, so
+/// the owner keeps no start right once their pool is gone. A per-user install's task stays
+/// (`--adopt` registered it; `--remove --uninstall` deletes it with the admin copy).
+fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
+    let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
+    match machine.copy_owner().map_err(failed)? {
+        Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
+        Some(CopyOwner::User(_)) | None => Ok(()),
     }
 }
 
