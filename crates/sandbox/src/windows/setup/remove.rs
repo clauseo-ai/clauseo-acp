@@ -34,8 +34,9 @@
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
 //!    group, D-B11), its profile, its account with its sign-in screen value;
-//!    Then, only once every pool account is gone and a second sweep has stopped any process
-//!    still running as a pool SID, the network filters, the owner's read grant
+//!    Then, only once every pool account is gone and a second sweep has stopped every process
+//!    still running as a pool SID (one that won't stop ends the run at `Strays`, network on),
+//!    the network filters, the owner's read grant
 //!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
 //!    process that won't stop, which must not run unfiltered while a user's removal fails. A
 //!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
@@ -328,6 +329,7 @@ fn steps(
             .write_record(&flagged)
             .map_err(|e| (RemoveStep::Flag, cause_of(&e)))?;
     }
+    // A process left running here is logged; deleting its profile or account fails if it matters.
     machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
@@ -335,10 +337,20 @@ fn steps(
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
     // Anything still running as a pool SID (one that started since the first sweep, or one the
-    // first couldn't stop) is stopped again, elevated, before the network goes.
-    machine
+    // first couldn't stop) is stopped again, elevated, before the network goes. One that won't
+    // stop keeps the network on: the run ends here, RemovedPartly, and a re-run retries.
+    let left = machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
+    if left > 0 {
+        return Err((
+            RemoveStep::Strays,
+            format!(
+                "{left} process(es) of the sandbox users wouldn't stop, so the network \
+                 protection stays on; restart the computer and uninstall again"
+            ),
+        ));
+    }
     report.firewall = machine
         .remove_network(&record.owner)
         .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
