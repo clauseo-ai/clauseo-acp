@@ -33,12 +33,15 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// or unreadable, fails at [`Step::Owners`] naming the folder, before any deny is written. A
 /// missing folder is skipped here: step 7's deny on it fails at [`Step::SharedWrites`], which
 /// names it as missing.
-pub(super) fn own_protected(machine: &mut impl Machine, folders: &[PathBuf]) -> Result<(), Failed> {
+pub(super) fn own_protected(
+    machine: &mut impl Machine,
+    folders: &[(PathBuf, PathBuf)],
+) -> Result<(), Failed> {
     let failed =
         |folder: &Path, why: String| (Step::Owners, format!("{}: {why}", folder.display()));
-    for folder in folders {
+    for (profile, folder) in folders {
         let there = machine
-            .exists(folder)
+            .in_profile(profile, folder)
             .map_err(|error| failed(folder, cause_of(&error)))?;
         if !there {
             continue;
@@ -49,7 +52,7 @@ pub(super) fn own_protected(machine: &mut impl Machine, folders: &[PathBuf]) -> 
         if allowed_owner(machine, &owner) {
             continue;
         }
-        machine.give_to_admins(folder).map_err(|error| {
+        machine.give_to_admins(profile, folder).map_err(|error| {
             failed(
                 folder,
                 format!("its owner {owner} can't be replaced: {}", cause_of(&error)),

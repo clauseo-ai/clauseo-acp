@@ -215,6 +215,10 @@ impl Removal for Remover {
         Machine::profile_of(&mut self.m, sid)
     }
 
+    fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError> {
+        Machine::in_profile(&mut self.m, profile, folder)
+    }
+
     fn delete_profile(&mut self, sid: &Sid, owner: &Sid) -> Result<(), MachineError> {
         assert_ne!(sid, owner, "the owner's profile is never deleted");
         self.call(format!("delete_profile {}", rid(sid)))?;

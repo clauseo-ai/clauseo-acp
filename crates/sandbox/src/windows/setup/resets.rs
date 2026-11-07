@@ -112,7 +112,9 @@ pub(super) fn delete(machine: &mut impl Machine, user: &PoolUser) -> Result<Path
     }
     let left: Vec<String> = left.iter().map(|path| path.display().to_string()).collect();
     Err(failed(format!(
-        "an earlier profile's folder is left ({}): delete it, then run set-up again",
+        "an earlier profile's folder is left ({}): delete it with rd /s /q from a Command Prompt \
+         run as administrator, which deletes links in it as links, then run set-up again; never \
+         use takeown /R or icacls /T on it, which follow links",
         left.join("; ")
     )))
 }
