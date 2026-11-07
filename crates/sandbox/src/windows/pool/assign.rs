@@ -16,7 +16,10 @@
 //!   clears the mark once it has deleted and remade the profile. A never-used user owes none.
 //!
 //! So a pool user is never shared between live sessions of different matters (D-B5), and carries
-//! nothing of one matter to the next; two sessions of one matter share its user. Among the free
+//! nothing of one matter to the next. Nor between two live sessions of one matter: a pool user
+//! serves one live session at a time ([`busy`]), so the outer runner may kill every process of
+//! its pool user outside its own job (`runner/sweep.rs`). For now a matter holds one user, so a
+//! second session of a matter while one is open is refused with [`Assign::Busy`]. Among the free
 //! users, one never used goes first, in pool order, then the one released longest ago. With none
 //! free, [`Assign::PoolFull`] names each user and why it is held back, which PR6 turns into tier
 //! C with its cause.
@@ -185,6 +188,22 @@ pub enum Assign {
     /// user not in the pool.
     #[error(transparent)]
     Records(#[from] SetupError),
+    /// Another session of the matter is open, or its set-aside record can't be read: the
+    /// matter's pool user serves one live session at a time ([`busy`]).
+    #[error("{0} has another session open, and its sandbox user serves one session at a time")]
+    Busy(MatterId),
+}
+
+/// Whether a matter's pool user is busy for the launch of `session`, given the sessions the
+/// matter's set-aside record lists as open (`None`: a record that can't be read). The launch
+/// marks its own session open first (`before_launch`), so busy is any other session open, or a
+/// record that can't be read (failing closed). Two launches of one matter marked open together
+/// both find the other's session and are both refused.
+///
+/// The rule today: a matter holds one pool user, and that user serves one live session. The
+/// follow-up gives a matter's second session a pool user of its own and replaces this check.
+pub(crate) fn busy(open: Option<&BTreeSet<String>>, session: &str) -> bool {
+    open.is_none_or(|sessions| sessions.iter().any(|other| other != session))
 }
 
 /// What [`decide`] found for a matter.
@@ -395,6 +414,23 @@ mod tests {
             &holds(&ledger, &OpenSessions::default()),
         );
         assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
+    }
+
+    #[test]
+    fn a_user_is_busy_while_another_session_of_its_matter_is_open() {
+        let sessions = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect();
+        let none: BTreeSet<String> = sessions(&[]);
+        assert!(!busy(Some(&none), "s1"), "nothing open");
+        assert!(
+            !busy(Some(&sessions(&["s1"])), "s1"),
+            "only this launch's own"
+        );
+        assert!(busy(Some(&sessions(&["s0"])), "s1"), "another, live");
+        assert!(
+            busy(Some(&sessions(&["s0", "s1"])), "s1"),
+            "another beside this"
+        );
+        assert!(busy(None, "s1"), "an unreadable record fails closed");
     }
 
     #[test]
