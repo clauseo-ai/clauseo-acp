@@ -35,7 +35,7 @@ fn the_dacl_names_the_desktop_user_and_the_pool_user_only() {
     let sddl = pipe_sddl(&desktop, &pool);
     assert_eq!(
         sddl,
-        "D:P(A;;0x12019f;;;S-1-5-21-1-2-3-1001)(A;;0x12019f;;;S-1-5-21-1-2-3-1005)\
+        "D:P(A;;0x12019b;;;S-1-5-21-1-2-3-1001)(A;;0x12019b;;;S-1-5-21-1-2-3-1005)\
          S:(ML;;NWNR;;;ME)"
     );
     // Protected, read and write only, and no broad group, logon SID or owner rights.
@@ -46,7 +46,7 @@ fn the_dacl_names_the_desktop_user_and_the_pool_user_only() {
     }
     assert_eq!(
         PIPE_RIGHTS,
-        0x0012_0089 | 0x0012_0116,
-        "FILE_GENERIC_READ | FILE_GENERIC_WRITE"
+        (0x0012_0089 | 0x0012_0116) & !0x4,
+        "FILE_GENERIC_READ | FILE_GENERIC_WRITE, less FILE_CREATE_PIPE_INSTANCE"
     );
 }

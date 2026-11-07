@@ -129,3 +129,15 @@ fn display_names_every_part() {
         assert!(text.contains(part), "{text}");
     }
 }
+
+#[test]
+fn the_agents_window_station_names_only_system_and_the_pool_user_at_low() {
+    let sddl = station_sddl(&sid(POOL), None);
+    assert_eq!(
+        sddl,
+        format!("D:(A;;GA;;;SY)(A;;GA;;;{POOL})S:(ML;;NW;;;LW)")
+    );
+    for absent in [DESKTOP, LOGON, ";WD)", ";BU)"] {
+        assert!(!sddl.contains(absent), "{absent} in {sddl}");
+    }
+}

@@ -12,6 +12,52 @@ const BIT_STRING: u8 = 0x03;
 const OID: u8 = 0x06;
 /// `[0] EXPLICIT`, the version.
 const VERSION: u8 = 0xA0;
+/// `[3] EXPLICIT`, the extensions.
+const EXTENSIONS: u8 = 0xA3;
+/// `BOOLEAN`.
+const BOOLEAN: u8 = 0x01;
+/// `OCTET STRING`.
+const OCTET_STRING: u8 = 0x04;
+/// `id-ce-basicConstraints`, 2.5.29.19, as an OID's content.
+const BASIC_CONSTRAINTS: [u8; 3] = [0x55, 0x1D, 0x13];
+
+/// Whether the certificate `der` is a CA's: it parses, and its basic constraints extension says
+/// `cA` is true. A certificate with no such extension (an end entity's, or a version 1 one) is
+/// not; a malformed extension list is not either.
+pub(super) fn is_ca(der: &[u8]) -> bool {
+    certificate(der).is_some_and(|parts| basic_constraints_ca(parts.extensions) == Some(true))
+}
+
+/// `cA` from the basic constraints in the `extensions` field's content (`SEQUENCE OF
+/// Extension`); `None` when it is malformed or has no such extension.
+fn basic_constraints_ca(extensions: &[u8]) -> Option<bool> {
+    let (list, after) = expect(extensions, SEQUENCE)?;
+    if !after.is_empty() {
+        return None;
+    }
+    let mut rest = list.content;
+    while !rest.is_empty() {
+        let (extension, next) = expect(rest, SEQUENCE)?;
+        rest = next;
+        let (oid, inner) = expect(extension.content, OID)?;
+        if oid.content != BASIC_CONSTRAINTS {
+            continue;
+        }
+        // `critical BOOLEAN DEFAULT FALSE`, then the value.
+        let inner = match expect(inner, BOOLEAN) {
+            Some((_, after_critical)) => after_critical,
+            None => inner,
+        };
+        let (value, _) = expect(inner, OCTET_STRING)?;
+        let (constraints, _) = expect(value.content, SEQUENCE)?;
+        return Some(match expect(constraints.content, BOOLEAN) {
+            Some((flag, _)) => flag.content.first().is_some_and(|byte| *byte != 0),
+            // `cA BOOLEAN DEFAULT FALSE`: absent is false.
+            None => false,
+        });
+    }
+    None
+}
 
 /// One TLV: its tag, the whole encoding, and the content inside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +79,8 @@ pub(super) struct Parts<'a> {
     pub(super) subject: &'a [u8],
     /// The `SubjectPublicKeyInfo`.
     pub(super) spki: &'a [u8],
+    /// The content of the `[3] extensions` field, empty when there is none.
+    pub(super) extensions: &'a [u8],
 }
 
 /// The first TLV of `input` and what follows it.
@@ -108,13 +156,19 @@ pub(super) fn certificate(der: &[u8]) -> Option<Parts<'_>> {
     let (_, rest) = expect(rest, SEQUENCE)?;
     let (subject, rest) = expect(rest, SEQUENCE)?;
     let (spki, mut rest) = expect(rest, SEQUENCE)?;
+    let mut extensions: &[u8] = &[];
     while !rest.is_empty() {
-        rest = read(rest)?.1;
+        let (field, next) = read(rest)?;
+        if field.tag == EXTENSIONS {
+            extensions = field.content;
+        }
+        rest = next;
     }
     Some(Parts {
         issuer: issuer.raw,
         subject: subject.raw,
         spki: spki.raw,
+        extensions,
     })
 }
 

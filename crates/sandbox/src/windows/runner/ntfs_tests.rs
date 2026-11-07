@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 use super::paths::{CodexReuse, WinPath};
+use super::policy::credential_link_check;
 use super::*;
 use crate::Policy;
 use crate::windows::pool::PoolUser;
@@ -112,4 +113,29 @@ fn m3_refuses_a_policy_in_the_lawyers_codex_folder() {
         codex_reuse_in_policy(&reused, &profile),
         Err(CodexReuse::Path("granted"))
     );
+}
+
+#[test]
+fn m3_refuses_a_credential_link_hard_linked_to_the_lawyers_codex_login() {
+    let place = Place::new("runner-m3-link");
+    folders(&place, &["matter", "state", r"profile\.codex"]);
+    let auth = place.dir.file(r"profile\.codex\auth.json", "{}");
+    let linked = place.dir.hard_link(r"state\auth.json", &auth);
+    let own = place.dir.file(r"state\own.json", "{}");
+    let profile = WinPath::parse(place.at("profile").to_str().unwrap()).unwrap();
+    let policy = |link: &Path| {
+        Policy::builder(place.at("matter"), place.at("state"))
+            .home(place.at("home"))
+            .credential_link(link)
+            .build()
+            .unwrap()
+    };
+    assert_eq!(
+        codex_link_in_policy(&policy(&linked), &profile),
+        Err(CodexReuse::LinkedLogin)
+    );
+    assert_eq!(codex_link_in_policy(&policy(&own), &profile), Ok(()));
+    // No auth.json in the profile: nothing to be the same file as.
+    let elsewhere = WinPath::parse(place.at("home").to_str().unwrap()).unwrap();
+    assert_eq!(credential_link_check(&linked, &elsewhere), Ok(()));
 }

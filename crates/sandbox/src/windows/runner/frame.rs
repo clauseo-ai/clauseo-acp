@@ -35,6 +35,8 @@ pub struct InnerLaunch {
     pub folders: Vec<String>,
     /// The folder they all lie below, which exists: the state folder.
     pub folder_base: String,
+    /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
+    pub desktop: String,
 }
 
 impl std::fmt::Debug for InnerLaunch {
@@ -63,6 +65,12 @@ pub enum InnerReport {
         exit: u32,
         /// What failed.
         what: String,
+    },
+    /// The agent exited, with this code: sent after `Started`, so the outer can tell the agent's
+    /// own end (a start that failed in it, `0xC0000142`) from the inner runner's.
+    Exited {
+        /// The agent's exit code.
+        code: u32,
     },
 }
 

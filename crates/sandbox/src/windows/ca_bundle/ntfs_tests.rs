@@ -220,7 +220,7 @@ fn a_merged_bundle_is_written_once_beside_the_machine_bundle_with_its_descriptor
     let data = place.at("data");
     let desktop = current_user_sid().unwrap();
     let one = "S-1-5-21-1-2-3-1101";
-    let merged = merge(pem_of(ROOT).as_bytes(), &[pem_of(OTHER).into_bytes()]);
+    let merged = merge(pem_of(ROOT).as_bytes(), &[pem_of(OTHER).into_bytes()], &[]);
     let file = write_merged(&data, &desktop, &[sid(one)], &merged.pem).unwrap();
     assert_eq!(file.parent().unwrap(), data.join("sandbox-ca"));
     assert_ne!(file, path(&data));
