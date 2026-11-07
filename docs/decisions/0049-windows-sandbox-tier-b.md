@@ -730,84 +730,100 @@ for `--reclaim`.
 
 ### The network (PR7)
 
-`crates/sandbox/src/windows/wfp`. A pool user's agent reaches its launch's egress proxy and the
-launch's listed loopback ports, and nothing else.
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 61080-61179,
+where its launch's egress proxy and listed ports are, and nothing else. Rulings: the
+orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals).
 
 **Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP
-transaction, Clauseo's persistent provider and sublayer (weight `0xFFFE`) and six block filters
-whose `ALE_USER_ID` condition names every live pool user: every connect over IPv4 and IPv6,
-loopback and 61080-61179 included; every inbound connection that isn't loopback; ICMP at resource
-assignment. Each block clears its action right. Then it grants the owner PR0 (c)'s three rights:
-`ADD_LINK` on the sublayer, `ADD` on the filter container, `ADD_LINK` on
-`ALE_AUTH_CONNECT_V4`, each with `READ`, plus `READ` on the provider and each block filter so a
-launch can check them. Last come four Windows Firewall rules, named for the pool: block everything
-that isn't loopback, both ways; block loopback UDP; block loopback TCP outside 61080-61179. A
-re-run or an extend rewrites the filters for the whole pool inside the transaction, so no pool
-user is ever unfiltered and a new one is covered by the next run. A WFP failure fails the set-up
-at `Step::Network`.
+transaction: Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in
+the sublayer deleted, foreign ones included; six block filters; and one static permit per pool
+user. The blocks cover every connect over IPv4 and IPv6 (loopback and the range included), every
+inbound connection that isn't loopback, and ICMP at resource assignment, each clearing its action
+right. Each block's `ALE_USER_ID` condition matches `NOT_EQUAL` over
+`(D;;CC;;;<group>)(D;;CC;;;<each pool user>)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)`:
+it is true when an access check doesn't grant `CC`, and a deny entry also matches a deny-only
+SID. So a pool process that makes its user SID or the group deny-only in a derived token (no
+privilege needed) is still blocked; review item 1. The allows keep every other token out of the
+block: `Everyone`, `RESTRICTED` for a restricted token's second pass, and the two application
+package groups for `AppContainer` and LPAC apps. A non-pool restricted token whose restricting set
+holds neither `Everyone` nor `RESTRICTED` fails the second pass and is blocked too; the spike
+measures this collateral. Each static permit, at a weight above the blocks, is `127.0.0.1`, TCP,
+remote ports 61080-61179, with an `ALE_USER_ID` `EQUAL` allow for that one user: a derived token
+that escapes the allow loses the permit and falls to the block. Then come the owner's grants,
+**read-only, no control**: `READ|ENUM` on the filter container, and `READ` on our provider,
+sublayer and filters. There is no ADD, ADD_LINK, WRITE or DELETE anywhere, so the lawyer can't
+add, change or remove a WFP filter. The disclosure is small: the lawyer's processes can enumerate
+the machine's WFP filters, which shows other products' filter metadata but gives no control.
+Last come four Windows Firewall rules naming the pool: block everything that isn't loopback, both
+ways; block loopback UDP; block loopback TCP outside 61080-61179. A re-run or an extend rewrites
+it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
 
-**Each launch** (`LaunchPermit::open`, as the desktop user) first checks set-up's objects: the
-provider, the sublayer, and each block filter at its layer, blocking, in our sublayer, with a
-descriptor that names the matter's pool user and holds nothing else the check doesn't read. Then,
-in a dynamic WFP session, it adds one permit per port, `127.0.0.1` over TCP, for that pool user,
-at a weight above every block: `Policy::proxy_ports` and `Loopback::Ports`, R24's relay port
-included. The session closes when the permit drops, and WFP deletes its filters with it, after a
-crash too. Under design (B) the pool user's SID is both the token's user and a restricting SID,
-so one SID in the descriptor passes both access checks; PR0 (c) needed two only because its user
-and its restricting SID differed. The first VM row confirms the match (`examples/s15_wfp_vm.rs`).
+**Each launch** (`check_launch`, as the desktop user) checks before the agent starts, and adds
+nothing:
+- the provider and the sublayer are there;
+- every filter in the sublayer is one of set-up's, exactly: key, layer, action, weight, flags,
+  match types and conditions;
+- every block denies the matter's pool user;
+- the user has its static permit.
 
-**Fail closed.** A missing, changed or unreadable set-up object, or one that doesn't name the pool
-user, refuses the launch with `Error::NetworkUnfiltered` (`sandbox.setup_required`). So do,
-with `agent.launch_failed`, a permit WFP refuses, `Loopback::Any` (D10: the browser, the only
-entry that asks for it, is off on tier B), and a port outside 61080-61179. No agent runs
-unfiltered.
+A foreign filter, a change, a missing object or a refused read refuses the launch with
+`Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do,
+with `agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
+61080-61179, or WFP not answering. The ports `Policy::proxy_ports` and `Loopback::Ports` name
+narrow nothing at the WFP layer, but are still checked to be inside the range, so a launch never
+counts on a port the firewall blocks. No agent runs unfiltered.
 
-**Why the range is excepted in the firewall rules, not in the block filters.** Within our
-sublayer the matching filter with the highest weight decides, and across sublayers a block beats a
-soft permit. A block filter that left 61080-61179 open would let matter B's agent reach matter A's
-proxy and relay ports, because the permit only opens and never narrows. So the block filters
-block the range too, and each permit opens its own launch's ports. The firewall rules sit in
-Windows Firewall's own sublayer, where our soft permit can't beat them; blocking loopback TCP
-outside the range there caps every permit at the range.
+**Inside the range, the listeners' secrets are the check.** Every pool user reaches every
+listener on `127.0.0.1:61080-61179`, other matters' included. S16's proxy demands its per-launch
+token, and R24's relay its token file. **Accepted risk:** a listener an agent makes in the range
+(or one it puts on another matter's listed port before that port is bound, review item 7; S16's
+`SO_EXCLUSIVEADDRUSE` is out of PR7's scope) is reachable from another matter's agent: a
+collusion channel between two hijacked agents, like the pipes (D11).
 
 **When the firewall fails.** WFP is the boundary: any WFP call that fails, the Base Filtering
 Engine not running included (named for IT: set BFE to start automatically), fails the set-up, so
 the machine stays on tier C (`SetUpFailed`). The firewall is the second layer: once WFP's filters
-are in, no firewall failure fails the set-up. Set-up goes on with WFP alone, `SetupReport::network`
-names the firewall as ineffective with its cause, and the set-up logs it. The causes:
-- Group Policy keeps local rules from taking effect (`LocalPolicyModifyState` is not OK in every
-  current profile). For firm IT: add the same rules by Group Policy, or let local rules apply
-  (`AllowLocalPolicyMerge`).
+are in, no firewall failure fails the set-up. Set-up goes on with WFP alone,
+`SetupReport::network` names the firewall as ineffective with its cause, and the set-up logs it.
+The causes:
+- Group Policy keeps local rules from taking effect. For firm IT: add the same rules by Group
+  Policy, or let local rules apply (`AllowLocalPolicyMerge`).
 - The Windows Defender Firewall service (`mpssvc`) isn't running. IT can set it to start
   automatically.
-- Windows Firewall is off for a current profile, as it is when a third-party firewall owns the
-  computer. IT can add the same rules there, or turn Windows Firewall back on.
+- Windows Firewall is off for a current profile, as when a third-party firewall owns it. IT can
+  add the same rules there, or turn Windows Firewall back on.
 - A firewall call fails otherwise; the call and its code are named.
 
-`setup-result.json` doesn't carry it; the host can show it later through R17 if IT asks.
+The firewall's `LocalUserAuthorizedList` can only allow, so a deny-only derived token slips past
+the firewall rules; WFP's blocks still catch it. `setup-result.json` doesn't carry the firewall's
+state; the host can show it later through R17 if IT asks.
 
 **Inbound loopback** to a pool user's own listener is not blocked: whoever connects is filtered on
-its own connect side, so the agent's loopback pair on a listed port works. No listener rule:
-`ALE_AUTH_RECV_ACCEPT` never saw the loopback peer in PR0 (c), and the browser waits for its own
-design (R2's job-based check).
+its own connect side. No listener rule: `ALE_AUTH_RECV_ACCEPT` never saw the loopback peer in
+PR0 (c), and the browser waits for its own design.
 
-**Accepted risk: name resolution.** Windows resolves names in the DNS Client service, which runs
-as NETWORK SERVICE, so no `ALE_USER_ID` condition sees it: a hijacked agent can still look names
-up, a DNS exfiltration channel. Codex has the same gap. Direct DNS (port 53 to any resolver) is
-blocked like everything else. For firm IT: firms that need to close DNS exfiltration can point
-the machine at a filtering resolver. The VM rows measure it (a lookup under the (B) token, and
-direct UDP 53 to a public resolver).
+**Accepted risks: traffic other accounts carry.** No `ALE_USER_ID` condition sees these. Each
+VM row measures it.
+- **Name resolution.** The DNS Client service resolves names as NETWORK SERVICE, so a hijacked
+  agent can still look names up: a DNS exfiltration channel, which Codex shares. Direct DNS (port
+  53 to any resolver) is blocked. For firm IT: firms that need to close DNS exfiltration can point
+  the machine at a filtering resolver.
+- **SMB.** The SMB client connects from the System process. The restricted token fails network
+  logon, so what leaks is the server name and the TCP connect.
+- **WebDAV.** Opening `\\host@SSL\DavWWWRoot\<path>` makes the WebClient service (LOCAL SERVICE)
+  send HTTPS to any host, and the path goes out before any authentication. Windows 11 starts
+  WebClient on demand. For firm IT: disable the WebClient service by Group Policy if you don't use
+  WebDAV. The row runs on a Windows 11 copy if there is one, else on win-01 (Server 2025, no
+  WebClient), and says which.
 
-**Smaller notes.** The permit opens IPv4 `127.0.0.1` only, where S16 binds; `::1` stays
-blocked. A set-up that fails after step 8a leaves filters naming users its rollback deleted, which
-match nothing. Removal (`wfp::remove_network`, for `PR4j`'s `--remove`) deletes every block
-filter key, the sublayer and the provider in one transaction, takes back the owner's grants on the
-filter container and the layer (every allow of the owner there), and removes the firewall rules;
-it can run again after a partial removal, and needs every session closed.
+**Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. Removal
+(`wfp::remove_network`, for `PR4j`'s `--remove`) deletes every filter in the sublayer, foreign
+ones included, every key set-up writes, the sublayer and the provider, in one transaction; then it
+takes back the owner's read grant on the filter container, and removes the firewall rules. It can
+run again after a partial removal.
 
 **For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
-starts: `LaunchPermit::open(&pool_user_sid, &policy)`; hold the permit until the launch's whole
-process tree has exited, then close or drop it. On `Err`, don't start the agent; map
+starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent, and map
 `Error::NetworkUnfiltered` by `Error::code`.
 
 ## Consequences
