@@ -1,0 +1,105 @@
+# s15-launch: tier B's runner proved on GitHub's Windows runners (S15 PR5). Builds the
+# clauseo-sandbox bins and the s15_launch_vm example for the runner's native target, installs
+# Codex from npm, and runs the harness unattended: prepare (the set-up runs directly, since the
+# runner's token is already elevated), every row, then cleanup. Each row prints PASS, FAIL, SKIP
+# or INFO; the job fails when a row fails or is INFO (a control could not run), or prepare
+# fails. The harness output is the artifact.
+#
+# - No version is written here, as in ci.yml: Rust from rust-toolchain.toml, Node from
+#   "engines.node" in ui/package.json, Codex at the pin in crates/limits/tests/live/package.json.
+# - Every action is pinned by commit SHA, with its tag in a comment, copied from ci.yml.
+# - Each row has a hard limit in the harness (120 s, --row-timeout); the job has its own.
+# - windows-2025 is the x64 runner ci.yml uses; windows-11-arm is the one the plan asks about.
+name: s15-launch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [exp-pr5-harness]
+  pull_request:
+    paths:
+      - "crates/sandbox/src/windows/runner**"
+      - "crates/sandbox/src/windows/token**"
+      - "crates/sandbox/src/windows/pipe**"
+      - "crates/sandbox/src/windows/ca_bundle**"
+      - "crates/sandbox/src/bin/clauseo-sandbox-run.rs"
+      - "crates/sandbox/examples/s15_launch_vm**"
+      - ".github/workflows/s15-launch.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s15-launch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: harness (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-11-arm, target: aarch64-pc-windows-msvc }
+          - { runner: windows-2025, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.runner }}
+    # The ARM64 build takes about 25 minutes cold (buildtime.yml); nine rows at 120 s at most.
+    timeout-minutes: 60
+    env:
+      TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: OS build and token
+        run: |
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "$($cv.ProductName) | $($cv.DisplayVersion) | build $($cv.CurrentBuildNumber).$($cv.UBR)"
+          whoami /groups | Select-String 'Mandatory Label'
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add $env:TARGET
+
+      - name: Build the runner, the set-up and the harness
+        run: cargo build --locked -p clauseo-sandbox --bins --example s15_launch_vm --target $env:TARGET
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+
+      - name: Install Codex at its pin
+        run: |
+          $pin = (Get-Content crates/limits/tests/live/package.json -Raw | ConvertFrom-Json).dependencies.'@openai/codex'
+          $dir = Join-Path $env:RUNNER_TEMP 'codex'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          npm install --prefix $dir --no-audit --no-fund "@openai/codex@$pin"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem (Join-Path $dir 'node_modules\@openai') -Recurse -Filter codex.exe | ForEach-Object { $_.FullName }
+
+      - name: Run the harness unattended
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 's15-launch'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $exe = "target\$env:TARGET\debug\examples\s15_launch_vm.exe"
+          $node = (Get-Command node).Source
+          $codex = Join-Path $env:RUNNER_TEMP 'codex\node_modules\@openai'
+          & $exe --unattended --root 'C:\ClauseoS15Vm' --node $node --codex $codex 2>&1 |
+            Tee-Object -FilePath (Join-Path $out "harness-${{ matrix.runner }}.txt")
+          $code = $LASTEXITCODE
+          Get-Content (Join-Path $out "harness-${{ matrix.runner }}.txt") |
+            Select-String '^(PASS|FAIL|SKIP|INFO) ' | ForEach-Object { "- $($_.Line)" } |
+            Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          exit $code
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: s15-launch-${{ matrix.runner }}
+          path: ${{ runner.temp }}/s15-launch
+          if-no-files-found: warn
