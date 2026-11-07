@@ -5,8 +5,10 @@
 //!
 //! - `pool <pid> in-job=<true|false|error:<code>|unchecked> <image>`: one per process whose
 //!   token user is the session's pool user (`win_pool::pool_processes`); `in-job` is
-//!   `IsProcessInJob` against the session's kill-on-close job. Then `pool-unknown <n>`, the
-//!   processes whose user the harness couldn't read; or `pool-error <why>` alone.
+//!   `IsProcessInJob` against the session's kill-on-close job. Then `pool-unreadable <pid>
+//!   <image>` per process whose user the harness couldn't read, and `pool-unknown <n>`, their
+//!   count; or `pool-error <why>` alone. An unreadable process may be the pool user's, so a
+//!   listing with one never passes.
 //! - `benign ran <pid>` or `benign never-ran <why>`: the benign `probe wait` the harness started
 //!   as the pool user outside the job printed its pid (it ran) or didn't; then `benign gone <ms>
 //!   exit <code>` (it had ended `ms` after it was started) or `benign alive <ms>`.
@@ -41,6 +43,11 @@ struct Pooled<'l> {
 
 /// The `pool` lines and the `pool-unknown` count; the `pool-error` text when there is one.
 fn pooled(lines: &[String]) -> Result<(Vec<Pooled<'_>>, usize), String> {
+    if values(lines, "pool-unknown").is_empty() && values(lines, "pool-error").is_empty() {
+        return Err(format!(
+            "the harness's listing has no pool-unknown line: {lines:?}"
+        ));
+    }
     if let Some(why) = values(lines, "pool-error").first() {
         return Err(format!("the harness's listing failed: {why}"));
     }
@@ -60,8 +67,24 @@ fn pooled(lines: &[String]) -> Result<(Vec<Pooled<'_>>, usize), String> {
     let unknown = values(lines, "pool-unknown")
         .first()
         .and_then(|n| n.parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(usize::MAX);
     Ok((found, unknown))
+}
+
+/// INFO when `unknown` processes' users couldn't be read: the count and their images.
+fn unreadable(lines: &[String], unknown: usize, what: &str) -> Option<Verdict> {
+    if unknown == 0 {
+        return None;
+    }
+    let images: Vec<&str> = values(lines, "pool-unreadable")
+        .into_iter()
+        .map(|rest| rest.split_once(' ').map_or("?", |(_, image)| image))
+        .collect();
+    Some(Verdict::Info(format!(
+        "{what}, but the harness couldn't read the user of {unknown} processes ({}), any of which \
+         may be the pool user's, so it proves nothing",
+        images.join(", ")
+    )))
 }
 
 fn named(found: &[&Pooled<'_>]) -> String {
@@ -73,9 +96,9 @@ fn named(found: &[&Pooled<'_>]) -> String {
 }
 
 /// `pool-processes-at-start`: the listing taken once the agent (`agent`, its pid) printed its
-/// first line. PASS when every process of the pool user is in the session's kill-on-close job;
-/// FAIL naming each that isn't (or couldn't be checked); INFO when the listing didn't see the
-/// agent itself, so it can't see the pool user's processes.
+/// first line. PASS when every process's user was read and every process of the pool user is
+/// in the session's kill-on-close job; FAIL naming each that isn't (or couldn't be checked);
+/// INFO when the listing didn't see the agent itself, or couldn't read some process's user.
 pub(crate) fn at_start(lines: &[String], agent: u32) -> Verdict {
     let (found, unknown) = match pooled(lines) {
         Ok(read) => read,
@@ -94,16 +117,18 @@ pub(crate) fn at_start(lines: &[String], agent: u32) -> Verdict {
             named(&outside)
         ));
     }
-    Verdict::Pass(format!(
+    let note = format!(
         "{} processes of the pool user, the agent ({agent}) among them, all in the session's \
-         kill-on-close job; {unknown} processes' users unknown to the harness",
+         kill-on-close job",
         found.len()
-    ))
+    );
+    unreadable(lines, unknown, &note).unwrap_or(Verdict::Pass(note))
 }
 
 /// `pool-processes-at-end`: `running`, the listing while the session ran (it must see the agent,
 /// as in [`at_start`], else INFO); `after`, the listing `waited_ms` after the session ended. PASS
-/// when `after` lists no process of the pool user; FAIL naming each it lists.
+/// when `after` read every process's user and lists none of the pool user's; FAIL naming each
+/// it lists; INFO when it couldn't read some process's user.
 pub(crate) fn at_end(running: &[String], agent: u32, after: &[String], waited_ms: u128) -> Verdict {
     match pooled(running) {
         Ok((found, unknown)) if !found.iter().any(|p| p.pid == agent) => {
@@ -127,10 +152,11 @@ pub(crate) fn at_end(running: &[String], agent: u32, after: &[String], waited_ms
             named(&left)
         ));
     }
-    Verdict::Pass(format!(
+    let note = format!(
         "no process of the pool user {waited_ms} ms after the session ended (the agent {agent} \
-         was seen while it ran); {unknown} processes' users unknown to the harness"
-    ))
+         was seen while it ran)"
+    );
+    unreadable(after, unknown, &note).unwrap_or(Verdict::Pass(note))
 }
 
 /// `sweep-before-logon` (`within` `None`: gone by the agent's first line) and
@@ -284,7 +310,7 @@ mod tests {
     const RUNNING: [&str; 3] = [
         "pool 200 in-job=true clauseo-sandbox-run.exe",
         "pool 300 in-job=true s15_launch_vm.exe",
-        "pool-unknown 7",
+        "pool-unknown 0",
     ];
 
     #[test]
@@ -308,25 +334,50 @@ mod tests {
     fn at_start_is_info_when_the_listing_misses_the_agent() {
         let missed = lines(&[
             "pool 200 in-job=true clauseo-sandbox-run.exe",
-            "pool-unknown 9",
+            "pool-unknown 0",
         ]);
         assert!(matches!(at_start(&missed, 300), Verdict::Info(_)));
     }
 
     #[test]
     fn at_end_passes_only_on_an_empty_listing_after_a_listing_that_saw_the_agent() {
-        let empty = lines(&["pool-unknown 7"]);
+        let empty = lines(&["pool-unknown 0"]);
         assert!(matches!(
             at_end(&lines(&RUNNING), 300, &empty, 1_500),
             Verdict::Pass(_)
         ));
-        let left = lines(&["pool 400 in-job=unchecked probe.exe", "pool-unknown 7"]);
+        let left = lines(&["pool 400 in-job=unchecked probe.exe", "pool-unknown 0"]);
         fail_names(
             &at_end(&lines(&RUNNING), 300, &left, 10_000),
             &["400 (probe.exe"],
         );
-        let missed = lines(&["pool-unknown 9"]);
+        let missed = lines(&["pool-unknown 0"]);
         assert!(matches!(at_end(&missed, 300, &empty, 0), Verdict::Info(_)));
+    }
+
+    #[test]
+    fn an_unreadable_process_makes_either_listing_info_never_pass() {
+        let mut start = RUNNING.to_vec();
+        start.pop();
+        start.extend([
+            "pool-unreadable 800 csrss.exe",
+            "pool-unreadable 900 lsass.exe",
+        ]);
+        start.push("pool-unknown 2");
+        let Verdict::Info(why) = at_start(&lines(&start), 300) else {
+            panic!("not INFO");
+        };
+        assert!(why.contains("2 processes (csrss.exe, lsass.exe)"), "{why}");
+        let after = lines(&["pool-unreadable 800 csrss.exe", "pool-unknown 1"]);
+        let Verdict::Info(why) = at_end(&lines(&RUNNING), 300, &after, 1_000) else {
+            panic!("not INFO");
+        };
+        assert!(why.contains("1 processes (csrss.exe)"), "{why}");
+        // A process outside the job still fails, whatever else was unreadable.
+        start.insert(0, "pool 400 in-job=false probe.exe");
+        fail_names(&at_start(&lines(&start), 300), &["400 (probe.exe"]);
+        // No count at all is no listing.
+        fail_names(&at_end(&lines(&RUNNING), 300, &[], 0), &["pool-unknown"]);
     }
 
     #[test]
