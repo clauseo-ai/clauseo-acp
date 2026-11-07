@@ -56,6 +56,11 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
             "!insertmacro CLAUSEO_OWN_SID",
             "StrCpy $R3 \"$LOCALAPPDATA\\${BUNDLEID}\"",
             "CreateDirectory \"$R3\"",
+            "FindWindow $R5 \"${CLAUSEO_MAIN_WINDOW_CLASS}\"",
+            "${If} $R5 <> 0",
+            "StrCpy $R6 6",
+            "StrCpy $R2 \"\"",
+            "${EndIf}",
             "${If} $R2 != \"\"",
             "MessageBox MB_OK|MB_ICONINFORMATION \"$(adminCopyAsk)\"",
         ],
@@ -80,7 +85,12 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
     }
     // A declined prompt is its own outcome; the wait has no end but the instance's own.
     assert_run(body, &["${ElseIf} $R9 = 1223", "StrCpy $R6 4"]);
-    line_with(body, &["WaitForSingleObject(p R7, i -1) i .R9"]);
+    // Up to 10 minutes, then outcome 7 (a details line).
+    line_with(
+        body,
+        &["WaitForSingleObject(p R7, i ${CLAUSEO_ADMIN_WAIT_MS}) i .R9"],
+    );
+    assert_run(body, &["${If} $R9 = 258", "StrCpy $R6 7"]);
     assert_run(
         body,
         &["${If} $R7 <> 0", "DetailPrint \"$(adminCopyWorking)\""],
@@ -107,13 +117,14 @@ fn the_installers_exit_codes_are_their_own() {
         .collect();
     let admin: Vec<&(String, u32)> = codes
         .iter()
-        .filter(|(name, _)| name.starts_with("ADMIN_COPY_"))
+        .filter(|(name, _)| name.starts_with("ADMIN_COPY_") || name == "APP_RUNNING")
         .collect();
     assert_eq!(
         admin,
         [
             &("ADMIN_COPY_SKIPPED".to_owned(), 22),
-            &("ADMIN_COPY_FAILED".to_owned(), 23)
+            &("ADMIN_COPY_FAILED".to_owned(), 23),
+            &("APP_RUNNING".to_owned(), 24)
         ]
     );
     // Each installer code once (#638's 20 and 21 join these when both land).
@@ -157,9 +168,13 @@ fn every_exit_code_of_adopt_has_its_outcome() {
         &[
             "${If} $R8 = ${CLAUSEO_ADMIN_NEWER_KEPT}",
             "StrCpy $R6 5",
+            "${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}",
+            "StrCpy $R6 6",
             "${EndIf}",
             "${If} $R6 <> 4",
             "${AndIf} $R6 <> 5",
+            "${AndIf} $R6 <> 6",
+            "${AndIf} $R6 <> 7",
         ],
     );
     line_with(
@@ -213,6 +228,12 @@ fn every_exit_code_of_adopt_has_its_outcome() {
             "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyDeclined)\"",
             "${ElseIf} $R6 = 5",
             "DetailPrint \"$(adminCopyNewerKept)\"",
+            "${ElseIf} $R6 = 6",
+            "DetailPrint \"$(adminCopyAppRunning)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+            "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
+            "${ElseIf} $R6 = 7",
+            "DetailPrint \"$(adminCopyStillRunning)\"",
             "${EndIf}",
         ],
     );
@@ -267,6 +288,15 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
             "adminCopyNewerKept",
             "Clauseo kept the newer copy of Safe workspace's set-up program that's already on \
              this computer.",
+        ),
+        (
+            "adminCopyAppRunning",
+            "Clauseo is installed, but Safe workspace isn't set up, because Clauseo is running. \
+             Quit Clauseo, then run this installer again.",
+        ),
+        (
+            "adminCopyStillRunning",
+            "Clauseo is still setting up Safe workspace. It finishes on its own.",
         ),
         (
             "adminCopySkippedSilent",

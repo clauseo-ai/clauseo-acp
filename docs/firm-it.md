@@ -57,6 +57,7 @@ or update. Seen on Windows Server 2025 (build 26100) on 2026-11-03, with the
 |---|---|
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but setting up Safe workspace failed |
+| 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
 Only the last code set is reported, so an install that set several reports one of them.
 

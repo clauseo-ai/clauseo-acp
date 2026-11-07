@@ -9,7 +9,12 @@
 ; expands to plain jumps): no `::` plug-in call, no `Call`, no library function such as
 ; GetOptions, StrLoc or VersionCompare. A test holds that.
 ;
-; It reads nothing the lawyer can write before it extracts: not $TEMP, the environment or HKCU.
+; It reads nothing the lawyer can write before it extracts: not the environment or HKCU, and
+; nothing from %TEMP%. NSIS itself only makes one empty file there at startup and deletes it at
+; once, to test that the folder can be written (NSIS 3.11 Main.c:76-84, 290-318). With /SOLID
+; dropped (template block "no-solid"), `File` reads the copy straight from the installer, with
+; nothing unpacked into %TEMP% first (fileform.c:309-315 does that only for solid data), and the
+; branch makes no plug-in folder.
 ; Its inputs are its own command line, which the outer, unelevated instance wrote, and HKLM
 ; (administrators only):
 ; - $INSTDIR, from /D= only (NSIS sets it before .onInit and cuts $CMDLINE there);
@@ -208,6 +213,13 @@
       ; The 64-bit registry, as the template's SetContext would set it later in .onInit (its
       ; ${RunningX64} test calls a plug-in; these installers are x64 and arm64 only).
       SetRegView 64
+      ; Clauseo running (its main window, hidden or minimised included): touch nothing (97). A
+      ; process of the lawyer's could fake the window and so block this step; that only denies it.
+      FindWindow $R5 "${CLAUSEO_MAIN_WINDOW_CLASS}"
+      ${If} $R5 <> 0
+        SetErrorLevel ${CLAUSEO_ADMIN_APP_RUNNING}
+        Quit
+      ${EndIf}
       !insertmacro CLAUSEO_CHECK_SID $R2
       StrCpy $R4 ""
       ${If} $R0 = 1

@@ -18,18 +18,27 @@ const SID: &str = "S-1-5-21-1-2-3-1001";
 const INSTALL: &str = r"C:\Users\lawyer\AppData\Local\Clauseo";
 const DATA: &str = r"C:\Users\lawyer\AppData\Local\chat.clauseo.app";
 
-/// The `ARGS` of the one `!insertmacro CLAUSEO_ADMIN_COPY '...'` line that `pick` accepts.
+/// The `ARGS` of the one `!insertmacro CLAUSEO_ADMIN_COPY '...'` (the elevated branch's) or
+/// `!insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '...'` (the per-machine installer's) line that `pick`
+/// accepts.
 fn adopt_args(code: &[String], pick: impl Fn(&str) -> bool) -> String {
-    let lines: Vec<&String> = code
+    let args = |line: &str| {
+        [
+            "!insertmacro CLAUSEO_ADMIN_COPY '",
+            "!insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '",
+        ]
         .iter()
-        .filter(|line| line.starts_with("!insertmacro CLAUSEO_ADMIN_COPY '") && pick(line))
-        .collect();
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    lines[0]
-        .strip_prefix("!insertmacro CLAUSEO_ADMIN_COPY '")
+        .find_map(|prefix| line.strip_prefix(prefix))
         .and_then(|rest| rest.strip_suffix('\''))
-        .unwrap_or_else(|| panic!("{}", lines[0]))
-        .to_owned()
+        .map(str::to_owned)
+    };
+    let found: Vec<String> = code
+        .iter()
+        .filter(|line| pick(line))
+        .filter_map(|line| args(line))
+        .collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    found[0].clone()
 }
 
 /// The program's arguments for the command line `--adopt ARGS` (the `ExecWait` line), its NSIS
@@ -72,6 +81,10 @@ fn the_installers_adopt_arguments_are_the_ones_the_set_up_program_parses() {
     line_with(
         &code,
         &["ExecWait '\"${CLAUSEO_ADMIN_DIR}\\clauseo-sandbox-setup.exe\" --adopt ${ARGS}' $R8"],
+    );
+    line_with(
+        &code,
+        &["StrCpy $R9 '\"${CLAUSEO_ADMIN_DIR}\\clauseo-sandbox-setup.exe\" --adopt ${ARGS}'"],
     );
 
     // Per user (the elevated branch): the SID in $R2, the data folder in $R3.
