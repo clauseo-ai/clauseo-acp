@@ -59,8 +59,14 @@ pub(crate) const SETUP_TEST_PREFIX: &str = "ClauseoSbTS";
 #[cfg(test)]
 pub(crate) const LINKS_TEST_PREFIX: &str = "ClauseoSbTK";
 
+/// The account name prefix of the refresh tasks' elevated test (`refresh/windows_tests.rs`):
+/// `ClauseoSbTT` and six hex digits, a pool user's in test builds only.
+#[cfg(test)]
+pub(crate) const TASK_TEST_PREFIX: &str = "ClauseoSbTT";
+
 /// Whether `name` is a pool user's account name: `ClauseoSbNN` exactly ([`pool_number`]),
-/// or in test builds a [`TEST_PREFIX`], [`RESET_TEST_PREFIX`], [`LINKS_TEST_PREFIX`] or
+/// or in test builds a [`TEST_PREFIX`], [`RESET_TEST_PREFIX`], [`LINKS_TEST_PREFIX`],
+/// [`TASK_TEST_PREFIX`] or
 /// [`SETUP_TEST_PREFIX`] name.
 pub fn is_pool_account_name(name: &str) -> bool {
     if pool_number(name).is_some() {
@@ -71,6 +77,7 @@ pub fn is_pool_account_name(name: &str) -> bool {
         .strip_prefix(TEST_PREFIX)
         .or_else(|| name.strip_prefix(RESET_TEST_PREFIX))
         .or_else(|| name.strip_prefix(LINKS_TEST_PREFIX))
+        .or_else(|| name.strip_prefix(TASK_TEST_PREFIX))
     {
         return suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit());
     }
@@ -230,6 +237,7 @@ mod tests {
         // The test family's names pass in test builds only.
         assert_eq!(check(Some("ClauseoSbTL0a1b2c")), Ok(()));
         assert_eq!(check(Some("ClauseoSbTK0a1b2c")), Ok(()));
+        assert_eq!(check(Some("ClauseoSbTT0a1b2c")), Ok(()));
         for name in [
             "alice",
             "Administrator",
@@ -242,6 +250,7 @@ mod tests {
             "ClauseoSbTL0a1b2",
             "ClauseoSbTLzzzzzz",
             "ClauseoSbTK0a1b2",
+            "ClauseoSbTT0a1b2",
         ] {
             assert_eq!(check(Some(name)), Err(NotPool::OtherName), "{name}");
         }

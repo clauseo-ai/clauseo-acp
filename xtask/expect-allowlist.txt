@@ -165,6 +165,9 @@ crates/sandbox/build.rs key unreachable_pub
 crates/sandbox/src/windows/refresh/source.rs - unsafe_code
 crates/sandbox/src/windows/refresh/staging.rs - unsafe_code
 crates/sandbox/src/windows/refresh/task.rs - unsafe_code
+# The tasks' elevated test: its Task Scheduler calls, the test user's cmd, and its bounded waits.
+crates/sandbox/src/windows/refresh/windows_tests.rs - unsafe_code
+crates/sandbox/src/windows/refresh/windows_tests.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/refresh/walk.rs - unsafe_code
 crates/sandbox/src/windows/refresh/windows_refresher.rs - unsafe_code
 crates/sandbox/src/windows/refresh/test_signer.rs compress clippy::many_single_char_names
