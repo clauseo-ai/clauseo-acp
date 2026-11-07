@@ -87,24 +87,41 @@ libuv's own nested job) does the effect decide instead, and both halves must hol
 - The clipboard write fails in `OpenClipboard`, `EmptyClipboard` or `SetClipboardData` with
   5 (or `0x80070005`), what `WRITECLIPBOARD` gives. The call that failed is printed.
 
-Then the harness runs the positive control, of the agent's kind. It derives a Low restricted
-token from its own (the lawyer's) token, the agent's shape: `CreateRestrictedToken(own,
-DISABLE_MAX_PRIVILEGE)` with the logon SID deny-only and the restricting SIDs its own user,
-`S-1-5-12`, `S-1-5-32-545` and `S-1-1-0`; `TokenIntegrityLevel` `S-1-16-4096`; `TokenDefaultDacl`
-`D:(A;;GA;;;<own user>)(A;;GA;;;SY)` (`win_ctl.rs`). It makes a fresh window station
-`ClauseoS15Ctl-<hex>` as the outer runner makes `ClauseoRun-…` (`CreateWindowStationW(name, 0,
-GENERIC_ALL, sa)`, a DACL of the harness's user and `SYSTEM`, labelled Low) with a `Default`
-desktop, and keeps both open while it starts `probe ui-control` there:
-`CreateProcessAsUserW(control token, lpDesktop = "ClauseoS15Ctl-<hex>\Default")`. A restricted
-copy of the caller's own primary token needs no privilege to assign. The process is outside any
-job of ours; it inherits whatever job the harness runs in (on CI, the runner's), which the row
-notes with that job's UI limits. The probe tries `CreateDesktopW` on its own station, then the
-clipboard write with an owner window, and prints each result. The control counts only when it
-ran on the `ClauseoS15Ctl-` station at Low with four restricting SIDs and both steps succeeded;
-then the agent's 5s come from the job's limits, since the token shape, the integrity and the
-station kind are the same. When the process can't start, or either step fails, the row is
-`INFO`, naming the call and code, never `PASS`. Any other read of the agent's limits fails the
-row and names the value.
+Then the harness runs the positive control (`checks_ctl.rs`): `probe ui-control` once per
+variant, each on its own fresh window station `ClauseoS15Ctl-<hex>` made as the outer runner
+makes `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)`, a DACL of `SYSTEM`, the
+token's user and the harness's user, labelled Low, with a `Default` desktop), kept open while
+the process runs on `ClauseoS15Ctl-<hex>\Default`. No variant is in a job of ours; each inherits
+whatever job the harness runs in (on CI, the runner service's), which the row notes. The probe
+tries `CreateDesktopW` on its own station, then the clipboard write, and prints each result with
+its token's user, integrity and restricting SIDs. Every variant's result is printed. The
+variants, closest to the agent first:
+
+- (a) the agent's own token: the harness reads matter A's pool user's password from
+  `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
+  `probe ui-relay` as that user with `CreateProcessWithLogonW` (`win_logon.rs`), as the outer
+  starts the inner. The relay makes the agent's token from its own as the inner runner's `make`
+  does (restricting the pool user, `S-1-5-12`, `S-1-5-32-545`, `S-1-1-0`; the logon SID
+  deny-only; Low; `DISABLE_MAX_PRIVILEGE`; the agent's default DACL) and starts
+  `probe ui-control` with `CreateProcessAsUserW`. It differs from the agent in not being in the
+  runner's job (also: its station's DACL adds the harness's user, and the token object's own
+  DACL isn't set).
+- (b) the same shape made from the harness's own (the lawyer's) token (`win_ctl.rs`, restricting
+  the lawyer instead of the pool user, default DACL the lawyer and `SYSTEM`). A restricted copy
+  of the caller's own primary token needs no privilege to assign.
+- (c) as (b), with `CreateDesktopW` given explicit `SECURITY_ATTRIBUTES` (a DACL of the token's
+  user and `SYSTEM`), in case the default descriptor is what gives 8.
+- (d) as (b), restricted but at the lawyer's own integrity level, not Low.
+- (e) as (b), Low but with no restricting SIDs.
+- (f) the lawyer's own token unchanged, run as a child process the same way.
+
+The control is the first variant, in that order, that ran on its `ClauseoS15Ctl-` station with
+its own token shape and whose desktop create and clipboard write both succeeded; the row notes
+how it differs from the agent. The gate: only a variant at (d) or closer lets the row pass,
+since then the agent's 5s come from the job's limits. When (e) or (f) is the first to succeed,
+the row is `INFO` with every variant's codes as evidence, for a decision (for (f) the note says
+the control is unrestricted). When none succeeds, the row is `INFO`, naming each variant's
+codes, never `PASS`. Any other read of the agent's limits fails the row and names the value.
 
 `node-pipes` and `codex` also add a global atom as the lawyer and pass its name to
 `probe job-ui <atom>` (as node's argument, and in the command the mock asks codex to run). What
@@ -133,5 +150,6 @@ exits 1 on `INFO` too. The output is the job's artifact.
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
 `write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
-`runners`, `breakaway`, `handles`, `desktop`; and `ui-control`, which the harness starts itself
-(the positive control, above). `probe.rs` and `probe_sec.rs` document what each prints.
+`runners`, `breakaway`, `handles`, `desktop`; and `ui-control` and `ui-relay`, which the
+harness starts itself (the positive control, above). `probe.rs` and `probe_sec.rs` document
+what each prints.
