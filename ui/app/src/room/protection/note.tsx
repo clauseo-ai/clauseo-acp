@@ -104,7 +104,7 @@ export function ProtectionNote({
         waiting={retry ? waitingWords(lang, state, cause) : null}
         failed={retry ? failedWords(lang, state) : null}
         extra={extra}
-        onGetInstaller={page === null ? undefined : () => openInstallerPage(transport, page)}
+        onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
         onClose={close}
         onProtect={retry ? press : undefined}
       />

@@ -122,6 +122,12 @@ describe("TauriTransport", () => {
     ]);
   });
 
+  test("quit_app asks the host to quit; the call resolves once the host has it", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.quitApp()).resolves.toBeUndefined();
+    expect(invoked.filter((i) => i.command === "quit_app")).toHaveLength(1);
+  });
+
   test("open_settings asks the host to open or focus the settings window; a refusal rejects as a HostError", async () => {
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.openSettings()).resolves.toBeUndefined();

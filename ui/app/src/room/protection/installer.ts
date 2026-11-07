@@ -1,9 +1,11 @@
 // Design B: the installer sets the Safe workspace up, so where it didn't (its Windows prompt
 // declined, or a silent per-user install) the repair is to run the installer again. A personal
 // install gets a button that opens the installed version's release page through open_external,
-// whose native confirm asks first; the lawyer downloads and runs the installer. The app itself
-// never downloads or starts it. A test build's release page is deleted or never existed, so it gets
-// no button.
+// whose native confirm asks first; the lawyer downloads and runs the installer. Once the page is
+// open, Clauseo quits through quit_app (the app's normal quit, as Cmd+Q), so the installer can
+// replace it; a declined confirm or a refused open leaves Clauseo open. The app itself never
+// downloads or starts the installer. A test build's release page is deleted or never existed, so it
+// gets no button.
 import { APP_VERSION } from "../../settings/version.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { quietly } from "../open.ts";
@@ -28,6 +30,27 @@ export const isTestBuild = (display: object): boolean =>
 export const repairPage = (display: object, version: string = APP_VERSION): string | null =>
   isTestBuild(display) ? null : installerPage(version);
 
-/** Opens the page in the browser; the host's confirm comes first, and a decline says nothing. */
-export const openInstallerPage = (transport: HostTransport, url: string): void =>
-  void quietly("open_external", transport.openExternal(url));
+/** The open that is waiting for the lawyer's answer to the host's confirm, if one is: a second
+ * click meanwhile gets the same promise and opens nothing more. */
+let pending: Promise<void> | null = null;
+
+/** Opens the page through open_external, then quits Clauseo through quit_app, but only when the
+ * page opened (the lawyer accepted the confirm). A decline (`transport.unauthorized`) or any other
+ * refusal says nothing and quits nothing. Resolves when the quit has been asked, or nothing was. */
+export function openInstallerPage(transport: HostTransport, url: string): Promise<void> {
+  pending ??= openThenQuit(transport, url).finally(() => {
+    pending = null;
+  });
+  return pending;
+}
+
+async function openThenQuit(transport: HostTransport, url: string): Promise<void> {
+  let opened = false;
+  await quietly(
+    "open_external",
+    transport.openExternal(url).then(() => {
+      opened = true;
+    }),
+  );
+  if (opened) await quietly("quit_app", transport.quitApp());
+}

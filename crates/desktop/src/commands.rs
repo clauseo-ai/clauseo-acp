@@ -33,7 +33,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 21] = [
+pub(crate) const COMMANDS: [&str; 22] = [
     "dispatch",
     "query",
     "open_stream",
@@ -55,6 +55,7 @@ pub(crate) const COMMANDS: [&str; 21] = [
     "open_settings",
     "count_ui",
     "setup",
+    "quit_app",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -500,6 +501,17 @@ pub(crate) async fn open_settings<R: Runtime>(
             format!("the settings window did not open: {error}"),
         )
     })
+}
+
+/// Quits the app the way Cmd+Q does: `app.exit` raises `RunEvent::ExitRequested` (`lib.rs`), so
+/// the agents' installs and sign-ins stop and the host stops before the app ends. Granted to
+/// `main` and the settings window, whose Get the installer button asks for it once the release
+/// page opened (`ui/app/src/room/protection/installer.ts`).
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn quit_app<R: Runtime>(app: AppHandle<R>) -> Result<(), HostError> {
+    app.exit(0);
+    Ok(())
 }
 
 /// Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`

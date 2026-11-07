@@ -9,7 +9,7 @@
 // no timer at rest.
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { pw } from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { st } from "@clauseo/components/lib/words-settings.ts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -28,6 +28,8 @@ let root: Root | null = null;
 let store: DisplayStore | null = null;
 /** The updater's view `get_update` answers; undefined: not scripted (refused). */
 let update: unknown = undefined;
+/** The language the settings window's ui settings name. */
+let language: "en" | "hi" = "en";
 
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -39,6 +41,7 @@ afterEach(async () => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   update = undefined;
+  language = "en";
 });
 
 async function settle() {
@@ -56,7 +59,7 @@ async function mount(
   platform: "mac" | "windows" | "linux" = "windows",
   hash = "#workspace",
 ) {
-  const settings = { ui: DEFAULT_UI, locked: [] };
+  const settings = { ui: { ...DEFAULT_UI, language }, locked: [] };
   const transport = new FakeTransport({
     platform,
     query: (query) => {
@@ -359,7 +362,21 @@ test("admin_copy_missing on a per-user install: not set up yet, the repair, and 
   expect(t.only("open_external")).toEqual([
     { call: "open_external", url: installerPage(APP_VERSION) },
   ]);
+  expect(t.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(t.protectionCommands()).toEqual([]);
+});
+
+test("the per-user repair says Clauseo will close, beside Get the installer, in English", async () => {
+  update = { current: "0.1.0", mode: "auto", state: "idle" };
+  await mount({ view: () => view(PROT.missing) });
+  expect(one("protection-close-line")?.textContent).toBe(pw("en", INSTALLER_CLOSE));
+});
+
+test("the same line in Hindi when the window is in Hindi", async () => {
+  update = { current: "0.1.0", mode: "auto", state: "idle" };
+  language = "hi";
+  await mount({ view: () => view(PROT.missing) });
+  expect(one("protection-close-line")?.textContent).toBe(pw("hi", INSTALLER_CLOSE));
 });
 
 test.each([
@@ -371,12 +388,14 @@ test.each([
   "admin_copy_missing on a firm install (%s): ask IT, with no button",
   async (_c, over, by) => {
     if (by !== null) update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
-    await mount({ view: () => view(PROT.missing, over) });
+    const t = await mount({ view: () => view(PROT.missing, over) });
     expect(one("protection-repair")?.textContent).toBe(
       pw("en", "Ask your IT team to install Clauseo again."),
     );
     expect(one("protection-installer")).toBeNull();
+    expect(one("protection-close-line")).toBeNull();
     expect(one("protection-setup")).toBeNull();
+    expect(t.only("quit_app")).toEqual([]);
   },
 );
 

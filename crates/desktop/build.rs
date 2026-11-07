@@ -47,6 +47,7 @@ const RELEASE: &[&str] = &[
     "open_settings",
     "count_ui",
     "setup",
+    "quit_app",
 ];
 
 /// What the `e2e` build adds: `E2E_COMMANDS` in `src/commands.rs`.

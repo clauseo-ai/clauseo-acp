@@ -183,7 +183,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-95, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -545,5 +545,14 @@ export const UC: Entry[] = [
     ),
     "room/protection-confirm",
     { protection: P.pool, press: [LINE, SETUP] },
+  ),
+  first(
+    "UC-96",
+    pw(
+      "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
+    ),
+    undefined,
+    {},
+    P.missing,
   ),
 ];

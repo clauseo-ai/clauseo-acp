@@ -10,7 +10,7 @@
 // after it, once.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
-import { pw } from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { APP_VERSION } from "../../settings/version.ts";
 import { installerPage } from "../protection/installer.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
@@ -190,12 +190,14 @@ test("admin_copy_missing: the repair's words and Get the installer, no command; 
     )}`,
   );
   expect(byId("protection-setup")).toBeNull();
+  expect(byId("protection-close-line")?.textContent).toBe(pw("en", INSTALLER_CLOSE));
   expect(reads(t)).toBe(0);
   await press(byId("protection-installer"));
   await settle();
   expect(t.only("open_external")).toEqual([
     { call: "open_external", url: installerPage(APP_VERSION) },
   ]);
+  expect(t.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(t.protectionCommands()).toEqual([]);
   await press(byId("workspace-not-now"));
   for (let i = 0; i < 3; i += 1) await settle();

@@ -1,13 +1,16 @@
 // Design B's repair page: stage F's per-version release page, built in one place, and no page for a
 // test build or a version that isn't a plain X.Y.Z. And the cause-to-words table: each reason R17
 // PR-E names, other_account, and an unknown reason's "ask IT" line.
-import { pw } from "@clauseo/components/lib/words-protection.ts";
-import { expect, test } from "vitest";
+import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
+import { afterEach, expect, test, vi } from "vitest";
 import { causeOf } from "./causes.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller } from "./blocked.ts";
 import { PROT, view } from "./fixtures.ts";
-import { installerPage, isTestBuild, repairPage } from "./installer.ts";
+import { installerPage, isTestBuild, openInstallerPage, repairPage } from "./installer.ts";
+import { FakeTransport } from "../../transport/fake-transport.ts";
 import type { NotProtectedCause } from "../../transport/protocol.ts";
+
+afterEach(() => vi.restoreAllMocks());
 
 test("the installer's page is the installed version's release page, never latest", () => {
   expect(installerPage("0.1.0")).toBe(
@@ -93,4 +96,88 @@ test("a firm install: per machine, or the firm's policy as a hint; a per-user in
   expect(firmInstall(view(PROT.missing), "policy")).toBe(true);
   expect(firmInstall(view(PROT.missing, { required: true }), null)).toBe(true);
   expect(firmInstall(view(PROT.missing, { unprotected_auto_allowed: false }), null)).toBe(true);
+});
+
+// Get the installer: the page opens through open_external, and only then Clauseo quits through
+// quit_app (the app's normal quit); a decline or a refusal leaves Clauseo open.
+const RELEASE = "https://github.com/clauseo-ai/clauseo-acp/releases/tag/v0.1.0";
+const DECLINED = { code: "transport.unauthorized", message: "declined", retryable: false };
+const REFUSED = { code: "command.invalid", message: "bad link", retryable: false };
+
+test("accepted: the release page opens, and Clauseo quits once, after it", async () => {
+  let accept: () => void = () => {};
+  const t = new FakeTransport({
+    openExternal: () => new Promise<void>((resolve) => (accept = resolve)),
+  });
+  const done = openInstallerPage(t, RELEASE);
+  expect(t.only("open_external")).toEqual([{ call: "open_external", url: RELEASE }]);
+  expect(t.only("quit_app")).toEqual([]);
+  accept();
+  await done;
+  expect(t.calls.filter((c) => c.call === "open_external" || c.call === "quit_app")).toEqual([
+    { call: "open_external", url: RELEASE },
+    { call: "quit_app" },
+  ]);
+});
+
+test("declined: nothing quits, and Clauseo stays open", async () => {
+  const t = new FakeTransport({ openExternal: () => Promise.reject(DECLINED) });
+  await openInstallerPage(t, RELEASE);
+  expect(t.only("open_external")).toHaveLength(1);
+  expect(t.only("quit_app")).toEqual([]);
+});
+
+test("a refused open says so to the console and quits nothing", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const t = new FakeTransport({ openExternal: () => Promise.reject(REFUSED) });
+  await openInstallerPage(t, RELEASE);
+  expect(t.only("quit_app")).toEqual([]);
+  expect(warn).toHaveBeenCalledOnce();
+});
+
+test("a refused quit is said to the console; the page stays open", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const t = new FakeTransport({ quitApp: () => Promise.reject(REFUSED) });
+  await openInstallerPage(t, RELEASE);
+  expect(t.only("open_external")).toHaveLength(1);
+  expect(t.only("quit_app")).toHaveLength(1);
+  expect(warn).toHaveBeenCalledOnce();
+});
+
+test("a second click while the first waits for the confirm opens nothing more and quits once", async () => {
+  let accept: () => void = () => {};
+  const t = new FakeTransport({
+    openExternal: () => new Promise<void>((resolve) => (accept = resolve)),
+  });
+  const first = openInstallerPage(t, RELEASE);
+  const second = openInstallerPage(t, RELEASE);
+  accept();
+  await Promise.all([first, second]);
+  expect(t.only("open_external")).toHaveLength(1);
+  expect(t.only("quit_app")).toHaveLength(1);
+});
+
+test("after a decline, the next click asks again", async () => {
+  let answer: () => void = () => {};
+  const t = new FakeTransport({
+    openExternal: () =>
+      t.only("open_external").length === 1
+        ? Promise.reject(DECLINED)
+        : new Promise<void>((resolve) => (answer = resolve)),
+  });
+  await openInstallerPage(t, RELEASE);
+  const again = openInstallerPage(t, RELEASE);
+  answer();
+  await again;
+  expect(t.only("open_external")).toHaveLength(2);
+  expect(t.only("quit_app")).toHaveLength(1);
+});
+
+test("the close line says what happens, in English and in Hindi", () => {
+  expect(pw("en", INSTALLER_CLOSE)).toBe(
+    "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
+  );
+  expect(pw("hi", INSTALLER_CLOSE)).toBe(
+    "Clauseo बंद हो जाएगा, ताकि इंस्टॉलर सुरक्षित कार्यक्षेत्र सेट अप कर सके। जो इंस्टॉलर आप डाउनलोड करें, उसे चलाएँ, फिर Clauseo दोबारा खोलें।",
+  );
 });

@@ -253,7 +253,7 @@ function holdOf(
           words={stepWords(lang, shield.parts.pw)}
           repair={repair.lines}
           onGetInstaller={
-            page === null ? undefined : () => shield.parts.openInstallerPage(transport, page)
+            page === null ? undefined : () => void shield.parts.openInstallerPage(transport, page)
           }
           onSetUp={acts.setUp}
           onNotNow={acts.notNow}

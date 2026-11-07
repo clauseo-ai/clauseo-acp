@@ -13,7 +13,7 @@
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
-import { pw } from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
@@ -151,7 +151,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
       <Button
         kind="tone"
         size="small"
-        onClick={() => openInstallerPage(ctx.transport, page)}
+        onClick={() => void openInstallerPage(ctx.transport, page)}
         data-testid="protection-installer"
       >
         {w.say(pw(lang, "Get the installer"))}
@@ -193,6 +193,11 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           {repair && (
             <p className="set-note" data-testid="protection-repair">
               {w.say(repairLine(lang, view, state.managedBy))}
+            </p>
+          )}
+          {page !== null && (
+            <p className="set-note" data-testid="protection-close-line">
+              {w.say(pw(lang, INSTALLER_CLOSE))}
             </p>
           )}
           {cause !== null && named1385(cause) && (
