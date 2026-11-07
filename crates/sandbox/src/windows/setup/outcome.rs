@@ -155,6 +155,9 @@ pub enum Step {
     Matters,
     /// 7: before the shared-write denies, no sandbox user may own a folder they protect.
     Owners,
+    /// 4: deleting the profile of a recorded user released from a matter, before its logon
+    /// makes it again (`resets.rs`).
+    ResetProfile,
 }
 
 impl fmt::Display for Step {
@@ -181,6 +184,7 @@ impl fmt::Display for Step {
             Step::Marker => "writing setup.json",
             Step::Matters => "reading the registered matters",
             Step::Owners => "making sure no sandbox user owns a protected folder",
+            Step::ResetProfile => "resetting a sandbox user's profile",
         })
     }
 }
@@ -258,8 +262,12 @@ pub struct SetupReport {
     pub pool: Vec<PoolUser>,
     /// The users this run made.
     pub made: Vec<PoolUser>,
-    /// The recorded users whose passwords this run reset (a re-run).
+    /// The recorded users whose passwords this run reset (a re-run, or a profile reset).
     pub reset: Vec<PoolUser>,
+    /// The recorded users whose profiles this run deleted and made again, as released users owe
+    /// (`resets.rs`); `Err` when their marks couldn't be cleared after, and why: they stay held
+    /// back until a set-up clears them.
+    pub profiles_reset: Result<Vec<PoolUser>, String>,
     /// The group's SID.
     pub group: Sid,
     /// Whether this run made the group.

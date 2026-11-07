@@ -3,20 +3,28 @@
 //!
 //! - no matter in `matters.json` holds it ([`MatterRow::holds`]);
 //! - no hand-back is owed for it ([`Ledger::handback_owed`], a kept owed entry included);
-//! - no ledger entry names it, in any state ([`Ledger::names_sid`], a kept entry included);
+//! - no ledger entry grants it access, in any state ([`Ledger::grants_sid`]: an allow, or a kept
+//!   entry whose rights can't be read). A deny doesn't hold it: each matter's fence denies every
+//!   other pool user on its folders, so a deny on matter M naming user X keeps M safe from X, and
+//!   stays when X goes to another matter;
 //! - it owns no item set aside and still on disk ([`SetAsideOwners`]): a moved item keeps its
 //!   owner, who has the implied `WRITE_DAC` on it;
 //! - no matter that held it, now or before ([`MatterRow::held_before`]), has an open session
-//!   ([`OpenSessions`]).
+//!   ([`OpenSessions`]);
+//! - it isn't owed a profile reset (`needs_reset` in `matters.json`): a release marks its user,
+//!   whose profile and hive may hold what the old matter's agent wrote, and the elevated set-up
+//!   clears the mark once it has deleted and remade the profile. A never-used user owes none.
 //!
-//! So a pool user is never shared between live sessions of different matters (D-B5); two
-//! sessions of one matter share its user. Among the free users, one never used goes first, in
-//! pool order, then the one released longest ago. With none free, [`Assign::PoolFull`] names each
-//! user and why it is held back, which PR6 turns into tier C with its cause.
+//! So a pool user is never shared between live sessions of different matters (D-B5), and carries
+//! nothing of one matter to the next; two sessions of one matter share its user. Among the free
+//! users, one never used goes first, in pool order, then the one released longest ago. With none
+//! free, [`Assign::PoolFull`] names each user and why it is held back, which PR6 turns into tier
+//! C with its cause.
 //!
-//! Pure: the decision reads the rows, the ledger, the set-aside owners and the open sessions
-//! given. `MatterSids::assign` reads the rows, the ledger and the set-aside owners inside
-//! `matters.lock`, makes the decision there and saves the result.
+//! Pure: the decision reads the rows and the [`Holds`] given: the ledger, the set-aside owners,
+//! the open sessions and the resets owed. `MatterSids::assign` reads the rows, the resets owed,
+//! the ledger and the set-aside owners inside `matters.lock`, makes the decision there and saves
+//! the result.
 
 use std::collections::BTreeSet;
 
@@ -67,7 +75,7 @@ impl OpenSessions {
 pub enum Why {
     /// A hand-back is still owed for it (a forget hasn't finished).
     Owed,
-    /// A ledger entry names it.
+    /// A ledger entry grants it access (an allow, or a kept entry whose rights can't be read).
     Entries,
     /// A matter that held it has an open session.
     Open,
@@ -76,6 +84,23 @@ pub enum Why {
     /// It owns an item set aside and still on disk, or a set-aside manifest that might name it
     /// can't be read.
     SetAside,
+    /// It was released from a matter and its profile and hive haven't been reset since: the
+    /// elevated set-up (an extend or a re-run) resets it.
+    NeedsReset,
+}
+
+/// What can hold a pool user back besides the rows: the ledger, the set-aside owners, the
+/// matters with an open session and the users owed a profile reset.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Holds<'a> {
+    /// The ACL ledger, read inside `matters.lock`.
+    pub(crate) ledger: &'a Ledger,
+    /// The owners of the items set aside.
+    pub(crate) set_aside: &'a SetAsideOwners,
+    /// The matters with an open session.
+    pub(crate) open: &'a OpenSessions,
+    /// The users owed a profile reset (`matters.json`'s `needs_reset`).
+    pub(crate) needs_reset: &'a BTreeSet<Sid>,
 }
 
 /// The owners of the items set aside and still on disk, from every matter's manifest; or all
@@ -136,7 +161,7 @@ impl SetAsideOwners {
 }
 
 /// A pool user held back, and why: the first reason found, checked in the order `Held`, `Owed`,
-/// `Entries`, `SetAside`, `Open`.
+/// `Entries`, `SetAside`, `Open`, `NeedsReset`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldBack {
     /// The pool user's SID.
@@ -171,16 +196,14 @@ pub(crate) enum Pick {
     New(Sid),
 }
 
-/// The pool user `matter` gets from `pool`, given every matter's row, the ledger, the set-aside
-/// owners and the matters with an open session, by the rules in this module's doc. A matter that
-/// holds a user not in `pool` is refused with [`Assign::Records`]: the machine record lost it.
+/// The pool user `matter` gets from `pool`, given every matter's row and what else `held` says,
+/// by the rules in this module's doc. A matter that holds a user not in `pool` is refused with
+/// [`Assign::Records`]: the machine record lost it.
 pub(crate) fn decide(
     matter: &MatterId,
     rows: &Rows,
     pool: &[Sid],
-    ledger: &Ledger,
-    set_aside: &SetAsideOwners,
-    open: &OpenSessions,
+    held: &Holds<'_>,
 ) -> Result<Pick, Assign> {
     if let Some(user) = rows.get(matter).and_then(MatterRow::holds) {
         if !pool.contains(user) {
@@ -197,7 +220,7 @@ pub(crate) fn decide(
         if !seen.insert(user) {
             continue;
         }
-        match held_back_why(user, rows, ledger, set_aside, open) {
+        match held_back_why(user, rows, held) {
             Some(why) => held_back.push(HeldBack {
                 pool: user.clone(),
                 why,
@@ -219,29 +242,26 @@ pub(crate) fn decide(
 }
 
 /// Why `user` can't go to another matter, or `None` when it may.
-fn held_back_why(
-    user: &Sid,
-    rows: &Rows,
-    ledger: &Ledger,
-    set_aside: &SetAsideOwners,
-    open: &OpenSessions,
-) -> Option<Why> {
+fn held_back_why(user: &Sid, rows: &Rows, held: &Holds<'_>) -> Option<Why> {
     if let Some((holder, _)) = rows.iter().find(|(_, row)| row.holds() == Some(user)) {
         return Some(Why::Held(*holder));
     }
-    if ledger.handback_owed(user) {
+    if held.ledger.handback_owed(user) {
         return Some(Why::Owed);
     }
-    if ledger.names_sid(user) {
+    if held.ledger.grants_sid(user) {
         return Some(Why::Entries);
     }
-    if set_aside.holds(user) {
+    if held.set_aside.holds(user) {
         return Some(Why::SetAside);
     }
     let held_by_open = rows
         .iter()
-        .any(|(matter, row)| row.named(user) && open.is_open(matter));
-    held_by_open.then_some(Why::Open)
+        .any(|(matter, row)| row.named(user) && held.open.is_open(matter));
+    if held_by_open {
+        return Some(Why::Open);
+    }
+    held.needs_reset.contains(user).then_some(Why::NeedsReset)
 }
 
 /// When `user` was last released, or `None` when no row names it: never used. A user only in
@@ -288,6 +308,22 @@ mod tests {
         Ledger::open(ledger_path(temp.path()), &[], &Reserved::default()).unwrap()
     }
 
+    static NO_SET_ASIDE: SetAsideOwners = SetAsideOwners {
+        owners: BTreeSet::new(),
+        all: false,
+    };
+    static NO_RESETS: BTreeSet<Sid> = BTreeSet::new();
+
+    /// What holds users back besides the rows: only `ledger` and `open`.
+    fn holds<'a>(ledger: &'a Ledger, open: &'a OpenSessions) -> Holds<'a> {
+        Holds {
+            ledger,
+            set_aside: &NO_SET_ASIDE,
+            open,
+            needs_reset: &NO_RESETS,
+        }
+    }
+
     #[test]
     fn never_used_users_go_first_then_the_longest_free() {
         let temp = TempDir::new("assign-order");
@@ -300,39 +336,15 @@ mod tests {
         rows.insert(matter(3), released(sid(1003), 200));
         // 1004 is never used, so it goes first though it is last in the pool.
         let new = matter(9);
-        let pick = decide(
-            &new,
-            &rows,
-            &pool,
-            &ledger,
-            &SetAsideOwners::default(),
-            &open,
-        )
-        .unwrap();
+        let pick = decide(&new, &rows, &pool, &holds(&ledger, &open)).unwrap();
         assert_eq!(pick, Pick::New(sid(1004)));
         rows.insert(matter(4), released(sid(1004), 400));
         // Then the one released longest ago, whatever its place in the pool.
-        let pick = decide(
-            &new,
-            &rows,
-            &pool,
-            &ledger,
-            &SetAsideOwners::default(),
-            &open,
-        )
-        .unwrap();
+        let pick = decide(&new, &rows, &pool, &holds(&ledger, &open)).unwrap();
         assert_eq!(pick, Pick::New(sid(1002)));
         // A later row for 1002 counts: its last release is what matters.
         rows.insert(matter(5), released(sid(1002), 500));
-        let pick = decide(
-            &new,
-            &rows,
-            &pool,
-            &ledger,
-            &SetAsideOwners::default(),
-            &open,
-        )
-        .unwrap();
+        let pick = decide(&new, &rows, &pool, &holds(&ledger, &open)).unwrap();
         assert_eq!(pick, Pick::New(sid(1003)));
     }
 
@@ -343,29 +355,13 @@ mod tests {
         let open = OpenSessions::default();
         let pool = [sid(1003), sid(1001), sid(1002)];
         let rows = Rows::new();
-        let pick = decide(
-            &matter(9),
-            &rows,
-            &pool,
-            &ledger,
-            &SetAsideOwners::default(),
-            &open,
-        )
-        .unwrap();
+        let pick = decide(&matter(9), &rows, &pool, &holds(&ledger, &open)).unwrap();
         assert_eq!(pick, Pick::New(sid(1003)));
         let mut rows = Rows::new();
         rows.insert(matter(1), released(sid(1001), 50));
         rows.insert(matter(2), released(sid(1002), 50));
         rows.insert(matter(3), released(sid(1003), 60));
-        let pick = decide(
-            &matter(9),
-            &rows,
-            &pool,
-            &ledger,
-            &SetAsideOwners::default(),
-            &open,
-        )
-        .unwrap();
+        let pick = decide(&matter(9), &rows, &pool, &holds(&ledger, &open)).unwrap();
         assert_eq!(pick, Pick::New(sid(1001)));
     }
 
@@ -387,9 +383,7 @@ mod tests {
             &matter(1),
             &rows,
             &[sid(1001)],
-            &ledger,
-            &SetAsideOwners::default(),
-            &OpenSessions::default(),
+            &holds(&ledger, &OpenSessions::default()),
         );
         assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
     }
@@ -402,9 +396,7 @@ mod tests {
             &matter(1),
             &Rows::new(),
             &[],
-            &ledger,
-            &SetAsideOwners::default(),
-            &OpenSessions::default(),
+            &holds(&ledger, &OpenSessions::default()),
         );
         let full = Assign::PoolFull {
             size: 0,

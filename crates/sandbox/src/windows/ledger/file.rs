@@ -115,6 +115,21 @@ impl State {
             )
     }
 
+    /// Whether an entry grants `sid` access: a trusted allow entry whose SID it is, in any
+    /// state; or, failing closed, a kept entry or kept hand-back holding it as any string value
+    /// (compared without ASCII case), since a kept item's rights are unknown. A trusted deny
+    /// names `sid` but grants nothing.
+    pub(super) fn grants_sid(&self, sid: &Sid) -> bool {
+        let in_entries = self.slots.iter().any(|slot| match slot {
+            Slot::Known(known) => known.entry.sid == *sid && known.entry.rights.is_allow(),
+            Slot::SetAside(value) => holds_text(value, sid.as_str()),
+        });
+        in_entries
+            || self.handbacks.iter().any(
+                |slot| matches!(slot, OwedSlot::SetAside(value) if holds_text(value, sid.as_str())),
+            )
+    }
+
     /// The hand-backs owed this version reads and trusts.
     pub(super) fn owed(&self) -> impl Iterator<Item = &HandbackOwed> {
         self.handbacks.iter().filter_map(|slot| match slot {

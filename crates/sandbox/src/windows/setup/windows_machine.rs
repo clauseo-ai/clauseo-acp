@@ -349,6 +349,21 @@ impl Machine for WindowsMachine {
         })
     }
 
+    fn resets_due(&mut self) -> Result<Vec<Sid>, MachineError> {
+        owned(self, |m| {
+            let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
+            Ok(matters.resets_due())
+        })
+    }
+
+    fn reset_done(&mut self, users: &[Sid]) -> Result<(), MachineError> {
+        owned(self, |m| {
+            let mut matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
+            matters.reset_done(users).map_err(from_setup)?;
+            Ok(())
+        })
+    }
+
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {
         let opened = self.as_owner(|m| {
             // As the owner, so this machine's reservations name the owner, not the admin.

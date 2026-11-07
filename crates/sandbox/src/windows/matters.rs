@@ -10,12 +10,17 @@
 //! A matter's pool user (design B, D9) is assigned by [`MatterSids::assign`] under the reuse rule
 //! in [`pool::assign`](super::pool::assign), and kept until [`MatterSids::release`] after a full
 //! forget. A released row stays, naming the user and when it was released: the pick order and
-//! the open-session check read it.
+//! the open-session check read it. The release also marks the user as owed a profile reset: its
+//! profile, `LocalLow` and hive may hold what the old matter's agent wrote there (its
+//! `HKCU\Software\AppDataLow` is Low-writable), so no other matter gets it until the elevated
+//! set-up has deleted and remade its profile and cleared the mark ([`MatterSids::reset_done`]).
 //!
-//! The file is version 2 (`file.rs`); a version 1 file is read and upgraded on the next write.
+//! The file is version 3 (`file.rs`); a version 1 or 2 file is read and upgraded on the next
+//! write.
 //!
 //! Built on every OS so its tests run everywhere; only Windows uses it.
 
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,6 +36,7 @@ use crate::SetupError;
 mod file;
 mod set_aside;
 
+use file::Contents;
 pub use file::{MatterRow, Rows};
 
 /// The folder under the data folder that holds the sandbox's records.
@@ -47,6 +53,8 @@ pub struct MatterSids {
     folder: PathBuf,
     reserved: Reserved,
     rows: Rows,
+    /// The pool users owed a profile reset.
+    needs_reset: BTreeSet<Sid>,
     /// How long a change waits for `matters.lock`; `None` is [`write::LOCK_WAIT`].
     lock_wait: Option<Duration>,
     /// Reads an owner for the set-aside walk (`set_aside.rs`); a fake in the tests.
@@ -78,12 +86,13 @@ impl MatterSids {
     /// with them the way to remove their permission entries.
     pub fn load_with(data_dir: &Path, reserved: Reserved) -> Result<MatterSids, SetupError> {
         let folder = data_dir.join(SANDBOX_DIR);
-        let rows = file::read(&folder.join(MATTERS_FILE), &reserved)?;
+        let read = file::read(&folder.join(MATTERS_FILE), &reserved)?;
         Ok(MatterSids {
             data_dir: data_dir.to_owned(),
             folder,
             reserved,
-            rows,
+            rows: read.rows,
+            needs_reset: read.needs_reset,
             lock_wait: None,
             owner_of: set_aside::owner_of,
         })
@@ -109,6 +118,41 @@ impl MatterSids {
     /// Every matter's row, as loaded or last changed.
     pub fn rows(&self) -> &Rows {
         &self.rows
+    }
+
+    /// The pool users owed a profile reset, as loaded or last changed.
+    pub fn needs_reset(&self) -> &BTreeSet<Sid> {
+        &self.needs_reset
+    }
+
+    /// The pool users the elevated set-up may reset now, as loaded or last changed: those owed
+    /// a reset that no matter holds. A user a matter holds is left marked for after its release.
+    pub fn resets_due(&self) -> Vec<Sid> {
+        let held: BTreeSet<&Sid> = self.rows.values().filter_map(MatterRow::holds).collect();
+        let due = self.needs_reset.iter().filter(|user| !held.contains(user));
+        due.cloned().collect()
+    }
+
+    /// Clears the reset mark of each of `users`, once the elevated set-up has deleted and remade
+    /// its profile and closed its `LocalLow` again. Inside [`MatterSids::change`]'s lock and
+    /// fresh read, so a mark another release added meanwhile stays; a user a matter holds keeps
+    /// its mark, as its profile wasn't reset. Which marks were cleared.
+    pub fn reset_done(&mut self, users: &[Sid]) -> Result<Vec<Sid>, SetupError> {
+        self.change(|contents, _| {
+            let held: BTreeSet<Sid> = contents
+                .rows
+                .values()
+                .filter_map(MatterRow::holds)
+                .cloned()
+                .collect();
+            let cleared: Vec<Sid> = users
+                .iter()
+                .filter(|user| !held.contains(*user) && contents.needs_reset.remove(*user))
+                .cloned()
+                .collect();
+            let changed = !cleared.is_empty();
+            Ok((cleared, changed))
+        })
     }
 
     /// How many matters are listed.
@@ -140,7 +184,8 @@ impl MatterSids {
     /// and the file is saved with it before it is returned; if the save fails, the matter has no
     /// SID.
     pub fn sid_for(&mut self, matter: &MatterId) -> Result<Sid, SetupError> {
-        self.change(|rows, reserved| {
+        self.change(|contents, reserved| {
+            let rows = &mut contents.rows;
             if let Some(sid) = rows.get(matter).and_then(|row| row.sid.clone()) {
                 return Ok((sid, false));
             }
@@ -168,9 +213,9 @@ impl MatterSids {
     /// hand-back or item recorded before the lock was taken is seen. Then the user
     /// [`pool::assign`](super::pool::assign) picks, by its reuse rule, is saved in the matter's
     /// row before it is returned; if the save fails, the matter holds none. A released matter
-    /// asking again gets a fresh pick, and its old user goes
-    /// to `held_before`. No free user is [`Assign::PoolFull`]. `open` is the caller's read;
-    /// see [`OpenSessions`] for why a stale one is safe.
+    /// asking again gets a fresh pick, and its old user goes to `held_before`. A user owed a
+    /// profile reset isn't picked. No free user is [`Assign::PoolFull`]. `open` is the caller's
+    /// read; see [`OpenSessions`] for why a stale one is safe.
     ///
     /// The caller marks the launch's session open (`before_launch`) **before** calling this, so
     /// no [`MatterSids::release`] can take the user between this and the session. A new pick
@@ -186,7 +231,8 @@ impl MatterSids {
     ) -> Result<Sid, Assign> {
         let data_dir = self.data_dir.clone();
         let owner_of = self.owner_of;
-        self.change(|rows, _| {
+        self.change(|contents, _| {
+            let Contents { rows, needs_reset } = contents;
             // The launch path: a matter keeping its user reads neither the ledger nor the
             // set-aside trees.
             if let Some(user) = rows.get(matter).and_then(MatterRow::holds)
@@ -197,7 +243,13 @@ impl MatterSids {
             let ledger =
                 ledger().map_err(|error| SetupError::Failed(format!("the ACL ledger: {error}")))?;
             let set_aside = set_aside::set_aside_owners(&data_dir, owner_of);
-            match assign::decide(matter, rows, pool, &ledger, &set_aside, open)? {
+            let held = assign::Holds {
+                ledger: &ledger,
+                set_aside: &set_aside,
+                open,
+                needs_reset,
+            };
+            match assign::decide(matter, rows, pool, &held)? {
                 Pick::Kept(user) => Ok((user, false)),
                 Pick::New(user) => {
                     if !session_open(&data_dir, matter)? {
@@ -221,20 +273,25 @@ impl MatterSids {
 
     /// Gives back `matter`'s pool user, after a full forget (`forget_matter` with no hand-back
     /// left owed): its row keeps the user, with `now` (whole seconds since the Unix epoch; 0
-    /// for a time before it) as `released_at`. Inside [`MatterSids::change`]'s lock and fresh
-    /// read. Refused while a session of the matter is open, read under the matter's set-aside
-    /// lock (`set_aside::under_lock`, an unreadable record counting as open), so a user is
-    /// never released from under a live session, nor between a launch's `assign` and its
-    /// session, as the launch marks the session first (see [`MatterSids::assign`]). The lock
-    /// order is `matters.lock`, then a set-aside lock, never the reverse. Whether a user was
-    /// released: a matter with none, or released already, is left as it is.
+    /// for a time before it) as `released_at`, and the user is marked as owed a profile reset,
+    /// in the same save, so no other matter gets it before the elevated set-up resets it.
+    /// Inside [`MatterSids::change`]'s lock and fresh read. Refused while a session of the
+    /// matter is open, read under the matter's set-aside lock (`set_aside::under_lock`, an
+    /// unreadable record counting as open), so a user is never released from under a live
+    /// session, nor between a launch's `assign` and its session, as the launch marks the session
+    /// first (see [`MatterSids::assign`]). The lock order is `matters.lock`, then a set-aside
+    /// lock, never the reverse. Whether a user was released: a matter with none, or released
+    /// already, is left as it is.
     pub fn release(&mut self, matter: &MatterId, now: SystemTime) -> Result<bool, SetupError> {
         let at = now
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
         let data_dir = self.data_dir.clone();
-        self.change(|rows, _| {
-            let Some(row) = rows.get_mut(matter).filter(|row| row.holds().is_some()) else {
+        self.change(|contents, _| {
+            let Some(row) = contents.rows.get_mut(matter) else {
+                return Ok((false, false));
+            };
+            let Some(user) = row.holds().cloned() else {
                 return Ok((false, false));
             };
             if session_open(&data_dir, matter)? {
@@ -243,6 +300,7 @@ impl MatterSids {
                 )));
             }
             row.released_at = Some(at);
+            contents.needs_reset.insert(user);
             Ok((true, true))
         })
     }
@@ -251,12 +309,12 @@ impl MatterSids {
     /// checks `matters.lock` (`write::check_owned_file`) and holds it (an exclusive OS file
     /// lock, so no other process or instance changes the file meanwhile; waiting at most 10 s,
     /// or [`MatterSids::with_lock_wait`], then an error naming the lock), and checks and reads
-    /// the file again inside it. `change` gets the rows read and the reservations, and returns
-    /// its result and whether it changed the rows; changed rows are saved, at version 2, and
-    /// kept here only once saved.
+    /// the file again inside it. `change` gets what was read and the reservations, and returns
+    /// its result and whether it changed them; changes are saved, at version 3, and kept here
+    /// only once saved.
     fn change<T, E: From<SetupError>>(
         &mut self,
-        change: impl FnOnce(&mut Rows, &Reserved) -> Result<(T, bool), E>,
+        change: impl FnOnce(&mut Contents, &Reserved) -> Result<(T, bool), E>,
     ) -> Result<T, E> {
         let failed =
             |why: io::Error| SetupError::Failed(format!("{}: {why}", self.folder.display()));
@@ -273,12 +331,14 @@ impl MatterSids {
         let path = self.folder.join(MATTERS_FILE);
         write::check_owned_file(&path).map_err(failed)?;
         let read = file::read(&path, &self.reserved)?;
-        self.rows = read.clone();
-        let mut rows = read;
-        let (value, changed) = change(&mut rows, &self.reserved)?;
+        self.rows.clone_from(&read.rows);
+        self.needs_reset.clone_from(&read.needs_reset);
+        let mut contents = read;
+        let (value, changed) = change(&mut contents, &self.reserved)?;
         if changed {
-            file::save(&path, &rows)?;
-            self.rows = rows;
+            file::save(&path, &contents)?;
+            self.rows = contents.rows;
+            self.needs_reset = contents.needs_reset;
             // The save put a new file in place; it gets the same explicit DACL.
             write::check_owned_file(&path).map_err(failed)?;
         }

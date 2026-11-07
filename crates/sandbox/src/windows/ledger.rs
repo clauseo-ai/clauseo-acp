@@ -39,8 +39,8 @@
 //! label item naming anything but the Low level, and one whose path isn't absolute, are kept as
 //! they are, written back unchanged, and never acted on or handed out. So is a hand-back owed
 //! this version can't read or that names an untrusted SID, except that it still blocks the reuse
-//! of the pool user it names. A file from a newer format
-//! version, or one that isn't JSON, is refused with `InvalidData` and left alone.
+//! of the pool user it names. A newer format version, or a file that isn't JSON, is refused with
+//! `InvalidData` and left alone.
 //!
 //! [`reconcile`]: super::apply::reconcile
 
@@ -384,21 +384,24 @@ impl Ledger {
     }
 
     /// Whether a hand-back is still owed for `pool`, as last read: a forget started and some
-    /// hand-back walk hasn't succeeded yet (`owed.rs`). PR4's pool-user reuse check (R14) must
-    /// refuse to reuse a pool user while this returns true. A kept hand-back this version can't
-    /// read or trust counts too when it names `pool`. A hand-back the lawyer can't do (a file it
-    /// can't open and can't set aside, as under the `C:\m` layout without `FILE_DELETE_CHILD`)
-    /// stays owed until PR4's elevated clean-up takes ownership with admin rights, then hands it
-    /// back.
+    /// hand-back walk hasn't succeeded yet (`owed.rs`). The reuse check (R14) holds the pool user
+    /// back while true. A kept hand-back naming `pool` counts too. One the lawyer can't do (a
+    /// file it can't open nor set aside, as under `C:\m` without `FILE_DELETE_CHILD`) stays owed
+    /// until PR4's elevated clean-up takes ownership, then hands it back.
     pub fn handback_owed(&self, pool: &Sid) -> bool {
         owed::owed_for(&self.state, pool)
     }
 
-    /// Whether any entry names `sid`, in any state, as last read: a trusted entry whose SID it
-    /// is, or a kept entry or kept hand-back holding it as any string value. The pool-user reuse
-    /// check (S15 `PR4c`, R14) refuses a pool user while this returns true.
+    /// Whether any entry names `sid`, a deny too, or a kept item holds it (set-up's dead SIDs).
     pub fn names_sid(&self, sid: &Sid) -> bool {
         self.state.names_sid(sid)
+    }
+
+    /// Whether a trusted allow ([`Rights::is_allow`]) for `sid` is listed, in any state, or a
+    /// kept item holds it (rights unknown): the reuse check (`PR4c`, R14) holds it back then. A
+    /// sibling deny on matter M keeps its user out of M, grants nothing, and stays on reuse.
+    pub fn grants_sid(&self, sid: &Sid) -> bool {
+        self.state.grants_sid(sid)
     }
 
     /// The hand-backs still owed, as last read: each names a matter whose `forget_matter` must

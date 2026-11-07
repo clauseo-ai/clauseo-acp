@@ -6,7 +6,8 @@
 //! `CLAUSEO_ELEVATED_TESTS=1`, so they never touch a dev box. Each makes its account under a
 //! name unique to the run ([`PREFIX`] and six hex digits), and first clears whatever a killed
 //! earlier try of this family left (accounts named `ClauseoSbTL*`, and profiles of such names).
-//! Other test families use other prefixes, so this one never clears their accounts.
+//! Other test families use other prefixes, so this one never clears their accounts; the profile
+//! reset's (`reset.rs`) is `ClauseoSbTR`.
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -40,6 +41,8 @@ fn gate(test: &str) -> bool {
     eprintln!("skipped {test}: needs an elevated token and CLAUSEO_ELEVATED_TESTS=1");
     false
 }
+
+mod reset;
 
 /// `bytes` random bytes as lowercase hex.
 fn random_hex(bytes: usize) -> String {
@@ -95,11 +98,12 @@ fn me() -> Sid {
     current_user_sid().unwrap()
 }
 
-/// Clears what a killed earlier try of this family left: every `ClauseoSbTL*` account with
-/// its profile, then any profile whose folder has that prefix and whose account is gone.
-fn clear_leftovers() {
+/// Clears what a killed earlier try of the family named by `prefix` left: every `<prefix>*`
+/// account with its profile, then any profile whose folder has that prefix and whose account is
+/// gone.
+fn clear_leftovers(prefix: &str) {
     let accounts = powershell(&format!(
-        "Get-LocalUser -Name '{PREFIX}*' | ForEach-Object {{ $_.Name + ' ' + $_.SID.Value }}"
+        "Get-LocalUser -Name '{prefix}*' | ForEach-Object {{ $_.Name + ' ' + $_.SID.Value }}"
     ));
     for line in accounts.lines() {
         let Some((name, sid)) = line.trim().split_once(' ') else {
@@ -112,7 +116,7 @@ fn clear_leftovers() {
     }
     let profiles = powershell(&format!(
         "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList' | \
-         Where-Object {{ (Get-ItemProperty $_.PSPath).ProfileImagePath -like '*\\{PREFIX}*' }} | \
+         Where-Object {{ (Get-ItemProperty $_.PSPath).ProfileImagePath -like '*\\{prefix}*' }} | \
          ForEach-Object {{ $_.PSChildName }}"
     ));
     for line in profiles.lines() {
@@ -133,16 +137,16 @@ impl TestUser {
     /// Makes `ClauseoSbTL<6 hex>` in `Users`, with a random password meeting the complexity
     /// policy. The password reaches PowerShell on its standard input, never a command line.
     fn new() -> TestUser {
-        TestUser::named(&random_hex(3))
+        TestUser::named(PREFIX, &random_hex(3))
     }
 
-    /// Makes `ClauseoSbTL<suffix>` as [`TestUser::new`] does.
+    /// Makes `<prefix><suffix>` as [`TestUser::new`] does.
     #[expect(
         clippy::disallowed_methods,
         reason = "the tests make accounts with PowerShell"
     )]
-    fn named(suffix: &str) -> TestUser {
-        let name = format!("{PREFIX}{suffix}");
+    fn named(prefix: &str, suffix: &str) -> TestUser {
+        let name = format!("{prefix}{suffix}");
         assert!(name.len() <= 20, "{name}");
         let password = Password::new(format!("Aa1!{}", random_hex(12)));
         let script = format!(
@@ -234,12 +238,12 @@ fn elevated_an_account_not_named_as_a_pool_user_is_refused() {
     if !gate("elevated_an_account_not_named_as_a_pool_user_is_refused") {
         return;
     }
-    clear_leftovers();
+    clear_leftovers(PREFIX);
     // `ClauseoSbTL`, five hex digits and a `g`: this family's prefix, so a leftover is
     // cleared, but not a name the check takes as a pool user's.
     let mut suffix = random_hex(3);
     suffix.replace_range(5.., "g");
-    let other = TestUser::named(&suffix);
+    let other = TestUser::named(PREFIX, &suffix);
     let error = stop_pool_processes(std::slice::from_ref(&other.sid), &me()).unwrap_err();
     assert!(error.to_string().contains("isn't a pool user"), "{error}");
     assert!(delete_profile(&other.sid, &me()).is_err());
@@ -255,7 +259,7 @@ fn elevated_log_on_once_makes_a_profile_and_delete_profile_removes_it() {
     if !gate("elevated_log_on_once_makes_a_profile_and_delete_profile_removes_it") {
         return;
     }
-    clear_leftovers();
+    clear_leftovers(PREFIX);
     let user = TestUser::new();
     let profile = log_on_once(&user.name, &user.password).unwrap();
     assert!(!profile.temporary, "{profile:?}");
@@ -294,7 +298,7 @@ fn elevated_a_wrong_password_is_refused_with_its_code_alone() {
     if !gate("elevated_a_wrong_password_is_refused_with_its_code_alone") {
         return;
     }
-    clear_leftovers();
+    clear_leftovers(PREFIX);
     let user = TestUser::new();
     let wrong = Password::new(format!("Bb2@{}", random_hex(12)));
     let error = log_on_once(&user.name, &wrong).unwrap_err();
