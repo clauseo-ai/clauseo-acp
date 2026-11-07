@@ -18,8 +18,8 @@ use windows::Win32::Security::Authorization::{
     SetNamedSecurityInfoW,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorLength,
-    OBJECT_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
     UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::core::{BOOL, PCWSTR};
@@ -116,8 +116,10 @@ pub(crate) fn sddl_bytes(sddl: &str) -> io::Result<Vec<u8>> {
     // SAFETY: the descriptor is valid and self-relative until `descriptor` drops, and the
     // slice is the length the call gives, so it stays inside it.
     let bytes = unsafe {
-        let length =
-            usize::try_from(GetSecurityDescriptorLength(descriptor.0)).map_err(io::Error::other)?;
+        let length = usize::try_from(windows::Win32::Security::GetSecurityDescriptorLength(
+            descriptor.0,
+        ))
+        .map_err(io::Error::other)?;
         std::slice::from_raw_parts(descriptor.0.0.cast::<u8>(), length).to_vec()
     };
     Ok(bytes)
