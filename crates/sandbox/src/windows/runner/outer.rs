@@ -101,10 +101,16 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let matter = message.matter_sid.as_ref();
     let agent_desktop = AgentDesktop::create(
         &station_name,
+        &desktop,
         &station_sddl(&message.pool_user, matter),
         &desktop_sddl(&message.pool_user, matter),
     )
-    .map_err(|e| Failure::new(RunExit::Token, os("the agent's window station", &e)))?;
+    .map_err(|(call, e)| {
+        Failure::new(
+            RunExit::Token,
+            os(&format!("the agent's window station: {call}"), &e),
+        )
+    })?;
     // The inner runner starts in System32, a folder its Low agent can't write (no DLL planted in
     // its current folder), and gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
