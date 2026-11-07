@@ -123,24 +123,23 @@ fn plant_bits(name: &str, exe: &str) -> Result<(), String> {
     let destination = dir.join("copy.txt").display().to_string();
     let marker = dir.join(MARKER).display().to_string();
     let notify = format!("\"{exe}\" probe items mark {} \"{marker}\"", tag_of(name));
-    exec_ok(
-        "bitsadmin.exe",
-        &["/rawreturn", "/create", "/download", name],
-    )?;
+    bits_step("create", &["/create", "/download", name])?;
     let url = file_url(&source);
-    exec_ok(
-        "bitsadmin.exe",
-        &["/rawreturn", "/addfile", name, &url, &destination],
+    bits_step("addfile", &["/addfile", name, &url, &destination])?;
+    bits_step("setnotifyflags", &["/setnotifyflags", name, "3"])?;
+    bits_step(
+        "setnotifycmdline",
+        &["/setnotifycmdline", name, exe, &notify],
     )?;
-    exec_ok(
-        "bitsadmin.exe",
-        &["/rawreturn", "/setnotifyflags", name, "3"],
-    )?;
-    exec_ok(
-        "bitsadmin.exe",
-        &["/rawreturn", "/setnotifycmdline", name, exe, &notify],
-    )?;
-    exec_ok("bitsadmin.exe", &["/rawreturn", "/resume", name])
+    bits_step("resume", &["/resume", name])
+}
+
+/// `bitsadmin /rawreturn <args>`, which must exit 0; an error starts with `step`, so the verdict
+/// can tell which call BITS refused.
+fn bits_step(step: &str, args: &[&str]) -> Result<(), String> {
+    let mut all = vec!["/rawreturn"];
+    all.extend_from_slice(args);
+    exec_ok("bitsadmin.exe", &all).map_err(|why| format!("{step}: {why}"))
 }
 
 /// The tag in `ClauseoS15-<tag>`.

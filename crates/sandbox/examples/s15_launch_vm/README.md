@@ -182,8 +182,10 @@ pool user's, so either listing with one is INFO, naming the count and the images
   cancel the job (1245) and leaves it for the `SYSTEM` stop task (PR #668); when it is still
   there, the row runs a second short session of A and checks again. PASS when the four are gone
   and the BITS job is gone or inert (no marker, never `TRANSFERRED` or `ACKNOWLEDGED`, through
-  both checks); FAIL names the kinds left, or any not planted or not checked, or says the BITS
-  job ran; INFO when only the BITS job couldn't be planted. At the row's end `probe items
+  both checks), or BITS refused the job (`AddFile` or `Resume` failed with 0x800704dd, as on the
+  test VMs: no job of the pool user's can run) and the marker is absent; FAIL names the kinds
+  left, or any not planted or not checked, or says the BITS job ran; INFO when only the BITS job
+  couldn't be planted for another reason. At the row's end `probe items
   remove` deletes whatever is left, and the row notes it. After #668 the row will also require
   the job gone once the system stop has run.
 
