@@ -38,8 +38,10 @@
 //!    set-up lock (a bounded wait), so the next set-up deletes and remakes its profile before the
 //!    user runs anything again (`resets.rs`): what the stopped process left in its profile goes
 //!    with it. Each user is added as soon as it is found, so a run the task's 2-minute limit
-//!    kills has marked every user it saw. Once the lock stays held, or a write fails, no more
-//!    are tried (49), so the lock's wait comes once at most.
+//!    kills has marked every user it saw. A pass that finds a process of unknown user marks every
+//!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
+//!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
+//!    at most.
 //!
 //! The reset itself isn't done here: it sets a new password, which only the owner's
 //! `secrets.bin` may hold (DPAPI, as the owner), and its open-session check and its `LocalLow`
@@ -276,7 +278,10 @@ struct Passes {
     unknown: usize,
     /// A snapshot's process list (`WTSEnumerateProcessesExW`) couldn't be read.
     list_failed: bool,
-    /// The users of `found` added to `ResetSids`.
+    /// Every pool user, once a pass found a process of unknown user, which may be any of
+    /// theirs: marked as `found` is, but not counted as found running.
+    suspects: BTreeSet<Sid>,
+    /// The users of `found` and `suspects` added to `ResetSids`.
     marked: BTreeSet<Sid>,
     /// Why a mark failed; once set, no more are tried.
     mark_failed: Option<String>,
@@ -389,6 +394,9 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
         let own = fs.own_pid();
         let picked = pick(&seen, pool, own);
         passes.unknown = picked.unknown;
+        if picked.unknown > 0 {
+            passes.suspects.extend(pool.iter().cloned());
+        }
         passes
             .found
             .extend(picked.stop.iter().map(|(_, user)| user.clone()));
@@ -447,14 +455,18 @@ fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resu
     Ok(())
 }
 
-/// Step 6: the users of `passes.found` not yet marked are added to `ResetSids` under the set-up
-/// lock, and to `passes.marked`. Nothing is done when there are none, or once a mark has failed
-/// (`passes.mark_failed`), so the lock's wait comes once at most.
+/// Step 6: the users of `passes.found` and `passes.suspects` not yet marked are added to
+/// `ResetSids` under the set-up lock, and to `passes.marked`. Nothing is done when there are
+/// none, or once a mark has failed (`passes.mark_failed`), so the lock's wait comes once at most.
 fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
     if passes.mark_failed.is_some() {
         return;
     }
-    let new: Vec<Sid> = passes.found.difference(&passes.marked).cloned().collect();
+    let wanted = passes.found.union(&passes.suspects);
+    let new: Vec<Sid> = wanted
+        .filter(|user| !passes.marked.contains(*user))
+        .cloned()
+        .collect();
     if new.is_empty() {
         return;
     }
