@@ -124,7 +124,8 @@ pub use record::{
 };
 pub use set_aside::{
     Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,
-    SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure,
+    SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideBookkeeping, SetAsideFailure,
+    forget_set_aside_bookkeeping, set_aside_record_closed,
 };
 #[cfg(windows)]
 pub use set_aside::{

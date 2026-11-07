@@ -27,7 +27,7 @@ fn matter(id: &str) -> MatterId {
 }
 
 /// The owner's matter.
-fn matter_one() -> MatterId {
+pub(super) fn matter_one() -> MatterId {
     matter("01890a5d-ac96-774b-bcce-b302099a8057")
 }
 
@@ -82,7 +82,7 @@ fn matters(machine: &Remover) -> PathBuf {
 }
 
 /// One matter of the owner's: the pool user's allow on its folder, another's deny in it.
-fn owners_matter(machine: &Remover) -> PathBuf {
+pub(super) fn owners_matter(machine: &Remover) -> PathBuf {
     let m1 = matters(machine).join("m1");
     let grants = vec![
         grant(
@@ -140,14 +140,18 @@ fn as_the_owner_every_matter_is_forgotten_as_the_owner_then_the_record_goes() {
     assert_all_gone(&machine, &acl);
 }
 
+/// A set-aside record with no open session, as a clean close leaves it.
+pub(super) const CLOSED: &[u8] = br#"{"version": 1, "sessions": [], "names": []}"#;
+
 /// `<data_dir>\sandbox\set-aside\<matter>`, made, holding what every launch leaves there.
-fn bookkeeping(data_dir: &Path, matter: MatterId) -> PathBuf {
+pub(super) fn bookkeeping(data_dir: &Path, matter: MatterId) -> PathBuf {
     let set_aside = data_dir.join(SANDBOX_DIR).join(SET_ASIDE_DIR);
     write::make_sandbox_dir(&set_aside).unwrap();
     let folder = set_aside.join(matter.to_string());
     write::make_sandbox_dir(&folder).unwrap();
     for name in SET_ASIDE_BOOKKEEPING {
-        write::write_atomic(&folder.join(name), b"{}").unwrap();
+        let bytes: &[u8] = if name == "record.json" { CLOSED } else { b"" };
+        write::write_atomic(&folder.join(name), bytes).unwrap();
     }
     folder
 }

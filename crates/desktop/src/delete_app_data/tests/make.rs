@@ -192,3 +192,32 @@ pub(super) fn remove_dir(path: &Path) {
 pub(super) fn remove_file(path: &Path) {
     std::fs::remove_file(path).unwrap();
 }
+
+/// Makes `link` (which must not exist) a second hard link to the file `target`.
+pub(super) fn hard_link(target: &Path, link: &Path) {
+    std::fs::hard_link(target, link).unwrap();
+}
+
+/// `path` as Windows takes it without dropping a trailing dot or space (`\\?\`); as it is
+/// elsewhere.
+fn verbatim(path: &Path) -> std::path::PathBuf {
+    if cfg!(windows) {
+        // The folder made absolute alone: \`GetFullPathNameW\` would drop the name's trailing dot.
+        let (folder, name) = (path.parent().unwrap(), path.file_name().unwrap());
+        let mut verbatim = std::ffi::OsString::from(r"\\?\");
+        verbatim.push(std::path::absolute(folder).unwrap());
+        std::path::PathBuf::from(verbatim).join(name)
+    } else {
+        path.to_owned()
+    }
+}
+
+/// Writes `bytes` as the file `path`, whose name may end in a dot or a space.
+pub(super) fn verbatim_file(path: &Path, bytes: &[u8]) {
+    std::fs::write(verbatim(path), bytes).unwrap();
+}
+
+/// Whether `path`, whose name may end in a dot or a space, is there.
+pub(super) fn verbatim_exists(path: &Path) -> bool {
+    std::fs::symlink_metadata(verbatim(path)).is_ok()
+}

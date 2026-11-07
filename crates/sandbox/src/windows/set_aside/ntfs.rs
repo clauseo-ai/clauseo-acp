@@ -68,7 +68,7 @@ use crate::windows::folder::verbatim_wide;
 mod forget;
 mod scan;
 
-pub(super) use forget::forget_bookkeeping;
+pub(super) use forget::{forget_from_sandbox, forget_from_set_aside};
 pub(super) use scan::same_name;
 
 /// `ERROR_REPARSE_POINT_ENCOUNTERED`: an open told not to follow a reparse point met one.
