@@ -15,7 +15,7 @@ use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURIT
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use super::super::super::accounts_tests::machine_on;
-use super::super::super::machine::{Machine, MachineError};
+use super::super::super::machine::Machine;
 use super::super::super::profile::{delete_profile, profile_of};
 use super::super::super::windows_machine::Names;
 use super::as_user::{run_in_cmd, try_in_cmd};
@@ -170,11 +170,12 @@ fn elevated_a_profile_shut_to_administrators_is_still_handed_off_and_deleted() {
     let owner = machine.owner_in_profile(&profile, &local_low).unwrap();
     let owner = owner.unwrap_or_else(|| panic!("{} wasn't found", local_low.display()));
     eprintln!("LocalLow's owner: {}", owner.as_str());
-    match machine.give_to_admins(&profile, &local_low) {
-        Ok(()) => {}
-        Err(MachineError::ProfileChanged(part)) => eprintln!("the hand-off stopped at {part}"),
-        Err(other) => panic!("the hand-off failed: {other:?}"),
+    if let Err(error) = machine.give_to_admins(&profile, &local_low) {
+        panic!("the hand-off failed: {error:?}");
     }
+    let owner = machine.owner_in_profile(&profile, &local_low).unwrap();
+    let owner = owner.unwrap_or_else(|| panic!("{} wasn't found", local_low.display()));
+    assert_eq!(owner.as_str(), ADMINISTRATORS, "{}", local_low.display());
 
     delete_profile(&user.sid, &me()).unwrap();
     assert!(!profile.exists(), "{}", profile.display());
