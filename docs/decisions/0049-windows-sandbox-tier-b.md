@@ -785,8 +785,13 @@ for `--reclaim`.
   gives its default DACL the threads' entries so a thread the system starts in it later is shut
   too, and shuts every thread again. Once the inner runs, its own agent can't open its Medium,
   unrestricted token. A process already running as the pool user could, in the gap before the
-  shut; the next item closes that gap. The agent's own token gets an explicit DACL naming the
-  pool user. Both runner exes are GUI-subsystem, so neither gets a console host. It makes the
+  shut; the next item closes that gap. The agent's own token gets an explicit protected DACL:
+  the pool user `READ_CONTROL`, `TOKEN_QUERY` and `TOKEN_ASSIGN_PRIMARY` (`0x20009`), `SYSTEM`
+  full, the lawyer `TOKEN_QUERY`, and `OWNER RIGHTS` held to `READ_CONTROL`. With no
+  `TOKEN_ADJUST_DEFAULT` the agent can't shut its default DACL before it asks a service for a
+  process that takes no descriptor (one outside the job, M2), and with no `WRITE_DAC` it can't
+  give itself that right; the inner starts the agent through the handle `CreateRestrictedToken`
+  gave it, whose rights the DACL set after doesn't change. Both runner exes are GUI-subsystem, so neither gets a console host. It makes the
   agent's profile folders part by part relative to each parent's handle, never through a link.
 - **One live session per pool user, and the sweep (M1).** From `CreateProcessWithLogonW`
   returning until the outer's shut, the suspended inner runner's process and thread carry the
@@ -911,7 +916,8 @@ for `--reclaim`.
   agent); at the tick and the end it is logged and tried again. While it lives, every launch for
   that pool user fails closed. The agent can make one of its own processes so (a process sets its
   own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
-  or one a service starts; only one outside the job outlives the session. The design that closes this is AppContainer, after launch (see
+  or one a service starts; only one outside the job outlives the session. The agent can't change
+  its token's default DACL for a service to pass on (its token's DACL, above). The design that closes this is AppContainer, after launch (see
   "Rejected: AppContainer (spike A)" for what blocks it today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
