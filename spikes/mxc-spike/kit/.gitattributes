@@ -1,0 +1,2 @@
+# The kit runs on Windows: cmd needs CRLF, and the zip is built on Linux from this checkout.
+* text eol=crlf

@@ -35,16 +35,46 @@ jobs:
         shell: pwsh
         run: |
           $bad = 0
-          foreach ($f in Get-ChildItem spikes/mxc-spike -Filter *.ps1) {
+          foreach ($f in Get-ChildItem spikes/mxc-spike -Filter *.ps1 -Recurse) {
             $tokens = $null; $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
             foreach ($e in $errors) {
               $bad++
-              "::error file=spikes/mxc-spike/$($f.Name),line=$($e.Extent.StartLineNumber),col=$($e.Extent.StartColumnNumber)::$($e.Message)"
+              "::error file=$(Resolve-Path -Relative $f.FullName),line=$($e.Extent.StartLineNumber),col=$($e.Extent.StartColumnNumber)::$($e.Message)"
             }
             "$($f.Name): $($errors.Count) parse error(s)"
           }
           if ($bad) { exit 1 }
+
+  # The probe kit for an in-person run on a borrowed Windows 11 laptop: kit/ zipped as
+  # mxc-probe-kit.zip (CRLF from kit/.gitattributes). Its SHA-256 is in the log and the summary.
+  kit:
+    name: probe kit zip
+    needs: parse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: spikes/mxc-spike/kit
+      - name: Zip the kit
+        run: |
+          cd spikes/mxc-spike/kit
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' probe.ps1 cleanup.ps1; then
+            echo "::error::non-ASCII in a kit script (Windows PowerShell 5.1 reads them as ANSI)"; exit 1
+          fi
+          zip -X -q "$GITHUB_WORKSPACE/mxc-probe-kit.zip" probe.ps1 cleanup.ps1 run-probe.cmd cleanup.cmd README.txt
+          cd "$GITHUB_WORKSPACE"
+          unzip -l mxc-probe-kit.zip
+          sum=$(sha256sum mxc-probe-kit.zip | cut -d' ' -f1)
+          echo "mxc-probe-kit.zip SHA-256 $sum"
+          echo "### mxc-probe-kit.zip SHA-256 \`$sum\`" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mxc-probe-kit
+          path: mxc-probe-kit.zip
+          if-no-files-found: error
 
   # Step 1, answered (run 42341399286): on demand only now.
   probe:
