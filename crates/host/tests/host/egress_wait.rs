@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::SessionKey;
-use clauseo_protocol::{StopReason, StreamId, ThreadId};
+use clauseo_protocol::{AgentId, StopReason, StreamId, ThreadId};
 use serde_json::{Value, json};
 
 use crate::egress::{Recording, calls, claude_then, wired};
@@ -291,6 +291,21 @@ fn two_sessions_of_one_matter_close_their_proxies_independently() {
     assert_eq!(closed.thread, second);
     assert_eq!(closed.matter, matter);
     assert_eq!(calls(&log), ["open 1", "open 2", "removal", "close 2"]);
+    // The first session ends too, before the host stops: a stop's removal waits only a short
+    // grace for the tree's end, which a loaded Windows runner can outlast, and then closes
+    // the proxy without the removal.
+    let agent = AgentId::new(CLAUDE).unwrap();
+    wait("stop_agents", host.handle.stop_agents(agent)).unwrap();
+    let closed = closes
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the first session's proxy closed");
+    assert_eq!(closed.thread, first);
+    assert_eq!(
+        calls(&log),
+        [
+            "open 1", "open 2", "removal", "close 2", "removal", "close 1"
+        ]
+    );
     host.shutdown();
     assert_eq!(
         calls(&log),
