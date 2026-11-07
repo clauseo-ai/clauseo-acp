@@ -14,6 +14,7 @@ use std::os::windows::io::FromRawHandle as _;
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::{
     CRYPT_E_NOT_FOUND, ERROR_FILE_NOT_FOUND, GENERIC_WRITE, GetLastError, HLOCAL, LocalFree,
@@ -36,11 +37,11 @@ use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DeleteFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE,
     MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
+use windows::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 use windows::core::{BOOL, PCWSTR};
 
 use super::{
-    CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth,
-    machine_name,
+    CA_DIR, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth, machine_name, stale,
 };
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
@@ -329,7 +330,13 @@ pub fn ensure_with(data_dir: &Path, desktop: &Sid, pool: &[Sid]) -> io::Result<B
         return Ok(cached.bundle.clone());
     }
     let (filtered, export_ms) = timed(export)?;
-    let file = write_bundle(data_dir, desktop, &pool, filtered.pem.as_bytes())?;
+    let file = write_bundle(
+        data_dir,
+        desktop,
+        &pool,
+        filtered.pem.as_bytes(),
+        system_now(),
+    )?;
     tracing::info!(
         kept = filtered.kept,
         dropped_disallowed = filtered.dropped_disallowed,
@@ -374,14 +381,15 @@ fn timed<T>(run: impl FnOnce() -> io::Result<T>) -> io::Result<(T, u64)> {
 /// file already there with these bytes is used as it is, so a reader holding it open never
 /// blocks the export; one that can't be read (an agent holds it unshared) or holds other bytes
 /// is passed over for the same name numbered, `machine-<16 hex>-<n>.pem`. Then the older
-/// machine bundles (and the fixed `roots.pem` of earlier builds) are removed, best-effort: one
-/// in use stays for the next export. A failure removes only the new file. Errors name the step,
-/// never the path (it is in the user's profile).
+/// machine bundles (and the fixed `roots.pem` of earlier builds) that [`stale`] names at `now`
+/// are removed, best-effort: one in use stays for the next export. A failure removes only the
+/// new file. Errors name the step, never the path (it is in the user's profile).
 pub(super) fn write_bundle(
     data_dir: &Path,
     desktop: &Sid,
     pool: &[Sid],
     pem: &[u8],
+    now: SystemTime,
 ) -> io::Result<PathBuf> {
     let first = machine_name(pem, pool);
     let stem = first.strip_suffix(".pem").unwrap_or(&first);
@@ -399,7 +407,7 @@ pub(super) fn write_bundle(
             Ok(_) if holds(&target, pem) => target,
             _ => continue,
         };
-        remove_stale(&data_dir.join(CA_DIR), &name);
+        remove_stale(&data_dir.join(CA_DIR), &name, now);
         return Ok(path);
     }
     Err(io::Error::other("the CA bundle has no free name"))
@@ -414,28 +422,34 @@ fn holds(path: &Path, pem: &[u8]) -> bool {
         && std::fs::read(path).is_ok_and(|bytes| bytes == pem)
 }
 
-/// Removes, best-effort, each machine bundle in `folder` but `keep`, and `roots.pem`. One open
-/// without delete sharing (an agent reading it) fails to delete and stays for the next export;
-/// the merged bundles (`roots-*.pem`) are left alone.
-fn remove_stale(folder: &Path, keep: &str) {
+/// Removes, best-effort, the files in `folder` that [`stale`] names at `now`. One open without
+/// delete sharing (an agent reading it) fails to delete and stays for the next export.
+fn remove_stale(folder: &Path, keep: &str, now: SystemTime) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let machine = name.starts_with("machine-")
-            && Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("pem"));
-        if name != keep && (machine || name == CA_FILE) {
-            // SAFETY: the name is NUL-terminated and lives for the call. `DeleteFileW` removes a
-            // link itself, never what it names; a failure leaves the file for the next export.
-            drop(unsafe { DeleteFileW(PCWSTR(wide(&entry.path()).as_ptr())) });
-        }
+    let files: Vec<(String, SystemTime)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let written = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+            Some((entry.file_name().into_string().ok()?, written))
+        })
+        .collect();
+    for name in stale(&files, keep, now) {
+        // SAFETY: the name is NUL-terminated and lives for the call. `DeleteFileW` removes a
+        // link itself, never what it names; a failure leaves the file for the next export.
+        drop(unsafe { DeleteFileW(PCWSTR(wide(&folder.join(name)).as_ptr())) });
     }
+}
+
+/// The system clock, from `GetSystemTimeAsFileTime`: what [`stale`] measures ages against.
+fn system_now() -> SystemTime {
+    // SAFETY: no arguments; it only reads the clock.
+    let time = unsafe { GetSystemTimeAsFileTime() };
+    let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    // 100 ns ticks from 1601; the Unix epoch is 11 644 473 600 s later.
+    let since_unix = ticks.saturating_sub(116_444_736_000_000_000);
+    UNIX_EPOCH + Duration::from_nanos(since_unix.saturating_mul(100))
 }
 
 /// Writes a machine bundle merged with a firm's certificates (`merge`) beside the machine

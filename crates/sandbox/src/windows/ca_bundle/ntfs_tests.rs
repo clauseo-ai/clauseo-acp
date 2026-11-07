@@ -12,6 +12,7 @@ use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::MetadataExt as _;
 use std::os::windows::io::FromRawHandle as _;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::Security::Cryptography::{
@@ -30,7 +31,7 @@ use super::store::{Store, export_from, write_bundle};
 use super::tests::{
     CLIENT_ONLY, INTERMEDIATE, OTHER, ROOT, SERVER_AND_CODE, SERVER_ONLY, der_of, pem_of,
 };
-use super::{CA_FILE, ensure_with, machine_name, merge, path, write_merged};
+use super::{STALE_AFTER, ensure_with, machine_name, merge, path, write_merged};
 use crate::windows::private_dir::owner;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
@@ -234,7 +235,7 @@ fn the_bundle_is_written_with_its_descriptor_and_rewritten_only_on_change() {
         entries(&grown.path),
         expected_entries(&desktop, &[one, two])
     );
-    assert!(!file.exists(), "the old one, not in use, is removed");
+    assert!(file.is_file(), "the old one is young: kept");
 
     crate::test_support::remove(&grown.path);
     ensure_with(&data, &desktop, &[sid(two), sid(one)]).unwrap();
@@ -262,46 +263,58 @@ fn hold(file: &Path, share: u32) -> std::fs::File {
     unsafe { std::fs::File::from_raw_handle(handle.0) }
 }
 
-/// Review L1: each export with other roots gets its own file, so an agent holding the old one
-/// open (no delete sharing) never blocks it; the old one is removed once it is closed.
+/// Review L1: each export with other roots gets its own file, so an agent holding an old one
+/// open (no delete sharing) never blocks it. An old one goes only past `STALE_AFTER`, not among
+/// the newest two, and closed.
 #[test]
 fn an_export_with_the_old_bundle_held_open_gets_its_own_file() {
     let place = Place::new("ca-bundle-held");
     let data = place.at("data");
     let desktop = current_user_sid().unwrap();
     let pool = [sid("S-1-5-21-1-2-3-1101")];
-    let earlier = data.join("sandbox-ca").join(CA_FILE);
-    let first = write_bundle(&data, &desktop, &pool, pem_of(ROOT).as_bytes()).unwrap();
-    place.dir.file(r"data\sandbox-ca\roots.pem", "earlier");
-    assert!(earlier.is_file());
-    let held = hold(&first, FILE_SHARE_READ.0);
-    let second = write_bundle(&data, &desktop, &pool, pem_of(OTHER).as_bytes()).unwrap();
-    assert_ne!(second, first, "other roots: another name");
-    assert_eq!(std::fs::read_to_string(&second).unwrap(), pem_of(OTHER));
-    assert!(first.is_file(), "in use: left for the next export");
-    assert!(
-        !earlier.exists(),
-        "the earlier builds' roots.pem is removed"
-    );
+    let write = |pem: &str, now: SystemTime| {
+        write_bundle(&data, &desktop, &pool, pem.as_bytes(), now).unwrap()
+    };
+    let one = write("one", UNIX_EPOCH);
+    let earlier = place.dir.file(r"data\sandbox-ca\roots.pem", "earlier");
+    let held = hold(&one, FILE_SHARE_READ.0);
+    let two = write("two", UNIX_EPOCH);
+    let three = write("three", UNIX_EPOCH);
+    assert!(two != one && three != two, "other roots: another name");
+    assert_eq!(std::fs::read_to_string(&three).unwrap(), "three");
+    for file in [&one, &earlier, &two] {
+        assert!(file.is_file(), "young: kept");
+    }
 
+    let written = std::fs::metadata(&three).unwrap().modified().unwrap();
+    let later = written + STALE_AFTER + Duration::from_hours(24);
+    let four = write("four", later);
+    assert!(three.is_file(), "one of the newest two: kept however old");
+    assert!(
+        !two.exists() && !earlier.exists(),
+        "old, closed, not newest: removed"
+    );
+    assert!(one.is_file(), "in use: left for the next export");
     drop(held);
-    let held = hold(&second, FILE_SHARE_READ.0);
-    let again = write_bundle(&data, &desktop, &pool, pem_of(OTHER).as_bytes()).unwrap();
-    assert_eq!(again, second, "the same bytes, held open: used as it is");
-    assert!(!first.exists(), "closed: removed");
+    let held = hold(&four, FILE_SHARE_READ.0);
+    assert_eq!(
+        write("four", later),
+        four,
+        "the same bytes, held open: used as it is"
+    );
+    assert!(!one.exists(), "closed: removed");
     drop(held);
 
     // Held unshared, so it can't even be read: the same bundle under a numbered name.
-    let locked = hold(&second, 0);
-    let past = write_bundle(&data, &desktop, &pool, pem_of(OTHER).as_bytes()).unwrap();
-    assert_ne!(past, second);
+    let locked = hold(&four, 0);
+    let past = write("four", later);
     assert!(
         past.to_str().unwrap().ends_with("-1.pem"),
         "{}",
         past.display()
     );
-    assert_eq!(std::fs::read_to_string(&past).unwrap(), pem_of(OTHER));
-    assert!(second.is_file(), "locked: left for the next export");
+    assert_eq!(std::fs::read_to_string(&past).unwrap(), "four");
+    assert!(four.is_file(), "locked: left for the next export");
     drop(locked);
 }
 

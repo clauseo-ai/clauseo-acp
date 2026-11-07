@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD;
 
 use super::{
     Filtered, der, file_sddl, filter_roots, is_disallowed, lists_server_auth, path, pem_block,
+    stale,
 };
 use crate::windows::sids::Sid;
 
@@ -246,6 +247,42 @@ fn the_file_descriptor_is_exact() {
     assert_eq!(
         file_sddl(&desktop, &[]),
         "O:S-1-5-21-1-2-3-1001D:P(A;;FA;;;S-1-5-21-1-2-3-1001)(A;;FA;;;SY)"
+    );
+}
+
+#[test]
+fn an_old_bundle_goes_only_past_its_age_and_outside_the_newest_two() {
+    use std::time::{Duration, UNIX_EPOCH};
+    let day = |n: u64| UNIX_EPOCH + Duration::from_secs(n * 86_400);
+    let files: Vec<(String, std::time::SystemTime)> = [
+        ("machine-0000000000000001.pem", 1),
+        ("roots.pem", 2),
+        ("machine-0000000000000002-1.pem", 3),
+        ("machine-0000000000000003.pem", 9),
+        ("machine-0000000000000004.pem", 10),
+        ("machine-0000000000000005.pem", 20),
+        ("machine-0000000000000006.pem", 21),
+        ("roots-0000000000000001.pem", 1),
+        ("other.pem", 1),
+    ]
+    .into_iter()
+    .map(|(name, at)| (name.to_owned(), day(at)))
+    .collect();
+    let keep = "machine-0000000000000001.pem";
+    assert_eq!(
+        stale(&files, keep, day(18)),
+        [
+            "machine-0000000000000004.pem",
+            "machine-0000000000000003.pem",
+            "machine-0000000000000002-1.pem",
+            "roots.pem",
+        ],
+        "past 7 days, not the newest two (days 20, 21), not kept; merged and others never"
+    );
+    assert_eq!(
+        stale(&files, keep, day(4)),
+        Vec::<String>::new(),
+        "all young"
     );
 }
 
