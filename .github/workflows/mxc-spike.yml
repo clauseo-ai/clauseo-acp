@@ -21,8 +21,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Step 1, answered (run 42341399286): on demand only now.
   probe:
     name: probe (${{ matrix.runner }})
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -53,4 +55,37 @@ jobs:
         with:
           name: probe-${{ matrix.runner }}
           path: ${{ runner.temp }}/probe-${{ matrix.runner }}.json
+          if-no-files-found: warn
+
+  # Step 2: the rows on the runner that qualified (25H2 26200.9725, base-container). Whole agents
+  # (Node 24.22.0 ARM64, Clauseo's npm pins, codex.exe ARM64) inside wxc-exec with UI on,
+  # proxy-only egress to proxy-mock.mjs, and a scripted model server instead of a login.
+  rows:
+    name: rows (windows-11-arm)
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: OS build
+        run: |
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "$($cv.ProductName) | $($cv.InstallationType) | $($cv.DisplayVersion) | build $($cv.CurrentBuildNumber).$($cv.UBR)"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            spikes/mxc-spike
+            crates/limits/tests/live
+
+      - name: Rows
+        run: ./spikes/mxc-spike/rows.ps1 -Repo "$env:GITHUB_WORKSPACE" -Logs "$env:RUNNER_TEMP/mxc-rows-logs" -Out "$env:RUNNER_TEMP/mxc-rows-logs/rows.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rows-windows-11-arm
+          path: ${{ runner.temp }}/mxc-rows-logs
           if-no-files-found: warn
