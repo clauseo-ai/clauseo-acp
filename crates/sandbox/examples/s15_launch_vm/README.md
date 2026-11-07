@@ -58,11 +58,11 @@ only when prepare ran the set-up.
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
-`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`. `clipboard` skips in a session
-with no clipboard the harness can use. `node-pipes` needs `--node`; `codex` needs `--node` and
-`--codex`, both given to prepare, which copies them into `bin\`. Each row has a limit
-(`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every process it
-started.
+`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `end-cleanup`. `clipboard` skips
+in a session with no clipboard the harness can use. `node-pipes` needs `--node`; `codex` needs
+`--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row has a
+limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
+process it started.
 
 The security rows (`checks_sec.rs`, `checks_m3.rs`):
 
@@ -140,8 +140,19 @@ pool user's, so either listing with one is INFO, naming the count and the images
   deny-only (as `whoami` asserts); FAIL names each that differs; INFO when the token can't be
   read. The logon SID's attributes are printed.
 
-The sweep rows fail until the runner's sweep lands: they are its test. The harness ends its
-benign process if it still runs at the row's end, and notes it.
+- `end-cleanup` (`checks_cleanup.rs`, verdict in `cleanup_verdict.rs`): before the session, the
+  harness, logged on as A's pool user as above, runs `probe items plant <tag>`
+  (`probe_items.rs`), which plants that user's own HKCU `Run` and `RunOnce` values, a `.cmd` in
+  its Startup folder, a scheduled task (`schtasks /create /xml`, its interactive token, a time
+  trigger in 2099, never run) and a suspended BITS job with no files (`bitsadmin /create`), each
+  named `ClauseoS15-<tag>` and running `probe wait`. After the session ends it runs
+  `probe items check` as that user until every item is gone or 30 s pass (the end-of-session
+  sweeper, `clauseo-sandbox-run --sweep`, gets that long). PASS when all are gone; FAIL names the
+  kinds left, or any not planted or not checked; INFO when only the BITS job couldn't be planted.
+  At the row's end `probe items remove` deletes whatever is left, and the row notes it.
+
+The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
+harness ends its benign process if it still runs at the row's end, and notes it.
 
 The UI limits (`whoami`, `node-pipes` and `codex` check them; `checks_ui.rs`): the agent runs
 on a window station of its own, `ClauseoRun-…`, whose DACL grants the pool user `GA`, in a job
@@ -223,7 +234,7 @@ atom whatever the job's limits are. The lookup outside the job is the control fo
 own atom; the desktop refusal is the effect that tells the limits apart.
 
 The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows'
-and `breakaway`'s in `pool_verdict.rs`) run on Windows with
+and `breakaway`'s in `pool_verdict.rs`, `end-cleanup`'s in `cleanup_verdict.rs`) run on Windows with
 `cargo test -p clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI
@@ -243,6 +254,6 @@ exits 1 on `INFO` too. The output is the job's artifact.
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`, `hold`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
 `write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
-`runners`, `breakaway`, `handles`, `desktop`; and `ui-control` and `ui-relay`, which the
+`runners`, `breakaway`, `handles`, `desktop`, `items`; and `ui-control` and `ui-relay`, which the
 harness starts itself (the positive control, above). `probe.rs` and `probe_sec.rs` document
 what each prints.

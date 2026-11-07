@@ -40,6 +40,7 @@
 //! - `read <path>`: `read ok <bytes>` or `read error <code>`.
 //! - `write <path>`: `write <code>` from opening it for writing (nothing is written).
 //! - `runners`, `breakaway`, `handles`, `desktop`: the security probes, `probe_sec.rs`.
+//! - `items <plant|check|remove> <tag>`: the `end-cleanup` row's items, `probe_items.rs`.
 
 use std::io::BufRead as _;
 use std::process::{Command, ExitCode, Stdio};
@@ -93,6 +94,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         "spawn-child" => spawn_child(),
+        "items" => super::probe_items::run(rest),
         "echo" => echo(),
         "exit" => match rest.first().and_then(|n| exit_code(n)) {
             Some(n) => match u8::try_from(n) {
@@ -158,7 +160,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             None => usage("write <path>"),
         },
         _ => usage(
-            "token|wait|hold|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
+            "token|wait|hold|open-process|open-pipes|spawn-child|items|echo|exit|read|write|job-ui|\
              ui-control|ui-relay|clipboard-read|clipboard-write|find-atom|runners|breakaway|\
              handles|desktop",
         ),
