@@ -9,7 +9,7 @@ use clauseo_sandbox::windows::ca_bundle;
 use clauseo_sandbox::windows::runner::{RUN_EXIT_BASE, RunExit};
 use clauseo_sandbox::windows::sids::Sid;
 
-use super::checks_ui::ui_limits;
+use super::checks_ui::{atom_info, ui_limits, with_atom};
 use super::launch::{Finished, Running, Spec, deadline, describe, launch, pool_of, summary, text};
 use super::manifest::Manifest;
 use super::rows::Ctx;
@@ -152,7 +152,7 @@ pub(crate) fn whoami(ctx: &Ctx<'_>) -> Result<String, String> {
             "the privileges are {privileges:?}, not SeChangeNotifyPrivilege alone"
         ));
     }
-    let limits = ui_limits(lines)?;
+    let limits = ui_limits(ctx, lines)?;
     Ok(format!(
         "{} at Low; restricted {want:?}; logon SID deny-only; SeChangeNotifyPrivilege alone; \
          {limits}",
@@ -160,22 +160,33 @@ pub(crate) fn whoami(ctx: &Ctx<'_>) -> Result<String, String> {
     ))
 }
 
-/// Row 2: node starts node with piped stdio, as A; then the harness's `probe job-ui` as node's
-/// child shows node's tree runs inside the job's UI limits.
+/// Row 2: node starts node with piped stdio, as A; then the harness's `probe job-ui <atom>` as
+/// node's child shows node's tree runs inside the job's UI limits (`ui_limits`), with the
+/// harness's atom looked up as information.
 pub(crate) fn node_pipes(ctx: &Ctx<'_>) -> Result<String, String> {
+    with_atom(ctx, |atom| node_pipes_with(ctx, atom))
+}
+
+fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
     let m = ctx.manifest;
     let node = m.node.clone().ok_or("no node")?;
-    // `node -e <script> <harness exe>`: the exe is process.argv[1].
+    // `node -e <script> <harness exe> <atom>`: process.argv[1] and [2].
     let script = "const cp=require('child_process');\
                   const c=cp.spawn(process.execPath,['-e','process.stdout.write(\"ok\")'],\
                   {stdio:'pipe'});let o='';c.stdout.on('data',d=>o+=d);\
                   c.on('error',e=>process.stdout.write('error:'+e.code+'\\n'));\
                   c.on('close',k=>{process.stdout.write('child:'+o+' code:'+k+'\\n');\
-                  const j=cp.spawnSync(process.argv[1],['probe','job-ui'],{encoding:'utf8'});\
+                  const j=cp.spawnSync(process.argv[1],['probe','job-ui',process.argv[2]],\
+                  {encoding:'utf8'});\
                   process.stdout.write((j.stdout||'')+(j.error?'job-ui error '+j.error.code:''));})";
     let spec = Spec {
         program: text(&node),
-        args: vec!["-e".to_owned(), script.to_owned(), text(&m.harness_exe())],
+        args: vec![
+            "-e".to_owned(),
+            script.to_owned(),
+            text(&m.harness_exe()),
+            atom.to_owned(),
+        ],
         path: node.parent().map(Path::to_path_buf).into_iter().collect(),
         ..Spec::default()
     };
@@ -187,7 +198,8 @@ pub(crate) fn node_pipes(ctx: &Ctx<'_>) -> Result<String, String> {
     if !done.stdout.iter().any(|l| l.contains("child:ok")) {
         return Err(format!("node's child didn't answer ok: {:?}", done.stdout));
     }
-    let limits = ui_limits(&done.stdout)?;
+    let limits = ui_limits(ctx, &done.stdout)?;
+    atom_info(ctx, &done.stdout, atom);
     Ok(format!("node's child answered ok over a pipe; {limits}"))
 }
 

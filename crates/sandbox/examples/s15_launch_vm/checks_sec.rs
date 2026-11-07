@@ -10,7 +10,7 @@ use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
 use super::launch::{Running, Spec, deadline, launch, pool_of, run_command};
-use super::probe_sec::{PIPE_OBJECT_PREFIX, REFUSED, TOKEN_RIGHTS};
+use super::probe_sec::{PIPE_OBJECT_PREFIX, REFUSED, THREAD_RIGHTS, TOKEN_RIGHTS};
 use super::rows::Ctx;
 use super::sys::say;
 use super::win;
@@ -22,14 +22,17 @@ const STATION_PREFIX: &str = "ClauseoRun-";
 const NO_SUCH_PROCESS: &str = "87";
 
 /// The `runners` row: A's agent is refused every right in [`REFUSED`] and [`TOKEN_RIGHTS`] on
-/// its inner runner (its parent) and on its outer runner (the process the harness started).
+/// its inner runner (its parent) and on its outer runner (the process the harness started), every
+/// right in [`THREAD_RIGHTS`] on each of their threads, and the process and token rights on any
+/// `conhost.exe` either started.
 pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
     reach(ctx, &[])
 }
 
 /// The `lawyer-processes` row: the same against the lawyer's processes: the outer runner, the
 /// host (the harness itself, standing in for Clauseo.exe, which starts the outer runner) and the
-/// proxy (a process the harness starts as the lawyer, standing in for the egress proxy's).
+/// proxy (a process the harness starts as the lawyer, standing in for the egress proxy's), with
+/// the runners' threads and console hosts as in `runners`.
 pub(crate) fn lawyer_processes(ctx: &Ctx<'_>) -> Result<String, String> {
     let stand_in = ctx.manifest.harness_exe();
     let mut proxy = run_command(std::process::Command::new(&stand_in).args(["probe", "wait"]))?;
@@ -50,8 +53,8 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     let outer = a.pid();
     let until = deadline(ctx.limit);
     let parent = a.line_after("parent ", until);
-    let mut targets = vec![("outer", outer)];
-    targets.extend_from_slice(extra);
+    let mut targets: Vec<(String, u32)> = vec![("outer".to_owned(), outer)];
+    targets.extend(extra.iter().map(|(role, pid)| ((*role).to_owned(), *pid)));
     let mut lines = String::new();
     for (role, pid) in &targets {
         lines.push_str(role);
@@ -77,9 +80,16 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
         "agent {agent}, its inner runner {inner}, the outer runner {outer}"
     ));
     if extra.is_empty() {
-        targets.insert(0, ("inner", inner));
+        targets.insert(0, ("inner".to_owned(), inner));
     }
     let mut bad = Vec::new();
+    let threads = threads(
+        ctx,
+        &done.stdout,
+        &[("inner", inner), ("outer", outer)],
+        &mut bad,
+    );
+    targets.extend(conhosts(ctx, &done.stdout, &mut bad));
     let mut seen = 0usize;
     for (role, pid) in &targets {
         for (right, _) in REFUSED.iter().chain(&TOKEN_RIGHTS) {
@@ -90,7 +100,7 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
                 .map(str::to_owned);
             match code.as_deref() {
                 None => bad.push(format!("{role} {right}: no line")),
-                Some("0") if *right == "PROCESS_QUERY_LIMITED_INFORMATION" && *role != "inner" => {
+                Some("0") if *right == "PROCESS_QUERY_LIMITED_INFORMATION" && role != "inner" => {
                     bad.push(format!(
                         "{role} ({pid}) {right}: GRANTED by the lawyer's default DACL (report \
                          it; not fixed here)"
@@ -118,9 +128,100 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
         .map(|(role, pid)| format!("{role} ({pid})"))
         .collect();
     Ok(format!(
-        "all {seen} opens were refused, processes and tokens, on {}",
+        "all {seen} opens were refused, processes and tokens, on {}; {threads}",
         names.join(", ")
     ))
+}
+
+/// Checks the agent's `threads` and `thread` lines for each of `runners`: a live runner with
+/// no thread found proves nothing, and every right in [`THREAD_RIGHTS`] on every thread must be
+/// refused (87, a thread that ended meanwhile, is counted apart; at least one thread per runner
+/// must be refused with another code). Its summary.
+fn threads(
+    ctx: &Ctx<'_>,
+    lines: &[String],
+    runners: &[(&str, u32)],
+    bad: &mut Vec<String>,
+) -> String {
+    let mut summary = Vec::new();
+    for (role, pid) in runners {
+        let count = values(lines, &format!("threads {role} {pid}"))
+            .first()
+            .map(|v| (*v).to_owned());
+        let Some(count) = count else {
+            bad.push(format!("{role} ({pid}) threads: no line"));
+            continue;
+        };
+        let Ok(count) = count.parse::<usize>() else {
+            bad.push(format!(
+                "{role} ({pid}): the thread snapshot failed: {count}"
+            ));
+            continue;
+        };
+        ctx.note(&format!("{role} runner ({pid}): {count} threads"));
+        if count == 0 {
+            bad.push(format!(
+                "{role} ({pid}): 0 threads found for a live pid (proves nothing)"
+            ));
+            continue;
+        }
+        let (mut refused, mut ended) = (0usize, 0usize);
+        for line in values(lines, &format!("thread {role}")) {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let tid = words.first().copied().unwrap_or("?");
+            for (right, _) in THREAD_RIGHTS {
+                let code = words
+                    .iter()
+                    .position(|w| *w == right)
+                    .and_then(|at| words.get(at + 1));
+                match code.copied() {
+                    None => bad.push(format!("{role} thread {tid} {right}: no code")),
+                    Some("0") => bad.push(format!("{role} ({pid}) thread {tid} {right}: OPENED")),
+                    Some(NO_SUCH_PROCESS) => ended += 1,
+                    Some(_) => refused += 1,
+                }
+            }
+        }
+        if refused == 0 {
+            bad.push(format!(
+                "{role} ({pid}): no thread open refused with a code other than 87 (proves \
+                 nothing)"
+            ));
+        }
+        summary.push(format!(
+            "{role} {count} threads ({refused} thread opens refused, {ended} on threads that \
+             ended)"
+        ));
+    }
+    format!("threads: {}", summary.join(", "))
+}
+
+/// The console hosts the agent found under the inner or the outer runner, as targets
+/// (`conhost-<pid>`); `conhost none` is noted (both runner exes are GUI-subsystem, so none is
+/// expected).
+fn conhosts(ctx: &Ctx<'_>, lines: &[String], bad: &mut Vec<String>) -> Vec<(String, u32)> {
+    let found = values(lines, "conhost");
+    if found == ["none"] {
+        ctx.note("conhost none (both runner exes are GUI-subsystem: none is expected)");
+        return Vec::new();
+    }
+    if found.is_empty() {
+        bad.push("no conhost line".to_owned());
+    }
+    let mut targets = Vec::new();
+    for value in found {
+        match value
+            .split_once(' ')
+            .map(|(parent, pid)| (parent, pid.trim().parse::<u32>()))
+        {
+            Some((parent, Ok(pid))) if parent != "error" => {
+                ctx.note(&format!("conhost {pid} under the {parent} runner: tested"));
+                targets.push((format!("conhost-{pid}"), pid));
+            }
+            _ => bad.push(format!("conhost: {value}")),
+        }
+    }
+    targets
 }
 
 /// The `breakaway` row: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or the child it made is still
