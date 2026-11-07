@@ -44,6 +44,14 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Makes the agent's profile folder `path` and its parents as this process's user: the inner
+/// runner, as the pool user, makes `<state>\AppData\Roaming` and the rest its environment names
+/// (S15 `PR5`), so they are made with the pool user's own rights and nothing else's.
+#[cfg(windows)]
+pub(crate) fn make_agent_folder(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+
 /// Renames `from` (not followed if a link) to `to`, refusing (`AlreadyExists`) when something
 /// is at `to`, since a rename over a file (or, on Unix, an empty folder) would succeed. For the
 /// set-aside's tests: the agent's renames, and the moves of their stand-in for NTFS.
