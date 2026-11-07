@@ -827,8 +827,9 @@ and every extra name of a file, is deleted itself on its own handle, so the prof
 delete meets none. A folder's DACL is written with `SetKernelObjectSecurity`, which never
 propagates to what is already inside, a planted junction included (`private_dir.rs`); the
 permission walk writes each child on its own handle and skips links. Guidance never sends an
-administrator to a recursive tool that follows links (`takeown /R`, `icacls /T`): `rd /s /q`
-deletes a folder's links as links. These opens enable the backup and restore privileges, with
+administrator to a recursive tool that follows links (`takeown /R`, `icacls /T`), nor to
+`rd /s /q`, which can clear read-only on a hard-linked file's other names: a left-over profile
+folder points to firm-it's "Clearing a leftover Windows sandbox by hand". These opens enable the backup and restore privileges, with
 backup intent, so a folder a pool user shut to administrators can't stop a set-up or a removal.
 They fail closed: a profiles folder reached through a junction (a redirected `C:\Users`), or a
 `ProfileList` path in 8.3 form, isn't the final path, so set-up stops at `Owners` and a removal
