@@ -8,13 +8,12 @@
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE};
 use windows::Win32::Security::{
     AccessCheck, DACL_SECURITY_INFORMATION, DuplicateTokenEx, GENERIC_MAPPING,
-    GROUP_SECURITY_INFORMATION, GetKernelObjectSecurity, GetTokenInformation,
-    LABEL_SECURITY_INFORMATION, LookupPrivilegeNameW, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET,
-    PSECURITY_DESCRIPTOR, SecurityImpersonation, TOKEN_ADJUST_DEFAULT, TOKEN_ALL_ACCESS,
-    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_EXECUTE, TOKEN_GROUPS, TOKEN_IMPERSONATE,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_READ,
-    TOKEN_WRITE, TokenDefaultDacl, TokenGroups, TokenImpersonation, TokenIntegrityLevel,
-    TokenPrivileges, TokenRestrictedSids,
+    GROUP_SECURITY_INFORMATION, GetKernelObjectSecurity, GetTokenInformation, LookupPrivilegeNameW,
+    OWNER_SECURITY_INFORMATION, PRIVILEGE_SET, PSECURITY_DESCRIPTOR, SecurityImpersonation,
+    TOKEN_ADJUST_DEFAULT, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_EXECUTE,
+    TOKEN_GROUPS, TOKEN_IMPERSONATE, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
+    TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_READ, TOKEN_WRITE, TokenDefaultDacl, TokenGroups,
+    TokenImpersonation, TokenIntegrityLevel, TokenPrivileges, TokenRestrictedSids,
 };
 use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
 use windows::Win32::System::SystemServices::{
@@ -206,9 +205,13 @@ fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
 /// from the handle held, then `shut_later`. Harness run 42358986179 failed every launch at `make`
 /// (5) when the default DACL was shut before it; each step here must pass. This process's user
 /// stands in for the pool user, and a made-up account for the desktop user, as in production
-/// they differ (`TokenSpecError::PoolIsDesktopUser`).
+/// they differ (`TokenSpecError::PoolIsDesktopUser`). As in the thread-shut test above, CI's
+/// `SeDebugPrivilege` goes first. With it, `shut_later` opens again the threads `shut_self` shut,
+/// a path the inner runner never takes (it holds no such privilege, so it is refused and passes
+/// them), and with it the sequence failed at `shut_later` with 5 (run 42419661450).
 #[test]
 fn the_inner_runners_token_sequence_passes_in_order() {
+    crate::windows::test_dacl::remove_privileges(&[windows::core::w!("SeDebugPrivilege")]);
     let token = os::own_token().unwrap();
     let me = os::user(&token).unwrap();
     let logon = os::logon_sid(&token).unwrap();
@@ -222,8 +225,12 @@ fn the_inner_runners_token_sequence_passes_in_order() {
 }
 
 /// N2: the agent, as the kernel checks an open of its own token, gets query, assign and
-/// read-control, and never `TOKEN_ADJUST_DEFAULT`, `TOKEN_DUPLICATE` or `WRITE_DAC`. The token is
-/// made at Medium so no mandatory label takes a right away: the DACL alone decides.
+/// read-control, and never `TOKEN_ADJUST_DEFAULT`, `TOKEN_DUPLICATE` or `WRITE_DAC`. The DACL
+/// alone decides: the descriptor is read without its label, and the token is made at Medium, the
+/// level an object with no label has. The token object's own label isn't the token's level: on
+/// CI (an elevated admin, High) `AccessCheck` with it granted `TOKEN_READ` (0x20008) alone, as a
+/// caller below an object's level keeps only the read and execute rights of its mapping
+/// (`TOKEN_ASSIGN_PRIMARY` is in neither), run 42419661450.
 #[test]
 fn the_agent_cant_set_its_tokens_default_dacl() {
     let own = os::own_token().unwrap();
@@ -234,10 +241,8 @@ fn the_agent_cant_set_its_tokens_default_dacl() {
     spec.integrity = sid("S-1-16-8192");
     let agent = os::make(&own, &spec).unwrap();
 
-    let information = OWNER_SECURITY_INFORMATION.0
-        | GROUP_SECURITY_INFORMATION.0
-        | DACL_SECURITY_INFORMATION.0
-        | LABEL_SECURITY_INFORMATION.0;
+    let information =
+        OWNER_SECURITY_INFORMATION.0 | GROUP_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0;
     let mut needed = 0u32;
     // SAFETY: no buffer and a zero length ask only for the size, written to `needed`.
     let sized = unsafe { GetKernelObjectSecurity(agent.0, information, None, 0, &raw mut needed) };
