@@ -348,7 +348,7 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   decision.
 - **A neighbour on a network share** gets no fence: the restricted token fails network logon
   (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
-  PR7's VM row (the (B) token against `\\localhost` and a guest share).
+  PR7's VM rows (`s15_wfp_vm`: the (B) token against `\\localhost\C$` and a guest share).
 - **Folders on `C:\` outside the matter's parent, and `ProgramData`**, stay readable where
   `Users` reads them. Owner: S15 close-out, Rohan's read-gap decision.
 - **Hard-linked files and junction targets inside a matter or sibling** stay bare (D7): no fence
@@ -727,6 +727,79 @@ ownership by hand as an administrator.
 **Set-aside restore stays unelevated.** It must raise no prompt. A restored item whose hand-over
 fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
 for `--reclaim`.
+
+### The network (PR7)
+
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches its launch's egress proxy and the
+launch's listed loopback ports, and nothing else.
+
+**Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP
+transaction, Clauseo's persistent provider and sublayer (weight `0xFFFE`) and six block filters
+whose `ALE_USER_ID` condition names every live pool user: every connect over IPv4 and IPv6,
+loopback and 61080-61179 included; every inbound connection that isn't loopback; ICMP at resource
+assignment. Each block clears its action right. Then it grants the owner PR0 (c)'s three rights:
+`ADD_LINK` on the sublayer, `ADD` on the filter container, `ADD_LINK` on
+`ALE_AUTH_CONNECT_V4`, each with `READ`, plus `READ` on the provider and each block filter so a
+launch can check them. Last come four Windows Firewall rules, named for the pool: block everything
+that isn't loopback, both ways; block loopback UDP; block loopback TCP outside 61080-61179. A
+re-run or an extend rewrites the filters for the whole pool inside the transaction, so no pool
+user is ever unfiltered and a new one is covered by the next run. A WFP failure fails the set-up
+at `Step::Network`.
+
+**Each launch** (`LaunchPermit::open`, as the desktop user) first checks set-up's objects: the
+provider, the sublayer, and each block filter at its layer, blocking, in our sublayer, with a
+descriptor that names the matter's pool user and holds nothing else the check doesn't read. Then,
+in a dynamic WFP session, it adds one permit per port, `127.0.0.1` over TCP, for that pool user,
+at a weight above every block: `Policy::proxy_ports` and `Loopback::Ports`, R24's relay port
+included. The session closes when the permit drops, and WFP deletes its filters with it, after a
+crash too. Under design (B) the pool user's SID is both the token's user and a restricting SID,
+so one SID in the descriptor passes both access checks; PR0 (c) needed two only because its user
+and its restricting SID differed. The first VM row confirms the match (`examples/s15_wfp_vm.rs`).
+
+**Fail closed.** A missing, changed or unreadable set-up object, or one that doesn't name the pool
+user, refuses the launch with `Error::NetworkUnfiltered` (`sandbox.setup_required`). So do,
+with `agent.launch_failed`, a permit WFP refuses, `Loopback::Any` (D10: the browser, the only
+entry that asks for it, is off on tier B), and a port outside 61080-61179. No agent runs
+unfiltered.
+
+**Why the range is excepted in the firewall rules, not in the block filters.** Within our
+sublayer the matching filter with the highest weight decides, and across sublayers a block beats a
+soft permit. A block filter that left 61080-61179 open would let matter B's agent reach matter A's
+proxy and relay ports, because the permit only opens and never narrows. So the block filters
+block the range too, and each permit opens its own launch's ports. The firewall rules sit in
+Windows Firewall's own sublayer, where our soft permit can't beat them; blocking loopback TCP
+outside the range there caps every permit at the range.
+
+**Group Policy and the firewall.** When Group Policy keeps local firewall rules from taking
+effect (`LocalPolicyModifyState` is not OK in every current profile), or a rule can't be
+written, set-up goes on: WFP's filters enforce alone, and `SetupReport::network` names the
+firewall as ineffective. For firm IT: with Group Policy owning the firewall, the second layer of
+Clauseo's network protection is off; add the same rules by Group Policy, or let local rules apply
+(`AllowLocalPolicyMerge`).
+
+**Inbound loopback** to a pool user's own listener is not blocked: whoever connects is filtered on
+its own connect side, so the agent's loopback pair on a listed port works. No listener rule:
+`ALE_AUTH_RECV_ACCEPT` never saw the loopback peer in PR0 (c), and the browser waits for its own
+design (R2's job-based check).
+
+**Accepted risk: name resolution.** Windows resolves names in the DNS Client service, which runs
+as NETWORK SERVICE, so no `ALE_USER_ID` condition sees it: a hijacked agent can still look names
+up, a DNS exfiltration channel. Codex has the same gap. Direct DNS (port 53 to any resolver) is
+blocked like everything else. For firm IT: firms that need to close DNS exfiltration can point
+the machine at a filtering resolver. The VM rows measure it (a lookup under the (B) token, and
+direct UDP 53 to a public resolver).
+
+**Smaller notes.** The permit opens IPv4 `127.0.0.1` only, where S16 binds; `::1` stays
+blocked. A set-up that fails after step 8a leaves filters naming users its rollback deleted, which
+match nothing. Removal (`wfp::remove_network`, for `PR4j`'s `--remove`) deletes every block
+filter key, the sublayer and the provider in one transaction, takes back the owner's grants on the
+filter container and the layer (every allow of the owner there), and removes the firewall rules;
+it can run again after a partial removal, and needs every session closed.
+
+**For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
+starts: `LaunchPermit::open(&pool_user_sid, &policy)`; hold the permit until the launch's whole
+process tree has exited, then close or drop it. On `Err`, don't start the agent; map
+`Error::NetworkUnfiltered` by `Error::code`.
 
 ## Consequences
 
