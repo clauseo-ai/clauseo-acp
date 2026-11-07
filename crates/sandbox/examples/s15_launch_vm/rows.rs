@@ -12,7 +12,7 @@ use super::manifest::Manifest;
 use super::sys::{now, say};
 
 /// Every row, in the order `rows` and `--unattended` run them.
-pub(crate) const ROWS: [&str; 27] = [
+pub(crate) const ROWS: [&str; 28] = [
     "whoami",
     "node-pipes",
     "open-process",
@@ -40,6 +40,7 @@ pub(crate) const ROWS: [&str; 27] = [
     "wts-visibility",
     "end-cleanup",
     "cancel",
+    "stdin-unread-cancel",
 ];
 
 /// How long the watchdog waits past a row's own limit before it calls the row hung.
@@ -187,6 +188,7 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
         "wts-visibility" => return super::checks_pool::wts_visibility(ctx),
         "end-cleanup" => super::checks_cleanup::end_cleanup(ctx),
         "cancel" => super::checks_cancel::cancel(ctx),
+        "stdin-unread-cancel" => super::checks_cancel::stdin_unread_cancel(ctx),
         other => Err(format!("no row {other:?}; rows: {}", ROWS.join(", "))),
     };
     ctx.outcome(result)

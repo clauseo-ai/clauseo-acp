@@ -59,7 +59,7 @@ Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-c
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
 `sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `child-token-default-dacl`,
-`wts-visibility`, `end-cleanup`, `cancel`.
+`wts-visibility`, `end-cleanup`, `cancel`, `stdin-unread-cancel`.
 `clipboard` skips in a session with no clipboard the harness can use. `node-pipes` needs `--node`;
 `codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
@@ -226,6 +226,19 @@ pool user's, so either listing with one is INFO, naming the count and the images
   logon time: the outer's `clauseo-sandbox-run: end sweeper: logon to resume <n> ms` line, from
   the logon's start to the resume, or that the outer logged none. A suspended runner found is
   ended at the row's end.
+- `stdin-unread-cancel` (`checks_cancel.rs`, verdict in `cancel_verdict.rs`): the same cancel
+  with the agent's stdin write blocked, a real pipe write rather than the unit test's fake. The
+  agent is `probe sleep-noread` (it sleeps up to 60 s and never reads its stdin). From a thread,
+  the harness writes 4 MiB to the outer's stdin, far past a pipe's buffer, then closes it as the
+  host does on a cancel; the outer reads it all (it buffers up to 16 MiB), and its own write to
+  the agent's full pipe stays blocked. The harness then lets the ladder run, killing the outer
+  only if it still runs 3 s after the close, and looks five times over 3 s after the outer
+  ended, as `cancel` does. PASS when the outer exited by itself within 3 s of the close, no
+  `clauseo-sandbox-run.exe` of A's pool user (or of a user the harness can't read) was suspended
+  in any look, and none was running at the last: the job's end released the blocked write. FAIL
+  names what was left: an outer still running at 3 s (killed then), or each runner process
+  suspended or still running. A harness write that fails or doesn't end within 20 s fails the
+  row too, naming it. INFO when the session never started or no look could read the threads.
 
 The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
 harness ends its benign process if it still runs at the row's end, and notes it.
