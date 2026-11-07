@@ -195,35 +195,30 @@ impl HostConfig {
         self
     }
 
-    /// The egress proxy that gives each session's browser its port (default: none, so no session
-    /// gets the `browser` server and the header shows it unavailable with `NoProxy`). The host
-    /// opens one per launch that can get the browser and closes it when the session ends (see
-    /// [`EgressProxy`]). The agent's own environment never points at it (tier C).
+    /// The egress proxy giving each session's browser its port (default: none: no `browser`
+    /// server, shown as `NoProxy`). One opens per launch that can get the browser and closes at
+    /// the session's end ([`EgressProxy`]); the agent's environment never points at it (tier C).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
         self
     }
 
-    /// How long a session's removal waits for the agent's tree and its Chrome to be gone before
-    /// it frees the session's proxy, relay, ports and run folder (default
-    /// [`DEFAULT_TREE_WAIT`]); past it they are held until the host stops. Tests shorten it.
+    /// The removal wait's cap (default [`DEFAULT_TREE_WAIT`]; `launch_checks::straggler`).
     #[cfg(feature = "test-support")]
     pub fn with_tree_wait(mut self, wait: std::time::Duration) -> Self {
         self.wiring.tree_wait = wait;
         self
     }
 
-    /// A hook run off the host thread as a session's removal starts that wait, with the port
-    /// the host claimed for the session's Chrome debugging port (none without browser claims):
-    /// a test binds it there, standing in for a Chrome that outlives the agent.
+    /// A hook run off the host thread as a session's removal starts that wait, with the session's
+    /// Chrome debugging port (none without claims): a test binds it, as a lingering Chrome.
     #[cfg(feature = "test-support")]
     pub fn with_tree_wait_hook(mut self, hook: Arc<dyn Fn(Option<u16>) + Send + Sync>) -> Self {
         self.wiring.tree_wait_hook = Some(hook);
         self
     }
 
-    /// Makes every run folder removal's thread fail to start, as when the OS refuses a thread:
-    /// a test checks the session's proxy and relay are held, not freed on the host thread.
+    /// Makes every removal's thread fail to start: a test checks the run's parts are held.
     #[cfg(feature = "test-support")]
     pub fn with_removal_thread_failing(mut self) -> Self {
         self.wiring.removal_thread_fails = true;
