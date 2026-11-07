@@ -22,6 +22,7 @@
 // its build.rs reads.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -434,6 +435,38 @@ test("signatureCheck holds for tauri signer's signature and fails each way it ca
   assert.deepEqual(signatureCheck(data, b64("nothing"), REAL_PUB), ["the signature is not minisign's text"]);
 });
 
+test("signatureCheck holds the trusted comment to the signed name and version when asked", () => {
+  const data = Buffer.from(REAL_DATA);
+  // REAL_SIG's comment: timestamp:1794046776\tfile:data.exe\tversion:1.2.3
+  assert.deepEqual(signatureCheck(data, REAL_SIG, REAL_PUB, { file: "data.exe", version: "1.2.3" }), []);
+  assert.deepEqual(signatureCheck(data, REAL_SIG, REAL_PUB, { file: "clauseo-sandbox-setup.exe", version: "1.2.3" }), [
+    "the trusted comment holds no file:clauseo-sandbox-setup.exe",
+  ]);
+  assert.deepEqual(signatureCheck(data, REAL_SIG, REAL_PUB, { file: "data", version: "1.2" }), [
+    "the trusted comment holds no file:data",
+    "the trusted comment holds no version:1.2",
+  ]);
+  // The CLI: the sandbox tool's .sig, signed as SANDBOX_EXE, as assemble checks it.
+  const dir = mkdtempSync(join(tmpdir(), "latest-json-verify-"));
+  try {
+    writeFileSync(join(dir, "tool-x64.exe"), REAL_DATA);
+    writeFileSync(join(dir, "tool-x64.exe.sig"), REAL_SIG);
+    writeFileSync(join(dir, "key.pub"), REAL_PUB);
+    const run = (...args) =>
+      spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--verify", join(dir, "tool-x64.exe"), join(dir, "key.pub"), ...args], {
+        encoding: "utf8",
+      });
+    assert.equal(run().status, 0);
+    assert.equal(run("data.exe", "1.2.3").status, 0);
+    const wrong = run("tool-x64.exe", "1.2.3");
+    assert.equal(wrong.status, 1);
+    assert.match(wrong.stderr, /the trusted comment holds no file:tool-x64\.exe/);
+    assert.equal(run("data.exe").status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("release.yml signs the sandbox tool, ships its .sig in both installers and checks both in assemble", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   const at = (commands, line) => {
@@ -442,13 +475,17 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
     return index;
   };
   const sign = jobCommands(text, "sign-windows");
-  const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$GITHUB_WORKSPACE/$exe"');
+  // Signed as SANDBOX_EXE (the trusted comment's file:), its .sig moved where the overlay reads it.
+  const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"');
+  assert.ok(at(sign, 'cp "$exe" "$dir/$SANDBOX_EXE"') < signed);
+  assert.ok(signed < at(sign, 'mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"'));
   const bundled = sign.findIndex((line) => /\btauri bundle\b/.test(line));
   assert.ok(signed < bundled, "the sandbox tool is signed before NSIS takes it");
   assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
   at(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"');
   const assemble = jobCommands(text, "assemble");
-  const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$signed" "$pub" ||');
+  const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
+  at(assemble, 'node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||');
   const listed = at(assemble, 'grep -qxF "$inner" <<< "$listing" ||');
   const same = at(assemble, '7z e -so -spd "$installer" "$inner" | cmp - "$published" ||');
   const notes = at(assemble, 'echo "## Inside the Windows installers"');
