@@ -134,8 +134,9 @@ They remove what the set-up makes:
   hides it from the sign-in screen;
 - the group's deny entry on `C:\ProgramData\Microsoft\DeviceSync`;
 - the group `ClauseoSandboxUsers`, once it has no members;
-- the key `HKLM\SOFTWARE\Clauseo\Sandbox`. The key `HKLM\SOFTWARE\Clauseo\Clauseo`, the
-  installer's, stays.
+- the key `HKLM\SOFTWARE\Clauseo\Sandbox`. After a per-machine install, the installer's key
+  `HKLM\SOFTWARE\Clauseo\Clauseo` stays beside it. After a per-user install, `HKLM\SOFTWARE\Clauseo`
+  is left empty, and you can delete it once you have checked that it is.
 
 Clauseo makes no firewall or WFP rules yet; they come in a later version, and this page will
 name them then.
@@ -185,14 +186,27 @@ Remove-Item -Path $key -ErrorAction SilentlyContinue
 ```
 
 Then check, in the same window, that each item is gone. Every number is 0 and both other values
-are `False`:
+are `False`. `Folders` counts what is left in `C:\Users` under a pool user's exact name, since a
+profile whose folder was held open can lose its entry and keep its folder:
 
 ```powershell
-[pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Key = Test-Path $key }
+[pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch $pool }).Count; Key = Test-Path $key }
 ```
 
 If a profile is still there, a process still holds it: restart the computer and paste the block
-again. A second run skips what is gone. If the group is still there, it has members or isn't the
+again. A second run skips what is gone. If `Profiles` is 0 but `Folders` isn't, the folder outlived
+its profile and stays even after a restart. Delete it by hand after a restart: take ownership for
+Administrators, give Administrators (by SID, so any language works) full control, then delete it,
+with the exact name in place of `ClauseoSb01`:
+
+```cmd
+takeown /F "C:\Users\ClauseoSb01" /A /R /D Y
+icacls "C:\Users\ClauseoSb01" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C
+rmdir /S /Q "C:\Users\ClauseoSb01"
+```
+
+`/D Y` is the answer in English Windows; another language may need its own letter. Never use a
+wildcard here: other accounts' folders can start with `ClauseoSb` too. If the group is still there, it has members or isn't the
 one the key named, and `--remove` would leave it too: look at it before you delete it.
 
 Each pool user's `AppData\LocalLow` deny goes with its profile. The matter folders aren't covered
@@ -206,30 +220,34 @@ files the sandbox set aside from a matter.
 
 Microsoft Defender has flagged Clauseo's unsigned `clauseo-sandbox-setup.exe` as
 `Trojan:Win32/Bearfoos.A!ml`. This is a false positive, and it has been submitted to Microsoft.
-When it happens, the per-user installer still finishes but without the setup exe, and the
-uninstaller can't remove the Windows protection (clear it by hand, above).
+It can happen at two points:
+
+- **During the install.** The per-user installer still finishes, but without the setup exe, so the
+  Windows protection can't be set up.
+- **After the set-up has run.** The protection is in place, but the exe is gone, so the uninstaller
+  can't remove it. This is when you need the by-hand clean-up above.
 
 To get the file back, an administrator opens Windows Security › Virus & threat protection ›
-Protection history, selects the item and chooses **Restore**, or **Allow on device** so it isn't
-quarantined again on that computer. From an elevated prompt, `Get-MpThreatDetection` lists the
-detections and `Get-MpThreat` the threats behind them, and Defender's command-line tool restores
-by threat name and path:
+Protection history, selects the item and chooses **Actions** › **Restore**. From an elevated
+prompt, `Get-MpThreatDetection` lists the detections and `Get-MpThreat` the threats behind them,
+and Defender's command-line tool lists the quarantined items and restores one by its path:
 
 ```cmd
 "%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -ListAll
-"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -Name "Trojan:Win32/Bearfoos.A!ml" -FilePath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
+"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -FilePath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
 ```
 
-For a per-user install the path is `%LOCALAPPDATA%\Clauseo\clauseo-sandbox-setup.exe`. Microsoft:
+For a per-user install the path is `C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe`,
+with the lawyer's user folder: at an administrator's prompt, `%LOCALAPPDATA%` is the
+administrator's folder, not the lawyer's. Microsoft:
 [Restore quarantined files](https://learn.microsoft.com/defender-endpoint/restore-quarantined-files-microsoft-defender-antivirus),
 [MpCmdRun](https://learn.microsoft.com/defender-endpoint/command-line-arguments-microsoft-defender-antivirus).
 
-Then repair the install: run the same installer again (per user or per machine, as before), so the
-setup exe is back in place.
+**Restore** puts the file back where it was, so nothing needs repairing. Defender may quarantine it
+again until Microsoft gives its verdict. If someone chose **Remove** instead, or the file is gone,
+run the same installer again (per user or per machine, as before) to put the setup exe back.
 
-We don't recommend excluding Clauseo's folders from scanning. Allowing this one detection on the
-device is narrower than a folder exclusion, which would also stop Defender scanning anything else
-that lands there. Your firm decides which to use.
+Whether to add an exclusion, or to allow the detection, is your firm's decision.
 
 ## 2. Signing
 
