@@ -111,6 +111,7 @@ mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
 pub mod strays;
+#[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
 #[cfg(windows)]
