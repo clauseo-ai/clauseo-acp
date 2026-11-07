@@ -1,41 +1,49 @@
-//! Tier B's network specs, checked on every OS (S15 PR7): which SIDs, ports and layers each
-//! filter names, idempotence and extend, removal, the permit from a policy, and the launch's
-//! fail-closed check against a fake WFP.
+//! Tier B's network specs, checked on every OS (S15 PR7): which SIDs, ports, layers, match
+//! types and flags each filter has, idempotence and extend, removal, the read-only grants, the
+//! descriptors, and the ports a launch names. The launch's check against a fake WFP is in
+//! `tests/check.rs`.
 
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
-use super::check::{FoundFilter, NetworkGap, SetupReader, check_setup};
+use super::check::{NetworkGap, WfpError};
 use super::spec::{
-    ACTRL_ADD, ACTRL_ADD_LINK, ACTRL_READ, Action, BLOCK_WEIGHT, Condition, Direction, Layer,
-    Namespace, NetworkSetup, Object, PERMIT_LAYER, PERMIT_WEIGHT, PROTOCOL_ICMP, PROTOCOL_ICMPV6,
-    PROTOCOL_TCP, RuleProtocol, SpecError, block_filters, checked_ports, grants, permit_filters,
-    permit_ports, revocations, rule_names, sddl_users, user_sddl,
+    ACTRL_ENUM, ACTRL_READ, Action, BLOCK_WEIGHT, Condition, Direction, FIREWALL_UNDER_POLICY,
+    FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object, PERMIT_BASE,
+    PERMIT_WEIGHT, PROTOCOL_ICMP, PROTOCOL_ICMPV6, PROTOCOL_TCP, RuleProtocol, SpecError,
+    allowed_users, checked_ports, denied_users, not_pool_sddl, permit_ports, revocations,
+    rule_names, user_sddl,
 };
 use crate::test_support::TempDir;
 use crate::windows::sids::Sid;
 use crate::{Error, Loopback, Policy};
 use clauseo_protocol::ErrorCode;
 
-fn sid(rid: u32) -> Sid {
+mod check;
+
+pub(super) fn sid(rid: u32) -> Sid {
     Sid::parse(&format!("S-1-5-21-11-22-33-{rid}")).unwrap()
 }
 
-fn owner() -> Sid {
+pub(super) fn owner() -> Sid {
     sid(1001)
 }
 
-fn setup(pool: &[u32]) -> NetworkSetup {
+pub(super) fn group() -> Sid {
+    sid(3000)
+}
+
+pub(super) fn setup(pool: &[u32]) -> NetworkSetup {
     let pool: Vec<Sid> = pool.iter().map(|&rid| sid(rid)).collect();
-    NetworkSetup::new(&owner(), &pool).unwrap()
+    NetworkSetup::new(&owner(), &group(), &pool).unwrap()
 }
 
 #[test]
-fn block_filters_name_every_pool_user_at_each_layer() {
+fn blocks_catch_the_group_and_every_pool_user_at_each_layer() {
     let ns = Namespace::production();
     let filters = setup(&[2002, 2001, 2002]).filters(&ns);
     let pool = vec![sid(2001), sid(2002)];
-    let layers: Vec<Layer> = filters.iter().map(|f| f.layer).collect();
+    let blocks = &filters[..6];
+    let layers: Vec<Layer> = blocks.iter().map(|f| f.layer).collect();
     assert_eq!(
         layers,
         [
@@ -47,13 +55,17 @@ fn block_filters_name_every_pool_user_at_each_layer() {
             Layer::AssignV6,
         ]
     );
-    for (n, filter) in (0u16..).zip(&filters) {
-        assert_eq!(filter.key, Some(ns.filter_key(n)), "{}", filter.name);
+    for (n, filter) in (0u16..).zip(blocks) {
+        assert_eq!(filter.key, ns.filter_key(n), "{}", filter.name);
         assert_eq!(filter.action, Action::Block);
         assert_eq!(filter.weight, BLOCK_WEIGHT);
-        assert_eq!(filter.conditions[0], Condition::Users(pool.clone()));
+        let not_pool = Condition::NotPool {
+            group: group(),
+            pool: pool.clone(),
+        };
+        assert_eq!(filter.conditions[0], not_pool);
     }
-    let rest: Vec<&[Condition]> = filters.iter().map(|f| &f.conditions[1..]).collect();
+    let rest: Vec<&[Condition]> = blocks.iter().map(|f| &f.conditions[1..]).collect();
     assert_eq!(
         rest,
         [
@@ -68,18 +80,63 @@ fn block_filters_name_every_pool_user_at_each_layer() {
 }
 
 #[test]
-fn no_block_filter_excepts_a_port_or_an_address() {
-    // The range is excepted only in the firewall rules: a block that left 61080-61179 open
-    // would let matter B's agent reach matter A's ports (spec.rs).
-    for filter in setup(&[2001]).filters(&Namespace::production()) {
-        assert!(
-            filter
-                .conditions
-                .iter()
-                .all(|c| !matches!(c, Condition::RemotePort(_) | Condition::RemoteV4(_))),
-            "{filter:?}"
+fn each_pool_user_gets_one_static_permit_for_the_range_only() {
+    let ns = Namespace::production();
+    let filters = setup(&[2002, 2001]).filters(&ns);
+    assert_eq!(filters.len(), 8);
+    for (i, (filter, user)) in filters[6..].iter().zip([2001, 2002]).enumerate() {
+        let i = u16::try_from(i).unwrap();
+        assert_eq!(filter.key, ns.filter_key(PERMIT_BASE + i));
+        assert_eq!(filter.layer, Layer::ConnectV4);
+        assert_eq!(filter.action, Action::Permit);
+        assert!(filter.weight == PERMIT_WEIGHT && PERMIT_WEIGHT > BLOCK_WEIGHT);
+        assert_eq!(
+            filter.conditions,
+            [
+                Condition::Users(vec![sid(user)]),
+                Condition::RemoteV4(Ipv4Addr::LOCALHOST),
+                Condition::Protocol(PROTOCOL_TCP),
+                Condition::RemotePorts(61080, 61179),
+            ]
         );
     }
+}
+
+#[test]
+fn match_types_and_flags_are_pinned() {
+    let filters = setup(&[2001]).filters(&Namespace::production());
+    let block = Flags {
+        persistent: true,
+        clear_action_right: true,
+    };
+    let permit = Flags {
+        persistent: true,
+        clear_action_right: false,
+    };
+    for filter in &filters {
+        let expected = if filter.action == Action::Block {
+            block
+        } else {
+            permit
+        };
+        assert_eq!(filter.flags(), expected, "{}", filter.name);
+    }
+    let matching = |c: Condition| c.matching();
+    let not_pool = Condition::NotPool {
+        group: group(),
+        pool: vec![sid(2001)],
+    };
+    assert_eq!(matching(not_pool), Match::NotEqual);
+    assert_eq!(matching(Condition::Users(vec![sid(2001)])), Match::Equal);
+    assert_eq!(matching(Condition::NotLoopback), Match::FlagsNoneSet);
+    assert_eq!(matching(Condition::Protocol(6)), Match::Equal);
+    assert_eq!(
+        matching(Condition::RemoteV4(Ipv4Addr::LOCALHOST)),
+        Match::Equal
+    );
+    assert_eq!(matching(Condition::RemotePorts(1, 2)), Match::Range);
+    // The address goes to WFP in host order.
+    assert_eq!(u32::from(Ipv4Addr::LOCALHOST), 0x7F00_0001);
 }
 
 #[test]
@@ -88,21 +145,22 @@ fn a_rerun_over_the_same_pool_builds_the_same_objects() {
     let (a, b) = (setup(&[2001, 2002]), setup(&[2002, 2001, 2001]));
     assert_eq!(a, b);
     assert_eq!(a.filters(&ns), b.filters(&ns));
+    assert_eq!(a.grants(&ns), b.grants(&ns));
     assert_eq!(a.rules(&ns), b.rules(&ns));
 }
 
 #[test]
-fn an_extend_covers_the_new_user_under_the_same_keys() {
+fn an_extend_covers_the_new_user() {
     let ns = Namespace::production();
-    let before = setup(&[2001, 2002]).filters(&ns);
     let after = setup(&[2001, 2002, 2003]).filters(&ns);
-    for (old, new) in before.iter().zip(&after) {
-        assert_eq!(old.key, new.key);
-        assert_eq!(
-            new.conditions[0],
-            Condition::Users(vec![sid(2001), sid(2002), sid(2003)])
-        );
+    for filter in &after[..6] {
+        let Condition::NotPool { pool, .. } = &filter.conditions[0] else {
+            panic!("{filter:?}");
+        };
+        assert_eq!(pool, &[sid(2001), sid(2002), sid(2003)]);
     }
+    assert_eq!(after.len(), 9);
+    assert_eq!(after[8].conditions[0], Condition::Users(vec![sid(2003)]));
     let rules = setup(&[2001, 2002, 2003]).rules(&ns);
     assert!(rules.iter().all(|r| r.users.contains(sid(2003).as_str())));
 }
@@ -111,35 +169,43 @@ fn an_extend_covers_the_new_user_under_the_same_keys() {
 fn a_pool_that_would_filter_the_wrong_programs_is_refused() {
     let users = Sid::parse("S-1-5-32-545").unwrap();
     let everyone = Sid::parse("S-1-1-0").unwrap();
-    assert_eq!(NetworkSetup::new(&owner(), &[]), Err(SpecError::NoPoolUser));
-    for group in [users, everyone] {
-        assert_eq!(
-            NetworkSetup::new(&owner(), &[sid(2001), group.clone()]),
-            Err(SpecError::NotAnAccount(group))
-        );
+    let new = |group: &Sid, pool: &[Sid]| NetworkSetup::new(&owner(), group, pool);
+    assert_eq!(new(&group(), &[]), Err(SpecError::NoPoolUser));
+    for bad in [users, everyone] {
+        let refused = Err(SpecError::NotAnAccount(bad.clone()));
+        assert_eq!(new(&group(), &[sid(2001), bad.clone()]), refused);
+        assert_eq!(new(&bad, &[sid(2001)]), refused, "as the group");
     }
-    assert_eq!(
-        NetworkSetup::new(&owner(), &[sid(2001), owner()]),
-        Err(SpecError::OwnerInPool(owner()))
-    );
+    let owner_refused = Err(SpecError::OwnerInPool(owner()));
+    assert_eq!(new(&group(), &[sid(2001), owner()]), owner_refused);
+    assert_eq!(new(&owner(), &[sid(2001)]), owner_refused, "as the group");
 }
 
 #[test]
-fn the_owner_gets_pr0s_three_grants_and_reads() {
+fn the_owner_gets_read_only_grants() {
     let ns = Namespace::production();
-    let grants: Vec<(Object, u32)> = grants(&ns)
+    let set_up = setup(&[2001, 2002]);
+    let grants: Vec<(Object, u32)> = set_up
+        .grants(&ns)
         .into_iter()
         .map(|g| (g.object, g.mask))
         .collect();
     let mut expected = vec![
-        (Object::Sublayer, ACTRL_ADD_LINK | ACTRL_READ),
-        (Object::FilterContainer, ACTRL_ADD | ACTRL_READ),
-        (Object::Layer(Layer::ConnectV4), ACTRL_ADD_LINK | ACTRL_READ),
+        (Object::FilterContainer, ACTRL_READ | ACTRL_ENUM),
+        (Object::Sublayer, ACTRL_READ),
         (Object::Provider, ACTRL_READ),
     ];
-    expected.extend((0..6).map(|n| (Object::Filter(ns.filter_key(n)), ACTRL_READ)));
+    expected.extend(
+        set_up
+            .filters(&ns)
+            .iter()
+            .map(|f| (Object::Filter(f.key), ACTRL_READ)),
+    );
     assert_eq!(grants, expected);
-    assert_eq!(PERMIT_LAYER, Layer::ConnectV4);
+    // FWPM_ACTRL_ADD, ADD_LINK, BEGIN_WRITE_TXN, WRITE and DELETE are never granted.
+    let control = 0x1 | 0x2 | 0x8 | 0x400 | 0x0001_0000;
+    assert!(grants.iter().all(|(_, mask)| mask & control == 0));
+    assert_eq!(revocations(), [Object::FilterContainer]);
 }
 
 #[test]
@@ -147,22 +213,18 @@ fn the_firewall_rules_except_only_the_range() {
     let ns = Namespace::production();
     let rules = setup(&[2001, 2002]).rules(&ns);
     let users = "O:LSD:(A;;CC;;;S-1-5-21-11-22-33-2001)(A;;CC;;;S-1-5-21-11-22-33-2002)";
-    let shape: Vec<(&str, Direction, RuleProtocol, &str, Option<&str>)> = rules
+    let shape: Vec<(&str, Direction, RuleProtocol, Option<&str>)> = rules
         .iter()
         .map(|r| {
             assert_eq!(r.users, users);
-            let ports = r.remote_ports.as_deref();
             (
                 r.name.as_str(),
                 r.direction,
                 r.protocol,
-                r.remote_addresses,
-                ports,
+                r.remote_ports.as_deref(),
             )
         })
         .collect();
-    let non_loopback = super::spec::NON_LOOPBACK_ADDRESSES;
-    let loopback = super::spec::LOOPBACK_ADDRESSES;
     assert_eq!(
         shape,
         [
@@ -170,28 +232,24 @@ fn the_firewall_rules_except_only_the_range() {
                 "clauseo_sandbox_block_outbound",
                 Direction::Out,
                 RuleProtocol::Any,
-                non_loopback,
                 None
             ),
             (
                 "clauseo_sandbox_block_inbound",
                 Direction::In,
                 RuleProtocol::Any,
-                non_loopback,
                 None
             ),
             (
                 "clauseo_sandbox_block_loopback_udp",
                 Direction::Out,
                 RuleProtocol::Udp,
-                loopback,
                 None
             ),
             (
                 "clauseo_sandbox_block_loopback_tcp",
                 Direction::Out,
                 RuleProtocol::Tcp,
-                loopback,
                 Some("1-61079,61180-65535")
             ),
         ]
@@ -201,18 +259,11 @@ fn the_firewall_rules_except_only_the_range() {
 #[test]
 fn removal_covers_everything_set_up_writes() {
     for ns in [Namespace::production(), Namespace::test()] {
-        let set_up = setup(&[2001]);
+        let set_up = setup(&[2001, 2002, 2003]);
         let keys = ns.removal_keys();
-        assert!(
-            set_up
-                .filters(&ns)
-                .iter()
-                .all(|f| keys.contains(&f.key.unwrap()))
-        );
+        assert!(set_up.filters(&ns).iter().all(|f| keys.contains(&f.key)));
         let names: Vec<String> = set_up.rules(&ns).into_iter().map(|r| r.name).collect();
         assert_eq!(names, rule_names(&ns));
-        let granted: Vec<Object> = grants(&ns).iter().map(|g| g.object).collect();
-        assert!(revocations().iter().all(|o| granted.contains(o)));
     }
     let (real, test) = (Namespace::production(), Namespace::test());
     assert!(
@@ -239,31 +290,63 @@ fn production_keys_never_change() {
 }
 
 #[test]
-fn the_user_descriptor_grants_match_to_each_sid() {
+fn the_descriptors_deny_the_pool_and_allow_one_user() {
+    let p = "S-1-5-21-11-22-33";
     assert_eq!(
-        user_sddl(&[sid(2001), sid(2002)]),
-        "O:SYG:SYD:(A;;CC;;;S-1-5-21-11-22-33-2001)(A;;CC;;;S-1-5-21-11-22-33-2002)"
+        not_pool_sddl(&group(), &[sid(2001), sid(2002)]),
+        format!(
+            "O:SYG:SYD:(D;;CC;;;{p}-3000)(D;;CC;;;{p}-2001)(D;;CC;;;{p}-2002)\
+             (A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)"
+        )
+    );
+    assert_eq!(
+        user_sddl(&[sid(2001)]),
+        format!("O:SYG:SYD:(A;;CC;;;{p}-2001)")
     );
 }
 
 #[test]
-fn only_plain_match_allows_read_as_coverage() {
-    let a = "S-1-5-21-11-22-33-2001";
-    let b = "S-1-5-21-11-22-33-2002";
+fn descriptors_read_back_only_in_set_ups_exact_shape() {
+    let p = "S-1-5-21-11-22-33";
+    let tail = "(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)";
+    let full = "(A;;CC;;;S-1-1-0)(A;;CC;;;S-1-5-12)(A;;CC;;;S-1-15-2-1)(A;;CC;;;S-1-15-2-2)";
+    let denied = Some(vec![group(), sid(2001)]);
     assert_eq!(
-        sddl_users(&format!("D:(A;;CC;;;{a})(A;;CC;;;{b})")),
+        denied_users(&format!("D:(D;;CC;;;{p}-3000)(D;;CC;;;{p}-2001){tail}")),
+        denied
+    );
+    assert_eq!(
+        denied_users(&format!("D:(D;;CC;;;{p}-3000)(D;;CC;;;{p}-2001){full}")),
+        denied
+    );
+    assert_eq!(denied_users(&not_pool_sddl(&group(), &[sid(2001)])), denied);
+    for odd in [
+        format!("D:(D;;CC;;;{p}-3000)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)"),
+        format!("D:(D;;CC;;;{p}-3000)(A;;CC;;;BU){tail}"),
+        format!("D:(D;;CCDC;;;{p}-3000){tail}"),
+        format!("D:(D;OICI;CC;;;{p}-3000){tail}"),
+        format!("D:P(D;;CC;;;{p}-3000){tail}"),
+        format!("D:{tail}"),
+        format!("D:(D;;CC;;;WD){tail}"),
+    ] {
+        assert_eq!(denied_users(&odd), None, "{odd}");
+    }
+    assert_eq!(
+        allowed_users(&format!("D:(A;;CC;;;{p}-2001)")),
+        Some(vec![sid(2001)])
+    );
+    assert_eq!(
+        allowed_users(&user_sddl(&[sid(2001), sid(2002)])),
         Some(vec![sid(2001), sid(2002)])
     );
-    assert_eq!(sddl_users(&user_sddl(&[sid(2001)])), Some(vec![sid(2001)]));
     for odd in [
-        format!("D:(A;;CC;;;{a})(D;;CC;;;{a})"),
-        format!("D:(A;;CC;;;{a})(A;;CC;;;WD)"),
-        format!("D:(A;;CCDC;;;{a})"),
-        format!("D:(A;OICI;CC;;;{a})"),
+        format!("D:(A;;CC;;;{p}-2001)(D;;CC;;;{p}-2001)"),
+        format!("D:(A;;CC;;;{p}-2001)(A;;CC;;;WD)"),
+        format!("D:(A;;CCDC;;;{p}-2001)"),
         "D:".to_owned(),
         "O:SYG:SY".to_owned(),
     ] {
-        assert_eq!(sddl_users(&odd), None, "{odd}");
+        assert_eq!(allowed_users(&odd), None, "{odd}");
     }
 }
 
@@ -277,7 +360,7 @@ fn policy(dir: &TempDir, ports: &[u16], loopback: Loopback) -> Policy {
 }
 
 #[test]
-fn the_permit_opens_the_proxy_and_listed_ports_only() {
+fn a_launch_names_only_ports_in_the_range_and_never_any() {
     let dir = TempDir::new("wfp-permit-ports");
     let listed = Loopback::Ports(vec![61150, 61091]);
     let ports = permit_ports(&policy(&dir, &[61090, 61091], listed)).unwrap();
@@ -297,195 +380,36 @@ fn the_permit_opens_the_proxy_and_listed_ports_only() {
 }
 
 #[test]
-fn the_permit_is_loopback_tcp_for_the_matters_user_above_every_block() {
-    let ns = Namespace::production();
-    let filters = permit_filters(&ns, &sid(2002), &[61090, 61150]);
-    assert_eq!(filters.len(), 2);
-    for (filter, port) in filters.iter().zip([61090, 61150]) {
-        assert_eq!(filter.key, None, "a permit is dynamic");
-        assert_eq!(filter.layer, Layer::ConnectV4);
-        assert_eq!(filter.action, Action::Permit);
-        assert!(filter.weight > BLOCK_WEIGHT && filter.weight == PERMIT_WEIGHT);
-        assert_eq!(
-            filter.conditions,
-            [
-                Condition::Users(vec![sid(2002)]),
-                Condition::RemoteV4(Ipv4Addr::LOCALHOST),
-                Condition::RemotePort(port),
-                Condition::Protocol(PROTOCOL_TCP),
-            ]
-        );
-    }
-}
-
-/// A change to an installed [`FakeWfp`], given the first and last block filter keys.
-type Change = fn(&mut FakeWfp, u128, u128);
-
-/// WFP in memory: the provider, the sublayer and filters by key; a read can fail.
-struct FakeWfp {
-    provider: bool,
-    sublayer: bool,
-    filters: BTreeMap<u128, FoundFilter>,
-    fail: Option<(&'static str, u32)>,
-}
-
-impl FakeWfp {
-    /// What `install` would leave for `pool` in `ns`.
-    fn installed(ns: &Namespace, pool: &[Sid]) -> FakeWfp {
-        let filters = block_filters(ns, pool)
-            .into_iter()
-            .map(|f| {
-                let found = FoundFilter {
-                    layer: Some(f.layer),
-                    block: true,
-                    sublayer: ns.sublayer,
-                    users: Some(user_sddl(pool).replacen("O:SYG:SYD:", "D:", 1)),
-                };
-                (f.key.unwrap(), found)
-            })
-            .collect();
-        FakeWfp {
-            provider: true,
-            sublayer: true,
-            filters,
-            fail: None,
-        }
-    }
-}
-
-impl SetupReader for FakeWfp {
-    fn provider(&mut self, _key: u128) -> Result<bool, (&'static str, u32)> {
-        self.fail.map_or(Ok(self.provider), Err)
-    }
-
-    fn sublayer(&mut self, _key: u128) -> Result<bool, (&'static str, u32)> {
-        Ok(self.sublayer)
-    }
-
-    fn filter(&mut self, key: u128) -> Result<Option<FoundFilter>, (&'static str, u32)> {
-        Ok(self.filters.get(&key).cloned())
-    }
-}
-
-#[test]
-fn a_launch_passes_only_a_whole_set_up_naming_its_user() {
-    let ns = Namespace::production();
-    let pool = [sid(2001), sid(2002)];
-    let mut wfp = FakeWfp::installed(&ns, &pool);
-    assert_eq!(check_setup(&ns, &sid(2002), &mut wfp), Ok(()));
-    assert_eq!(
-        check_setup(&ns, &sid(2003), &mut wfp),
-        Err(NetworkGap::PoolUserNotCovered),
-        "a pool user set-up hasn't covered yet"
-    );
-    assert_eq!(
-        check_setup(&Namespace::test(), &sid(2002), &mut wfp),
-        Err(NetworkGap::FilterMissing(
-            "Clauseo sandbox (test) block_connect_v4".to_owned()
-        )),
-        "another namespace's keys"
-    );
-}
-
-#[test]
-fn each_missing_or_changed_object_refuses_the_launch() {
-    let ns = Namespace::production();
-    let pool = [sid(2001)];
-    let user = sid(2001);
-    let first = ns.filter_key(0);
-    let last = ns.filter_key(5);
-    let cases: [(&str, Change, NetworkGap); 7] = [
-        (
-            "no provider",
-            |w, _, _| w.provider = false,
-            NetworkGap::NotSetUp,
-        ),
-        (
-            "no sublayer",
-            |w, _, _| w.sublayer = false,
-            NetworkGap::NotSetUp,
-        ),
-        (
-            "a filter gone",
-            |w, _, last| drop(w.filters.remove(&last)),
-            NetworkGap::FilterMissing("Clauseo sandbox block_icmp_v6".to_owned()),
-        ),
-        (
-            "a permit in a block's place",
-            |w, first, _| w.filters.get_mut(&first).unwrap().block = false,
-            NetworkGap::FilterMissing("Clauseo sandbox block_connect_v4".to_owned()),
-        ),
-        (
-            "another layer",
-            |w, first, _| w.filters.get_mut(&first).unwrap().layer = None,
-            NetworkGap::FilterMissing("Clauseo sandbox block_connect_v4".to_owned()),
-        ),
-        (
-            "another sublayer",
-            |w, first, _| w.filters.get_mut(&first).unwrap().sublayer = 7,
-            NetworkGap::FilterMissing("Clauseo sandbox block_connect_v4".to_owned()),
-        ),
-        (
-            "a deny in the descriptor",
-            |w, _, last| {
-                let users = &mut w.filters.get_mut(&last).unwrap().users;
-                *users = Some("D:(A;;CC;;;S-1-5-21-11-22-33-2001)(D;;CC;;;WD)".to_owned());
-            },
-            NetworkGap::PoolUserNotCovered,
-        ),
-    ];
-    for (what, change, gap) in cases {
-        let mut wfp = FakeWfp::installed(&ns, &pool);
-        change(&mut wfp, first, last);
-        assert_eq!(
-            check_setup(&ns, &user, &mut wfp),
-            Err(gap.clone()),
-            "{what}"
-        );
-        assert!(gap.needs_setup(), "{what}");
-    }
-    let mut wfp = FakeWfp::installed(&ns, &pool);
-    wfp.fail = Some(("FwpmProviderGetByKey0", 5));
-    let unreadable = NetworkGap::Unreadable {
-        call: "FwpmProviderGetByKey0",
-        code: 5,
-    };
-    assert_eq!(check_setup(&ns, &user, &mut wfp), Err(unreadable));
-}
-
-#[test]
-fn a_stale_set_up_needs_set_up_and_a_failed_permit_fails_the_launch() {
+fn a_stale_set_up_needs_set_up_and_the_rest_fail_the_launch() {
     let code = |cause: NetworkGap| Error::NetworkUnfiltered { cause }.code();
-    assert_eq!(code(NetworkGap::NotSetUp), ErrorCode::SandboxSetupRequired);
+    for stale in [
+        NetworkGap::NotSetUp,
+        NetworkGap::FilterMissing("x".to_owned()),
+        NetworkGap::PoolUserNotCovered,
+        NetworkGap::Unreadable { call: "c", code: 5 },
+        NetworkGap::ForeignFilter("x".to_owned()),
+    ] {
+        assert_eq!(code(stale), ErrorCode::SandboxSetupRequired);
+    }
+    for launch in [
+        NetworkGap::LoopbackAny,
+        NetworkGap::PortOutsideRange(1),
+        NetworkGap::EngineUnavailable {
+            call: "FwpmEngineOpen0",
+            code: 1753,
+        },
+    ] {
+        assert_eq!(code(launch), ErrorCode::AgentLaunchFailed);
+    }
+    let foreign = NetworkGap::ForeignFilter("Hostile permit".to_owned());
     assert_eq!(
-        code(NetworkGap::FilterMissing("x".to_owned())),
-        ErrorCode::SandboxSetupRequired
-    );
-    assert_eq!(
-        code(NetworkGap::PoolUserNotCovered),
-        ErrorCode::SandboxSetupRequired
-    );
-    let unreadable = NetworkGap::Unreadable { call: "c", code: 5 };
-    assert_eq!(code(unreadable), ErrorCode::SandboxSetupRequired);
-    assert_eq!(code(NetworkGap::LoopbackAny), ErrorCode::AgentLaunchFailed);
-    assert_eq!(
-        code(NetworkGap::PortOutsideRange(1)),
-        ErrorCode::AgentLaunchFailed
-    );
-    let failed = NetworkGap::PermitFailed {
-        call: "FwpmFilterAdd0",
-        code: 5,
-    };
-    assert_eq!(code(failed.clone()), ErrorCode::AgentLaunchFailed);
-    assert_eq!(
-        Error::NetworkUnfiltered { cause: failed }.to_string(),
-        "the sandbox couldn't permit this agent's network (FwpmFilterAdd0 failed, error 0x5)"
+        Error::NetworkUnfiltered { cause: foreign }.to_string(),
+        "a network filter set-up didn't write is in the sandbox's sublayer: Hostile permit"
     );
 }
 
 #[test]
 fn each_firewall_trouble_is_named_for_firm_it() {
-    use super::spec::{FIREWALL_UNDER_POLICY, FirewallTrouble};
     for code in [0x8007_0426, 0x8007_06D9, 0x8007_06BA] {
         assert_eq!(
             FirewallTrouble::from_call("x", code),
@@ -495,8 +419,8 @@ fn each_firewall_trouble_is_named_for_firm_it() {
     let com = FirewallTrouble::from_call("Rules::Add", 0x8000_4005);
     assert_eq!(
         com.words(),
-        "a firewall call failed (Rules::Add, error 0x80004005), so the second \
-         layer of Clauseo's network protection is off; its network filters still enforce"
+        "a firewall call failed (Rules::Add, error 0x80004005), so the second layer of \
+         Clauseo's network protection is off; its network filters still enforce"
     );
     let policy = FirewallTrouble::GroupPolicy("state 1".to_owned()).words();
     assert!(policy.starts_with(FIREWALL_UNDER_POLICY) && policy.contains("AllowLocalPolicyMerge"));
@@ -524,7 +448,6 @@ fn each_firewall_trouble_is_named_for_firm_it() {
 
 #[test]
 fn the_base_filtering_engine_down_is_named() {
-    use super::check::WfpError;
     for code in [1753, 1722, 1062, 0x8007_06D9] {
         let down = WfpError {
             call: "FwpmEngineOpen0",

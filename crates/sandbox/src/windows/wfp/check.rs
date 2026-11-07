@@ -1,24 +1,29 @@
 //! A launch's fail-closed check of set-up's network objects (S15 PR7), with no Windows call:
-//! before a launch adds its permit, set-up's provider, sublayer and every block filter must be
-//! there, unchanged, and naming the launch's pool user. Anything else refuses the launch with a
-//! named cause ([`NetworkGap`]), so no agent ever runs unfiltered. The reads go through
-//! [`SetupReader`]; `engine.rs` reads WFP itself.
+//! before a tier-B launch starts its agent, set-up's provider and sublayer must be there, and
+//! every filter in our sublayer must be one of set-up's, exactly as set-up writes it: the block
+//! filters catching the launch's pool user, and a static permit for it. Any other filter in the
+//! sublayer, any change, or a read the owner is refused, refuses the launch with a named cause
+//! ([`NetworkGap`]), so no agent runs unfiltered. The reads go through [`SetupReader`];
+//! `engine/read.rs` reads WFP itself. Set-up uses [`classify`] to find foreign filters.
 
-use super::spec::{Layer, Namespace, block_filters, sddl_users};
+use super::spec::{
+    Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, allowed_users,
+    block_filters, denied_users, is_account, is_permit_key, permit_filter,
+};
 use crate::windows::sids::Sid;
 
-/// Why a tier-B launch can't get its network filtered, so it is refused. Variants are appended
-/// from here on: the host maps each (R17 PR-E).
+/// Why a tier-B launch can't get its network filtered, so it is refused. The host maps each
+/// (R17 PR-E).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NetworkGap {
     /// Set-up's provider or sublayer isn't there: set-up's network step never ran, or the
     /// set-up was removed.
     #[error("the sandbox's network filters aren't set up")]
     NotSetUp,
-    /// One of set-up's block filters is missing or not as set-up wrote it; its name.
+    /// One of set-up's filters is missing or not as set-up wrote it; its name.
     #[error("the sandbox's network filter {0} is missing or changed")]
     FilterMissing(String),
-    /// Set-up's block filters don't name the launch's pool user.
+    /// Set-up's filters don't catch the launch's pool user, or it has no static permit.
     #[error("the sandbox's network filters don't cover this matter's sandbox user")]
     PoolUserNotCovered,
     /// Set-up's objects couldn't be read: the owner's read grant is missing, or WFP failed.
@@ -36,20 +41,24 @@ pub enum NetworkGap {
     /// The policy names a loopback port outside 61080-61179, which the firewall blocks.
     #[error("the sandbox can't permit loopback port {0}, outside 61080-61179")]
     PortOutsideRange(u16),
-    /// The launch's permit couldn't be added.
-    #[error("the sandbox couldn't permit this agent's network ({call} failed, error {code:#x})")]
-    PermitFailed {
+    /// WFP couldn't be opened to check (the Base Filtering Engine isn't running, say).
+    #[error("the sandbox couldn't check its network filters ({call} failed, error {code:#x})")]
+    EngineUnavailable {
         /// The call, as Windows names it.
         call: &'static str,
         /// Its result code.
         code: u32,
     },
+    /// A filter in our sublayer that set-up didn't write; its name. Running set-up again
+    /// deletes it.
+    #[error("a network filter set-up didn't write is in the sandbox's sublayer: {0}")]
+    ForeignFilter(String),
 }
 
 impl NetworkGap {
     /// Whether running set-up again fixes it (`sandbox.setup_required`): set-up's objects are
-    /// missing, changed, unreadable, or don't cover the pool user. The rest are the launch's
-    /// own failures (`agent.launch_failed`).
+    /// missing, changed, unreadable, joined by a foreign filter, or don't cover the pool user.
+    /// The rest are the launch's own failures (`agent.launch_failed`).
     pub fn needs_setup(&self) -> bool {
         matches!(
             self,
@@ -57,6 +66,7 @@ impl NetworkGap {
                 | NetworkGap::FilterMissing(_)
                 | NetworkGap::PoolUserNotCovered
                 | NetworkGap::Unreadable { .. }
+                | NetworkGap::ForeignFilter(_)
         )
     }
 }
@@ -92,17 +102,47 @@ impl WfpError {
     }
 }
 
-/// One of set-up's block filters as WFP has it.
+/// One condition of a filter as WFP holds it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FoundCondition {
+    /// An `ALE_USER_ID` condition: its match type and its descriptor's DACL as SDDL.
+    Users {
+        /// Its match type.
+        matching: Match,
+        /// The descriptor's DACL, as SDDL.
+        sddl: String,
+    },
+    /// `FWPM_CONDITION_FLAGS`, `FLAGS_NONE_SET`, `IS_LOOPBACK`.
+    NotLoopback,
+    /// `FWPM_CONDITION_IP_PROTOCOL`, `EQUAL`.
+    Protocol(u8),
+    /// `FWPM_CONDITION_IP_REMOTE_ADDRESS`, `EQUAL`, an IPv4 address in host order.
+    RemoteV4(u32),
+    /// `FWPM_CONDITION_IP_REMOTE_PORT`, `RANGE`.
+    RemotePorts(u16, u16),
+    /// Anything else.
+    Other,
+}
+
+/// A filter in our sublayer as WFP holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundFilter {
+    /// Its key.
+    pub key: u128,
+    /// Its WFP id, for deleting it.
+    pub id: u64,
+    /// Its name.
+    pub name: String,
     /// Its layer; `None` for a layer that isn't one of ours.
     pub layer: Option<Layer>,
-    /// Whether its action is block.
-    pub block: bool,
-    /// Its sublayer's key.
-    pub sublayer: u128,
-    /// Its `ALE_USER_ID` condition's descriptor, as SDDL; `None` when it has none.
-    pub users: Option<String>,
+    /// Its action; `None` for one that is neither block nor permit.
+    pub action: Option<Action>,
+    /// Its weight, when it is a `FWP_UINT8`.
+    pub weight: Option<u8>,
+    /// Its flags.
+    pub flags: Flags,
+    /// Its conditions.
+    pub conditions: Vec<FoundCondition>,
 }
 
 /// What a launch reads of set-up's objects. A read that fails is `Err((call, code))`.
@@ -111,13 +151,106 @@ pub trait SetupReader {
     fn provider(&mut self, key: u128) -> Result<bool, (&'static str, u32)>;
     /// Whether the sublayer `key` is there.
     fn sublayer(&mut self, key: u128) -> Result<bool, (&'static str, u32)>;
-    /// The filter `key`, when it is there.
-    fn filter(&mut self, key: u128) -> Result<Option<FoundFilter>, (&'static str, u32)>;
+    /// Every filter in the sublayer `key` the reader may see.
+    fn filters_in(&mut self, key: u128) -> Result<Vec<FoundFilter>, (&'static str, u32)>;
+}
+
+/// What a filter in our sublayer is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    /// Set-up's block filter `n`, as set-up writes it, catching these SIDs (group and pool).
+    Block(usize, Vec<Sid>),
+    /// A static permit for this pool user, as set-up writes it.
+    Permit(Sid),
+    /// Anything else: not set-up's, or changed.
+    Foreign,
+}
+
+/// `spec`'s conditions as WFP would hold them, the user descriptor left out, sorted.
+fn plain(conditions: &[Condition]) -> Vec<FoundCondition> {
+    let mut plain: Vec<FoundCondition> = conditions
+        .iter()
+        .filter_map(|c| match c {
+            Condition::Users(_) | Condition::NotPool { .. } => None,
+            Condition::NotLoopback => Some(FoundCondition::NotLoopback),
+            Condition::Protocol(p) => Some(FoundCondition::Protocol(*p)),
+            Condition::RemoteV4(a) => Some(FoundCondition::RemoteV4(u32::from(*a))),
+            Condition::RemotePorts(lo, hi) => Some(FoundCondition::RemotePorts(*lo, *hi)),
+        })
+        .collect();
+    plain.sort();
+    plain
+}
+
+/// Whether `found` has `spec`'s key, layer, action, weight, flags and plain conditions, and
+/// exactly one user condition with `matching`; that condition's SDDL when it does.
+fn shaped_like<'f>(found: &'f FoundFilter, spec: &FilterSpec, matching: Match) -> Option<&'f str> {
+    let mut users = found.conditions.iter().filter_map(|c| {
+        if let FoundCondition::Users { matching: m, sddl } = c
+            && *m == matching
+        {
+            Some(sddl.as_str())
+        } else {
+            None
+        }
+    });
+    let sddl = users.next()?;
+    let mut rest: Vec<FoundCondition> = found
+        .conditions
+        .iter()
+        .filter(|c| !matches!(c, FoundCondition::Users { .. }))
+        .cloned()
+        .collect();
+    rest.sort();
+    let same = found.key == spec.key
+        && found.layer == Some(spec.layer)
+        && found.action == Some(spec.action)
+        && found.weight == Some(spec.weight)
+        && found.flags == spec.flags()
+        && found.conditions.len() == rest.len() + 1
+        && users.next().is_none()
+        && rest == plain(&spec.conditions);
+    same.then_some(sddl)
+}
+
+/// What `found`, a filter in our sublayer in `ns`, is: one of set-up's blocks or static permits
+/// exactly as set-up writes them, or foreign.
+pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
+    let placeholder = Sid::parse("S-1-5-21-0-0-0-1000");
+    let Ok(placeholder) = placeholder else {
+        return Kind::Foreign;
+    };
+    let blocks = block_filters(ns, &placeholder, std::slice::from_ref(&placeholder));
+    if let Some(n) = blocks.iter().position(|b| b.key == found.key) {
+        let denied = blocks
+            .get(n)
+            .and_then(|spec| shaped_like(found, spec, Match::NotEqual))
+            .and_then(denied_users);
+        return match denied {
+            Some(denied) if denied.iter().all(is_account) => Kind::Block(n, denied),
+            _ => Kind::Foreign,
+        };
+    }
+    if !is_permit_key(ns, found.key) {
+        return Kind::Foreign;
+    }
+    let permit = (0u16..)
+        .map(|i| permit_filter(ns, i, &placeholder))
+        .take(usize::from(crate::windows::pool::POOL_CAP))
+        .find(|spec| spec.key == found.key);
+    let users = permit
+        .as_ref()
+        .and_then(|spec| shaped_like(found, spec, Match::Equal))
+        .and_then(allowed_users);
+    match users.as_deref() {
+        Some([user]) if is_account(user) => Kind::Permit(user.clone()),
+        _ => Kind::Foreign,
+    }
 }
 
 /// Checks set-up's objects in `ns` for a launch of `user`: the provider and the sublayer are
-/// there, and each block filter is there, at its layer, blocking, in our sublayer, with an
-/// `ALE_USER_ID` descriptor naming `user` and holding nothing [`sddl_users`] doesn't read.
+/// there; every filter in the sublayer is one of set-up's ([`classify`]); all the blocks are
+/// there and each catches `user`; and `user` has a static permit.
 pub fn check_setup(
     ns: &Namespace,
     user: &Sid,
@@ -129,19 +262,33 @@ pub fn check_setup(
     {
         return Err(NetworkGap::NotSetUp);
     }
-    for spec in block_filters(ns, std::slice::from_ref(user)) {
-        let Some(key) = spec.key else { continue };
-        let found = reader.filter(key).map_err(unreadable)?;
-        let Some(found) = found else {
-            return Err(NetworkGap::FilterMissing(spec.name));
-        };
-        if found.layer != Some(spec.layer) || !found.block || found.sublayer != ns.sublayer {
-            return Err(NetworkGap::FilterMissing(spec.name));
+    let mut blocks: Vec<Option<Vec<Sid>>> = vec![None; BLOCK_COUNT];
+    let mut permitted = false;
+    for found in reader.filters_in(ns.sublayer).map_err(unreadable)? {
+        match classify(ns, &found) {
+            Kind::Block(n, denied) => {
+                if let Some(slot) = blocks.get_mut(n) {
+                    *slot = Some(denied);
+                }
+            }
+            Kind::Permit(sid) => permitted |= sid == *user,
+            Kind::Foreign => return Err(NetworkGap::ForeignFilter(found.name)),
         }
-        let users = found.users.as_deref().and_then(sddl_users);
-        if !users.is_some_and(|users| users.contains(user)) {
+    }
+    let Ok(placeholder) = Sid::parse("S-1-5-21-0-0-0-1000") else {
+        return Err(NetworkGap::NotSetUp);
+    };
+    for (spec, denied) in block_filters(ns, &placeholder, &[]).iter().zip(&blocks) {
+        let Some(denied) = denied else {
+            return Err(NetworkGap::FilterMissing(spec.name.clone()));
+        };
+        if !denied.contains(user) {
             return Err(NetworkGap::PoolUserNotCovered);
         }
     }
-    Ok(())
+    if permitted {
+        Ok(())
+    } else {
+        Err(NetworkGap::PoolUserNotCovered)
+    }
 }
