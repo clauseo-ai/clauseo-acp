@@ -305,6 +305,9 @@ impl SetupAgents for FakeInstall {
     fn read_account(&self, agent: &AgentId) -> clauseo_agents::AccountFuture {
         self.real.read_account(agent)
     }
+    fn read_account_refreshed(&self, agent: &AgentId) -> clauseo_agents::AccountFuture {
+        self.real.read_account_refreshed(agent)
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
 
 use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Whether `a` and `b` are one file: the same device and inode on Unix, the same volume serial
 /// number and file index on Windows. False when either is a symbolic link, a junction or any
@@ -43,6 +44,40 @@ pub struct FileStamp {
     changed: (i64, i64),
     /// The length in bytes.
     size: u64,
+}
+
+impl FileStamp {
+    /// The later of its last write and last status change, as a wall time (`None` outside
+    /// `SystemTime`'s range). R17's refresh-on-check confirms a login file only when this is no
+    /// later than its forced read's reply. On Unix the status change (ctime) cannot be set back;
+    /// Windows' `ChangeTime` can (`SetFileInformationByHandle`), a gap 0048 accepts.
+    pub fn last_change(&self) -> Option<SystemTime> {
+        wall(self.modified.max(self.changed))
+    }
+}
+
+/// A stamp's time as a wall time: seconds and nanoseconds since the epoch.
+#[cfg(unix)]
+fn wall((secs, nanos): (i64, i64)) -> Option<SystemTime> {
+    since_epoch(i128::from(secs) * 1_000_000_000 + i128::from(nanos))
+}
+
+/// A stamp's time as a wall time: 100 ns ticks since 1601.
+#[cfg(windows)]
+fn wall((ticks, _): (i64, i64)) -> Option<SystemTime> {
+    /// 1601 to 1970 in 100 ns ticks.
+    const TO_EPOCH: i128 = 116_444_736_000_000_000;
+    since_epoch((i128::from(ticks) - TO_EPOCH) * 100)
+}
+
+/// `nanos` nanoseconds after the epoch (before it when negative).
+fn since_epoch(nanos: i128) -> Option<SystemTime> {
+    let span = Duration::from_nanos(u64::try_from(nanos.unsigned_abs()).ok()?);
+    if nanos >= 0 {
+        UNIX_EPOCH.checked_add(span)
+    } else {
+        UNIX_EPOCH.checked_sub(span)
+    }
 }
 
 /// `path`'s [`FileStamp`], never following a link; `None` for a symbolic link, a junction or

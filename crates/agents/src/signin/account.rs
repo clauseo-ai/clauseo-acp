@@ -9,7 +9,9 @@
 //!   ([`crate::state::Installed::codex_cli`]; exit 0 with its signed-in line is signed in), then
 //!   `account/read` through the app-server, its `ChatGPT` `email` (the pinned schema's account
 //!   has no id). Exit 0 with no signed-in line, no answer, a missing CLI, or a signed-in status
-//!   whose `account/read` names no account or errs is [`AccountRead::Failed`].
+//!   whose `account/read` names no account or errs is [`AccountRead::Failed`]; the one error
+//!   Codex 0.162.1 gives for a refused login (`codex::identity::rpc_error_kind`) is
+//!   [`AccountRead::Refused`].
 //!
 //! The identity comes only from that output: nothing here opens a credential. The email is
 //! hashed at once ([`AccountHash::of`]) and never kept, logged or shown. A read's runs keep their
@@ -23,6 +25,7 @@ use clauseo_process::Timer;
 use sha2::{Digest as _, Sha256};
 
 use crate::integrity::to_hex;
+use crate::signin::codex::identity::Checked;
 use crate::signin::codex::{StatusSaid, identity};
 use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
@@ -79,15 +82,17 @@ pub enum AccountRead {
     /// The status could not tell: no start, no answer within its limit, cancelled, or the
     /// read was refused (no install, no home).
     Failed,
+    /// Codex said the login's tokens are refused (`account/read`'s "workspace routing discovery
+    /// unauthorized"): a definite auth refusal, never an account, and no answer either.
+    Refused,
 }
 
 /// A read's answer, on its way from the job's thread.
 pub type AccountFuture = Pin<Box<dyn Future<Output = AccountRead> + Send>>;
 
 /// The read: see the module docs. With `refresh` (Codex only; Claude ignores it), Codex's
-/// `account/read` asks for a token refresh first ([`codex::identity::read_with`]), and an
-/// answer that names no account or errs (the refresh refused) is a definite
-/// [`AccountRead::NoAccount`]; no answer stays [`AccountRead::Failed`].
+/// `account/read` asks for a token refresh first ([`codex::identity::read_checked`]); a forced
+/// read maps its answers as a plain one does.
 pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, refresh: bool) -> AccountRead {
     let cancel = &job.ticket.cancel;
     let kind = if found::is_reused(job) {
@@ -109,18 +114,18 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, refresh: bo
             // the account is not known either way.
             StatusSaid::NoMarker | StatusSaid::NoAnswer => AccountRead::Failed,
             StatusSaid::LoggedIn => {
-                match codex::identity::read_with(job, cancel, kind, &job.home, refresh).await {
-                    identity::AccountRead::Chatgpt(identity) => named(&identity),
+                let read = codex::identity::read_checked(job, cancel, kind, &job.home, refresh);
+                match read.await {
+                    Checked::Read(identity::AccountRead::Chatgpt(identity)) => named(&identity),
                     // An API-key, Bedrock or unknown kind of account names no email.
-                    identity::AccountRead::NotChatgpt => AccountRead::NoAccount,
-                    // A forced refresh refused (an auth error, `refresh_token_reused`) or
-                    // naming no account is a definite answer: not this login.
-                    identity::AccountRead::NoAccount if refresh => AccountRead::NoAccount,
+                    Checked::Read(identity::AccountRead::NotChatgpt) => AccountRead::NoAccount,
                     // `login status` said signed in, yet `account/read` named no account or
-                    // answered with an error: who is signed in is not known.
-                    identity::AccountRead::NoAccount | identity::AccountRead::NoAnswer => {
-                        AccountRead::Failed
-                    }
+                    // answered with an error other than a refusal (an offline app-server's
+                    // included): who is signed in is not known.
+                    Checked::Read(
+                        identity::AccountRead::NoAccount | identity::AccountRead::NoAnswer,
+                    ) => AccountRead::Failed,
+                    Checked::Refused => AccountRead::Refused,
                 }
             }
         },

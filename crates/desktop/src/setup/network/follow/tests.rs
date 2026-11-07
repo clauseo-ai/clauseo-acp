@@ -119,6 +119,9 @@ impl SetupAgents for Networks {
     fn read_account(&self, _agent: &AgentId) -> clauseo_agents::AccountFuture {
         Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
     }
+    fn read_account_refreshed(&self, _agent: &AgentId) -> clauseo_agents::AccountFuture {
+        Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
+    }
 }
 
 /// Log lines, as the subscriber writes them.

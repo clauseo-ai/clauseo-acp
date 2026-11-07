@@ -164,14 +164,14 @@ fn a_forced_read_sends_refresh_token_and_a_plain_one_does_not() {
 }
 
 #[test]
-fn a_refused_refresh_is_no_account_and_one_with_no_answer_is_failed() {
+fn a_forced_reads_rpc_error_is_taken_as_offline_and_no_answer_is_failed() {
     let fx = Fixture::new("account-codex-refresh-refused", "ok-after:0");
     let agents = signed_in(&fx, &codex(), Method::Browser);
     swap_to(&fx, &codex(), "refresh-refused", "test@example.com");
     assert_eq!(
         block_on(agents.read_account_refreshed(&codex())),
-        AccountRead::NoAccount,
-        "refresh_token_reused is a definite answer"
+        AccountRead::Failed,
+        "a JSON-RPC error to a forced read is taken as offline until stage B tells them apart"
     );
     assert_eq!(
         block_on(agents.read_account(&codex())),
@@ -198,6 +198,34 @@ fn a_read_that_cannot_start_is_failed() {
     assert_eq!(block_on(agents.read_account(&codex())), AccountRead::Failed);
     let unknown = AgentId::new("fake-acp").unwrap();
     assert_eq!(block_on(agents.read_account(&unknown)), AccountRead::Failed);
+}
+
+/// R17: a forced read the identity check gives up at its bound (a stalled network hangs Codex's
+/// app-server past 150 s) is cancelled when its future is dropped: the hung app-server is killed
+/// then, not at its own 20 s limit, and the next read finds none left behind.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_forced_read_given_up_kills_its_hung_app_server() {
+    let fx = Fixture::new("account-forced-hang", "ok-after:0");
+    let agents = signed_in(&fx, &codex(), Method::Browser);
+    fx.stall(Some("app-server"));
+    let before = fx.codex_runs(&["app-server"]).len();
+    let read = agents.read_account_refreshed(&codex());
+    crate::support::eventually("the forced read's app-server runs", || {
+        fx.codex_runs(&["app-server"]).len() > before
+    });
+    let hung = fx.codex_runs(&["app-server"])[before].pid;
+    // The check's bound passes: it drops the read.
+    drop(read);
+    assert!(crate::support::gone(hung), "pid {hung} still runs");
+    fx.stall(None);
+    assert_eq!(
+        block_on(agents.read_account(&codex())),
+        account("test@example.com")
+    );
+    for run in fx.codex_runs(&["app-server"]) {
+        assert!(crate::support::gone(run.pid), "pid {} left behind", run.pid);
+    }
 }
 
 #[cfg(unix)]

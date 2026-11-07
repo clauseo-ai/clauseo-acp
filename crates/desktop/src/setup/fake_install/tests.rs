@@ -98,6 +98,9 @@ impl SetupAgents for Real {
     fn read_account(&self, _: &AgentId) -> clauseo_agents::AccountFuture {
         Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
     }
+    fn read_account_refreshed(&self, _: &AgentId) -> clauseo_agents::AccountFuture {
+        Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
+    }
 }
 
 fn fake(hold: Duration) -> (FakeInstall, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {

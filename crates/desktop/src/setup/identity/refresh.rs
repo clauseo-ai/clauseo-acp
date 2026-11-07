@@ -3,83 +3,164 @@
 //! closes the token-only swap (a swapped access and refresh token under the old `id_token`
 //! would otherwise read as the old account until Codex's next refresh).
 //!
-//! - **Force only when needed.** The last confirmed stamp of Codex's `auth.json` (its file id,
+//! - **Pending until forced.** The last confirmed stamp of Codex's `auth.json` (its file id,
 //!   last write, status change and size, from metadata only, never the contents) is kept per
-//!   agent. A check forces a refresh only on its first check since Clauseo started, or when the
-//!   stamp is not the confirmed one; with the stamp unchanged it reads as before, with no
-//!   refresh. A forced check that confirms the recorded account keeps the stamp after the read
-//!   (Codex's refresh rewrites the file in place), so Clauseo's own rewrite forces nothing.
-//! - **The 60 s guard.** Forcing, a login file whose last write is under [`GUARD`] old (a
-//!   session's own refresh just wrote it) is read without a refresh now, and that answer counts
-//!   for this check; one forced re-check is due at its last write plus [`GUARD`]. If the file
-//!   changed again by then, the re-check reads without a refresh and nothing more is due.
-//! - **No answer is not a mismatch.** A forced read with no answer (offline, a timeout, a proxy
-//!   down, a run that did not start) falls back to the read without a refresh, which decides as
-//!   before; one forced re-check is due [`RETRY_AFTER`] later (a re-check after no answer is not
-//!   retried again). Only a definite answer refuses: another account, or a refresh refused (an
-//!   auth error, `refresh_token_reused`), which S18 reads as no account.
+//!   agent. A stamp that is not it is pending, and only a forced read confirms it: a read
+//!   without a refresh may let this launch go, but never confirms. With the stamp confirmed a
+//!   check reads as before, with no refresh.
+//! - **Confirmed takes a rewrite and the same account.** Codex 0.162.1 answers a forced
+//!   `account/read` from the stored `id_token` whatever the refresh did, but every refresh that
+//!   succeeds rewrites `auth.json` in place. So a forced read confirms only when the stamp
+//!   advanced during it (another stamp just after the reply than just before the request) and
+//!   is no later than the reply ([`confirms`]), and one plain read of the rewritten file then
+//!   names the recorded account; that stamp is the confirmed one, so Clauseo's own rewrite
+//!   forces nothing. Another account there is a change, the one definite answer. A forced read
+//!   with no rewrite (the refresh refused or skipped) confirms nothing, and its answer decides
+//!   this launch as a plain read's would.
+//! - **At most one forced refresh per [`GUARD`].** While pending, a check forces once
+//!   [`GUARD`] has passed since Clauseo's last forced refresh (at once if it has), however
+//!   recently or often the file was written: constant writes delay a force by [`GUARD`] at
+//!   most. Inside it the check reads without a refresh, and a look asks for the forced check
+//!   once it is due ([`Refresh::fire_if_due`]).
+//! - **No answer is not a mismatch.** A forced read with no answer (offline, a timeout at its
+//!   share of the check's bound, after which its app-server is killed, a run that did not
+//!   start, or any JSON-RPC error but Codex's refused login) falls back to the plain read,
+//!   which decides this launch. Such a read, or one with no rewrite, leaves the stamp pending
+//!   and forcing goes on with [`backoff`] (30 s, 1 min, 2 min, 5 min, then every 5 min). Codex's
+//!   refused login (`AccountRead::Refused`) is unknown, launches refused, with the same backoff.
 //! - **One forced refresh at a time in Clauseo.** Codex 0.162.1 takes no lock across processes
 //!   for a `ChatGPT` login, so two refreshes at once would both send the same refresh token.
 //!   One lock covers every forced refresh of the process (the app has one [`Refresh`], in its
 //!   one `Identities`): a caller for the agent whose refresh is under way waits for it and takes
 //!   its answer; a caller for another waits its turn. Sessions refreshing on their own are
-//!   outside it; the guard and the lock narrow that race, they do not close it.
+//!   outside it; the rate and the lock narrow that race, they do not close it.
 //!
 //! Claude is unchanged: its checks never force anything.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use clauseo_agents::{AccountFuture, AccountRead};
+use clauseo_agents::{AccountFuture, AccountRead, Clock, SystemClock};
 use clauseo_protocol::AgentId;
 use futures::future::{FutureExt as _, Shared};
 
 use super::Stamp;
+use super::watch::stamp;
 use crate::bridge::lock;
 
-/// How old Codex's login file must be before a check forces a refresh.
+/// The least time between two of Clauseo's forced refreshes of one login.
 pub(crate) const GUARD: Duration = Duration::from_secs(60);
-/// How long after a forced read with no answer the one forced re-check is due.
-pub(crate) const RETRY_AFTER: Duration = Duration::from_secs(60);
+
+/// How long after the `misses`th forced read in a row that did not confirm (no answer, or a
+/// refusal) the next one is due at the earliest: 30 s, 1 min, 2 min, 5 min, then every 5 min.
+pub(crate) fn backoff(misses: u32) -> Duration {
+    let secs = match misses {
+        0 | 1 => 30,
+        2 => 60,
+        3 => 120,
+        _ => 300,
+    };
+    Duration::from_secs(secs)
+}
+
+/// The share of a check's bound a forced read may take, the rest kept for its plain fallback:
+/// five eighths (25 s of 40), and a plain read needs no network.
+pub(crate) fn forced_share(bound: Duration) -> Duration {
+    bound / 8 * 5
+}
 
 /// How a check reads the account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Plan {
     /// As before: no refresh.
     Plain,
-    /// With a forced refresh. `retry` says whether a forced read with no answer may make one
-    /// re-check due (not when this one is that re-check).
-    Forced { retry: bool },
+    /// With a forced refresh.
+    Forced,
 }
 
-/// A forced re-check due at `at` (the clock's monotonic time), for the login file at `stamp`.
-#[derive(Debug, Clone, Copy)]
-struct Due {
-    at: Duration,
-    stamp: Stamp,
-    /// Made after a forced read with no answer: its own no answer makes nothing more due.
-    after_no_answer: bool,
-    /// A look found it come and asked for its check (the look's clock may run ahead of the
-    /// check's).
+/// How a forced check ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ended {
+    /// The login file was rewritten to this stamp, and its plain read named the recorded
+    /// account.
+    Confirmed(Stamp),
+    /// It was rewritten, but its plain read did not confirm (another account, an unknown one,
+    /// no answer): still pending, forced again once [`GUARD`] has passed.
+    Unconfirmed,
+    /// No rewrite, no answer, or a refused login: still pending, nothing else changed, forced
+    /// again after [`backoff`].
+    Missed,
+}
+
+/// A forced read's answer, the login file's stamps just before its request and just after its
+/// reply, and the files' clock when the reply came.
+#[derive(Debug, Clone)]
+pub(crate) struct Reply {
+    pub(crate) read: AccountRead,
+    pub(crate) before: Stamp,
+    pub(crate) after: Stamp,
+    pub(crate) replied: SystemTime,
+}
+
+impl Reply {
+    /// Whether Codex rewrote the login file during the read: see [`confirms`].
+    pub(crate) fn rewrote(&self) -> bool {
+        self.after != self.before && confirms(self.after, self.replied)
+    }
+}
+
+type Flight = Pin<Box<dyn Future<Output = Reply> + Send>>;
+
+/// One agent's refresh state.
+#[derive(Debug, Default)]
+struct State {
+    /// The login file's stamp after the last forced check that confirmed the account.
+    confirmed: Option<Stamp>,
+    /// The last check saw a stamp that is not the confirmed one.
+    pending: bool,
+    /// When Clauseo's last forced read of it started (the clock's monotonic time).
+    last_forced: Option<Duration>,
+    /// Forced reads in a row that did not answer or were refused.
+    misses: u32,
+    /// The earliest the next forced read may run after the last miss.
+    retry_at: Option<Duration>,
+    /// A look found the forced check due and asked for it (a look's clock may run ahead of
+    /// the check's).
     fired: bool,
+}
+
+impl State {
+    /// When the next forced read is due: [`GUARD`] after the last one, and not before the
+    /// backoff's retry.
+    fn due(&self) -> Duration {
+        let rate = self
+            .last_forced
+            .map_or(Duration::ZERO, |at| at.saturating_add(GUARD));
+        rate.max(self.retry_at.unwrap_or(Duration::ZERO))
+    }
 }
 
 #[derive(Default)]
 struct Inner {
-    /// The login file's stamp after the last forced check that confirmed the account.
-    confirmed: BTreeMap<AgentId, Stamp>,
-    /// The one forced re-check due per agent.
-    due: BTreeMap<AgentId, Due>,
+    /// The latest monotonic time any look or check gave: a look's clock may run ahead of the
+    /// check's (the tests'), and a forced read ends after it starts.
+    seen: Duration,
+    agents: BTreeMap<AgentId, State>,
     /// The forced read under way per agent, which a second caller for it takes.
-    flying: BTreeMap<AgentId, Shared<AccountFuture>>,
+    flying: BTreeMap<AgentId, Shared<Flight>>,
 }
 
 /// Refresh-on-check's state: see the module docs.
 pub(crate) struct Refresh {
     /// Whether Codex's checks force refreshes (on in the app; tests of other parts turn it off).
     pub(crate) on: bool,
+    /// The clock file times are stamped by, read when a forced reply comes (the system's;
+    /// tests set one behind the files).
+    pub(crate) files_clock: Arc<dyn Clock>,
     inner: Arc<Mutex<Inner>>,
     /// Held through each forced read: one at a time in the process.
     one_at_a_time: Arc<futures::lock::Mutex<()>>,
@@ -89,140 +170,143 @@ impl Default for Refresh {
     fn default() -> Self {
         Self {
             on: true,
+            files_clock: Arc::new(SystemClock),
             inner: Arc::default(),
             one_at_a_time: Arc::default(),
         }
     }
 }
 
+impl Inner {
+    /// `now`, or a later time already seen; kept as seen.
+    fn at(&mut self, now: Duration) -> Duration {
+        self.seen = self.seen.max(now);
+        self.seen
+    }
+}
+
 impl Refresh {
-    /// How a check of `agent` reads, its Codex login file at `stamp` with last write
-    /// `modified`, at wall time `wall` and monotonic time `now`. Takes a due re-check that has
-    /// come; makes one due when the guard holds the refresh off. Logs by fixed words.
-    pub(crate) fn plan(
-        &self,
-        agent: &AgentId,
-        stamp: Stamp,
-        modified: Option<SystemTime>,
-        wall: SystemTime,
-        now: Duration,
-    ) -> Plan {
-        let mut inner = lock(&self.inner);
-        if let Some(due) = inner.due.get(agent).copied()
-            && (due.fired || now >= due.at)
-        {
-            inner.due.remove(agent);
-            if due.stamp == stamp {
-                tracing::info!(%agent, "identity: forced re-check");
-                return Plan::Forced {
-                    retry: !due.after_no_answer,
-                };
-            }
-            tracing::info!(%agent, "identity: refresh skipped, login changed again");
-            return Plan::Plain;
-        }
-        if inner.confirmed.get(agent) == Some(&stamp) || !matches!(stamp, Stamp::File(_)) {
-            return Plan::Plain;
-        }
-        // A last write in the future (a clock set back) counts as just now.
-        let age = modified.map_or(Duration::ZERO, |modified| {
-            wall.duration_since(modified).unwrap_or(Duration::ZERO)
-        });
-        if age < GUARD {
-            if !inner.due.contains_key(agent) {
-                let due = Due {
-                    at: now.saturating_add(GUARD.saturating_sub(age)),
-                    stamp,
-                    after_no_answer: false,
-                    fired: false,
-                };
-                inner.due.insert(agent.clone(), due);
-            }
-            tracing::info!(%agent, "identity: refresh skipped, login just changed");
-            return Plan::Plain;
-        }
-        Plan::Forced { retry: true }
+    /// A look at `now`: refresh-on-check's times are never earlier from here on.
+    pub(crate) fn saw(&self, now: Duration) {
+        lock(&self.inner).at(now);
     }
 
-    /// Whether a forced re-check of `agent` has come at `now` (a look's time); one that has
-    /// is marked so, and the next check takes it.
+    /// How a check of `agent` reads, its Codex login file at `stamp`, at the clock's monotonic
+    /// time `now`: forced when the stamp is pending and a forced read is due, which then counts
+    /// as Clauseo's last. Logs by fixed words.
+    pub(crate) fn plan(&self, agent: &AgentId, stamp: Stamp, now: Duration) -> Plan {
+        let mut inner = lock(&self.inner);
+        let now = inner.at(now);
+        let state = inner.agents.entry(agent.clone()).or_default();
+        // No login file to refresh, or the confirmed one: nothing pending.
+        if !matches!(stamp, Stamp::File(_)) || state.confirmed == Some(stamp) {
+            state.pending = false;
+            state.fired = false;
+            return Plan::Plain;
+        }
+        state.pending = true;
+        if state.fired || now >= state.due() {
+            state.fired = false;
+            state.last_forced = Some(now);
+            return Plan::Forced;
+        }
+        tracing::info!(%agent, "identity: refresh held; login pending a forced check");
+        Plan::Plain
+    }
+
+    /// Whether a forced check of `agent` is due at `now` (a look's time) while its stamp is
+    /// pending; one that is is marked so, and the next check forces.
     pub(crate) fn fire_if_due(&self, agent: &AgentId, now: Duration) -> bool {
         let mut inner = lock(&self.inner);
-        let Some(due) = inner.due.get_mut(agent) else {
+        let now = inner.at(now);
+        let Some(state) = inner.agents.get_mut(agent) else {
             return false;
         };
-        if now >= due.at {
-            due.fired = true;
+        if state.pending && now >= state.due() {
+            state.fired = true;
         }
-        due.fired
+        state.pending && state.fired
     }
 
-    /// A forced read with no answer, its login file at `stamp`: one forced re-check is due at
-    /// `at`, unless one is already.
-    pub(crate) fn retry_at(&self, agent: &AgentId, stamp: Stamp, at: Duration) {
-        let due = Due {
-            at,
-            stamp,
-            after_no_answer: true,
-            fired: false,
-        };
-        lock(&self.inner).due.entry(agent.clone()).or_insert(due);
+    /// A forced check of `agent` ended at `now`: see [`Ended`].
+    pub(crate) fn forced_ended(&self, agent: &AgentId, ended: Ended, now: Duration) {
+        let mut inner = lock(&self.inner);
+        let now = inner.at(now);
+        let state = inner.agents.entry(agent.clone()).or_default();
+        match ended {
+            Ended::Confirmed(stamp) => {
+                state.confirmed = Some(stamp);
+                state.pending = false;
+                state.misses = 0;
+                state.retry_at = None;
+            }
+            Ended::Unconfirmed => {
+                state.confirmed = None;
+                state.pending = true;
+            }
+            Ended::Missed => {
+                state.pending = true;
+                state.misses = state.misses.saturating_add(1);
+                state.retry_at = Some(now.saturating_add(backoff(state.misses)));
+                tracing::info!(%agent, "identity: forced refresh to be tried again");
+            }
+        }
     }
 
     /// The forced read of `agent`, `read` started only once the process's one forced refresh
-    /// at a time is free. A forced read of `agent` under way is taken instead of a second.
+    /// at a time is free, with the stamps of its login file at `login` around it ([`Reply`]).
+    /// A forced read of `agent` under way is taken instead of a second.
     pub(crate) fn forced(
         &self,
         agent: &AgentId,
+        login: PathBuf,
         read: impl FnOnce() -> AccountFuture + Send + 'static,
-    ) -> Shared<AccountFuture> {
+    ) -> Shared<Flight> {
         let mut inner = lock(&self.inner);
         if let Some(flying) = inner.flying.get(agent) {
             return flying.clone();
         }
         let one = Arc::clone(&self.one_at_a_time);
         let state = Arc::clone(&self.inner);
+        let clock = Arc::clone(&self.files_clock);
         let who = agent.clone();
-        let flight: AccountFuture = Box::pin(async move {
+        let flight: Flight = Box::pin(async move {
             let _one = one.lock().await;
+            let before = stamp(&login);
             let answer = read().await;
+            let replied = clock.now();
+            let after = stamp(&login);
             // Before the lock is let go: a caller from now on starts the next one.
             lock(&state).flying.remove(&who);
-            answer
+            Reply {
+                read: answer,
+                before,
+                after,
+                replied,
+            }
         });
         let flight = flight.shared();
         inner.flying.insert(agent.clone(), flight.clone());
         flight
     }
 
-    /// A forced read of `agent` was given up at the check's bound: the next caller starts
-    /// another, and once its last caller lets go, the read under way is dropped with the lock.
+    /// A forced read of `agent` was given up at its share of the check's bound: the next
+    /// caller starts another, and once its last caller lets go, the read under way is dropped
+    /// with the lock.
     pub(crate) fn abandon(&self, agent: &AgentId) {
         lock(&self.inner).flying.remove(agent);
     }
-
-    /// A forced check of `agent` ended: when it `confirmed` the account, the login file's
-    /// stamp after it (`stamp`) is the confirmed one; else none is, so the next check forces.
-    pub(crate) fn forced_ended(&self, agent: &AgentId, confirmed: bool, stamp: Stamp) {
-        let mut inner = lock(&self.inner);
-        if confirmed {
-            inner.confirmed.insert(agent.clone(), stamp);
-        } else {
-            inner.confirmed.remove(agent);
-        }
-    }
-
-    /// Whether `read` is a forced read's no answer, which falls back to the plain read.
-    pub(crate) fn no_answer(read: &AccountRead) -> bool {
-        matches!(read, AccountRead::Failed)
-    }
 }
 
-/// `path`'s last write, from metadata only, never following a link.
-pub(crate) fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::symlink_metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
+/// Whether the login file at `stamp`, another than before a forced read that replied at
+/// `replied` (the files' clock), can be that read's rewrite: its last write and status change
+/// are no later than the reply, so no write after the reply is taken for it. Fails closed when
+/// either is unknown.
+pub(crate) fn confirms(stamp: Stamp, replied: SystemTime) -> bool {
+    let Stamp::File(file) = stamp else {
+        return false;
+    };
+    file.last_change().is_some_and(|at| at <= replied)
 }
 
 #[cfg(test)]

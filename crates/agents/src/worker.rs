@@ -356,27 +356,27 @@ impl Agents {
     }
 
     /// R17's identity check: the account `agent`'s login names now, from one status run under
-    /// the environment its sessions see (`signin/account.rs`), hashed. It runs beside any
-    /// sign-in job and changes no state. `Failed` when it could not tell, or could not start
-    /// (an unknown agent, no home, no install, the handle shut down).
+    /// the environment its sessions see (`signin/account.rs`), hashed, beside any sign-in job,
+    /// changing no state. `Failed` when it could not tell or start (an unknown agent, no home or
+    /// install, the handle shut down). Dropping the future first cancels it, killing its runs.
     pub fn read_account(&self, agent: &AgentId) -> AccountFuture {
         self.start_read(agent, false)
     }
 
-    /// [`Agents::read_account`] with a forced token refresh, for Codex: its `account/read`
-    /// sends `refreshToken: true` (the same request, no other), so Codex refreshes the login
-    /// with `OpenAI` before it answers. A refresh refused, or an answer naming no account, is
-    /// `NoAccount`; no answer is `Failed`. For Claude it is `read_account`.
+    /// [`Agents::read_account`] with Codex's `account/read` sending `refreshToken: true` (the
+    /// same request), so Codex refreshes the login with `OpenAI` first. For Claude it is that.
     pub fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
         self.start_read(agent, true)
     }
 
     fn start_read(&self, agent: &AgentId, refresh: bool) -> AccountFuture {
         let (reply, answer) = oneshot::channel();
-        if let Ok(start) = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)) {
+        let start = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)).ok();
+        let cancel = start.as_ref().map(signin::cancel_of);
+        if let Some(start) = start {
             self.send(Command::Account(Box::new(start), refresh, reply));
         }
-        Box::pin(async move { answer.await.unwrap_or(AccountRead::Failed) })
+        signin::answer_of(answer, cancel)
     }
 
     /// `agent`'s last sign-in state, or `None` before any.
