@@ -120,7 +120,7 @@ jobs:
     name: rows (windows-11-arm)
     needs: parse
     runs-on: windows-11-arm
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh

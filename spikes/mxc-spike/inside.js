@@ -36,7 +36,8 @@ async function netMode(allowHost, refusedHost) {
     env: {
       HTTPS_PROXY: process.env.HTTPS_PROXY ?? null,
       HTTP_PROXY: process.env.HTTP_PROXY ?? null,
-      https_proxy: process.env.https_proxy ?? null,
+      // A key differing from HTTPS_PROXY only in case broke PS 7's ConvertFrom-Json (run 42342730658).
+      lowercase_https_proxy: process.env.https_proxy ?? null,
       NO_PROXY: process.env.NO_PROXY ?? null,
       ALL_PROXY: process.env.ALL_PROXY ?? null,
       CLAUSEO_TOKEN_PROBE: process.env.CLAUSEO_TOKEN_PROBE ?? null,

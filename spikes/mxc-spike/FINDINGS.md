@@ -58,6 +58,19 @@ Mac against the same pinned packages (darwin builds), outside any sandbox:
 - the claude-agent-acp turn ended `end_turn` with 2 permission requests and both files;
 - the codex-acp turn ended `end_turn`.
 
+### Rows run 42342730658 (partial: harness hang in 5c, fixed since)
+
+| Row | strict | A | Evidence |
+|---|---|---|---|
+| 0 node starts | PASS | PASS | `NODE_OK v24.22.0 arm64`, 331 / 225 ms |
+| 1 realpath (#1464) | native and promises OK; **JS `fs.realpathSync` EPERM** | same | Node's CJS loader uses the JS realpath, so rows 6r, 6s and 6e now test `require` |
+| 2 Git Bash (#1061) | FAIL | FAIL | `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-…): 0xC0000022`, exit 0xC0000005 |
+| 3 del (#1676) | FAIL (`del`: Access is denied; `unlinkSync` OK) | PASS | the drive-root `enumeratePaths` workaround works |
+| 4 network | (inside.js result lost: PS 7's `ConvertFrom-Json` refuses keys differing only in case, `HTTPS_PROXY`/`https_proxy`; fixed) | | 4e: `curl.exe` through the environment's proxy got 200; with `--noproxy *`, "Could not connect" |
+| 5a reads outside | PASS (`cmd type`: Access is denied) | PASS (EPERM) | |
+| 5b listings under A | | USERPROFILE **listable** (34 names); Documents and matter-b refused (denied) | the cost of the #1676 workaround |
+| 5c tree, 5d start-up, 6 agents | not reached | | the tree walk looped forever on `@($null)`; fixed, row 6 now runs right after row 0, every wait bounded |
+
 ## What S15a and G6 already cover, and what is new
 
 | Item | Already there | New in this spike |

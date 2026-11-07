@@ -35,6 +35,11 @@ function Row($id, $status, $name, $evidence) {
 }
 function Median([double[]]$xs) { if (-not $xs) { return $null }; $s = $xs | Sort-Object; $s[[int][math]::Floor(($s.Count - 1) / 2)] }
 
+# Runs a program with a hard timeout. On timeout the whole tree under it (wxc-exec and the
+# container's processes) is killed and the result says TIMEOUT. Output reads are bounded too: if
+# a process outside the tree still holds a pipe after the exit or the kill, the read gives up
+# after 5 s and says so instead of hanging. The RESULT line is parsed with -AsHashtable (PS 7's
+# ConvertFrom-Json refuses keys that differ only in case), and a parse failure is kept.
 function Invoke-Timed([string]$exe, [string]$arguments, [int]$timeoutSec = 180, [hashtable]$envVars = @{}, [string]$cwd = '') {
     $psi = [System.Diagnostics.ProcessStartInfo]::new($exe, $arguments)
     $psi.UseShellExecute = $false
@@ -45,7 +50,7 @@ function Invoke-Timed([string]$exe, [string]$arguments, [int]$timeoutSec = 180, 
     foreach ($k in $envVars.Keys) { $psi.Environment[$k] = $envVars[$k] }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     try { $p = [System.Diagnostics.Process]::Start($psi) } catch {
-        return [pscustomobject]@{ Exit = $null; TimedOut = $false; Ms = 0; Out = ''; Err = "start failed: $_"; Result = $null }
+        return [pscustomobject]@{ Exit = $null; TimedOut = $false; Ms = 0; Out = ''; Err = "start failed: $_"; Result = $null; ResultError = $null }
     }
     $p.StandardInput.Close()
     $o = $p.StandardOutput.ReadToEndAsync()
@@ -53,11 +58,15 @@ function Invoke-Timed([string]$exe, [string]$arguments, [int]$timeoutSec = 180, 
     $done = $p.WaitForExit($timeoutSec * 1000)
     if (-not $done) { try { $p.Kill($true) } catch {}; $p.WaitForExit(10000) | Out-Null }
     $sw.Stop()
-    $out = $o.Result
-    $res = $null
+    $out = '(stdout still open 5 s after the end: a process outside the tree holds it)'
+    $err = '(stderr still open 5 s after the end)'
+    if ($o.Wait(5000)) { $out = $o.Result }
+    if ($e.Wait(5000)) { $err = $e.Result }
+    if (-not $done) { $err = "TIMEOUT after $timeoutSec s, tree killed. " + $err }
+    $res = $null; $resErr = $null
     $line = ($out -split "`r?`n" | Where-Object { $_ -like 'RESULT *' } | Select-Object -Last 1)
-    if ($line) { try { $res = $line.Substring(7) | ConvertFrom-Json } catch {} }
-    [pscustomobject]@{ Exit = if ($done) { $p.ExitCode } else { $null }; TimedOut = -not $done; Ms = [int]$sw.Elapsed.TotalMilliseconds; Out = $out; Err = $e.Result; Result = $res }
+    if ($line) { try { $res = $line.Substring(7) | ConvertFrom-Json -AsHashtable } catch { $resErr = "RESULT line did not parse: $($_.Exception.Message)" } }
+    [pscustomobject]@{ Exit = if ($done) { $p.ExitCode } else { $null }; TimedOut = -not $done; Ms = [int]$sw.Elapsed.TotalMilliseconds; Out = $out; Err = $err; Result = $res; ResultError = $resErr }
 }
 function Code($r) { if ($r.TimedOut) { 'TIMEOUT' } elseif ($null -eq $r.Exit) { 'NOSTART' } else { '{0}/0x{1:X8}' -f $r.Exit, $r.Exit } }
 # One Windows command line from an argument array (MSVCRT quoting), for the policies' commandLine.
@@ -245,6 +254,92 @@ foreach ($c in 'strict', 'A') {
     Row "0-$c" $(if ($r.Out -match 'NODE_OK') { 'PASS' } else { 'FAIL' }) "node -e starts ($c)" "$(Code $r) $($r.Ms) ms; $(Tail $r.Out 1); $(Tail $r.Err 2)"
 }
 
+# ---------------------------------------------------------------- row 6: whole agents (right after row 0, so a later hang cannot cost it)
+Section 'Row 6: whole agents inside'
+$agentEnv = @{
+    CLAUDE_CONFIG_DIR = $ClaudeHome
+    ANTHROPIC_API_KEY = 'sk-ant-mock-not-a-key'
+    ANTHROPIC_BASE_URL = "http://127.0.0.1:$P"
+    DISABLE_AUTOUPDATER = '1'
+    DISABLE_TELEMETRY = '1'
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+    CLAUDE_CODE_GIT_BASH_PATH = $Bash
+    CODEX_HOME = $CodexHome
+    MOCK_API_KEY = 'mock-not-a-key'
+}
+
+# Loader checks first: Node's CJS loader resolves through the JS fs.realpathSync, which row 1
+# showed failing with EPERM under strict. Each error names its call (code, syscall, path).
+$reqCode = "const path=require('path');const d=process.env.MXC_PKG;const o={};const f=(e)=>'ERR '+e.code+' '+(e.syscall||'')+' '+(e.path||e.message);const specs={claude_acp:'@agentclientprotocol/claude-agent-acp/package.json',codex_acp:'@agentclientprotocol/codex-acp/package.json',sdk:'@anthropic-ai/claude-agent-sdk/package.json'};for(const k in specs){try{o[k]=require.resolve(specs[k],{paths:[d]})}catch(e){o[k]=f(e)}}try{require(path.join(d,'node_modules','@agentclientprotocol','claude-agent-acp','package.json'));o.require_file='ok'}catch(e){o.require_file=f(e)}try{require('fs').realpathSync(d);o.js_realpath='ok'}catch(e){o.js_realpath=f(e)}console.log('RESULT '+JSON.stringify(o))"
+foreach ($c in 'strict', 'A') {
+    $r = Contained "r6-require-$c" (JsE $reqCode) $Cfg[$c] @{ MXC_PKG = $Install } 60
+    $o = $r.Result
+    $ok = $o -and ("$($o.claude_acp)$($o.codex_acp)$($o.sdk)$($o.require_file)" -notmatch 'ERR')
+    if ($o) { $ev = 'claude-agent-acp: {0}; codex-acp: {1}; claude-agent-sdk: {2}; require(package.json): {3}; fs.realpathSync(install): {4}' -f $o.claude_acp, $o.codex_acp, $o.sdk, $o.require_file, $o.js_realpath } else { $ev = "$(Code $r) $($r.ResultError) $(Tail $r.Err 3)" }
+    Row "6r-$c" $(if ($ok) { 'PASS' } else { 'FAIL' }) "require.resolve of the agents' packages from the install ($c)" $ev
+    $r = Contained "r6-script-$c" (Join-CommandLine @($Node, (Join-Path $Kit 'inside.js'), 'read', (Join-Path $Matter 'real.txt'))) $Cfg[$c] @{} 60
+    $sev = if ($r.Result) { 'RESULT ok' } else { "$(Code $r) $($r.ResultError) stderr: $(Tail $r.Err 4)" }
+    Row "6s-$c" $(if ($r.Result) { 'PASS' } else { 'FAIL' }) "node runs a script file (main-module resolution) ($c)" $sev
+    foreach ($ad in @(@{ id = 'claude-acp'; js = $ClaudeAcp }, @{ id = 'codex-acp'; js = $CodexAcp })) {
+        $pf = New-Policy "r6-acpinit-$($ad.id)-$c" (Join-CommandLine @($Node, $ad.js)) $Cfg[$c] $agentEnv
+        $r = Invoke-Timed $Node (Join-CommandLine @((Join-Path $Kit 'acp-driver.mjs'), $Wxc, $pf, $Matter, '60000', 'init')) 90
+        $o = $r.Result
+        $iok = $o -and ($o.outcome -eq 'done')
+        if ($o) { $iev = 'outcome={0} steps={1} stderr head: {2}' -f $o.outcome, ($o.steps -join '; '), (($o.stderr_head | Select-Object -First 6) -join ' | ') } else { $iev = "driver: $(Code $r) $($r.ResultError) $(Tail $r.Err 3)" }
+        Row "6e-$($ad.id)-$c" $(if ($iok) { 'PASS' } else { 'FAIL' }) "ACP initialize: node loads $($ad.id) ($c)" $iev
+    }
+}
+
+$agentCfg = $Cfg.A
+foreach ($c in 'A', 'B') {
+    $r1 = Contained "r6-claude-version-$c" "`"$ClaudeExe`" --version" $Cfg[$c] $agentEnv 120
+    $r2 = Contained "r6-codex-version-$c" "`"$CodexExe`" --version" $Cfg[$c] $agentEnv 120
+    $ok = ($r1.Exit -eq 0) -and ($r2.Exit -eq 0)
+    Row "6a-$c" $(if ($ok) { 'PASS' } else { 'FAIL' }) "claude --version and codex --version inside ($c)" "claude: $(Code $r1) $($r1.Ms) ms $(Tail $r1.Out 1) $(if ($r1.Exit -ne 0) { Tail $r1.Err 2 }); codex: $(Code $r2) $($r2.Ms) ms $(Tail $r2.Out 1) $(if ($r2.Exit -ne 0) { Tail $r2.Err 2 })"
+    if ($ok) { $agentCfg = $Cfg[$c]; break }
+}
+$o1 = Invoke-Timed $ClaudeExe '--version' 60
+$o2 = Invoke-Timed $CodexExe '--version' 60
+Row '6a-outside' 'INFO' 'the same --version outside' "claude: $(Code $o1) $($o1.Ms) ms $(Tail $o1.Out 1); codex: $(Code $o2) $($o2.Ms) ms $(Tail $o2.Out 1)"
+"agents run under config $($agentCfg.name)"
+
+function Clear-Outputs { foreach ($f in 'claude-bash.txt', 'claude-write.txt', 'codex-shell.txt') { Remove-Item (Join-Path $Matter $f) -Force -ErrorAction SilentlyContinue } }
+function Mock-Since([int]$skip) { @(Get-Content $MockLog | Select-Object -Skip $skip | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'mock' }) }
+
+Clear-Outputs
+$skip = (Get-Content $MockLog).Count
+$r = Contained 'r6-claude-turn' "`"$ClaudeExe`" -p `"Run the spike test.`" --model claude-haiku-5-5 --allowedTools Bash,Write --permission-mode acceptEdits --output-format json" $agentCfg $agentEnv 300
+$bashFile = (Get-Content (Join-Path $Matter 'claude-bash.txt') -ErrorAction SilentlyContinue) -join ''
+$writeFile = (Get-Content (Join-Path $Matter 'claude-write.txt') -ErrorAction SilentlyContinue) -join ''
+$mk = Mock-Since $skip
+$results = ($mk | ForEach-Object { $_.results } | Where-Object { $_ } | ForEach-Object { "$($_.id) error=$($_.is_error): $($_.text)" } | Select-Object -Unique) -join ' || '
+$msys = if ($results -match 'NtCreateDirectoryObject|msys-2\.0|0xC0000022') { 'yes: the Bash tool hit the Git Bash (MSYS) failure of row 2' } else { 'no MSYS error in the tool results' }
+Row '6b-bash' $(if ($bashFile -match 'hi') { 'PASS' } else { 'FAIL' }) 'claude -p turn: Bash tool writes m/claude-bash.txt' "$(Code $r) $($r.Ms) ms; file=$(if ($bashFile) { $bashFile } else { 'missing' }); model calls=$($mk.Count); Git Bash failure: $msys; tool results: $results"
+Row '6b-write' $(if ($writeFile -match 'Write tool') { 'PASS' } else { 'FAIL' }) 'claude -p turn: Write tool writes m/claude-write.txt' "file=$(if ($writeFile) { $writeFile } else { 'missing' }); stdout: $(Tail $r.Out 1); stderr: $(Tail $r.Err 2)"
+
+$skip = (Get-Content $MockLog).Count
+$r = Contained 'r6-codex-turn' "`"$CodexExe`" exec --skip-git-repo-check -C `"$Matter`" `"Run the spike test.`"" $agentCfg $agentEnv 300
+$cf = (Get-Content (Join-Path $Matter 'codex-shell.txt') -ErrorAction SilentlyContinue) -join ''
+$mk = Mock-Since $skip
+Row '6c' $(if ($cf -match 'hi') { 'PASS' } else { 'FAIL' }) 'codex exec turn: shell call writes m/codex-shell.txt' "$(Code $r) $($r.Ms) ms; file=$(if ($cf) { $cf } else { 'missing' }); model calls=$($mk.Count) tools offered=$(($mk | Select-Object -First 1).tools -join ','); tool output: $(($mk | ForEach-Object { $_.outputs } | Where-Object { $_ }) -join ' || '); stderr: $(Tail $r.Err 2)"
+
+# ACP: Clauseo's real launch shape (node.exe + the adapter's dist/index.js), driven over stdio.
+foreach ($ad in @(@{ id = 'claude-acp'; js = $ClaudeAcp; files = @('claude-bash.txt', 'claude-write.txt') }, @{ id = 'codex-acp'; js = $CodexAcp; files = @('codex-shell.txt') })) {
+    Clear-Outputs
+    $pf = New-Policy "r6-acp-$($ad.id)" "`"$Node`" `"$($ad.js)`"" $agentCfg $agentEnv
+    $r = Invoke-Timed $Node (Join-CommandLine @((Join-Path $Kit 'acp-driver.mjs'), $Wxc, $pf, $Matter, '240000')) 300
+    Set-Content -Path (Join-Path $Logs "r6-acp-$($ad.id).out.txt") -Value $r.Out
+    $o = $r.Result
+    $files = $ad.files | ForEach-Object { "$_=$(Test-Path (Join-Path $Matter $_))" }
+    $ok = $o -and ($o.stop_reason -eq 'end_turn') -and -not ($ad.files | Where-Object { -not (Test-Path (Join-Path $Matter $_)) })
+    if ($o) {
+        $detail = 'outcome={0} steps={1} non-JSON stdout={2} permissions={3} tools={4} error={5}' -f $o.outcome, ($o.steps -join '; '), $o.non_json_stdout, $o.permissions, ($o.tool_calls -join ','), $o.error
+    } else {
+        $detail = 'driver: {0} {1}' -f (Code $r), (Tail $r.Err 3)
+    }
+    Row "6d-$($ad.id)" $(if ($ok) { 'PASS' } else { 'FAIL' }) "ACP turn through $($ad.id) (node + adapter inside)" "$detail; files: $($files -join ' ')"
+}
+
 # ---------------------------------------------------------------- row 1: realpath (#1464)
 Section 'Row 1: realpath (microsoft/mxc#1464)'
 $rp = "const fs=require('fs');const t=process.env.MXC_T;const o={};try{o.native=fs.realpathSync.native(t)}catch(e){o.native='ERR '+e.code}try{o.js=fs.realpathSync(t)}catch(e){o.js='ERR '+e.code}fs.promises.realpath(t).then(v=>{o.promises=v},e=>{o.promises='ERR '+e.code}).finally(()=>console.log('RESULT '+JSON.stringify(o)))"
@@ -289,7 +384,7 @@ Section 'Row 4: network in proxy mode (microsoft/mxc#1666)'
 $r = Contained 'r4-net-A' "`"$Node`" `"$Kit\inside.js`" net example.com example.org" $Cfg.A @{} 120
 $o = $r.Result
 if (-not $o) {
-    Row '4' 'FAIL' 'network probe' "inside.js did not report: $(Code $r); $(Tail $r.Err 3)"
+    Row '4' 'FAIL' 'network probe' "inside.js did not report: $(Code $r); $($r.ResultError); stdout: $(Tail $r.Out 2); stderr: $(Tail $r.Err 3)"
 } else {
     $leak = ($o.dns_lookup -like 'resolved*') -or ($o.dns_resolve4_direct -like 'resolved*')
     Row '4a' $(if ($leak) { 'FAIL' } else { 'PASS' }) 'DNS refused inside (fails if #1666 reproduces)' "dns.lookup(example.com): $($o.dns_lookup); random name: $($o.dns_lookup_random); c-ares UDP 53: $($o.dns_resolve4_direct)"
@@ -299,7 +394,7 @@ if (-not $o) {
     $connects = @(Get-Content $MockLog | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'connect' })
     $auth = ($connects | ForEach-Object { "$($_.host):$($_.verdict):auth-$($_.proxy_auth)" }) -join ', '
     $survives = "$($o.env.HTTPS_PROXY)" -match [regex]::Escape($Token)
-    Row '4d' 'INFO' 'Clauseo proxy token survives MXC' "survives=$survives; HTTPS_PROXY inside=$($o.env.HTTPS_PROXY); HTTP_PROXY=$($o.env.HTTP_PROXY); https_proxy=$($o.env.https_proxy); NO_PROXY=$($o.env.NO_PROXY); CLAUSEO_TOKEN_PROBE=$($o.env.CLAUSEO_TOKEN_PROBE); proxy saw: $auth"
+    Row '4d' 'INFO' 'Clauseo proxy token survives MXC' "survives=$survives; HTTPS_PROXY inside=$($o.env.HTTPS_PROXY); HTTP_PROXY=$($o.env.HTTP_PROXY); https_proxy=$($o.env.lowercase_https_proxy); NO_PROXY=$($o.env.NO_PROXY); CLAUSEO_TOKEN_PROBE=$($o.env.CLAUSEO_TOKEN_PROBE); proxy saw: $auth"
 }
 $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
 if (Test-Path $curl) {
@@ -344,10 +439,17 @@ while ((Get-Date) -lt $deadline -and -not $ready) {
 }
 Start-Sleep -Milliseconds 800
 $procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CreationDate
-$tree = @(); $frontier = @($tp.Id)
-while ($frontier.Count) {
-    $kids = @($procs | Where-Object { $frontier -contains $_.ParentProcessId -and $_.ProcessId -ne $tp.Id -and ($tree.ProcessId -notcontains $_.ProcessId) })
-    $tree += $kids; $frontier = @($kids.ProcessId)
+# Bounded walk (run 42342730658 hung here: @($kids.ProcessId) of an empty set is @($null), so the
+# old while loop never ended).
+$tree = [System.Collections.Generic.List[object]]::new()
+$seen = [System.Collections.Generic.HashSet[uint32]]::new()
+$frontier = [System.Collections.Generic.List[uint32]]::new(); $frontier.Add([uint32]$tp.Id); [void]$seen.Add([uint32]$tp.Id)
+for ($depth = 0; $depth -lt 10 -and $frontier.Count -gt 0; $depth++) {
+    $next = [System.Collections.Generic.List[uint32]]::new()
+    foreach ($pr in $procs) {
+        if ($frontier.Contains([uint32]$pr.ParentProcessId) -and $seen.Add([uint32]$pr.ProcessId)) { $tree.Add($pr); $next.Add([uint32]$pr.ProcessId) }
+    }
+    $frontier = $next
 }
 $k0 = [Diagnostics.Stopwatch]::StartNew()
 try { $tp.Kill($false) } catch {}
@@ -368,68 +470,6 @@ $pfT = New-Policy 'r5-timing' $m $Cfg.A
 $inside = 1..5 | ForEach-Object { (Invoke-Timed $Wxc "`"$pfT`"" 120).Ms }
 $Facts.node_ms_outside = @($outside); $Facts.node_ms_inside = @($inside)
 Row '5d' 'INFO' 'start-up added: node -e outside vs inside, wall ms to exit' "outside median $(Median $outside) ms ($($outside -join ',')); inside median $(Median $inside) ms ($($inside -join ',')); added ~$((Median $inside) - (Median $outside)) ms"
-
-# ---------------------------------------------------------------- row 6: whole agents
-Section 'Row 6: whole agents inside'
-$agentEnv = @{
-    CLAUDE_CONFIG_DIR = $ClaudeHome
-    ANTHROPIC_API_KEY = 'sk-ant-mock-not-a-key'
-    ANTHROPIC_BASE_URL = "http://127.0.0.1:$P"
-    DISABLE_AUTOUPDATER = '1'
-    DISABLE_TELEMETRY = '1'
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
-    CLAUDE_CODE_GIT_BASH_PATH = $Bash
-    CODEX_HOME = $CodexHome
-    MOCK_API_KEY = 'mock-not-a-key'
-}
-$agentCfg = $Cfg.A
-foreach ($c in 'A', 'B') {
-    $r1 = Contained "r6-claude-version-$c" "`"$ClaudeExe`" --version" $Cfg[$c] $agentEnv 120
-    $r2 = Contained "r6-codex-version-$c" "`"$CodexExe`" --version" $Cfg[$c] $agentEnv 120
-    $ok = ($r1.Exit -eq 0) -and ($r2.Exit -eq 0)
-    Row "6a-$c" $(if ($ok) { 'PASS' } else { 'FAIL' }) "claude --version and codex --version inside ($c)" "claude: $(Code $r1) $($r1.Ms) ms $(Tail $r1.Out 1) $(if ($r1.Exit -ne 0) { Tail $r1.Err 2 }); codex: $(Code $r2) $($r2.Ms) ms $(Tail $r2.Out 1) $(if ($r2.Exit -ne 0) { Tail $r2.Err 2 })"
-    if ($ok) { $agentCfg = $Cfg[$c]; break }
-}
-$o1 = Invoke-Timed $ClaudeExe '--version' 60
-$o2 = Invoke-Timed $CodexExe '--version' 60
-Row '6a-outside' 'INFO' 'the same --version outside' "claude: $(Code $o1) $($o1.Ms) ms $(Tail $o1.Out 1); codex: $(Code $o2) $($o2.Ms) ms $(Tail $o2.Out 1)"
-"agents run under config $($agentCfg.name)"
-
-function Clear-Outputs { foreach ($f in 'claude-bash.txt', 'claude-write.txt', 'codex-shell.txt') { Remove-Item (Join-Path $Matter $f) -Force -ErrorAction SilentlyContinue } }
-function Mock-Since([int]$skip) { @(Get-Content $MockLog | Select-Object -Skip $skip | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'mock' }) }
-
-Clear-Outputs
-$skip = (Get-Content $MockLog).Count
-$r = Contained 'r6-claude-turn' "`"$ClaudeExe`" -p `"Run the spike test.`" --model claude-haiku-5-5 --allowedTools Bash,Write --permission-mode acceptEdits --output-format json" $agentCfg $agentEnv 300
-$bashFile = (Get-Content (Join-Path $Matter 'claude-bash.txt') -ErrorAction SilentlyContinue) -join ''
-$writeFile = (Get-Content (Join-Path $Matter 'claude-write.txt') -ErrorAction SilentlyContinue) -join ''
-$mk = Mock-Since $skip
-$results = ($mk | ForEach-Object { $_.results } | Where-Object { $_ } | ForEach-Object { "$($_.id) error=$($_.is_error): $($_.text)" } | Select-Object -Unique) -join ' || '
-Row '6b-bash' $(if ($bashFile -match 'hi') { 'PASS' } else { 'FAIL' }) 'claude -p turn: Bash tool writes m/claude-bash.txt' "$(Code $r) $($r.Ms) ms; file=$(if ($bashFile) { $bashFile } else { 'missing' }); model calls=$($mk.Count); tool results: $results"
-Row '6b-write' $(if ($writeFile -match 'Write tool') { 'PASS' } else { 'FAIL' }) 'claude -p turn: Write tool writes m/claude-write.txt' "file=$(if ($writeFile) { $writeFile } else { 'missing' }); stdout: $(Tail $r.Out 1); stderr: $(Tail $r.Err 2)"
-
-$skip = (Get-Content $MockLog).Count
-$r = Contained 'r6-codex-turn' "`"$CodexExe`" exec --skip-git-repo-check -C `"$Matter`" `"Run the spike test.`"" $agentCfg $agentEnv 300
-$cf = (Get-Content (Join-Path $Matter 'codex-shell.txt') -ErrorAction SilentlyContinue) -join ''
-$mk = Mock-Since $skip
-Row '6c' $(if ($cf -match 'hi') { 'PASS' } else { 'FAIL' }) 'codex exec turn: shell call writes m/codex-shell.txt' "$(Code $r) $($r.Ms) ms; file=$(if ($cf) { $cf } else { 'missing' }); model calls=$($mk.Count) tools offered=$(($mk | Select-Object -First 1).tools -join ','); tool output: $(($mk | ForEach-Object { $_.outputs } | Where-Object { $_ }) -join ' || '); stderr: $(Tail $r.Err 2)"
-
-# ACP: Clauseo's real launch shape (node.exe + the adapter's dist/index.js), driven over stdio.
-foreach ($ad in @(@{ id = 'claude-acp'; js = $ClaudeAcp; files = @('claude-bash.txt', 'claude-write.txt') }, @{ id = 'codex-acp'; js = $CodexAcp; files = @('codex-shell.txt') })) {
-    Clear-Outputs
-    $pf = New-Policy "r6-acp-$($ad.id)" "`"$Node`" `"$($ad.js)`"" $agentCfg $agentEnv
-    $r = Invoke-Timed $Node "`"$Kit\acp-driver.mjs`" `"$Wxc`" `"$pf`" `"$Matter`" 240000" 300
-    Set-Content -Path (Join-Path $Logs "r6-acp-$($ad.id).out.txt") -Value $r.Out
-    $o = $r.Result
-    $files = $ad.files | ForEach-Object { "$_=$(Test-Path (Join-Path $Matter $_))" }
-    $ok = $o -and ($o.stop_reason -eq 'end_turn') -and -not ($ad.files | Where-Object { -not (Test-Path (Join-Path $Matter $_)) })
-    if ($o) {
-        $detail = 'outcome={0} steps={1} non-JSON stdout={2} permissions={3} tools={4} error={5}' -f $o.outcome, ($o.steps -join '; '), $o.non_json_stdout, $o.permissions, ($o.tool_calls -join ','), $o.error
-    } else {
-        $detail = 'driver: {0} {1}' -f (Code $r), (Tail $r.Err 3)
-    }
-    Row "6d-$($ad.id)" $(if ($ok) { 'PASS' } else { 'FAIL' }) "ACP turn through $($ad.id) (node + adapter inside)" "$detail; files: $($files -join ' ')"
-}
 
 # ---------------------------------------------------------------- summary and clean-up
 Section 'Summary'

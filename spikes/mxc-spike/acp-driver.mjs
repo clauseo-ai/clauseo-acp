@@ -1,14 +1,16 @@
 // ACP client for the MXC spike: runs on the host, starts an ACP adapter inside the container
 // through wxc-exec, and drives one turn: initialize, session/new, session/prompt. Permission
 // requests are answered with the first allow option. Prints one line: RESULT <json>.
-//   node acp-driver.mjs <wxc-exec.exe> <policy.json> <matter> [timeoutMs]
+//   node acp-driver.mjs <wxc-exec.exe> <policy.json> <matter> [timeoutMs] [init]
+// With `init`, it stops after initialize: does the adapter load at all (Node's loader, require)?
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 
-const [wxc, policy, matter, timeoutArg] = process.argv.slice(2);
+const [wxc, policy, matter, timeoutArg, modeArg] = process.argv.slice(2);
+const initOnly = modeArg === 'init';
 const timeoutMs = Number(timeoutArg || 180000);
 const t0 = Date.now();
-const r = { steps: [], non_json_stdout: 0, notifications: {}, tool_calls: [], permissions: 0, stderr_tail: [] };
+const r = { steps: [], non_json_stdout: 0, notifications: {}, tool_calls: [], permissions: 0, stderr_head: [], stderr_tail: [] };
 
 const child = spawn(wxc, [policy], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
 let nextId = 1;
@@ -51,6 +53,7 @@ readline.createInterface({ input: child.stdout }).on('line', (line) => {
   }
 });
 readline.createInterface({ input: child.stderr }).on('line', (line) => {
+  if (r.stderr_head.length < 12) r.stderr_head.push(line.slice(0, 300));
   r.stderr_tail.push(line.slice(0, 300));
   if (r.stderr_tail.length > 15) r.stderr_tail.shift();
 });
@@ -72,6 +75,7 @@ child.on('exit', (code) => { r.exit = code; setTimeout(() => finish(`adapter exi
 (async () => {
   const init = await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
   r.steps.push(`initialize ok ${Date.now() - t0} ms (protocol ${init?.protocolVersion}, auth methods ${(init?.authMethods || []).map((m) => m.id).join('|') || 'none'})`);
+  if (initOnly) { finish('done'); return; }
   const session = await request('session/new', { cwd: matter, mcpServers: [] });
   r.steps.push(`session/new ok ${Date.now() - t0} ms`);
   const prompt = await request('session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'Run the spike test.' }] });
