@@ -96,6 +96,8 @@ mod start;
 mod sweep;
 #[cfg(windows)]
 mod sweeper;
+#[cfg(any(windows, test))]
+mod sweeper_flow;
 
 pub use env::agent_env;
 #[cfg(windows)]

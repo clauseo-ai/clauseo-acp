@@ -251,3 +251,14 @@ fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user
     let spec = TokenSpec::for_pool(&sid(POOL), &logon, &desktop, None).unwrap();
     assert_eq!(spec.deny_only, [logon]);
 }
+
+#[test]
+fn the_sweepers_com_token_dacl_adds_query_duplicate_and_impersonate_for_its_user() {
+    assert_eq!(
+        sweeper_com_token_sddl(&sid(POOL)),
+        format!("D:P(A;;GA;;;SY)(A;;0xe;;;{POOL})(A;;RC;;;OW)")
+    );
+    // TOKEN_QUERY, TOKEN_DUPLICATE and TOKEN_IMPERSONATE alone: no TOKEN_ASSIGN_PRIMARY (0x1),
+    // TOKEN_ADJUST_* (0x20, 0x40, 0x80, 0x100), READ_CONTROL or WRITE_DAC/WRITE_OWNER.
+    assert_eq!(SWEEPER_COM_TOKEN_RIGHTS, 0x8 | 0x2 | 0x4);
+}
