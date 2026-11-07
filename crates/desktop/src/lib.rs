@@ -125,6 +125,7 @@ mod setup;
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod ui_language;
 mod update;
 mod webview2;
 mod window_frame;

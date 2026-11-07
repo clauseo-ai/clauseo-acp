@@ -435,11 +435,15 @@ pub(crate) async fn follow_settings(
                 code = error.code().as_str(),
                 "settings changes not followed"
             );
+            crate::ui_language::follow(reread().settings().ui.language);
             return;
         }
     };
     loop {
-        let read = SettingsRead::read(&reread(), backend.known.keys());
+        let effective = reread();
+        // The installer and uninstaller read the language from the registry (ui_language.rs).
+        crate::ui_language::follow(effective.settings().ui.language);
+        let read = SettingsRead::read(&effective, backend.known.keys());
         super::refresh::apply_settings(backend, read).await;
         if changes.next().await.is_none() {
             break;
