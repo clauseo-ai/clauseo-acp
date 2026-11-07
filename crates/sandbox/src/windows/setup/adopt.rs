@@ -27,7 +27,10 @@
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
 //!    `AdminCopyOwner`. `UserInstallDir` is checked as text only, and stays untrusted (0049);
-//! 7. per user, the normal `--set-up` for the lawyer and the data folder runs in this process
+//! 7. per user, the SYSTEM refresh task (`refresh::register_refresh_task`, PR 3) is registered
+//!    for the lawyer, else `Failed`; a per-machine install doesn't update itself, so it gets no
+//!    task;
+//! 8. per user, the normal `--set-up` for the lawyer and the data folder runs in this process
 //!    (which also requires the folder to be the lawyer's own), and its exit is `--adopt`'s;
 //!    `--per-machine` sets nobody up (each user's set-up runs later through the app) and exits
 //!    `Done`.
@@ -88,6 +91,9 @@ pub trait Adopter {
     fn sha256(&mut self, exe: &Path) -> Result<String, String>;
     /// Writes the record's admin-copy values.
     fn write_values(&mut self, values: &AdminValues) -> Result<(), String>;
+    /// Registers (or updates) the SYSTEM refresh task `\Clauseo\SandboxRefresh` for the record
+    /// owner `owner` (`refresh::register_refresh_task`, S15 tier B PR 3).
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String>;
     /// The normal `--set-up` for the lawyer found and `data_dir`, in this process.
     fn set_up(&mut self, data_dir: &Path) -> SetupExit;
 }
@@ -183,7 +189,15 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         return failed("the record's admin-copy values couldn't be written", &error);
     }
     match target {
-        Target::User { data_dir, .. } => machine.set_up(data_dir),
+        Target::User {
+            owner_sid,
+            data_dir,
+        } => {
+            if let Err(error) = machine.register_refresh_task(owner_sid) {
+                return failed("the refresh task couldn't be registered", &error);
+            }
+            machine.set_up(data_dir)
+        }
         Target::Machine => SetupExit::Done,
     }
 }

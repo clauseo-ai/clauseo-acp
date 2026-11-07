@@ -28,6 +28,8 @@ struct Fake {
     found: Vec<(PathBuf, Found)>,
     security: Vec<u8>,
     changes: Vec<String>,
+    /// The refresh task's registration fails.
+    task_fails: bool,
     set_up_exit: SetupExit,
 }
 
@@ -53,6 +55,7 @@ impl Fake {
             ],
             security: locked_dacl(true),
             changes: Vec::new(),
+            task_fails: false,
             set_up_exit: SetupExit::Done,
         }
     }
@@ -138,6 +141,14 @@ impl Adopter for Fake {
         Ok(())
     }
 
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String> {
+        if self.task_fails {
+            return Err("the Task Scheduler refused".to_owned());
+        }
+        self.changes.push(format!("task {owner}"));
+        Ok(())
+    }
+
     fn set_up(&mut self, data_dir: &Path) -> SetupExit {
         self.changes.push(format!("set-up {}", data_dir.display()));
         self.set_up_exit
@@ -161,20 +172,33 @@ fn refused(fake: &mut Fake, install: &str, target: &Target, exit: SetupExit, cas
 }
 
 #[test]
-fn a_per_user_adopt_locks_records_then_sets_up_in_that_order() {
+fn a_per_user_adopt_locks_records_registers_the_task_then_sets_up_in_that_order() {
     let mut fake = Fake::new();
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Done
     );
-    assert_eq!(fake.changes.len(), 3, "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 4, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(
         fake.changes[1],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[2], format!("set-up {DATA}"));
+    assert_eq!(fake.changes[2], format!("task {LAWYER}"));
+    assert_eq!(fake.changes[3], format!("set-up {DATA}"));
+}
+
+#[test]
+fn a_refresh_task_that_cant_be_registered_fails_before_the_set_up() {
+    let mut fake = Fake::new();
+    fake.task_fails = true;
+    assert_eq!(
+        adopt(&mut fake, Path::new(INSTALL), &user()),
+        SetupExit::Failed
+    );
+    assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
+    assert!(fake.changes[1].starts_with("record "), "{:?}", fake.changes);
 }
 
 #[test]
@@ -336,6 +360,7 @@ fn a_per_machine_adopt_takes_any_administrators_only_folder_and_sets_nobody_up()
         adopt(&mut fake, Path::new(MACHINE), &Target::Machine),
         SetupExit::Done
     );
+    // Lock and record only: no refresh task, since a per-machine install doesn't update itself.
     assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(

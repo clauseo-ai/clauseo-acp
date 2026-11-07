@@ -30,6 +30,7 @@ use windows::core::PCWSTR;
 use super::machine::MachineError;
 use super::record_write;
 use crate::windows::admin_copy::{self, Found, os, same_path};
+use crate::windows::refresh;
 
 /// Deletes the admin copy as the module says. The record's values first: a failure there
 /// stops before any file is touched.
@@ -90,25 +91,18 @@ pub(super) fn clear(
     Ok(())
 }
 
-/// PR 3's hook: deletes the SYSTEM refresh task `\Clauseo\SandboxRefresh`. Run by the
-/// uninstaller's removal only, before the admin folder goes. Nothing yet: this PR makes no task.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "PR 3 fills it with calls that can fail; the caller already stops on its error"
-)]
+/// PR 3's hook: deletes the SYSTEM refresh task `\Clauseo\SandboxRefresh`
+/// (`refresh::unregister_refresh_task`; one that isn't there is `Ok`). Run by the uninstaller's
+/// removal only, before the admin folder goes.
 pub(crate) fn unregister_refresh_task() -> Result<(), MachineError> {
-    Ok(())
+    refresh::unregister_refresh_task().map_err(|error| MachineError::Other(error.to_string()))
 }
 
 /// PR 3's hook: deletes the refresh task's staging folder,
-/// `%ProgramFiles%\Clauseo\Sandbox\staging\`, its own way (it goes with the rest of the admin
-/// folder's contents after anyway). Nothing yet.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "PR 3 fills it with calls that can fail; the caller already stops on its error"
-)]
+/// `%ProgramFiles%\Clauseo\Sandbox\staging\`, its own way (`refresh::remove_staging`; it goes
+/// with the rest of the admin folder's contents after anyway).
 pub(crate) fn remove_staging() -> Result<(), MachineError> {
-    Ok(())
+    refresh::remove_staging().map_err(MachineError::Other)
 }
 
 /// The name the running copy is renamed to in its own folder: one nothing starts.

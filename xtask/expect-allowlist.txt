@@ -509,8 +509,6 @@ crates/sandbox/src/windows/admin_copy/os.rs lock_tree clippy::disallowed_methods
 crates/sandbox/src/windows/admin_copy/ntfs_tests.rs a_held_hash_keeps_the_file_from_changing_until_it_drops clippy::disallowed_methods
 crates/sandbox/src/windows/setup/admin_remove.rs - unsafe_code
 crates/sandbox/src/windows/setup/admin_remove.rs - clippy::disallowed_methods
-crates/sandbox/src/windows/setup/admin_remove.rs unregister_refresh_task clippy::unnecessary_wraps
-crates/sandbox/src/windows/setup/admin_remove.rs remove_staging clippy::unnecessary_wraps
 crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disallowed_methods
 crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
 crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
