@@ -68,6 +68,9 @@ use crate::log_file::Cause;
 pub(super) struct Preparing {
     /// Its id: an answer for an earlier launch's checks is dropped.
     id: u64,
+    /// The session it launches: one of its matter's running sessions for the sandbox's
+    /// launchers from the checks' start (`sandbox::running`).
+    pub(super) key: SessionKey,
     /// The work that waits for the agent's session.
     pub(super) waiting: Vec<Waiting>,
 }
@@ -295,7 +298,11 @@ pub(super) fn prepare(
     let Some(state) = state(actor, thread) else {
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
+    state.preparing = Some(Box::new(Preparing {
+        id,
+        key: run.key,
+        waiting,
+    }));
     let check = FolderCheck {
         matter: Some(run.key.matter),
         source: actor.folder_check,
@@ -538,37 +545,6 @@ pub(super) fn on_prepared(
     launch_prepared(actor, thread, waiting, prepared, None);
 }
 
-/// The launch on the actor with what its checks (and the sandbox's launcher) found; when no agent
-/// started, its run folder is removed off the actor. A spawned agent's jail (`sandbox`) rides on
-/// the thread's run folder from then on.
-fn launch_prepared(
-    actor: &mut Actor,
-    thread: ThreadId,
-    waiting: Vec<Waiting>,
-    mut prepared: Box<Prepared>,
-    sandbox: Option<sandbox::SandboxSession>,
-) {
-    let run = prepared.run.clone();
-    let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
-    if let Some(state) = state(actor, thread) {
-        state.run = Some(run.clone());
-    }
-    let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
-    let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
-    if launched {
-        packs::hold_notice(actor, thread, packs_skipped);
-        if let Some(run) = state(actor, thread).and_then(|state| state.run.as_mut()) {
-            run.sandbox = sandbox;
-        }
-    } else {
-        if let Some(state) = state(actor, thread) {
-            state.run = None;
-        }
-        // A process that was started and then failed is waited for like any other.
-        discard(actor, thread, run, failed_tree);
-    }
-}
-
 /// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
 /// has ended. The notes folder stays.
 pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
@@ -588,7 +564,9 @@ mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
 mod sandbox;
-pub(super) use sandbox::{on_sandboxed, on_session_ended, on_set_aside_late};
+pub(super) use sandbox::{SandboxInput, launcher, on_sandbox_input};
+mod spawn;
+use spawn::launch_prepared;
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

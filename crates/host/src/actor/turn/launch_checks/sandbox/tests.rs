@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::{ErrorCode, MatterId, ThreadId};
 use clauseo_sandbox::SetAside;
 
-use super::notice::{NAMED, When, notice, relative_names};
+use super::notice::{NAMED, When, notice, plain, relative_names};
 use super::{UndoOnDrop, launch_policy, refused};
 use crate::actor::turn::launch_checks::RunFolders;
 use crate::config::SessionKey;
@@ -41,6 +41,63 @@ fn set_aside_names_are_relative_to_the_matter_and_outside_ones_are_dropped() {
     // A verbatim matter root matches a plain name too.
     let root = PathBuf::from(format!(r"\\?\{}", matter.display()));
     assert_eq!(relative_names(&set_aside[..1], &root), [".git"]);
+}
+
+#[test]
+fn the_verbatim_prefix_goes_for_drives_and_unc_shares_alike() {
+    assert_eq!(plain(Path::new(r"\\?\C:\m\.git")), Path::new(r"C:\m\.git"));
+    assert_eq!(
+        plain(Path::new(r"\\?\UNC\srv\share\m\.git")),
+        Path::new(r"\\srv\share\m\.git")
+    );
+    assert_eq!(plain(Path::new("/tmp/m/.git")), Path::new("/tmp/m/.git"));
+    // Only the prefix's own form: a name that merely starts alike stays as it is.
+    assert_eq!(plain(Path::new(r"\\srv\share")), Path::new(r"\\srv\share"));
+}
+
+#[test]
+fn a_name_matches_the_matter_by_whole_names_never_through_dot_dot() {
+    let base = std::env::temp_dir().join("clauseo-b2-prefix");
+    let matter = base.join("ab");
+    let set_aside = [
+        // A lookalike: `abc` begins with `ab` but is another folder.
+        moved(&base.join("abc").join(".git")),
+        // Out of the matter and back in, or out of it: never named.
+        moved(
+            &matter
+                .join("sub")
+                .join("..")
+                .join("..")
+                .join("x")
+                .join(".git"),
+        ),
+        moved(&matter.join("..").join("ab").join(".git")),
+        moved(&matter.join("sub").join("CLAUDE.md")),
+    ];
+    assert_eq!(relative_names(&set_aside, &matter), ["sub/CLAUDE.md"]);
+}
+
+#[test]
+fn letter_case_matches_on_windows_only() {
+    let base = std::env::temp_dir().join("clauseo-b2-case");
+    let set_aside = [moved(&base.join("matter").join(".git"))];
+    let names = relative_names(&set_aside, &base.join("Matter"));
+    if cfg!(windows) {
+        assert_eq!(names, [".git"], "Windows' folders ignore letter case");
+    } else {
+        assert_eq!(names, [] as [String; 0], "another folder here");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_unc_share_names_relative_to_its_matter() {
+    let matter = Path::new(r"\\srv\share\Matters\m");
+    let set_aside = [
+        moved(Path::new(r"\\?\UNC\srv\share\matters\M\sub\AGENTS.md")),
+        moved(Path::new(r"\\?\UNC\srv\other\Matters\m\.git")),
+    ];
+    assert_eq!(relative_names(&set_aside, matter), ["sub/AGENTS.md"]);
 }
 
 #[test]

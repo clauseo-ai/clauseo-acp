@@ -27,33 +27,54 @@ pub(super) enum When {
 }
 
 /// The names in `set_aside` relative to `matter` (the policy's matter root), `/`-joined: each
-/// `from` (absolute, maybe with Windows' `\\?\` prefix) loses that prefix, then the root. One
-/// outside the matter, or naming the matter itself, is dropped.
+/// `from` (absolute, maybe with Windows' `\\?\` prefix) loses that prefix, then the root,
+/// whole names only (`ab` is not under `abc`) and in any letter case on Windows. One outside
+/// the matter, naming the matter itself, or with a `..` in it, is dropped.
 pub(super) fn relative_names(set_aside: &[SetAside], matter: &Path) -> Vec<String> {
     let root = plain(matter);
     set_aside
         .iter()
         .filter_map(|moved| {
-            let from = plain(&moved.from);
-            let relative = from.strip_prefix(&root).ok()?;
-            let parts = relative
-                .components()
-                .map(|part| match part {
-                    Component::Normal(name) => Some(name.to_string_lossy()),
-                    Component::Prefix(_)
-                    | Component::RootDir
-                    | Component::CurDir
-                    | Component::ParentDir => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let parts = under(&plain(&moved.from), &root)?;
             (!parts.is_empty()).then(|| parts.join("/"))
         })
         .collect()
 }
 
+/// `from`'s names below `root`, when `from` is `root` or under it and the rest are plain
+/// names (no `..`, `.` or root).
+fn under(from: &Path, root: &Path) -> Option<Vec<String>> {
+    let mut parts = from.components();
+    for wanted in root.components() {
+        let part = parts.next()?;
+        if !same(wanted.as_os_str(), part.as_os_str()) {
+            return None;
+        }
+    }
+    parts
+        .map(|part| match part {
+            Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir => None,
+        })
+        .collect()
+}
+
+/// Whether two names are the same name: in any letter case on Windows, whose folders ignore
+/// it, and exactly elsewhere.
+fn same(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
 /// `path` without Windows' verbatim prefix: `\\?\C:\m` is `C:\m`, `\\?\UNC\srv\share` is
 /// `\\srv\share`. Any other path is as it is.
-fn plain(path: &Path) -> PathBuf {
+pub(super) fn plain(path: &Path) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path.to_owned();
     };

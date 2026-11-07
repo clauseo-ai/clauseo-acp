@@ -24,16 +24,36 @@ use crate::log_file::Cause;
 /// released only once the run was freed ([`on_run_removed`]): a held run keeps it, so no new
 /// Chrome starts while a held one may live. The removal counts as work in flight
 /// (`Work::run_removals`) until its [`TurnInput::RunRemoved`], so shutdown
-/// answers only once it is done.
+/// answers only once it is done. A sandboxed session's `after_session` runs first, off the
+/// actor, then this removal, as one piece of work that ends with `SandboxInput::SessionEnded`
+/// (R17 PR-B2).
 pub(super) fn discard(
     actor: &mut Actor,
     thread: ThreadId,
     mut run: RunFolders,
     tree: Option<TreeWatch>,
 ) {
-    if let Some(session) = run.sandbox.take() {
-        super::sandbox::after_session(actor, thread, run.key, session);
+    let key = run.key;
+    let session = run.sandbox.take();
+    actor.work.run_removals += 1;
+    actor.wiring.browser_slots.begin_release(key);
+    let removal = removal(actor, thread, run, tree);
+    match session {
+        Some(session) => super::sandbox::after_session(actor, thread, key, session, removal),
+        None => actor.spawn_post(async move {
+            let freed = removal.await;
+            Input::Turn(TurnInput::RunRemoved { key, freed })
+        }),
     }
+}
+
+/// [`discard`]'s removal of `run`, to run off the actor: whether the run was freed.
+fn removal(
+    actor: &Actor,
+    thread: ThreadId,
+    run: RunFolders,
+    tree: Option<TreeWatch>,
+) -> impl Future<Output = bool> + 'static {
     let key = run.key;
     let clock = std::sync::Arc::clone(&actor.clock);
     let cap = actor.wiring.tree_wait;
@@ -42,13 +62,11 @@ pub(super) fn discard(
         matter: Some(key.matter),
         wait: cap.saturating_add(codex::prepare::PREPARE_WAIT),
     };
-    actor.work.run_removals += 1;
-    actor.wiring.browser_slots.begin_release(key);
     let hook = actor.wiring.run_removal_hook.clone();
     let held = actor.wiring.held.clone();
     let wait_hook = actor.wiring.tree_wait_hook.clone();
     let thread_fails = actor.wiring.removal_thread_fails;
-    actor.spawn_post(async move {
+    async move {
         let work = move || {
             let browser = run.browser_session.as_deref();
             if let Some(wait_hook) = &wait_hook {
@@ -95,7 +113,7 @@ pub(super) fn discard(
         } else {
             codex::prepare::off_actor(clock, job, work).await
         };
-        let freed = match removed {
+        match removed {
             Ok(freed) => freed,
             Err(error) => {
                 tracing::warn!(
@@ -105,9 +123,8 @@ pub(super) fn discard(
                 );
                 false
             }
-        };
-        Input::Turn(TurnInput::RunRemoved { key, freed })
-    });
+        }
+    }
 }
 
 /// A run folder's removal ended: shutdown no longer waits for it, and a session whose run was
