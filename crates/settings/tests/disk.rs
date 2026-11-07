@@ -6,6 +6,8 @@ use clauseo_settings::{Effective, Files as _, FontSize, Locations, SystemFiles, 
 use std::path::PathBuf;
 use std::process;
 
+#[path = "disk/trust.rs"]
+mod trust;
 #[cfg(unix)]
 #[path = "disk/write.rs"]
 mod write;

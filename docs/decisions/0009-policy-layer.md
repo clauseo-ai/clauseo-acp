@@ -19,6 +19,60 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   - macOS: managed preferences for the domain `ai.clauseo.desktop`, then
     `/Library/Application Support/Clauseo/policy.json`.
   - Linux: `/etc/clauseo/policy.json`.
+  - *Amended 2026-11-06 (security review of #554):* **a `policy.json` is read only when an
+    administrator owns it.** Ordinary users can make folders under `ProgramData`, so without a
+    check any user-level process could plant a machine-wide policy (agent launch commands that run
+    as another user, security keys turned down). On macOS and Linux the file and its folder must be
+    owned by root, have no group or other write bit and not be symlinks; on Linux `/etc` must have
+    no group or other write bit either (`/Library/Application Support` is not checked: admin-group
+    users can write it, and a folder they make there fails the owner check). On Windows the file
+    and `ProgramData\Clauseo` must be owned by Administrators, SYSTEM or TrustedInstaller and not
+    be reparse points; the file's DACL grants no write-type right to any other SID, and the
+    folder's grants no other SID a right that removes, renames or re-secures a file in it
+    (`FILE_DELETE_CHILD`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER`, `GENERIC_WRITE`,
+    `GENERIC_ALL`). The folder rule is narrower because a user can add a file there only where
+    none exists, and that file is user-owned, so it is ignored. On Windows the file must also
+    have exactly one name, so no one can hard-link an admin-owned file in as `policy.json`; on
+    Unix a second name elsewhere changes nothing (only root can add a name in the folder), and
+    counting names would let any user switch the policy off with `ln` (review of #590). The
+    check and the read use the same open file (Unix: `O_DIRECTORY | O_NOFOLLOW` on the folder,
+    `openat(O_NOFOLLOW)` on the file, `fstat`, then read that descriptor; Windows: one handle
+    opened without following a reparse point), so nothing is swapped in between. **The folder
+    is judged before anything in it is opened** (round 2 of the #590 review): a folder that
+    fails the owner or mode rule ignores the policy, so a planted object never makes the file
+    unreadable and locks every user's security keys. A folder that will not open is judged by
+    `lstat` on its path: a link, something not a folder, or a wrong owner or mode is ignored; a
+    folder that looks trusted, or cannot be looked at, is unreadable, because the failure may be
+    the reading process's own sandbox (`sandbox-exec` on macOS, a Landlock ruleset on Linux),
+    and ignoring it would let a process switch the policy off for itself (round 4). On Windows a
+    process started with a restricted token or in an AppContainer can still make the policy read
+    as ignored for itself; that needs deliberate tooling. On Linux a user can run Clauseo in a
+    user namespace (`unshare -r`, no root needed), where root's files show another owner, and
+    with a mount namespace present a different `/etc`, so the policy reads as ignored or absent
+    for that process. A firm that needs the policy enforced on Linux restricts unprivileged user
+    namespaces: the `kernel.unprivileged_userns_clone=0` sysctl, or AppArmor's userns
+    restriction, which Ubuntu 24.04 turns on by default. A `uid_map` check was rejected: it
+    would lock settings for every user under flatpak, snap or a container, and would not stop
+    `unshare -rm` with a tmpfs over `/etc`. More generally, the policy file binds the Clauseo
+    builds the firm deploys. Clauseo is open source, so a user who can run a build of their own
+    is not bound by it; firms enforce which builds run with application allowlisting (MDM, WDAC,
+    Santa). Only in a trusted folder does a file that cannot be opened count as
+    unreadable on Unix (only root put it there). On Windows a trusted folder still lets users add
+    files, so any refused or odd open of the file (access denied, a directory, a reparse point)
+    ignores it, but a sharing or lock violation (someone holding the file open, which any user
+    can do since every user can read it) is retried three times 100 ms apart and then makes the
+    file unreadable, failing closed, so holding it cannot switch the policy off; an admin-made file Users cannot read is therefore ignored,
+    and IT keeps the Users read right the folder's ACL gives it. IT creates the
+    folder itself (owned by Administrators with a protected ACL on Windows; as root on macOS, or
+    deploys through managed preferences), since a folder a user made first is theirs. **A file that fails is ignored**: it reads as absent,
+    locks nothing and shows nothing in the app, and the host log says once which source was ignored
+    and why (`owner is not an administrator`, `writable by non-administrators`, a link, more
+    than one name, cannot be opened or is not a folder or plain file), once per process, with no path. It is not treated as unreadable: a planted file must not be able
+    to lock the security keys either. An administrator who sets a bad ACL on the firm's own file
+    loses the policy until the ACL is fixed. The registry key and managed preferences are writable
+    only by administrators, as the OS enforces, so they are not checked. (`TrustedFilePolicy` in
+    `crates/settings/src/policy/trust.rs`; the Windows ACL walk in
+    `crates/settings/src/policy/windows/acl.rs`.)
   - Only these count. `HKEY_CURRENT_USER`, roaming app data and user-writable files are never
     policy, and no variable moves a source: `CLAUSEO_DATA_DIR` moves only the data folder and,
     with it, the default matters folder, `<data dir>-matters` beside it (never inside: the

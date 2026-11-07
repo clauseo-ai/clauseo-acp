@@ -6,7 +6,7 @@
 mod tests;
 
 use super::managed_prefs::{self, PlistValue, SOURCE};
-use super::{FilePolicy, PolicyRead, PolicySource};
+use super::{PolicyRead, PolicySource, TrustedFilePolicy};
 use crate::SystemFiles;
 use crate::locations::IDENTIFIER;
 use objc2_core_foundation::{
@@ -15,15 +15,20 @@ use objc2_core_foundation::{
 };
 use std::path::PathBuf;
 
-/// Managed preferences, then the `policy.json` in `/Library/Application Support/Clauseo`.
+/// Managed preferences, then the `policy.json` in `/Library/Application Support/Clauseo`, read
+/// only when root owns it and its folder and neither is group- or other-writable
+/// ([`TrustedFilePolicy`]). `/Library/Application Support` itself is not checked: admin-group
+/// users can write it, and a folder they make there is theirs, so it fails the owner check (and
+/// the firm's file in it is ignored: deploy through managed preferences, or make the folder as
+/// root first).
 pub(super) fn sources() -> Vec<Box<dyn PolicySource>> {
     vec![
         Box::new(ManagedPreferences {
             domain: IDENTIFIER.to_owned(),
         }),
-        Box::new(FilePolicy::new(
+        Box::new(TrustedFilePolicy::owned_by(
             PathBuf::from("/Library/Application Support/Clauseo/policy.json"),
-            SystemFiles,
+            0,
         )),
     ]
 }

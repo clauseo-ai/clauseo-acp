@@ -22,18 +22,23 @@ unicode-normalization = { workspace = true }
 # The key names in macOS managed preferences files; plain Rust, so tested on every OS.
 plist = { workspace = true }
 
-# The registry and the known folders.
+# The registry and the known folders; the owner, DACL and link count of policy.json and its
+# folder (Security, Security_Authorization, Storage_FileSystem).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_System_Registry",
   "Win32_UI_Shell",
   "Win32_System_Com",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
 ] }
 
 # The login user's name from the real user id, for its managed preferences file (macOS); built
-# on every Unix so it is tested off macOS too.
+# on every Unix so it is tested off macOS too; `fs` for the policy.json trust check, which opens
+# the folder and the file without following a symlink (open, openat) and reads that descriptor.
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["user"] }
+nix = { workspace = true, features = ["user", "fs"] }
 
 # Managed preferences.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -41,6 +46,8 @@ objc2-core-foundation = { workspace = true, features = ["CFPreferences"] }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json", "redactions"] }
+# Captures the host log line of an ignored policy file in the disk tests.
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
 [lints]
 workspace = true
