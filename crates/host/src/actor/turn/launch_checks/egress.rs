@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clauseo_protocol::{AgentId, AgentKind};
+use clauseo_sandbox::ports::ListenerFor;
 use clauseo_sandbox::{
     Allowlist, Denial, DenialSink, LoginKind, ProxyConfig, Upstream, builtin_allowlist,
 };
@@ -152,6 +153,9 @@ pub(crate) fn proxy_config(
         record: None,
         // Stage C's rule: the token-free listener only for a launch with the browser.
         browser,
+        // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS`. R17
+        // PR-D asks for `ListenerFor::TierB` when it runs a tier-B launch's agent jailed.
+        listener: ListenerFor::Other,
     }
 }
 
