@@ -12,8 +12,8 @@
 //! The wait is bounded: [`HOLD_BOUND`] on the host clock after the start, a little past the
 //! lookup's own 2 s, or a lookup whose sender is dropped, refuses what is held with the
 //! retryable `matter.folder_missing`, as does anything asking after the bound and before an
-//! answer. Shutdown answers what is held with `Error::Closed`, as it does a command it will not
-//! run, and never waits for it.
+//! answer, or past [`MAX_HELD`] held requests. Shutdown answers what is held with
+//! `Error::Closed`, as it does a command it will not run, and never waits for it.
 //!
 //! No check reads Documents: the refused folders never list it, so a pick or a register is
 //! checked the same before and after the answer. An answer with no folder, or a dropped sender,
@@ -37,6 +37,10 @@ use crate::error::Error;
 /// How long after the start what needs the default location may wait for the lookup: a little
 /// past its own 2 s bound (`clauseo_settings`' `DOCUMENTS_WAIT`).
 pub(crate) const HOLD_BOUND: Duration = Duration::from_secs(5);
+
+/// How many requests may be held for the answer at once. Past it a request runs at once and
+/// meets [`not_yet`], as after the bound: a window that keeps asking cannot grow the list.
+pub(crate) const MAX_HELD: usize = 64;
 
 /// The folders with the default matters folder under Documents, as the lookup gives them
 /// (`Locations::with_documents`), once it answers.
@@ -117,10 +121,13 @@ pub(super) fn pending(actor: &Actor) -> bool {
 }
 
 /// Whether a request that needs the default location waits for the answer: it is still
-/// looked up, the bound has not passed and the host is not stopping. Otherwise the request runs
-/// at once, and while the lookup is pending meets [`not_yet`].
+/// looked up, the bound has not passed, the host is not stopping and fewer than [`MAX_HELD`]
+/// wait. Otherwise the request runs at once, and while the lookup is pending meets [`not_yet`].
 fn holds(actor: &Actor) -> bool {
-    pending(actor) && !actor.documents.bound && !matches!(actor.phase, HostPhase::Stopping(_))
+    pending(actor)
+        && !actor.documents.bound
+        && !matches!(actor.phase, HostPhase::Stopping(_))
+        && actor.documents.held.len() < MAX_HELD
 }
 
 /// Holds `query` with its `reply` when it needs the default location and [`holds`] says so;
