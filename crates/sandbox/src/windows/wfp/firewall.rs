@@ -28,7 +28,9 @@ use windows::Win32::System::Com::{
 };
 use windows::core::{BSTR, HRESULT, Interface};
 
-use super::spec::{Direction, FirewallOutcome, FirewallTrouble, RuleProtocol, RuleSpec};
+use super::spec::{
+    Direction, FirewallOutcome, FirewallTrouble, RuleProtocol, RuleSpec, allowed_users,
+};
 
 /// COM initialised on this thread for the firewall calls; uninitialised on drop when this
 /// initialised it (a thread already in another apartment keeps it).
@@ -214,15 +216,16 @@ fn ensure_rule(list: &INetFwRules, spec: &RuleSpec) -> Result<(), FirewallTroubl
     let users = unsafe { rule.LocalUserAuthorizedList() }
         .map_err(|e| com("reading LocalUserAuthorizedList", e))?
         .to_string();
-    let wanted = spec
-        .users
-        .split(";;;")
-        .skip(1)
-        .filter_map(|ace| ace.split(')').next());
-    if let Some(missing) = wanted.into_iter().find(|sid| !users.contains(sid)) {
+    // Exactly the pool, compared as SIDs, never by substring.
+    let mut got = allowed_users(&users);
+    let mut wanted = allowed_users(&spec.users);
+    for list in [&mut got, &mut wanted].into_iter().flatten() {
+        list.sort();
+    }
+    if got.is_none() || got != wanted {
         return Err(FirewallTrouble::RuleUsers {
             rule: spec.name.clone(),
-            missing: missing.to_owned(),
+            read_back: users,
         });
     }
     Ok(())

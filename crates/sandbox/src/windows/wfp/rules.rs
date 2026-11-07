@@ -7,7 +7,8 @@
 //! [`WINDOWS_PORTS`], the one place the range is excepted (`spec.rs` says why). `firewall.rs`
 //! writes them on Windows.
 
-use super::spec::{Namespace, aces};
+use super::sddl::aces;
+use super::spec::Namespace;
 use crate::ports::WINDOWS_PORTS;
 use crate::windows::sids::Sid;
 
@@ -120,7 +121,7 @@ pub fn rule_names(ns: &Namespace) -> Vec<String> {
 
 /// A firewall rule's `LocalUserAuthorizedList`: one allow per SID, as Codex writes it.
 pub fn rule_users(sids: &[Sid]) -> String {
-    format!("O:LSD:{}", aces(sids))
+    format!("O:LSD:{}", aces('A', sids))
 }
 
 /// Every TCP port outside [`WINDOWS_PORTS`], as the firewall writes port ranges.
@@ -164,12 +165,12 @@ pub enum FirewallTrouble {
         /// Its HRESULT.
         code: u32,
     },
-    /// A rule's `LocalUserAuthorizedList` read back without a pool user.
+    /// A rule's `LocalUserAuthorizedList` read back as other than exactly the pool.
     RuleUsers {
         /// The rule's name.
         rule: String,
-        /// The pool user's SID it lacks.
-        missing: String,
+        /// What it read back as.
+        read_back: String,
     },
 }
 
@@ -203,9 +204,9 @@ impl FirewallTrouble {
             FirewallTrouble::Com { what, code } => {
                 format!("a firewall call failed ({what}, error {code:#x}), so {STILL_ENFORCED}")
             }
-            FirewallTrouble::RuleUsers { rule, missing } => format!(
-                "the firewall rule {rule} didn't keep the sandbox user {missing}, so \
-                 {STILL_ENFORCED} for that user"
+            FirewallTrouble::RuleUsers { rule, read_back } => format!(
+                "the firewall rule {rule} reads back with other users than the pool's ({read_back}), \
+                 so {STILL_ENFORCED}"
             ),
         }
     }

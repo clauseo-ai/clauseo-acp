@@ -11,7 +11,6 @@ use std::ptr;
 use windows::Win32::Foundation::{HLOCAL, LocalFree};
 use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FwpmFilterGetSecurityInfoByKey0, FwpmFilterSetSecurityInfoByKey0, FwpmFreeMemory0,
-    FwpmLayerGetSecurityInfoByKey0, FwpmLayerSetSecurityInfoByKey0,
     FwpmProviderGetSecurityInfoByKey0, FwpmProviderSetSecurityInfoByKey0,
     FwpmSubLayerGetSecurityInfoByKey0, FwpmSubLayerSetSecurityInfoByKey0,
 };
@@ -22,7 +21,7 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSID};
 use windows::core::{GUID, HSTRING, PWSTR};
 
-use super::{Engine, check, code_of, layer_key};
+use super::{Engine, check, code_of};
 use crate::windows::sids::Sid;
 use crate::windows::wfp::check::WfpError;
 use crate::windows::wfp::spec::{Namespace, Object};
@@ -31,7 +30,6 @@ use crate::windows::wfp::spec::{Namespace, Object};
 #[derive(Debug, Clone, Copy)]
 enum Kind {
     Filter,
-    Layer,
     Sublayer,
     Provider,
 }
@@ -41,7 +39,6 @@ fn kind_and_key(ns: &Namespace, object: Object) -> (Kind, Option<GUID>) {
     match object {
         Object::FilterContainer => (Kind::Filter, None),
         Object::Filter(key) => (Kind::Filter, Some(GUID::from_u128(key))),
-        Object::Layer(layer) => (Kind::Layer, Some(layer_key(layer))),
         Object::Sublayer => (Kind::Sublayer, Some(GUID::from_u128(ns.sublayer))),
         Object::Provider => (Kind::Provider, Some(GUID::from_u128(ns.provider))),
     }
@@ -72,16 +69,6 @@ pub(in crate::windows::wfp) fn grant(
     let code = unsafe {
         match kind {
             Kind::Filter => FwpmFilterGetSecurityInfoByKey0(
-                handle,
-                key,
-                info,
-                no_sid,
-                no_sid,
-                &raw mut acl,
-                no_sacl,
-                &raw mut sd,
-            ),
-            Kind::Layer => FwpmLayerGetSecurityInfoByKey0(
                 handle,
                 key,
                 info,
@@ -127,9 +114,6 @@ pub(in crate::windows::wfp) fn grant(
         match kind {
             Kind::Filter => {
                 FwpmFilterSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
-            }
-            Kind::Layer => {
-                FwpmLayerSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
             }
             Kind::Sublayer => {
                 FwpmSubLayerSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
