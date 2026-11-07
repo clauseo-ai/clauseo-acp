@@ -546,6 +546,7 @@ crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer/end.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
+crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
 crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
