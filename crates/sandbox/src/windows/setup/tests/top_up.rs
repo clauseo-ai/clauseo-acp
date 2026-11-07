@@ -1,5 +1,5 @@
 //! The top-up (`top_up.rs`): every run leaves at least [`MIN_FREE_AFTER_RUN`] free pool users,
-//! cap allowing; a re-run that tops up resets no password unless a kept profile needs it.
+//! cap allowing, on top of what the run does anyway: a re-run stays a re-run.
 
 use super::*;
 
@@ -12,13 +12,12 @@ fn pool_holding(test: &str, held: impl IntoIterator<Item = u32>) -> (FakeMachine
     (machine, acl)
 }
 
-/// The top-up a report gives, with no repair.
+/// The top-up a report gives.
 fn top_up(free_before: usize, added: usize, short: usize) -> TopUp {
     TopUp {
         free_before,
         added,
         short,
-        repair: None,
     }
 }
 
@@ -52,9 +51,11 @@ fn three_marked_and_two_free_make_five_free_so_it_adds_three() {
     assert_eq!(report.top_up, top_up(5, 3, 0));
     let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
     assert_eq!(made, (1009..=1011).map(sid).collect::<Vec<_>>());
-    let reset: Vec<Sid> = report.reset.iter().map(|u| u.sid.clone()).collect();
+    assert_eq!(report.reset.len(), 8, "a re-run resets every kept password");
+    let profiles = report.profiles_reset.unwrap().into_iter();
+    let profiles: Vec<Sid> = profiles.map(|u| u.sid).collect();
     assert_eq!(
-        reset,
+        profiles,
         (1004..=1006).map(sid).collect::<Vec<_>>(),
         "the marked alone"
     );
@@ -109,39 +110,8 @@ fn near_the_cap_it_adds_what_fits_and_reports_the_rest() {
 }
 
 #[test]
-fn a_re_run_that_tops_up_resets_no_kept_password() {
+fn a_re_run_that_tops_up_is_still_a_re_run() {
     let (mut machine, mut acl) = pool_holding("topup-rerun", 1001..=1004);
-    // Open sessions don't refuse it: no password changes under them.
-    machine.sessions_open = true;
-    let old = passwords(&machine);
-    let from = machine.calls.len();
-    let req = request(&mut machine, 0, Vec::new());
-    let report = set_up(&mut machine, &mut acl, &req).unwrap();
-    assert_eq!(report.top_up, top_up(4, 4, 0));
-    assert_eq!(report.reset, []);
-    let calls = machine.calls_since(from);
-    assert!(
-        !calls.iter().any(|c| c.starts_with("set_password")),
-        "{calls:?}"
-    );
-    assert!(!calls.contains(&"sessions_open"));
-    assert!(calls.contains(&"protect_for_owner 1009,1010,1011,1012"));
-    let now = passwords(&machine);
-    for (name, password) in &old {
-        assert!(
-            now.contains(&(name.clone(), password.clone())),
-            "{name} kept"
-        );
-        let sid = &machine.state.accounts[name].sid;
-        assert_eq!(&machine.state.secrets[sid], password, "{name}'s blob kept");
-    }
-    assert_eq!(machine.state.secrets.len(), 12);
-}
-
-#[test]
-fn a_re_run_that_tops_up_with_a_profile_missing_resets_every_kept_password() {
-    let (mut machine, mut acl) = pool_holding("topup-repair", 1001..=1004);
-    machine.state.profiles.remove(&sid(1006));
     machine.sessions_open = true;
     let before = machine.state.clone();
     let req = request(&mut machine, 0, Vec::new());
@@ -153,15 +123,26 @@ fn a_re_run_that_tops_up_with_a_profile_missing_resets_every_kept_password() {
     );
 
     machine.sessions_open = false;
+    let old = passwords(&machine);
+    let from = machine.calls.len();
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
-    let repair = report.top_up.repair.clone().unwrap();
-    assert!(repair.contains("ClauseoSb06 has no profile"), "{repair}");
-    assert_eq!((report.top_up.added, report.made.len()), (4, 4));
-    assert_eq!(report.reset.len(), 8, "every kept password");
-    assert!(
-        machine.state.profiles.contains_key(&sid(1006)),
-        "logged on again"
-    );
+    assert_eq!(report.top_up, top_up(4, 4, 0));
+    assert_eq!(report.reset.len(), 8, "every kept password, as today");
+    assert_eq!(report.made.len(), 4);
+    let calls = machine.calls_since(from);
+    let all = "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012";
+    assert!(calls.contains(&all), "{calls:?}");
+    let now = passwords(&machine);
+    for (name, password) in &old {
+        assert!(
+            !now.contains(&(name.clone(), password.clone())),
+            "{name} reset"
+        );
+        let sid = &machine.state.accounts[name].sid;
+        let now = &machine.state.accounts[name].password;
+        assert_eq!(&machine.state.secrets[sid], now, "{name}'s new blob");
+    }
+    assert_eq!(machine.state.secrets.len(), 12);
 }
 
 #[test]

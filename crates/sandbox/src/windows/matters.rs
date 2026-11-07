@@ -133,6 +133,28 @@ impl MatterSids {
         due.cloned().collect()
     }
 
+    /// The users of `pool` that [`MatterSids::assign`] would hold back once the elevated set-up
+    /// has reset those [`MatterSids::resets_due`] names: the set-up's top-up counts the rest
+    /// free (`setup/top_up.rs`). The same rule as `assign` (`assign::held_back`): the rows as
+    /// loaded, `ledger` (grants and hand-backs owed), the set-aside owners, the open sessions
+    /// and the marks left after the resets. A ledger or open sessions that can't be read hold
+    /// every user, as an unreadable set-aside manifest does.
+    pub fn held_after_resets(&self, pool: &[Sid], ledger: io::Result<Ledger>) -> Vec<Sid> {
+        let (Ok(ledger), Ok(open)) = (ledger, self.open_sessions()) else {
+            return pool.to_vec();
+        };
+        let due: BTreeSet<Sid> = self.resets_due().into_iter().collect();
+        let needs_reset: BTreeSet<Sid> = self.needs_reset.difference(&due).cloned().collect();
+        let set_aside = set_aside::set_aside_owners(&self.data_dir, self.owner_of);
+        let held = assign::Holds {
+            ledger: &ledger,
+            set_aside: &set_aside,
+            open: &open,
+            needs_reset: &needs_reset,
+        };
+        assign::held_back(pool, &self.rows, &held)
+    }
+
     /// Clears the reset mark of each of `users`, once the elevated set-up has deleted and remade
     /// its profile and closed its `LocalLow` again. Inside [`MatterSids::change`]'s lock and
     /// fresh read, so a mark another release added meanwhile stays; a user a matter holds keeps

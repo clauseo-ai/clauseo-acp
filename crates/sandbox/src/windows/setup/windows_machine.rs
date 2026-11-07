@@ -32,7 +32,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{self, Marker, MarkerState};
-use crate::windows::matters::{MatterRow, MatterSids};
+use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets;
@@ -386,25 +386,14 @@ impl Machine for WindowsMachine {
         })
     }
 
-    fn held_users(&mut self, trusted: &[Sid]) -> Result<Vec<Sid>, MachineError> {
+    fn held_users(&mut self, pool: &[Sid], trusted: &[Sid]) -> Result<Vec<Sid>, MachineError> {
         owned(self, |m| {
             let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
-            let rows = matters.rows().values();
-            let mut held: Vec<Sid> = rows.filter_map(MatterRow::holds).cloned().collect();
-            match m.ledger(trusted) {
-                Ok(ledger) => {
-                    let granted = trusted.iter().filter(|sid| ledger.grants_sid(sid));
-                    held.extend(granted.cloned());
-                }
-                Err(error) => {
-                    // Counting every user in use only adds users, cap allowing.
-                    tracing::warn!(%error, "the ledger can't be read; every sandbox user in use");
-                    held.extend_from_slice(trusted);
-                }
+            let ledger = m.ledger(trusted);
+            if let Err(error) = &ledger {
+                tracing::warn!(%error, "the ledger can't be read; every sandbox user is in use");
             }
-            held.sort();
-            held.dedup();
-            Ok(held)
+            Ok(matters.held_after_resets(pool, ledger))
         })
     }
 

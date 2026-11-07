@@ -158,8 +158,7 @@ fn preflight(machine: &mut impl Machine) -> Result<(), SetupFailure> {
 /// A set-up makes enough for [`POOL_START`] users at least; an extend makes `add` more; then
 /// each tops up to [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free users (`top_up.rs`,
 /// `held` the users in use); none goes past [`POOL_CAP`] SIDs in the record, dead ones kept
-/// for the ledger included. A re-run with users to reset refuses while a session is open; one
-/// that tops up resets none unless a kept user's profile needs it (`top_up::probe`).
+/// for the ledger included. A re-run with users to reset refuses while a session is open.
 fn plan_pool(
     machine: &mut impl Machine,
     before: Option<&MachineRecord>,
@@ -247,10 +246,6 @@ fn plan_pool(
         )));
     }
     plan.reset = add == 0 && kept > 0;
-    if plan.reset && plan.top_up.added > 0 {
-        plan.top_up.repair = top_up::probe(machine, &plan.kept, &plan.resets);
-        plan.reset = plan.top_up.repair.is_some();
-    }
     if plan.reset {
         match owned(machine, Machine::sessions_open) {
             Ok(false) => {}
