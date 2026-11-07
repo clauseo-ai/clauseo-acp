@@ -76,10 +76,17 @@ fn a_kill_on_close_jobs_child_that_read_its_own_job_dies_with_the_creators_handl
     }
     stdin.write_all(b"go\n").unwrap();
     stdin.flush().unwrap();
+    // Not at the line's start: with `--test-threads=1` libtest prints `test <name> ... ` before
+    // the test runs, so the child's line follows it. A search for a line starting with it read
+    // on to the end of the child's stdout, which never came, as the child waits for the end of
+    // the stdin held here (run 42419661450 timed out so).
     let said = BufReader::new(stdout)
         .lines()
         .map_while(Result::ok)
-        .find(|line| line.starts_with("job-child "))
+        .find_map(|line| {
+            line.split_once("job-child ")
+                .map(|(_, rest)| format!("job-child {rest}"))
+        })
         .unwrap_or_default();
     // Its immediate job is the test's, holding the child alone, even when this test runs in a
     // job of its own (nested jobs).
