@@ -174,7 +174,7 @@ test("login found: UD1's found card, sending use_found_login or use_different_ac
 
 test("signing in: UD1's panel inline, with the paste field and Cancel; a failure shows gate-failed's words; the main window is not asked for", async () => {
   const t = await at({ waiting: { since: AT, nudge: true } });
-  expect(words()).toContain("Finish signing in in your browser");
+  expect(words()).toContain("Finish signing in with your browser.");
   expect(words()).toContain("Didn't open?");
   await press(button("Paste it", block("claude")!));
   const field = block("claude")!.querySelector<HTMLInputElement>("input");

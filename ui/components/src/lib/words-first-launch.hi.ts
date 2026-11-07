@@ -24,7 +24,7 @@ export const HI = {
   // the live region's words for the download, which hears no bytes (new)
   "Getting {name} ready…": "{name} तैयार हो रहा है…",
   "{name} is ready": "{name} तैयार है",
-  "Use the system proxy": "सिस्टम की proxy इस्तेमाल करें",
+  "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
   "Ask your IT team": "अपनी IT टीम से कहें",
   "Message copied": "संदेश कॉपी हो गया",
   "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
@@ -66,7 +66,7 @@ export const HI = {
   "Using your firm's account": "आपकी फ़र्म का खाता इस्तेमाल हो रहा है",
 
   // signing in, in the browser (design)
-  "Finish signing in in your browser": "अपने ब्राउज़र में साइन इन पूरा करें",
+  "Finish signing in with your browser.": "अपने ब्राउज़र में साइन इन पूरा करें",
   "Didn't open?": "ब्राउज़र नहीं खुला?",
   "Got a code instead?": "इसके बजाय कोड मिला?",
   "Paste it": "उसे पेस्ट करें",

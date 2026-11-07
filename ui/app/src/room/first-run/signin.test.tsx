@@ -126,10 +126,10 @@ test("plan-key: with keys_available false there is no key field, and the screen 
   expect(text()).toContain("This computer has no keyring to keep an API key in.");
 });
 
-test("signin-wait: Finish signing in in your browser, with Cancel sending CancelSignIn; no nudge until the host says so", async () => {
+test("signin-wait: Finish signing in with your browser, with Cancel sending CancelSignIn; no nudge until the host says so", async () => {
   const t = await at({ waiting: { since: AT, nudge: false } });
   expect(gateState()).toBe("waiting");
-  expect(text()).toContain("Finish signing in in your browser");
+  expect(text()).toContain("Finish signing in with your browser.");
   expect(text()).not.toContain("Didn't open?");
   // the window keeps no clock of its own: time passing brings no nudge
   await new Promise((resolve) => setTimeout(resolve, 40));

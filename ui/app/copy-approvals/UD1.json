@@ -91,7 +91,10 @@
   },
   "UD1-14": {
     "en": "Use the system proxy",
-    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
@@ -282,11 +285,11 @@
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-38": {
-    "en": "Finish signing in in your browser",
+    "en": "Finish signing in with your browser.",
     "hi": "अपने ब्राउज़र में साइन इन पूरा करें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-39": {
     "en": "Didn't open?",
@@ -745,14 +748,20 @@
   },
   "UD1-86": {
     "en": "Use the system proxy",
-    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-87": {
     "en": "Use the system proxy",
-    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"

@@ -44,6 +44,36 @@ test("install: missing with no bytes to download shows no line at all", async ()
   expect(text()).not.toContain("Needs a download");
 });
 
+test("install: missing while the sign-in is queued says the size, never Getting ready, live words included", async () => {
+  await mountFirstRun({
+    matters: [A],
+    first: [
+      install(CLAUDE, { missing: { download_bytes: 160_000_000 } }),
+      signIn(CLAUDE, "queued"),
+    ],
+  });
+  expect(foot()?.dataset["state"]).toBe("missing");
+  expect(text()).toContain("Needs a download of about 160 MB");
+  expect(text()).toContain("Your browser opens when Claude is ready.");
+  expect(text()).not.toContain("Getting Claude ready");
+  const said = foot()?.closest(".room-entry")?.querySelector('[role="status"]')?.textContent;
+  expect(said).toBe("Needs a download of about 160 MB");
+});
+
+test("install: downloading while the sign-in is queued shows the progress line, and the live region the state", async () => {
+  await mountFirstRun({
+    matters: [A],
+    first: [
+      install(CLAUDE, { downloading: { received: 45_000_000, total: 160_000_000 } }),
+      signIn(CLAUDE, "queued"),
+    ],
+  });
+  expect(foot()?.dataset["state"]).toBe("downloading");
+  expect(text()).toContain("Getting Claude ready… 45 MB of 160 MB");
+  const said = foot()?.closest(".room-entry")?.querySelector('[role="status"]')?.textContent;
+  expect(said).toBe("Getting Claude ready…");
+});
+
 test("install: downloading says its size and progress in whole MB: 45 MB of 160 MB", async () => {
   await mountFirstRun({
     matters: [],

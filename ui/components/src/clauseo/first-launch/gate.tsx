@@ -218,7 +218,7 @@ export function Gate({
       ) : (
         <>
           <Act dot act={cancel}>
-            <Say>{w("Finish signing in in your browser")}</Say>
+            <Say>{w("Finish signing in with your browser.")}</Say>
           </Act>
           {/* only once the host says the page may not have opened (30 s): never on a timer of the window's own */}
           {view.nudge && (
