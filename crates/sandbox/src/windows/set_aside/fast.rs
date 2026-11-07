@@ -33,6 +33,21 @@ pub(crate) fn under_lock<R>(
     Ok(f(open))
 }
 
+/// The sessions `matter`'s record lists as open, read under its set-aside lock: launched with no
+/// after-session pass yet. No record is none open; `None` is a record that can't be read.
+pub(crate) fn open_sessions_of(
+    data_dir: &Path,
+    matter: &MatterId,
+) -> Result<Option<BTreeSet<String>>, SetAsideFailure> {
+    let place = Place::new(data_dir, matter);
+    let _held = place.lock()?;
+    Ok(match place.read_record() {
+        Ok(Some(record)) => Some(record.sessions),
+        Ok(None) => Some(BTreeSet::new()),
+        Err(_unreadable) => None,
+    })
+}
+
 /// Removes `matter`'s clean-close record; the caller holds the matter's lock. Every launch
 /// does, before it adds its session, so no record is ever left while an agent runs.
 pub(super) fn spend_clean_close(data_dir: &Path, matter: &MatterId) -> Result<(), SetAsideFailure> {
