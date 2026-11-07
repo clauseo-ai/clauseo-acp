@@ -85,12 +85,9 @@ fn run_once(shared: &Arc<Shared>, text: &str) -> io::Result<Once> {
             &launcher.args,
             &launcher.cwd,
             &launcher.env,
+            #[cfg(windows)]
+            &launcher.job,
         )?;
-        #[cfg(windows)]
-        if let Err(error) = launcher.job.adopt(&mut child, "agent-browser") {
-            drop(child.wait());
-            return Err(error);
-        }
         #[cfg(unix)]
         launcher.reaper.say(&format!("agent {}", child.id()));
         let pipes = (child.stdin.take(), child.stdout.take());

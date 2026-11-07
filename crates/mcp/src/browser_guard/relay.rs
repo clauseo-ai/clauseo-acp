@@ -42,15 +42,14 @@ mod oneshot;
 pub(crate) mod pumps;
 
 use std::io;
-use std::process::Child;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use super::note;
 use super::parent::Parent;
 use super::session::{self, Shared, Stopped};
+use super::{Child, note};
 pub(crate) use lines::{Line, Overflow, read_line};
 use lines::{answer_all, lock};
 
@@ -71,10 +70,6 @@ const CRASHED: &str = "Chrome exited unexpectedly; the guard stopped the browser
                        browser call starts it again";
 /// The error a request in flight gets when the guard ends.
 const ENDED: &str = "the browser server ended before this call was answered";
-
-/// Windows: the child gets no console window (agent-browser issue #1644).
-#[cfg(windows)]
-pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// What the guard's threads report. The browser's events carry the generation of the start
 /// they belong to (`session.rs`).

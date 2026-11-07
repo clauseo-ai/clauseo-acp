@@ -26,6 +26,8 @@
 //! `docs/decisions/0029-browser.md` gives every rule its reason.
 
 mod chrome;
+#[cfg(any(windows, test))]
+mod command_line;
 mod downloads;
 mod env;
 mod filter;
@@ -43,6 +45,13 @@ mod runs;
 mod session;
 #[cfg(any(unix, test))]
 mod socket;
+
+/// The guard's children and their pipes: std's on Unix; on Windows the job's own, created in
+/// the guard's job (`job/spawn.rs`), which std's `Command` cannot do.
+#[cfg(windows)]
+use job::{Child, ChildStderr, ChildStdin};
+#[cfg(unix)]
+use std::process::{Child, ChildStderr, ChildStdin};
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

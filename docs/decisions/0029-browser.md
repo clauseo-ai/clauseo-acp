@@ -103,11 +103,21 @@ The socket folder is agent-writable (`<cwd>` is, and the jail allows the Unix so
 the whole session), so the agent can write the claimed port into a file itself. The check
 catches agent-browser's silent fallback to another port; it is not a boundary against the agent.
 
-How far "ends agent-browser" reaches differs by OS. On Windows the guard starts Chrome and then
-agent-browser suspended, puts each in a Job Object the guard owns
-(`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no breakaway allowed), then resumes it
-(`browser_guard/job.rs`); `DETACHED_PROCESS` and a new process group do not leave a job, so
-ending the job ends the daemon and Chrome too. On Unix the guard kills the direct child, then
+How far "ends agent-browser" reaches differs by OS. On Windows the guard creates Chrome,
+agent-browser and each one-shot agent-browser directly in a Job Object it owns
+(`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no breakaway allowed): `CreateProcessW` with the job in
+a `PROC_THREAD_ATTRIBUTE_JOB_LIST` attribute (`browser_guard/job.rs`, `job/spawn.rs`), so
+Windows puts the process in the job as it creates it, and a failed join fails the creation. No
+moment exists when a child runs, or waits, outside the job: before, the guard started each one
+suspended, then assigned it, then resumed it, and a guard killed between the start and the
+assignment left a suspended child outside the job for good. Each child now starts running, not
+suspended; nothing has to wait for it to join. Std's `Command` cannot pass the attribute (its
+`raw_attribute` is unstable), so the guard builds what `Command` gave before itself: the pipes
+and `NUL`, with only the child's three standard handles inherited (a
+`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), `CREATE_NO_WINDOW`, exactly the given environment, the
+working folder, and std's argument quoting, ported with std's own test cases
+(`browser_guard/command_line.rs`). `DETACHED_PROCESS` and a new process group do not leave a
+job, so ending the job ends the daemon and Chrome too. On Unix the guard kills the direct child, then
 the daemon, which has left the process group (`setsid`), by the pid of the process listening on
 the session's socket, then Chrome's process group ("Chrome on the claimed port", below).
 
@@ -125,13 +135,14 @@ Why each value:
 
 **The child.** agent-browser starts with `--cwd` as its working folder, piped stdin and stdout,
 and the guard's stderr; on Windows with `CREATE_NO_WINDOW` (agent-browser issue #1644). The
-guard starts it with `std::process::Command::spawn`, which `clippy.toml` bans because agents
-start through the `process` crate: this crate may depend only on serde, serde_json, nix (Unix)
+guard starts it with `std::process::Command::spawn` (on Windows with `CreateProcessW`, to create
+it in the guard's job, above), which `clippy.toml` bans because agents start through the
+`process` crate: this crate may depend only on serde, serde_json, nix (Unix)
 and windows (Windows), the children are fixed programs (agent-browser, the host's Chrome, and on
 Unix the guard's own binary as its reaper), and the host starts the guard itself through the
 `process` crate, whose tree kill reaches the guard and agent-browser. One `#[expect]` at each
-spawn carries it (`spawn_child` in `crates/mcp/src/browser_guard/relay.rs`, `spawn` in
-`chrome.rs`, `Reaper::start` in `reaper.rs`). The guard exits with the child's exit code, or
+spawn carries it (`spawn_child` in `crates/mcp/src/browser_guard/relay/pumps.rs`, `spawn` in
+`chrome.rs`, `Reaper::start` in `reaper.rs`; Unix only for the first two). The guard exits with the child's exit code, or
 1 when a signal killed it.
 
 **The relay.** Child to agent: each stdout line is copied whole, bytes unchanged. Agent to child:
@@ -1434,6 +1445,15 @@ The download (part 3):
   for the session (the guard exits 1).
 - The host has two read-only probes for a run folder: `runs_settled` (cleanup finished) and
   `chrome_groups` (whose Chrome may live). Neither proves Chrome dead by itself.
+- On Windows the guard creates its children itself (`job/spawn.rs`, `job/child.rs`), so a std
+  change to `Command` (its quoting, its handle rules) does not reach them; `command_line.rs`
+  follows std 1.99 and a toolchain bump re-reads std's `make_command_line`, `append_arg` and
+  `make_envp`. The program path goes to `CreateProcessW` as given: no `.exe` added, no `PATH`
+  search and no verbatim prefix for a path over `MAX_PATH` (both programs are absolute paths the
+  guard checked). A relative program, and a `.bat` or `.cmd` file, which Windows would run
+  through `cmd.exe` with quoting rules of its own (CVE-2024-24576), are refused. Environment
+  names fold and sort as UTF-16, one unit at a time, as Windows compares them. Creating a process
+  in a job takes Windows 10 or later.
 
 ## Not verified
 
@@ -1485,9 +1505,10 @@ The download (part 3):
 - The `starting` scan ran on Linux only (unit and stub tests); the macOS listing
   (`proc_listallpids`, `KERN_PROCARGS2`) passes clippy for `aarch64-apple-darwin` only, and
   whether a macOS jail lets the reaper read other processes' arguments is unknown (if not, the
-  self-check fails and the record stays `Starting`). On Windows a guard killed between Chrome's
-  suspended spawn and its adoption into the job leaves that Chrome suspended (never run) outside
-  the job, and the sweep deletes the `starting` record anyway; not tested.
+  self-check fails and the record stays `Starting`). On Windows Chrome is created in the job
+  (`job/spawn.rs`), so the job ends any Chrome a `starting` record may name; that gap (a guard
+  killed between a suspended spawn and the assignment to the job) is closed, and the in-job
+  creation runs only in CI's Windows job (`job/tests.rs`), not on the VM yet.
 - The one-shot handshake assumes agent-browser's MCP server stays stateless between messages; an
   agent-browser bump re-reads `mcp.rs` for that.
 - The Unix parent check counts only pid 1 as a parent gone at the start; under a subreaper a

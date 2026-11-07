@@ -38,12 +38,12 @@ nix = { workspace = true, features = ["socket"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 
-# Windows only: Chrome and agent-browser run in a Job Object the guard owns, so a refused port,
-# and the guard's own exit, end Chrome and agent-browser's detached daemon
-# (src/browser_guard/job.rs); a Toolhelp snapshot and a process handle wait for the guard's
-# parent (src/browser_guard/parent/windows.rs). The workspace line's features, plus
-# `Win32_Storage_FileSystem` for `MoveFileExW`, the download move that never replaces a file
-# (src/write/windows.rs).
+# Windows only: Chrome and agent-browser are created in a Job Object the guard owns
+# (`CreateProcessW` with a job list), so a refused port, and the guard's own exit, end Chrome and
+# agent-browser's detached daemon (src/browser_guard/job.rs, job/spawn.rs); a Toolhelp snapshot
+# and a process handle wait for the guard's parent (src/browser_guard/parent/windows.rs). The
+# workspace line's features, plus `Win32_Storage_FileSystem` for `MoveFileExW`, the download
+# move that never replaces a file (src/write/windows.rs), and `CreateFileW`, a child's `NUL`.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 

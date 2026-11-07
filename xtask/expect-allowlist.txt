@@ -341,6 +341,12 @@ crates/mcp/src/browser_guard/relay/pumps.rs spawn_child clippy::disallowed_metho
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
 crates/mcp/src/browser_guard/job.rs - unsafe_code
+# Windows: the guard's children created in its job (CreateProcessW with a job list), the child
+# type std's Child cannot be made into, and the tests' IsProcessInJob.
+crates/mcp/src/browser_guard/job/spawn.rs - unsafe_code
+crates/mcp/src/browser_guard/job/child.rs - unsafe_code
+crates/mcp/src/browser_guard/job/tests.rs - unsafe_code
+crates/mcp/src/browser_guard/job/tests.rs an_inheritable_handle_outside_the_list_stays_out_of_the_child clippy::disallowed_methods
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods

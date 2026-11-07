@@ -17,8 +17,8 @@
 //!   names; it never puts the token on stdout, stderr or argv.
 //! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
 //!   is made with mode 0700 and checked in `browser_guard/socket.rs`), and the three places it
-//!   starts a process (`browser_guard/relay.rs` `spawn_child`, `chrome.rs` `spawn`, and on Unix
-//!   `reaper.rs` `Reaper::start`).
+//!   starts a process (`browser_guard/relay/pumps.rs` `spawn_child`, `chrome.rs` `spawn`, both
+//!   through `job/spawn.rs` on Windows, and on Unix `reaper.rs` `Reaper::start`).
 //!
 //! # Interface
 //!
