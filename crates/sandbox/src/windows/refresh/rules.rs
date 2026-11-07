@@ -119,7 +119,9 @@ pub const STAGING_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)";
 
 /// Whether `found`, an owner and DACL read back as SDDL, is `expected`: the same text but for
 /// the DACL's `AI` and `AR` flags, which Windows adds when it sets a descriptor through
-/// `SetSecurityInfo` and which grant nothing.
+/// `SetSecurityInfo` and which grant nothing. A string compare alone: on Windows, `expected`
+/// first goes through `staging::as_read_back`, so both write a SID the same way (`LA`, not the
+/// built-in Administrator's `S-1-5-21-...-500`).
 pub fn sddl_matches(found: &str, expected: &str) -> bool {
     let plain = |sddl: &str| match sddl.split_once("D:") {
         Some((owner, dacl)) => {
