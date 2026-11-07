@@ -157,18 +157,62 @@ impl Place {
         matches!(self.root, Root::Share { .. })
     }
 
+    /// The server of a share path.
+    pub(crate) fn server(&self) -> Option<&str> {
+        match &self.root {
+            Root::Share { server, .. } => Some(server),
+            Root::Drive(_) => None,
+        }
+    }
+
+    /// Whether a typed share path may be opened: always for a drive path; for a share, only on
+    /// one of `servers`, the servers this machine already uses (names compared ignoring case,
+    /// never resolved), and never a server with `@` or `%` (`WebDAV`, ports, escapes), a loopback
+    /// (`localhost`, `127.*`, `.`) or an administrative share (`c$`). Page script types
+    /// these, so an outside server would get the lawyer's NTLM hash and what the page encodes in
+    /// its name.
+    pub(crate) fn share_allowed(&self, servers: &[String]) -> bool {
+        let (Some(server), Root::Share { share, .. }) = (self.server(), &self.root) else {
+            return true;
+        };
+        let server = server.to_lowercase();
+        let loopback = server == "localhost" || server == "." || server.starts_with("127.");
+        !loopback
+            && !server.contains(['@', '%'])
+            && !share.ends_with('$')
+            && servers.iter().any(|known| known.to_lowercase() == server)
+    }
+
+    /// The folders from the first below the root down to this one.
+    pub(crate) fn below_root(&self) -> Vec<Self> {
+        (1..=self.parts.len())
+            .map(|depth| Self {
+                root: self.root.clone(),
+                parts: self.parts.iter().take(depth).cloned().collect(),
+            })
+            .collect()
+    }
+
     /// The names below the root.
     pub(crate) fn parts(&self) -> &[String] {
         &self.parts
     }
 }
 
+/// The names Windows keeps for devices, with or without an extension.
+const DEVICES: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
 /// Whether `name` is one folder name the chooser takes: not empty, not `.` or `..`, no
-/// separator, no `:` and none of `*?"<>|` or a control character, and not ending in a dot or a
-/// space.
+/// separator, no `:` and none of `*?"<>|` or a control character, not ending in a dot or a
+/// space, and no device name (`CON`, `nul.txt`, `COM1`, ...).
 pub(crate) fn name_ok(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).to_lowercase();
     !name.is_empty()
         && !name.ends_with(['.', ' '])
+        && !DEVICES.contains(&stem.as_str())
         && !name.chars().any(|c| {
             c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })

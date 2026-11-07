@@ -71,7 +71,8 @@ export const commands = {
 	 *  [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
 	 *  (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
 	 *  instead): then it opens an in-app chooser session (closing any other) and answers `choose`
-	 *  with its start points. Never `choose` off Windows.
+	 *  with its start points. At most 20 sessions a run and 3 a minute; past that the native dialog
+	 *  opens. Never `choose` off Windows.
 	 */
 	pickFolderOrChoose: () => typedError<PickAnswer, HostError>(__TAURI_INVOKE("pick_folder_or_choose")),
 	/**

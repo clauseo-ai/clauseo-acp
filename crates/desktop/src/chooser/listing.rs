@@ -32,26 +32,38 @@ pub(crate) struct Entry {
     pub(crate) link: bool,
 }
 
-/// What the chooser asks of the machine. Every call may block on a share that is down, so each
-/// runs under [`bounded`] but [`Machine::drives`] and [`Machine::remote_drive`], which read no
-/// folder.
-pub(crate) trait Machine: Send + Sync + 'static {
+/// How long the session's one read of the drives may take.
+pub(crate) const DRIVES_WAIT: Duration = Duration::from_millis(1500);
+
+/// The drives and network servers a session uses, read once when it opens.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Drives {
     /// The fixed and removable drives' letters.
-    fn drives(&self) -> Vec<char>;
-    /// Whether the drive `letter` is a network drive.
-    fn remote_drive(&self, letter: char) -> bool;
+    pub(crate) local: Vec<char>,
+    /// The network drives' letters.
+    pub(crate) remote: Vec<char>,
+    /// The servers this machine already uses: those of the network drives and of the known
+    /// folders (Documents, Desktop, ...), as written.
+    pub(crate) servers: Vec<String>,
     /// The Desktop folder, unchecked.
-    fn desktop(&self) -> Option<String>;
+    pub(crate) desktop: Option<String>,
+}
+
+/// What the chooser asks of the machine. Every call may block on a share that is down, so each
+/// runs on a thread of its own under a time limit ([`bounded`]).
+pub(crate) trait Machine: Send + Sync + 'static {
+    /// The drives, the servers in use and the Desktop.
+    fn drives(&self) -> Drives;
     /// The entries of `folder`: an error of kind `PermissionDenied` when Windows refused to read
     /// it, of any other kind when it is not there or not a folder.
     fn read(&self, folder: &str) -> std::io::Result<Vec<Entry>>;
-    /// Whether `folder` is a folder and no link (`Entry::link`).
-    fn plain_dir(&self, folder: &str) -> bool;
+    /// What `path` itself is (its name left empty), or `None` when it is not there.
+    fn entry(&self, path: &str) -> Option<Entry>;
 }
 
-/// Whether `place` is on the network: a share path, or a network drive.
-pub(crate) fn on_network(machine: &dyn Machine, place: &Place) -> bool {
-    place.is_share() || place.letter().is_some_and(|l| machine.remote_drive(l))
+/// Whether `place` is on the network: a share path, or a network drive of `drives`.
+pub(crate) fn on_network(drives: &Drives, place: &Place) -> bool {
+    place.is_share() || place.letter().is_some_and(|l| drives.remote.contains(&l))
 }
 
 /// Runs `work` on a thread of its own and waits at most `wait` for it. `None` when it ran out

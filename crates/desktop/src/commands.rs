@@ -245,7 +245,8 @@ async fn native_pick<R: Runtime>(
 /// [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
 /// (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
 /// instead): then it opens an in-app chooser session (closing any other) and answers `choose`
-/// with its start points. Never `choose` off Windows.
+/// with its start points. At most 20 sessions a run and 3 a minute; past that the native dialog
+/// opens. Never `choose` off Windows.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_folder_or_choose<R: Runtime>(
@@ -258,32 +259,32 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
     let setting = std::env::var(crate::chooser::PICKER_VAR).ok();
     let stalls = chooser.inner().clone();
     let route = tauri::async_runtime::spawn_blocking(move || {
-        crate::chooser::route(cfg!(windows), setting.as_deref(), || stalls.would_stall())
+        // Past the session caps the lawyer sees the native dialog; no check runs then.
+        let may_open = cfg!(windows) && stalls.may_open(crate::open::now());
+        crate::chooser::route(may_open, setting.as_deref(), || stalls.would_stall())
     })
     .await
     .unwrap_or(Route::Native);
-    if route == Route::Native {
-        return Ok(match native_pick(app, &bridge, &last).await? {
-            Some(folder) => PickAnswer::Picked { folder },
-            None => PickAnswer::Cancelled,
-        });
+    if route == Route::Chooser {
+        let opener = chooser.inner().clone();
+        let (last_pick, data) = (last.get(), app_data.0.clone());
+        let start = tauri::async_runtime::spawn_blocking(move || {
+            let mut refused = clauseo_settings::refused_folders(&SystemDirs);
+            refused.push(data);
+            let home = SystemDirs.home();
+            let now = crate::open::now();
+            opener.open(home.as_deref(), last_pick.as_deref(), &refused, now)
+        })
+        .await
+        .map_err(|error| HostError::new(ErrorCode::Internal, format!("no chooser: {error}")))?;
+        if let Some(start) = start {
+            return Ok(PickAnswer::Choose { start });
+        }
     }
-    let opener = chooser.inner().clone();
-    let (last, data) = (last.get(), app_data.0.clone());
-    let start = tauri::async_runtime::spawn_blocking(move || {
-        let mut refused = clauseo_settings::refused_folders(&SystemDirs);
-        refused.push(data);
-        let home = SystemDirs.home();
-        opener.open(
-            home.as_deref(),
-            last.as_deref(),
-            &refused,
-            crate::open::now(),
-        )
+    Ok(match native_pick(app, &bridge, &last).await? {
+        Some(folder) => PickAnswer::Picked { folder },
+        None => PickAnswer::Cancelled,
     })
-    .await
-    .map_err(|error| HostError::new(ErrorCode::Internal, format!("no chooser: {error}")))?;
-    Ok(PickAnswer::Choose { start })
 }
 
 /// Goes where `go` says in the chooser session `chooser` and lists the folder there: by a

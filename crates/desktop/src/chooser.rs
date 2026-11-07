@@ -4,11 +4,15 @@
 //! typed ([`Chooser::list`]), and `chooser_choose` ends in a native confirm before the folder
 //! goes through the bridge's own `pick_folder` (`choose.rs`), so admission is unchanged.
 //!
-//! Limits: one session at a time (a new one closes the old), at most [`LISTINGS_MAX`] listings
-//! in it, closed after [`IDLE_MAX`] idle, on choose and on cancel. Every read runs on a thread of
-//! its own under `listing::LIST_WAIT`. Network folders are reachable only under a share the lawyer
-//! typed; the start points are the fixed and removable drives, home, the Desktop and the last
-//! pick's folder, never Documents, the Libraries or a network place.
+//! Limits: at most [`SESSIONS_MAX`] sessions a run and [`SESSIONS_PER_MINUTE`] a minute (past
+//! that the pick draws the native dialog), one at a time (a new one closes the old), at most
+//! [`LISTINGS_MAX`] listings in it, closed after [`IDLE_MAX`] idle, on choose and on cancel. The
+//! drives and the servers in use are read once as a session opens, under `listing::DRIVES_WAIT`;
+//! every other read runs on a thread of its own under `listing::LIST_WAIT`. A typed share opens
+//! only on a server this machine already uses (`Place::share_allowed`), a typed path goes through
+//! no link, hidden or system folder, and network folders are reachable only under the share or
+//! network drive typed last. The start points are the fixed and removable drives, home, the
+//! Desktop and the last pick's folder, never Documents, the Libraries or a network place.
 
 mod choose;
 mod listing;
@@ -18,6 +22,7 @@ mod stall;
 mod tests;
 #[cfg(windows)]
 mod windows;
+mod wire;
 
 use std::hash::{BuildHasher as _, RandomState};
 use std::path::{Path, PathBuf};
@@ -26,16 +31,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clauseo_protocol::{ErrorCode, HostError};
-use serde::{Deserialize, Serialize};
 
 pub(crate) use choose::{NativeFolderConfirm, choose_folder};
-use listing::{LIST_WAIT, Machine, bounded, folders, on_network};
+use listing::{DRIVES_WAIT, Drives, LIST_WAIT, Machine, bounded, folders, on_network};
 use place::Place;
 use stall::{KnownFolders, PROBE_WAIT, Probes};
 pub(crate) use stall::{PICKER_VAR, Route, route};
 
 use crate::bridge::lock;
-use crate::picked::PickedFolder;
+pub(crate) use wire::{
+    ChooserStart, Go, Item, ListState, Listing, PickAnswer, StartKind, StartPoint,
+};
 
 /// The most listings one session gives.
 pub(crate) const LISTINGS_MAX: u32 = 300;
@@ -43,109 +49,12 @@ pub(crate) const LISTINGS_MAX: u32 = 300;
 /// How long a session lasts with no call.
 pub(crate) const IDLE_MAX: Duration = Duration::from_secs(600);
 
-/// What `pick_folder_or_choose` answers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum PickAnswer {
-    /// The native dialog picked a folder.
-    Picked { folder: PickedFolder },
-    /// The native dialog was cancelled.
-    Cancelled,
-    /// The native dialog would stall: choose in the page, starting from these.
-    Choose { start: ChooserStart },
-}
+/// The most sessions one run opens; past it, or past [`SESSIONS_PER_MINUTE`], a pick draws the
+/// native dialog, which the lawyer sees, so page script cannot read folders without end.
+pub(crate) const SESSIONS_MAX: usize = 20;
 
-/// A chooser session and where it may start.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-pub(crate) struct ChooserStart {
-    /// The session, for `chooser_list`, `chooser_choose` and `chooser_cancel`.
-    pub(crate) chooser: u32,
-    /// The places to start from.
-    pub(crate) starts: Vec<StartPoint>,
-}
-
-/// A place to start from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-pub(crate) struct StartPoint {
-    /// What `Go::Start` names it by.
-    pub(crate) key: u8,
-    /// What it is.
-    pub(crate) kind: StartKind,
-    /// How it shows: `C:` for a drive, the `picked::display` rule otherwise, and empty for home.
-    pub(crate) display: String,
-}
-
-/// What a start point is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum StartKind {
-    /// A fixed or removable drive.
-    Drive,
-    /// The home folder.
-    Home,
-    /// The Desktop.
-    Desktop,
-    /// The folder of the last pick.
-    LastPick,
-}
-
-/// Where `chooser_list` goes.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[cfg_attr(test, derive(specta::Type))]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum Go {
-    /// A start point, by its key.
-    Start { key: u8 },
-    /// A folder of the last listing, by its index.
-    Into { index: u32 },
-    /// The folder above, stopping at a drive or share root.
-    Up,
-    /// A path the lawyer typed (`place.rs` says which it takes).
-    Typed { path: String },
-    /// The folder shown, read again.
-    Again,
-}
-
-/// A folder as the page shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-pub(crate) struct Listing {
-    /// The folder shown, by the `picked::display` rule; empty for home.
-    pub(crate) display: String,
-    /// Its parts from the root (`C:`, `\\server\share`), or from home (shown as an empty one).
-    pub(crate) crumbs: Vec<String>,
-    /// What reading it gave.
-    pub(crate) state: ListState,
-}
-
-/// What reading a folder gave.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum ListState {
-    /// Its folders, and whether there were more than shown.
-    Folders { items: Vec<Item>, more: bool },
-    /// It did not answer in time.
-    NoAnswer,
-    /// It is not there.
-    NotFound,
-    /// The chooser does not open it; the folder shown stays.
-    NotAllowed,
-}
-
-/// A folder in a listing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(specta::Type))]
-pub(crate) struct Item {
-    /// Its name.
-    pub(crate) name: String,
-    /// Whether Clauseo refuses it (`refused_folders`); it does not open.
-    pub(crate) refused: bool,
-}
+/// The most sessions opened in any minute.
+pub(crate) const SESSIONS_PER_MINUTE: usize = 3;
 
 /// The chooser's state, managed by the app: the one session, and what it asks the machine.
 #[derive(Clone)]
@@ -155,6 +64,8 @@ pub(crate) struct Chooser {
     probes: Arc<Probes>,
     session: Arc<Mutex<Option<Session>>>,
     outstanding: Arc<AtomicUsize>,
+    /// When each session of this run opened.
+    opened: Arc<Mutex<Vec<Instant>>>,
 }
 
 /// The live session.
@@ -166,6 +77,7 @@ struct Session {
     current: Option<Place>,
     listing: Vec<Item>,
     network_root: Option<Place>,
+    drives: Drives,
     listings: u32,
     used: Instant,
 }
@@ -188,6 +100,7 @@ impl Chooser {
             probes: Arc::default(),
             session: Arc::default(),
             outstanding: Arc::default(),
+            opened: Arc::default(),
         }
     }
 
@@ -198,32 +111,52 @@ impl Chooser {
             .is_some_and(|known| self.probes.would_stall(known, PROBE_WAIT))
     }
 
-    /// Opens a session, closing any other: its start points, of `home`, the Desktop and
-    /// `last_pick`'s folder each only when local. `refused` is marked in listings.
+    /// Whether a session may open at `now`: fewer than [`SESSIONS_MAX`] this run and than
+    /// [`SESSIONS_PER_MINUTE`] in the minute before `now`.
+    pub(crate) fn may_open(&self, now: Instant) -> bool {
+        room(&lock(&self.opened), now)
+    }
+
+    /// Opens a session, closing any other, unless [`Chooser::may_open`] says no (`None`: draw
+    /// the native dialog). Its drives and servers are read once, on a thread, at most
+    /// `DRIVES_WAIT` (none past it). The start points: the local drives, and `home`, the
+    /// Desktop and `last_pick`'s folder each only when local. `refused` is marked in listings.
     pub(crate) fn open(
         &self,
         home: Option<&Path>,
         last_pick: Option<&Path>,
         refused: &[PathBuf],
         now: Instant,
-    ) -> ChooserStart {
-        let machine = self.machine.as_ref();
+    ) -> Option<ChooserStart> {
+        {
+            let mut opened = lock(&self.opened);
+            if !room(&opened, now) {
+                return None;
+            }
+            opened.push(now);
+        }
+        let machine = Arc::clone(&self.machine);
+        let drives = bounded(&self.outstanding, DRIVES_WAIT, move || machine.drives());
+        let drives = drives.unwrap_or_default();
         let local = |path: Option<&Path>| {
             path.and_then(Path::to_str)
                 .and_then(Place::from_os)
-                .filter(|place| !on_network(machine, place))
+                .filter(|place| !on_network(&drives, place))
         };
         let home_place = local(home);
-        let mut starts: Vec<(StartKind, Place)> = machine
-            .drives()
-            .into_iter()
+        let mut starts: Vec<(StartKind, Place)> = drives
+            .local
+            .iter()
+            .copied()
             .filter_map(Place::drive)
             .map(|drive| (StartKind::Drive, drive))
             .collect();
-        let desktop = machine.desktop();
         let named = [
             (StartKind::Home, home_place.clone()),
-            (StartKind::Desktop, local(desktop.as_deref().map(Path::new))),
+            (
+                StartKind::Desktop,
+                local(drives.desktop.as_deref().map(Path::new)),
+            ),
             // The folder above the last pick, as `dialogs::start_folder` opens the native dialog.
             (
                 StartKind::LastPick,
@@ -262,13 +195,14 @@ impl Chooser {
             current: None,
             listing: Vec::new(),
             network_root: None,
+            drives,
             listings: 0,
             used: now,
         });
-        ChooserStart {
+        Some(ChooserStart {
             chooser: id,
             starts: points,
-        }
+        })
     }
 
     /// Goes where `go` says in session `chooser` and lists the folder there; blocks at most
@@ -276,7 +210,7 @@ impl Chooser {
     /// the last listing, a start key it did not give and a path [`Place::typed`] refuses;
     /// `transport.unauthorized` past [`LISTINGS_MAX`].
     pub(crate) fn list(&self, chooser: u32, go: Go, now: Instant) -> Result<Listing, HostError> {
-        let (target, typed, here, home, refused) = {
+        let (target, typed, network, here, home, refused) = {
             let mut guard = lock(&self.session);
             let session = live(&mut guard, chooser, now)?;
             if session.listings >= LISTINGS_MAX {
@@ -313,29 +247,38 @@ impl Chooser {
             if !start && refused.iter().any(|no| no.same(&target)) {
                 return Ok(not_allowed(here.as_ref(), session.home.as_ref()));
             }
-            if !typed && target.is_share() && !under(session.network_root.as_ref(), &target) {
+            // From the session's one read of the drives: nothing here waits on the network.
+            let network = on_network(&session.drives, &target);
+            let reachable = if typed {
+                target.share_allowed(&session.drives.servers)
+            } else {
+                !network || under(session.network_root.as_ref(), &target)
+            };
+            if !reachable {
                 return Ok(not_allowed(here.as_ref(), session.home.as_ref()));
             }
-            (target, typed, here, session.home.clone(), refused)
+            (target, typed, network, here, session.home.clone(), refused)
         };
-        // Off the lock: a network drive's question may block.
-        let network = on_network(self.machine.as_ref(), &target);
-        let roots = lock(&self.session)
-            .as_ref()
-            .and_then(|s| s.network_root.clone());
-        if network && !typed && !under(roots.as_ref(), &target) {
-            return Ok(not_allowed(here.as_ref(), home.as_ref()));
-        }
         let machine = Arc::clone(&self.machine);
-        let text = target.text();
-        let read = bounded(&self.outstanding, LIST_WAIT, move || machine.read(&text));
+        let path = target.clone();
+        let read = bounded(&self.outstanding, LIST_WAIT, move || {
+            // A typed path goes through no link, hidden or system folder that exists.
+            let blocked = typed
+                && path
+                    .below_root()
+                    .iter()
+                    .map_while(|folder| machine.entry(&folder.text()))
+                    .any(|entry| entry.link || entry.hidden);
+            (!blocked).then(|| machine.read(&path.text()))
+        });
         let state = match read {
             None => ListState::NoAnswer,
-            Some(Err(error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Some(None) => return Ok(not_allowed(here.as_ref(), home.as_ref())),
+            Some(Some(Err(error))) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 return Ok(not_allowed(here.as_ref(), home.as_ref()));
             }
-            Some(Err(_)) => ListState::NotFound,
-            Some(Ok(entries)) => {
+            Some(Some(Err(_))) => ListState::NotFound,
+            Some(Some(Ok(entries))) => {
                 let (names, more) = folders(entries);
                 let items = names
                     .into_iter()
@@ -384,6 +327,15 @@ impl Chooser {
             _ => Err(invalid("no such folder chooser")),
         }
     }
+}
+
+/// Whether a session may open at `now`, after the ones `opened`.
+fn room(opened: &[Instant], now: Instant) -> bool {
+    let last_minute = opened
+        .iter()
+        .filter(|at| now.saturating_duration_since(**at) < Duration::from_secs(60))
+        .count();
+    opened.len() < SESSIONS_MAX && last_minute < SESSIONS_PER_MINUTE
 }
 
 /// The live session `chooser`, which `now` marks used; an expired one is closed.
@@ -462,20 +414,14 @@ struct NoMachine;
 
 #[cfg(not(windows))]
 impl Machine for NoMachine {
-    fn drives(&self) -> Vec<char> {
-        Vec::new()
-    }
-    fn remote_drive(&self, _letter: char) -> bool {
-        false
-    }
-    fn desktop(&self) -> Option<String> {
-        None
+    fn drives(&self) -> Drives {
+        Drives::default()
     }
     fn read(&self, _folder: &str) -> std::io::Result<Vec<Entry>> {
         Err(std::io::ErrorKind::Unsupported.into())
     }
-    fn plain_dir(&self, _folder: &str) -> bool {
-        false
+    fn entry(&self, _path: &str) -> Option<Entry> {
+        None
     }
 }
 

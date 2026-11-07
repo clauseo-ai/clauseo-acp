@@ -10,39 +10,52 @@ use std::time::{Duration, Instant};
 
 use clauseo_protocol::ErrorCode;
 
-use super::listing::{Entry, LISTING_MAX, OUTSTANDING_MAX, bounded};
+use super::listing::{Drives, Entry, LISTING_MAX, OUTSTANDING_MAX, bounded};
 use super::place::{Place, TYPED_MAX};
 use super::*;
 
 mod choose;
+mod typed;
 
 const HOME: &str = r"C:\Users\rmehra";
 
-/// A machine of folders named in a map: drives C and D, Z a network drive, a Desktop under
-/// home, and `C:\Slow`, whose read waits on `gate` (up to 30 s) until the test lets it go.
+/// A machine of folders named in a map: drives C and D, Z a network drive, the server `SRV` in
+/// use, a Desktop under home, the link `C:\Users\All Users` and the hidden `AppData` under home,
+/// and `C:\Slow`, whose read waits on `gate` (up to 30 s) until the test lets it go; with
+/// `slow_drives`, so does reading the drives.
 struct Fake {
     tree: HashMap<String, Result<Vec<Entry>, std::io::ErrorKind>>,
     desktop: String,
+    servers: Vec<String>,
+    slow_drives: bool,
     gate: Mutex<mpsc::Receiver<()>>,
 }
 
+impl Fake {
+    fn wait(&self) {
+        let _released = self
+            .gate
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(30));
+    }
+}
+
 impl Machine for Fake {
-    fn drives(&self) -> Vec<char> {
-        vec!['C', 'D']
-    }
-    fn remote_drive(&self, letter: char) -> bool {
-        letter == 'Z'
-    }
-    fn desktop(&self) -> Option<String> {
-        Some(self.desktop.clone())
+    fn drives(&self) -> Drives {
+        if self.slow_drives {
+            self.wait();
+        }
+        Drives {
+            local: vec!['C', 'D'],
+            remote: vec!['Z'],
+            servers: self.servers.clone(),
+            desktop: Some(self.desktop.clone()),
+        }
     }
     fn read(&self, folder: &str) -> std::io::Result<Vec<Entry>> {
         if folder == r"C:\Slow" {
-            let _released = self
-                .gate
-                .lock()
-                .unwrap()
-                .recv_timeout(Duration::from_secs(30));
+            self.wait();
         }
         self.tree
             .get(&folder.to_lowercase())
@@ -50,8 +63,16 @@ impl Machine for Fake {
             .unwrap_or(Err(std::io::ErrorKind::NotFound))
             .map_err(std::io::Error::from)
     }
-    fn plain_dir(&self, folder: &str) -> bool {
-        matches!(self.tree.get(&folder.to_lowercase()), Some(Ok(_)))
+    fn entry(&self, path: &str) -> Option<Entry> {
+        let path = path.to_lowercase();
+        let link = path == r"c:\users\all users";
+        let hidden = path == r"c:\users\rmehra\appdata";
+        let known = matches!(self.tree.get(&path), Some(Ok(_)));
+        (link || hidden || known).then(|| Entry {
+            hidden,
+            link,
+            ..dir("")
+        })
     }
 }
 
@@ -66,6 +87,11 @@ fn dir(name: &str) -> Entry {
 
 /// A chooser on the fake machine, and the sender that lets `C:\Slow`'s reads go.
 fn fake_chooser(desktop: &str) -> (Chooser, mpsc::Sender<()>) {
+    fake_with(desktop, &["SRV"], false)
+}
+
+/// [`fake_chooser`] with the servers in use, and whether reading the drives hangs.
+fn fake_with(desktop: &str, servers: &[&str], slow_drives: bool) -> (Chooser, mpsc::Sender<()>) {
     let (release, gate) = mpsc::channel();
     let mut tree = HashMap::new();
     let mut put = |path: &str, names: &[&str]| {
@@ -75,8 +101,11 @@ fn fake_chooser(desktop: &str) -> (Chooser, mpsc::Sender<()>) {
     put(r"C:\", &["Cases", "Users", "Windows"]);
     put(r"C:\Cases", &["Acme", "Beta"]);
     put(r"C:\Cases\Acme", &[]);
+    put(r"C:\Users", &["All Users", "rmehra"]);
     put(HOME, &["Desktop", "Work"]);
     put(r"C:\Users\rmehra\Work", &[]);
+    put(r"C:\Users\rmehra\AppData\Local", &[]);
+    put(r"C:\Users\All Users\Data", &[]);
     put(r"\\srv\share", &["Team"]);
     put(r"\\srv\share\Team", &[]);
     put(r"Z:\", &["Mapped"]);
@@ -87,6 +116,8 @@ fn fake_chooser(desktop: &str) -> (Chooser, mpsc::Sender<()>) {
     let fake = Fake {
         tree,
         desktop: desktop.to_owned(),
+        servers: servers.iter().map(|s| (*s).to_owned()).collect(),
+        slow_drives,
         gate: Mutex::new(gate),
     };
     (Chooser::with(Arc::new(fake), None), release)
@@ -96,7 +127,9 @@ fn fake_chooser(desktop: &str) -> (Chooser, mpsc::Sender<()>) {
 fn open(chooser: &Chooser, now: Instant) -> ChooserStart {
     let refused = [Path::new(r"C:\Windows").to_path_buf()];
     let last = Path::new(r"C:\Cases\Acme");
-    chooser.open(Some(Path::new(HOME)), Some(last), &refused, now)
+    chooser
+        .open(Some(Path::new(HOME)), Some(last), &refused, now)
+        .unwrap()
 }
 
 fn key(start: &ChooserStart, kind: StartKind) -> u8 {
