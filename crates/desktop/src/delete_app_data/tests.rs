@@ -5,6 +5,7 @@
 
 mod admin_copy;
 mod admin_copy_ask;
+mod admin_copy_contract;
 mod admin_copy_hook;
 mod make;
 mod sandbox_link;
