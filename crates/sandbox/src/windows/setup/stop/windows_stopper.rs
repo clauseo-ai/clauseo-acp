@@ -46,9 +46,6 @@ use crate::windows::sids::Sid;
 
 /// The exit code a stopped process gets.
 const STOPPED_EXIT: u32 = 1;
-/// How long each stopped process is waited for, in milliseconds: one still there is terminated
-/// again by the next pass.
-const EXIT_WAIT_MS: u32 = 1_000;
 /// The pause before the next pass after a termination failed, in milliseconds.
 const PAUSE_MS: u32 = 250;
 /// `WTS_ANY_SESSION`: every session's processes.
@@ -150,15 +147,16 @@ impl Stopper for WindowsStopper {
         }
     }
 
-    fn terminate(&mut self, pid: u32) -> Result<(), Failed> {
+    fn terminate(&mut self, pid: u32, wait: Duration) -> Result<(), Failed> {
         let Some((_, handle)) = self.handles.iter().find(|(at, _)| *at == pid) else {
             return Err("not opened for termination".to_owned());
         };
         // SAFETY: the handle is open with PROCESS_TERMINATE on the process whose user was read.
         unsafe { TerminateProcess(handle.0, STOPPED_EXIT) }
             .map_err(|error| format!("TerminateProcess failed ({})", error.code().0))?;
+        let wait_ms = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
         // SAFETY: the handle is open with PROCESS_SYNCHRONIZE; the wait is bounded.
-        if unsafe { WaitForSingleObject(handle.0, EXIT_WAIT_MS) } == WAIT_OBJECT_0 {
+        if unsafe { WaitForSingleObject(handle.0, wait_ms) } == WAIT_OBJECT_0 {
             Ok(())
         } else {
             Err("it hadn't exited when the wait ran out".to_owned())
@@ -225,7 +223,8 @@ pub(super) type Opened = Vec<(u32, Handle)>;
 /// and a pid isn't reused while a handle to its process is open, so each entry for an opened pid
 /// is the process that handle is on. A process the list names but the snapshot didn't (started
 /// since) is added with no handle, so a pool user's keeps the passes going. A list that can't be
-/// read leaves the token and the owner to say whose each process is.
+/// read marks every process `list_failed`: the token then says whose each is, and one it can't
+/// read is unknown, unless its owner is a pool user (`stop::user_of`).
 pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
     let mut seen = Vec::new();
     // Every handle stays open until the list is read, the query-only ones too.
@@ -257,7 +256,12 @@ pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
                 }
             }
         }
-        Err(why) => tracing::warn!(%why, "the process list's users couldn't be read"),
+        Err(why) => {
+            tracing::warn!(%why, "the process list's users couldn't be read");
+            for process in &mut seen {
+                process.list_failed = true;
+            }
+        }
     }
     let can_stop: Vec<u32> = seen.iter().filter(|p| p.can_stop).map(|p| p.pid).collect();
     held.retain(|(pid, _)| can_stop.contains(pid));
@@ -304,6 +308,7 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
         token,
         owner,
         can_stop,
+        list_failed: false,
     };
     Some((process, Some(handle)))
 }

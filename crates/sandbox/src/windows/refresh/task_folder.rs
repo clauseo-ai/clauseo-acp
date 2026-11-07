@@ -8,6 +8,16 @@
 //! again would take the folder back, but would leave whatever that user put in it (a task of
 //! theirs, a folder below). The owner tells the two apart: only an administrator can make
 //! `Administrators` or `SYSTEM` the owner.
+//!
+//! An owner that can't be read is treated as anyone else's: the folder is deleted. That is safe,
+//! since a folder Clauseo made holds only Clauseo's tasks, which `register_task` registers
+//! again; keeping a folder whose owner is unknown could keep a user's tasks in it.
+//!
+//! Two outcomes follow, both accepted. A user-made `\Clauseo` holding a task administrators
+//! can't delete fails the delete, and so the registration (`--adopt` or the set-up) with that
+//! error: a user who could make the folder can block the install, but can't take it over. A
+//! folder an administrator made whose owner is that administrator's own SID, not
+//! `Administrators`, is deleted and made again, which loses nothing.
 
 /// The Task Scheduler's folders, as the preparation uses them; `task.rs` implements it over
 /// `ITaskService` and the tests fake it. Every error is a line for the log.
@@ -44,13 +54,17 @@ pub(super) fn admin_owner(owner: &str) -> bool {
     matches!(owner, "BA" | "SY" | "S-1-5-32-544" | "S-1-5-18")
 }
 
-/// `\Clauseo`, ready for the tasks: one an administrator made gets `sddl` again; one anyone else
-/// made, or whose owner can't be read, is deleted with everything in it; a missing or deleted
-/// one is made with `sddl`.
+/// `\Clauseo`, ready for the tasks: one owned by `Administrators` or `SYSTEM` gets `sddl`
+/// again; any other, or one whose owner can't be read, is deleted with everything in it; a
+/// missing or deleted one is made with `sddl`.
 pub(super) fn prepare<F: Folders>(folders: &mut F, sddl: &str) -> Result<F::Folder, String> {
     if let Some(folder) = folders.find()? {
-        let owner = folders.owner_sddl(&folder)?;
-        if sddl_owner(&owner).is_some_and(admin_owner) {
+        let owner = folders.owner_sddl(&folder).ok();
+        if owner
+            .as_deref()
+            .and_then(sddl_owner)
+            .is_some_and(admin_owner)
+        {
             folders.set(&folder, sddl)?;
             return Ok(folder);
         }
@@ -70,6 +84,7 @@ mod tests {
     struct Fake {
         there: Option<String>,
         fail_delete: bool,
+        fail_owner: bool,
         calls: Vec<String>,
     }
 
@@ -83,6 +98,9 @@ mod tests {
 
         fn owner_sddl(&mut self, (): &()) -> Result<String, String> {
             self.calls.push("owner".to_owned());
+            if self.fail_owner {
+                return Err("ITaskFolder::GetSecurityDescriptor failed (0x80070005)".to_owned());
+            }
             Ok(format!("O:{}", self.there.clone().unwrap_or_default()))
         }
 
@@ -145,6 +163,23 @@ mod tests {
             assert_eq!(fake.calls, expected, "{owner}");
             assert_eq!(fake.there.as_deref(), Some("BA"));
         }
+    }
+
+    #[test]
+    fn a_folder_whose_owner_cant_be_read_is_deleted_and_made_again() {
+        let mut fake = Fake {
+            there: Some("BA".to_owned()),
+            fail_owner: true,
+            ..Fake::default()
+        };
+        prepare(&mut fake, SDDL).unwrap();
+        let expected = [
+            "find".to_owned(),
+            "owner".to_owned(),
+            "delete".to_owned(),
+            format!("create {SDDL}"),
+        ];
+        assert_eq!(fake.calls, expected);
     }
 
     #[test]
