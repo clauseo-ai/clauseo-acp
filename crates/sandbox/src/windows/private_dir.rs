@@ -79,7 +79,10 @@ pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
 
 /// Makes the folder `path` (its parent must exist) with [`sddl`]'s protected DACL for this
 /// thread's user (`current_user_sid`) in place from the start (`CreateDirectoryW` with the
-/// descriptor). `Ok(false)` when something is there already, which this leaves to [`protect`].
+/// descriptor), then written again through a handle ([`secure_existing`]): NTFS drops
+/// `SE_DACL_AUTO_INHERITED` from a descriptor given at creation, and without it what is made
+/// inside gets entries not marked inherited. `Ok(false)` when something is there already,
+/// which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
     let user = current_user_sid()?;
     let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
@@ -92,7 +95,7 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
     // SAFETY: `target` is NUL-terminated and outlives the call; `attributes` and the descriptor
     // it points to live until this function returns.
     match unsafe { CreateDirectoryW(PCWSTR(target.as_ptr()), Some(&raw const attributes)) } {
-        Ok(()) => Ok(true),
+        Ok(()) => secure_existing(path).map(|()| true),
         Err(error) if error.code() == ERROR_ALREADY_EXISTS.to_hresult() => Ok(false),
         Err(error) => Err(os_error(&error)),
     }
