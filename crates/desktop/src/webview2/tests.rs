@@ -193,12 +193,6 @@ fn language_files() -> [(String, &'static str); 2] {
     ]
 }
 
-/// The installer's English file.
-fn english_file() -> String {
-    let [(english, _), _] = language_files();
-    english
-}
-
 #[test]
 fn the_installer_language_files_sit_beside_each_other() {
     let [(english, _), (hindi, _)] = language_files();
