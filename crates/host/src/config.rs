@@ -196,8 +196,7 @@ impl HostConfig {
     }
 
     /// The egress proxy giving each session's browser its port (default: none: no `browser`
-    /// server, shown as `NoProxy`). One opens per launch that can get the browser and closes at
-    /// the session's end ([`EgressProxy`]); the agent's environment never points at it (tier C).
+    /// server, shown as `NoProxy`); one opens per launch with the browser ([`EgressProxy`]).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
         self
@@ -210,8 +209,7 @@ impl HostConfig {
         self
     }
 
-    /// A hook run off the host thread as a session's removal starts that wait, with the session's
-    /// Chrome debugging port (none without claims): a test binds it, as a lingering Chrome.
+    /// Runs as a removal's wait starts, with the session's Chrome port: a test binds it there.
     #[cfg(feature = "test-support")]
     pub fn with_tree_wait_hook(mut self, hook: Arc<dyn Fn(Option<u16>) + Send + Sync>) -> Self {
         self.wiring.tree_wait_hook = Some(hook);
