@@ -46,7 +46,8 @@
         "customLanguageFiles": {
           "English": "windows/nsis/English.nsh",
           "Hindi": "windows/nsis/Hindi.nsh"
-        }
+        },
+        "template": "windows/nsis/installer.nsi"
       }
     },
     "linux": {
