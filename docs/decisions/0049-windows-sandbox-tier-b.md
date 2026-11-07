@@ -727,8 +727,13 @@ where its launch's egress proxy and listed ports are, and nothing else. Rulings:
 orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals,
 the range moved).
 
-**The range** (`ports::TIER_B_PORTS`, 46100-46199) is for tier B's listeners alone: the proxy's,
-R24's relay, and what a tier-B launch claims (`claim_port`, `claim_port_at`). It sits below 49152,
+**The range** (`ports::TIER_B_PORTS`, 46100-46199) holds a tier-B launch's listeners and nothing
+else: its proxy's agent listener and R24 relay (`ports::bind_loopback(ListenerFor::TierB)`,
+`ProxyConfig::listener`), and what a tier-B launch claims (`claim_port`, `claim_port_at`). A
+tier-C launch's listeners, and the proxy's browser listener on any tier (it takes no token), bind
+outside it (`ListenerFor::Other`: port 0, asked again when the OS hands out a port in the range),
+so no pool user's static permit reaches them when a tier-C browser launch runs on a tier-B
+machine. It sits below 49152,
 where Windows' dynamic range starts by default, so the OS never hands its ports to another
 program's port-0 bind, and clear of the listeners known below it (WinRM 47001, the ASP.NET state
 service 42424, EtherNet/IP 44818, BACnet 47808, SQL Server's browser 1434) and of IANA's
@@ -738,7 +743,9 @@ tier-C session, never lands there. Set-up and every launch check the machine aga
 (`wfp::check_ports`) and refuse tier B, named, on an overlap:
 - **Windows' TCP dynamic range**, read from WMI: `MSFT_NetTCPSetting` in `ROOT\StandardCimv2`,
   `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts`, every setting's (the class
-  behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"). For IT:
+  behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"), on a
+  thread of its own, capped at 5 s (no answer fails closed, `PortsUnchecked`). A VM row measures
+  its cost unelevated, which decides whether a host process should cache it. For IT:
   `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
 - **Excluded port ranges** (Hyper-V, WSL and Docker reserve blocks, sometimes below 49152).
   Windows publishes no call that lists them: `netsh int ipv4 show excludedportrange` reads the
@@ -747,10 +754,13 @@ tier-C session, never lands there. Set-up and every launch check the machine aga
   the range nobody listens on is test-bound on `127.0.0.1` and `::1`; `WSAEACCES` marks it
   excluded (`ports::refused_ports`).
 - **At each launch, the listeners**: every TCP listener in the range, IPv4 and IPv6, any address
-  (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's or a process
-  running this process's own program file (`QueryFullProcessImageNameW`, compared without case):
-  the proxy and the relay run in the host. Anything else, `http.sys` as System included, refuses
-  the launch (`NetworkGap::ForeignListener`, naming the program).
+  (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's: the proxy
+  and the relay run in the host. A program-file match would pass another Windows user's Clauseo,
+  or this program started suspended and injected into, so it isn't one. Anything else,
+  `http.sys` as System included, refuses the launch (`NetworkGap::ForeignListener`, naming the
+  program from `QueryFullProcessImageNameW`). A port that refused its test bind is re-checked
+  against the listeners read after the binds, so a listener that came up meanwhile is named as
+  one.
 
 **Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP transaction:
 Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in the sublayer
@@ -770,14 +780,14 @@ a weight above the blocks, is `127.0.0.1`, TCP, remote ports 46100-46199, with a
 to the block. Then come the owner's grants, **read-only, no control**: `READ|ENUM` on the filter
 container, and `READ` on our provider, sublayer and filters. There is no ADD, ADD_LINK, WRITE or
 DELETE anywhere, so the lawyer can't add, change or remove a WFP filter. Implicit owner rights would
-undo that, so set-up reads back the owner of the provider, the sublayer and each filter:
-Administrators or SYSTEM, or the set-up fails, named (the policy "System objects: Default owner for
-objects created by members of the Administrators group" set to the creator would make the lawyer the
-owner). The disclosure is small: the lawyer's processes can enumerate the machine's WFP filters,
-which shows other products' filter metadata but gives no control. Last come four Windows Firewall
-rules naming the pool: block everything that isn't loopback, both ways; block loopback UDP; block
-loopback TCP outside 46100-46199. A re-run or an extend rewrites it all for the whole pool. A WFP
-failure fails the set-up at `Step::Network`.
+undo that, so set-up reads back, inside the transaction before it commits, the owner of the
+provider, the sublayer and each filter: Administrators or SYSTEM, or the set-up fails, named (the
+policy "System objects: Default owner for objects created by members of the Administrators group"
+set to the creator would make the lawyer the owner). The disclosure is small: the lawyer's processes
+can enumerate the machine's WFP filters, which shows other products' filter metadata but gives no
+control. Last come four Windows Firewall rules naming the pool: block everything that isn't
+loopback, both ways; block loopback UDP; block loopback TCP outside 46100-46199. A re-run or an
+extend rewrites it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
 
 **Measured** (spike run 42351029777, branch `exp-wfp-denyonly` at `7d66a922b`, GitHub's
 `windows-2025` and `windows-11-arm` runners, 23 rows passing on each). The spike installs these
@@ -797,7 +807,10 @@ once after. Results:
     collateral there).
 - Harness limits: a restricted token holding neither `Everyone` nor `RESTRICTED` can't start a
   program at all (`0xC0000022`), before or after the filters. The admin's AppContainer child
-  failed to reach 1.1.1.1 before the filters too, so that row isn't attributable.
+  failed to reach 1.1.1.1 before the filters too (runs 42351029777 and 42354843371), so the pool
+  user's AppContainer row proves nothing yet. The control now runs in a registered AppContainer
+  profile with `internetClient` and `privateNetworkClientServer`, which Windows Firewall needs
+  to let a package out; until it reaches, that row counts as information only.
 - A derived token needs a default DACL its process can open (for example `Everyone`) to start;
   a hijacked agent can set one on its own derived token, so the rows give it one.
 
@@ -829,11 +842,13 @@ program that binds a fixed port in the range after a launch's check is reachable
 launch's agent until the next launch refuses; the range is out of the OS's hands, so only a
 program asking for that port by number can do it.
 
-**Defence in depth, a spike** (`exp-wfp-denyonly`): a filter at `ALE_AUTH_RECV_ACCEPT_V4` that
-blocks a connection whose remote user (`FWPM_CONDITION_ALE_REMOTE_USER_ID`) is a pool user to any
-local program but the host (`FWPM_CONDITION_ALE_APP_ID`). If Windows fills the remote user for
-loopback, it covers a foreign listener wherever it lands; if not, it is dropped, and this record
-says why. Pending the run.
+**Defence in depth, dropped.** A filter at `ALE_AUTH_RECV_ACCEPT_V4` that blocks a connection
+whose remote user (`FWPM_CONDITION_ALE_REMOTE_USER_ID`) is a pool user to any local program but
+the host (`FWPM_CONDITION_ALE_APP_ID`) would cover a foreign listener wherever it lands. Windows
+leaves the remote user empty for a loopback accept: in spike run 42354843371 (`exp-wfp-denyonly`,
+`windows-2025` and `windows-11-arm`) the filter didn't stop the pool user reaching a foreign
+listener, while the same rows' controls passed. The spike's rows stay on that branch as the
+record.
 
 **When the firewall fails.** WFP is the boundary: any WFP call that fails, the Base Filtering
 Engine not running included (named for IT: set BFE to start automatically), fails the set-up, so
@@ -875,12 +890,12 @@ VM row measures it.
 under anonymous impersonation is blocked too: whether WFP reads the process's token (a pool user) or
 the thread's (the anonymous logon, which holds no `Everyone`), the allow doesn't grant. Only a
 machine with `EveryoneIncludesAnonymous = 1` that WFP reads by thread would let it through; a VM row
-measures it. Removal (`wfp::remove`, which `--remove` runs once every pool account is gone, since
-`stop_strays` only logs a process that won't stop) deletes every filter in the sublayer, foreign
-ones included, every key set-up writes, the sublayer and the provider, in one transaction; then it
-takes back the owner's read grant on the filter container, and removes the firewall rules; a
-firewall failure there is reported, not fatal, as at set-up. It can run again after a partial
-removal.
+measures it. Removal (`wfp::remove`, which `--remove` runs once every pool account is gone and a
+second sweep has stopped, elevated, any process still running as a pool SID, since `stop_strays`
+only logs a process that won't stop) deletes every filter in the sublayer, foreign ones included,
+every key set-up writes, the sublayer and the provider, in one transaction; then it takes back the
+owner's read grant on the filter container, and removes the firewall rules; a firewall failure there
+is reported, not fatal, as at set-up. It can run again after a partial removal.
 
 **For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
 starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent, and map
