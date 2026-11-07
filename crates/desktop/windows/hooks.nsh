@@ -82,18 +82,18 @@
 ; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
 ; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
 ; the installer's own. The template deletes it with the data (installer.nsi:884, and step 2).
-;
-; The admin copy of the sandbox's set-up program (S15 tier B) is in admin_copy.nsh, included
-; here: the elevated instance's branch, which the template's .onInit block inserts
-; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
-!include "${__FILEDIR__}\admin_copy.nsh"
 
 ; NSIS's warning 6000 is "unknown variable/constant detected, ignoring" (Source/build.h,
 ; DW_VAR_IGNORED_UNKNOWN): an unknown name stays as literal text and the hook does the wrong thing
 ; quietly. This makes that warning an error for the whole compile (the template includes this file
-; before its own code). The source test the_installer_scripts_use_only_known_nsis_variables checks
-; the names as well.
+; before its own code), so it comes before admin_copy.nsh and the files that one includes. The
+; source test the_installer_scripts_use_only_known_nsis_variables checks the names as well.
 !pragma warning error 6000 ; an unknown variable name is an error, not a silent literal (the COMMONAPPDATA bug)
+
+; The admin copy of the sandbox's set-up program (S15 tier B) is in admin_copy.nsh, included
+; here: the elevated instance's branch, which the template's .onInit block inserts
+; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
+!include "${__FILEDIR__}\admin_copy.nsh"
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).

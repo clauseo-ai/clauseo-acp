@@ -609,20 +609,26 @@ started elevated, by the app or by the uninstall hook.
   before the `_?=` (template block `uninstall-string`), so the uninstaller runs in place. Its
   `un.onInit` first makes the administrators-only plug-in folder (block `un-admin-section`, the
   installer's `CLAUSEO_MACHINE_START`, exit 25 on failure, its box skipped under `/S`, `/P` and
-  `/UPDATE`), so `SetContext`'s System and `nsis_tauri_utils` no longer load from `%TEMP%`. A
-  running image can't be deleted, so at the end of the section (`uninstall_in_place.nsh`, block
-  `uninstall-self-delete`) it renames itself to `uninstall.<GetTempFileName stem>.old` and starts,
-  once (from `un.onGUIEnd` when it has a window, from the section under `/S`), a hidden
-  `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes that one
-  file and removes `installer-temp` and the install folder only if empty. `/d` keeps out HKCU's
-  `AutoRun`, which an elevated cmd would otherwise run from the user's hive. It builds no line,
-  and leaves the file, when the folder's path or the renamed one holds one of `% ^ & | < > " !`.
+  `/UPDATE`), so `SetContext`'s System and `nsis_tauri_utils` no longer load from `%TEMP%`. It
+  then refuses (exit 26) unless `$EXEDIR` is `$INSTDIR`: `_?=` takes the rest of the line as the
+  folder, so an option appended after it would otherwise unregister Clauseo and leave its files,
+  and a start without `_?=` (the stub's `%TEMP%` copy) is refused too. NSIS holds its own exe
+  open without delete sharing until exit (`fileform.c:192`, `util.c:465`, `Main.c:472`), so at
+  the end of the section (`uninstall_in_place.nsh`, block `uninstall-self-delete`) it starts,
+  once (from `un.onGUIEnd` when it has a window, from the section under `/S`; in `$SYSDIR`), a
+  hidden `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes
+  `uninstall.exe` only if the main exe isn't there, and removes `installer-temp` and the install
+  folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
+  keeps a new install's `uninstall.exe` unless both land in the instant between `if` and `del`.
+  `/d` keeps out HKCU's `AutoRun`, which an elevated cmd would otherwise run from the user's
+  hive. It builds no line, and leaves the file, when the paths hold one of `% ^ & | < > " !`.
   The reinstall page runs the old uninstaller this way too, never with `/UPDATE`; its own
-  `_?=` comes last on the line, which NSIS takes, and the self-delete can only remove the
-  renamed file and empty folders, so it isn't skipped there. **Residual:** an install registered
-  by an older version keeps its old `UninstallString` (no `_?=`), and so the `%TEMP%` copy,
-  until it's reinstalled, and `uninstall.exe` started by hand without `_?=` still copies itself.
-  Not yet run on Windows.
+  `_?=` comes last on the line, which NSIS takes, and the self-delete can only remove the old
+  `uninstall.exe` and empty folders, so it isn't skipped there. **Residual:** an install
+  registered by an older version keeps its old `UninstallString` (no `_?=`), and so the `%TEMP%`
+  copy, until it's reinstalled. `uninstall.exe` started by hand without `_?=` still copies itself
+  before any script runs; the copy then refuses with 26, but by then it is already running
+  elevated. Not yet run on Windows.
 - Keeping the copy current after an app update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)
