@@ -3,12 +3,13 @@
 //! matches them, a folder the lawyer can't list, and the exit check after a repair that refused
 //! (R1). Windows only; they run on the VM.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::time::timestamp;
 use super::{Reason, SetAsideFailure, after_session, before_launch, list_set_aside};
-use super::{restore_set_aside, set_aside_path};
+use super::{make_folders, restore_set_aside, set_aside_path};
 use crate::Error;
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{World, matter_one};
@@ -246,4 +247,29 @@ fn a_nested_claude_md_in_any_case_is_set_aside_and_one_there_at_launch_stays() {
     assert_eq!(seen, [(root.join("a/b/CLAUDE.md"), Reason::New)]);
     assert!(is_empty(&root.join("a/b")));
     assert!(root.join("sub/AGENTS.md").is_file());
+}
+
+/// S15 `PR5` review L3: the profile folders' base is opened as itself and its final path
+/// confirmed, so a junction at a folder above it (or at the base) is never followed, while a
+/// plain base gets its folders made.
+#[test]
+fn a_profile_base_reached_through_a_junction_is_refused_and_nothing_is_made() {
+    let w = World::new("ntfs-profile-base");
+    w.dir.dir("real/state");
+    let parts = [OsString::from("AppData"), OsString::from("Roaming")];
+    let real = w.canonical("real");
+    make_folders(&real.join("state"), &parts).unwrap();
+    assert!(real.join(r"state\AppData\Roaming").is_dir());
+
+    let above = w.canonical(".").join("above");
+    junction(&above, &real).unwrap();
+    let other = [OsString::from("Local")];
+    assert!(make_folders(&above.join("state"), &other).is_err());
+    let at_base = w.canonical(".").join("at-base");
+    junction(&at_base, &real.join("state")).unwrap();
+    assert!(make_folders(&at_base, &other).is_err());
+    assert!(
+        !real.join(r"state\Local").exists(),
+        "nothing made through a junction"
+    );
 }

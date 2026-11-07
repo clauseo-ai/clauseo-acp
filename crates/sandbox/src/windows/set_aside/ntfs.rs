@@ -235,10 +235,19 @@ fn folder_chain(
     parts: &[OsString],
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
 ) -> Result<Handle, SetAsideFailure> {
-    let mut folder = open_path(sandbox, FOLDER).map_err(|e| failure(&e))?;
+    let folder = open_path(sandbox, FOLDER).map_err(|e| failure(&e))?;
     if reparse(&folder).map_err(|e| io_failure(&e))? {
         return Err(SetAsideFailure::Changed);
     }
+    chain_below(folder, parts, disposition)
+}
+
+/// Opens each of `parts` below the open folder `folder` as [`folder_chain`] does. The last.
+fn chain_below(
+    mut folder: Handle,
+    parts: &[OsString],
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+) -> Result<Handle, SetAsideFailure> {
     for part in parts {
         let next = open_at(
             &folder,
@@ -258,9 +267,12 @@ fn folder_chain(
 }
 
 /// Opens or makes each of `parts` below the folder `base` as [`folder_chain`] does, never through
-/// a link: the inner runner's profile folders (`write::make_agent_folder`, S15 `PR5`).
+/// a link: the inner runner's profile folders (`write::make_agent_folder`, S15 `PR5`). `base`
+/// is opened as [`open_folder`] opens it: refused when it is a reparse point or its final path
+/// isn't `base`, so a junction swapped in at a folder above it is never followed.
 pub(in crate::windows) fn make_folders(base: &Path, parts: &[OsString]) -> io::Result<()> {
-    folder_chain(base, parts, FILE_OPEN_IF)
+    open_folder(base, FOLDER)
+        .and_then(|folder| chain_below(folder, parts, FILE_OPEN_IF))
         .map(drop)
         .map_err(|failure| io::Error::other(failure.to_string()))
 }
