@@ -43,6 +43,9 @@ const TRIES: u32 = 3;
 const BACKOFF: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(8)];
 /// The wait between tries while offline.
 const OFFLINE_WAIT: Duration = Duration::from_secs(30);
+/// Offline tries in a row after which `Waiting` says unreachable (`agent.install_unreachable`)
+/// rather than offline, unless the OS reports no network at all: about 90 s of tries.
+const UNREACHABLE_AFTER: u32 = 3;
 /// Bytes in the log's and the failure's MB.
 const MB: u64 = 1_000_000;
 
@@ -91,6 +94,8 @@ pub(crate) struct Run {
     tries: u32,
     /// Tries made so far, offline ones included: the temp folder's number.
     pub(crate) attempts: u32,
+    /// Offline tries in a row, the last included; 0 after any other end of a try.
+    offline_streak: u32,
     /// The last progress, for the log's `received:` line.
     pub(crate) received: u64,
     pub(crate) total: u64,
@@ -102,6 +107,7 @@ impl Run {
             log: InstallLog::new(agent),
             tries: 0,
             attempts: 0,
+            offline_streak: 0,
             received: 0,
             total: 0,
         }
@@ -225,18 +231,18 @@ impl<T: Timer + Send + Sync> Job<T> {
             match err.next {
                 Next::Cancelled => return,
                 Next::Offline => {
+                    run.offline_streak += 1;
+                    let reason = self.waiting_reason(run.offline_streak);
                     let mut log = run.log.clone();
                     push_error(&mut log, &err);
-                    finish_log(&mut log, &run, FailureKind::Offline);
-                    let state = InstallState::Waiting {
-                        reason: FailureKind::Offline,
-                        log,
-                    };
+                    finish_log(&mut log, &run, reason);
+                    let state = InstallState::Waiting { reason, log };
                     if !self.emit(state, false) || !self.wait(OFFLINE_WAIT).await {
                         return;
                     }
                 }
                 Next::Blocked | Next::DiskFull | Next::Stop => {
+                    run.offline_streak = 0;
                     run.tries += 1;
                     let kind = match err.next {
                         Next::Blocked => FailureKind::Blocked,
@@ -246,6 +252,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                     return self.fail(kind, &err, &run, user.as_ref());
                 }
                 Next::Retry => {
+                    run.offline_streak = 0;
                     run.tries += 1;
                     let backoff = usize::try_from(run.tries - 1)
                         .ok()
@@ -307,6 +314,19 @@ impl<T: Timer + Send + Sync> Job<T> {
             .map_err(|err| err.at(Step::Prepare))?;
         files::clean_up(config, &fetched);
         Ok(installed)
+    }
+
+    /// Why a job waits after `streak` offline tries in a row: `Offline`, or `Unreachable` from
+    /// the [`UNREACHABLE_AFTER`]th on, when the hosts stay out of reach though the OS does not
+    /// report the network gone (a firm proxy or firewall dropping every connection, say). While
+    /// the OS reports no network at all it stays `Offline`, so a lawyer on a train is not sent
+    /// to IT.
+    fn waiting_reason(&self, streak: u32) -> FailureKind {
+        if streak >= UNREACHABLE_AFTER && !self.config.os_network.disconnected() {
+            FailureKind::Unreachable
+        } else {
+            FailureKind::Offline
+        }
     }
 
     /// `DiskFull` when the free space at the data folder is below the need. A free space that

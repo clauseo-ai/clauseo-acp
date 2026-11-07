@@ -471,4 +471,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (364, 0x5d63_342b_9689_b794),
         (266, 0xaedd_5424_3350_9aee),
     ),
+    (
+        "added/turn_failed-AgentInstallUnreachable",
+        include_bytes!("added/turn_failed-AgentInstallUnreachable.jsonl"),
+        include_bytes!("added/turn_failed-AgentInstallUnreachable.msgpack"),
+        (353, 0xdb95_4a32_96ad_083a),
+        (254, 0x8ad9_f6ab_7225_c544),
+    ),
 ];

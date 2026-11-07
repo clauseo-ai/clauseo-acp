@@ -72,6 +72,9 @@ windows = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
   "Win32_System_Registry",
+  # osnet: the Network List Manager's connectivity, through COM.
+  "Win32_Networking_NetworkListManager",
+  "Win32_System_Com",
 ] }
 
 [dev-dependencies]

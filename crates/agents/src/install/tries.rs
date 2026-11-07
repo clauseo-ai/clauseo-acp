@@ -174,7 +174,7 @@ impl TryError {
 impl From<FetchError> for TryError {
     fn from(err: FetchError) -> TryError {
         let next = match err.kind {
-            FetchKind::Offline => Next::Offline,
+            FetchKind::Offline | FetchKind::Lost => Next::Offline,
             FetchKind::Blocked => Next::Blocked,
             FetchKind::DiskFull => Next::DiskFull,
             FetchKind::Cancelled => Next::Cancelled,
@@ -183,6 +183,7 @@ impl From<FetchError> for TryError {
         let (step, cause) = match err.kind {
             FetchKind::Integrity => (Step::Verify, "checksum mismatch"),
             FetchKind::Offline => (Step::Fetch, "network unreachable"),
+            FetchKind::Lost => (Step::Fetch, "connection reset, aborted or timed out"),
             FetchKind::Blocked => (Step::Fetch, "blocked by a proxy or firewall"),
             FetchKind::DiskFull => (Step::Fetch, "disk full"),
             FetchKind::Cancelled => (Step::Fetch, "paused"),

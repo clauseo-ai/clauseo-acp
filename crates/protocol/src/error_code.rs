@@ -255,6 +255,10 @@ error_codes! {
     BlocklistNoticeExpired = "blocklist.notice_expired", retryable: false, meaning: "The \
         blocked-site notice an allow names is one the host no longer keeps (too old, or from \
         before a restart), so nothing was allowed: allow the site from a new notice.";
+    AgentInstallUnreachable = "agent.install_unreachable", retryable: true, meaning: "The \
+        agent's install has not reached its hosts for three tries in a row while the computer \
+        reports a network: a firm proxy or firewall may be dropping the connections. The install \
+        goes on waiting and trying again by itself.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

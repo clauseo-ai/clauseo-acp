@@ -84,6 +84,7 @@ export type ErrorCode =
   | "sandbox.blocked"
   | "blocklist.override_off"
   | "blocklist.notice_expired"
+  | "agent.install_unreachable"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -197,6 +198,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // keeps (decision record 0053)
   "blocklist.notice_expired":
     "This notice has expired. Open the site again, then allow it from the new notice.",
+  // provisional (the Windows VM pass of #664): the app says it with the hosts beside it
+  "agent.install_unreachable":
+    "Clauseo can't reach its download server. If your internet is working, ask your IT team to allow its addresses.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

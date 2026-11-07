@@ -1689,6 +1689,8 @@ export type ErrorCode =
 "blocklist.override_off" | 
 /** The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. */
 "blocklist.notice_expired" | 
+/** The agent's install has not reached its hosts for three tries in a row while the computer reports a network: a firm proxy or firewall may be dropping the connections. The install goes on waiting and trying again by itself. */
+"agent.install_unreachable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2810,7 +2812,10 @@ export type InstallProgress =
 } }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
 /**  Offline: the install waits and tries again by itself. */
 ({ waiting: {
-	/**  Why it waits: `agent.install_offline`. */
+	/**
+	 *  Why it waits: `agent.install_offline`, or `agent.install_unreachable` once three
+	 *  tries in a row met no network while the computer reports one.
+	 */
 	code: ErrorCode,
 	/**  The hosts the install contacts, for "Ask your IT team". */
 	hosts: string[],

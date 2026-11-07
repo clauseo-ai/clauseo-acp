@@ -46,3 +46,7 @@ mod node_env;
 #[cfg(test)]
 #[path = "install/setup_retry.rs"]
 mod setup_retry;
+
+#[cfg(test)]
+#[path = "install/unreachable.rs"]
+mod unreachable;

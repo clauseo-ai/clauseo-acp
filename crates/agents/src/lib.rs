@@ -52,6 +52,7 @@
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
 //!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`];
+//! - [`OsNetwork`] and [`SystemNetwork`], whether the OS reports no network at all;
 //!   [`Agents::set_network`] with a [`Network`] (the proxies and CA files, for the next job), and
 //!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
@@ -126,6 +127,7 @@ mod integrity;
 pub mod keys;
 mod log;
 mod node;
+mod osnet;
 mod pins;
 mod platform;
 mod receipt;
@@ -146,6 +148,7 @@ pub use config::{
 };
 pub use fileid::same_file;
 pub use log::InstallLog;
+pub use osnet::{OsNetwork, SystemNetwork};
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use receipt::{install_folder, install_root, script_path};

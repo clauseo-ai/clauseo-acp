@@ -103,11 +103,11 @@ fn a_cut_download_resumes_by_range_to_the_full_verified_file() {
     assert_eq!(seen.last().unwrap().0, full);
 }
 
-/// A connection reset before the answer (the network gone as a request goes out) is offline. One
+/// A connection reset before the answer (the network gone as a request goes out) is lost. One
 /// reset mid-body is a cut, as ureq reads it (`UnexpectedEof`, "Peer disconnected"): failed,
 /// counted as a try, the `.part` kept for the next try's range.
 #[test]
-fn a_reset_before_the_answer_is_offline_and_one_mid_body_a_cut() {
+fn a_reset_before_the_answer_is_lost_and_one_mid_body_a_cut() {
     let (registry, bytes, dir, fetcher) = setup("reset");
     registry.then(PATH, Behaviour::ResetAfter(70_000));
     registry.then(PATH, Behaviour::Reset);
@@ -115,7 +115,7 @@ fn a_reset_before_the_answer_is_offline_and_one_mid_body_a_cut() {
     let err = fetch(&fetcher, &job).unwrap_err();
     assert_eq!(err.kind, FetchKind::Failed, "{err:?}");
     let err = fetch(&fetcher, &job).unwrap_err();
-    assert_eq!(err.kind, FetchKind::Offline, "{err:?}");
+    assert_eq!(err.kind, FetchKind::Lost, "{err:?}");
     let size = fetch(&fetcher, &job).unwrap();
     assert_eq!(size, bytes.len() as u64);
 }

@@ -9,9 +9,13 @@ use crate::log::{redact, redact_url};
 /// Which way a download failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum FetchKind {
-    /// Name resolution failed, connect failed with no route, or the connection was reset,
-    /// aborted or timed out: wait and try again.
+    /// Clearly offline: name resolution failed, or the network is down or unreachable. Wait and
+    /// try again.
     Offline,
+    /// A connection reset, aborted or timed out (connecting, sending or receiving): offline, or a
+    /// proxy or firewall dropping every connection, which the client cannot tell apart. Waited
+    /// on as offline; the install says unreachable once it has lasted three tries.
+    Lost,
     /// A 403 or 407, a TLS failure, or a web page where a file should be: a proxy or a firewall
     /// is in the way, and a retry would meet it again.
     Blocked,
@@ -61,10 +65,12 @@ impl FetchError {
 /// The kind of a ureq error, from the request or from reading the body.
 pub(crate) fn classify(err: &ureq::Error) -> FetchKind {
     match err {
-        ureq::Error::HostNotFound
-        | ureq::Error::Timeout(ureq::Timeout::Connect | ureq::Timeout::Resolve) => {
+        ureq::Error::HostNotFound | ureq::Error::Timeout(ureq::Timeout::Resolve) => {
             FetchKind::Offline
         }
+        ureq::Error::Timeout(ureq::Timeout::Global | ureq::Timeout::PerCall) => FetchKind::Failed,
+        // Connecting, sending or receiving timed out: as a bare io `TimedOut` is.
+        ureq::Error::Timeout(_) => FetchKind::Lost,
         ureq::Error::Io(io) => classify_io(io),
         ureq::Error::Tls(_) | ureq::Error::Pem(_) | ureq::Error::Rustls(_) => FetchKind::Blocked,
         ureq::Error::ConnectProxyFailed(reason) => match proxy_status(reason) {
@@ -84,16 +90,15 @@ pub(crate) fn error_status(err: &ureq::Error) -> Option<u16> {
     }
 }
 
-/// The kind of an io error met on the network: a lost route or connection is offline, a TLS
-/// failure (rustls reports it as an io error wrapping its own) is blocked, the rest failed. A
-/// refused connection is a host that answers, so it failed rather than offline.
+/// The kind of an io error met on the network: a TLS failure (rustls reports it as an io error
+/// wrapping its own) is blocked; a refused connection is a host that answers, so failed.
 ///
-/// Offline covers the kinds of a network that went away (unreachable, down, a connection reset
-/// or aborted, a timed-out connect), a failed name lookup (Windows reports it as a raw Windows
-/// Sockets code std leaves uncategorised; Unix as std's own `failed to lookup address
-/// information` error), and on Windows the socket codes of the same, in case std leaves one
-/// uncategorised.
-/// An io error wrapping another (a reader that boxes the socket's error) is looked through.
+/// Offline is clearly offline: the network down or unreachable, or a failed name lookup (Windows
+/// reports it as a raw Windows Sockets code std leaves uncategorised, [`OFFLINE_WSA_CODES`];
+/// Unix as std's own `failed to lookup address information` error). Lost is a connection reset,
+/// aborted or timed out, which std maps from the Windows codes 10053, 10054 and 10060 as from
+/// their Unix ones. An io error wrapping another (a reader that boxes the socket's error) is
+/// looked through.
 pub(crate) fn classify_io(err: &io::Error) -> FetchKind {
     let mut current = err;
     loop {
@@ -124,10 +129,10 @@ fn io_kind(err: &io::Error) -> Option<FetchKind> {
     match err.kind() {
         io::ErrorKind::NetworkUnreachable
         | io::ErrorKind::HostUnreachable
-        | io::ErrorKind::NetworkDown
-        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::NetworkDown => Some(FetchKind::Offline),
+        io::ErrorKind::ConnectionAborted
         | io::ErrorKind::ConnectionReset
-        | io::ErrorKind::TimedOut => Some(FetchKind::Offline),
+        | io::ErrorKind::TimedOut => Some(FetchKind::Lost),
         _ if is_lookup_failure(err) => Some(FetchKind::Offline),
         _ => None,
     }
@@ -142,14 +147,13 @@ fn is_lookup_failure(err: &io::Error) -> bool {
     err.raw_os_error().is_none() && err.to_string().starts_with(LOOKUP_FAILED)
 }
 
-/// The Windows Sockets codes of a network gone away or a failed lookup: `WSAENETDOWN`,
-/// `WSAENETUNREACH`, `WSAECONNABORTED`, `WSAECONNRESET`, `WSAETIMEDOUT`, `WSAEHOSTUNREACH`,
-/// `WSAHOST_NOT_FOUND`, `WSATRY_AGAIN` and `WSANO_DATA`. Not `WSAECONNREFUSED` (10061): a
-/// refused connection is a host that answers, failed as on Unix.
+/// The Windows Sockets codes of a failed name lookup, which std leaves uncategorised:
+/// `WSAHOST_NOT_FOUND`, `WSATRY_AGAIN` and `WSANO_DATA`. The other codes of a network gone away
+/// need no list: std maps `WSAENETDOWN`, `WSAENETUNREACH` and `WSAEHOSTUNREACH` to the
+/// unreachable kinds, and `WSAECONNABORTED`, `WSAECONNRESET` and `WSAETIMEDOUT` to the lost
+/// ones. `WSAECONNREFUSED` is refused, failed as on Unix.
 #[cfg(windows)]
-pub(crate) const OFFLINE_WSA_CODES: [i32; 9] = [
-    10050, 10051, 10053, 10054, 10060, 10065, 11001, 11002, 11004,
-];
+pub(crate) const OFFLINE_WSA_CODES: [i32; 3] = [11001, 11002, 11004];
 
 /// Whether `code` is one of [`OFFLINE_WSA_CODES`]; on Unix the kinds alone decide.
 #[cfg(windows)]
