@@ -103,20 +103,20 @@ code departs from the brief.
   one warning per process that names no host. On Windows the whole WinHTTP lookup, WPAD included, is
   bounded to 10 s on its own thread, and at most 8 such threads live at once in the process (a
   lookup left running past its bound keeps its slot), so hung lookups cannot pile up threads; past
-  that the lookup fails. A failed lookup is kept apart from `DIRECT` (`UpstreamAnswer::Failed`,
-  cached the same 60 s): on Windows, a PAC URL the settings name is asked before auto-detect (a
-  firm's GPO often sets both, and a slow WPAD would use up the lookup's 10 s bound), auto-detect's
-  route answering only when the PAC URL fails; a PAC URL that fails, with no WPAD route either, is
-  failed, and so is a WPAD lookup that fails with nothing else set, but for the answers that mean no
-  proxy on this network (12180 no WPAD file found, 12167 a `wpad` name serving no script, 12178 the
-  auto-proxy service off; each PAC fetch the service cannot make is retried in process first), which
-  read as direct; WinHTTP reports "no WPAD on this network" and a transient discovery failure with
-  that same code (12180), so a transient one still reads as direct; a connection decides over it as
-  "A failed lookup" (below) says, and `upstream_answer` hands it to a caller that keeps an earlier
-  answer over a failure (desktop's S17 route refresh). `upstream_for` (stage E's connector relay)
-  maps a failure to direct, returns `Result<Route, Error>` and refuses a firm URL that `start_proxy`
-  refuses, so the relay fails visibly rather than going around the firm's proxy. `Upstream`'s
-  `Debug` shows only a fixed URL's scheme, host and port.
+  that the lookup fails. A failed lookup is kept apart from `DIRECT` (`UpstreamAnswer::Failed`, with
+  its `FailKind`, cached the same 60 s): on Windows, a PAC URL the settings name is asked before
+  auto-detect (a firm's GPO often sets both, and a slow WPAD would use up the lookup's 10 s bound),
+  auto-detect's route answering only when the PAC URL fails; a PAC URL that fails, with no WPAD
+  route either, is failed, and so is a WPAD lookup that fails with nothing else set, but for the
+  answers that mean no proxy on this network (12180 no WPAD file found, 12167 a `wpad` name serving
+  no script, 12178 the auto-proxy service off; each PAC fetch the service cannot make is retried in
+  process first), which read as direct; WinHTTP reports "no WPAD on this network" and a transient
+  discovery failure with that same code (12180), so a transient one still reads as direct; a
+  connection decides over it as "A failed lookup" (below) says, and `upstream_answer` hands it to a
+  caller that keeps an earlier answer over a failure (desktop's S17 route refresh). `upstream_for`
+  (stage E's connector relay) maps a failure to direct, returns `Result<Route, Error>` and refuses a
+  firm URL that `start_proxy` refuses, so the relay fails visibly rather than going around the
+  firm's proxy. `Upstream`'s `Debug` shows only a fixed URL's scheme, host and port.
 - **allow and revoke** change a live exact-host list, read on every request. `revoke` removes the
   exact host whether it came from the start list or `allow`, and closes each open tunnel whose
   host the list no longer allows; a `*.domain` entry that still covers the host keeps it and its
@@ -244,9 +244,43 @@ let a private literal or `localhost` through now. A public literal off the list 
 
 Amended 2026-11-07: a failed lookup. Before, a connection whose OS lookup failed went direct.
 For a firm whose PAC or static proxy routes every connection through its inspection proxy, a PAC
-server that goes down, or a PAC script that breaks, then sent the agent around the inspection. Each
-connection whose route lookup fails (the OS lookup failed or timed out, no lookup slot was free,
-or the lookup took longer than the connect timeout) now takes the first of:
+server that goes down, or a PAC script that breaks, then sent the agent around the inspection. A
+failed lookup now says why, as a `FailKind`, and each connection whose route lookup fails (the
+OS lookup failed or timed out, no lookup slot was free, or the lookup took longer than the
+connect timeout) decides by its kind.
+
+The kinds, in order (a later one is added at the end):
+
+- **`PacUnreachable`:** the PAC file the settings name could not be fetched. On Windows, WinHTTP
+  12167 (`ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`) for a PAC URL, or its host silent (12002
+  timeout, 12007 no such name, 12029 no connection); on macOS, a PAC URL's fetch failure
+  (`NSURLErrorDomain`, or a negative URL-loading code in `kCFErrorDomainCFNetwork`), or its run
+  with no answer within 5 s. WPAD's fetch failures are not this kind: they read as no proxy here,
+  as above. A static proxy setting never gives it.
+- **`BadScript`:** the PAC script was got and would not run: WinHTTP 12166
+  (`ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`), from a PAC URL or WPAD, or macOS's
+  `kCFErrorPACFileError` (308), from a PAC URL or an inline script.
+- **`Other`:** everything else: no free lookup slot, settings unreadable or too slow, WinHTTP's
+  auto-proxy service error (12178), the Windows lookup past its 10 s bound, and any other code.
+
+The Windows codes are mapped in `parse::pac_kind`, beside `pac_error`; the macOS ones in
+`parse::cf_pac_kind`, from the PAC run. Both are pure functions, tested on every target.
+
+**`PacUnreachable`** usually means the laptop is off the firm's network (at home, a VPN dropped),
+where the PAC server is out of reach and so, most likely, is the proxy it names. Browsers go
+direct when they cannot fetch a PAC file, and so does the egress proxy, with one check first:
+
+1. **The host's earlier proxy, while it answers.** When a real lookup gave the same scheme, host
+   and port a proxy under 10 minutes ago (the reuse window below), the proxy probes it with
+   `upstream::reachable` (resolve and TCP-connect, nothing sent), capped at 1 s and run off the
+   proxy thread. A proxy that takes the connection is kept: the laptop is still on the firm's
+   network and only the PAC server is down. One that does not is forgotten, so no later failure
+   in the window reuses it, and the connection goes direct.
+2. **Direct, otherwise:** no earlier proxy, or an earlier `DIRECT`. This holds even when the firm
+   meant a proxy: refusing would leave an off-network laptop with no network at all, for a proxy
+   it cannot reach.
+
+**`BadScript` and `Other`** take the first of:
 
 1. **The host's last good route.** The route a real lookup gave for the same scheme, host and port
    under 10 minutes ago, `DIRECT` included, is reused: the same window as desktop's backstop for a
@@ -259,23 +293,25 @@ or the lookup took longer than the connect timeout) now takes the first of:
    (macOS `ProxyAutoConfigJavaScript`, as an MDM profile pushes) or a static proxy, WinHTTP found
    a PAC script it could not run (12166, WPAD's included), or the settings could not be read, or
    not within the connect timeout (refusing is the safe side when the firm may require a proxy).
-   The connection gets 502,
-   the status an upstream that fails already gets, for CONNECT and plain `http://` alike (the
-   proxy's refusals carry no header naming the cause), the record's verdict is `Failed`, and
-   `Denial::UpstreamUnavailable { host, port }` goes through the rate cap like any denial.
+   The connection gets 502, the status an upstream that fails already gets, for CONNECT and plain
+   `http://` alike (the proxy's refusals carry no header naming the cause), the record's verdict
+   is `Failed`, and `Denial::UpstreamUnavailable { host, port }` goes through the rate cap like
+   any denial. A broken script is no sign the laptop left the firm's network, so it does not go
+   direct.
 3. **Direct, otherwise:** settings read and naming nothing (a plain network), or auto-detect
    (WPAD) alone that found nothing usable, where there is no firm proxy to go around.
 
 The OS lookup reads the reason when it fails and the cache keeps it with the failure, in a
-crate-internal `Answer::Failed(Failure)`; the public `UpstreamAnswer` and `upstream_answer` are as
-they were, so desktop's refresh is unchanged. On macOS the reason is the system proxy settings
-(`ProxyAutoConfigEnable` with a URL, a `ProxyAutoConfigJavaScript` present, `HTTPEnable` or
-`HTTPSEnable`); on Windows the current user's
-settings (an auto-config URL or a proxy string) and the PAC error code. A failure that asked the OS
-nothing (no slot, a lookup past the connect timeout, past the Windows thread bound) reads the
-settings then. Known gap: macOS's own error for a PAC script that would not run is not mapped,
-so a broken script that WPAD alone found on macOS still goes direct. WPAD is off by default on
-macOS, and firms push a PAC URL, an inline script or a static proxy, each of which refuses.
+crate-internal `Answer::Failed(Failure, FailKind)`. The public `UpstreamAnswer::Failed` carries
+the `FailKind`; desktop's refresh ignores it (`Failed(_)`) and is unchanged. On macOS whether a
+proxy was meant comes from the system proxy settings (`ProxyAutoConfigEnable` with a URL, a
+`ProxyAutoConfigJavaScript` present, `HTTPEnable` or `HTTPSEnable`); on Windows from the current
+user's settings (an auto-config URL or a proxy string) and the PAC error code. A failure that
+asked the OS nothing (no slot, a lookup past the connect timeout, past the Windows thread bound)
+reads the settings then. Known gap: on macOS a script that would not run is `BadScript` but not,
+by itself, a proxy meant, so a broken script that WPAD alone found on macOS still goes direct.
+WPAD is off by default on macOS, and firms push a PAC URL, an inline script or a static proxy,
+each of which refuses.
 
 ## Status
 
