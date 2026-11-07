@@ -25,6 +25,7 @@ mod bounded;
 #[cfg(target_os = "macos")]
 mod macos;
 mod parse;
+mod reachable;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
@@ -42,6 +43,7 @@ use url::Url;
 
 use crate::{Clock, Error, SystemClock};
 use parse::{NoProxy, normal_host};
+pub use reachable::reachable;
 
 /// How long an OS answer is kept for one host and port: a proxy answer, a `DIRECT` and a failed
 /// lookup (which goes direct) alike, so a WPAD or PAC timeout stalls a connection at most once a
