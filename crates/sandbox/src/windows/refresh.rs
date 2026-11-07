@@ -88,6 +88,9 @@ pub mod version;
 mod walk;
 #[cfg(windows)]
 mod windows_refresher;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;
 
 pub use rules::{
     EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,

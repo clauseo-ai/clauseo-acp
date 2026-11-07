@@ -50,7 +50,7 @@ mod links_by_user;
 mod reset;
 
 /// `bytes` random bytes as lowercase hex.
-fn random_hex(bytes: usize) -> String {
+pub(crate) fn random_hex(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
     getrandom::fill(&mut buffer).unwrap();
     buffer.iter().fold(String::new(), |mut text, byte| {
@@ -76,7 +76,7 @@ fn me() -> Sid {
 /// Clears what a killed earlier try of the family named by `prefix` left: every `<prefix>*`
 /// account with its profile, then any profile whose folder has that prefix and whose account is
 /// gone.
-fn clear_leftovers(prefix: &str) {
+pub(crate) fn clear_leftovers(prefix: &str) {
     for name in names_starting(prefix, Kind::User).unwrap() {
         if let Some(sid) = accounts::sid_of(&name, Kind::User).unwrap() {
             drop(delete_profile(&sid, &me()));
@@ -109,10 +109,10 @@ fn sweep_profiles(prefix: &str) {
 }
 
 /// A test account, made with a random password, deleted with its profile on drop.
-struct TestUser {
-    name: String,
-    password: Password,
-    sid: Sid,
+pub(crate) struct TestUser {
+    pub(crate) name: String,
+    pub(crate) password: Password,
+    pub(crate) sid: Sid,
 }
 
 impl TestUser {
@@ -124,7 +124,7 @@ impl TestUser {
 
     /// Makes `<prefix><suffix>` as [`TestUser::new`] does. The password goes to `NetUserAdd` in a
     /// buffer wiped when the call returns, never on a command line.
-    fn named(prefix: &str, suffix: &str) -> TestUser {
+    pub(crate) fn named(prefix: &str, suffix: &str) -> TestUser {
         let name = format!("{prefix}{suffix}");
         assert!(name.len() <= 20, "{name}");
         let password = generate().unwrap();

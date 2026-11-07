@@ -124,4 +124,4 @@ impl Drop for Loaded {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
