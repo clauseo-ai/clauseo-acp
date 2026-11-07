@@ -18,7 +18,8 @@ struct Fake {
     bits_error: Option<i32>,
 }
 
-/// The removal's calls, recorded in the same list: one item of each kind.
+/// The removal's calls, recorded in the same list: one item of each kind, but no class key once
+/// it was deleted.
 struct Calls<'a>(&'a mut Vec<String>, Option<i32>);
 
 fn key(kind: Kind) -> &'static str {
@@ -35,6 +36,9 @@ impl Leftovers for Calls<'_> {
     type Item = Kind;
     fn list(&mut self, kind: Kind) -> io::Result<Vec<Kind>> {
         self.0.push(format!("list {}", key(kind)));
+        if kind == Kind::Classes && self.0.iter().any(|event| event == "delete classes") {
+            return Ok(vec![]);
+        }
         Ok(vec![kind])
     }
     fn delete(&mut self, kind: Kind, _: &Kind) -> io::Result<()> {
@@ -96,13 +100,14 @@ fn the_token_is_widened_only_after_the_sweep_and_before_the_classes_and_com() {
     let mut fake = Fake::default();
     let (code, _) = go(&mut fake);
     assert_eq!(code, 0);
-    assert_eq!(
-        fake.events,
-        events(
-            &["shut", "sweep", "widen"],
-            &["classes", "run", "startup", "tasks", "bits"]
-        )
+    // The classes are looked at again right before BITS, whose creation looks its class up.
+    let mut want = events(
+        &["shut", "sweep", "widen"],
+        &["classes", "run", "startup", "tasks"],
     );
+    want.push("list classes".to_owned());
+    want.extend(removal(&["bits"]));
+    assert_eq!(fake.events, want);
 }
 
 #[test]
