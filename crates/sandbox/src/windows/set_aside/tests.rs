@@ -453,3 +453,60 @@ fn the_bookkeeping_reads_a_record_as_files_rs_writes_it() {
         assert!(!set_aside_record_closed(bytes.as_bytes()), "{bytes}");
     }
 }
+
+/// A manifest with nothing outstanding, as a restore of every item leaves it.
+pub(crate) const MANIFEST_NONE: &[u8] = b"{\"version\": 1, \"next\": 2, \"entries\": []}";
+/// A manifest still listing one item set aside.
+pub(crate) const MANIFEST_ONE: &[u8] = b"{\"version\": 1, \"next\": 2, \"entries\": [{\"id\": 1, \
+    \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \"from\": \"C:\\\\m\\\\.git\", \
+    \"to\": \"C:\\\\d\\\\.git\", \"folder\": \"20261107T101500-000Z\", \"within\": [], \
+    \"name\": \".git\", \"reason\": \"new\", \"owner\": null, \
+    \"at\": \"2026-11-07T10:15:00.000Z\"}]}";
+
+#[test]
+fn the_bookkeeping_reads_a_manifest_as_files_rs_writes_it() {
+    use super::files::Manifest;
+    let settled = |bytes: &[u8]| Manifest::settled_empty(bytes);
+    let written = |manifest: &Manifest| serde_json::to_vec_pretty(manifest).unwrap();
+    // Nothing set aside, or every item restored: settled.
+    let mut manifest = Manifest::default();
+    assert!(settled(&written(&manifest)));
+    manifest.next = 5;
+    assert!(settled(&written(&manifest)));
+    // One item still set aside, or one move begun: outstanding.
+    let entry = Entry {
+        id: 1,
+        matter: matter_one(),
+        from: PathBuf::from("m").join(".git"),
+        to: PathBuf::from("d").join(".git"),
+        folder: "20261107T101500-000Z".to_owned(),
+        within: Vec::new(),
+        name: ".git".into(),
+        reason: Reason::New,
+        owner: None,
+        at: "2026-11-07T10:15:00.000Z".to_owned(),
+    };
+    manifest.entries.push(entry.clone());
+    assert!(!settled(&written(&manifest)));
+    manifest.entries.clear();
+    manifest.intents.push(entry);
+    assert!(!settled(&written(&manifest)));
+    // The fixtures other tests use are the typed form.
+    assert!(settled(MANIFEST_NONE));
+    let one: Manifest = serde_json::from_slice(MANIFEST_ONE).unwrap();
+    assert_eq!(one.entries.len(), 1);
+    assert!(!settled(MANIFEST_ONE));
+    // What the typed read refuses is outstanding.
+    let text = String::from_utf8(written(&Manifest::default())).unwrap();
+    let refused = [
+        text.replacen("\"version\": 1", "\"version\": 2", 1),
+        text.replacen("\"entries\": []", "\"entries\": [], \"entries\": []", 1),
+        text.replacen("\"entries\": []", "\"entries\": [], \"extra\": 1", 1),
+        "{}".to_owned(),
+        "data".to_owned(),
+    ];
+    for bytes in refused {
+        assert_ne!(bytes, text);
+        assert!(!settled(bytes.as_bytes()), "{bytes}");
+    }
+}

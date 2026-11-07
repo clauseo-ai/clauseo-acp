@@ -32,9 +32,10 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::Entry;
 use super::names::{Links, Names, keyed};
 #[cfg(any(windows, test))]
-use super::{Entry, SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
+use super::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
 #[cfg(any(windows, test))]
 use crate::windows::matters::SANDBOX_DIR;
 #[cfg(any(windows, test))]
@@ -43,7 +44,7 @@ use crate::windows::write;
 #[cfg(any(windows, test))]
 const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 #[cfg(any(windows, test))]
-const MANIFEST_FILE: &str = "manifest.json";
+const MANIFEST_FILE: &str = SET_ASIDE_BOOKKEEPING[2];
 #[cfg(any(windows, test))]
 const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
 /// The version both files are written in and the only one read.
@@ -110,7 +111,7 @@ impl Record {
 }
 
 /// Every item set aside from a matter and not restored.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Manifest {
@@ -123,6 +124,18 @@ pub(super) struct Manifest {
     /// between leaves it here for the next load to settle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) intents: Vec<Entry>,
+}
+
+impl Manifest {
+    /// Whether `bytes` read as a manifest of [`VERSION`] with nothing outstanding: no item set
+    /// aside and not restored, no move begun. Anything the typed read refuses is `false`.
+    pub(super) fn settled_empty(bytes: &[u8]) -> bool {
+        serde_json::from_slice::<Manifest>(bytes).is_ok_and(|manifest| {
+            manifest.version == VERSION
+                && manifest.entries.is_empty()
+                && manifest.intents.is_empty()
+        })
+    }
 }
 
 #[cfg(any(windows, test))]

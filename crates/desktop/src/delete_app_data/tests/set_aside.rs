@@ -63,10 +63,9 @@ fn bookkeeping_beside_a_pass_folder_holding_a_file_keeps_the_whole_set_aside() {
 
 #[test]
 fn any_other_name_keeps_the_whole_set_aside() {
-    // The manifest of a pass whose items were restored, a name differing only in case, any
-    // other file, and a file directly in the set-aside: none is the bookkeeping.
+    // A name differing only in case, any other file, and a file directly in the set-aside: none
+    // is the bookkeeping.
     let names = [
-        format!("{}/manifest.json", MATTERS[0]),
         format!("{}/Record.json", MATTERS[1]),
         format!("{}/notes.txt", MATTERS[0]),
         "sandbox/set-aside/record.json".to_owned(),
@@ -219,4 +218,90 @@ fn bookkeeping_that_cannot_be_deleted_is_reported_and_nothing_above_it_goes() {
     assert!(exists(&matter.join("record.json")));
     assert!(exists(&world.data("sandbox/set-aside")));
     assert!(!exists(&world.data("store.sqlite")));
+}
+
+/// A manifest with nothing outstanding, as a restore of every item leaves it (`files.rs`).
+const MANIFEST_NONE: &[u8] = b"{\"version\": 1, \"next\": 2, \"entries\": []}";
+/// A manifest still listing one item set aside.
+const MANIFEST_ONE: &[u8] = b"{\"version\": 1, \"next\": 2, \"entries\": [{\"id\": 1, \
+    \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \"from\": \"C:\\\\m\\\\.git\", \
+    \"to\": \"C:\\\\d\\\\.git\", \"folder\": \"20261107T101500-000Z\", \"within\": [], \
+    \"name\": \".git\", \"reason\": \"new\", \"owner\": null, \
+    \"at\": \"2026-11-07T10:15:00.000Z\"}]}";
+
+/// The set-aside is kept with no failure, and `matter`'s bookkeeping and manifest are still there.
+fn assert_matter_and_manifest_kept(world: &World, matter: &str) {
+    assert_matter_kept(world, matter);
+    assert!(exists(&world.data(&format!("{matter}/manifest.json"))));
+}
+
+#[test]
+fn a_fully_restored_matter_goes_and_nothing_is_kept() {
+    let world = bookkeeping_world("dad-set-aside-restored");
+    for matter in MATTERS {
+        write(&world, &format!("{matter}/manifest.json"), MANIFEST_NONE);
+    }
+    assert_eq!(world.delete(true), (DELETED, String::new()));
+    world.assert_both_gone();
+    world.assert_canary_whole();
+}
+
+#[test]
+fn a_manifest_still_listing_an_item_unparsable_or_of_another_version_keeps_its_matter() {
+    let other = String::from_utf8(MANIFEST_NONE.to_vec()).unwrap().replacen(
+        "\"version\": 1",
+        "\"version\": 2",
+        1,
+    );
+    assert_ne!(other.as_bytes(), MANIFEST_NONE);
+    for (n, manifest) in [MANIFEST_ONE, b"data", b"{}", other.as_bytes()]
+        .into_iter()
+        .enumerate()
+    {
+        let world = bookkeeping_world(&format!("dad-set-aside-manifest-{n}"));
+        write(&world, &format!("{}/manifest.json", MATTERS[0]), manifest);
+        assert_matter_and_manifest_kept(&world, MATTERS[0]);
+        let kept = std::fs::read(world.data(&format!("{}/manifest.json", MATTERS[0]))).unwrap();
+        assert_eq!(kept, manifest);
+    }
+}
+
+#[test]
+fn a_manifest_listing_nothing_beside_a_pass_folder_with_a_file_keeps_the_whole_set_aside() {
+    let world = bookkeeping_world("dad-set-aside-manifest-pass");
+    let pass = format!("{}/20261107T101500-000Z/.git", MATTERS[1]);
+    write(
+        &world,
+        &format!("{}/manifest.json", MATTERS[1]),
+        MANIFEST_NONE,
+    );
+    world.data_dir(&pass);
+    world.data_file(&format!("{pass}/HEAD"));
+    assert_kept_whole(&world);
+    assert!(exists(&world.data(&format!("{pass}/HEAD"))));
+    assert!(exists(
+        &world.data(&format!("{}/manifest.json", MATTERS[1]))
+    ));
+}
+
+#[test]
+fn a_hard_linked_manifest_or_lock_keeps_its_matter_the_record_included() {
+    for (n, name) in ["manifest.json", "set-aside.lock"].into_iter().enumerate() {
+        let world = bookkeeping_world(&format!("dad-set-aside-hard-link-{n}"));
+        write(
+            &world,
+            &format!("{}/manifest.json", MATTERS[0]),
+            MANIFEST_NONE,
+        );
+        world.scratch.file("outside/canary/linked", MANIFEST_NONE);
+        let path = world.data(&format!("{}/{name}", MATTERS[0]));
+        make::remove_file(&path);
+        make::hard_link(&world.at("outside/canary/linked"), &path);
+        assert_matter_and_manifest_kept(&world, MATTERS[0]);
+        assert_eq!(
+            std::fs::read(world.data(&format!("{}/record.json", MATTERS[0]))).unwrap(),
+            CLOSED
+        );
+        assert!(exists(&world.at("outside/canary/linked")));
+    }
 }

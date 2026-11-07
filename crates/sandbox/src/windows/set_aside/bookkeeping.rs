@@ -2,20 +2,25 @@
 //! matter is forgotten (`setup/remove/ledger_work.rs`), never on the administrator's path (K1);
 //! and by the uninstaller's `--delete-app-data` (the desktop crate), from a set-aside holding
 //! nothing else. Every launch leaves `<data_dir>\sandbox\set-aside\<matter>\record.json` and
-//! `set-aside.lock` ([`SET_ASIDE_BOOKKEEPING`]).
+//! `set-aside.lock`; a pass that set something aside leaves `manifest.json`, which a restore of
+//! every item empties ([`SET_ASIDE_BOOKKEEPING`]).
 //!
-//! Only those two names go, each only as a plain file (no reparse point, no folder, one link
-//! only: a hard-linked one leaves the folder as it is), then the matter's folder, only when
-//! nothing else is in it. A record that still lists an open session, or can't be read or
-//! parsed, is kept with the rest: the next launch checks a crashed session's changes only
-//! against it (`run.rs`), so deleting it would let what an agent planted become the next
-//! launch's trusted starting point. The lawyer's files a pass moved aside, and the manifest
-//! listing them, stay.
+//! It is all or nothing, in two passes. First every name in the matter's folder is checked: each
+//! must be one of those three (matched ignoring case, as NTFS matches), a plain file (no reparse
+//! point, no folder) with one link, and its contents must let it go ([`contents_allow`]): a
+//! record that lists no open session, a manifest with nothing outstanding (no item set aside and
+//! not restored, no move begun), and a manifest only beside such a record. Anything else (a pass
+//! folder, another name, a hard-linked file, a record still open or a manifest still listing an
+//! item, either unreadable or of another version) leaves the folder exactly as it is. Only then
+//! is each file deleted, and last the folder, which goes only if empty. A record still open is
+//! kept because the next launch checks a crashed session's changes only against it (`run.rs`):
+//! deleting it would let what an agent planted become the next launch's trusted starting point.
 //!
-//! On NTFS everything is opened by handle without following a link, and the record is read on
-//! the handle that deletes it (`ntfs/forget.rs`). Off Windows, where only the tests run it, each
-//! folder on the way is refused if a symbolic link, names match ignoring ASCII case as NTFS
-//! does, and each file is checked by its own metadata.
+//! On NTFS everything is opened by handle without following a link, each file is read and
+//! checked on the handle that deletes it, and every handle stays open from the check to the
+//! delete (`ntfs/forget.rs`). Off Windows, where only the tests run it, each folder on the way is
+//! refused if a symbolic link, names match ignoring ASCII case, and each file is checked by its
+//! own metadata.
 
 use std::ffi::OsStr;
 use std::path::Path;
@@ -25,7 +30,7 @@ use clauseo_protocol::MatterId;
 
 use super::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
 
-/// The most a record read here may hold: 64 MiB. A larger one is kept.
+/// The most a record or a manifest read here may hold: 64 MiB. A larger one is kept.
 pub(super) const RECORD_CAP: usize = 64 << 20;
 
 /// What became of a matter's set-aside folder.
@@ -35,8 +40,8 @@ pub enum SetAsideBookkeeping {
     NoFolder,
     /// The bookkeeping and the folder are gone.
     Gone,
-    /// The folder stays: it holds something else, a record still open or unreadable, or a
-    /// bookkeeping file with another link. Whatever bookkeeping could go went.
+    /// The folder stays as it was: it holds something else, a record still open, a manifest
+    /// still listing an item, either unreadable, or a bookkeeping file with another link.
     Left,
 }
 
@@ -45,6 +50,35 @@ pub enum SetAsideBookkeeping {
 /// read refuses (a duplicate field, an unknown one, another version, unparsable) is open (kept).
 pub(crate) fn set_aside_record_closed(bytes: &[u8]) -> bool {
     super::files::Record::closed(bytes)
+}
+
+/// The record's and the manifest's places in [`SET_ASIDE_BOOKKEEPING`]; the lock is the other.
+pub(super) const RECORD_AT: usize = 0;
+/// See [`RECORD_AT`].
+pub(super) const MANIFEST_AT: usize = 2;
+
+/// Whether the bookkeeping file at `at` in [`SET_ASIDE_BOOKKEEPING`] must be read before it
+/// goes: the record and the manifest; the lock goes whatever it holds.
+pub(super) fn read_first(at: usize) -> bool {
+    at == RECORD_AT || at == MANIFEST_AT
+}
+
+/// Whether the contents `bytes` of the bookkeeping file at `at` let it go: a record that lists
+/// no open session ([`set_aside_record_closed`]), a manifest with nothing outstanding (read as
+/// the `Manifest` `files.rs` writes; anything its typed read refuses is outstanding).
+pub(super) fn contents_allow(at: usize, bytes: &[u8]) -> bool {
+    bytes.len() <= RECORD_CAP
+        && match at {
+            RECORD_AT => set_aside_record_closed(bytes),
+            MANIFEST_AT => super::files::Manifest::settled_empty(bytes),
+            _ => true,
+        }
+}
+
+/// Whether the bookkeeping files found, by their places, may go together: a manifest only
+/// beside a record (one whose contents allowed it).
+pub(super) fn together(found: &[usize]) -> bool {
+    !found.contains(&MANIFEST_AT) || found.contains(&RECORD_AT)
 }
 
 /// `--remove`'s call: deletes `matter`'s set-aside bookkeeping under `data_dir` (a data folder
@@ -89,7 +123,7 @@ mod posix {
     use std::os::unix::fs::MetadataExt as _;
     use std::path::Path;
 
-    use super::{RECORD_CAP, SET_ASIDE_BOOKKEEPING, SetAsideBookkeeping, set_aside_record_closed};
+    use super::{SET_ASIDE_BOOKKEEPING, SetAsideBookkeeping, contents_allow, read_first, together};
     use crate::windows::set_aside::SetAsideFailure;
     use crate::windows::write;
 
@@ -110,8 +144,8 @@ mod posix {
         }
     }
 
-    /// Each of `way` checked as a real folder, then the bookkeeping in `folder` deleted, then
-    /// `folder` when empty.
+    /// Each of `way` checked as a real folder, then `folder`'s names checked as the module
+    /// says, then each deleted, then `folder` when empty.
     pub(super) fn forget(
         way: &[&Path],
         folder: &Path,
@@ -124,7 +158,8 @@ mod posix {
         if present(folder, true)?.is_none() {
             return Ok(SetAsideBookkeeping::NoFolder);
         }
-        // Each bookkeeping name as listed, matched ignoring case, as NTFS opens it.
+        // First pass: every name checked; anything that isn't bookkeeping fit to go leaves the
+        // folder as it is.
         let mut found = Vec::new();
         for entry in std::fs::read_dir(folder).map_err(|error| failure(&error))? {
             let path = entry.map_err(|error| failure(&error))?.path();
@@ -132,28 +167,32 @@ mod posix {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
-            if let Some(at) = SET_ASIDE_BOOKKEEPING
+            let Some(at) = SET_ASIDE_BOOKKEEPING
                 .iter()
                 .position(|own| own.eq_ignore_ascii_case(name))
-            {
-                found.push((at, path));
-            }
-        }
-        // The record first: one still open keeps everything.
-        found.sort_by_key(|(at, _)| *at);
-        for (at, path) in found {
+            else {
+                return Ok(SetAsideBookkeeping::Left);
+            };
             let Some(meta) = present(&path, false)? else {
                 continue;
             };
             if meta.nlink() > 1 {
                 return Ok(SetAsideBookkeeping::Left);
             }
-            if at == 0 {
+            if read_first(at) {
                 let bytes = std::fs::read(&path).map_err(|error| failure(&error))?;
-                if bytes.len() > RECORD_CAP || !set_aside_record_closed(&bytes) {
+                if !contents_allow(at, &bytes) {
                     return Ok(SetAsideBookkeeping::Left);
                 }
             }
+            found.push((at, path));
+        }
+        let places: Vec<usize> = found.iter().map(|(at, _)| *at).collect();
+        if !together(&places) {
+            return Ok(SetAsideBookkeeping::Left);
+        }
+        // Second pass: each deleted.
+        for (_, path) in found {
             write::remove_owned_file(&path).map_err(|error| failure(&error))?;
         }
         match write::remove_empty_folder(folder) {

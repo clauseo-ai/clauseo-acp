@@ -11,9 +11,10 @@
 //! (`Removal::owners_ledger`); then every matter with a trusted entry or a hand-back owed is
 //! forgotten (`apply::forget_matter`: its entries taken back, the lawyer's own labels put
 //! back, what its pool users made handed back to the owner, its trees walked), then, once nothing
-//! of it is left in the ledger, its set-aside
-//! bookkeeping deleted (`Removal::forget_set_aside`: `record.json` and `set-aside.lock`, and
-//! the matter's set-aside folder if then empty; a failure is logged, never fatal). Anything left
+//! of it is left in the ledger, its set-aside bookkeeping deleted (`Removal::forget_set_aside`:
+//! when the matter's set-aside folder holds only `record.json` with no open session,
+//! `set-aside.lock` and a `manifest.json` with nothing outstanding, those and the folder go;
+//! otherwise nothing; a failure is logged, never fatal). Anything left
 //! (an entry whose removal failed, a hand-back still owed, a kept entry naming a pool SID) stops
 //! the run, so the record stays and the ledger keeps trusting its entries.
 //!

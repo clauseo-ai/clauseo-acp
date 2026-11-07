@@ -10,10 +10,10 @@ use clauseo_protocol::MatterId;
 
 use super::remove::{assert_all_gone, pool};
 use super::remove_fake::Remover;
-use super::remove_ledger::{CLOSED, bookkeeping, matter_one, owners_matter};
+use super::remove_ledger::{CLOSED, LEFT_BY_LAUNCH, bookkeeping, matter_one, owners_matter};
 use super::*;
+use crate::windows::SET_ASIDE_DIR;
 use crate::windows::write;
-use crate::windows::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR};
 
 /// A record whose session never had its after-session pass: a crash's changes still unchecked.
 const OPEN: &[u8] = b"{\"version\": 1, \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \
@@ -94,7 +94,7 @@ fn a_matter_folder_that_is_a_link_is_not_followed() {
     folder_link(&machine, &decoy, &one);
     let removed = remove(&mut machine, &mut acl, false).unwrap();
     assert!(matches!(removed, Removed::All(_)), "{removed:?}");
-    for name in SET_ASIDE_BOOKKEEPING {
+    for name in LEFT_BY_LAUNCH {
         assert!(decoy.join(name).exists(), "{name}");
     }
     assert!(std::fs::symlink_metadata(&one).is_ok());
@@ -132,7 +132,7 @@ fn a_record_or_a_set_aside_that_is_a_symbolic_link_is_not_followed() {
     );
     let removed = remove(&mut machine, &mut acl, false).unwrap();
     assert!(matches!(removed, Removed::All(_)), "{removed:?}");
-    for name in SET_ASIDE_BOOKKEEPING {
+    for name in LEFT_BY_LAUNCH {
         assert!(decoy.join(name).exists(), "{name}");
     }
 }
@@ -152,4 +152,114 @@ fn bookkeeping_names_match_ignoring_case_as_ntfs_does() {
         "{}",
         one.display()
     );
+}
+
+/// A manifest with nothing outstanding: every item restored (`files.rs`'s typed form).
+use crate::windows::set_aside::tests::{MANIFEST_NONE, MANIFEST_ONE};
+
+/// A removal as the owner of a forgotten matter whose set-aside folder holds the launch's
+/// bookkeeping, `manifest` as its manifest, and what `also` adds; `check` then looks at that
+/// folder while the scratch folder is still there.
+fn removed_with_manifest(
+    test: &str,
+    manifest: &[u8],
+    also: impl FnOnce(&Remover, &Path),
+    check: impl FnOnce(&Path),
+) {
+    let (mut machine, mut acl) = pool(test, Some(owner()));
+    let data_dir = machine.m.data_dir();
+    owners_matter(&machine);
+    let one = bookkeeping(&data_dir, matter_one());
+    write::write_atomic(&one.join("manifest.json"), manifest).unwrap();
+    also(&machine, &one);
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+    assert_eq!(machine.forgot, [matter_one()]);
+    assert_all_gone(&machine, &acl);
+    check(&one);
+}
+
+/// `folder` is there with the launch's bookkeeping and its manifest, untouched.
+fn assert_untouched(folder: &Path) {
+    for name in LEFT_BY_LAUNCH.iter().chain(&["manifest.json"]) {
+        assert!(folder.join(name).exists(), "{name}");
+    }
+}
+
+/// `rel`, `path` below `machine`'s scratch folder, for its helpers.
+fn rel(machine: &Remover, path: &Path) -> String {
+    let below = path.strip_prefix(machine.m.dir.path()).unwrap();
+    below.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn a_fully_restored_matter_goes_whole() {
+    removed_with_manifest(
+        "remove-set-aside-restored",
+        MANIFEST_NONE,
+        |_, _| {},
+        |one| {
+            assert!(std::fs::symlink_metadata(one).is_err(), "{}", one.display());
+        },
+    );
+}
+
+#[test]
+fn a_manifest_still_listing_an_item_keeps_everything() {
+    removed_with_manifest(
+        "remove-set-aside-outstanding",
+        MANIFEST_ONE,
+        |_, _| {},
+        assert_untouched,
+    );
+}
+
+#[test]
+fn a_manifest_listing_nothing_beside_a_pass_folder_with_a_file_keeps_everything() {
+    let pass = |_: &Remover, one: &Path| {
+        let git = one.join("20261107T101500-000Z").join(".git");
+        write::make_sandbox_dir(&git).unwrap();
+        write::write_atomic(&git.join("HEAD"), b"ref: refs/heads/main").unwrap();
+    };
+    removed_with_manifest("remove-set-aside-pass", MANIFEST_NONE, pass, |one| {
+        assert_untouched(one);
+        assert!(one.join("20261107T101500-000Z/.git/HEAD").exists());
+    });
+}
+
+#[test]
+fn an_unparsable_or_other_version_manifest_keeps_everything() {
+    let other = String::from_utf8(MANIFEST_NONE.to_vec()).unwrap().replacen(
+        "\"version\": 1",
+        "\"version\": 2",
+        1,
+    );
+    assert_ne!(other.as_bytes(), MANIFEST_NONE);
+    for (n, manifest) in [b"{}".as_slice(), b"data", other.as_bytes()]
+        .into_iter()
+        .enumerate()
+    {
+        let test = format!("remove-set-aside-manifest-{n}");
+        removed_with_manifest(&test, manifest, |_, _| {}, assert_untouched);
+    }
+}
+
+#[test]
+fn a_hard_linked_manifest_or_lock_keeps_everything_the_record_included() {
+    for name in ["manifest.json", "set-aside.lock"] {
+        let link = |machine: &Remover, one: &Path| {
+            let original = machine.m.dir.path().join("lawyers-file");
+            write::write_atomic(&original, MANIFEST_NONE).unwrap();
+            write::remove_owned_file(&one.join(name)).unwrap();
+            machine
+                .m
+                .dir
+                .hard_link(&rel(machine, &one.join(name)), &original);
+        };
+        let test = format!("remove-set-aside-hard-link-{name}");
+        removed_with_manifest(&test, MANIFEST_NONE, link, |one| {
+            assert_eq!(std::fs::read(one.join("record.json")).unwrap(), CLOSED);
+            assert_untouched(one);
+        });
+    }
 }

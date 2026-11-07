@@ -13,6 +13,7 @@ use super::fake::OTHER_OWNER;
 use super::remove::{assert_all_gone, pool};
 use super::remove_fake::Remover;
 use super::*;
+use crate::windows::SET_ASIDE_DIR;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, LOW_LABEL_SID};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
@@ -20,7 +21,9 @@ use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::sids::Reserved;
 use crate::windows::write;
 use crate::windows::writer::FileId;
-use crate::windows::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR};
+
+/// What every launch leaves in a matter's set-aside folder: the record and the lock.
+pub(super) const LEFT_BY_LAUNCH: [&str; 2] = ["record.json", "set-aside.lock"];
 
 fn matter(id: &str) -> MatterId {
     id.parse().unwrap()
@@ -151,7 +154,7 @@ pub(super) fn bookkeeping(data_dir: &Path, matter: MatterId) -> PathBuf {
     write::make_sandbox_dir(&set_aside).unwrap();
     let folder = set_aside.join(matter.to_string());
     write::make_sandbox_dir(&folder).unwrap();
-    for name in SET_ASIDE_BOOKKEEPING {
+    for name in LEFT_BY_LAUNCH {
         let bytes: &[u8] = if name == "record.json" { CLOSED } else { b"" };
         write::write_atomic(&folder.join(name), bytes).unwrap();
     }
@@ -169,7 +172,7 @@ fn moved_files(folder: &Path) -> PathBuf {
 }
 
 #[test]
-fn as_the_owner_a_forgotten_matters_bookkeeping_goes_and_its_moved_files_stay() {
+fn as_the_owner_a_forgotten_matters_bookkeeping_goes_unless_moved_files_are_beside_it() {
     let (mut machine, mut acl) = pool("remove-ledger-set-aside", Some(owner()));
     let data_dir = machine.m.data_dir();
     owners_matter(&machine);
@@ -184,7 +187,7 @@ fn as_the_owner_a_forgotten_matters_bookkeeping_goes_and_its_moved_files_stay() 
     record(&data_dir, matter_two(), vec![allow], None);
     // Bookkeeping only: it goes, and the matter's folder with it.
     let one = bookkeeping(&data_dir, matter_one());
-    // Bookkeeping beside a pass's moved files: only the bookkeeping goes.
+    // Bookkeeping beside a pass's moved files: everything stays.
     let two = bookkeeping(&data_dir, matter_two());
     let head = moved_files(&two);
     // A matter the ledger doesn't name was never forgotten: its bookkeeping stays.
@@ -199,8 +202,9 @@ fn as_the_owner_a_forgotten_matters_bookkeeping_goes_and_its_moved_files_stay() 
         "{}",
         one.display()
     );
-    for name in SET_ASIDE_BOOKKEEPING {
-        assert!(!two.join(name).exists(), "{name}");
+    // All or nothing: beside moved files, the bookkeeping stays too (the set-aside is Kept).
+    for name in LEFT_BY_LAUNCH {
+        assert!(two.join(name).exists(), "{name}");
         assert!(three.join(name).exists(), "{name}");
     }
     assert_eq!(std::fs::read(&head).unwrap(), b"ref: refs/heads/main");
@@ -222,7 +226,7 @@ fn as_an_administrator_no_set_aside_bookkeeping_is_ever_deleted() {
         let removed = remove(&mut machine, &mut acl, true).unwrap();
         assert!(matches!(removed, Removed::All(_)), "{removed:?}");
         assert_eq!(machine.forgot, Vec::<MatterId>::new());
-        for name in SET_ASIDE_BOOKKEEPING {
+        for name in LEFT_BY_LAUNCH {
             assert!(one.join(name).exists(), "{name}");
         }
     }
@@ -234,7 +238,7 @@ fn as_the_owner_a_bookkeeping_name_that_is_a_folder_is_left_and_the_removal_stil
     let data_dir = machine.m.data_dir();
     owners_matter(&machine);
     let one = bookkeeping(&data_dir, matter_one());
-    let [record_name, _] = SET_ASIDE_BOOKKEEPING;
+    let [record_name, _] = LEFT_BY_LAUNCH;
     write::remove_owned_file(&one.join(record_name)).unwrap();
     write::make_sandbox_dir(&one.join(record_name)).unwrap();
     write::write_atomic(&one.join(record_name).join("kept.txt"), b"x").unwrap();
