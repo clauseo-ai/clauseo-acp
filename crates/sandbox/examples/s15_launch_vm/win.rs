@@ -133,6 +133,14 @@ pub(crate) fn token_facts(token: HANDLE) -> io::Result<TokenFacts> {
     })
 }
 
+/// The user SID of `token` (a live handle with `TOKEN_QUERY`), as text.
+pub(crate) fn token_user(token: HANDLE) -> io::Result<String> {
+    let user = information(token, TokenUser)?;
+    // SAFETY: GetTokenInformation wrote a TOKEN_USER at the start of the aligned buffer.
+    let user = unsafe { &*user.as_ptr().cast::<TOKEN_USER>() };
+    sid_text(user.User.Sid)
+}
+
 /// A token handle someone else closes.
 struct Borrowed(HANDLE);
 
