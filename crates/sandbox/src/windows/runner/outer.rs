@@ -40,6 +40,8 @@ const NEXT_CONNECT: Duration = Duration::from_secs(15);
 const DRAIN: Duration = Duration::from_secs(2);
 /// The most `Log` lines read from `ctl` while waiting for one report.
 const LOG_CAP: usize = 100_000;
+/// What the outer says when a sweep of its session found an escapee.
+const ESCAPED: &str = "a process of the sandbox user's outlived every sweep of this session";
 
 /// A runner failure: its exit code and what to say on stderr.
 struct Failure(RunExit, String);
@@ -102,9 +104,17 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let result = session(&message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
-        end.steps().wait();
+        end.wait();
     }
-    result
+    match result {
+        // An escapee found at a tick, at the end or by the end sweeper is the run's outcome;
+        // the failure is said first.
+        Err(Failure(exit, what)) if end.escaped() && exit != RunExit::Escapee => {
+            say(&format!("clauseo-sandbox-run: {what}"));
+            Err(Failure::new(RunExit::Escapee, ESCAPED))
+        }
+        other => other,
+    }
 }
 
 /// The launch once read: the checks, the pipes, the job, the desktop, the start of the inner
@@ -224,18 +234,18 @@ fn serve(
     if let Err(error) = write_frame(&ctl, launch) {
         // An inner whose first-act sweep failed reported it and exited without reading.
         let failure = Failure::new(RunExit::Pipe, os("ctl write", &error));
-        return Err(reported(&ctl, inner).unwrap_or(failure));
+        return Err(reported(&ctl, inner, end).unwrap_or(failure));
     }
     for pipe in [&stdin, &stdout, &stderr] {
         if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
             // An inner runner that failed before it opened its pipes said why on `ctl`.
-            return Err(reported(&ctl, inner).unwrap_or(failure));
+            return Err(reported(&ctl, inner, end).unwrap_or(failure));
         }
     }
-    match next_report(&ctl) {
+    match next_report(&ctl, end) {
         Ok(InnerReport::Started { .. }) => {}
         Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
-        Ok(InnerReport::Exited { .. } | InnerReport::Log { .. }) => {
+        Ok(InnerReport::Exited { .. } | InnerReport::Log { .. } | InnerReport::Escapee { .. }) => {
             return Err(Failure::new(
                 RunExit::Pipe,
                 "the inner runner skipped its start report",
@@ -246,11 +256,24 @@ fn serve(
     relay(inner, ctl, [stdin, stdout, stderr], end)
 }
 
-/// The next report on `ctl` that isn't a `Log` line; each `Log` line goes to stderr.
-fn next_report(ctl: &ServerPipe) -> io::Result<InnerReport> {
+/// The next report on `ctl` that isn't a `Log` line or an `Escapee` report; each `Log` line
+/// goes to stderr, and each `Escapee` report is kept in `end` (the run's outcome) and said.
+fn next_report(ctl: &ServerPipe, end: &End) -> io::Result<InnerReport> {
     for _ in 0..LOG_CAP {
         match read_frame::<InnerReport>(ctl)? {
             InnerReport::Log { line } => say(&line),
+            InnerReport::Escapee {
+                point,
+                count,
+                images,
+            } => {
+                end.mark_escapee();
+                say(&format!(
+                    "clauseo-sandbox-run: sweep ({point}): {count} of the sandbox user's processes \
+                     can't be ended ({})",
+                    images.join(", ")
+                ));
+            }
             report @ (InnerReport::Started { .. }
             | InnerReport::Failed { .. }
             | InnerReport::Exited { .. }) => return Ok(report),
@@ -263,10 +286,15 @@ fn next_report(ctl: &ServerPipe) -> io::Result<InnerReport> {
 }
 
 /// The failure the inner runner reported on `ctl`, if it did.
-fn reported(ctl: &ServerPipe, inner: &Process) -> Option<Failure> {
-    match next_report(ctl) {
+fn reported(ctl: &ServerPipe, inner: &Process, end: &End) -> Option<Failure> {
+    match next_report(ctl, end) {
         Ok(InnerReport::Failed { exit, what }) => Some(failed(inner, exit, &what)),
-        Ok(InnerReport::Started { .. } | InnerReport::Exited { .. } | InnerReport::Log { .. })
+        Ok(
+            InnerReport::Started { .. }
+            | InnerReport::Exited { .. }
+            | InnerReport::Log { .. }
+            | InnerReport::Escapee { .. },
+        )
         | Err(_) => inner_exit(inner),
     }
 }
@@ -314,7 +342,8 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// runner exits, the job is ended and emptied and the end sweeper started first (`end.rs`): a
 /// descendant the agent left in the job ends then, and what it held closes. Then the output has
 /// [`DRAIN`] per stream to finish. On a cancel the exit code is the one the run would have had
-/// without the job's end (`end::exit_code`).
+/// without the job's end (`end::exit_code`). A sweep of the session that found an escapee makes
+/// it [`RunExit::Escapee`] (`EndSweep::outcome`), the code it replaces said on stderr.
 fn relay(
     inner: &Process,
     ctl: ServerPipe,
@@ -349,9 +378,10 @@ fn relay(
     }
     drop(done);
     let (report, reports) = mpsc::channel();
+    let reader_end = Arc::clone(end);
     thread::Builder::new()
         .spawn(move || {
-            if let Ok(last) = next_report(&ctl) {
+            if let Ok(last) = next_report(&ctl, &reader_end) {
                 let _sent = report.send(last);
             }
         })
@@ -372,8 +402,13 @@ fn relay(
         left -= 1;
     }
     tell_status(last.as_ref(), code);
-    end.steps().wait();
-    exit_now(code)
+    end.wait();
+    if end.escaped() {
+        say(&format!(
+            "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"
+        ));
+    }
+    exit_now(end.outcome(code))
 }
 
 /// One line on stderr when the run ended at a Windows status (`0xC0000000` and up), naming

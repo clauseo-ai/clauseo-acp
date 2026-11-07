@@ -11,7 +11,8 @@
 //! - [`Point::Start`]: the inner runner's first act once resumed (`inner_flow.rs`), before it
 //!   reads the launch or makes anything. Only the inner itself is kept: nothing else can be in
 //!   the job yet (the job is unnamed, its only full handle is the outer's, and the inner has
-//!   started nothing). The first failure fails the launch closed (`RunExit::Sweep`).
+//!   started nothing). The first failure fails the launch closed (`RunExit::Escapee` for a
+//!   process that can't be opened or ended, else `RunExit::Sweep`).
 //! - [`Point::Tick`]: every [`TICK`] while the agent runs, in the inner, keeping the job's
 //!   processes: one some Windows service started outside the job lives at most that long.
 //! - [`Point::End`]: in the inner, once the agent exited, keeping the job's processes (the outer
@@ -24,6 +25,13 @@
 //! At every point but the first, a process that can't be opened, checked or ended is logged and
 //! the sweep goes on with the rest; it is tried again in the sweep's next round and at the next
 //! tick, and the sweep ends in [`SweepError::Left`].
+//!
+//! **Escapees.** A process of the pool user's that can't be opened (after the owner's
+//! `WRITE_DAC` reopen, below) or can't be ended is an escapee ([`SweepError::escapees`]): it
+//! lives on outside every job, and no sweep of the pool user's can end it. The inner reports it on
+//! `ctl` (`InnerReport::Escapee`), the first act exits `RunExit::Escapee` rather than
+//! `RunExit::Sweep`, and so does the end sweeper ([`end_sweeper_exit`]). One that only can't be
+//! checked (its job or start time) is a plain failure.
 //!
 //! **Two listings.** [`Processes::list`] reads each process's user by opening it, which fails
 //! for a process whose DACL shuts the pool user out (one that set its own, with an `OWNER
@@ -74,6 +82,8 @@ pub(crate) const TICK: Duration = Duration::from_secs(30);
 const ROUNDS: usize = 8;
 /// The exit code a swept process ends with: the runner's `RunExit` range's last code.
 pub(crate) const SWEPT: u32 = super::RUN_EXIT_BASE + 0xff;
+/// The most image names an escapee report carries.
+pub(crate) const IMAGES_CAP: usize = 8;
 
 /// Where the sweep runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,9 +225,62 @@ pub(crate) enum SweepError {
         image: String,
         code: String,
     },
-    /// At a point but the first: this many of them were left, each logged.
+    /// At a point but the first: this many of them were left, each logged; `unkillable` of
+    /// them couldn't be opened or ended (escapees), whose image names are `images` (each once,
+    /// at most [`IMAGES_CAP`]).
     #[error("{count} of the sandbox user's processes were left (each logged)")]
-    Left { count: usize },
+    Left {
+        count: usize,
+        unkillable: usize,
+        images: Vec<String>,
+    },
+    /// The end sweeper's own creation time, its cutoff, couldn't be read.
+    #[error("the end sweeper has no start time ({code})")]
+    OwnStart { code: String },
+}
+
+/// The pool user's processes a sweep couldn't end: how many, and their image names (each once,
+/// at most [`IMAGES_CAP`]; never a path).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Escapees {
+    pub(crate) count: usize,
+    pub(crate) images: Vec<String>,
+}
+
+impl SweepError {
+    /// The escapees this failure names: a process that couldn't be opened or ended, or the ones
+    /// [`SweepError::Left`] counts so; `None` for any other failure.
+    pub(crate) fn escapees(&self) -> Option<Escapees> {
+        match self {
+            SweepError::Open { image, .. } | SweepError::Kill { image, .. } => Some(Escapees {
+                count: 1,
+                images: vec![image.clone()],
+            }),
+            SweepError::Left {
+                unkillable, images, ..
+            } if *unkillable > 0 => Some(Escapees {
+                count: *unkillable,
+                images: images.clone(),
+            }),
+            SweepError::List(_)
+            | SweepError::Job { .. }
+            | SweepError::StillRunning
+            | SweepError::Started { .. }
+            | SweepError::Left { .. }
+            | SweepError::OwnStart { .. } => None,
+        }
+    }
+}
+
+/// The end sweeper's exit code from its kills' result and whether its removal went: 0 when both
+/// went, `RunExit::Escapee` when the kills left an escapee, else `RunExit::Sweep` when either
+/// failed.
+pub(crate) fn end_sweeper_exit(kills: &Result<(), SweepError>, removed: bool) -> u32 {
+    match kills {
+        Err(error) if error.escapees().is_some() => super::RunExit::Escapee.code(),
+        Ok(()) if removed => 0,
+        Err(_) | Ok(()) => super::RunExit::Sweep.code(),
+    }
 }
 
 /// Kills every process of `user` but those in `keep` (this process's own pid) and those in the
@@ -267,20 +330,24 @@ fn sweep_with<P: Processes>(
     log: &mut dyn FnMut(&str),
 ) -> Result<(), SweepError> {
     let before = match point {
-        Point::Sweeper => Some(calls.own_start().map_err(|e| SweepError::Started {
-            pid: keep.first().copied().unwrap_or_default(),
-            image: String::from("the end sweeper"),
-            code: code(&e),
-        })?),
+        Point::Sweeper => Some(
+            calls
+                .own_start()
+                .map_err(|e| SweepError::OwnStart { code: code(&e) })?,
+        ),
         Point::Start | Point::Tick | Point::End => None,
     };
     let mut failures = Failures {
         point,
         logged: BTreeSet::new(),
         count: 0,
+        unkillable: 0,
+        images: Vec::new(),
     };
     for _ in 0..ROUNDS {
         failures.count = 0;
+        failures.unkillable = 0;
+        failures.images.clear();
         let seen = list(calls)?;
         let mut opened = Vec::new();
         for found in seen
@@ -326,7 +393,11 @@ fn sweep_with<P: Processes>(
         if round == 0 {
             return match failures.count {
                 0 => Ok(()),
-                count => Err(SweepError::Left { count }),
+                count => Err(SweepError::Left {
+                    count,
+                    unkillable: failures.unkillable,
+                    images: failures.images,
+                }),
             };
         }
     }
@@ -364,11 +435,15 @@ fn spared<P: Processes>(
 }
 
 /// A round's failures: the first act's first ends the sweep; past it, each is logged once a
-/// sweep and counted for the round.
+/// sweep and counted for the round, escapees apart.
 struct Failures {
     point: Point,
     logged: BTreeSet<u32>,
     count: usize,
+    /// How many of this round's couldn't be opened or ended.
+    unkillable: usize,
+    /// Their image names, each once, at most [`IMAGES_CAP`].
+    images: Vec<String>,
 }
 
 impl Failures {
@@ -377,6 +452,14 @@ impl Failures {
             return Err(error);
         }
         self.count += 1;
+        if let Some(escapees) = error.escapees() {
+            self.unkillable += escapees.count;
+            for image in escapees.images {
+                if self.images.len() < IMAGES_CAP && !self.images.contains(&image) {
+                    self.images.push(image);
+                }
+            }
+        }
         if self.logged.insert(pid_of(&error)) {
             log(&format!(
                 "clauseo-sandbox-run: sweep ({}): {error}",
@@ -393,7 +476,10 @@ fn pid_of(error: &SweepError) -> u32 {
         | SweepError::Job { pid, .. }
         | SweepError::Kill { pid, .. }
         | SweepError::Started { pid, .. } => *pid,
-        SweepError::List(_) | SweepError::StillRunning | SweepError::Left { .. } => 0,
+        SweepError::List(_)
+        | SweepError::StillRunning
+        | SweepError::Left { .. }
+        | SweepError::OwnStart { .. } => 0,
     }
 }
 

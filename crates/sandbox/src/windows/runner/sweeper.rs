@@ -13,7 +13,9 @@
 //! It then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
 //! its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name, sweep point) and each
 //! kind's count, which the outer relays while it lives. It exits 0 when
-//! everything went, [`RunExit::Sweep`] when anything failed or the time ran out.
+//! everything went, [`RunExit::Escapee`] when a process of its user's couldn't be opened or
+//! ended (`sweep::end_sweeper_exit`), [`RunExit::Sweep`] when anything else failed or the time
+//! ran out.
 //!
 //! It writes no result file: the run folder admits only the desktop user, `SYSTEM` and
 //! `Administrators`, and a file the pool user could write there would be a path its other
@@ -29,8 +31,8 @@ use super::inner_flow::at;
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
-use super::sweep::Point;
 use super::sweep::os::end_sweep_own;
+use super::sweep::{Point, end_sweeper_exit};
 use crate::windows::token::os::{own_token, shut_sweeper, shut_token_first, user};
 
 /// How long the whole sweep may take.
@@ -53,18 +55,14 @@ pub fn run_sweep() -> u32 {
         ));
         return RunExit::Sweep.code();
     }
-    match finished.recv_timeout(SWEEP_LIMIT) {
-        Ok(true) => 0,
-        Ok(false) => RunExit::Sweep.code(),
-        Err(_) => {
-            say("clauseo-sandbox-run: the end sweeper ran out of time");
-            RunExit::Sweep.code()
-        }
-    }
+    finished.recv_timeout(SWEEP_LIMIT).unwrap_or_else(|_| {
+        say("clauseo-sandbox-run: the end sweeper ran out of time");
+        RunExit::Sweep.code()
+    })
 }
 
-/// The token's shut, the kills, then the removal; whether all went without a failure.
-fn sweep_all() -> bool {
+/// The token's shut, the kills, then the removal; the exit code.
+fn sweep_all() -> u32 {
     // First of all, as the inner's first act: shut this process's own token to all but SYSTEM.
     let token = match own_token() {
         Ok(token) => token,
@@ -83,29 +81,27 @@ fn sweep_all() -> bool {
         Err(error) => return failed("read its token's user", &error),
     };
     let mut log = |line: &str| say(line);
-    let swept = match end_sweep_own(&me, &mut log) {
-        Ok(()) => true,
-        Err(error) => {
-            say(&format!(
-                "clauseo-sandbox-run: {}",
-                at(Point::Sweeper, &error)
-            ));
-            false
-        }
-    };
+    let kills = end_sweep_own(&me, &mut log);
+    if let Err(error) = &kills {
+        say(&format!(
+            "clauseo-sandbox-run: {}",
+            at(Point::Sweeper, error)
+        ));
+    }
     let mut calls = OsLeftovers::new(&token, me);
-    let clean = remove_all(&mut calls, &Kind::ALL, "end sweeper", &mut log);
-    swept && clean
+    let removed = remove_all(&mut calls, &Kind::ALL, "end sweeper", &mut log);
+    end_sweeper_exit(&kills, removed)
 }
 
-fn failed(what: &str, error: &io::Error) -> bool {
+/// Says the sweeper couldn't do `what`; [`RunExit::Sweep`].
+fn failed(what: &str, error: &io::Error) -> u32 {
     let code = error
         .raw_os_error()
         .map_or_else(|| error.kind().to_string(), |c| c.to_string());
     say(&format!(
         "clauseo-sandbox-run: the end sweeper can't {what} ({code})"
     ));
-    false
+    RunExit::Sweep.code()
 }
 
 /// One line on stderr, the pipe the outer reads while it lives.
