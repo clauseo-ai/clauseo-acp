@@ -148,3 +148,42 @@ fn the_agent_token_holds_what_the_spec_says_when_read_back() {
         ]
     );
 }
+
+/// The third harness run's class: a thread already shut to this process's own user (as the outer
+/// runner shuts the inner's first thread) must not fail the shut of the rest, and the current
+/// thread is shut through its pseudo-handle whatever its DACL.
+#[test]
+fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
+    use std::sync::mpsc;
+
+    use windows::Win32::Foundation::GENERIC_ALL;
+    use windows::Win32::Storage::FileSystem::WRITE_DAC;
+    use windows::Win32::System::Threading::{
+        GetCurrentThread, GetCurrentThreadId, OpenThread, THREAD_ACCESS_RIGHTS,
+    };
+
+    use crate::windows::acl::object::Handle;
+
+    let shut = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
+    let (id_tx, id_rx) = mpsc::channel();
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    let worker = std::thread::spawn(move || {
+        // SAFETY: no arguments.
+        id_tx.send(unsafe { GetCurrentThreadId() }).unwrap();
+        stop_rx.recv().unwrap();
+    });
+    let id = id_rx.recv().unwrap();
+    // SAFETY: a live thread of this process, opened with WRITE_DAC; closed by `Handle`.
+    let handle = unsafe { OpenThread(THREAD_ACCESS_RIGHTS(WRITE_DAC.0), false, id) }.unwrap();
+    super::os::shut_object(Handle(handle).0, shut).unwrap();
+    // The worker is shut to this user now: opening it again is refused.
+    // SAFETY: as above.
+    let again = unsafe { OpenThread(THREAD_ACCESS_RIGHTS(GENERIC_ALL.0), false, id) };
+    assert!(again.is_err(), "the worker should be shut to this user");
+    // And the current thread too, before the call: only its pseudo-handle reaches it.
+    // SAFETY: the pseudo-handle needs no close.
+    super::os::shut_object(unsafe { GetCurrentThread() }, shut).unwrap();
+    super::os::shut_threads(shut).unwrap();
+    stop_tx.send(()).unwrap();
+    worker.join().unwrap();
+}
