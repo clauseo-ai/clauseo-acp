@@ -181,7 +181,7 @@ fn a_lookup_that_panics_gives_its_thread_slot_back() {
     static THREADS: AtomicUsize = AtomicUsize::new(0);
     // The thread unwinds: its slot guard drops before the answer's sender, so by the time the
     // waiter sees the sender gone, the count is back to zero.
-    let failed = bounded(Duration::from_secs(10), &THREADS, 1, || {
+    let failed: Result<Route, String> = bounded(Duration::from_secs(10), &THREADS, 1, || {
         std::panic::resume_unwind(Box::new("the OS lookup failed"))
     });
     assert!(failed.is_err());

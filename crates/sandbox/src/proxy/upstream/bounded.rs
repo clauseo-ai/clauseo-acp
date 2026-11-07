@@ -3,18 +3,16 @@
 
 use std::time::Duration;
 
-use super::Route;
-
 /// Runs `lookup` on its own thread and waits at most `limit` for it. A lookup still running
 /// then is left to finish on its thread, and its answer is dropped. `threads` counts the
 /// threads alive, those left running included; past `most` no thread starts and the lookup
 /// fails, so hung lookups cannot pile up threads.
-pub(super) fn bounded(
+pub(super) fn bounded<T: Send + 'static>(
     limit: Duration,
     threads: &'static std::sync::atomic::AtomicUsize,
     most: usize,
-    lookup: impl FnOnce() -> Result<Route, String> + Send + 'static,
-) -> Result<Route, String> {
+    lookup: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
     use std::sync::atomic::Ordering;
     threads
         .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {

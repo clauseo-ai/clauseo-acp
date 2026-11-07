@@ -14,7 +14,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
-use crate::proxy::upstream::{Env, OsRoute, Scheme};
+use crate::proxy::upstream::{Answer, Env, Failure, OsAnswer, OsRoute, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
@@ -196,6 +196,10 @@ pub(crate) struct Setup {
     pub(crate) env: Option<Env>,
     /// For `Upstream::System`: the OS lookup (direct when `None`).
     pub(crate) os: Option<Box<OsRoute>>,
+    /// For `Upstream::System`: an OS lookup that may fail, in place of `os`.
+    pub(crate) answers: Option<Box<OsAnswer>>,
+    /// For `Upstream::System`: what the settings show when a lookup fails without asking the OS.
+    pub(crate) intent: Failure,
     /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
     pub(crate) browser: bool,
 }
@@ -209,6 +213,8 @@ impl Default for Setup {
             limits: Limits::default(),
             env: None,
             os: None,
+            answers: None,
+            intent: Failure::Unmeant,
             browser: true,
         }
     }
@@ -262,12 +268,16 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,
         limits: setup.limits,
-        system: match (setup.env, setup.os) {
-            (None, None) => None,
-            (env, os) => {
-                let direct = |_: Scheme, _: &str, _: u16| Route::Direct;
-                let os = os.unwrap_or_else(|| Box::new(direct));
-                Some((env.unwrap_or_default(), os))
+        system: match (setup.env, setup.os, setup.answers) {
+            (None, None, None) => None,
+            (env, os, answers) => {
+                let os = os.unwrap_or_else(|| Box::new(|_: Scheme, _: &str, _: u16| Route::Direct));
+                let answers = answers.unwrap_or_else(|| {
+                    Box::new(move |scheme: Scheme, host: &str, port: u16| -> Answer {
+                        os(scheme, host, port).into()
+                    })
+                });
+                Some((env.unwrap_or_default(), answers, setup.intent))
             }
         },
     };

@@ -1,6 +1,8 @@
 //! The proxy thread: the executor, the two accept loops, the rate cap's tick, and each request's
 //! checks up to the connect.
 
+mod route;
+
 use std::cell::{Cell, RefCell};
 use std::net::{SocketAddr, TcpListener};
 use std::pin::pin;
@@ -22,7 +24,7 @@ use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
 use crate::proxy::token::Token;
-use crate::proxy::upstream::{Lookup, Route, Scheme};
+use crate::proxy::upstream::{Lookup, Route};
 use crate::proxy::{
     Allowlist, Exchange, Limits, Listener, Record, Shared, SharedClock, Unopened, Verdict, connect,
     http,
@@ -59,6 +61,8 @@ pub(crate) struct Ctx {
     pub(crate) limits: Limits,
     reach: RefCell<Reach>,
     pub(crate) load: Rc<Load>,
+    /// Each host's last good route, for a failed lookup.
+    remembered: route::Remembered,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -87,6 +91,7 @@ pub(crate) fn run(
         limits: parts.limits,
         reach: RefCell::new(Reach::default()),
         load: Rc::new(Load::default()),
+        remembered: route::Remembered::default(),
     });
     let executor = LocalExecutor::new();
     async_io::block_on(executor.run(async {
@@ -306,22 +311,11 @@ impl Ctx {
         target: Target,
         exchange: &mut Exchange,
     ) {
-        let route = {
-            let lookup = Arc::clone(&self.lookup);
-            let host = target.name.text();
-            let port = target.port;
-            let scheme = if matches!(target.kind, Kind::Connect) {
-                Scheme::Https
-            } else {
-                Scheme::Http
-            };
-            let lookup = blocking::unblock(move || lookup.route(scheme, &host, port));
-            within(self.limits.connect, lookup)
-                .await
-                .unwrap_or_else(|| {
-                    tracing::warn!("egress: upstream lookup too slow; going direct");
-                    Route::Direct
-                })
+        // The same status as an upstream that fails; the denial names the cause.
+        let Some(route) = route::route(self, &target, exchange).await else {
+            return self
+                .answer(client, exchange, 502, Verdict::Failed, "")
+                .await;
         };
         let way = match route {
             Route::Direct => match self.resolve(&target, exchange).await {
