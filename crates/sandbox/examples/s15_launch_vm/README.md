@@ -58,14 +58,15 @@ only when prepare ran the set-up.
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
-`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `wts-visibility`, `end-cleanup`.
+`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `wts-visibility`, `end-cleanup`,
+`cancel`.
 `clipboard` skips in a session with no clipboard the harness can use. `node-pipes` needs `--node`;
 `codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
 process it started.
 
 A row's agent keeps its stdin open until it has ended by itself (`Running::finish`): the host
-closes stdin only to end a session, and the runner ends the job 1.5 s after that. Only the agents
+closes stdin only to end a session, and the runner ends the job 1 s after that. Only the agents
 that end at their stdin's end have it closed (`Running::end`: `probe hold`, and `stdio`'s `probe
 echo`). `codex` runs under `probe stdin-null`, since `codex exec` reads its stdin to the end before
 it starts.
@@ -189,6 +190,21 @@ pool user's, so either listing with one is INFO, naming the count and the images
   remove` deletes whatever is left, and the row notes it. After #668 the row will also require
   the job gone once the system stop has run.
 
+- `cancel` (`checks_cancel.rs`, verdict in `cancel_verdict.rs`): a cancel as the host does
+  it. Once A's pool user has no process left, the harness runs `probe wait` as A (it ignores
+  its stdin's end), closes the outer's stdin, waits 2 s and kills the outer. The outer gives the
+  agent 1 s, ends the job, waits up to 400 ms for it to empty, then starts its end sweeper
+  (created suspended, its DACL shut, then resumed) or skips it when less than 500 ms of the 2 s
+  is left (`clauseo-sandbox-run: warning: no end sweeper: ...`). Right after the kill and four
+  more times over 1.5 s, the harness reads every process's threads
+  (`NtQuerySystemInformation(SystemProcessInformation)`, `win_suspend.rs`) and the user of each
+  `clauseo-sandbox-run.exe`. FAIL names each one of A's pool user, or of a user the harness
+  can't read, whose threads all wait suspended: a kill between the sweeper's creation and its
+  resume left it behind. INFO when no look could read the threads' states (the `NTSTATUS` is
+  named) or the session never started. PASS otherwise, naming the running runner processes of
+  that user it saw (an end sweeper) or none. The outer's stderr is printed and the text says
+  whether it skipped the sweeper. A suspended runner found is ended at the row's end.
+
 The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
 harness ends its benign process if it still runs at the row's end, and notes it.
 
@@ -274,7 +290,8 @@ own atom; the desktop refusal is the effect that tells the limits apart.
 
 The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows',
 `breakaway`'s and `wts-visibility`'s in `pool_verdict.rs`, `end-cleanup`'s in
-`cleanup_verdict.rs`) run on Windows with `cargo test -p clauseo-sandbox --example s15_launch_vm`.
+`cleanup_verdict.rs`, `cancel`'s in `cancel_verdict.rs`) run on Windows with `cargo test -p
+clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI
 
