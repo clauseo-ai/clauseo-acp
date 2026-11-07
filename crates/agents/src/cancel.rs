@@ -87,6 +87,8 @@ pub(crate) struct Cancel {
     stopped: Level,
     /// A stop at once: kill.
     killed: Level,
+    /// A second stop after the first (the lawyer's Cancel again, or the quit after it).
+    again: Level,
     /// The graceful stop's kind, when [`Cancel::stop`] set it first.
     how: Mutex<Option<Stop>>,
 }
@@ -97,6 +99,7 @@ impl Cancel {
         Cancel {
             stopped: Level::new(),
             killed: Level::new(),
+            again: Level::new(),
             how: Mutex::new(None),
         }
     }
@@ -109,16 +112,22 @@ impl Cancel {
     }
 
     /// Asks a graceful stop of kind `how`: sets [`Cancel::is_cancelled`] but not
-    /// [`Cancel::is_killed`]. A later stop does not change the first one's kind.
+    /// [`Cancel::is_killed`]. A later stop does not change the first one's kind; it ends
+    /// [`Cancel::stopped_again`].
     pub(crate) fn stop(&self, how: Stop) {
-        {
+        let first = {
             let mut set = self
                 .how
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if set.is_none() && !self.stopped.is_set() {
+            let first = set.is_none() && !self.stopped.is_set();
+            if first {
                 *set = Some(how);
             }
+            first
+        };
+        if !first {
+            self.again.set();
         }
         self.stopped.set();
     }
@@ -150,6 +159,11 @@ impl Cancel {
     pub(crate) async fn killed(&self) {
         self.killed.wait().await;
     }
+
+    /// Ends once a second stop comes after the first (at once if one did).
+    pub(crate) async fn stopped_again(&self) {
+        self.again.wait().await;
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +194,8 @@ mod tests {
         // A later stop keeps the first one's kind.
         cancel.stop(Stop::Quit);
         assert_eq!(cancel.how(), Some(Stop::Lawyer(Duration::from_secs(2))));
+        // The second stop ends the wait for it.
+        futures::executor::block_on(cancel.stopped_again());
         cancel.cancel();
         assert!(cancel.is_killed());
     }

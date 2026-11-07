@@ -5,7 +5,8 @@
 //! - Linux: the `LISTEN` sockets on the port from `/proc/net/tcp` and `/proc/net/tcp6`, by
 //!   inode, each matched to a `socket:[inode]` link under `/proc/<pid>/fd` of a pid in the tree.
 //! - macOS (and any Unix without `/proc`): `lsof -nP -iTCP:<port> -sTCP:LISTEN -Fp`, started
-//!   through the caller's launcher with an empty environment and a 2 s limit, its `p<pid>` lines.
+//!   through the caller's launcher with an empty environment and a 500 ms limit, its `p<pid>`
+//!   lines.
 //! - Windows: `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER`, IPv4 and IPv6
 //!   ([`windows`]).
 //!
@@ -174,8 +175,9 @@ pub(crate) mod lsof {
 
     /// Where `lsof` is: macOS's, then a Linux one.
     const PLACES: [&str; 2] = ["/usr/sbin/lsof", "/usr/bin/lsof"];
-    /// The most `lsof` may take.
-    const LIMIT: Duration = Duration::from_secs(2);
+    /// The most `lsof` may take; past it the listener counts as not owned, so the stop goes on
+    /// to the bound without a `/cancel`.
+    const LIMIT: Duration = Duration::from_millis(500);
     /// The most of its output read.
     const OUTPUT_MAX: u64 = 64 * 1024;
 

@@ -92,17 +92,75 @@ fn quit_sends_cancel_and_ends_inside_its_bound() {
 }
 
 /// The quit while the login saves Codex's login file (truncated, then written in two halves a
-/// second apart): the `/cancel` waits behind the save, the save finishes, the file is whole.
+/// second apart): the `/cancel` waits behind the save and the save runs to its end, never cut.
+/// The saved login was never confirmed and has no `login-source` record, which at the next start
+/// would read as reused, so the quit removes it: the home holds no unmarked login file.
 #[test]
-fn a_quit_in_the_middle_of_a_save_leaves_the_file_whole() {
+fn a_quit_in_the_middle_of_a_save_lets_it_finish_and_leaves_no_unmarked_file() {
     let mut fx = Fixture::new("graceful-mid-write", "slow-save:1000");
     let port = fx.listen_for_cancel();
     let (agents, _events) = login_listening(&fx, port);
     eventually("the save started", || login_file(&fx).exists());
     assert!(agents.shutdown(QUIT_WAIT), "a job still runs");
-    let text = std::fs::read_to_string(login_file(&fx)).unwrap();
-    let saved: serde_json::Value = serde_json::from_str(&text).expect("a whole file");
-    assert_eq!(saved["email"], "test@example.com");
+    assert!(
+        home(&fx).join("fake-save-finished").is_file(),
+        "the save was cut"
+    );
+    assert!(!fx.marker(&codex(), "login-source").exists());
+    assert!(!login_file(&fx).exists(), "an unmarked login file is left");
+}
+
+/// The stop at once is not held up by a `/cancel` the login does not answer (it is saving):
+/// with a bound the request's 1 s read would pass, the quit still kills the login inside it,
+/// and the cut file, unmarked, goes.
+#[test]
+fn a_slow_cancel_does_not_delay_the_kill_at_the_bound() {
+    let mut fx = Fixture::new("graceful-slow-cancel", "slow-save:3000");
+    let port = fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx, port);
+    eventually("the save started", || login_file(&fx).exists());
+    let login = fx.codex_runs(&["login"]).remove(0);
+    assert!(
+        agents.shutdown(Duration::from_millis(900)),
+        "the kill came late"
+    );
+    assert!(!home(&fx).join("fake-save-finished").exists());
+    assert!(!login_file(&fx).exists(), "an unmarked login file is left");
+    #[cfg(target_os = "linux")]
+    assert!(crate::support::gone(login.pid), "pid {} runs", login.pid);
+    let _ = login;
+}
+
+/// A login whose confirmation lands as the quit starts (the account read answers after it) is
+/// recorded as Clauseo's own, so the next start reads it as own, not reused.
+#[test]
+fn a_confirmation_during_the_quit_is_recorded_as_own() {
+    let mut fx = Fixture::new("graceful-confirm-quit", "slow-save:0");
+    fx.set_env("FAKE_APP_SERVER_PAUSE_MS", "500");
+    {
+        let (agents, _events) = start(&fx);
+        agents.sign_in(&codex(), Method::Browser).unwrap();
+        eventually("the account read runs", || {
+            !fx.codex_runs(&["app-server"]).is_empty()
+        });
+        assert!(agents.shutdown(QUIT_WAIT), "a job still runs");
+    }
+    let source = std::fs::read_to_string(fx.marker(&codex(), "login-source")).unwrap();
+    assert!(source.contains("own"), "{source}");
+    assert!(login_file(&fx).is_file());
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    let last = events.until_end().1;
+    assert!(
+        matches!(
+            last,
+            SigninState::SignedIn {
+                source: clauseo_agents::Source::Own,
+                ..
+            }
+        ),
+        "{last:?}"
+    );
 }
 
 /// Signs Codex in with Clauseo's own login (`login-source` `own`), so a status check reads
