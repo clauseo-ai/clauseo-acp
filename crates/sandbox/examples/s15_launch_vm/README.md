@@ -41,13 +41,19 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION`, `PROCESS_QUERY_LIMITED_INFORMATION` and
   the token (`TOKEN_QUERY`, `TOKEN_DUPLICATE`) on its inner runner (its parent pid) and its outer
   runner (the harness sends that pid on stdin). What `SYNCHRONIZE` gets is printed as
-  information. It lists every thread of both runners (`TH32CS_SNAPTHREAD`, by owner pid) and
+  information. Once the agent prints its parent, the harness, as the lawyer outside the job,
+  lists every thread of both runners (`TH32CS_SNAPTHREAD`, by owner pid) and sends the ids on
+  stdin (`threads <role> <tid>...`, with the pids, before `end`); the agent's own snapshot
+  sees none of them under its token, so its count is only printed as information. The agent
   tries `OpenThread` with `THREAD_ALL_ACCESS`, `THREAD_QUERY_LIMITED_INFORMATION` and
-  `THREAD_GET_CONTEXT` on each: every open must be refused, the thread count per runner is
-  printed, and a live runner with no thread found fails (it proves nothing; so does one whose
-  every thread gave 87, gone). Any `conhost.exe` whose parent is either runner
-  (`TH32CS_SNAPPROCESS`) must be refused the same process and token rights; `conhost none` is
-  printed when there is none, which is expected, since both runner exes are GUI-subsystem.
+  `THREAD_GET_CONTEXT` on each id: every open must be refused (any code but 0), the thread
+  count per runner is printed, and a live runner with no thread id from the harness fails (it
+  proves nothing; so does one whose every open gave 87, gone). The harness's own
+  process snapshot (`TH32CS_SNAPPROCESS`) finds any `conhost.exe` whose parent is either
+  runner and sends each as `conhost <pid>` in the same write; the agent must be refused the
+  same process and token rights on each. `conhost none (harness snapshot)` is printed when there
+  is none, as information: it is expected, since both runner exes are GUI-subsystem. What the
+  agent's own snapshot finds is printed as information too.
 - `lawyer-processes`: the same rights, refused on the lawyer's processes: the outer runner, the
   host (the harness itself, standing in for Clauseo.exe) and the proxy (a `probe wait` the harness
   starts as the lawyer, standing in for the egress proxy's process), and the runners' threads and
@@ -81,10 +87,15 @@ libuv's own nested job) does the effect decide instead, and both halves must hol
 - The clipboard write fails in `OpenClipboard`, `EmptyClipboard` or `SetClipboardData` with
   5 (or `0x80070005`), what `WRITECLIPBOARD` gives. The call that failed is printed.
 
-Then the harness runs the positive controls as the lawyer, outside the job, on its own window
-station: `CreateDesktopW` there must work (the desktop is closed at once), and a clipboard write
-is tried (skipped, with the reason, in a session with no clipboard). Any other read fails the
-row and names the value.
+Then the harness runs the positive controls as the lawyer, outside the job. The desktop one
+uses the agent's kind of object: a fresh window station `ClauseoS15Ctl-<hex>`, made as the outer
+runner makes `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)`, a DACL of the
+harness's user and `SYSTEM`, labelled Low), then `SetProcessWindowStation` to it,
+`CreateDesktopW("Default")` there, back, and both closed. It must work for the agent's 5 to
+count. When it fails, the row is `INFO`, naming the call and code, never `PASS` (the harness's
+own service station in CI can't make a desktop: 8). A clipboard write is tried too (skipped,
+with the reason, in a session with no clipboard). Any other read fails the row and names the
+value.
 
 `node-pipes` and `codex` also add a global atom as the lawyer and pass its name to
 `probe job-ui <atom>` (as node's argument, and in the command the mock asks codex to run). What
@@ -101,8 +112,9 @@ The unit test of that rule (`checks_ui.rs`) runs on Windows with
 The `s15-launch` workflow, which lives on the throwaway branch `exp-pr5-harness` and never on
 main, runs `s15_launch_vm --unattended --node <node> --codex <dir>` on `windows-11-arm` and
 `windows-2025`. Unattended mode runs prepare, every row and then cleanup,
-and cleanup runs even when a row fails. It prints one `PASS`, `FAIL` or `SKIP` line per row, and
-exits 1 when prepare or any row failed. The output is the job's artifact.
+and cleanup runs even when a row fails. It prints one `PASS`, `FAIL`, `SKIP` or `INFO` line per
+row (`INFO`: the agent's side held but a positive control failed, so neither a pass nor a fail),
+and exits 1 when prepare or any row failed. The output is the job's artifact.
 
 ## Probes
 
