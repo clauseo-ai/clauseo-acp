@@ -13,6 +13,7 @@
 // which carries these parts, holds no first-run words of its own.
 import type { ReactNode } from "react";
 import { useDisplay } from "../../lib/display.ts";
+import { pw, INSTALLER_CLOSE } from "../../lib/words-protection.ts";
 import { tbt } from "../../lib/words-toolbar.ts";
 import { Button } from "../../ui/button.tsx";
 import { NotProtectedMark } from "../not-protected.tsx";
@@ -77,6 +78,7 @@ export function WorkspaceStep({
   onSetUp: () => void;
   onNotNow: () => void;
 }) {
+  const { lang } = useDisplay();
   const body =
     state === "repair" ? (
       <>
@@ -97,6 +99,11 @@ export function WorkspaceStep({
           <span data-testid="protection-repair">
             <Say>{repair.join(" ")}</Say>
           </span>
+          {onGetInstaller !== undefined && (
+            <span data-testid="protection-close-line">
+              <Say>{pw(lang, INSTALLER_CLOSE)}</Say>
+            </span>
+          )}
         </Act>
         <div className="fl-gate-ways">
           <Button kind="quiet" size="small" onClick={onNotNow} data-testid="workspace-not-now">

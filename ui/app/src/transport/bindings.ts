@@ -157,6 +157,13 @@ export const commands = {
 	 *  messages, after `subscribe_app`. Never waits for the host.
 	 */
 	setup: (command: SetupCommand) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("setup", { command })),
+	/**
+	 *  Quits the app the way Cmd+Q does: `app.exit` raises `RunEvent::ExitRequested` (`lib.rs`), so
+	 *  the agents' installs and sign-ins stop and the host stops before the app ends. Granted to
+	 *  `main` and the settings window, whose Get the installer button asks for it once the release
+	 *  page opened (`ui/app/src/room/protection/installer.ts`).
+	 */
+	quitApp: () => typedError<null, HostError>(__TAURI_INVOKE("quit_app")),
 };
 
 /* Constants */

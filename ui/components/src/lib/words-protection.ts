@@ -26,6 +26,11 @@ export const POOL_FULL_CODE = "sandbox.pool_full";
  * cause (blocked.ts), never the turn. */
 export const BLOCKED_CODE = "sandbox.blocked";
 
+/** The line beside "Get the installer" on a personal install: the button quits Clauseo once the
+ * page is open (the app's quit, desktop's quit_app), so the lawyer knows before clicking. */
+export const INSTALLER_CLOSE: ProtectionKey =
+  "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.";
+
 /** A protection command's or launch's refusal in words: the pool's and the block's codes here,
  * every other through errorWords. */
 export function protectionErrorWords(lang: Lang, code: string): string {

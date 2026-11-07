@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dia
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
-import { pw } from "../lib/words-protection.ts";
+import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { Say } from "./say.tsx";
 
@@ -150,6 +150,8 @@ export function NotProtectedNote({
                           ]
                         : []),
                   ];
+  // the line beside the installer's button: the button quits Clauseo once the page is open
+  const close = onGetInstaller === undefined ? [] : [p(INSTALLER_CLOSE)];
   const retry =
     onProtect === undefined ||
     why === "off" ||
@@ -180,7 +182,7 @@ export function NotProtectedNote({
         }
         body={
           <span className="np-note-body">
-            {[...lines, ...extra].map((line) => (
+            {[...lines, ...extra, ...close].map((line) => (
               <span key={line}>
                 <Say>{line}</Say>
               </span>

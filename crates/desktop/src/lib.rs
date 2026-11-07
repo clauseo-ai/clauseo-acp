@@ -263,6 +263,7 @@ pub fn run() -> tauri::Result<()> {
             commands::open_settings,
             commands::count_ui,
             commands::setup,
+            commands::quit_app,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

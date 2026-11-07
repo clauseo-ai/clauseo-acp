@@ -72,6 +72,7 @@ export type FakeCall =
   | { call: "pick_folder" }
   | FakeChooserCall
   | { call: "open_external"; url: string }
+  | { call: "quit_app" }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -117,6 +118,8 @@ export type FakeHost = {
    * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
    * Protected View. */
   openExternal?: (url: string) => void | Promise<void>;
+  /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
+  quitApp?: () => void | Promise<void>;
   openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
@@ -530,6 +533,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   async openExternal(url: string): Promise<void> {
     this.calls.push({ call: "open_external", url });
     await this.#answer(() => this.host.openExternal?.(url));
+  }
+
+  async quitApp(): Promise<void> {
+    this.calls.push({ call: "quit_app" });
+    await this.#answer(() => this.host.quitApp?.());
   }
 
   async openFile(file: FileRefId): Promise<OpenedFile> {

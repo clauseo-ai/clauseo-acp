@@ -320,6 +320,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   async openExternal(url: string): Promise<void> {
     await call(commands.openExternal(url));
   }
+  async quitApp(): Promise<void> {
+    await call(commands.quitApp());
+  }
   async openFile(file: FileRefId): Promise<OpenedFile> {
     return call(commands.openFile(file));
   }

@@ -12,7 +12,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { protectionErrorWords, pw } from "@clauseo/components/lib/words-protection.ts";
+import {
+  INSTALLER_CLOSE,
+  protectionErrorWords,
+  pw,
+} from "@clauseo/components/lib/words-protection.ts";
 import { act } from "react";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { MATTER } from "../../testing/stream-script.ts";
@@ -115,11 +119,13 @@ test("admin_copy_missing: the note says not set up yet, why, the repair, and Get
     "Run the Clauseo installer again to set up the Safe workspace.",
   ] as const)
     expect(note?.textContent).toContain(pw("en", line));
+  expect(note?.textContent).toContain(pw("en", INSTALLER_CLOSE));
   await h!.click(inBody("protection-installer"));
   await settle();
   expect(h!.transport.only("open_external")).toEqual([
     { call: "open_external", url: installerPage(APP_VERSION) },
   ]);
+  expect(h!.transport.only("quit_app")).toEqual([{ call: "quit_app" }]);
   expect(sentRetries()).toEqual([]);
 });
 

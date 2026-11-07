@@ -88,6 +88,10 @@ export const HI = {
   "Run the Clauseo installer again to set up the Safe workspace.":
     "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Clauseo इंस्टॉलर फिर से चलाएँ।",
   "Get the installer": "इंस्टॉलर पाएँ",
+  // the close line beside the button: the button quits Clauseo once the page opened (installer.ts),
+  // provisional
+  "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.":
+    "Clauseo बंद हो जाएगा, ताकि इंस्टॉलर सुरक्षित कार्यक्षेत्र सेट अप कर सके। जो इंस्टॉलर आप डाउनलोड करें, उसे चलाएँ, फिर Clauseo दोबारा खोलें।",
   "Ask your IT team to install Clauseo again.": "अपनी IT टीम से Clauseo फिर से इंस्टॉल करने को कहें।",
   "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता।",

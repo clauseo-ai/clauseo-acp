@@ -671,6 +671,16 @@
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
+  "UC-96": {
+    "en": "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
+    "hi": "Clauseo बंद हो जाएगा, ताकि इंस्टॉलर सुरक्षित कार्यक्षेत्र सेट अप कर सके। जो इंस्टॉलर आप डाउनलोड करें, उसे चलाएँ, फिर Clauseo दोबारा खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
   "UC-78": {
     "en": "Your firm requires the Safe workspace, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. The Safe workspace comes in an update.",
     "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और Clauseo के इस संस्करण में यह अभी नहीं है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। सुरक्षित कार्यक्षेत्र एक अपडेट में आएगा।",
