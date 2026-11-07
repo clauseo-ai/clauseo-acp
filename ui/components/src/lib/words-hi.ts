@@ -2,6 +2,7 @@
 // (words-core.ts's loadHindi, which display.ts calls), so an English page carries none of it. Importing this file
 // fills the registry at once, as the tests, the copy review and the gallery do.
 import { registerHindi } from "./words-core.ts";
+import { HI as blocklist } from "./words-blocklist.hi.ts";
 import { HI as breaks } from "./words-breaks.hi.ts";
 import { HI as connectors } from "./words-connectors.hi.ts";
 import { HI as connectorsRoom } from "./words-connectors-room.hi.ts";
@@ -41,6 +42,7 @@ import { HI as words } from "./words.hi.ts";
 
 /** Each words file's Hindi by its area, the file's name less "words-": wordsOf("errors") reads words-errors.hi.ts. */
 export const HINDI = {
+  blocklist,
   breaks,
   connectors,
   "connectors-room": connectorsRoom,

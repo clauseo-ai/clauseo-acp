@@ -62,6 +62,7 @@ import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
+import { UBL } from "./registry-blocklist.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -581,4 +582,5 @@ export const REGISTRY: readonly Entry[] = [
   ...FOLDER_RIGHTS,
   ...FOLDER_CHOOSER,
   ...TN,
+  ...UBL,
 ];

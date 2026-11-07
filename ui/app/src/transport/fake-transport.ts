@@ -4,6 +4,7 @@
 // beyond the generated ones (room/host-next.ts), scripted, and `appEvent` plays H4's events as the room reads them.
 import type {
   AppEvent,
+  SiteBlocked,
   NextCommand,
   NextHost,
   NextHostSource,
@@ -15,6 +16,7 @@ import type {
   Settings,
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
+import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
@@ -146,6 +148,8 @@ export type FakeHost = {
   setup?: FakeSetupHost;
   /** UC: with it, the fake carries the protection wire (`protectionWire`), as R17 PR-B's host will. Read when made. */
   protection?: FakeProtectionHost;
+  /** 0053: the unsafe-site list's host (fake-blocklist.ts); without it allowed_sites lists none. */
+  blocklist?: FakeBlocklistHost;
 };
 
 /** UC's protection wire, scripted: the `protection` query and the two commands. Their events are the test's to play
@@ -416,6 +420,13 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#appHeard) listener(event);
   }
 
+  /** 0053: plays `site_blocked` as the host sends it to every window; the blocklist host hears
+   * it. */
+  siteBlocked(site: SiteBlocked): void {
+    this.host.blocklist?.notice?.(site);
+    this.appEvent({ site_blocked: site });
+  }
+
   /** UC: plays `protection_changed` for a matter, as the host sends it to every window. */
   protectionChanged(matter: string, protection: Protection): void {
     this.appEvent({ protection_changed: { matter, protection } });
@@ -482,7 +493,10 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
           : null;
     if (protecting !== null && this.host.protection !== undefined)
       await this.#answer(() => this.host.protection?.command?.(protecting));
-    else if (this.host.dispatch !== undefined)
+    else if (isBlocklistCommand(command.command) && this.host.blocklist !== undefined) {
+      const [blocklist, sent] = [this.host.blocklist, command.command];
+      await this.#answer(() => blocklist.command?.(sent));
+    } else if (this.host.dispatch !== undefined)
       try {
         outcome = await this.host.dispatch(command);
       } catch (error) {
@@ -497,6 +511,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   async query(query: HostQuery): Promise<QueryResult> {
     this.calls.push({ call: "query", query });
+    if (query === "allowed_sites")
+      return { allowed_sites: [...(await this.#answer(() => this.host.blocklist?.sites() ?? []))] };
     const protection = this.host.protection;
     if (query === "protection" && protection !== undefined)
       return { protection: await this.#answer(() => protection.view()) };

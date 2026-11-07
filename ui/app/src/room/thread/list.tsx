@@ -17,6 +17,7 @@ import type { EntryId, StreamId, Timestamp, TurnId, ViewEntry } from "../../tran
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { AnswerMeta } from "./answer-meta.tsx";
 import { CaseLawHintSlot } from "./case-law-hint.tsx";
+import { SiteBlockedSlot } from "./site-blocked.tsx";
 import { stamp } from "./clock.ts";
 import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
@@ -187,7 +188,8 @@ const LiveExchange = memo(
     ids: readonly EntryId[];
     asked: boolean;
     sentNow: EntryId | null;
-    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx). */
+    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx) and the
+     * unsafe-site list's notices (site-blocked.tsx). */
     turn: TurnId | null;
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
@@ -233,6 +235,7 @@ const LiveExchange = memo(
             <>
               {answer}
               {notes && <SteerNotesOf ids={rest} stream={stream} paged={paged} />}
+              <SiteBlockedSlot stream={stream} turn={turn} />
               <CaseLawHintSlot stream={stream} turn={turn} />
             </>
           )

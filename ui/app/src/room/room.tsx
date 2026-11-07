@@ -44,6 +44,7 @@ import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
+import { blockedSitesOf } from "../store/blocked-sites.ts";
 import { connectorsStoreOf } from "../store/connectors.ts";
 import { StoreContext } from "../store/hooks.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
@@ -342,6 +343,8 @@ function RoomFrame({
   // the connectors' store listens from the room's start (U15): a case-law hint is in no catch-up, so one sent while no
   // conversation's composer or thread is up must still be heard
   useState(() => connectorsStoreOf(transport));
+  // and so does the unsafe-site list's (0053): its notices are in no catch-up either
+  useState(() => blockedSitesOf(transport));
   // Find's key focuses the rail's Find from anywhere in the room, a folded rail opened first
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
   const [openRail] = useState(() => () => setRailOpen(true));

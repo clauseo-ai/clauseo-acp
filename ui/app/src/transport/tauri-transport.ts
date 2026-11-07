@@ -179,6 +179,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("case_law_hint" in event && event.case_law_hint !== undefined) ||
           ("folder_scanned" in event && event.folder_scanned !== undefined) ||
           ("protection_changed" in event && event.protection_changed !== undefined) ||
+          ("site_blocked" in event && event.site_blocked !== undefined) ||
           // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
           Object.hasOwn(event, "protection_view_changed")
         ) {
@@ -253,8 +254,10 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`, `protection_changed`). The first listener subscribes the window's channel to them;
-   * read the current state with `query` after `ready`, so no change falls between. */
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
+   * `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`,
+   * `protection_changed`, `site_blocked`). The first listener subscribes the window's channel to
+   * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
     return {
