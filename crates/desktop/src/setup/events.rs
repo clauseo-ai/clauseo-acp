@@ -52,6 +52,7 @@ impl SetupEvents {
     /// that does not encode (none does) is dropped.
     pub(crate) fn publish(&self, event: SetupEvent) {
         let slot = Slot::of(&event);
+        log_event(&event);
         let Some(text) = crate::frame::setup_text(event) else {
             tracing::warn!("a setup event did not encode and was dropped");
             return;
@@ -151,6 +152,50 @@ pub(crate) fn note(agent: &AgentId, note: clauseo_agents::SigninNote) {
 }
 
 /// Which latest state an event replaces.
+/// How many setup events a run logs (`log_event`).
+const EVENT_LINES: u32 = 100;
+
+/// The setup events logged so far this run.
+static EVENTS_LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// One lifecycle line per setup event published, the first [`EVENT_LINES`] of a run, on the
+/// IPC lines' clock (`ipc.rs`): when each install and sign-in state reached the windows, a
+/// status check's (detection's) answer among them. The event's kind, agent and state kind
+/// only: never an email, a code or a path.
+fn log_event(event: &SetupEvent) {
+    if let SetupEvent::SignInChanged { agent, state } = event {
+        super::status_timing::answered(agent, &state_kind(state));
+    }
+    if EVENTS_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= EVENT_LINES {
+        return;
+    }
+    let (kind, agent, state) = match event {
+        SetupEvent::SetupInfo { .. } => ("setup_info", None, String::new()),
+        SetupEvent::AgentInstallProgress { agent, state } => {
+            ("install", Some(agent), state_kind(state))
+        }
+        SetupEvent::SignInChanged { agent, state } => ("sign_in", Some(agent), state_kind(state)),
+    };
+    let agent = agent.map_or("", AgentId::as_str);
+    tracing::info!(
+        target: crate::ipc::TARGET,
+        at_ms = crate::chooser::trace::at_ms(),
+        kind,
+        agent,
+        state,
+        "setup event"
+    );
+}
+
+/// A state's variant name as the wire spells it: the string, or an object's one key.
+fn state_kind(state: &impl serde::Serialize) -> String {
+    match serde_json::to_value(state) {
+        Ok(serde_json::Value::String(name)) => name,
+        Ok(serde_json::Value::Object(fields)) => fields.keys().next().cloned().unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
 enum Slot {
     Info,
     Install(AgentId),
