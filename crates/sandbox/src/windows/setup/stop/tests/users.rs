@@ -12,6 +12,7 @@ fn process(pid: u32, listed: Option<Sid>, token: Option<Sid>, owner: Option<Sid>
         token,
         owner,
         can_stop: true,
+        list_failed: false,
     }
 }
 
@@ -32,15 +33,55 @@ fn a_token_shut_to_system_is_read_from_the_process_list() {
 }
 
 #[test]
-fn with_no_list_entry_the_token_then_the_owner_say_whose_it_is() {
+fn with_no_list_entry_the_token_says_whose_it_is_and_a_pool_owner_adds_it() {
     let pool_token = process(31, None, Some(sid(1010)), None);
     let pool_owner = process(32, None, None, Some(sid(1011)));
-    // Another account owns 33: neither a pool user's nor unknown.
-    let other_owner = process(33, None, None, Some(Sid::parse(OWNER).unwrap()));
-    let (exit, fake) = run(vec![pool_token, pool_owner, other_owner]);
+    let (exit, fake) = run(vec![pool_token, pool_owner]);
     assert_eq!(exit, StopExit::Done);
     assert_eq!(fake.stopped(), [31, 32]);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+}
+
+#[test]
+fn an_owner_that_isnt_a_pool_user_never_clears_a_process() {
+    // The owner is the creator, not the user: Administrators owns an elevated administrator's
+    // processes, whoever runs them. With no user from the list or the token, 33 is unknown.
+    for owner in [OWNER, "S-1-5-32-544"] {
+        let other_owner = process(33, None, None, Some(Sid::parse(owner).unwrap()));
+        let (exit, fake) = run(vec![other_owner]);
+        assert_eq!(exit, StopExit::NotStopped, "{owner}");
+        assert_eq!(fake.stopped(), Vec::<u32>::new(), "{owner}");
+        assert!(fake.logged[0].1.contains("1 unknown"), "{:?}", fake.logged);
+    }
+}
+
+#[test]
+fn a_failed_process_list_leaves_only_the_token_or_a_pool_owner_to_name_a_process() {
+    let failed = |process: Process| Process {
+        list_failed: true,
+        ..process
+    };
+    // The token names 50 and a pool owner names 51; both are stopped, and that is all.
+    let named = vec![
+        failed(process(50, None, Some(sid(1010)), None)),
+        failed(process(51, None, None, Some(sid(1011)))),
+        failed(process(52, None, Some(Sid::parse(OWNER).unwrap()), None)),
+    ];
+    let (exit, fake) = run(named);
+    assert_eq!(exit, StopExit::Done);
+    assert_eq!(fake.stopped(), [50, 51]);
+    // A token that can't be read is unknown, opened or not: with no list, a protected process
+    // is no longer exempt, since nothing would name a pool user's.
+    for can_stop in [true, false] {
+        let unread = Process {
+            can_stop,
+            ..failed(process(53, None, None, None))
+        };
+        let (exit, fake) = run(vec![unread]);
+        assert_eq!(exit, StopExit::NotStopped, "can_stop {can_stop}");
+        assert_eq!(StopExit::NotStopped.as_code(), 48);
+        assert!(fake.logged[0].1.contains("1 unknown"), "{:?}", fake.logged);
+    }
 }
 
 #[test]

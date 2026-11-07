@@ -1147,8 +1147,8 @@ lawyer: `schtasks /run /tn \Clauseo\SandboxStop` starts it and `schtasks /end /t
 \Clauseo\SandboxStop` is refused (and the same for the refresh). The folder gets that owner and DACL
 when it is made. A folder already there is kept, and given them again, only when its owner is
 Administrators or SYSTEM, which only an administrator can set. Anyone else's (a standard user may be
-able to make `\Clauseo` first) is deleted with every task and folder in it, then made again
-(`task_folder::prepare`). The app asks for a run after an update (`request_admin_refresh`,
+able to make `\Clauseo` first), or one whose owner can't be read, is deleted with every task and
+folder in it, then made again (`task_folder::prepare`). The app asks for a run after an update (`request_admin_refresh`,
 `IRegisteredTask::Run`, unelevated). Only
 `--remove --uninstall` deletes the task and the staging folder ("Two removals"); plain
 `--remove` keeps them with the copy. `--adopt` registers the task before it writes the record's
@@ -1258,7 +1258,11 @@ owner may only read it, which starts it), one instance at a time. Its action is 
 `--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
 registration fails `--adopt` before the record's admin-copy values are written, as for the
 refresh task. `--remove --uninstall` deletes both tasks, after the values and before the admin
-folder (`refresh::TEARDOWN`).
+folder (`refresh::TEARDOWN`). The folder rule above has two accepted outcomes. A user-made
+`\Clauseo` holding a task administrators can't delete fails the delete, and so the registration,
+with that error: a user who could make the folder can block the install, but not take it over.
+A folder an administrator made, owned by that administrator's own SID rather than
+Administrators, is deleted and made again, which loses nothing.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 neither task. The refresh task stays per-user only: IT updates a per-machine install. The stop
@@ -1290,15 +1294,21 @@ admin copy.
    so each entry is the process its handle is on. A pool user owns its token and can drop SYSTEM
    from the token's DACL (`SeDebugPrivilege` passes the process's DACL, not the token's), so the
    token's user is only a cross-check: when it differs from the list's, the process's user is
-   unknown. With no list entry, the token's user counts, then the process object's owner, which a
-   standard user can't set to another account. A process whose user no source gives is never stopped
-   but counts as unknown, unless it also can't be opened with `PROCESS_TERMINATE` (a protected
-   process; one a pool user started would still be named by the list); pid 0 and 4 and this process
-   are never looked at. The pass suspends every pool user's process it found (`NtSuspendProcess`),
+   unknown. With no list entry, the token's user counts. With neither, the process object's
+   owner (which a standard user can't set to another account) may add the process, never clear
+   it: an owner that is a pool SID gets it stopped, and any other owner leaves it unknown, since
+   an owner is the creator, not the user (an elevated administrator's processes are owned by
+   Administrators). A process whose user no source gives is never stopped but counts as unknown,
+   unless it also can't be opened with `PROCESS_TERMINATE` while the list was read (a protected
+   process; one a pool user started would still be named by the list). When the list can't be
+   read at all, that exemption goes too: the run ends at 48 unless the token, or a pool owner,
+   named every process. Pid 0 and 4 and this process are never looked at. Each pass adds the pool
+   users it found to `ResetSids` (step 6) before it stops anything. The pass suspends every pool user's process it found (`NtSuspendProcess`),
    then terminates each through its handle, so a parent can't start another between two
    terminations. Nothing resumes a process: it is terminated next, and one that won't end stays
-   suspended, a pool user's, until the reset. The passes stop after 60 s, inside the task's 2
-   minutes with the lock's 30 s after them; what the last pass still finds then is left;
+   suspended, a pool user's, until the reset. Each terminated process is waited for up to 1 s,
+   and the waits stop 15 s after the passes' 60 s, so the run ends inside the task's 2 minutes
+   with the lock's 30 s wait. What the pass after 60 s still finds is left;
 5. cancels every BITS job a pool user owns (`EnumJobs(BG_JOB_ENUM_ALL_USERS)`, each job's
    `GetOwner`), at the impersonate level on the manager, the enumerator and each job, as the
    runner's end sweeper does. A pool user's BITS job can't run (the runner's test shows it, #649)
@@ -1307,7 +1317,9 @@ admin copy.
    runs even when no process was found. Other users' jobs are left alone;
 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`
    (`REG_MULTI_SZ`, a value appended to the set-up's, deleted with them by `--remove`), under
-   the set-up lock with a 30 s wait.
+   the set-up lock with a 30 s wait. Each user is added as soon as a pass or the BITS step finds
+   it, so a run the task's limit kills has still marked every user it saw. Once the lock stays
+   held or a write fails, no more users are tried (49), so the wait comes once at most.
 
 It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
 cancelled and not). Its exit codes follow the refresh's (`StopExit`):

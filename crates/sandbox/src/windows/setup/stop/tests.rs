@@ -49,6 +49,11 @@ struct Fake {
     refuse: Vec<u32>,
     /// Pids whose first termination fails.
     refuse_once: Vec<u32>,
+    /// Pids that never exit once terminated: each termination waits out its wait, on the
+    /// fake clock, and fails.
+    hang: Vec<u32>,
+    /// The wait each termination was given, in order.
+    waits: Vec<Duration>,
     /// Why the marks fail, if they do.
     marks: Marks,
     held: bool,
@@ -75,6 +80,8 @@ impl Fake {
             jobs_refuse: Vec::new(),
             refuse: Vec::new(),
             refuse_once: Vec::new(),
+            hang: Vec::new(),
+            waits: Vec::new(),
             marks: Marks::Written,
             held: false,
             resets: Vec::new(),
@@ -108,6 +115,7 @@ fn seen(pid: u32, user: Option<Sid>) -> Process {
         token: user,
         owner: None,
         can_stop,
+        list_failed: false,
     }
 }
 
@@ -152,7 +160,12 @@ impl Stopper for Fake {
         Ok(())
     }
 
-    fn terminate(&mut self, pid: u32) -> Result<(), Failed> {
+    fn terminate(&mut self, pid: u32, wait: Duration) -> Result<(), Failed> {
+        self.waits.push(wait);
+        if self.hang.contains(&pid) {
+            self.now += wait;
+            return Err("it hadn't exited when the wait ran out".to_owned());
+        }
         if let Some(at) = self.refuse_once.iter().position(|once| *once == pid) {
             self.refuse_once.remove(at);
             return Err("access denied".to_owned());
@@ -235,9 +248,11 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     // 1013 runs as a local account the record doesn't list: left alone, as are the owner,
     // SYSTEM, the unreadable process, this one and the kernel's.
     assert_eq!(fake.stopped(), [10, 12, 16]);
-    // Every one suspended before any is terminated; the second snapshot finds none, and ends.
+    // Their users marked first, then every one suspended before any is terminated; the second
+    // snapshot finds none, and ends.
     let suspend_then_stop = [
         "snapshot",
+        "mark 2",
         "suspend 10",
         "suspend 12",
         "suspend 16",
@@ -246,7 +261,6 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
         "stop 16",
         "snapshot",
         "jobs",
-        "mark 2",
     ];
     assert_eq!(fake.done, suspend_then_stop);
     assert_eq!(fake.resets, [sid(1010), sid(1011)], "1012 wasn't running");
@@ -296,7 +310,10 @@ fn a_pool_that_never_empties_is_left_at_the_time_limit_but_its_users_are_marked(
     let limit = usize::try_from(PASS_LIMIT.as_secs()).unwrap();
     assert_eq!(fake.snapshots_taken(), limit);
     assert_eq!(fake.stopped().len(), 2 * (limit - 1));
-    assert_eq!(fake.done.last().map(String::as_str), Some("mark 2"));
+    // Marked by the first pass, once.
+    let marks: Vec<&String> = fake.done.iter().filter(|l| l.starts_with("mark")).collect();
+    assert_eq!(marks, ["mark 2"]);
+    assert_eq!(fake.done[1], "mark 2");
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     let (error, line) = &fake.logged[0];
     assert!(error);
@@ -310,6 +327,66 @@ fn a_pool_that_never_empties_is_left_at_the_time_limit_but_its_users_are_marked(
     ];
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+}
+
+#[test]
+fn each_user_is_marked_when_first_found_before_its_processes_are_stopped() {
+    let mut fake = Fake::new(&[1010, 1011]);
+    // 1010 runs first; 1011 only shows up in the second pass. 1011 also owns a BITS job, but is
+    // marked already, so the BITS step marks no one new.
+    let second = vec![seen(10, Some(sid(1010))), seen(20, Some(sid(1011)))];
+    fake.snapshots = vec![
+        Ok(vec![seen(10, Some(sid(1010)))]),
+        Ok(second),
+        Ok(Vec::new()),
+    ];
+    fake.refuse_once = vec![10];
+    fake.jobs = Ok(vec![Some(sid(1011))]);
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    let order = [
+        "snapshot",
+        "mark 1",
+        "suspend 10",
+        "pause",
+        "snapshot",
+        "mark 1",
+        "suspend 10",
+        "suspend 20",
+        "stop 10",
+        "stop 20",
+        "snapshot",
+        "jobs",
+        "cancel 0",
+    ];
+    assert_eq!(fake.done, order);
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+    assert!(
+        fake.logged[0].1.contains("2 users marked"),
+        "{:?}",
+        fake.logged
+    );
+}
+
+#[test]
+fn the_waits_past_the_time_limit_are_capped_so_the_run_ends_inside_the_tasks_limit() {
+    let mut fake = Fake::new(&[1010]);
+    // Forty processes that never exit: each pass would wait 40 s for them.
+    let pids: Vec<u32> = (100..140).collect();
+    fake.hang.clone_from(&pids);
+    let hung = pids.iter().map(|pid| seen(*pid, Some(sid(1010)))).collect();
+    fake.snapshots = vec![Ok(hung)];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    // The second pass begins at 42 s, before the limit, and waits until 75 s, then not at all.
+    let cap = PASS_LIMIT + LAST_WAITS;
+    assert!(fake.now <= cap + Duration::from_secs(1), "{:?}", fake.now);
+    assert!(fake.waits.iter().all(|wait| *wait <= EXIT_WAIT));
+    let total: Duration = fake.waits.iter().sum();
+    // 73 s: the cap, less the two snapshots' seconds.
+    assert_eq!(total, Duration::from_secs(73));
+    assert_eq!(fake.waits.last(), Some(&Duration::ZERO));
+    // Its user was marked before the first termination.
+    assert_eq!(fake.done[..2], ["snapshot", "mark 1"]);
+    assert!(fake.logged[0].1.contains("40 left"), "{:?}", fake.logged);
 }
 
 #[test]
