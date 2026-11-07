@@ -82,28 +82,28 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 ; adminCopyStillRunning: the set-up outlasted the installer's 10-minute wait; it may still be
 ; running, or may have stopped, and Settings' Safe workspace in the app shows which; details list
 ; only (exit code 23 for a silent per-machine install).
-LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up Safe workspace. Windows may name the publisher as Unknown Publisher. That's expected: it's this installer asking."
-LangString adminCopyWorking ${LANG_ENGLISH} "Setting up Safe workspace. This can take a few minutes."
-LangString adminCopyDone ${LANG_ENGLISH} "Safe workspace is set up."
-LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because Windows' permission prompt was declined. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
-LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
-LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
-LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
-LangString adminCopyNewerKept ${LANG_ENGLISH} "Clauseo kept the newer copy of Safe workspace's set-up program that's already on this computer."
-LangString adminCopyAppRunning ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because Clauseo is running. Quit Clauseo, then run this installer again."
-LangString adminCopyStillRunning ${LANG_ENGLISH} "Safe workspace may still be setting up. To see whether it worked, open Settings in Clauseo and look at Safe workspace."
-LangString adminCopySkippedSilent ${LANG_ENGLISH} "Safe workspace isn't set up, because this install is silent. To set it up, run this installer again without /S."
+LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up the Safe workspace. It will say the publisher is unknown. That's expected: it's this installer asking. Choose Yes."
+LangString adminCopyWorking ${LANG_ENGLISH} "Setting up the Safe workspace. This can take a few minutes."
+LangString adminCopyDone ${LANG_ENGLISH} "The Safe workspace is set up."
+LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because permission was refused when Windows asked. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
+LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
+LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
+LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
+LangString adminCopyNewerKept ${LANG_ENGLISH} "Clauseo kept the newer copy of the Safe workspace's set-up program that's already on this computer."
+LangString adminCopyAppRunning ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because Clauseo is running. Quit Clauseo, then run this installer again."
+LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo may still be setting up the Safe workspace. To see whether it worked, open Clauseo's Settings and look under Safe workspace."
+LangString adminCopySkippedSilent ${LANG_ENGLISH} "The Safe workspace isn't set up, because this install is silent. To set it up, run this installer again without /S."
 ; installTempFailed: the per-machine installer couldn't make its own temporary folder under
 ; Program Files (windows/safe_temp.nsh), so it stops before it loads anything; a box, skipped by
 ; /S, /P and /UPDATE, then exit code 25. Provisional (stage F, 2026-11-07).
-LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because the installer couldn't make a safe folder for its temporary files in Program Files. Nothing was installed. Run the installer again. If it fails again, ask whoever looks after this computer."
+LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because the installer couldn't make a folder for its temporary files in Program Files that only administrators can change. Run the installer again. If it fails again, ask whoever looks after this computer."
 ; uninstallTempFailed: the same for the per-machine uninstaller, which stops before it removes
 ; anything; a box, skipped by /S, /P and /UPDATE, then exit code 25. Provisional (2026-11-07).
-LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a safe folder for its temporary files in Program Files. Nothing was removed. Run the uninstaller again. If it fails again, ask whoever looks after this computer."
+LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a folder for its temporary files in Program Files that only administrators can change. Nothing was removed. Run the uninstaller again. If it fails again, ask whoever looks after this computer."
 ; uninstallNotInPlace: the per-machine uninstaller wasn't started in its own folder, as with options
 ; added after _?= (windows/uninstall_in_place.nsh); a box, skipped by /S, then exit code 26.
 ; Provisional (2026-11-07).
-LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started the way Windows registered it. Nothing was removed. Uninstall Clauseo from Settings, Apps, or ask whoever looks after this computer."
+LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started from Clauseo's own folder. Nothing was removed. Uninstall Clauseo from Settings > Apps, or ask whoever looks after this computer."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

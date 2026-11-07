@@ -205,8 +205,8 @@ Var ClauseoAdminTimedOut
 ; (CLAUSEO_NEWER_THAN_THIS), so an older installer never puts an older copy back. 3: the record
 ; holds a value this check reads (AdminCopyOwner, OwnerSid or AdminCopyVersion, found by name
 ; among the key's values, compared as Windows compares names) that ReadRegStr can't read as text
-; (another type, too long) or that is empty. --adopt fails on such a record too (its read errs:
-; exit 3), so it is refused as a failed set-up, before anything is written. A value that is
+; (another type, too long) or that is empty. --adopt fails on such a record too: an unreadable
+; value is exit 3; an empty AdminCopyVersion is exit 9 (Downgrade), nothing written. A value that is
 ; missing checks nothing: the first install has no record, and a per-machine set-up or a removal
 ; leaves no OwnerSid; --adopt checks again. Plain NSIS, no plug-in or library function, as the
 ; elevated branch needs. Uses $R5, $R7, $R8 and $0 to $4.

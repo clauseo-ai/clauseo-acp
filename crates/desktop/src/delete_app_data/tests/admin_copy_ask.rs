@@ -269,58 +269,57 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
     for (key, words) in [
         (
             "adminCopyAsk",
-            "Next, Windows asks for permission to set up Safe workspace. Windows \
-             may name the publisher as Unknown Publisher. That's expected: it's this installer \
-             asking.",
+            "Next, Windows asks for permission to set up the Safe workspace. It will say the \
+             publisher is unknown. That's expected: it's this installer asking. Choose Yes.",
         ),
         (
             "adminCopyWorking",
-            "Setting up Safe workspace. This can take a few minutes.",
+            "Setting up the Safe workspace. This can take a few minutes.",
         ),
-        ("adminCopyDone", "Safe workspace is set up."),
+        ("adminCopyDone", "The Safe workspace is set up."),
         (
             "adminCopyDeclined",
-            "Clauseo is installed, but Safe workspace isn't set up, because Windows' \
-             permission prompt was declined. Clauseo works without it. To set it up, run this \
-             installer again and choose Yes. If Windows asks for an administrator's password, \
-             ask whoever looks after this computer to enter it.",
+            "Clauseo is installed, but the Safe workspace isn't set up, because permission was \
+             refused when Windows asked. Clauseo works without it. To set it up, run this \
+             installer again and choose Yes. If Windows asks for an administrator's password, ask \
+             whoever looks after this computer to enter it.",
         ),
         (
             "adminCopyFailed",
-            "Clauseo is installed, but Safe workspace couldn't be set up. Clauseo works \
-             without it. Run this installer again to try once more. If it still isn't set up, \
-             ask whoever looks after this computer.",
+            "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works \
+             without it. Run this installer again to try once more. If it still isn't set up, ask \
+             whoever looks after this computer.",
         ),
         (
             "adminCopyOtherAccount",
-            "Clauseo is installed, but Safe workspace isn't set up, because another \
-             Windows account on this computer already has it. Clauseo works without it.",
+            "Clauseo is installed, but the Safe workspace isn't set up, because another Windows \
+             account on this computer already has it. Clauseo works without it.",
         ),
         (
             "adminCopyMachineFailed",
-            "Clauseo is installed, but Safe workspace couldn't be set up on this \
-             computer. Clauseo works without it. Whoever looks after this computer can run this \
-             installer again to set it up.",
+            "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. \
+             Clauseo works without it. Whoever looks after this computer can run this installer \
+             again to set it up.",
         ),
         (
             "adminCopyNewerKept",
-            "Clauseo kept the newer copy of Safe workspace's set-up program that's already on \
+            "Clauseo kept the newer copy of the Safe workspace's set-up program that's already on \
              this computer.",
         ),
         (
             "adminCopyAppRunning",
-            "Clauseo is installed, but Safe workspace isn't set up, because Clauseo is running. \
-             Quit Clauseo, then run this installer again.",
+            "Clauseo is installed, but the Safe workspace isn't set up, because Clauseo is \
+             running. Quit Clauseo, then run this installer again.",
         ),
         (
             "adminCopyStillRunning",
-            "Safe workspace may still be setting up. To see whether it worked, open Settings in \
-             Clauseo and look at Safe workspace.",
+            "Clauseo may still be setting up the Safe workspace. To see whether it worked, open \
+             Clauseo's Settings and look under Safe workspace.",
         ),
         (
             "adminCopySkippedSilent",
-            "Safe workspace isn't set up, because this install is silent. To set \
-             it up, run this installer again without /S.",
+            "The Safe workspace isn't set up, because this install is silent. To set it up, run \
+             this installer again without /S.",
         ),
     ] {
         let line = format!("LangString {key} ${{LANG_ENGLISH}} \"{words}\"");
