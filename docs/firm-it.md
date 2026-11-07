@@ -199,6 +199,29 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
 Nothing in `HKCU` or a user-writable file counts as policy. Policy is read once at start-up: a
 change applies on the next start.
 
+**The policy folder on Windows.** `C:\ProgramData\Clauseo` must be owned by Administrators and
+not writable by Users. Any user can create a folder under `ProgramData`, so check one that is
+already there. The per-machine installer creates the folder that way (owner
+Administrators, nothing inherited, SYSTEM and Administrators full control, Users read) and
+leaves a folder that is already there as it is, saying so in its details list. The uninstaller
+leaves the folder, with any policy in it. After a per-user install, or when the folder was
+already there, create or fix it from an elevated Command Prompt:
+
+```bat
+mkdir "%ProgramData%\Clauseo"
+icacls "%ProgramData%\Clauseo" /setowner *S-1-5-32-544
+icacls "%ProgramData%\Clauseo" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX
+```
+
+(`mkdir` says the folder exists when it does; carry on with the rest.) The SIDs are SYSTEM,
+Administrators and Users, so the commands work in any Windows language. Check it with
+`icacls "%ProgramData%\Clauseo"`: it lists only `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`,
+`BUILTIN\Administrators:(OI)(CI)(F)` and `BUILTIN\Users:(OI)(CI)(RX)`, none marked `(I)`
+(the names are in the system's language). Remove any other entry with
+`icacls "%ProgramData%\Clauseo" /remove:g <name>`. `dir /q "%ProgramData%"` shows the owner
+beside `Clauseo`: `BUILTIN\Administrators`. Then put `policy.json` in it from the same elevated
+prompt.
+
 **What a policy value does.** It replaces the user's value and shows as locked in the app: Settings
 shows the policy's value with its choices greyed out and the line "Managed by your organisation"
 (measured on Windows Server 2025, 2026-11-03, with `ui.theme` = `dark`). A value

@@ -28,6 +28,12 @@
 ;
 ; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept); the uninstall-declined
 ; line is S15a's.
+;
+; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
+; creates $COMMONAPPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
+; docs/firm-it.md section 6) owned by Administrators, so a user who made the folder first cannot
+; make a firm's policy be ignored. A folder that is already there is left as it is.
+; The uninstaller leaves that folder, since a firm's policy may be in it.
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).
@@ -184,4 +190,69 @@
       ${EndIf}
     ${EndIf}
   ${EndIf}
+!macroend
+
+; The firm-policy folder, per-machine installs only. The test is inside the macro: the template
+; (installer.nsi) includes this file at line 36, before `!define INSTALLMODE` at line 46, so a
+; test at file scope would see no INSTALLMODE.
+!macro NSIS_HOOK_POSTINSTALL
+  !if "${INSTALLMODE}" == "perMachine"
+    Push $R5
+    Push $R6
+    Push $R7
+    Push $R8
+    Push $R9
+    ; The all-users context, which the per-machine installer already runs in (SetContext);
+    ; set for the work if not, and put back after ($R9 1).
+    StrCpy $R9 0
+    ${IfNot} ${ShellVarContextAll}
+      StrCpy $R9 1
+      SetShellVarContext all
+    ${EndIf}
+    ; Anything at the path, a link or a file included, is left as it is: GetFileAttributesW reads
+    ; the path itself and never follows a link (${FileExists} would). INVALID_FILE_ATTRIBUTES is -1.
+    System::Call 'kernel32::GetFileAttributesW(w "$COMMONAPPDATA\Clauseo") i .R7'
+    ${If} $R7 <> -1
+      DetailPrint "$(policyFolderExists)"
+    ${Else}
+      ; Created in one step with its security: owner Administrators (O:BA), group Administrators,
+      ; a protected DACL (P: nothing inherited from ProgramData), SYSTEM and Administrators full
+      ; access, Users read and execute (0x1200a9), each inherited by files and folders inside
+      ; (OICI). SDDL_REVISION_1 is 1; the size out-parameter is optional (NULL).
+      StrCpy $R6 0
+      System::Call 'advapi32::ConvertStringSecurityDescriptorToSecurityDescriptorW(w "O:BAG:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)", i 1, *p .R6, p 0) i .R7'
+      StrCpy $R8 0
+      ${If} $R7 <> 0
+        ; SECURITY_ATTRIBUTES as a 32-bit process lays it out: every member 4 bytes, no padding.
+        !if ${NSIS_PTR_SIZE} > 4
+          !error "hooks.nsh lays out SECURITY_ATTRIBUTES for a 32-bit installer; lay it out again"
+        !endif
+        ; nLength, lpSecurityDescriptor, bInheritHandle (FALSE).
+        System::Call '*(&l4, p R6, i 0) p .R7'
+        System::Call 'kernel32::CreateDirectoryW(w "$COMMONAPPDATA\Clauseo", p R7) i .R8 ?e'
+        ; GetLastError: ERROR_ALREADY_EXISTS (183) means something appeared there since the test.
+        Pop $R5
+        ${If} $R8 = 0
+        ${AndIf} $R5 = 183
+          StrCpy $R8 2
+        ${EndIf}
+        System::Free $R7
+        ; The descriptor is the system's (LocalAlloc'd); LocalFree releases it.
+        System::Call 'kernel32::LocalFree(p R6)'
+      ${EndIf}
+      ${If} $R8 = 2
+        DetailPrint "$(policyFolderExists)"
+      ${ElseIf} $R8 = 0
+        DetailPrint "$(policyFolderFailed)"
+      ${EndIf}
+    ${EndIf}
+    ${If} $R9 = 1
+      SetShellVarContext current
+    ${EndIf}
+    Pop $R9
+    Pop $R8
+    Pop $R7
+    Pop $R6
+    Pop $R5
+  !endif
 !macroend
