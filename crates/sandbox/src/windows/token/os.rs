@@ -449,7 +449,7 @@ fn information(token: &Handle, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec
 }
 
 /// The canonical text of the SID at `sid`.
-fn sid_text(sid: PSID) -> io::Result<Sid> {
+pub(in crate::windows) fn sid_text(sid: PSID) -> io::Result<Sid> {
     let mut text = PWSTR::null();
     // SAFETY: `sid` points at a valid SID; `text` is a live out-pointer, freed below.
     unsafe { ConvertSidToStringSidW(sid, &raw mut text) }.map_err(|error| os_error(&error))?;

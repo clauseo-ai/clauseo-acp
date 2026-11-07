@@ -10,10 +10,10 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
-use super::spawn::{
-    Process, assign_and_resume, end_job, kill_on_close_job, log_on, restrict_dll_search,
-    system_folder,
-};
+use super::spawn::{Process, end_job, kill_on_close_job, restrict_dll_search, system_folder};
+use super::start::start;
+use super::sweep::os::OsProcesses;
+use super::sweep::{Point, TICK, watch};
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::acl::object::Handle;
 use crate::windows::matters::SANDBOX_DIR;
@@ -21,10 +21,13 @@ use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
-use crate::windows::token::os::shut_object;
+use crate::windows::sids::Sid;
 use crate::windows::token::os::{own_token, profile_folder};
-use crate::windows::token::{desktop_sddl, runner_process_sddl, runner_thread_sddl, station_sddl};
+use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
+use steps::Start;
+
+mod steps;
 
 /// How long the inner runner has to connect `ctl`: its logon, which makes the pool user's
 /// profile the first time (about 1.7 s on the VM, `s15-spikes-userpool.md`), included.
@@ -115,47 +118,19 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // The inner runner starts in System32, a folder its Low agent can't write (no DLL planted in
     // its current folder), and gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
-    // `log_on` takes the password and wipes it as it returns.
-    let inner =
-        log_on(&message.pool_name, password, exe_text, set.base(), &cwd).map_err(logon_failure)?;
-    // Its token's user, read now: from its first instruction the inner shuts its token to all but
-    // SYSTEM until the launch arrives over `ctl`.
-    let user = inner
-        .user()
-        .map_err(|e| Failure::new(RunExit::Logon, os("the inner runner's token", &e)));
-    match user {
-        Ok(user) if user == message.pool_user => {}
-        Ok(_) => {
-            inner.kill(RunExit::Logon.code());
-            return Err(Failure::new(
-                RunExit::Logon,
-                "the inner runner isn't the pool user",
-            ));
-        }
-        Err(failure) => {
-            inner.kill(RunExit::Logon.code());
-            return Err(failure);
-        }
-    }
-    // Shut the inner runner's process and first thread to its agent (the same pool user) while
-    // it is still suspended, so no agent of this pool user already running opens either in the
-    // moment before the inner shuts itself (`token::os::shut_self`).
-    let shut = shut_object(inner.handle.0, &runner_process_sddl(&desktop))
-        .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(&desktop)));
-    if let Err(error) = shut {
-        inner.kill(RunExit::Token.code());
-        return Err(Failure::new(
-            RunExit::Token,
-            os("the inner runner's DACL", &error),
-        ));
-    }
-    if let Err(error) = assign_and_resume(&job, &inner) {
-        inner.kill(RunExit::Job.code());
-        return Err(Failure::new(
-            RunExit::Job,
-            os("AssignProcessToJobObject", &error),
-        ));
-    }
+    // Sweep (a), the logon, the user's check, the job, the shut, sweep (b), then the resume
+    // (`start.rs`): no process of the pool user but this inner runner lives once it runs.
+    let mut steps = Start {
+        pool_name: &message.pool_name,
+        pool_user: &message.pool_user,
+        desktop: &desktop,
+        password: Some(password),
+        exe: exe_text,
+        base: set.base(),
+        cwd: &cwd,
+        job: &job,
+    };
+    let inner = start(&mut steps)?;
     let launch = InnerLaunch {
         pool_user: message.pool_user.clone(),
         desktop_user: desktop,
@@ -171,9 +146,21 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
             .unwrap_or_default(),
     };
     let result = serve(&inner, &job, pipes, &launch);
-    // `job` drops when this returns: the inner runner and the agent's tree end with it.
+    // `serve` returns only on a failure (`relay` exits the process): the job's processes end,
+    // then sweep (c), and `job` drops.
+    let code = result.as_ref().err().map_or(RunExit::Spawn, |f| f.0);
+    end_job(&job, code.code());
+    sweep_end(&job, &message.pool_user);
     drop(job);
     result
+}
+
+/// Sweep (c): every process of the pool user is killed at session end; a failure is a line on
+/// stderr, and the run ends as it would have.
+fn sweep_end(job: &Handle, pool_user: &Sid) {
+    if let Err(what) = steps::sweep_at(job, pool_user, &[], Point::End) {
+        say(&format!("clauseo-sandbox-run: {what}"));
+    }
 }
 
 /// Connects and checks each pipe, sends the launch, relays the agent's stdio until the inner
@@ -207,7 +194,7 @@ fn serve(
         }
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    relay(inner, job, &ctl, stdin, stdout, stderr)
+    relay(inner, job, &launch.pool_user, &ctl, [stdin, stdout, stderr])
 }
 
 /// The failure the inner runner reported on `ctl`, if it did.
@@ -248,14 +235,15 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
 /// closes when this process's stdin ends, so the agent reads the end of its input. Once the
 /// inner runner exited, the output has [`DRAIN`] to finish; then the job is ended, which closes
-/// what a lingering descendant still holds, and the output gets [`DRAIN`] again.
+/// what a lingering descendant still holds, and the output gets [`DRAIN`] again. While the
+/// inner runner runs, the pool user's processes outside the job are swept every [`TICK`];
+/// once it exited, all of them (sweep (c)).
 fn relay(
     inner: &Process,
     job: &Handle,
+    pool_user: &Sid,
     ctl: &ServerPipe,
-    stdin: ServerPipe,
-    stdout: ServerPipe,
-    stderr: ServerPipe,
+    [stdin, stdout, stderr]: [ServerPipe; 3],
 ) -> Result<u32, Failure> {
     let spawned = |what: &io::Error| Failure::new(RunExit::Pipe, os("relay thread", what));
     // It may stay blocked on the host's pipe; the process ends without it.
@@ -282,10 +270,14 @@ fn relay(
             .map_err(|e| spawned(&e))?;
     }
     drop(done);
-    let code = inner
-        .wait(None)
-        .ok()
-        .flatten()
+    let mut calls = OsProcesses { job };
+    let mut log = |line: &str| say(line);
+    let ended = |interval| match inner.wait(Some(interval)) {
+        Ok(None) => None,
+        Ok(Some(code)) => Some(Some(code)),
+        Err(_) => Some(None),
+    };
+    let code = watch(&mut calls, pool_user, &[inner.pid], TICK, ended, &mut log)
         .map_or(RunExit::Spawn.code(), super::agent_code);
     let mut left = 2;
     for ended_job in [false, true] {
@@ -296,6 +288,7 @@ fn relay(
             left -= 1;
         }
     }
+    sweep_end(job, pool_user);
     tell_status(ctl, code);
     exit_now(code)
 }
