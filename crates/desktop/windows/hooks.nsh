@@ -45,13 +45,22 @@
 ; removeSkippedSilent, removeExeMissing, setupExeRemoved); the uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
-; creates $COMMONAPPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
+; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
 ; docs/firm-it.md section 6) owned by Administrators, so a user who made the folder first cannot
-; make a firm's policy be ignored. A folder that is already there is left as it is.
+; make a firm's policy be ignored. $APPDATA is the all-users folder only because the hook sets the
+; context to all around its work (NSIS has no COMMONAPPDATA; the old name was taken as text).
+; A folder that is already there is left as it is.
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
 ; Then both installers check that clauseo-sandbox-setup.exe is still in $INSTDIR: Windows security
 ; can remove it as it is written. Gone, they say so (setupExeRemoved): a box, or under /S a line
 ; in the details list and exit code CLAUSEO_EXIT_SETUP_EXE_REMOVED. The install stays.
+
+; NSIS's warning 6000 is "unknown variable/constant detected, ignoring" (Source/build.h,
+; DW_VAR_IGNORED_UNKNOWN): an unknown name stays as literal text and the hook does the wrong thing
+; quietly. This makes that warning an error for the whole compile (the template includes this file
+; before its own code). The source test the_installer_scripts_use_only_known_nsis_variables checks
+; the names as well.
+!pragma warning error 6000 ; an unknown variable name is an error, not a silent literal (the COMMONAPPDATA bug)
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).
@@ -312,7 +321,8 @@
     ${EndIf}
     ; Anything at the path, a link or a file included, is left as it is: GetFileAttributesW reads
     ; the path itself and never follows a link (${FileExists} would). INVALID_FILE_ATTRIBUTES is -1.
-    System::Call 'kernel32::GetFileAttributesW(w "$COMMONAPPDATA\Clauseo") i .R7'
+    ; $APPDATA here is C:\ProgramData only because the context is all (set above).
+    System::Call 'kernel32::GetFileAttributesW(w "$APPDATA\Clauseo") i .R7'
     ${If} $R7 <> -1
       DetailPrint "$(policyFolderExists)"
     ${Else}
@@ -330,7 +340,7 @@
         !endif
         ; nLength, lpSecurityDescriptor, bInheritHandle (FALSE).
         System::Call '*(&l4, p R6, i 0) p .R7'
-        System::Call 'kernel32::CreateDirectoryW(w "$COMMONAPPDATA\Clauseo", p R7) i .R8 ?e'
+        System::Call 'kernel32::CreateDirectoryW(w "$APPDATA\Clauseo", p R7) i .R8 ?e'
         ; GetLastError: ERROR_ALREADY_EXISTS (183) means something appeared there since the test.
         Pop $R5
         ${If} $R8 = 0

@@ -30,10 +30,10 @@ LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all 
 LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It's in the ai.clauseo.desktop folder in your local AppData folder. Ask whoever looks after this computer to remove it."
 ; policyFolderExists and policyFolderFailed: the per-machine installer's lines in its details list
 ; (DetailPrint, windows/hooks.nsh NSIS_HOOK_POSTINSTALL) about the firm-policy folder;
-; $COMMONAPPDATA is C:\ProgramData there. Exists: something was already at that path, left as it
+; $APPDATA is C:\ProgramData there. Exists: something was already at that path, left as it
 ; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
-LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $COMMONAPPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
-LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $COMMONAPPDATA\Clauseo for a firm policy. Your IT team can create it."
+LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $APPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
+LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy. Your IT team can create it."
 ; removeStillRunning: S15's removal of Clauseo's protection (clauseo-sandbox-setup.exe --remove)
 ; was still running when the uninstaller stopped waiting for it, after 2 minutes; it carries on
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
