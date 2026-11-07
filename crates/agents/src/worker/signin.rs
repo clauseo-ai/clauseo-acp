@@ -5,12 +5,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
+use super::stop::{JobEnd, Stopped};
 use super::{Ticket, Worker};
-use crate::cancel::Cancel;
+use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
 use crate::signin::env::Vendor;
 use crate::signin::job::{self, SigninJob, Task};
@@ -56,15 +58,21 @@ struct Inner {
 #[derive(Debug)]
 struct Slot {
     ticket: Ticket,
+    /// Set when the job's thread ends.
+    ended: Arc<JobEnd>,
     task: Task,
     paste: Option<async_channel::Sender<PasteCode>>,
     kick: Option<async_channel::Sender<()>>,
 }
 
+/// How long the lawyer's Cancel lets a sign-in's runs end gracefully before they are killed.
+pub(crate) const CANCEL_GRACE: Duration = Duration::from_secs(2);
+
 /// A reserved job, for the worker to start.
 #[derive(Debug)]
 pub(crate) struct SigninStart {
     ticket: Ticket,
+    ended: Arc<JobEnd>,
     task: Task,
     vendor: Vendor,
     /// The install when the call was made; a task that queues reads it again before it starts.
@@ -214,12 +222,14 @@ impl SigninHub {
         self.reserve(agent, vendor, Task::StopUsing(why), installed)
     }
 
-    /// Cancels `agent`'s sign-in run; its job reports `Failed { code: Cancelled }`.
+    /// Cancels `agent`'s sign-in run gracefully ([`Stop::Lawyer`] with [`CANCEL_GRACE`]): each
+    /// run ends as its kind allows and is killed past the grace; its job reports what a status
+    /// check then says (`Failed { code: Cancelled }` while signed out).
     pub(super) fn cancel(&self, agent: &AgentId) -> Result<(), SigninError> {
         let inner = self.lock();
         match inner.jobs.get(agent) {
             Some(slot) if slot.task.signs_in() => {
-                slot.ticket.cancel.cancel();
+                slot.ticket.cancel.stop(Stop::Lawyer(CANCEL_GRACE));
                 Ok(())
             }
             _ => Err(SigninError::NotRunning(agent.clone())),
@@ -317,10 +327,12 @@ impl SigninHub {
         } else {
             (None, None)
         };
+        let ended = Arc::new(JobEnd::default());
         inner.jobs.insert(
             agent.clone(),
             Slot {
                 ticket: ticket.clone(),
+                ended: Arc::clone(&ended),
                 task,
                 paste: sender,
                 kick,
@@ -328,6 +340,7 @@ impl SigninHub {
         );
         Ok(Some(SigninStart {
             ticket,
+            ended,
             task,
             vendor,
             installed,
@@ -431,12 +444,25 @@ impl SigninHub {
         }
     }
 
-    /// Stops every job: the handle is gone.
+    /// Stops every job at once: the handle is gone.
     pub(super) fn stop_all(&self) {
         let jobs = std::mem::take(&mut self.lock().jobs);
         for slot in jobs.into_values() {
             slot.ticket.cancel.cancel();
         }
+    }
+
+    /// Stops every job gracefully for the quit ([`Stop::Quit`]): each run ends as its kind
+    /// allows, and nothing a job sends from now on reaches anyone. Gives each job's stop, for
+    /// the quit to wait on and to kill at its bound ([`Stopped::wait_or_kill`]).
+    pub(super) fn stop_all_gracefully(&self) -> Vec<Stopped> {
+        let jobs = std::mem::take(&mut self.lock().jobs);
+        jobs.into_values()
+            .map(|slot| {
+                slot.ticket.cancel.stop(Stop::Quit);
+                Stopped::new(slot.ticket.cancel, slot.ended)
+            })
+            .collect()
     }
 }
 
@@ -453,6 +479,7 @@ fn is_current(inner: &Inner, ticket: &Ticket) -> bool {
 pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, start: SigninStart) {
     let SigninStart {
         ticket,
+        ended,
         task,
         vendor,
         installed,
@@ -462,9 +489,11 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     } = start;
     let hub = &worker.shared.signin;
     if !hub.is_job(&ticket) {
+        ended.mark();
         return;
     }
     let fail = |ticket: &Ticket| {
+        ended.mark();
         let state = SigninState::Failed {
             code: SigninCode::Failed,
             at: worker.config.clock.now(),
@@ -502,8 +531,12 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     };
     let spawned = worker
         .shared
-        .spawn_job(format!("clauseo-signin-{}", ticket.agent), move || {
-            job::run(job, kick);
+        .spawn_job(format!("clauseo-signin-{}", ticket.agent), {
+            let ended = Arc::clone(&ended);
+            move || {
+                job::run(job, kick);
+                ended.mark();
+            }
         });
     if spawned.is_err() {
         fail(&ticket);

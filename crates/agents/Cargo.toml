@@ -65,6 +65,8 @@ nix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  # signin/stopping/owner: the listeners on Codex's callback port and their owners.
+  "Win32_NetworkManagement_IpHelper",
   "Win32_Storage_FileSystem",
   # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
   "Win32_System_Registry",

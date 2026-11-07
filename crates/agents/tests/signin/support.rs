@@ -357,6 +357,27 @@ impl Fixture {
         self.config.ready_for_tests.remove(agent).unwrap()
     }
 
+    /// Codex's browser login listens on a free port of the test's own, as Codex listens on
+    /// 1455, and ends on `GET /cancel` there (the fake's `FAKE_CODEX_PORT`). Returns the port.
+    pub(crate) fn listen_for_cancel(&mut self) -> u16 {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        self.config.signin.callback_port = Some(port);
+        self.set_env("FAKE_CODEX_PORT", &port.to_string());
+        port
+    }
+
+    /// Sets `name` to `value` in every run's base environment.
+    pub(crate) fn set_env(&mut self, name: &str, value: &str) {
+        self.config
+            .signin
+            .base_env
+            .insert(OsString::from(name), OsString::from(value));
+    }
+
     /// Whether the resolver answers (online) or fails every lookup (offline).
     pub(crate) fn set_online(&self, online: bool) {
         self.online.store(online, Ordering::SeqCst);
