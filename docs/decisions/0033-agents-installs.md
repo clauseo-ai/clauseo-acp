@@ -268,16 +268,19 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    target: the registry (or the firm's mirror) for installs, the agent's first sign-in host for its
    sign-in, its primary API host (`api.anthropic.com` or a Claude plan's endpoint,
    `api.openai.com`) for its launches. The targets are asked all at once, within one budget of 5 s
-   for the whole resolution (a lookup past it counts as direct in that route until it answers, then
-   the route is made again with its answer, no new lookup), on desktop's network thread, which
-   starts with the setup thread, beside the keys' load and never on the window's start path. A PAC
-   `DIRECT` is no proxy, and an empty value is unset. The CA files are `network.ca_certs` alone.
-   `Agents` starts with the settings' and the environment's route and then takes the OS's, every
-   `SettingsChanged` resolves again, and so does the network thread once the route is 60 s old
-   (each install try first asks for a fresh route, waiting at most the 5 s budget, and within the
-   60 s takes it as it is, with no OS lookup): `Agents::set_network` hands the result to the next
-   sign-in job (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a proxy gets `NO_PROXY`
-   with the loopback names, where its OAuth callback listens, and every sign-in run gets
+   for the whole resolution (a lookup past it, or one that failed or found no free slot, has no
+   answer: in a first route or after a settings change it counts as direct until it answers, then
+   the route is made again with its answer, no new lookup, unless another route was made since; on
+   a refresh of the same settings it keeps the last route's answer, so only the OS answering
+   `DIRECT` turns a proxy off), on desktop's network thread, which starts with the setup thread,
+   beside the keys' load and never on the window's start path. A PAC `DIRECT` is no proxy, and an
+   empty value is unset. The CA files are `network.ca_certs` alone. `Agents` starts with the
+   settings' and the environment's route and then takes the OS's, every `SettingsChanged` resolves
+   again, and so does the network thread once the route is 60 s old (each install try first asks
+   for a fresh route, waiting at most the 5 s budget, and within the 60 s takes it as it is, with
+   no OS lookup): `Agents::set_network` hands the result to the next sign-in job
+   (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a proxy gets `NO_PROXY` with the
+   loopback names, where its OAuth callback listens, and every sign-in run gets
    `NODE_USE_SYSTEM_CA=1` and Codex's CA as `CODEX_CA_CERTIFICATE`) and to every install try, a
    running job's next one too (each try reads the current network as it makes its client, so one
    waiting offline goes through a proxy set meanwhile), and the launch hook adds `HTTPS_PROXY`,

@@ -11,7 +11,9 @@ use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::AgentId;
 use url::Url;
 
-use super::super::{NetworkFacts, NetworkRoute, NetworkSlot, OsLookup, ProxyEnv, ask_all};
+use super::super::{
+    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, ProxyEnv, ask_all,
+};
 use super::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, OS_LOOKUP_BUDGET, follow};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
@@ -256,7 +258,7 @@ fn slow_os(each: Duration, slow: Duration) -> Arc<OsLookup> {
             .host_str()
             .is_some_and(|host| host.starts_with("slow"));
         futures::executor::block_on(AsyncIoTimer.after(if slow_host { slow } else { each }));
-        Some(OS_PROXY.to_owned())
+        OsAnswer::Proxy(OS_PROXY.to_owned())
     })
 }
 
@@ -285,7 +287,7 @@ fn five_slow_lookups_take_about_one_lookups_time() {
     assert!(
         answers
             .values()
-            .all(|answer| answer.as_deref() == Some(OS_PROXY))
+            .all(|answer| answer.proxy().as_deref() == Some(OS_PROXY))
     );
     assert!(
         took < Duration::from_millis(1_200),
@@ -293,10 +295,10 @@ fn five_slow_lookups_take_about_one_lookups_time() {
     );
 }
 
-/// A lookup past the budget counts as direct in the route; the answers in time are kept, and
-/// the route is made by the budget, not by the slow lookup.
+/// A lookup past the budget has no answer in the route; the answers in time are kept, and the
+/// route is made by the budget, not by the slow lookup.
 #[test]
-fn a_lookup_past_the_budget_counts_as_direct_and_the_rest_are_kept() {
+fn a_lookup_past_the_budget_has_no_answer_and_the_rest_are_kept() {
     let os = slow_os(Duration::ZERO, Duration::from_secs(3));
     let asked = SystemClock.monotonic();
     let budget = Duration::from_millis(300);
@@ -305,10 +307,11 @@ fn a_lookup_past_the_budget_counts_as_direct_and_the_rest_are_kept() {
     assert!(took >= budget && took < Duration::from_secs(2), "{took:?}");
     let fast = Url::parse("https://fast.example/").unwrap();
     assert_eq!(
-        answers.get(&fast).cloned().flatten().as_deref(),
+        answers.get(&fast).and_then(OsAnswer::proxy).as_deref(),
         Some(OS_PROXY)
     );
-    assert!(!answers.contains_key(&Url::parse("https://slow.example/").unwrap()));
+    let slow = Url::parse("https://slow.example/").unwrap();
+    assert_eq!(answers.get(&slow), Some(&OsAnswer::Unknown));
     // The whole resolution fits the 5 s budget, a margin left to hand the route on.
     assert!(OS_LOOKUP_BUDGET < FIRST_ROUTE_WAIT);
     assert_eq!(FIRST_ROUTE_WAIT, Duration::from_secs(5));
@@ -456,7 +459,7 @@ fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
     let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
     assert!(
         !hook_env(&hook, &claude()).contains_key("HTTPS_PROXY"),
-        "late: direct for now"
+        "a first route: a lookup with no answer yet goes direct"
     );
     let asked = lookups.load(std::sync::atomic::Ordering::SeqCst);
     let started = SystemClock.monotonic();
@@ -478,3 +481,5 @@ fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
     );
     assert_eq!(hook_env(&hook, &codex())["HTTPS_PROXY"], OS_PROXY);
 }
+
+mod keep;
