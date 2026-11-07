@@ -17,7 +17,8 @@
 //! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
 //! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
 //! this user those rights, and opened again; when that fails too, the first error stands. Its
-//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`.
+//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`. Whether
+//! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
 //!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
@@ -213,6 +214,24 @@ impl Processes for OsProcesses<'_> {
             Err(io::Error::from(io::ErrorKind::TimedOut))
         }
     }
+
+    fn exited(&mut self, process: &Handle) -> bool {
+        exited(process.0, Duration::ZERO)
+    }
+
+    fn pause(&mut self, pause: Duration) {
+        sleep(pause);
+    }
+}
+
+/// The pause between two looks at a process whose kill was refused.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sweep's bounded wait for a refused process to exit by itself, 100 ms at a time \
+              for up to 2 s; the tests inject the pause (`refused::wait_out`)"
+)]
+fn sleep(pause: Duration) {
+    std::thread::sleep(pause);
 }
 
 /// The pids of this process's own job (`JobObjectBasicProcessIdList`, no job handle), the

@@ -25,9 +25,11 @@
 //!   ([`Processes::own_start`]) or started by one it killed. It makes two passes
 //!   ([`end_sweep`]).
 //!
-//! At every point but the first, a process that can't be opened, checked or ended is logged and
-//! the sweep goes on with the rest; it is tried again in the sweep's next round and at the next
-//! tick, and the sweep ends in [`SweepError::Left`].
+//! A process whose kill is refused is looked at again for up to 2 s after the round's kills, and
+//! one that exited by itself meanwhile is no failure (`refused.rs`). At every point but the
+//! first, a process that can't be opened, checked or ended is logged and the sweep goes on with
+//! the rest; it is tried again in the sweep's next round and at the next tick, and the sweep ends
+//! in [`SweepError::Left`].
 //!
 //! **The job's processes** ([`job_kept`]). The inner holds no handle to its job: a
 //! kill-on-close job ends its processes only when its last handle closes, and one held by the
@@ -86,6 +88,7 @@ use crate::windows::sids::Sid;
 
 #[cfg(windows)]
 pub(super) mod os;
+mod refused;
 
 /// How often the inner sweeps while the agent runs.
 pub(crate) const TICK: Duration = Duration::from_secs(30);
@@ -198,6 +201,10 @@ pub(crate) trait Processes {
     fn own_start(&mut self) -> io::Result<u64>;
     /// Ends it, and waits until it has ended.
     fn kill(&mut self, process: &Self::Process) -> io::Result<()>;
+    /// Whether it has exited, without waiting: a process whose kill was refused.
+    fn exited(&mut self, process: &Self::Process) -> bool;
+    /// Waits `pause` before the next look at a refused process.
+    fn pause(&mut self, pause: Duration);
 }
 
 /// Why a sweep failed. Its text names a pid, an image name and an OS code, nothing else.
@@ -294,7 +301,7 @@ pub(crate) fn end_sweeper_exit(kills: &Result<(), SweepError>, removed: bool) ->
 /// Kills every process of `user` but those in `keep` (this process's own pid) and, past the
 /// first act, the inner's job's ([`job_kept`]), and, for the end sweeper, those created since it
 /// was but for what a process it killed started; each kill and, past the first act, each failure
-/// is a line given to `log`. The pids it killed.
+/// is a line given to `log`. The pids it ended: killed, or exited by themselves once refused.
 pub(crate) fn sweep<P: Processes>(
     calls: &mut P,
     user: &Sid,
@@ -386,6 +393,7 @@ fn sweep_with<P: Processes>(
         };
         let rule = Rule { point, own, job };
         let mut round = 0usize;
+        let mut refused = Vec::new();
         for (found, process) in opened {
             if !again.iter().any(|s| s.pid == found.pid && is(s, user)) {
                 continue;
@@ -399,7 +407,12 @@ fn sweep_with<P: Processes>(
                 }
             };
             if let Err(error) = calls.kill(&process) {
-                failures.add(failed(found, &error, Step::Kill), log)?;
+                refused.push(refused::Refused {
+                    found,
+                    process,
+                    started,
+                    error,
+                });
                 continue;
             }
             log(&format!(
@@ -408,6 +421,17 @@ fn sweep_with<P: Processes>(
             ));
             killed.entries.push((found.pid, started, process));
             round += 1;
+        }
+        let (ended, left) = refused::wait_out(calls, refused);
+        for gone in ended {
+            log(&gone.exited_line(point));
+            killed
+                .entries
+                .push((gone.found.pid, gone.started, gone.process));
+            round += 1;
+        }
+        for still in left {
+            failures.add(failed(still.found, &still.error, Step::Kill), log)?;
         }
         if round == 0 {
             return match failures.count {
