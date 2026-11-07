@@ -80,7 +80,7 @@ pub(crate) struct WindowsStopper {
 }
 
 impl WindowsStopper {
-    fn new() -> WindowsStopper {
+    pub(super) fn new() -> WindowsStopper {
         WindowsStopper {
             _debug: DebugPrivilege::enable(),
             handles: Vec::new(),

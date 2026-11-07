@@ -69,7 +69,7 @@ fn pause() {
 }
 
 /// `%SystemRoot%\System32`.
-fn system32() -> String {
+pub(crate) fn system32() -> String {
     let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
     format!(r"{system}\System32")
 }
@@ -77,7 +77,7 @@ fn system32() -> String {
 /// Runs `script` in `cmd` as `user`, with its profile loaded, and waits for it: its exit code
 /// (`None` if it didn't end in time) and what it printed, read from a file in `folder`, which
 /// `user` must be able to write. `script` runs inside a `(...)` group: no bare parentheses.
-fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Option<u32>, String) {
+pub(crate) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Option<u32>, String) {
     let output = folder.join("output.txt");
     let cmd = format!(r"{}\cmd.exe", system32());
     // `/s`: cmd takes what is between the outer quotes as it is.
