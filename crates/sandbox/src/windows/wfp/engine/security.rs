@@ -217,59 +217,19 @@ pub(in crate::windows::wfp) fn owner_of(
     let key = key.as_ref().map(ptr::from_ref);
     let info = OWNER_SECURITY_INFORMATION.0;
     let mut owner = PSID::default();
-    let mut sd = windows::Win32::Security::PSECURITY_DESCRIPTOR::default();
-    let no_sid = ptr::null_mut::<PSID>();
-    let no_acl = ptr::null_mut::<*mut ACL>();
-    let handle = engine.handle;
-    // SAFETY: `key` is as in [`grant`]; the group, DACL and SACL out-pointers are null, which
-    // the calls allow when not asked for; `owner` and `sd` are live out-pointers. `sd` is
-    // WFP's and freed below; `owner` points into it.
-    let code = unsafe {
-        match kind {
-            Kind::Filter => FwpmFilterGetSecurityInfoByKey0(
-                handle,
-                key,
-                info,
-                &raw mut owner,
-                no_sid,
-                no_acl,
-                no_acl,
-                &raw mut sd,
-            ),
-            Kind::Sublayer => FwpmSubLayerGetSecurityInfoByKey0(
-                handle,
-                key,
-                info,
-                &raw mut owner,
-                no_sid,
-                no_acl,
-                no_acl,
-                &raw mut sd,
-            ),
-            Kind::Provider => FwpmProviderGetSecurityInfoByKey0(
-                handle,
-                key,
-                info,
-                &raw mut owner,
-                no_sid,
-                no_acl,
-                no_acl,
-                &raw mut sd,
-            ),
-        }
-    };
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    let code = get_security(
+        engine,
+        kind,
+        key,
+        info,
+        &raw mut owner,
+        ptr::null_mut(),
+        &mut sd,
+    );
     check("Fwpm*GetSecurityInfoByKey0", code, &[])?;
-    let mut text = PWSTR::null();
-    // SAFETY: `owner` points into `sd`, still live; `text` is LocalAlloc'd and freed below.
-    let converted = unsafe { ConvertSidToStringSidW(owner, &raw mut text) };
-    // SAFETY: as above; the conversion gave a NUL-terminated string.
-    let found = converted
-        .ok()
-        .and_then(|()| unsafe { text.to_string() }.ok());
-    if !text.is_null() {
-        // SAFETY: from the conversion (LocalAlloc), freed once, here.
-        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
-    }
+    // `owner` points into `sd`, still live.
+    let found = sid_text(owner);
     let mut wfp_sd = sd.0;
     // SAFETY: `sd` came from the get call above and is freed once, here.
     unsafe { FwpmFreeMemory0(&raw mut wfp_sd) };
@@ -277,6 +237,112 @@ pub(in crate::windows::wfp) fn owner_of(
         call: "ConvertSidToStringSidW",
         code: 0,
     })
+}
+
+/// Reads `info` of the object `key` of `kind` into the out-pointers (`owner` and `dacl` may be
+/// null when not asked for); `sd` gets WFP's descriptor, which the caller frees with
+/// `FwpmFreeMemory0`. The call's result code.
+fn get_security(
+    engine: &Engine,
+    kind: Kind,
+    key: Option<*const GUID>,
+    info: u32,
+    owner: *mut PSID,
+    dacl: *mut *mut ACL,
+    sd: &mut PSECURITY_DESCRIPTOR,
+) -> u32 {
+    let no_sid = ptr::null_mut::<PSID>();
+    let no_sacl = ptr::null_mut::<*mut ACL>();
+    let handle = engine.handle;
+    // SAFETY: `key` points at a live GUID or is none (the filter container); the out-pointers
+    // are live or null, and null only for parts `info` doesn't ask for, which the calls allow;
+    // `sd` is a live out-pointer.
+    unsafe {
+        match kind {
+            Kind::Filter => {
+                FwpmFilterGetSecurityInfoByKey0(handle, key, info, owner, no_sid, dacl, no_sacl, sd)
+            }
+            Kind::Sublayer => FwpmSubLayerGetSecurityInfoByKey0(
+                handle, key, info, owner, no_sid, dacl, no_sacl, sd,
+            ),
+            Kind::Provider => FwpmProviderGetSecurityInfoByKey0(
+                handle, key, info, owner, no_sid, dacl, no_sacl, sd,
+            ),
+        }
+    }
+}
+
+/// One entry of an object's DACL: its type (`ACCESS_ALLOWED_ACE_TYPE` is 0), its rights, and
+/// its SID as text (`None` for an entry type whose SID isn't where an allow's is).
+#[cfg(test)]
+pub(in crate::windows::wfp) type Entry = (u8, u32, Option<String>);
+
+/// `object`'s DACL in `ns`: `None` when it has none or a NULL one (anyone may do anything).
+#[cfg(test)]
+pub(in crate::windows::wfp) fn dacl_of(
+    engine: &Engine,
+    ns: &Namespace,
+    object: Object,
+) -> Result<Option<Vec<Entry>>, WfpError> {
+    use windows::Win32::Security::{ACCESS_ALLOWED_ACE, GetAce};
+    let (kind, key) = kind_and_key(ns, object);
+    let key = key.as_ref().map(ptr::from_ref);
+    let mut acl: *mut ACL = ptr::null_mut();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    let info = DACL_SECURITY_INFORMATION.0;
+    let code = get_security(
+        engine,
+        kind,
+        key,
+        info,
+        ptr::null_mut(),
+        &raw mut acl,
+        &mut sd,
+    );
+    check("Fwpm*GetSecurityInfoByKey0", code, &[])?;
+    let mut entries = None;
+    if !acl.is_null() {
+        let mut found = Vec::new();
+        // SAFETY: `acl` points into `sd`, live until freed below.
+        let count = unsafe { (*acl).AceCount };
+        for index in 0..u32::from(count) {
+            let mut ace: *mut core::ffi::c_void = ptr::null_mut();
+            // SAFETY: `index` is below the ACL's count; `ace` is a live out-pointer.
+            if unsafe { GetAce(acl, index, &raw mut ace) }.is_err() {
+                continue;
+            }
+            let ace = ace.cast::<ACCESS_ALLOWED_ACE>();
+            // SAFETY: every ACE starts with a header and a mask; types 0 (allow), 1 (deny), 9
+            // and 10 (their callback forms) have the SID right after, as in ACCESS_ALLOWED_ACE.
+            let (kind, mask) = unsafe { ((*ace).Header.AceType, (*ace).Mask) };
+            let sid = matches!(kind, 0 | 1 | 9 | 10).then(|| {
+                // SAFETY: as above; the SID lies inside the ACE.
+                sid_text(PSID(unsafe { (&raw mut (*ace).SidStart).cast() }))
+            });
+            found.push((kind, mask, sid.flatten()));
+        }
+        entries = Some(found);
+    }
+    let mut wfp_sd = sd.0;
+    // SAFETY: `sd` came from the get call above and is freed once, here.
+    unsafe { FwpmFreeMemory0(&raw mut wfp_sd) };
+    Ok(entries)
+}
+
+/// `sid` as text.
+fn sid_text(sid: PSID) -> Option<String> {
+    let mut text = PWSTR::null();
+    // SAFETY: `sid` is a valid SID; `text` is LocalAlloc'd and freed below.
+    let converted = unsafe { ConvertSidToStringSidW(sid, &raw mut text) };
+    // SAFETY: the conversion gave a NUL-terminated string.
+    let found = converted
+        .ok()
+        .and_then(|()| unsafe { text.to_string() }.ok());
+    if !text.is_null() {
+        // SAFETY: from the conversion (LocalAlloc), freed once, here.
+        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+    }
+    found
 }
 
 /// `acl` with `sid`'s allow of `mask` merged in (or every allow of `sid` taken out), as a new

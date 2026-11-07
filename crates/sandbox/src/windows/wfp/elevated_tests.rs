@@ -5,8 +5,8 @@
 //! the owner).
 
 use super::check::{NetworkGap, check_setup};
-use super::engine::Engine;
-use super::spec::{Namespace, NetworkSetup};
+use super::engine::{Engine, Entry, dacl_of};
+use super::spec::{Namespace, NetworkSetup, Object};
 use super::{check_launch_in, install, remove};
 use crate::Error;
 use crate::windows::record::current_user_sid;
@@ -39,6 +39,37 @@ impl Drop for Cleanup {
     }
 }
 
+/// Everyone, Users, Authenticated Users, INTERACTIVE: who must get no write right on our
+/// objects.
+const ANYONE: [&str; 4] = ["S-1-1-0", "S-1-5-32-545", "S-1-5-11", "S-1-5-4"];
+
+/// The write rights: `FWPM_ACTRL_ADD`, `ADD_LINK`, `WRITE`, then `DELETE`, `WRITE_DAC`,
+/// `WRITE_OWNER`, `GENERIC_ALL`, `GENERIC_WRITE`.
+const WRITES: u32 = 0x1 | 0x2 | 0x400 | 0x1_0000 | 0x4_0000 | 0x8_0000 | 0x1000_0000 | 0x4000_0000;
+
+/// Checks `object`'s DACL as set-up created it with `O:BA` and no DACL of its own: one is there
+/// (not NULL), and no allow gives [`ANYONE`] a write right.
+fn assert_dacl_holds(engine: &Engine, ns: &Namespace, object: Object) {
+    let entries: Vec<Entry> = dacl_of(engine, ns, object)
+        .unwrap()
+        .unwrap_or_else(|| panic!("{object:?} has no DACL or a NULL one"));
+    eprintln!("{object:?}: {entries:?}");
+    assert!(!entries.is_empty(), "{object:?}'s DACL is empty");
+    for (kind, mask, sid) in &entries {
+        let deny = matches!(kind, 1 | 6 | 10 | 12);
+        if deny || mask & WRITES == 0 {
+            continue;
+        }
+        let sid = sid
+            .as_deref()
+            .unwrap_or_else(|| panic!("{object:?}: an allow of type {kind}"));
+        assert!(
+            !ANYONE.contains(&sid),
+            "{object:?} lets {sid} write ({mask:#x})"
+        );
+    }
+}
+
 /// What a launch's check says for `user` now.
 fn checked(user: &Sid) -> Result<(), NetworkGap> {
     let mut engine = Engine::open(false, "Clauseo sandbox test check").unwrap();
@@ -63,6 +94,15 @@ fn elevated_install_extend_check_and_remove() {
     // shows WFP takes NOT_EQUAL over a descriptor and a port range.
     assert_eq!(report.filters, 8);
     eprintln!("firewall: {:?}", report.firewall);
+    let engine = Engine::open(false, "Clauseo sandbox test DACLs").unwrap();
+    for object in [
+        Object::Provider,
+        Object::Sublayer,
+        Object::Filter(ns.filter_key(0)),
+    ] {
+        assert_dacl_holds(&engine, &ns, object);
+    }
+    drop(engine);
     assert_eq!(checked(&a), Ok(()));
     assert_eq!(checked(&b), Ok(()));
     assert_eq!(checked(&c), Err(NetworkGap::PoolUserNotCovered));
