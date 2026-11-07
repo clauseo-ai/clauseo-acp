@@ -1,9 +1,10 @@
 //! The rows on the runner job's UI limits: `clipboard` and `atoms`, and the check the
 //! `whoami`, `node-pipes` and `codex` rows make of a probe's `ui-limits` and `ui-effect` lines
-//! ([`ui_limits`]), which runs the harness's positive control (`checks_ctl.rs`), and the atom
-//! information.
+//! ([`ui_limits`]), which runs the harness's positive control (`checks_ctl.rs`) and the per-effect
+//! gate (`gate.rs`), and the atom information.
 
-use super::checks_ctl::controls;
+use super::checks_ctl::{Live, controls};
+use super::gate::Kind;
 use super::launch::{Spec, deadline, launch, summary};
 use super::manifest::Manifest;
 use super::rows::Ctx;
@@ -21,92 +22,50 @@ pub(crate) fn random() -> Result<String, String> {
     }))
 }
 
-/// The calls of a clipboard write whose failure is the job's `WRITECLIPBOARD` limit (the owner
-/// window and the memory block come before or beside them and prove nothing).
-const CLIPBOARD_CALLS: [&str; 3] = ["OpenClipboard", "EmptyClipboard", "SetClipboardData"];
-/// `ERROR_ACCESS_DENIED`, and the same as an `HRESULT`.
-const ACCESS_DENIED: [u32; 2] = [5, 0x8007_0005];
-
-/// What [`judge`] read from a `probe job-ui`'s lines.
-#[derive(Debug, PartialEq, Eq)]
-enum UiRead {
-    /// The innermost job's limits are exactly [`UI_LIMITS`].
-    Exact,
-    /// They read `0x0` (libuv's nested job), and the effect showed the runner's limits bind:
-    /// the clipboard call that failed with 5.
-    Nested(String),
-}
-
 /// Checks the UI limits bind the probe that printed `lines` (`probe job-ui`'s, or
-/// `probe token`'s): [`judge`]'s rules, and when it passed on the effect (a `0x0` read), the
-/// harness's positive control (`checks_ctl.rs`); a control that can't run makes the row INFO.
-pub(crate) fn ui_limits(ctx: &Ctx<'_>, lines: &[String]) -> Result<String, String> {
-    match judge(lines)? {
-        UiRead::Exact => Ok(format!("the job's UI limits read exactly {UI_LIMITS:#x}")),
-        UiRead::Nested(call) => {
-            let controls = controls(ctx);
-            Ok(format!(
-                "the innermost job reads 0x0 (libuv's, nested): CreateDesktopW on its own \
-                 station gave 5 and its clipboard write failed in {call} with 5, so the \
-                 runner's UI limits bind it; {controls}"
-            ))
-        }
+/// `probe token`'s): a direct read of exactly [`UI_LIMITS`] passes alone (not in `strict`
+/// mode); a read of exactly `0x0` (libuv's nested job), or any of the two in `strict` mode, runs
+/// the positive control (`checks_ctl.rs`) and `gate.rs` decides on the effects. A gate of
+/// INFO calls [`Ctx::info`]; FAIL, or any other read, is the `Err`.
+pub(crate) fn ui_limits(
+    ctx: &Ctx<'_>,
+    lines: &[String],
+    live: Live<'_>,
+    strict: bool,
+) -> Result<String, String> {
+    let limits = read_limits(lines)?;
+    if limits == UI_LIMITS && !strict {
+        return Ok(format!("the job's UI limits read exactly {UI_LIMITS:#x}"));
     }
-}
-
-/// The pass rule: `ui-limits` reads exactly [`UI_LIMITS`]; or it reads exactly `0x0` (the
-/// nested-job case) and the effect holds: `ui-effect desktop-create 5`, and
-/// `ui-effect clipboard-write failed <call> <code>` with `call` in [`CLIPBOARD_CALLS`] and
-/// `code` 5 (or `0x80070005`). Any other read fails, naming it.
-fn judge(lines: &[String]) -> Result<UiRead, String> {
-    let line = lines
-        .iter()
-        .find_map(|l| l.strip_prefix("ui-limits "))
-        .ok_or_else(|| format!("no ui-limits line in {lines:?}"))?;
-    let limits = u32::from_str_radix(line.trim().trim_start_matches("0x"), 16)
-        .map_err(|_not_hex| format!("the job's UI limits weren't read: ui-limits {line}"))?;
-    if limits == UI_LIMITS {
-        return Ok(UiRead::Exact);
-    }
-    if limits != 0 {
+    if limits != UI_LIMITS && limits != 0 {
         return Err(format!(
             "the job's UI limits read {limits:#x}, not exactly {UI_LIMITS:#x} (nor 0x0, \
              libuv's nested job)"
         ));
     }
-    let effect = |key: &str| {
-        lines
-            .iter()
-            .find_map(|l| l.strip_prefix(key))
-            .map(str::trim)
-    };
-    let desktop = effect("ui-effect desktop-create ");
-    if desktop != Some("5") {
-        return Err(format!(
-            "the job's UI limits read 0x0, and CreateDesktopW on its own station gave \
-             {desktop:?}, not 5: the DESKTOP limit doesn't bind it"
-        ));
-    }
-    let clipboard = effect("ui-effect clipboard-write ");
-    let failed = clipboard
-        .and_then(|c| c.strip_prefix("failed "))
-        .and_then(|c| {
-            let (call, code) = c.split_once(' ')?;
-            let code = match code.strip_prefix("0x") {
-                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-                None => code.parse().ok()?,
-            };
-            Some((call, code))
-        });
-    match failed {
-        Some((call, code)) if CLIPBOARD_CALLS.contains(&call) && ACCESS_DENIED.contains(&code) => {
-            Ok(UiRead::Nested(call.to_owned()))
+    let judged = controls(ctx, lines, live, strict);
+    let text = format!(
+        "the innermost job reads {limits:#x}; the effects, per effect: {}",
+        judged.text
+    );
+    match judged.kind {
+        Kind::Pass => Ok(text),
+        Kind::Fail => Err(text),
+        Kind::Info => {
+            ctx.info(&format!("no effect is discriminating: {text}"));
+            Ok(text)
         }
-        _ => Err(format!(
-            "the job's UI limits read 0x0, and its clipboard write gave {clipboard:?}, not a \
-             clipboard call failing with 5: the WRITECLIPBOARD limit doesn't bind it"
-        )),
     }
+}
+
+/// The `ui-limits <hex>` line's value; why when there is none or it isn't hex.
+fn read_limits(lines: &[String]) -> Result<u32, String> {
+    let line = lines
+        .iter()
+        .find_map(|l| l.strip_prefix("ui-limits "))
+        .ok_or_else(|| format!("no ui-limits line in {lines:?}"))?;
+    u32::from_str_radix(line.trim().trim_start_matches("0x"), 16)
+        .map_err(|_not_hex| format!("the job's UI limits weren't read: ui-limits {line}"))
 }
 
 /// Adds a global atom as the lawyer (the harness), runs `body` with its name, then deletes it;
@@ -228,29 +187,14 @@ pub(crate) fn atoms(ctx: &Ctx<'_>) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UI_LIMITS, UiRead, judge};
-
-    fn lines(text: &[&str]) -> Vec<String> {
-        text.iter().map(|l| (*l).to_owned()).collect()
-    }
+    use super::{UI_LIMITS, read_limits};
 
     #[test]
-    fn judge_takes_exact_limits_or_zero_with_the_effect() {
-        let exact = format!("ui-limits {UI_LIMITS:#x}");
-        assert_eq!(judge(&lines(&[&exact])), Ok(UiRead::Exact));
-        assert!(judge(&lines(&["ui-limits 0x7f"])).is_err());
-        assert!(judge(&lines(&["ui-limits 0x1ff"])).is_err());
-        let nested = ["ui-limits 0x0", "ui-effect desktop-create 5"];
-        let with = |clip: &str| judge(&lines(&[nested[0], nested[1], clip]));
-        assert_eq!(
-            with("ui-effect clipboard-write failed EmptyClipboard 5"),
-            Ok(UiRead::Nested("EmptyClipboard".to_owned()))
-        );
-        assert!(with("ui-effect clipboard-write failed OpenClipboard 0x80070005").is_ok());
-        assert!(with("ui-effect clipboard-write failed CreateWindowExW 5").is_err());
-        assert!(with("ui-effect clipboard-write failed SetClipboardData 1418").is_err());
-        assert!(with("ui-effect clipboard-write ok").is_err());
-        let open = lines(&["ui-limits 0x0", "ui-effect desktop-create 0"]);
-        assert!(judge(&open).is_err());
+    fn the_limits_line_reads_as_hex() {
+        let exact = vec![format!("ui-limits {UI_LIMITS:#x}")];
+        assert_eq!(read_limits(&exact), Ok(UI_LIMITS));
+        assert_eq!(read_limits(&["ui-limits 0x0".to_owned()]), Ok(0));
+        assert!(read_limits(&["ui-limits error 5".to_owned()]).is_err());
+        assert!(read_limits(&[]).is_err());
     }
 }
