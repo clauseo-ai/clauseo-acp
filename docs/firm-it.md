@@ -48,6 +48,16 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   unless removing the sandbox's set-up succeeded, and the files the sandbox set aside from a
   matter (`sandbox\set-aside`) are always kept. A message names the kept folder, or the folder to
   delete by hand when something could not be deleted and nothing was kept.
+- Where Clauseo's Windows protection was set up (task S15), uninstalling first removes it, elevated
+  (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
+  their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
+  access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
+  and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. The
+  per-machine uninstall removes it whoever uninstalls, the silent `/S` as SYSTEM included. The
+  uninstaller waits for it at most 2 minutes, then carries on; the removal finishes on its own, and
+  `clauseo-sandbox-setup.exe` may stay in the install folder until it has. If the removal doesn't
+  finish (a folder it can't reach, say), the `sandbox` folder and the key stay: reinstall
+  Clauseo, then uninstall it again, and the new removal finishes the job.
 
 ### Intune (Win32 app)
 
@@ -64,7 +74,16 @@ is a 32-bit process, where `%ProgramFiles%` means `C:\Program Files (x86)`. `/S`
 switch. `uninstall.exe /S` hands over to a copy of itself in `%TEMP%` and returns before the files
 are gone. On our test machine the stub returned after 0.46 s and the folder was gone 0.26 s later.
 Windows PowerShell's `Start-Process -Wait` waits for that copy too. Either way it leaves each
-user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place.
+user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place. As SYSTEM it removes the protection's
+sandbox users, group and key as well (above), allowing up to 2 minutes more, and the access rules
+Clauseo put on each matter folder it recorded.
+
+It doesn't go through the files inside a lawyer's matters, so the copies Windows made of those
+rules below each matter folder stay: entries naming the deleted sandbox users, and the low
+integrity label the matter had while Clauseo protected it. They give nothing to any account that
+still exists. To clear them, an administrator can run `icacls "D:\Matters\Example" /reset /T /C`.
+That resets the folder and everything below it to the permissions it inherits, so don't use it on
+a matter where your firm set permissions on anything inside.
 
 Measured on Windows Server 2025 (build 26100), 2026-11-03, with the 0.0.0 dry-run installer, from an
 elevated PowerShell: install exit 0 in about 2 s, with no window and no UAC prompt; uninstall exit
