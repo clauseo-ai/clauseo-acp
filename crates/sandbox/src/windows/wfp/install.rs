@@ -2,15 +2,16 @@
 //! transaction: the provider and the sublayer; every filter already in our sublayer deleted
 //! (ours, and any foreign one); the block filters and one static permit per pool user added.
 //! So a re-run or an extend replaces the filters with no moment where a pool user is
-//! unfiltered. Then the owner's read-only grants; then the firewall rules, which never fail the
+//! unfiltered. Then the owner's read-only grants, and each object's owner read back: it must be
+//! Administrators or SYSTEM ([`owner_allowed`]), or the set-up fails; then the firewall rules, which never fail the
 //! set-up ([`FirewallOutcome`]). Any WFP failure, the Base Filtering Engine down included,
 //! fails it.
 
-use super::check::{Kind, WfpError, classify};
-use super::engine::{Engine, filters_in, grant};
+use super::check::{ERROR_INVALID_OWNER, Kind, OWNER_CHECK, WfpError, classify, owner_allowed};
+use super::engine::{Engine, filters_in, grant, owner_of};
 use super::firewall;
 use super::spec::{
-    FirewallOutcome, Namespace, NetworkReport, NetworkSetup, revocations, rule_names,
+    FirewallOutcome, Namespace, NetworkReport, NetworkSetup, Object, revocations, rule_names,
 };
 use crate::windows::sids::Sid;
 
@@ -48,6 +49,21 @@ pub fn install(ns: &Namespace, setup: &NetworkSetup) -> Result<NetworkReport, Wf
     transaction.commit()?;
     for each in setup.grants(ns) {
         grant(&engine, ns, each.object, setup.owner(), each.mask, false)?;
+    }
+    let mut objects = vec![Object::Provider, Object::Sublayer];
+    objects.extend(filters.iter().map(|spec| Object::Filter(spec.key)));
+    for object in objects {
+        let owner = owner_of(&engine, ns, object)?;
+        if !owner_allowed(&owner) {
+            tracing::warn!(
+                ?object,
+                "one of set-up's WFP objects isn't owned by Administrators"
+            );
+            return Err(WfpError {
+                call: OWNER_CHECK,
+                code: ERROR_INVALID_OWNER,
+            });
+        }
     }
     let firewall = firewall::ensure(&setup.rules(ns));
     if let FirewallOutcome::Ineffective(why) = &firewall {

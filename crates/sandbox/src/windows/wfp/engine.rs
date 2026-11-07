@@ -39,7 +39,7 @@ mod conditions;
 mod read;
 mod security;
 
-pub(super) use security::grant;
+pub(super) use security::{grant, owner_of};
 
 /// Every filter in `ns`'s sublayer the caller may enumerate.
 pub(super) fn filters_in(

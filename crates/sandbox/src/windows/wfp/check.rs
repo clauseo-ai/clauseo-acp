@@ -7,8 +7,8 @@
 //! `engine/read.rs` reads WFP itself. Set-up uses [`classify`] to find foreign filters.
 
 use super::spec::{
-    Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, allowed_users,
-    block_filters, denied_users, is_account, is_permit_key, permit_filter,
+    Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, SUBLAYER_WEIGHT,
+    allowed_users, block_filters, denied_users, is_account, is_permit_key, permit_filter,
 };
 use crate::windows::sids::Sid;
 
@@ -87,11 +87,32 @@ pub struct WfpError {
 /// codes and as HRESULTs.
 const BFE_DOWN: [u32; 6] = [1753, 1722, 1062, 0x8007_06D9, 0x8007_06BA, 0x8007_0426];
 
+/// The [`WfpError::call`] when one of set-up's WFP objects isn't owned by Administrators or
+/// SYSTEM (with [`ERROR_INVALID_OWNER`]): its owner may rewrite its permissions.
+pub(in crate::windows::wfp) const OWNER_CHECK: &str =
+    "the owner check of the sandbox's network objects";
+
+/// `ERROR_INVALID_OWNER`, the code of a failed [`OWNER_CHECK`].
+pub(in crate::windows::wfp) const ERROR_INVALID_OWNER: u32 = 1307;
+
+/// Whether `owner`, the owner of one of set-up's WFP objects, may own it: Administrators or
+/// SYSTEM, never the lawyer, whose implicit owner rights would let them rewrite its DACL.
+pub(in crate::windows::wfp) fn owner_allowed(owner: &str) -> bool {
+    matches!(owner, "S-1-5-32-544" | "S-1-5-18")
+}
+
 impl WfpError {
     /// The words for set-up's cause: the Base Filtering Engine named when it isn't running,
-    /// else the call and its code. Either fails the set-up: WFP is the boundary.
+    /// objects of ours owned by someone other than Administrators or SYSTEM named, else the
+    /// call and its code. Each fails the set-up: WFP is the boundary.
     pub fn cause(&self) -> String {
-        if BFE_DOWN.contains(&self.code) {
+        if self.call == OWNER_CHECK && self.code == ERROR_INVALID_OWNER {
+            "Clauseo's network filters were created owned by the signed-in user, not \
+             Administrators, so that user could change them: IT should set the policy \
+             \"System objects: Default owner for objects created by members of the \
+             Administrators group\" back to Administrators group, then run Clauseo's set-up again"
+                .to_owned()
+        } else if BFE_DOWN.contains(&self.code) {
             format!(
                 "the Base Filtering Engine service (BFE) isn't running, and Clauseo's network \
                  protection needs it: IT can set it to start automatically ({self})"
@@ -141,6 +162,11 @@ pub struct FoundFilter {
     pub weight: Option<u8>,
     /// Its flags.
     pub flags: Flags,
+    /// Its flag bits other than those in [`Flags`] (`FWPM_FILTER_FLAG_DISABLED`, say): set-up
+    /// sets none, so any refuses it.
+    pub other_flags: u32,
+    /// Its provider's key, if it has one.
+    pub provider: Option<u128>,
     /// Its conditions.
     pub conditions: Vec<FoundCondition>,
 }
@@ -149,8 +175,8 @@ pub struct FoundFilter {
 pub trait SetupReader {
     /// Whether the provider `key` is there.
     fn provider(&mut self, key: u128) -> Result<bool, (&'static str, u32)>;
-    /// Whether the sublayer `key` is there.
-    fn sublayer(&mut self, key: u128) -> Result<bool, (&'static str, u32)>;
+    /// The sublayer `key`'s weight; `None` when it isn't there.
+    fn sublayer(&mut self, key: u128) -> Result<Option<u16>, (&'static str, u32)>;
     /// Every filter in the sublayer `key` the reader may see.
     fn filters_in(&mut self, key: u128) -> Result<Vec<FoundFilter>, (&'static str, u32)>;
 }
@@ -216,6 +242,9 @@ fn shaped_like<'f>(found: &'f FoundFilter, spec: &FilterSpec, matching: Match) -
 /// What `found`, a filter in our sublayer in `ns`, is: one of set-up's blocks or static permits
 /// exactly as set-up writes them, or foreign.
 pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
+    if found.other_flags != 0 || found.provider != Some(ns.provider) {
+        return Kind::Foreign;
+    }
     let placeholder = Sid::parse("S-1-5-21-0-0-0-1000");
     let Ok(placeholder) = placeholder else {
         return Kind::Foreign;
@@ -249,21 +278,30 @@ pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
 }
 
 /// Checks set-up's objects in `ns` for a launch of `user`: the provider and the sublayer are
-/// there; every filter in the sublayer is one of set-up's ([`classify`]); all the blocks are
-/// there and each catches `user`; and `user` has a static permit.
+/// there, the sublayer at set-up's weight; every filter in the sublayer is one of set-up's
+/// ([`classify`]); all the blocks are there and each catches `user`; `user` has a static permit;
+/// and every permit names a user the blocks catch (the pool set-up recorded).
 pub fn check_setup(
     ns: &Namespace,
     user: &Sid,
     reader: &mut impl SetupReader,
 ) -> Result<(), NetworkGap> {
     let unreadable = |(call, code)| NetworkGap::Unreadable { call, code };
-    if !reader.provider(ns.provider).map_err(unreadable)?
-        || !reader.sublayer(ns.sublayer).map_err(unreadable)?
-    {
+    if !reader.provider(ns.provider).map_err(unreadable)? {
         return Err(NetworkGap::NotSetUp);
     }
+    match reader.sublayer(ns.sublayer).map_err(unreadable)? {
+        None => return Err(NetworkGap::NotSetUp),
+        Some(weight) if weight != SUBLAYER_WEIGHT => {
+            return Err(NetworkGap::FilterMissing(format!(
+                "{} sublayer",
+                ns.display
+            )));
+        }
+        Some(_) => {}
+    }
     let mut blocks: Vec<Option<Vec<Sid>>> = vec![None; BLOCK_COUNT];
-    let mut permitted = false;
+    let mut permits: Vec<(Sid, String)> = Vec::new();
     for found in reader.filters_in(ns.sublayer).map_err(unreadable)? {
         match classify(ns, &found) {
             Kind::Block(n, denied) => {
@@ -271,7 +309,7 @@ pub fn check_setup(
                     *slot = Some(denied);
                 }
             }
-            Kind::Permit(sid) => permitted |= sid == *user,
+            Kind::Permit(sid) => permits.push((sid, found.name)),
             Kind::Foreign => return Err(NetworkGap::ForeignFilter(found.name)),
         }
     }
@@ -285,8 +323,11 @@ pub fn check_setup(
         if !denied.contains(user) {
             return Err(NetworkGap::PoolUserNotCovered);
         }
+        if let Some((_, name)) = permits.iter().find(|(sid, _)| !denied.contains(sid)) {
+            return Err(NetworkGap::ForeignFilter(name.clone()));
+        }
     }
-    if permitted {
+    if permits.iter().any(|(sid, _)| sid == user) {
         Ok(())
     } else {
         Err(NetworkGap::PoolUserNotCovered)
