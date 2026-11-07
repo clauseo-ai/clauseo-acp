@@ -47,8 +47,9 @@ pub(crate) const GRACE: Duration = Duration::from_millis(1000);
 /// How long the outer waits for its ended job to empty before it starts the sweeper.
 pub(crate) const EMPTY_WAIT: Duration = Duration::from_millis(400);
 /// How much of [`HOST_BUDGET`] must be left, after the stdin end, for the sweeper's logon, shut
-/// and resume to begin ([`sweeper_fits`]). No harness log yet times those three; the outer's own
-/// logon of the inner, up to the agent's first line, took 123 to 409 ms in the harness's runs.
+/// and resume to begin ([`sweeper_fits`]). The outer's own logon of the inner, up to the agent's
+/// first line, took 123 to 409 ms in the harness's runs; the outer now logs the sweeper's own
+/// (`outer/end.rs`), which the harness's `cancel` row records.
 pub(crate) const SWEEPER_BUDGET: Duration = Duration::from_millis(500);
 /// How often it looks meanwhile.
 pub(crate) const EMPTY_POLL: Duration = Duration::from_millis(25);

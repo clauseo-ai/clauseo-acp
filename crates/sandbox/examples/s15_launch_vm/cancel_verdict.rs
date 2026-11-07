@@ -18,6 +18,20 @@ use super::pool_verdict::Verdict;
 
 /// What the runner logs on stderr when it starts no end sweeper.
 pub(crate) const NO_SWEEPER: &str = "clauseo-sandbox-run: warning: no end sweeper";
+/// What the outer logs once the end sweeper is resumed, before `<n> ms`: its own logon, shut and
+/// resume's time.
+const LOGON_TIME: &str = "clauseo-sandbox-run: end sweeper: logon to resume ";
+
+/// The sweeper's logon-to-resume time in the outer's `stderr`, as information alone.
+fn logon_time(stderr: &[String]) -> String {
+    stderr
+        .iter()
+        .find_map(|line| line.split_once(LOGON_TIME).map(|(_, rest)| rest.trim()))
+        .map_or_else(
+            || "the outer logged no sweeper logon time".to_owned(),
+            |time| format!("the end sweeper's logon to resume took {time}"),
+        )
+}
 
 /// One `runner` line.
 struct Runner<'l> {
@@ -102,6 +116,7 @@ pub(crate) fn cancel(started: Result<u32, &str>, lines: &[String], stderr: &[Str
         || "the outer didn't log skipping the end sweeper".to_owned(),
         |line| format!("the outer logged {line:?}"),
     );
+    let said = format!("{said}; {}", logon_time(stderr));
     if !bad.is_empty() {
         let named: Vec<String> = bad.into_iter().collect();
         return Verdict::Fail(format!(
@@ -184,9 +199,21 @@ mod tests {
     #[test]
     fn cancel_passes_naming_a_running_sweeper_or_none() {
         let sweeper = lines(&["look 0 1", "runner 0 800 running pool", "look 400 0"]);
+        let timed = lines(&["clauseo-sandbox-run: end sweeper: logon to resume 212 ms"]);
+        let verdict = cancel(Ok(300), &sweeper, &timed);
+        assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");
+        names(
+            &verdict,
+            &[
+                "running runner processes 800",
+                "2 looks",
+                "logon to resume took 212 ms",
+            ],
+        );
+        // Missing, it is said, and the rule is the same.
         let verdict = cancel(Ok(300), &sweeper, &[]);
         assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");
-        names(&verdict, &["running runner processes 800", "2 looks"]);
+        names(&verdict, &["no sweeper logon time"]);
         let none = lines(&["look 0 0", "suspend-error 400 0xc0000017", "look 800 0"]);
         let verdict = cancel(Ok(300), &none, &lines(&["other", SKIPPED]));
         assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");

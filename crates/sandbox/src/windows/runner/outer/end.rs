@@ -1,7 +1,8 @@
 //! The detached end sweeper's calls (Windows), for `end.rs`'s order: the launch's job ended
 //! (`TerminateJobObject`) and waited for until `ActiveProcesses` is 0, then `--sweep` started as
 //! the pool user with `CreateProcessWithLogonW`, suspended, its process and thread shut as the
-//! inner's are, then resumed. It is never assigned to this launch's job: the Secondary Logon
+//! inner's are, then resumed; the time from the logon's start to the resume is logged
+//! ([`LOGON_LINE`]). It is never assigned to this launch's job: the Secondary Logon
 //! service starts it as its own child, outside the outer's jobs, in a job of the service's own,
 //! so the host ending the outer's job leaves it running. Its stdout and stderr are a pipe whose
 //! lines this runner writes to its own stderr while it lives; on a cancel nobody reads them.
@@ -74,6 +75,11 @@ fn clock() -> Instant {
 
 /// [`SweeperSteps::now`]'s origin: its first reading.
 static ORIGIN: OnceLock<Instant> = OnceLock::new();
+/// When the sweeper's logon began: one sweeper a process.
+static LOGON_BEGAN: OnceLock<Instant> = OnceLock::new();
+/// The stderr line that times the sweeper's logon, shut and resume, before its milliseconds
+/// (the harness's `cancel` row reads it).
+const LOGON_LINE: &str = "clauseo-sandbox-run: end sweeper: logon to resume";
 
 impl SweeperSteps for OsSweeper {
     type Sweeper = Process;
@@ -87,6 +93,7 @@ impl SweeperSteps for OsSweeper {
     }
 
     fn log_on(&self) -> Result<Process, String> {
+        LOGON_BEGAN.get_or_init(clock);
         let password = secret_for(&self.data_dir, &self.pool_user).map_err(|e| e.to_string())?;
         let (read, write) = output_pipe().map_err(|e| os("CreatePipe", &e))?;
         // `log_on` takes the password and wipes it as it returns.
@@ -128,7 +135,12 @@ impl SweeperSteps for OsSweeper {
     }
 
     fn resume(&self, sweeper: &Process) -> Result<(), String> {
-        resume(sweeper).map_err(|e| os("ResumeThread", &e))
+        resume(sweeper).map_err(|e| os("ResumeThread", &e))?;
+        if let Some(began) = LOGON_BEGAN.get() {
+            let ms = clock().saturating_duration_since(*began).as_millis();
+            say(&format!("{LOGON_LINE} {ms} ms"));
+        }
+        Ok(())
     }
 
     fn kill(&self, sweeper: &Process) {

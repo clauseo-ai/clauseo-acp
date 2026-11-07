@@ -1049,7 +1049,9 @@ for `--reclaim`.
     a default DACL that grants the pool user `GA`. With a 1 s grace the logon starts at most
     1.5 s after the stdin end, and 500 ms is more than the harness has measured for a whole
     session start through the agent's first line, the outer's logon of the inner included (123
-    to 409 ms), so in the normal timing the host's kill comes after the resume. The harness's
+    to 409 ms), so in the normal timing the host's kill comes after the resume. The outer logs
+    the sweeper's own time from its logon's start to its resume (`clauseo-sandbox-run: end
+    sweeper: logon to resume <n> ms`), which the `cancel` row records. The harness's
     `cancel` row checks that no suspended `clauseo-sandbox-run` of the pool user is left. A machine
     slow enough to overrun the 500 ms can still leave one. So can a host kill outside the 2 s
     cancel ladder, which the budget doesn't cover: a crash of the host, or the outer's process
