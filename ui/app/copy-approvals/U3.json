@@ -306,6 +306,17 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "note": "Widened from U3-41 (approved 2026-11-02) for a network folder that doesn't answer in time, which now also gives matter.folder_missing (#617)"
   },
+  "U3-err-matter.folder_not_a_matter": {
+    "en": "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
+    "hi": "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "note": "Split from matter.folder_missing: the folder is there but its .clauseo/matter.json is missing, unreadable or another matter's"
+  },
   "U3-err-matter.folder_refused": {
     "en": "A whole drive, your home folder or a system folder can't be a matter.",
     "hi": "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
