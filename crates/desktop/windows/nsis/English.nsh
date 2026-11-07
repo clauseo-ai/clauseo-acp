@@ -54,7 +54,7 @@ LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe wo
 ; folder on its way or the file itself can be changed by more than administrators, or its SHA-256
 ; isn't the one the machine's record holds (or either couldn't be read), so it didn't start it.
 ; A box; under /S a details line and exit code 27. Draft, for the app thread (2026-11-07).
-LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo didn't remove its sandbox, because it couldn't confirm that its set-up program in Program Files is the one it installed and that only administrators can change it. The sandbox's hidden user accounts are still on this computer. Whoever looks after this computer can remove them; the steps are in Clauseo's notes for IT."
+LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
 LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/

@@ -122,11 +122,12 @@ fn the_hook_checks_the_chain_hashes_compares_then_elevates_and_a_mismatch_refuse
     // The exit code and the words are firm IT's and the drafts'.
     line_with(&code, &["!define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27"]);
     let english = read("windows/nsis/English.nsh");
-    let words = "LangString removeAdminCopyRefused ${LANG_ENGLISH} \"Clauseo didn't remove its \
-                 sandbox, because it couldn't confirm that its set-up program in Program Files is \
-                 the one it installed and that only administrators can change it. The sandbox's \
-                 hidden user accounts are still on this computer. Whoever looks after this \
-                 computer can remove them; the steps are in Clauseo's notes for IT.\"";
+    let words = "LangString removeAdminCopyRefused ${LANG_ENGLISH} \"Clauseo couldn't remove the \
+                 Safe workspace, because it couldn't confirm that the program that sets it up, in \
+                 Program Files, is the one Clauseo installed and that only administrators can \
+                 change it. The Safe workspace's hidden Windows accounts are still on this \
+                 computer. Whoever looks after this computer can remove them. Clauseo's notes for \
+                 IT explain how.\"";
     assert!(english.lines().any(|line| line == words), "{words}");
     let approvals: serde_json::Value =
         serde_json::from_str(&read("../../ui/app/doc-approvals.json")).unwrap();
