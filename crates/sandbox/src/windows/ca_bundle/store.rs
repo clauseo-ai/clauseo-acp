@@ -5,7 +5,7 @@
     reason = "FFI to the certificate store calls and the bundle file's create and rename"
 )]
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{self, Write as _};
 use std::iter::once;
@@ -15,16 +15,21 @@ use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::{Mutex, PoisonError};
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, GENERIC_WRITE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    CRYPT_E_NOT_FOUND, ERROR_FILE_NOT_FOUND, GENERIC_WRITE, GetLastError, HLOCAL, LocalFree,
+    SetLastError, WIN32_ERROR,
+};
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::Cryptography::{
-    CERT_CONTEXT, CERT_OPEN_STORE_FLAGS, CERT_STORE_OPEN_EXISTING_FLAG, CERT_STORE_PROV_SYSTEM_W,
-    CERT_STORE_READONLY_FLAG, CERT_SYSTEM_STORE_CURRENT_USER,
+    CERT_CONTEXT, CERT_DISALLOWED_ENHKEY_USAGE_PROP_ID, CERT_DISALLOWED_FILETIME_PROP_ID,
+    CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, CERT_OPEN_STORE_FLAGS, CERT_STORE_OPEN_EXISTING_FLAG,
+    CERT_STORE_PROV_SYSTEM_W, CERT_STORE_READONLY_FLAG, CERT_SYSTEM_STORE_CURRENT_USER,
     CERT_SYSTEM_STORE_CURRENT_USER_GROUP_POLICY_ID, CERT_SYSTEM_STORE_LOCAL_MACHINE,
     CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID, CERT_SYSTEM_STORE_LOCAL_MACHINE_GROUP_POLICY_ID,
-    CERT_SYSTEM_STORE_LOCATION_SHIFT, CertCloseStore, CertEnumCertificatesInStore, HCERTSTORE,
+    CERT_SYSTEM_STORE_LOCATION_SHIFT, CTL_USAGE, CertCloseStore, CertEnumCertificatesInStore,
+    CertGetCertificateContextProperty, CertGetEnhancedKeyUsage, HCERTSTORE,
 };
 use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows::Win32::Storage::FileSystem::{
@@ -33,7 +38,9 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::{BOOL, PCWSTR};
 
-use super::{CA_DIR, CA_FILE, Filtered, file_sddl, filter_roots, path};
+use super::{
+    CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth, path,
+};
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
@@ -101,6 +108,20 @@ impl Store {
     /// The DER of every certificate in it.
     fn certificates(&self) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
+        self.each(|_, der| out.push(der.to_vec()));
+        out
+    }
+
+    /// The DER of every certificate in it, each with whether its store properties limit it as
+    /// a root for server authentication ([`limited`]).
+    fn roots(&self) -> Vec<(Vec<u8>, bool)> {
+        let mut out = Vec::new();
+        self.each(|context, der| out.push((der.to_vec(), limited(context))));
+        out
+    }
+
+    /// Calls `visit` with each certificate's context and its DER, while the context is live.
+    fn each(&self, mut visit: impl FnMut(*const CERT_CONTEXT, &[u8])) {
         let mut previous: *const CERT_CONTEXT = null_mut();
         loop {
             // SAFETY: the store is open; `previous` is null or the context the last call
@@ -108,20 +129,116 @@ impl Store {
             // call that returns null.
             let next = unsafe { CertEnumCertificatesInStore(self.0, Some(previous)) };
             if next.is_null() {
-                return out;
+                return;
             }
             // SAFETY: `next` is a live context from the store until the next call frees it.
             let context = unsafe { &*next };
             let length = usize::try_from(context.cbCertEncoded).unwrap_or(0);
             if !context.pbCertEncoded.is_null() && length > 0 {
                 // SAFETY: the context's encoded bytes are `cbCertEncoded` long and live as long
-                // as the context, which is copied from before the next call.
+                // as the context, which `visit` uses before the next call.
                 let bytes = unsafe { std::slice::from_raw_parts(context.pbCertEncoded, length) };
-                out.push(bytes.to_vec());
+                visit(next, bytes);
             }
             previous = next;
         }
     }
+}
+
+/// Whether the store properties of the live context `context` limit it as a root for server
+/// authentication: its enhanced key usage property (`CertGetEnhancedKeyUsage`, the property
+/// only) is present and empty (every purpose turned off) or lacks server authentication; its
+/// disallowed usages list server authentication; or a disallowed time is set at all. A missing
+/// property limits nothing; one present but unreadable limits (fails closed).
+fn limited(context: *const CERT_CONTEXT) -> bool {
+    usage_limited(context)
+        || match property(context, CERT_DISALLOWED_ENHKEY_USAGE_PROP_ID) {
+            Property::Missing => false,
+            Property::Unreadable => true,
+            Property::Value(encoded) => !excludes_server_auth(&encoded),
+        }
+        || !matches!(
+            property(context, CERT_DISALLOWED_FILETIME_PROP_ID),
+            Property::Missing
+        )
+}
+
+/// Whether the encoded usage list `encoded` reads and leaves out server authentication.
+fn excludes_server_auth(encoded: &[u8]) -> bool {
+    lists_server_auth(encoded) == Some(false)
+}
+
+/// The enhanced key usage property's part of [`limited`].
+fn usage_limited(context: *const CERT_CONTEXT) -> bool {
+    let flags = CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG.0;
+    let mut size = 0u32;
+    // SAFETY: the context is live; no buffer asks only for the size, written to `size`.
+    match unsafe { CertGetEnhancedKeyUsage(context, flags, None, &raw mut size) } {
+        Ok(()) => {}
+        Err(error) if error.code() == CRYPT_E_NOT_FOUND => return false,
+        Err(_) => return true,
+    }
+    let mut buffer = vec![0u64; usize::try_from(size).unwrap_or(0).div_ceil(8).max(1)];
+    let usage = buffer.as_mut_ptr().cast::<CTL_USAGE>();
+    // SAFETY: clears the thread's last error, so a zero count below can be told apart.
+    unsafe { SetLastError(WIN32_ERROR(0)) };
+    // SAFETY: the context is live; `buffer` is writable for `size` bytes and aligned for a
+    // CTL_USAGE, whose strings it holds.
+    if unsafe { CertGetEnhancedKeyUsage(context, flags, Some(usage), &raw mut size) }.is_err() {
+        return true;
+    }
+    // SAFETY: the call wrote a CTL_USAGE at the start of `buffer`.
+    let usage = unsafe { &*usage };
+    if usage.cUsageIdentifier == 0 {
+        // A zero count with CRYPT_E_NOT_FOUND is good for all uses; with no error, for none.
+        // SAFETY: reads the thread's last error, set by the call just made.
+        let last = unsafe { GetLastError() };
+        return u32::try_from(CRYPT_E_NOT_FOUND.0).ok() != Some(last.0);
+    }
+    let count = usize::try_from(usage.cUsageIdentifier).unwrap_or(0);
+    // SAFETY: `rgpszUsageIdentifier` points at `cUsageIdentifier` strings inside `buffer`.
+    let oids = unsafe { std::slice::from_raw_parts(usage.rgpszUsageIdentifier, count) };
+    !oids.iter().any(|oid| {
+        // SAFETY: each is a NUL-terminated ANSI string inside `buffer`.
+        let text = unsafe { oid.as_bytes() };
+        text == SERVER_AUTH.as_bytes()
+    })
+}
+
+/// A certificate context's property, as read.
+enum Property {
+    /// Not set.
+    Missing,
+    /// Set, but it couldn't be read.
+    Unreadable,
+    /// Its bytes.
+    Value(Vec<u8>),
+}
+
+/// The property `id` of the live context `context`.
+fn property(context: *const CERT_CONTEXT, id: u32) -> Property {
+    let mut size = 0u32;
+    // SAFETY: the context is live; no buffer asks only for the size, written to `size`.
+    match unsafe { CertGetCertificateContextProperty(context, id, None, &raw mut size) } {
+        Ok(()) => {}
+        Err(error) if error.code() == CRYPT_E_NOT_FOUND => return Property::Missing,
+        Err(_) => return Property::Unreadable,
+    }
+    let mut bytes = vec![0u8; usize::try_from(size).unwrap_or(0)];
+    // SAFETY: the context is live; `bytes` is writable for `size` bytes.
+    let read = unsafe {
+        CertGetCertificateContextProperty(
+            context,
+            id,
+            Some(bytes.as_mut_ptr().cast()),
+            &raw mut size,
+        )
+    };
+    if read.is_err() {
+        return Property::Unreadable;
+    }
+    bytes.truncate(usize::try_from(size).unwrap_or(0));
+    Property::Value(bytes)
 }
 
 impl Drop for Store {
@@ -132,11 +249,25 @@ impl Drop for Store {
     }
 }
 
-/// [`filter_roots`] over the certificates of the stores `roots` and `disallowed`.
+/// [`filter_roots`] over the certificates of the stores `roots` and `disallowed`, after the
+/// roots whose store properties limit them ([`limited`]) are dropped: a certificate limited in
+/// any one root store is dropped from all of them, and counted once in `dropped_limited`.
 pub(super) fn export_from(roots: &[Store], disallowed: &[Store]) -> Filtered {
-    let roots: Vec<Vec<u8>> = roots.iter().flat_map(Store::certificates).collect();
+    let all: Vec<(Vec<u8>, bool)> = roots.iter().flat_map(Store::roots).collect();
+    let limits: BTreeSet<&[u8]> = all
+        .iter()
+        .filter(|(_, limited)| *limited)
+        .map(|(der, _)| der.as_slice())
+        .collect();
+    let roots: Vec<Vec<u8>> = all
+        .iter()
+        .filter(|(der, _)| !limits.contains(der.as_slice()))
+        .map(|(der, _)| der.clone())
+        .collect();
     let disallowed: Vec<Vec<u8>> = disallowed.iter().flat_map(Store::certificates).collect();
-    filter_roots(&roots, &disallowed)
+    let mut filtered = filter_roots(&roots, &disallowed);
+    filtered.dropped_limited = limits.len();
+    filtered
 }
 
 /// The machine's roots: `Root` and `Disallowed` at each of [`LOCATIONS`], filtered.
@@ -191,6 +322,7 @@ pub fn ensure_with(data_dir: &Path, desktop: &Sid, pool: &[Sid]) -> io::Result<B
         dropped_disallowed = filtered.dropped_disallowed,
         dropped_not_self_issued = filtered.dropped_not_self_issued,
         dropped_unparsable = filtered.dropped_unparsable,
+        dropped_limited = filtered.dropped_limited,
         pool = pool.len(),
         export_ms,
         "the sandbox CA bundle was exported"
