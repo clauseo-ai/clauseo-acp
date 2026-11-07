@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
+    "appDirectoriesOverride": { "config": "$LOCALDATA/ai.clauseo.desktop" },
     "windows": [],
     "security": {
       "freezePrototype": true,
