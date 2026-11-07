@@ -3,8 +3,8 @@
 //! `checks_sec.rs`.
 //!
 //! - `runners`: `pid <self>`, `parent <pid>` (its inner runner, from
-//!   `NtQueryInformationProcess(ProcessBasicInformation)`), then reads `outer <pid>` from stdin
-//!   (the harness knows the outer runner's pid). For each of `inner` and `outer`:
+//!   `NtQueryInformationProcess(ProcessBasicInformation)`), then reads `<role> <pid>` lines from
+//!   stdin up to `end` (the outer runner, the host and proxy stand-ins). For each target:
 //!   `runner-image <role> <pid> <path or code>`, one `runner <role> <right> <code>` per refused
 //!   right ([`REFUSED`] and the token's [`TOKEN_RIGHTS`]; 0 when it opened), and one
 //!   `runner-info <role> <right> <code>` per right that may be granted ([`INFO`]).
@@ -39,26 +39,24 @@ use super::sys::{say, sleep, start};
 use super::win_desk;
 use super::win_sec::{self, OBJ_INHERIT};
 
-/// The process rights the agent must be refused on both runners.
-pub(crate) const REFUSED: [(&str, u32); 4] = [
+/// The process rights the agent must be refused on every target.
+pub(crate) const REFUSED: [(&str, u32); 5] = [
     ("PROCESS_ALL_ACCESS", PROCESS_ALL_ACCESS.0),
     ("PROCESS_VM_READ", PROCESS_VM_READ.0),
     ("PROCESS_DUP_HANDLE", PROCESS_DUP_HANDLE.0),
     ("PROCESS_QUERY_INFORMATION", PROCESS_QUERY_INFORMATION.0),
+    (
+        "PROCESS_QUERY_LIMITED_INFORMATION",
+        PROCESS_QUERY_LIMITED_INFORMATION.0,
+    ),
 ];
 /// The token rights the agent must be refused on both runners (`OpenProcessToken`).
 pub(crate) const TOKEN_RIGHTS: [(&str, u32); 2] = [
     ("TOKEN_QUERY", TOKEN_QUERY.0),
     ("TOKEN_DUPLICATE", TOKEN_DUPLICATE.0),
 ];
-/// The rights printed as information: the agent may get them on its inner runner.
-const INFO: [(&str, u32); 2] = [
-    (
-        "PROCESS_QUERY_LIMITED_INFORMATION",
-        PROCESS_QUERY_LIMITED_INFORMATION.0,
-    ),
-    ("SYNCHRONIZE", PROCESS_SYNCHRONIZE.0),
-];
+/// The right printed as information.
+const INFO: [(&str, u32); 1] = [("SYNCHRONIZE", PROCESS_SYNCHRONIZE.0)];
 /// How long one handle's name query may take.
 const NAME_LIMIT: Duration = Duration::from_secs(2);
 /// The prefix of a runner pipe's object name.
@@ -77,41 +75,43 @@ pub(crate) fn run(what: &str) -> Option<ExitCode> {
 
 fn runners() -> ExitCode {
     say(&format!("pid {}", std::process::id()));
-    let parent = match win_sec::parent_pid() {
+    let mut targets: Vec<(String, u32)> = Vec::new();
+    match win_sec::parent_pid() {
         Ok(parent) => {
             say(&format!("parent {parent}"));
-            Some(parent)
+            targets.push(("inner".to_owned(), parent));
         }
-        Err(why) => {
-            say(&format!("parent error {why}"));
-            None
-        }
-    };
-    let mut line = String::new();
-    drop(std::io::stdin().lock().read_line(&mut line));
-    let outer = line
-        .trim()
-        .strip_prefix("outer ")
-        .and_then(|pid| pid.trim().parse::<u32>().ok());
-    if outer.is_none() {
-        say(&format!(
-            "outer error no `outer <pid>` line on stdin: {line:?}"
-        ));
+        Err(why) => say(&format!("parent error {why}")),
     }
-    for (role, pid) in [("inner", parent), ("outer", outer)] {
-        let Some(pid) = pid else { continue };
-        match win_sec::image_of(pid) {
+    // `<role> <pid>` lines (the outer runner, and for `lawyer-processes` the host and proxy
+    // stand-ins), then `end`.
+    for line in std::io::stdin().lock().lines() {
+        let Ok(line) = line else { break };
+        let line = line.trim();
+        if line == "end" || line.is_empty() {
+            break;
+        }
+        match line
+            .split_once(' ')
+            .map(|(role, pid)| (role, pid.trim().parse::<u32>()))
+        {
+            Some((role, Ok(pid))) => targets.push((role.to_owned(), pid)),
+            _ => say(&format!("target error {line:?}")),
+        }
+    }
+    for (role, pid) in &targets {
+        match win_sec::image_of(*pid) {
             Ok(path) => say(&format!("runner-image {role} {pid} {path}")),
             Err(code) => say(&format!("runner-image {role} {pid} error {code}")),
         }
         for (right, access) in REFUSED {
             say(&format!(
                 "runner {role} {right} {}",
-                win_sec::open_code(pid, access)
+                win_sec::open_code(*pid, access)
             ));
         }
         for (right, access) in TOKEN_RIGHTS {
-            match win_sec::token_code(pid, access) {
+            match win_sec::token_code(*pid, access) {
                 Ok(code) => say(&format!("runner {role} {right} {code}")),
                 // The token can't be reached when the process can't be opened at all.
                 Err(code) => say(&format!(
@@ -123,7 +123,7 @@ fn runners() -> ExitCode {
         for (right, access) in INFO {
             say(&format!(
                 "runner-info {role} {right} {}",
-                win_sec::open_code(pid, access)
+                win_sec::open_code(*pid, access)
             ));
         }
     }
