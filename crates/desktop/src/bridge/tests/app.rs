@@ -291,8 +291,8 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
 }
 
 /// What each label's channel carries (`AppEvents`, 0028, U12, 0037): `main` every app and
-/// limits event, the settings window `settings_changed`, `connectors_changed`, `update_changed`
-/// and the limits, and any
+/// limits event, the settings window `settings_changed`, `connectors_changed`, `update_changed`,
+/// `protection_changed`, `protection_view_changed` and the limits, and any
 /// other label neither.
 /// So a window of another label that follows the app feed gets nothing of it, while the
 /// settings window gets each settings change.
@@ -307,6 +307,9 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     // R24: Settings' Connectors section reads the connector state; the hint is the room's.
     let connectors_changed = r#"{"connectors_changed":{}}"#;
     let case_law_hint = r#"{"case_law_hint":{}}"#;
+    // 0051: Settings' protection section and the room both show the sandbox.
+    let protection_changed = r#"{"protection_changed":{}}"#;
+    let protection_view_changed = r#"{"protection_view_changed":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
@@ -315,6 +318,8 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
         (Feed::App, folder_scanned),
         (Feed::App, connectors_changed),
         (Feed::App, case_law_hint),
+        (Feed::App, protection_changed),
+        (Feed::App, protection_view_changed),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
@@ -324,6 +329,8 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     assert!(carries(SETTINGS, Feed::App, connectors_changed));
     assert!(!carries(SETTINGS, Feed::App, case_law_hint));
     assert!(carries(SETTINGS, Feed::App, update_changed));
+    assert!(carries(SETTINGS, Feed::App, protection_changed));
+    assert!(carries(SETTINGS, Feed::App, protection_view_changed));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
     assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));

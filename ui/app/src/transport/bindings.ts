@@ -121,12 +121,18 @@ export const commands = {
 	reveal: (target: RevealTarget) => typedError<null, HostError>(__TAURI_INVOKE("reveal", { target })),
 	/**
 	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
-	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner). An
+	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner;
+	 *  `"protection"`: UC's first-run button, R17). An
 	 *  unknown section is refused as the arguments decode. Granted to `main` only.
 	 */
 	openSettings: (section: 
 /**  The Connectors section. */
-"connectors" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
+"connectors" | 
+/**
+ *  The Protection section: the sandbox's state, its set-up and removal (decision record
+ *  0051). The page is the app's.
+ */
+"protection" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
 	/**
 	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
 	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
@@ -2368,15 +2374,19 @@ export type HostCommand =
  */
 ({ connector: ConnectorCommand }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
- *  Try the sandbox's set-up or check again (decision record 0051); each matter whose
- *  protection changes gets `HostEvent::ProtectionChanged`. No receipt. Until the host
- *  builds it, `command.invalid`. JSON: `{"retry_protection": {}}`.
+ *  Try the sandbox's set-up or check again (decision record 0051): the set-up, with its
+ *  administrator prompt, when `ProtectionView::retry_asks_admin`, else a check. Answered
+ *  when it ends: `Done`, `sandbox.setup_refused` or `sandbox.setup_failed`; a second one
+ *  while it runs joins it. Each matter whose protection changes gets
+ *  `HostEvent::ProtectionChanged`. No receipt. `command.invalid` with no sandbox, or while a
+ *  removal runs. JSON: `{"retry_protection": {}}`.
  */
 ({ retry_protection: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; remove_sandbox_setup?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Remove the sandbox's set-up from this computer, after one administrator prompt (decision
- *  record 0051); each matter then gets `HostEvent::ProtectionChanged`. No receipt. Until
- *  the host builds it, `command.invalid`. JSON: `{"remove_sandbox_setup": {}}`.
+ *  record 0051); each matter then gets `HostEvent::ProtectionChanged`. Answered as
+ *  `RetryProtection` is. No receipt. `command.invalid` with no set-up, or while a set-up
+ *  runs. JSON: `{"remove_sandbox_setup": {}}`.
  */
 ({ remove_sandbox_setup: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; connector?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; retry_protection?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_skill_pack?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never };
 
@@ -2416,9 +2426,9 @@ export type HostError = {
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -2428,19 +2438,19 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ account_limits_changed: AccountLimits }) & { browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The whole limits view after a change. Never logged and in no stream: it reaches
  *  `subscribe_limits` subscribers only (R16).
  */
-({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The display settings changed: the whole view after the change. App-wide, never part of
  *  a stream: it reaches app subscribers only.
  */
-({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
  *  App-wide, never logged and in no stream: it reaches app subscribers only, as each state
@@ -2450,34 +2460,34 @@ export type HostEvent =
 ({ browser_install: {
 	/**  Where it stands. */
 	state: BrowserInstallState,
-} }) & { account_limits_changed?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
  *  it reaches app subscribers only.
  */
-({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
  *  list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
  *  it has open.
  */
-({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; update_changed?: never } | 
+({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; update_changed?: never } | 
 /**
  *  How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
  *  stream: it reaches app subscribers only.
  */
-({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The updater's state changed: the whole view after the change (decision record 0037).
  *  App-wide, never part of a stream: it reaches app subscribers only.
  */
-({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never } | 
+({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never } | 
 /**
  *  The connectors' state changed: the whole state after the change (R24). App-wide, never
  *  logged and in no stream: it reaches app subscribers only, and every app catch-up carries
  *  the latest one, as for `SettingsChanged`.
  */
-({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A turn's web searches looked like Indian case law and the case-law connector is live but
  *  not added (R24): the app offers it under the answer. Once per matter, never after the
@@ -2491,7 +2501,7 @@ export type HostEvent =
 	thread: ThreadId,
 	/**  The turn whose searches fired it. */
 	turn: TurnId,
-} }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A matter's protection changed (decision record 0051): the sandbox came or went, or why it
  *  is off changed. App-wide, never logged and in no stream: it reaches app subscribers
@@ -2503,7 +2513,18 @@ export type HostEvent =
 	matter: MatterId,
 	/**  Its protection now. */
 	protection: Protection,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_view_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  This computer's protection view changed (decision record 0051): the sandbox's detection,
+ *  the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
+ *  view after the change, as `HostQuery::Protection` answers it. App-wide, never logged,
+ *  in no stream and never folded: it reaches app subscribers only, and, as for
+ *  `ProtectionChanged`, a catch-up carries none (`HostQuery::Protection` gives it).
+ */
+({ protection_view_changed: {
+	/**  The view now. */
+	view: ProtectionView,
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -2619,7 +2640,7 @@ export type HostQuery =
 "list_skill_packs" | 
 /**
  *  This computer's sandbox and the firm's protection settings (decision record 0051).
- *  Answered `QueryResult::Protection`; until the host builds it, `command.invalid`.
+ *  Answered `QueryResult::Protection`, from the host's cache, at once.
  *  JSON: `"protection"`.
  */
 "protection";
@@ -3320,10 +3341,14 @@ export type Motion =
  */
 export type NotProtectedCause = 
 /**
- *  This computer has no sandbox Clauseo can use: Linux, Windows on ARM, or a build without
- *  the sandbox.
+ *  This computer has no sandbox Clauseo can use: `why` says which case (an OS without
+ *  one, Windows on ARM, or a build without the sandbox). A data variant since R17 PR-B1:
+ *  `{"unsupported": {"why": "os"}}`; no released build wrote the plain string.
  */
-"unsupported" | 
+({ unsupported: {
+	/**  Which case. */
+	why: UnsupportedWhy,
+} }) & { pool_full?: never; switched_off?: never } | 
 /**
  *  The sandbox needs a one-time set-up with an administrator's consent, not done yet.
  *  Tier C when `sandbox.required` is false; `sandbox.setup_required` when it is true.
@@ -3351,12 +3376,12 @@ export type NotProtectedCause =
 	owed: number,
 	/**  Users that still own set-aside items. */
 	set_aside: number,
-} }) & { switched_off?: never } | 
+} }) & { switched_off?: never; unsupported?: never } | 
 /**  The lawyer switched protection off for the matter at `at`. */
 ({ switched_off: {
 	/**  When. */
 	at: Timestamp,
-} }) & { pool_full?: never } | 
+} }) & { pool_full?: never; unsupported?: never } | 
 /**  A cause from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -4042,7 +4067,33 @@ export type ProtectionView = {
 	 *  mode. When `false`, it runs only in the ask modes.
 	 */
 	unprotected_auto_allowed: boolean,
+	/**  What the host is doing to the sandbox now, if anything; left out when nothing. */
+	in_progress?: ProtectionWork,
+	/**
+	 *  Whether `RetryProtection` runs the set-up, which asks for an administrator's consent:
+	 *  a set-up exists on this computer and is needed, was refused, failed or is outdated.
+	 *  `false` when a retry only checks again (no set-up here, it is done, or another Windows
+	 *  user owns it). Missing from an older host: `false`.
+	 */
+	retry_asks_admin?: boolean,
 };
+
+/**
+ *  What the host is doing to this computer's sandbox now (`ProtectionView::in_progress`). A
+ *  value from a newer Clauseo decodes to `Unknown`.
+ */
+export type ProtectionWork = 
+/**
+ *  The one-time set-up runs (`RetryProtection`): it may wait at an administrator
+ *  prompt for minutes.
+ */
+"set_up" | 
+/**  The set-up is being removed (`RemoveSandboxSetup`). */
+"remove" | 
+/**  The host checks the sandbox again (`RetryProtection` when no set-up can help). */
+"check" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  A query's answer. */
 export type QueryResult = 
@@ -4486,13 +4537,19 @@ export type SessionCapabilities = {
 
 /**
  *  A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
- *  and banner open Connectors). Closed, as the app asked: a value the build does not know is
- *  refused when the command's arguments decode, never ignored, and a new section is added here
- *  together with the page that shows it (ADR 0002's rule for commands, which a webview sends).
+ *  and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+ *  asked: a value the build does not know is refused when the command's arguments decode, never
+ *  ignored, and a new section is added here together with the page that shows it (ADR 0002's
+ *  rule for commands, which a webview sends).
  */
 export type SettingsSection = 
 /**  The Connectors section. */
-"connectors";
+"connectors" | 
+/**
+ *  The Protection section: the sandbox's state, its set-up and removal (decision record
+ *  0051). The page is the app's.
+ */
+"protection";
 
 /**  What `GetSettings` answers and `SettingsChanged` carries. */
 export type SettingsView = {
@@ -5829,6 +5886,20 @@ export type UndoPreview = {
 	 */
 	edited_since: MatterPath[],
 };
+
+/**
+ *  Why this computer has no sandbox Clauseo can use (`NotProtectedCause::Unsupported`). A
+ *  value from a newer Clauseo decodes to `Unknown`.
+ */
+export type UnsupportedWhy = 
+/**  This OS has none in Clauseo: Linux, or a Windows build before Windows 10 22H2. */
+"os" | 
+/**  Windows on ARM, which stays without a sandbox until there is one to test on. */
+"windows_arm" | 
+/**  This build of Clauseo has no sandbox wired in. */
+"not_built" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**
  *  `update.mode`: how updates install. A window sets only `auto` and `notify`; `none` comes

@@ -7,14 +7,17 @@
 //! - [`ProtectionTier`] and [`Protection`] are closed: the tiers are the threat model's three
 //!   (`docs/threat-model.md`), and a matter either runs in the sandbox or does not.
 //! - [`NotProtectedCause`] is open: more causes will come, and a newer host's cause decodes to
-//!   `Unknown` here instead of failing the whole answer.
+//!   `Unknown` here instead of failing the whole answer. So are [`UnsupportedWhy`] and
+//!   [`ProtectionWork`].
+//! - `HostEvent::ProtectionViewChanged` carries the whole [`ProtectionView`] each time it
+//!   changes: the detection, the work in progress, `retry_asks_admin`, or either setting.
 //! - Nothing here names a Windows account or a SID: [`NotProtectedCause::PoolFull`] carries
 //!   counts only. The host logs the accounts, on the host only.
 
 use serde::{Deserialize, Serialize};
 
 use crate::Timestamp;
-use crate::open_enum::{enum_with_names, open_data_enum};
+use crate::open_enum::{enum_with_names, open_data_enum, open_unit_enum};
 
 enum_with_names! {
     /// How strongly this computer can sandbox an agent (`docs/threat-model.md`, the tiers).
@@ -72,9 +75,13 @@ open_data_enum! {
     /// (`Unknown` included) with `sandbox.required`.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum NotProtectedCause {
-        /// This computer has no sandbox Clauseo can use: Linux, Windows on ARM, or a build without
-        /// the sandbox.
-        Unsupported = "unsupported",
+        /// This computer has no sandbox Clauseo can use: `why` says which case (an OS without
+        /// one, Windows on ARM, or a build without the sandbox). A data variant since R17 PR-B1:
+        /// `{"unsupported": {"why": "os"}}`; no released build wrote the plain string.
+        Unsupported = "unsupported" {
+            /// Which case.
+            why: UnsupportedWhy,
+        },
         /// The sandbox needs a one-time set-up with an administrator's consent, not done yet.
         /// Tier C when `sandbox.required` is false; `sandbox.setup_required` when it is true.
         NeedsSetUp = "needs_set_up",
@@ -107,7 +114,9 @@ open_data_enum! {
         Unknown,
     }
     test mod not_protected_cause with [
-        NotProtectedCause::Unsupported,
+        NotProtectedCause::Unsupported {
+            why: UnsupportedWhy::WindowsArm,
+        },
         NotProtectedCause::NeedsSetUp,
         NotProtectedCause::SetUpRefused,
         NotProtectedCause::SetUpFailed,
@@ -122,6 +131,35 @@ open_data_enum! {
             at: Timestamp::ZERO,
         },
     ];
+}
+
+open_unit_enum! {
+    /// Why this computer has no sandbox Clauseo can use (`NotProtectedCause::Unsupported`). A
+    /// value from a newer Clauseo decodes to `Unknown`.
+    pub enum UnsupportedWhy {
+        /// This OS has none in Clauseo: Linux, or a Windows build before Windows 10 22H2.
+        Os,
+        /// Windows on ARM, which stays without a sandbox until there is one to test on.
+        WindowsArm,
+        /// This build of Clauseo has no sandbox wired in.
+        NotBuilt,
+    }
+    test mod unsupported_why;
+}
+
+open_unit_enum! {
+    /// What the host is doing to this computer's sandbox now (`ProtectionView::in_progress`). A
+    /// value from a newer Clauseo decodes to `Unknown`.
+    pub enum ProtectionWork {
+        /// The one-time set-up runs (`RetryProtection`): it may wait at an administrator
+        /// prompt for minutes.
+        SetUp,
+        /// The set-up is being removed (`RemoveSandboxSetup`).
+        Remove,
+        /// The host checks the sandbox again (`RetryProtection` when no set-up can help).
+        Check,
+    }
+    test mod protection_work;
 }
 
 /// The answer to `HostQuery::Protection`: this computer's sandbox and the firm's two protection
@@ -140,10 +178,20 @@ pub struct ProtectionView {
     /// `sandbox.allow_unprotected_auto`: an agent outside the sandbox may still run in an auto
     /// mode. When `false`, it runs only in the ask modes.
     pub unprotected_auto_allowed: bool,
+    /// What the host is doing to the sandbox now, if anything; left out when nothing.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub in_progress: Option<ProtectionWork>,
+    /// Whether `RetryProtection` runs the set-up, which asks for an administrator's consent:
+    /// a set-up exists on this computer and is needed, was refused, failed or is outdated.
+    /// `false` when a retry only checks again (no set-up here, it is done, or another Windows
+    /// user owns it). Missing from an older host: `false`.
+    #[serde(default)]
+    pub retry_asks_admin: bool,
 }
 
 impl ProtectionView {
-    /// The view of `computer`, with `tier` taken from it: its tier when protected, C when not.
+    /// The view of `computer`, with `tier` taken from it: its tier when protected, C when not;
+    /// nothing in progress and `retry_asks_admin` false, which the host sets after.
     /// `Protected { tier: C }` is a contradiction the host never builds (debug assertion).
     #[must_use]
     pub fn new(computer: Protection, required: bool, unprotected_auto_allowed: bool) -> Self {
@@ -159,6 +207,8 @@ impl ProtectionView {
             computer,
             required,
             unprotected_auto_allowed,
+            in_progress: None,
+            retry_asks_admin: false,
         }
     }
 }

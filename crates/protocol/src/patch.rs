@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AccountLimits, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope, FolderScanned,
     HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId, Protection,
-    Seq, SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView, ViewEntry,
-    ViewEpoch,
+    ProtectionView, Seq, SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView,
+    ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -190,6 +190,15 @@ pub enum HostEvent {
         matter: MatterId,
         /// Its protection now.
         protection: Protection,
+    },
+    /// This computer's protection view changed (decision record 0051): the sandbox's detection,
+    /// the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
+    /// view after the change, as `HostQuery::Protection` answers it. App-wide, never logged,
+    /// in no stream and never folded: it reaches app subscribers only, and, as for
+    /// `ProtectionChanged`, a catch-up carries none (`HostQuery::Protection` gives it).
+    ProtectionViewChanged {
+        /// The view now.
+        view: ProtectionView,
     },
 }
 

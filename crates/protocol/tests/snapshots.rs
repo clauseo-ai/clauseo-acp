@@ -72,6 +72,8 @@ use clauseo_protocol::{
     PromptBlock,
     Protection,
     ProtectionTier,
+    ProtectionView,
+    ProtectionWork,
     RefreshWhy,
     RestoreRequest,
     StopReason,
@@ -449,6 +451,17 @@ mod host_event {
         ProtectionChanged => protection_changed: HostEvent::ProtectionChanged {
             matter: matter_id(1),
             protection: Protection::Protected { tier: ProtectionTier::B },
+        };
+        ProtectionViewChanged => protection_view_changed: HostEvent::ProtectionViewChanged {
+            view: ProtectionView {
+                in_progress: Some(ProtectionWork::SetUp),
+                retry_asks_admin: true,
+                ..ProtectionView::new(
+                    Protection::NotProtected { cause: NotProtectedCause::NeedsSetUp },
+                    true,
+                    false,
+                )
+            },
         };
     } }
 }

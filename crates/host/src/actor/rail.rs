@@ -287,8 +287,9 @@ fn matter_row(
         // As the folder check last answered at the create or an agent launch
         // (`agent/folder_support.rs`): read from memory, never checked here.
         folder_support: actor.folder_supports.get(&row.id).copied(),
-        // Not known yet: the sandbox seams come with decision record 0051's next step.
-        protection: None,
+        // The computer's, from the cache (decision record 0051): per-matter causes come later
+        // (R18's switch, PR-E's pool).
+        protection: Some(actor.protection.computer().clone()),
     }
 }
 

@@ -17,6 +17,7 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::{PendingMatter, Stage};
+use super::protection::work::{Asked as ProtectionAsked, command as protection};
 use super::settings::{
     first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
 };
@@ -308,16 +309,13 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::update::command(actor, ctx, Asked::CancelScheduled);
         }
         HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
-        // Decision record 0051: the sandbox seams that run them come in its next step.
-        HostCommand::RetryProtection {} | HostCommand::RemoveSandboxSetup {} => {
-            not_built(actor, ctx);
-        }
+        // Decision record 0051: held until the work ends, with no receipt.
+        HostCommand::RetryProtection {} => protection(actor, ctx, ProtectionAsked::Retry),
+        HostCommand::RemoveSandboxSetup {} => protection(actor, ctx, ProtectionAsked::Remove),
     }
 }
 
-/// A command the host does not run yet (`RestartAgent`, `RetryProtection`,
-/// `RemoveSandboxSetup`):
-/// `command.invalid`, with no receipt.
+/// A command the host does not run yet (`RestartAgent`): `command.invalid`, with no receipt.
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
     actor.finish_command(ctx.id, Err(refusal));
@@ -426,6 +424,9 @@ fn create_thread(
             ErrorCode::CommandInvalid,
             format!("no agent {agent} in the settings"),
         ));
+    }
+    if let Some(refused) = super::protection::refusal(actor) {
+        return Err(refused);
     }
     let now = actor.now();
     let thread: ThreadId = actor.ids.mint(now.wall)?;

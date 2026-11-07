@@ -464,16 +464,18 @@ const SETTINGS_COMMANDS: [&str; 7] = [
 ];
 
 /// `open_settings` takes an optional, closed `section` (R24: the room's case-law hint and
-/// banner open Connectors): none and `"connectors"` open the window; a value the build does not
+/// banner open Connectors; R17's first run opens Protection): none, `"connectors"` and
+/// `"protection"` open the window; a value the build does not
 /// know, or one of another type, is refused as the arguments decode and opens nothing.
 #[test]
-fn open_settings_takes_the_connectors_section_or_none_and_refuses_others() {
+fn open_settings_takes_a_known_section_or_none_and_refuses_others() {
     let scratch = Scratch::new("settings-section", &[]);
     let host = scratch.start(Vec::new());
     let (app, main) = app(host.bridge());
     for refused in [
         json!({"section": "billing"}),
         json!({"section": "Connectors"}),
+        json!({"section": "Protection"}),
         json!({"section": 1}),
     ] {
         let answer = invoke(&main, "open_settings", refused.clone());
@@ -503,6 +505,13 @@ fn open_settings_takes_the_connectors_section_or_none_and_refuses_others() {
     );
     // No section: brought forward where it was, with no hash set.
     assert_eq!(hashes(&app), ["connectors"]);
+    assert_eq!(app.webview_windows().len(), 2);
+    // R17: UC's first-run button opens Protection.
+    assert_eq!(
+        invoke(&main, "open_settings", json!({"section": "protection"})),
+        Ok(Value::Null)
+    );
+    assert_eq!(hashes(&app), ["connectors", "protection"]);
     assert_eq!(app.webview_windows().len(), 2);
 }
 

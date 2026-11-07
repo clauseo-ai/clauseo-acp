@@ -14,7 +14,7 @@ use crate::ids::IdSource;
 use crate::search::SearchSeams;
 use crate::update::Updater;
 
-use super::{IdleStop, LaunchWiring, ProfileHook};
+use super::{IdleStop, LaunchWiring, ProfileHook, Sandbox};
 
 /// A `HostConfig` taken apart by the host thread.
 pub(crate) struct ConfigParts {
@@ -45,6 +45,8 @@ pub(crate) struct ConfigParts {
     pub(crate) update: UpdateSeams,
     /// The idle stop's limit and live-agents cap.
     pub(crate) idle: IdleStop,
+    /// The sandbox seam (`with_sandbox`), if any.
+    pub(crate) sandbox: Option<Sandbox>,
 }
 
 /// The updater and what its machine starts from (decision record 0037).

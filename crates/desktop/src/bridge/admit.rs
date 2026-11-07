@@ -11,7 +11,10 @@
 //! sends only `DismissCaseLawHint` and `RefreshBalance`: it shows agent output, so it never adds
 //! a connector or a key, spends credits, opens a pay link, signs out or removes; its hint and
 //! banner open Settings at the connector (`open_settings` with `section: "connectors"`), whose
-//! window sends the rest.
+//! window sends the rest. The sandbox's two commands (0051, R17 PR-B1), `RetryProtection` and
+//! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
+//! main window's protection notice. Neither carries a field, and the host holds each answer
+//! until the set-up (with its administrator prompt) ends.
 
 use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
@@ -22,7 +25,8 @@ use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 /// pane `SetSkillPack` (0040), for its
 /// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
 /// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
-/// the connector commands but the hint's (R24), any other window nothing.
+/// the connector commands but the hint's (R24), for its protection section `RetryProtection`
+/// and `RemoveSandboxSetup` (0051), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -38,12 +42,16 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::RefreshLimits { .. }
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
-            | HostCommand::CheckForUpdate {} => Ok(()),
+            | HostCommand::CheckForUpdate {}
+            // Protection (0051): retrying the set-up, or removing it.
+            | HostCommand::RetryProtection {}
+            | HostCommand::RemoveSandboxSetup {} => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
-                 check_for_update and the connector commands",
+                 check_for_update, retry_protection, remove_sandbox_setup and the connector \
+                 commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -102,7 +110,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // taking a scheduled install back, and "Check again"; settings may not install (0037).
         | HostCommand::InstallUpdate { .. }
         | HostCommand::CancelScheduledUpdate {}
-        | HostCommand::CheckForUpdate {} => Ok(()),
+        | HostCommand::CheckForUpdate {}
+        // 0051: the protection notice's "Set up" and the removal; no field to check.
+        | HostCommand::RetryProtection {}
+        | HostCommand::RemoveSandboxSetup {} => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
@@ -130,10 +141,6 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // other switches are (least privilege, 0040); the matter picker only reads them.
         HostCommand::SetSkillPack { .. } => Err(invalid(
             "skill packs are turned on and off from the settings window only",
-        )),
-        // Decision record 0051: the host does not run them yet; its next step rules here.
-        HostCommand::RetryProtection {} | HostCommand::RemoveSandboxSetup {} => Err(invalid(
-            "the protection commands are not admitted yet",
         )),
         // R24: the room's hint and the balance only; the rest is the settings window's.
         HostCommand::Connector(connector) => connector_main(connector),

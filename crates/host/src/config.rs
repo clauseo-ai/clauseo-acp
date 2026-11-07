@@ -8,7 +8,7 @@ use std::sync::Arc;
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
+use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
 use crate::agent::login_link::{LoginCheck, SignInAgain};
@@ -33,49 +33,16 @@ mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
 mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
+mod sandbox;
+pub use sandbox::{Detect, Sandbox};
+mod session;
+#[cfg(feature = "test-support")]
+pub use session::TestProxy;
+pub use session::{EgressProxy, SessionKey};
 mod wiring;
 pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
 pub use crate::actor::turn::PackRequest;
-
-/// One agent session, as the egress proxy knows it: the matter, the thread, and the launch (the
-/// launch prep's id, from the same counter as the agent's).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SessionKey {
-    /// The thread's matter.
-    pub matter: MatterId,
-    /// The thread.
-    pub thread: ThreadId,
-    /// The launch.
-    pub launch: u64,
-}
-
-impl SessionKey {
-    /// The session's id, `<thread>-<launch>`: the name of its `run/` folder and agent-browser's
-    /// session name.
-    pub fn id(&self) -> String {
-        format!("{}-{}", self.thread, self.launch)
-    }
-}
-
-/// The egress proxy, as the host asks it (stage C's R17 implements it). Until it exists,
-/// production passes none and the `browser` entry is left out (`NoProxy`).
-pub trait EgressProxy: Send + Sync {
-    /// The port of `session`'s browser listener, or none.
-    fn port_for(&self, session: SessionKey) -> Option<u16>;
-}
-
-/// A proxy stand-in for tests: the same port for every session.
-#[cfg(feature = "test-support")]
-#[derive(Debug, Clone, Copy)]
-pub struct TestProxy(pub u16);
-
-#[cfg(feature = "test-support")]
-impl EgressProxy for TestProxy {
-    fn port_for(&self, _session: SessionKey) -> Option<u16> {
-        Some(self.0)
-    }
-}
 
 /// How to start a host. The data folder is `Effective::data_dir()`.
 #[non_exhaustive]
@@ -102,6 +69,7 @@ pub struct HostConfig {
     search: SearchSeams,
     update: UpdateSeams,
     idle: IdleStop,
+    sandbox: Option<Sandbox>,
 }
 
 impl HostConfig {
@@ -145,6 +113,7 @@ impl HostConfig {
                 fail_close: false,
             },
             idle: IdleStop::default(),
+            sandbox: None,
         }
     }
 
@@ -553,6 +522,22 @@ impl HostConfig {
         self
     }
 
+    /// The sandbox seam (default: none: the computer is `Unsupported { why: not_built }`, and
+    /// `RetryProtection` and `RemoveSandboxSetup` are `command.invalid`). Pass it only together
+    /// with the launchers (R17 PR-B2/D/E): alone, macOS' detection says tier A with no jail behind
+    /// it, and `sandbox.required` would pass. The first detection runs in `Host::start`, on the
+    /// calling thread; later ones off the host's thread.
+    #[must_use]
+    pub fn with_sandbox(mut self, sandbox: Sandbox) -> Self {
+        self.sandbox = Some(sandbox);
+        self
+    }
+
+    /// The seam set, for the first detection in `Host::start`.
+    pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
+        self.sandbox.as_ref()
+    }
+
     /// The receiving end of the login splits, for `HostHandle::login_splits`.
     pub(crate) fn login_splits(&self) -> LoginSplits {
         self.wiring.sign_in.receiver()
@@ -583,6 +568,7 @@ impl HostConfig {
             search: self.search,
             update: self.update,
             idle: self.idle,
+            sandbox: self.sandbox,
         }
     }
 }

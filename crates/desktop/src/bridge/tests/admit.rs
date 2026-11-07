@@ -2,7 +2,8 @@
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
 //! bridge refuses is refused before any window has opened its stream. The settings window
 //! sends `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits` (Plan and
-//! usage, U12) and reads `GetSettings`, nothing else; `FirstAct` comes from `main` only; another
+//! usage, U12), both protection commands (0051), and reads `GetSettings` and `Protection`;
+//! `FirstAct` comes from `main` only; another
 //! label sends nothing (0028, 0036).
 //! The Chrome for Testing download's two commands are main's alone (0029). The updater's
 //! commands and `GetUpdate` go by the table in `the_update_commands_go_by_window` (0037).
@@ -534,28 +535,56 @@ fn list_skill_packs_from_main_and_settings_is_admitted() {
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }
 
-/// Decision record 0051, PR-A: the host does not answer the protection query or run its two
-/// commands yet, so the bridge refuses all three from every window with `command.invalid`,
-/// before the host sees them.
+/// Decision record 0051, R17 PR-B1: the settings window and `main` may send both protection
+/// commands and read the protection view, and their channels carry `protection_changed` and
+/// `protection_view_changed`; another label sends, reads and receives none of it. With no
+/// sandbox seam (desktop wires none yet) the host answers the view as not built.
 #[test]
-fn the_protection_query_and_commands_are_refused_from_every_window() {
+fn the_protection_query_commands_and_events_go_to_settings_and_main_only() {
     let scratch = Scratch::new("admit-protection", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    for label in [MAIN, SETTINGS, "other"] {
-        for body in [
-            json!({"retry_protection": {}}),
-            json!({"remove_sandbox_setup": {}}),
-        ] {
-            let refused = bridge.admit(label, &command(body.clone())).unwrap_err();
-            assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}: {body}");
+    let bodies = [
+        json!({"retry_protection": {}}),
+        json!({"remove_sandbox_setup": {}}),
+    ];
+    let events = [
+        r#"{"protection_changed":{}}"#,
+        r#"{"protection_view_changed":{}}"#,
+    ];
+    let carries = |label: &str, json| pump::AppEvents::of(label).carries(Feed::App, json);
+    for label in [MAIN, SETTINGS] {
+        for body in &bodies {
+            bridge
+                .admit(label, &command(body.clone()))
+                .unwrap_or_else(|e| {
+                    panic!("{label}: {body}: {e}");
+                });
         }
-        let refused = block_on(bridge.query(label, read(json!("protection")))).unwrap_err();
-        assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}");
+        let answer = block_on(bridge.query(label, read(json!("protection")))).unwrap();
+        let QueryResult::Protection(view) = answer else {
+            panic!("{label}: {answer:?}");
+        };
+        assert_eq!(
+            view.computer,
+            clauseo_protocol::Protection::NotProtected {
+                cause: clauseo_protocol::NotProtectedCause::Unsupported {
+                    why: clauseo_protocol::UnsupportedWhy::NotBuilt,
+                },
+            },
+            "{label}"
+        );
+        for json in events {
+            assert!(carries(label, json), "{label}: {json}");
+        }
     }
-    let refused = block_on(bridge.query(MAIN, HostQuery::Protection)).unwrap_err();
-    assert!(
-        refused.to_string().contains("not admitted yet"),
-        "{refused}"
-    );
+    for body in &bodies {
+        let refused = bridge.admit("other", &command(body.clone())).unwrap_err();
+        assert_eq!(refused.code(), ErrorCode::CommandInvalid, "other: {body}");
+    }
+    let refused = block_on(bridge.query("other", read(json!("protection")))).unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::CommandInvalid);
+    for json in events {
+        assert!(!carries("other", json), "other: {json}");
+    }
 }

@@ -45,22 +45,27 @@ const TITLE: &str = "Settings";
 const MENU_ID: &str = "settings";
 
 /// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
-/// and banner open Connectors). Closed, as the app asked: a value the build does not know is
-/// refused when the command's arguments decode, never ignored, and a new section is added here
-/// together with the page that shows it (ADR 0002's rule for commands, which a webview sends).
+/// and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+/// asked: a value the build does not know is refused when the command's arguments decode, never
+/// ignored, and a new section is added here together with the page that shows it (ADR 0002's
+/// rule for commands, which a webview sends).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SettingsSection {
     /// The Connectors section.
     Connectors,
+    /// The Protection section: the sandbox's state, its set-up and removal (decision record
+    /// 0051). The page is the app's.
+    Protection,
 }
 
 impl SettingsSection {
-    /// The page's fragment for it: `settings.html#connectors`.
+    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`.
     fn fragment(self) -> &'static str {
         match self {
             Self::Connectors => "connectors",
+            Self::Protection => "protection",
         }
     }
 }

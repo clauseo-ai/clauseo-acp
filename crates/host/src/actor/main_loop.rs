@@ -7,7 +7,7 @@ use std::pin::pin;
 use futures::stream::{self, StreamExt};
 
 use super::input::{Input, Request};
-use super::{Actor, Exit, app_lists, shutdown, triage, update};
+use super::{Actor, Exit, app_lists, protection, shutdown, triage, update};
 
 /// One item of the merged input stream.
 enum Next {
@@ -37,6 +37,7 @@ pub(super) async fn main_loop(
                 update::tick(actor);
                 triage::tick(actor);
                 app_lists::flush(actor);
+                protection::tick(actor);
             }
             // Every handle is gone (the internal channel never ends: the actor holds a sender).
             Some(Next::HandlesGone) | None => shutdown::begin_shutdown(actor, None),
@@ -47,6 +48,7 @@ pub(super) async fn main_loop(
                 update::tick(actor);
                 triage::tick(actor);
                 app_lists::flush(actor);
+                protection::tick(actor);
             }
         }
     }

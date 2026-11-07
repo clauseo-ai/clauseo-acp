@@ -46,6 +46,7 @@ mod main_loop;
 mod matter_details;
 mod matters;
 mod papers;
+pub(crate) mod protection;
 mod query;
 mod rail;
 mod relocate;
@@ -129,6 +130,8 @@ pub(crate) struct Actor {
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
     pub(crate) browser_install: browser_install::BrowserInstall,
+    /// This computer's protection, its seam and the set-up work running (`protection.rs`).
+    pub(crate) protection: protection::ProtectionHost,
     /// The connector state and the commands' work in flight (R24).
     pub(crate) connectors: connectors::ConnectorsOnActor,
     /// The tools each thread's header shows, laid over the header unlogged.
@@ -223,6 +226,8 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
     let (ready, started) = mpsc::channel::<Result<(), Error>>();
     let (exit, exited) = futures::channel::oneshot::channel::<HostExit>();
     let post = internal.clone();
+    // The first detection, here on the calling thread: never on the actor (`protection.rs`).
+    let config = (protection::observe(config.sandbox()), config);
     let thread = thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || run(config, request_rx, (post, internal_rx), ready, exit))
@@ -248,7 +253,7 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    config: HostConfig,
+    (first, config): (protection::Observed, HostConfig),
     requests: async_channel::Receiver<Request>,
     (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
@@ -257,7 +262,7 @@ fn run(
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
-        let mut actor = match startup::open(config, spawner, post, ready.clone()).await {
+        let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
             Ok(actor) => actor,
             Err(error) => {
                 let _gone = ready.send(Err(error));
@@ -475,6 +480,7 @@ impl Actor {
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
             Input::Connector(input) => connectors::on_input(self, *input),
+            Input::Protection(done) => protection::work::on_done(self, *done),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

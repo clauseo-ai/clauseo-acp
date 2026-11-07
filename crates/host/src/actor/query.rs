@@ -6,7 +6,7 @@
 //! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
 //! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
 //! (`query/folder_support.rs`), and `ListSkillPacks` reads the skill packs off it
-//! (`query/skill_packs.rs`).
+//! (`query/skill_packs.rs`). `Protection` answers from the cached detection (`protection.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -46,13 +46,6 @@ fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
         None => Err(super::matters::no_default_location()),
     };
     let _gone = reply.send(answer);
-}
-
-/// A query the host does not answer yet (`Protection`: decision record 0051 answers it once the
-/// sandbox seams come, in its next step): `command.invalid`.
-fn not_built(reply: Reply<QueryResult>) {
-    let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
-    let _gone = reply.send(Err(refusal));
 }
 
 /// Answers one query.
@@ -148,7 +141,11 @@ pub(super) fn query(
         }
         HostQuery::GetUpdate => super::update::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
-        HostQuery::Protection => not_built(reply),
+        // From the cache (decision record 0051): never detected here.
+        HostQuery::Protection => {
+            let view = super::protection::view(actor);
+            let _gone = reply.send(Ok(QueryResult::Protection(view)));
+        }
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));

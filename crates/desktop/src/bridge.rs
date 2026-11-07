@@ -216,7 +216,8 @@ impl Bridge {
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
     /// until the bridge rules on it. The `settings` window reads the settings (0028), the
-    /// updater's state (0037) and the skill packs (0040) alone, and any other window nothing.
+    /// updater's state (0037), the skill packs (0040) and the protection view (0051) alone, and
+    /// any other window nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -227,12 +228,15 @@ impl Bridge {
             SETTINGS_WINDOW
                 if matches!(
                     query,
-                    HostQuery::GetSettings | HostQuery::GetUpdate | HostQuery::ListSkillPacks
+                    HostQuery::GetSettings
+                        | HostQuery::GetUpdate
+                        | HostQuery::ListSkillPacks
+                        | HostQuery::Protection
                 ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
-                    "the settings window reads only the settings, the update state and the \
-                     skill packs",
+                    "the settings window reads only the settings, the update state, the skill \
+                     packs and the protection view",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -255,15 +259,13 @@ impl Bridge {
             | HostQuery::ListPapers { .. }
             // The skill packs and their states (0040): reads the packs folder, writes nothing.
             // Both windows show them: Settings' Skills pane and the main window's matter picker.
-            | HostQuery::ListSkillPacks => {}
+            | HostQuery::ListSkillPacks
+            // The sandbox's view (0051): the host's cache, read only. Both windows show it.
+            | HostQuery::Protection => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.
             HostQuery::FolderSupport { source } => admit::picked_source(self, source)?,
-            // Decision record 0051: the host does not answer it yet; its next step rules here.
-            HostQuery::Protection => {
-                return Err(invalid("the protection query is not admitted yet"));
-            }
         }
         self.host().await?.query(PRINCIPAL, query).await
     }

@@ -153,7 +153,8 @@ impl Rig {
         let mut pool = LocalPool::new();
         let (post, internal) = async_channel::unbounded();
         let (ready, _ready) = std::sync::mpsc::channel();
-        let open = startup::open(config, pool.spawner(), post, ready);
+        let first = crate::actor::protection::observe(config.sandbox());
+        let open = startup::open((config, first), pool.spawner(), post, ready);
         let mut actor = pool.run_until(open).unwrap();
         startup::begin_startup(&mut actor);
         let mut rig = Self {
