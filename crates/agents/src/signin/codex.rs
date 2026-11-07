@@ -29,14 +29,23 @@
 //! limit ([`STATUS_LIMIT`]). The first poll that says signed in kills the login; then [`confirm`]
 //! gives `SignedIn { email, plan, source: Own, at }`, or `signin.failed` when it does not
 //! confirm. It ends otherwise:
-//! - on Cancel or a newer job, killed: `signin.cancelled`;
+//! - on a newer job, killed: `signin.cancelled`;
+//! - on the lawyer's Cancel or the app's quit, gracefully (`super::stopping`): the browser login
+//!   gets `GET /cancel` on its callback port when its own process tree holds the port, and is
+//!   awaited (a save already going finishes first); the device-code login is killed at once.
+//!   After the lawyer's Cancel, `login` having deleted the login it replaced, a status check
+//!   says how it stands: `SignedIn` only when Codex confirms a login, else `signin.cancelled`
+//!   (the signed-out card) with nothing unconfirmed left in the home. During the quit nothing
+//!   more runs;
 //! - at the run's limit (10 minutes, 20 for device code, whose code expires first), killed:
 //!   `signin.link_expired`;
 //! - by exiting 0: [`confirm`] decides between `SignedIn` and `signin.failed`;
 //! - by exiting otherwise: `signin.device_code_off`, `signin.port_busy` or `signin.cancelled`
 //!   when a line said so, else `signin.failed`.
 //!
-//! The login, its pollers and the app-server are all gone before the last state is sent.
+//! The login, its pollers and the app-server are all gone before the last state is sent. Each
+//! `login status` and `logout` is awaited on a graceful stop and killed only at its bound; the
+//! app-server gets its stdin closed and is awaited the same way (`identity.rs`).
 //!
 //! **A login that ran but did not confirm** (its `signin.failed` or `signin.cancelled` after the
 //! run exited 0 or a poll said signed in) leaves no login behind ([`remove_own_login`]): an
@@ -46,6 +55,7 @@
 //! unknown kind of account is not a `ChatGPT` sign-in, so it confirms signed out.
 
 mod device;
+mod ended;
 pub(crate) mod identity;
 
 use std::ffi::OsString;
@@ -61,18 +71,27 @@ use futures::channel::oneshot;
 use futures::future::{Either, select};
 
 use self::device::{CODE_LIFETIME, DeviceLines, is_device_code_off, is_port_busy};
+use self::ended::{checked_again, confirmed_or_failed, remove_own_login};
 use crate::cancel::Cancel;
 use crate::signin::claude::{LOGIN_LIMIT, LOGOUT_LIMIT, POLL, is_cancel_line};
 use crate::signin::codex::identity::AccountRead;
 use crate::signin::env::{RunKind, codex_store_args};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
+use crate::signin::stopping::{self, OnStop, Stopping};
 use crate::signin::{Method, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
 use crate::status::{Identity, codex_logged_in, codex_says_logged_in};
 
 /// The most one `login status` may take: Codex's cold start measured 3.7 s on a Windows VM, so
 /// Claude's 5 s is too tight here.
 pub(crate) const STATUS_LIMIT: Duration = Duration::from_secs(15);
+/// A logout on a graceful stop: awaited (it revokes, then deletes the login file), killed only at
+/// the bound.
+const LOGOUT_STOP: OnStop = OnStop {
+    how: Stopping::Wait,
+    what: "codex logout",
+    writes: true,
+};
 /// How often "Try again" probes the callback port.
 pub(crate) const PORT_POLL: Duration = Duration::from_secs(2);
 /// The device-code run's own limit: past the code's 15 minutes, so the code's expiry is what
@@ -166,7 +185,19 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
         args.push(OsString::from("--device-auth"));
     }
     let limit = if device { DEVICE_LIMIT } else { LOGIN_LIMIT };
-    let spec = job.spec(args, job.env(kind, None), limit);
+    let mut spec = job.spec(args, job.env(kind, None), limit);
+    spec.on_stop = OnStop {
+        // The device-code login has no graceful end: killed at once, as before.
+        how: if device {
+            Stopping::Kill
+        } else {
+            Stopping::Cancel {
+                port: job.config.signin.callback_port(),
+            }
+        },
+        what: "codex login",
+        writes: true,
+    };
     job.report(SigninState::Waiting {
         since: job.now(),
         nudge: false,
@@ -212,6 +243,10 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
         let watch = pin!(async {
             loop {
                 job.timer.after(POLL).await;
+                // Once the job is stopped no new poll starts; the login's own end decides.
+                if cancel.is_cancelled() {
+                    futures::future::pending::<()>().await;
+                }
                 if status(job, cancel).await == Some(true) {
                     return;
                 }
@@ -231,12 +266,12 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
             Either::Right((Either::Right(((), _)), _)) => First::Expired,
         }
     };
-    match first {
-        First::Confirmed => confirmed_or_failed(job, cancel, true).await,
+    let unconfirmed = match first {
+        First::Confirmed => return confirmed_or_failed(job, cancel, true).await,
         First::Expired => job.failed(SigninCode::LinkExpired),
         First::Ran(Err(_)) => {
             job.note(SigninNote::LoginExited { code: None });
-            job.failed(SigninCode::Failed)
+            return job.failed(SigninCode::Failed);
         }
         First::Ran(Ok(ran)) => {
             if let Ended::Exited(code) = ran.ended {
@@ -245,75 +280,12 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
             match ran.ended {
                 Ended::Cancelled => job.failed(SigninCode::Cancelled),
                 Ended::TimedOut => job.failed(SigninCode::LinkExpired),
-                Ended::Exited(Some(0)) => confirmed_or_failed(job, cancel, false).await,
+                Ended::Exited(Some(0)) => return confirmed_or_failed(job, cancel, false).await,
                 Ended::Exited(_) => job.failed(refusal(&said)),
             }
         }
-    }
-}
-
-/// The end of a login the lawyer started: [`confirm`]'s `SignedIn`, else `signin.cancelled`
-/// when it was cancelled meanwhile, else `signin.failed`. Only such a sign-in may fail; a
-/// status check that confirms nothing is never `Failed`. `polled`: a poll's `login status`
-/// just said signed in, so only `account/read` is left to confirm.
-async fn confirmed_or_failed<T: Timer + Send + Sync>(
-    job: &SigninJob<T>,
-    cancel: &Cancel,
-    polled: bool,
-) -> SigninState {
-    let own = RunKind::Own { home: &job.home };
-    let confirmation = if polled {
-        confirm_account(job, cancel, own, &job.home).await
-    } else {
-        confirm(job, cancel, own, &job.home).await
     };
-    if let Confirmation::Confirmed(identity) = confirmation {
-        return signed_in(job, identity);
-    }
-    // The login ran, so the home may hold its file: unconfirmed, it goes. A removal that failed
-    // leaves it; nothing more can be done here.
-    let _gone = remove_own_login(job).await;
-    if cancel.is_cancelled() {
-        job.failed(SigninCode::Cancelled)
-    } else {
-        job.failed(SigninCode::Failed)
-    }
-}
-
-/// Clauseo's own login in the home goes, for a login that ran and did not confirm, and for a
-/// sign-out with no CLI: Codex's `logout` through the CLI when it is there (with a cancel of its
-/// own, so a cancelled sign-in still cleans up), then the home's `auth.json` removed directly
-/// when it is still there (`reuse::remove_home_login`, which never reads it). It is Clauseo's
-/// own home, and the caller holds the lock on Codex's login files. Never while the home's file is
-/// the lawyer's (the guard, [`super::reuse::codex_login_shared`]), and never when the lawyer's
-/// home folder is not known, since the guard cannot then tell: nothing is touched. `true` when
-/// the home holds no login file afterwards.
-async fn remove_own_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> bool {
-    let Some(lawyer) = job.config.signin.lawyer_home() else {
-        return false;
-    };
-    if super::reuse::codex_login_shared(&job.home, &lawyer) {
-        return false;
-    }
-    if job.script().is_some() {
-        let kind = RunKind::Own { home: &job.home };
-        let mut args = codex_store_args(kind);
-        args.push(OsString::from("logout"));
-        let spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
-        // Its exit does not matter: the file is checked and removed below either way.
-        drop(
-            run(
-                &*job.launcher,
-                &*job.timer,
-                spec,
-                &Cancel::new(),
-                None,
-                |_: &str| {},
-            )
-            .await,
-        );
-    }
-    super::reuse::remove_home_login(&job.home).is_ok()
+    checked_again(job, unconfirmed).await
 }
 
 /// What [`confirm`] found.
@@ -472,6 +444,11 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     let limit = job.status_limit(STATUS_LIMIT);
     let mut spec = job.spec(args, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
+    spec.on_stop = OnStop::status("codex login status");
+    if let Some(home) = stopping::codex_home_of(&spec.env) {
+        let lawyer = job.config.signin.lawyer_home();
+        stopping::before_status(&home, lawyer.as_deref(), job.now(), &job.ticket.agent);
+    }
     let said_in = AtomicBool::new(false);
     let ran = run(
         &*job.launcher,
@@ -530,7 +507,8 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
     let kind = RunKind::Own { home: &job.home };
     let mut args = codex_store_args(kind);
     args.push(OsString::from("logout"));
-    let spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
+    let mut spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
+    spec.on_stop = LOGOUT_STOP;
     let cancel = &job.ticket.cancel;
     let ran = run(
         &*job.launcher,
