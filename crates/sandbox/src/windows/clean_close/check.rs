@@ -17,7 +17,8 @@ use crate::windows::set_aside;
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
 /// `apply`. First the pool is this user's and the set-up program's admin copy passes
 /// `admin_copy::check_launchable`, or the launch is refused with [`Error::Blocked`]
-/// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged` or `AdminCopyUnsafe`) and nothing
+/// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged`, `AdminCopyUnsafe`, or `ToolMissing`
+/// for a copy gone after Windows security blocked it) and nothing
 /// is read or removed: without a copy only administrators can
 /// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
