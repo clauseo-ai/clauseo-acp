@@ -10,12 +10,12 @@
 //!   destroys `settings`, so closing `main` still ends the app.
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
-//!   is ready waits for it, and after a failed start gets that start's error. The host runs with
-//!   the effective settings (`Locations::resolve`, so `CLAUSEO_DATA_DIR` moves the data folder;
-//!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, the
-//!   refused folders of `refused_folders`, and the launch profile (`profile.rs`, built on that
-//!   thread; with none when it cannot be built). Exit waits for the start, then for
-//!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
+//!   is ready waits for it, and after a failed start gets that start's error. That thread adds
+//!   Documents to the folders (`Locations::with_documents`, never on the main thread: a share may
+//!   be down), then the host runs with the effective settings (`Effective::load`, system policy
+//!   sources), the `PassthroughLauncher`, the refused folders of `refused_folders`, and the launch
+//!   profile (`profile.rs`, built on that thread; none when it cannot be built). Exit waits for the
+//!   start, then for `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
 //! - Every quit runs the agents' stop before the process ends (`quit.rs`): a closed window or
 //!   `AppHandle::exit` through `RunEvent::ExitRequested`; on Unix the first SIGTERM, SIGINT or
 //!   SIGHUP through `AppHandle::exit(0)` (`quit_signals.rs`: caught by handlers on Tauri's
@@ -274,7 +274,7 @@ pub fn run() -> tauri::Result<()> {
             e2e::grant_scoreboard(app)?;
             // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
-            let locations = Locations::resolve(&SystemDirs, &SystemEnv)?;
+            let locations = Locations::resolve_without_documents(&SystemDirs, &SystemEnv)?;
             // Managed before the window opens: a command reaching unmanaged state fails.
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
@@ -342,6 +342,7 @@ fn start_host<R: Runtime>(
     setup_parts: setup::SetupParts,
 ) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
+        let locations = locations.with_documents(&SystemDirs, &SystemEnv);
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();

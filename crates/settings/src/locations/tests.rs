@@ -105,6 +105,40 @@ fn resolve_on_windows_without_documents_succeeds() {
     assert_eq!(at.default_matters_dir(), None);
 }
 
+/// The desktop's split start, `without_documents_for` on the main thread and
+/// `with_documents_for` on the host-start thread, gives what `resolve_for` gives, on each OS,
+/// with Documents and without, with `CLAUSEO_DATA_DIR` and without. The first part never asks
+/// for Documents: without `CLAUSEO_DATA_DIR` it has no default matters folder.
+#[test]
+fn the_split_start_gives_what_resolve_gives() {
+    let no_documents = windows_dirs_without(Some(KnownFolder::Documents));
+    let cases = [
+        (Os::Windows, windows_dirs()),
+        (Os::Windows, no_documents),
+        (Os::Mac, home_dirs()),
+        (Os::Linux, home_dirs()),
+        (Os::Mac, FakeDirs::default()),
+    ];
+    let envs = [
+        FakeEnv::default(),
+        FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-7/data"))]),
+    ];
+    for (os, dirs) in &cases {
+        for env in &envs {
+            let Ok(whole) = Locations::resolve_for(*os, dirs, env) else {
+                assert!(Locations::without_documents_for(*os, dirs, env).is_err());
+                continue;
+            };
+            let early = Locations::without_documents_for(*os, dirs, env).unwrap();
+            if env.0.is_empty() {
+                assert_eq!(early.default_matters_dir(), None, "{os:?}");
+            }
+            assert_eq!(early.data_dir(), whole.data_dir(), "{os:?}");
+            assert_eq!(early.with_documents_for(*os, dirs, env), whole, "{os:?}");
+        }
+    }
+}
+
 /// With `CLAUSEO_DATA_DIR` set and no home, macOS and Linux resolve too, with no default
 /// matters folder: only the data folder needs a home there.
 #[test]

@@ -1,7 +1,8 @@
 //! A folder lookup with a time limit, for a known folder that may sit on a network share: a
 //! Documents folder redirected to a share that is down (a firm laptop off VPN) can hold an
-//! existence check on SMB for 20 to 40 s or more, and the desktop resolves Documents on its main
-//! thread before the first window. Plain Rust, so it is tested on every OS.
+//! existence check on SMB for 20 to 40 s or more, and the desktop's host waits on Documents before
+//! it starts (on its own thread, never the main one: `Locations::with_documents`). Plain Rust, so
+//! it is tested on every OS.
 
 #[cfg(test)]
 mod tests;
