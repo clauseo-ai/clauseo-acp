@@ -261,28 +261,44 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
 
    S17's firm proxy (desktop's `setup/network.rs`) is the caller's one resolver, which the
    installs, the sign-ins and the agents' launches all take. First match wins:
-   `network.upstream_proxy` (a policy's over the lawyer's), then `HTTPS_PROXY` or
-   `https_proxy`, then the OS's proxy behind one switch, `OS_FALLBACK` (on): the sandbox's
-   `Upstream::System` lookup (macOS `CFNetwork`, Windows `WinHTTP`, PAC and WPAD included, bounded
-   and cached there), asked per target: the registry (or the firm's mirror) for installs, the
-   agent's first sign-in host for its sign-in, its primary API host (`api.anthropic.com` or a
-   Claude plan's endpoint, `api.openai.com`) for its launches. A PAC `DIRECT` is no proxy, and an
-   empty value is unset. The CA files are `network.ca_certs` alone. `Agents` starts with the
-   settings' and the environment's route; the OS's, which can wait on WPAD, follows from a
-   thread of desktop's own, and every `SettingsChanged` resolves again: `Agents::set_network`
-   hands the result to the next install and sign-in job (`InstallConfig::proxy` and
-   `signin_proxy`), and the launch hook adds `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
-   (loopback) and the CA file under sign-in's variable (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`),
-   never over a variable the firm plan's `env` or the agent's own entry sets. The log names the
-   source (`policy`, `setting`, `env`, `os` or `none`) with each proxy's scheme, host and port
-   only. Limits: one proxy serves a launch's every host, the OS's answer for the agent's primary
-   API host; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log says
-   `os` for both; an install, retry or sign-in pressed before the OS's first answer lands waits
-   for it (at most 20 s), so its first try never goes direct, and the start's `agent.keys_loading`
-   launch refusal stays until then too, so no agent launched at start goes direct. Chaining the sandbox's
-   egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives it
-   `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
-   `https://` setting, which that proxy cannot chain to, is logged once per change.
+   `network.upstream_proxy` (a policy's over the lawyer's), then `HTTPS_PROXY`, `https_proxy`,
+   `ALL_PROXY` or `all_proxy` (never `HTTP_PROXY`, which is for plain `http://`), then the OS's
+   proxy behind one switch, `OS_FALLBACK` (on): the sandbox's `Upstream::System` lookup (macOS
+   `CFNetwork`, Windows `WinHTTP`, PAC and WPAD included, bounded and cached there), asked per
+   target: the registry (or the firm's mirror) for installs, the agent's first sign-in host for its
+   sign-in, its primary API host (`api.anthropic.com` or a Claude plan's endpoint,
+   `api.openai.com`) for its launches. The targets are asked all at once, within one budget of 5 s
+   for the whole resolution (a lookup past it counts as direct in that route), on desktop's network
+   thread, which starts with the setup thread, beside the keys' load and never on the window's
+   start path. A PAC `DIRECT` is no proxy, and an empty value is unset. The CA files are
+   `network.ca_certs` alone. `Agents` starts with the settings' and the environment's route and
+   then takes the OS's, and every `SettingsChanged` resolves again: `Agents::set_network` hands the
+   result to the next sign-in job (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a
+   proxy gets `NO_PROXY` with the loopback names, where its OAuth callback listens, and every
+   sign-in run gets `NODE_USE_SYSTEM_CA=1` and Codex's CA as `CODEX_CA_CERTIFICATE`) and to every
+   install try, a running job's next one too (each try reads the current network as it makes its
+   client, so one waiting offline goes through a proxy set meanwhile), and the launch hook adds
+   `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (loopback) and the CA file under sign-in's variable
+   (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, the path as it is; never `SSL_CERT_FILE`, which
+   the tools in an agent's shell take to replace the system roots, so a launcher's or an inherited
+   one stays) and `NODE_USE_SYSTEM_CA=1`, so Node trusts the OS's store too, each on its own and
+   never over a variable the firm plan's `env` or the agent's own entry sets (an entry's own
+   `NO_PROXY` stays and the proxy still comes; an `ALL_PROXY` there keeps both proxies out). An
+   agent's stderr tail shows any URL's user name and password as `***`, since a proxy URL may carry
+   them. The log names the source (`policy`, `setting`, `env`, `os` or `none`) with each proxy's
+   scheme, host and port only. An install, retry or sign-in pressed before the OS's first answer
+   lands, and first run's install, waits for it (at most until 5 s after the setup's start), so its
+   first try never goes direct, and the start's `agent.keys_loading` launch refusal stays until
+   then too, so no agent launched at start goes direct. Known limits, until the sandbox's local
+   forwarder (S16) carries the agents' own traffic: one fixed proxy serves a launch's every host,
+   the OS's answer for the agent's primary API host, so a PAC script's fallbacks and other per-host
+   answers, and the OS's bypass list, are not applied to it; the sandbox's lookup does not tell a
+   static OS proxy from a PAC one, so the log says `os` for both; the route is not resolved again
+   when the computer changes networks, so after changing networks (office, home, VPN), restart
+   Clauseo. Chaining the sandbox's egress proxy (tiers A and B, S16) to this upstream is stage C's:
+   the route gives it `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and
+   `ca_cert`, and an `https://` setting, which that proxy cannot chain to, is logged once per
+   change.
 
 ## Consequences
 

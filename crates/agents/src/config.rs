@@ -119,6 +119,15 @@ impl InstallConfig {
         }
     }
 
+    /// Its network part: the proxies and the CA files.
+    pub(crate) fn network(&self) -> Network {
+        Network {
+            proxy: self.proxy.clone(),
+            signin_proxy: self.signin_proxy.clone(),
+            ca_certs: self.ca_certs.clone(),
+        }
+    }
+
     /// Takes in `network`: the proxies and the CA files, for the next job.
     pub(crate) fn set_network(&mut self, network: Network) {
         let Network {

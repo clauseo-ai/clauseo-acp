@@ -26,10 +26,16 @@ fn env(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
         .collect()
 }
 
-/// Whether `actual` is `expected`, printing names only: values hold keys.
+/// Whether `actual` is `expected` beside `NODE_USE_SYSTEM_CA=1`, which every launch gets (S17),
+/// printing names only: values hold keys.
 fn same(actual: &BTreeMap<OsString, OsString>, expected: &BTreeMap<OsString, OsString>) {
+    let mut actual = actual.clone();
+    assert_eq!(
+        actual.remove(&OsString::from("NODE_USE_SYSTEM_CA")),
+        Some(OsString::from("1"))
+    );
     assert!(
-        actual == expected,
+        &actual == expected,
         "names {:?}, expected {:?}",
         actual.keys().collect::<Vec<_>>(),
         expected.keys().collect::<Vec<_>>()
@@ -89,5 +95,5 @@ fn the_env_holds_only_the_key_variable_plus_the_plan_variables() {
         Some(&OsString::from("1"))
     );
     // An agent of no kind gets nothing.
-    same(&hook.launch_env(&id("gemini-acp")), &BTreeMap::new());
+    assert!(hook.launch_env(&id("gemini-acp")).is_empty());
 }

@@ -449,9 +449,16 @@ Coming:
   proxy ([decision 0036](decisions/0036-counts.md), "The desktop").
 - `nodejs.org` and `registry.npmjs.org`: Node and the agents' own downloads (task S17), unless
   `install.bundle` or `install.registry` points at your copy. They, the agents' sign-ins and the
-  agents themselves go through `network.upstream_proxy`, else `HTTPS_PROXY`, else the OS's
-  proxy settings, PAC included, and trust the agent's `network.ca_certs` file
-  ([decision 0033](decisions/0033-agents-installs.md), item 4).
+  agents themselves go through `network.upstream_proxy`, else `HTTPS_PROXY` (or `ALL_PROXY`),
+  else the OS's proxy settings, PAC included, and trust the OS's certificate store and the
+  agent's `network.ca_certs` file ([decision 0033](decisions/0033-agents-installs.md), item 4).
+  Known limits until the sandbox's local forwarder (S16) carries the agents' traffic:
+  - an agent's own traffic uses one fixed proxy, the OS's answer for its API host: a PAC
+    script's fallbacks and other per-host answers, and the OS's bypass list, are not applied to
+    it (installs and sign-ins are asked about per host);
+  - the OS is asked once, at start and when the settings change, within 5 s; a lookup slower
+    than that counts as direct until then;
+  - after changing networks (office, home, VPN), restart Clauseo.
 
 ## 8. Claude's personal skills
 

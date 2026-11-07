@@ -11,7 +11,8 @@
 //! at its limit) confirms nothing either way.
 //!
 //! Every run here has the Own environment: `CODEX_HOME` and, on macOS and Linux, `HOME` set to
-//! the agent's home, `CODEX_API_KEY=""`, and `SSL_CERT_FILE` for the agent's CA.
+//! the agent's home, `CODEX_API_KEY=""`, `CODEX_CA_CERTIFICATE` for the agent's CA and
+//! `NODE_USE_SYSTEM_CA=1`.
 //!
 //! **Browser** (`Method::Browser`): before the run, `127.0.0.1:1455` (the callback port) is bound
 //! and let go at once. Taken: no run, `Failed { code: PortBusy }`. "Try again" ([`try_again`])

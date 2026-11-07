@@ -8,14 +8,15 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use clauseo_agents::InstallState;
 use clauseo_agents::keys::Keychain;
+use clauseo_agents::{Clock as _, InstallState, SystemClock};
 use clauseo_host::ProfileHook as _;
+use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::ErrorCode;
 use serde_json::json;
 
 use super::fakes::{HostCall, Rig, command, rig, rig_with};
-use super::{MAIN, claude, codex};
+use super::{MAIN, claude, codex, missing};
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
 use crate::setup::keys::KeyCache;
@@ -97,6 +98,38 @@ fn an_install_waits_for_the_first_route_and_goes_through_it() {
     assert_eq!(pushed.first().and_then(|n| n.proxy.as_deref()), Some(FIRM));
 }
 
+/// A fresh machine whose OS route lands late: first run's install of Claude waits for it, so
+/// `Agents` gets the route before the install and its first download goes through the proxy
+/// (`Agents` takes commands in order); the pump goes on meanwhile.
+#[test]
+fn first_run_installs_only_once_the_first_route_has_reached_agents() {
+    let rig = rig_unrouted();
+    let (feed, source) = futures::channel::mpsc::unbounded();
+    feed.unbounded_send(missing(claude())).unwrap();
+    feed.unbounded_send(missing(codex())).unwrap();
+    let mut pump = pin!(rig.backend.pump(source));
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    let installs = || {
+        let calls = rig.calls();
+        calls
+            .into_iter()
+            .filter(|(name, _)| *name == "install")
+            .collect::<Vec<_>>()
+    };
+    assert!(matches!(pump.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(installs(), [], "no install before the route");
+    assert!(lock(&rig.agents.networks).is_empty());
+    let mut read = SettingsRead::default();
+    read.network.upstream = Some(FIRM.to_owned());
+    block_on(apply_settings(&rig.backend, read));
+    assert!(matches!(pump.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(installs(), [("install", claude())]);
+    let pushed = lock(&rig.agents.networks).clone();
+    assert_eq!(pushed.first().and_then(|n| n.proxy.as_deref()), Some(FIRM));
+    drop(feed);
+    block_on(pump);
+}
+
 /// Claude's `agent.keys_loading` from the host's start, as `SetupStart::launch_refusals` gives it.
 fn loading(rig: &Rig) {
     lock(&rig.backend.wiring.refused).insert(claude(), ErrorCode::AgentKeysLoading);
@@ -135,6 +168,27 @@ fn a_launch_at_start_waits_for_the_route_and_then_gets_the_os_proxy() {
         env.get(std::ffi::OsStr::new("HTTPS_PROXY")),
         Some(&std::ffi::OsString::from(OS_PROXY))
     );
+}
+
+/// Keys that load slowly use up part of the route's wait rather than add to it: a route that
+/// never lands lifts the refusal at the bound from the setup's start (when its network follow
+/// started), not the bound from the keys' end.
+#[test]
+fn the_route_wait_counts_from_the_start_not_from_the_keys() {
+    let rig = rig_unrouted();
+    let started = SystemClock.monotonic();
+    loading(&rig);
+    // The keys' load.
+    block_on(AsyncIoTimer.after(Duration::from_millis(500)));
+    let lifting = SystemClock.monotonic();
+    block_on(lift_at_start(&rig.backend, Duration::from_millis(600)));
+    assert!(lifted(&rig));
+    let waited = SystemClock.monotonic().saturating_sub(lifting);
+    assert!(
+        waited < Duration::from_millis(450),
+        "{waited:?}: the wait started again after the keys"
+    );
+    assert!(SystemClock.monotonic().saturating_sub(started) >= Duration::from_millis(590));
 }
 
 /// A route that never lands still lifts the refusal once the wait is over.
