@@ -39,7 +39,10 @@ mod grant_probe;
 #[cfg(windows)]
 mod install;
 #[cfg(windows)]
+mod os_ports;
+#[cfg(windows)]
 mod permit;
+mod port_check;
 pub mod rules;
 mod sddl;
 pub mod spec;
@@ -52,7 +55,10 @@ pub use grant_probe::{GrantProbe, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
+pub use os_ports::check_ports;
+#[cfg(windows)]
 pub use permit::{check_launch, check_launch_in};
+pub use port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
 pub use spec::{FirewallOutcome, FirewallTrouble, Namespace, NetworkReport, NetworkSetup};
 
 /// Removes Clauseo's network set-up ([`remove`] in [`Namespace::production`]), elevated, with
