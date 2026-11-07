@@ -400,7 +400,8 @@ pub enum RunExit {
     LogonRight,
     /// The pool user's password was refused (1326): set-up must run again.
     Password,
-    /// Another logon failure.
+    /// Another logon failure, or what the outer needs before its logon failed to be read or
+    /// written: the pool user's secret, System32's path, the session's unclean-session marker.
     Logon,
     /// M3: the launch would reuse the lawyer's `~\.codex`.
     CodexReuse,

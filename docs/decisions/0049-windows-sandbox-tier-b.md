@@ -1238,7 +1238,11 @@ leaves that profile, both naming the part.
     pool user, the outer writes `<data_dir>\sandbox\run\<launch id>.session`, holding the pool
     user's SID, as the launch file is written: atomically, with the run folder's three entries
     (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
-    the pool user can neither write nor remove it. It removes it only at a clean end: the inner
+    the pool user can neither write nor remove it. A marker that can't be written refuses the
+    launch before anything runs as the pool user (`runner::marker::marked`): the outer exits
+    `RunExit::Logon`, as for a failed read of the pool user's secret, with "the session marker
+    failed (<code>)" on stderr, and no logon follows, so no session runs that no marker names. It
+    removes it only at a clean end: the inner
     exited (no failure, and no cancel whose agent outlived its 1 s), reported the agent's exit, the end sweeper started and exited
     0 while the outer waited, and no sweep found an escapee. A crash, a cancel, a failure, a job
     that didn't empty or an escapee leaves it. `runner::unclean_sessions` lists the sessions

@@ -138,3 +138,34 @@ fn a_marker_takes_only_a_launch_id() {
         );
     }
 }
+
+#[test]
+fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
+    let data = TempDir::new("marker-refused");
+    let launch = data
+        .path()
+        .join("sandbox")
+        .join("run")
+        .join(format!("{ID}.json"));
+    // No run folder: the write fails, and the session (the logons) never runs.
+    let mut logged_on = false;
+    let refused = marked(data.path(), &launch, &sid(POOL), |_| logged_on = true);
+    assert!(refused.is_err());
+    assert!(!logged_on, "a session ran with no marker");
+    // Nor with a launch file whose name gives no id.
+    run_folder(&data);
+    let unnamed = data.path().join("sandbox").join("run").join("launch.json");
+    let refused = marked(data.path(), &unnamed, &sid(POOL), |_| logged_on = true);
+    assert_eq!(
+        refused.map_err(|e| e.kind()),
+        Err(io::ErrorKind::InvalidInput)
+    );
+    assert!(!logged_on);
+    // Written, the session runs with the marker's path, already on disk.
+    let ran = marked(data.path(), &launch, &sid(POOL), |marker| {
+        logged_on = true;
+        marker.is_file().then_some(marker)
+    });
+    assert!(logged_on);
+    assert_eq!(ran.unwrap(), Some(marker_path(data.path(), ID)));
+}

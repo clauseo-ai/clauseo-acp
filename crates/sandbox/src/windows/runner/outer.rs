@@ -2,7 +2,7 @@
 //! `spawn_in_tree` with `--launch <file>`. See `runner.rs` for the whole chain.
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -10,7 +10,7 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, EndSweep, GRACE, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
-use super::marker::{launch_id, remove_marker, write_marker};
+use super::marker::{marked, remove_marker};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
@@ -76,18 +76,21 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
-    // `relay` removes it. One that can't be written is said, and the run goes on: the first act
-    // still refuses a launch while an escapee lives.
-    let marker = launch_id(launch_file).and_then(|id| {
-        write_marker(&data_dir, id, &message.pool_user)
-            .inspect_err(|e| {
-                say(&format!(
-                    "clauseo-sandbox-run: {}",
-                    os("the session marker", e)
-                ));
-            })
-            .ok()
-    });
+    // `relay` removes it. One that can't be written refuses the launch, as a failed read of the
+    // pool user's secret does: no logon follows.
+    marked(&data_dir, launch_file, &message.pool_user, |marker| {
+        marked_outer(&message, data_dir.clone(), marker, exe)
+    })
+    .map_err(|e| Failure::new(RunExit::Logon, os("the session marker", &e)))?
+}
+
+/// The run once its marker is written.
+fn marked_outer(
+    message: &LaunchMessage,
+    data_dir: PathBuf,
+    marker: PathBuf,
+    exe: &Path,
+) -> Result<u32, Failure> {
     let desktop =
         current_user_sid().map_err(|e| Failure::new(RunExit::BadLaunch, os("user", &e)))?;
     let exe_text = exe
@@ -116,7 +119,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         job: OnceLock::new(),
         marker,
     }));
-    let result = session(&message, &end);
+    let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
         end.wait();
@@ -419,9 +422,8 @@ fn relay(
     });
     tell_status(last.as_ref(), code);
     let swept = end.wait();
-    if let Some(marker) = &end.steps().marker
-        && end.clean(swept, reported.is_some())
-        && let Err(error) = remove_marker(marker)
+    if end.clean(swept, reported.is_some())
+        && let Err(error) = remove_marker(&end.steps().marker)
     {
         say(&format!(
             "clauseo-sandbox-run: {}",
@@ -509,7 +511,7 @@ fn read_launch(path: &Path) -> Result<LaunchMessage, Failure> {
 }
 
 /// `<data_dir>` from `<data_dir>\sandbox\run\<id>.json`.
-fn data_dir_of(launch_file: &Path) -> Result<std::path::PathBuf, Failure> {
+fn data_dir_of(launch_file: &Path) -> Result<PathBuf, Failure> {
     let run = launch_file.parent();
     let sandbox = run
         .filter(|run| run.file_name().is_some_and(|name| name == RUN_DIR))
