@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!-- The setup exe's manifest input (build.rs, /MANIFESTINPUT): the Windows versions it supports,
-     the same as the app's (crates/desktop/windows-app.manifest). The linker merges it with its
-     /MANIFESTUAC entry (requireAdministrator) into the exe's one manifest. msvc targets only. -->
+     the app's list (crates/desktop/windows-app.manifest) and Windows 7, so the Program
+     Compatibility Assistant sees an exe written for every Windows it may run on. The linker
+     merges it with its /MANIFESTUAC entry (requireAdministrator) into the exe's one manifest.
+     msvc targets only. tests/setup_exe.rs requires all four. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
@@ -11,6 +13,8 @@
       <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
       <!-- Windows 8 -->
       <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <!-- Windows 7 -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
     </application>
   </compatibility>
 </assembly>

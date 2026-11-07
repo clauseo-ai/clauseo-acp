@@ -3,12 +3,12 @@
 # (target/, wiped between the builds), and fails unless the two exes have the same SHA-256; on a
 # mismatch it uploads both. The builds are release.yml's (the same profile environment and
 # RUSTFLAGS, through `node .github/scripts/sidecars.mjs --setup-exe`, which adds the path remaps
-# and SOURCE_DATE_EPOCH); crates/sandbox/build.rs adds /Brepro and /PDBALTPATH:%_PDB%. The
+# and SOURCE_DATE_EPOCH); crates/sandbox/build.rs adds /Brepro and /DEBUG:NONE. The
 # toolchain is rust-toolchain.toml's.
 #
 # The same path, not two: the goal is that rebuilding a release commit in CI gives the same hash.
-# A different target dir gives a different exe (crates/sandbox/build.rs says why: lld's PDB GUID
-# hashes the PDB, which holds absolute object paths).
+# A different target dir gives a different exe (crates/sandbox/build.rs says why: RUSTFLAGS'
+# remaps miss the host's proc macros under --target).
 #
 # Manual only (`gh workflow run setup-exe-repro.yml --ref <branch>`): two cold LTO builds per
 # target are too slow for every pull request, and the exe changes rarely. Run it when the
