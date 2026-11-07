@@ -94,10 +94,26 @@ impl CopyOwner {
 /// again. Outside [`MachineRecord`]. The next set-up resets each listed user of the pool, even
 /// one a matter holds, once no session is open (`resets.rs`), and takes it off the list.
 pub const RESET_SIDS: &str = "ResetSids";
+/// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the stop task last
+/// completed, written only by a run that ends 0 (every pool user's process gone, every pool BITS
+/// job cancelled, `ResetSids` written). A run that is ended, interrupted or exits non-zero never
+/// writes it and leaves an earlier one as it is. Outside [`MachineRecord`]; deleted with the
+/// set-up's values.
+pub const STOP_COMPLETED: &str = "StopCompleted";
+/// `StopLeft` (`REG_DWORD`): the pool users' processes and jobs the completed stop left,
+/// written with [`STOP_COMPLETED`], so always 0.
+pub const STOP_LEFT: &str = "StopLeft";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 6] = [
-    OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING, RESET_SIDS,
+pub const SETUP_VALUES: [&str; 8] = [
+    OWNER_SID,
+    GROUP_SID,
+    POOL_SIDS,
+    DATA_DIR,
+    REMOVING,
+    RESET_SIDS,
+    STOP_COMPLETED,
+    STOP_LEFT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -134,6 +150,8 @@ pub enum RegValue {
     MultiSz(Vec<u16>),
     /// `REG_DWORD`.
     Dword(u32),
+    /// `REG_QWORD`.
+    Qword(u64),
 }
 
 /// Why a record isn't written or isn't read.
@@ -236,13 +254,14 @@ fn multi_sz(sids: &[Sid]) -> Vec<u16> {
 }
 
 /// `value`'s data as the bytes `RegSetValueExW` takes: the units in little-endian order (the
-/// byte order of every Windows target), or the DWORD's four bytes.
+/// byte order of every Windows target), or the DWORD's four bytes, or the QWORD's eight.
 pub fn bytes(value: &RegValue) -> Vec<u8> {
     match value {
         RegValue::Sz(units) | RegValue::MultiSz(units) => {
             units.iter().flat_map(|unit| unit.to_le_bytes()).collect()
         }
         RegValue::Dword(number) => number.to_le_bytes().to_vec(),
+        RegValue::Qword(number) => number.to_le_bytes().to_vec(),
     }
 }
 
@@ -339,6 +358,10 @@ mod tests {
             [0x3A, 0x26, 0, 0]
         );
         assert_eq!(bytes(&RegValue::Dword(1)), [1, 0, 0, 0]);
+        assert_eq!(
+            bytes(&RegValue::Qword(0x0102_0304_0506_0708)),
+            [8, 7, 6, 5, 4, 3, 2, 1]
+        );
     }
 
     #[test]
@@ -407,6 +430,9 @@ mod tests {
         // The stop task's marks go with the set-up's values, so `--remove` deletes them.
         assert_eq!(RESET_SIDS, "ResetSids");
         assert!(SETUP_VALUES.contains(&RESET_SIDS));
+        // So do its completion's.
+        assert_eq!((STOP_COMPLETED, STOP_LEFT), ("StopCompleted", "StopLeft"));
+        assert!(SETUP_VALUES.contains(&STOP_COMPLETED) && SETUP_VALUES.contains(&STOP_LEFT));
     }
 
     #[test]
