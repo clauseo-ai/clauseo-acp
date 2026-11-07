@@ -91,7 +91,7 @@ pub struct HostConfig {
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
-    scratch_scan: crate::actor::scratch::Scan,
+    scratch: crate::actor::scratch::Seams,
     counts: Option<Counts>,
     search: SearchSeams,
     update: UpdateSeams,
@@ -116,7 +116,7 @@ pub(crate) struct ConfigParts {
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
     pub(crate) scan_walk: crate::actor::scan::Walk,
-    pub(crate) scratch_scan: crate::actor::scratch::Scan,
+    pub(crate) scratch: crate::actor::scratch::Seams,
     /// The usage counts a caller set; `None` counts nothing.
     pub(crate) counts: Option<Counts>,
     /// The search thread's test seams.
@@ -165,7 +165,7 @@ impl HostConfig {
             limits_reader: None,
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
-            scratch_scan: crate::actor::scratch::os_scan(),
+            scratch: crate::actor::scratch::Seams::default(),
             counts: None,
             search: SearchSeams::default(),
             update: UpdateSeams {
@@ -439,7 +439,15 @@ impl HostConfig {
     /// `scratch::free_folder`, for tests that hold it.
     #[cfg(test)]
     pub(crate) fn with_scratch_scan(mut self, scan: crate::actor::scratch::Scan) -> Self {
-        self.scratch_scan = scan;
+        self.scratch.scan = scan;
+        self
+    }
+
+    /// Shutdown waits for the Scratch scan too, and says so on `told` each time it does, for
+    /// tests that answer the scan while the host stops.
+    #[cfg(test)]
+    pub(crate) fn with_scratch_stop_held(mut self, told: std::sync::mpsc::Sender<()>) -> Self {
+        self.scratch.stop_held = Some(told);
         self
     }
 
@@ -572,7 +580,7 @@ impl HostConfig {
             limits_reader: self.limits_reader,
             wiring: self.wiring,
             scan_walk: self.scan_walk,
-            scratch_scan: self.scratch_scan,
+            scratch: self.scratch,
             counts: self.counts,
             search: self.search,
             update: self.update,

@@ -140,3 +140,72 @@ fn windows_roaming_unchecked_child() {
         Some(roaming)
     );
 }
+
+/// The planted share of [`windows_documents_on_a_dead_share`]'s child.
+#[cfg(windows)]
+const DEAD_SHARE: &str = r"\\192.0.2.1\clauseo-test";
+
+/// A Documents folder on a share that does not answer, through the real `SystemDirs`: a child
+/// whose planted USERPROFILE is a share at a TEST-NET-1 address (RFC 5737, never routed) gets
+/// Documents as `<share>\Documents`, as [`windows_without_documents`] explains, and must get
+/// `None` within the 2 s wait. Windows' own check of the folder (`KF_FLAG_DEFAULT`) waits on
+/// SMB for about 20 s there, so going back to it fails the child's time limit. A network that
+/// refuses the address at once instead of dropping it gives a fast `None` either way: the test
+/// then passes but proves less.
+#[cfg(windows)]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "reruns this test binary with a planted USERPROFILE; nothing else is launched or \
+              written"
+)]
+fn windows_documents_on_a_dead_share() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    let profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let documents = SystemDirs.known_folder(KnownFolder::Documents);
+    let under_profile = profile
+        .zip(documents)
+        .is_some_and(|(profile, documents)| documents.starts_with(profile));
+    if !under_profile {
+        eprintln!("Documents is not under USERPROFILE here; skipped");
+        return;
+    }
+    // The child may take longer to exit than to pass: its check is left stuck on the share.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "system::tests::windows_documents_on_a_dead_share_child",
+            "--exact",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("USERPROFILE", DEAD_SHARE)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "the child ran: {text}");
+}
+
+/// [`windows_documents_on_a_dead_share`]'s child: run only by it, with the planted share.
+#[cfg(windows)]
+#[test]
+#[ignore = "run by windows_documents_on_a_dead_share with a planted USERPROFILE"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "checks a bound on wall-clock time"
+)]
+fn windows_documents_on_a_dead_share_child() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    assert_eq!(
+        std::env::var_os("USERPROFILE"),
+        Some(std::ffi::OsString::from(DEAD_SHARE))
+    );
+    let started = std::time::Instant::now();
+    let documents = SystemDirs.known_folder(KnownFolder::Documents);
+    let took = started.elapsed();
+    assert_eq!(documents, None);
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+}

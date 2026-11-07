@@ -1,6 +1,7 @@
 //! The Scratch matter's folder scan off the actor, held by a stand-in the test releases: ready
 //! goes out once [`READY_WAIT`] passes on the manual clock, and a late Scratch reaches an app
-//! subscriber as any new matter does; a host stopped mid-scan makes none. Never a sleep.
+//! subscriber as any new matter does; a scan that answers while the host stops, or once it has
+//! stopped, makes none. Never a sleep.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
@@ -50,14 +51,29 @@ fn held_scan() -> (Scan, Held) {
 }
 
 fn config(dir: &Path, clock: &ManualClock, run: u16, scan: Option<Scan>) -> HostConfig {
+    config_with(dir, clock, run, scan, None)
+}
+
+/// [`config`], with shutdown waiting for the scan and saying so on `stop_held` when given.
+fn config_with(
+    dir: &Path,
+    clock: &ManualClock,
+    run: u16,
+    scan: Option<Scan>,
+    stop_held: Option<mpsc::Sender<()>>,
+) -> HostConfig {
     crate::write::create_dir_all(&dir.join("data")).unwrap();
     let effective = Effective::load(&Locations::under_home(dir), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.join("home")));
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_clock(Arc::new(clock.clone()))
         .with_ids(Box::new(crate::SequentialIds::with_run(run)));
-    match scan {
+    let config = match scan {
         Some(scan) => config.with_scratch_scan(scan),
+        None => config,
+    };
+    match stop_held {
+        Some(told) => config.with_scratch_stop_held(told),
         None => config,
     }
 }
@@ -71,8 +87,17 @@ type Started = JoinHandle<Result<(HostHandle, HostJoin), clauseo_protocol::HostE
 /// Starts a host whose Scratch scan is held: `Host::start` runs on its own thread, as it returns
 /// only once ready. Returns once the scan is entered and the ready wait armed.
 fn start_held(dir: &Path, clock: &ManualClock) -> (Started, Held) {
+    start_held_with(dir, clock, None)
+}
+
+/// [`start_held`], with shutdown waiting for the scan when `stop_held` is given.
+fn start_held_with(
+    dir: &Path,
+    clock: &ManualClock,
+    stop_held: Option<mpsc::Sender<()>>,
+) -> (Started, Held) {
     let (scan, held) = held_scan();
-    let config = config(dir, clock, 0, Some(scan));
+    let config = config_with(dir, clock, 0, Some(scan), stop_held);
     let started = std::thread::spawn(move || Host::start(config));
     held.entered.recv_timeout(PATIENCE).unwrap();
     let armed = clock.clone();
@@ -151,6 +176,42 @@ fn ready_does_not_wait_for_a_held_scan_and_the_late_scratch_reaches_the_app() {
     join.join().unwrap();
 }
 
+/// No matter in the store under `dir`'s data folder.
+fn no_matter_stored(dir: &Path) {
+    block_on(async {
+        let store = Store::open(StoreOptions::new(dir.join("data")))
+            .await
+            .unwrap();
+        assert!(
+            store.matters().await.unwrap().is_empty(),
+            "a matter was stored"
+        );
+        store.close().await.unwrap();
+    });
+}
+
+/// The scan answers while the host stops, held there by the test seam: the stopping actor
+/// takes the answer, makes nothing, and the shutdown ends.
+#[test]
+fn a_scan_that_answers_while_the_host_stops_makes_no_scratch() {
+    let dir = TempDir::new("scratch-stopping");
+    let clock = clock();
+    let (told, stop_held) = mpsc::channel();
+    let (started, held) = start_held_with(dir.path(), &clock, Some(told));
+    let (host, join) = ready_past_the_wait(started, &clock);
+    let stopping = std::thread::spawn(move || block_on(host.shutdown()));
+    // The actor is stopping, and waits for the scan.
+    stop_held.recv_timeout(PATIENCE).unwrap();
+    assert!(!stopping.is_finished(), "shutdown ended with the scan held");
+
+    held.release.send(()).unwrap();
+    assert!(held.answered.recv_timeout(PATIENCE).unwrap().is_some());
+    stopping.join().unwrap().unwrap();
+    join.join().unwrap();
+    assert!(!scratch_folder(dir.path(), "Scratch").exists());
+    no_matter_stored(dir.path());
+}
+
 #[test]
 fn a_host_stopped_mid_scan_makes_no_scratch() {
     let dir = TempDir::new("scratch-stopped");
@@ -165,14 +226,5 @@ fn a_host_stopped_mid_scan_makes_no_scratch() {
     held.release.send(()).unwrap();
     assert!(held.answered.recv_timeout(PATIENCE).unwrap().is_some());
     assert!(!scratch_folder(dir.path(), "Scratch").exists());
-    block_on(async {
-        let store = Store::open(StoreOptions::new(dir.path().join("data")))
-            .await
-            .unwrap();
-        assert!(
-            store.matters().await.unwrap().is_empty(),
-            "a matter was stored"
-        );
-        store.close().await.unwrap();
-    });
+    no_matter_stored(dir.path());
 }

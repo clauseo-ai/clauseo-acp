@@ -254,6 +254,8 @@ crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code
 crates/settings/src/system/tests.rs windows_without_documents clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_roaming_unchecked clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
 crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
 # Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
 # follows the real user id.
