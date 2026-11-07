@@ -5,7 +5,9 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
-use super::{Filtered, der, file_sddl, filter_roots, is_disallowed, path, pem_block};
+use super::{
+    Filtered, der, file_sddl, filter_roots, is_disallowed, lists_server_auth, path, pem_block,
+};
 use crate::windows::sids::Sid;
 
 /// A self-signed root, `CN=Clauseo Test root`.
@@ -151,6 +153,7 @@ fn a_root_also_in_disallowed_is_dropped() {
             dropped_disallowed: 1,
             dropped_not_self_issued: 0,
             dropped_unparsable: 0,
+            dropped_limited: 0,
         },
         filtered
     );
@@ -250,4 +253,36 @@ fn the_file_descriptor_is_exact() {
 fn the_bundle_lives_in_its_own_folder() {
     let data = std::path::Path::new("data");
     assert_eq!(path(data), data.join("sandbox-ca").join("roots.pem"));
+}
+
+/// `SEQUENCE OF OBJECT IDENTIFIER` for server authentication and code signing.
+pub(super) const SERVER_AND_CODE: &[u8] = &[
+    0x30, 0x14, 0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01, 0x06, 0x08, 0x2B, 0x06,
+    0x01, 0x05, 0x05, 0x07, 0x03, 0x03,
+];
+/// The same for client authentication alone.
+pub(super) const CLIENT_ONLY: &[u8] = &[
+    0x30, 0x0A, 0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02,
+];
+/// The same for server authentication alone.
+pub(super) const SERVER_ONLY: &[u8] = &[
+    0x30, 0x0A, 0x06, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01,
+];
+
+#[test]
+fn a_usage_list_reads_whole_or_not_at_all() {
+    assert_eq!(lists_server_auth(SERVER_AND_CODE), Some(true));
+    assert_eq!(lists_server_auth(SERVER_ONLY), Some(true));
+    assert_eq!(lists_server_auth(CLIENT_ONLY), Some(false));
+    assert_eq!(lists_server_auth(&[0x30, 0x00]), Some(false));
+    for bad in [
+        &[][..],
+        &[0x30],
+        &[0x30, 0x02, 0x06, 0x00],
+        &[0x30, 0x02, 0x04, 0x00],
+        &[0x30, 0x00, 0x00],
+        &SERVER_ONLY[..SERVER_ONLY.len() - 1],
+    ] {
+        assert_eq!(lists_server_auth(bad), None, "{bad:02x?}");
+    }
 }

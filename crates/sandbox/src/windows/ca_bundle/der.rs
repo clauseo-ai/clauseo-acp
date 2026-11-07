@@ -8,6 +8,8 @@ const SEQUENCE: u8 = 0x30;
 const INTEGER: u8 = 0x02;
 /// `BIT STRING`.
 const BIT_STRING: u8 = 0x03;
+/// `OBJECT IDENTIFIER`.
+const OID: u8 = 0x06;
 /// `[0] EXPLICIT`, the version.
 const VERSION: u8 = 0xA0;
 
@@ -114,4 +116,24 @@ pub(super) fn certificate(der: &[u8]) -> Option<Parts<'_>> {
         subject: subject.raw,
         spki: spki.raw,
     })
+}
+
+/// The content of each OID in the DER `SEQUENCE OF OBJECT IDENTIFIER` `encoded`, which must
+/// be exactly that with nothing after it; an empty sequence gives none.
+pub(super) fn oid_list(encoded: &[u8]) -> Option<Vec<&[u8]>> {
+    let (list, after) = expect(encoded, SEQUENCE)?;
+    if !after.is_empty() {
+        return None;
+    }
+    let mut rest = list.content;
+    let mut out = Vec::new();
+    while !rest.is_empty() {
+        let (oid, next) = expect(rest, OID)?;
+        if oid.content.is_empty() {
+            return None;
+        }
+        out.push(oid.content);
+        rest = next;
+    }
+    Some(out)
 }

@@ -7,6 +7,10 @@
 //! - The export (Windows, `store.rs`): the `Root` and `Disallowed` stores, opened read-only, at
 //!   the local machine, its group policy and enterprise locations, and the current user and its
 //!   group policy location; a store that doesn't exist is skipped. Each certificate's DER.
+//! - The store properties (Windows, before the filter): a root whose usages are all turned off
+//!   or leave out server authentication, whose disallowed usages list it, or that has a
+//!   disallowed time is dropped ([`Filtered::dropped_limited`]); a missing property limits
+//!   nothing.
 //! - The filter ([`filter_roots`], every OS): a root also in `Disallowed` (the same DER, or the
 //!   same public key) is dropped; only self-issued certificates (issuer Name bytes equal to the
 //!   subject Name bytes) are kept, so no intermediate is ever trusted as a root; what doesn't parse
@@ -63,6 +67,22 @@ pub struct Filtered {
     pub dropped_not_self_issued: usize,
     /// Dropped: not a certificate `der.rs` can read.
     pub dropped_unparsable: usize,
+    /// Dropped before the filter (Windows export): a root whose store properties limit it for
+    /// server authentication (its usages, disallowed usages or disallowed time). Always 0 from
+    /// [`filter_roots`] itself.
+    pub dropped_limited: usize,
+}
+
+/// Server authentication's OID, as `CertGetEnhancedKeyUsage` writes it.
+pub const SERVER_AUTH: &str = "1.3.6.1.5.5.7.3.1";
+/// [`SERVER_AUTH`]'s content octets in DER.
+const SERVER_AUTH_DER: [u8; 8] = [0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01];
+
+/// Whether the DER usage list `encoded` (`SEQUENCE OF OBJECT IDENTIFIER`, as a certificate
+/// store keeps disallowed usages) lists server authentication; `None` when it doesn't read.
+pub fn lists_server_auth(encoded: &[u8]) -> Option<bool> {
+    let oids = der::oid_list(encoded)?;
+    Some(oids.contains(&&SERVER_AUTH_DER[..]))
 }
 
 /// The roots to trust from the `Root` stores' certificates `roots` and the `Disallowed` stores'
