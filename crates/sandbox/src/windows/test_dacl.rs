@@ -18,8 +18,8 @@ use windows::Win32::Security::Authorization::{
     SetNamedSecurityInfoW,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorLength,
+    OBJECT_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
     UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::core::{BOOL, PCWSTR};
@@ -93,6 +93,34 @@ fn set_dacl(path: &Path, sddl: &str, how: OBJECT_SECURITY_INFORMATION) -> io::Re
         )));
     }
     Ok(())
+}
+
+/// The self-relative descriptor `sddl` describes, as bytes: for a write by handle
+/// (`Object::set`), which propagates nothing.
+#[cfg(test)]
+pub(crate) fn sddl_bytes(sddl: &str) -> io::Result<Vec<u8>> {
+    let text: Vec<u16> = sddl.encode_utf16().chain(once(0)).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR(null_mut());
+    // SAFETY: `text` is NUL-terminated and outlives the call; `descriptor` is a live out-pointer,
+    // and the descriptor it receives is freed by `Local` below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(text.as_ptr()),
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+    }
+    .map_err(io::Error::other)?;
+    let descriptor = Local(descriptor);
+    // SAFETY: the descriptor is valid and self-relative until `descriptor` drops, and the
+    // slice is the length the call gives, so it stays inside it.
+    let bytes = unsafe {
+        let length =
+            usize::try_from(GetSecurityDescriptorLength(descriptor.0)).map_err(io::Error::other)?;
+        std::slice::from_raw_parts(descriptor.0.0.cast::<u8>(), length).to_vec()
+    };
+    Ok(bytes)
 }
 
 /// A descriptor from `ConvertStringSecurityDescriptorToSecurityDescriptorW`, freed on drop.

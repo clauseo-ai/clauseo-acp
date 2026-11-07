@@ -119,6 +119,14 @@ impl Drop for Running {
 /// panics, with what it printed, unless it exits with 0. Its output goes to a file in the
 /// profile, which the user may write and the profile delete takes away.
 pub(super) fn run_in_cmd(user: &TestUser, profile: &Path, script: &str) {
+    let (code, printed) = try_in_cmd(user, profile, script);
+    assert_eq!(code, Some(0), "{script}\n{printed}");
+    eprintln!("as the test user: {script}\n{printed}");
+}
+
+/// [`run_in_cmd`] without the check: its exit code (`None` if it didn't end in time) and what
+/// it printed, stdout and stderr together, read without failing on bytes that aren't UTF-8.
+pub(super) fn try_in_cmd(user: &TestUser, profile: &Path, script: &str) -> (Option<u32>, String) {
     let output = profile.join(OUTPUT);
     let cmd = format!(r"{}\cmd.exe", system32());
     // `/s`: cmd takes what is between the outer quotes as it is.
@@ -129,7 +137,9 @@ pub(super) fn run_in_cmd(user: &TestUser, profile: &Path, script: &str) {
     let running = Running::start(user, &cmd, &line);
     let code = running.exit_code(COMMAND_MS);
     drop(running);
-    let printed = std::fs::read_to_string(&output).unwrap_or_default();
-    assert_eq!(code, Some(0), "{script}\n{printed}");
-    eprintln!("as the test user: {script}\n{printed}");
+    let printed = match std::fs::read(&output) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(error) => format!("(its output can't be read: {error})"),
+    };
+    (code, printed)
 }
