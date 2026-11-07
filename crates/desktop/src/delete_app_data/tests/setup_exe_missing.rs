@@ -1,11 +1,13 @@
 //! What the sources must keep when Windows security removed the sandbox's set-up program
 //! (`clauseo-sandbox-setup.exe`): both installers check for it after installing and say so, the
-//! uninstaller says so when it finds it gone after a set-up, each with a box or, under `/S`, an
-//! exit code of its own that `docs/firm-it.md` lists.
+//! uninstaller says so when it finds its admin copy (the one its removal starts) gone after a
+//! set-up, each with a box or, under `/S`, an exit code of its own that `docs/firm-it.md` lists.
 
 use super::sources::{hook_code, line_with, preuninstall, read};
 
 const SETUP_EXE: &str = "\"$INSTDIR\\clauseo-sandbox-setup.exe\"";
+/// The admin copy in Program Files, the one the uninstaller's removal starts (`hooks.nsh`).
+const ADMIN_EXE: &str = "\"${CLAUSEO_ADMIN_EXE}\"";
 
 /// The post-install macro's code lines.
 fn postinstall(code: &[String]) -> &[String] {
@@ -56,12 +58,12 @@ fn the_uninstaller_says_the_protection_stays_when_the_set_up_program_is_gone() {
     let code = hook_code();
     let body = preuninstall(&code);
     let freed = line_with(body, &["System::Free $R6"]);
-    let check = line_with(body, &["${IfNot} ${FileExists}", SETUP_EXE]);
+    let check = line_with(body, &["${IfNot} ${FileExists}", ADMIN_EXE]);
     let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
     // After the removal's block, before the data folders.
     assert_eq!(freed + 2, check, "{body:?}");
     let expected = [
-        format!("${{IfNot}} ${{FileExists}} {SETUP_EXE}"),
+        format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"),
         "SetRegView 64".to_owned(),
         "ClearErrors".to_owned(),
         "EnumRegValue $R3 HKLM \"SOFTWARE\\Clauseo\\Sandbox\" 0".to_owned(),

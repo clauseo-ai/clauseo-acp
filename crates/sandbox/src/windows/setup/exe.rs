@@ -27,8 +27,9 @@
 //! runs `--set-up` in this process for the lawyer the unelevated installer named and its token
 //! confirms (`Owner::of_installer`).
 //!
-//! After a `--remove` that leaves no pool owner on the machine, the admin copy is removed last
-//! (`admin_remove.rs`), by the removal of the install that placed it only; a failure there is
+//! After a `--remove --uninstall` that leaves no pool owner on the machine, the admin copy is
+//! removed last (`admin_remove.rs`), by the removal of the install that placed it only (the
+//! app's plain `--remove` keeps it, with its record values); a failure there is
 //! logged and the exit stays the removal's, as what is left is only administrators' to change.
 
 use std::ffi::OsString;
@@ -50,7 +51,7 @@ use super::result_file::{self, SetupResult};
 use super::windows_machine::{Names, WindowsMachine};
 use super::{SetupRequest, owner_failure, set_up};
 use crate::windows::NtfsAcl;
-use crate::windows::admin_copy::copy_removable;
+use crate::windows::admin_copy::{Removal, copy_removable};
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::sids::Sid;
 
@@ -100,7 +101,10 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
             };
             run_adopt(Names::production(), &user_install_dir, &target)
         }
-        Mode::Remove { per_machine } => {
+        Mode::Remove {
+            per_machine,
+            uninstall,
+        } => {
             if per_machine && !may_remove_per_machine() {
                 tracing::error!("--per-machine needs an elevated process or LOCAL SYSTEM");
                 return SetupExit::Usage;
@@ -108,7 +112,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
             let invoker = Owner::of_parent(None)
                 .inspect_err(|error| tracing::warn!(%error, "the user who asked isn't known"))
                 .ok();
-            run_remove(Names::production(), invoker, per_machine)
+            run_remove(Names::production(), invoker, per_machine, uninstall)
         }
     }
 }
@@ -209,7 +213,12 @@ fn may_remove_per_machine() -> bool {
 /// `--remove` (`per_machine`: `--per-machine`) on the machine `names` names, for `invoker`,
 /// the verified parent's token user when found: [`remove`] over a [`WindowsRemoval`], its
 /// outcome logged with counts and causes only.
-pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool) -> SetupExit {
+pub(crate) fn run_remove(
+    names: Names,
+    invoker: Option<Owner>,
+    per_machine: bool,
+    uninstall: bool,
+) -> SetupExit {
     let mut acl = match NtfsAcl::new() {
         Ok(acl) => acl,
         Err(error) => {
@@ -223,7 +232,7 @@ pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool
     match remove(&mut machine, &mut acl, per_machine) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
-            remove_admin_copy_if_theirs(&record_key, per_machine, invoker_sid.as_ref());
+            remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
             SetupExit::Removed
         }
         Err(failure) => {
@@ -234,15 +243,26 @@ pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool
 }
 
 /// The admin copy's removal (`admin_remove.rs`), when `admin_copy::copy_removable` says so:
-/// the pool under `record_key` has no owner left, and this removal is the one of the install
-/// that placed the copy (`AdminCopyOwner`): a per-machine one for `machine`, the lawyer's own
+/// the uninstaller's removal (`uninstall`; the app's in-app one never takes it), the pool under
+/// `record_key` has no owner left, and this removal is the one of the install that placed the
+/// copy (`AdminCopyOwner`): a per-machine one for `machine`, the lawyer's own
 /// per-user one (`invoker`) for theirs.
-fn remove_admin_copy_if_theirs(record_key: &str, per_machine: bool, invoker: Option<&Sid>) {
+fn remove_admin_copy_if_theirs(
+    record_key: &str,
+    uninstall: bool,
+    per_machine: bool,
+    invoker: Option<&Sid>,
+) {
     let read = super::record_write::read(record_key)
         .and_then(|pool| Ok((pool, super::record_write::read_admin(record_key)?)));
     match read {
         Ok((pool, (copy_owner, _version))) => {
-            if copy_removable(pool.is_some(), copy_owner.as_ref(), per_machine, invoker) {
+            let removal = Removal {
+                uninstall,
+                per_machine,
+                invoker,
+            };
+            if copy_removable(&removal, pool.is_some(), copy_owner.as_ref()) {
                 if let Err(error) = remove_admin_copy(record_key) {
                     tracing::error!(%error, "the admin copy couldn't be removed in full");
                 }

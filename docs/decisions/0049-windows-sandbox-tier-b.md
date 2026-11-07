@@ -515,14 +515,23 @@ started elevated, by the app or by the uninstall hook.
   the copy, its `.sig` and `staging\` (else `AdminCopyUnsafe`; deny entries are ignored); and its
   SHA-256 must be the recorded one (else `AdminCopyChanged`). Each is `sandbox.blocked`, not
   retryable, with words for IT. A tier-B launch hashes the copy each time.
-- **Removing it.** `--remove`, once the pool has no owner left and only for the install that
-  placed the copy (a per-machine removal for `machine`, the lawyer's own for theirs), deletes the
-  four values, then everything in the folder, then the folder. The running copy is renamed in
-  place to a name nothing starts and scheduled for deletion at restart
-  (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; a reinstall before the restart keeps
-  its new copy. The SYSTEM task that refreshes the copy after an update (`\Clauseo\SandboxRefresh`,
-  staging in `Sandbox\staging\`) is a later change; `remove_refresh_task` is where its removal
-  goes.
+- **The state shows the repair first.** `UserSetup::state` checks the copy before the marker
+  and record: missing (or no recorded hash), changed or unsafe is `SetupState::Blocked` with that
+  cause, at the first open after a declined or silent install; `Needed` only with a verified
+  copy. The state keeps the copy's hash for its file identity (volume, file ID, size, last write)
+  between calls; the launch and the elevated start hash it every time.
+- **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
+  rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
+  `DataDir`, `Removing`), but the copy, its four values and the refresh task stay, so a later
+  in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
+  one-owner rule: the same lawyer sets up again, another user is `OtherAccount`. The
+  uninstaller's hook runs `--remove --uninstall`: all that, then, once the pool has no owner and
+  only for the install that placed the copy (a per-machine removal for `machine`, the lawyer's
+  own for theirs), the four values, the refresh task and staging (`unregister_refresh_task`,
+  `remove_staging`), everything in the folder, then the folder; the key goes once empty. The
+  running copy is renamed in place to a name nothing starts and scheduled for deletion at
+  restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; a reinstall before the
+  restart keeps its new copy.
 - **The copy beside the app stays.** A per-user install still ships
   `clauseo-sandbox-setup.exe` beside `Clauseo.exe`, with its `requireAdministrator` manifest: it
   is the installer's payload and the refresh task's source, and nothing starts it.

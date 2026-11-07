@@ -1,15 +1,19 @@
-//! `UserSetup` on Windows CI, unelevated: the state it reads on a runner nothing set up, and
-//! the admin copy that isn't there, so nothing starts.
+//! `UserSetup` on Windows CI, unelevated: a runner has no admin copy, so the state names it
+//! and nothing starts.
 
 use super::*;
 use crate::Blocked;
 use crate::test_support::TempDir;
 
+/// A runner has no admin copy: the state says so up front, before any set-up is tried.
 #[test]
-fn the_state_on_a_runner_nothing_set_up_is_needed() {
+fn the_state_on_a_runner_with_no_admin_copy_is_admin_copy_missing() {
     let dir = TempDir::new("user-setup-state");
     let setup = UserSetup::new(dir.path().join("data"));
-    assert_eq!(setup.state(), SetupState::Needed);
+    assert_eq!(
+        setup.state(),
+        SetupState::Blocked(Blocked::AdminCopyMissing)
+    );
 }
 
 /// A runner has no admin copy and no recorded hash: every start is refused before

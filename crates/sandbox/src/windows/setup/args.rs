@@ -9,12 +9,16 @@
 //!   lock the admin folder, record the copy's hash and the install folder, then, per user, set
 //!   up. `--owner-sid` and `--data-dir` come from the unelevated installer, the lawyer's own;
 //!   `--adopt` checks the SID against that process's token (`adopt.rs`).
-//! - `--remove [--per-machine]`: the uninstall (`PR4j`). The hook adds `--per-machine` only in
+//! - `--remove [--uninstall] [--per-machine]`: the removal (`PR4j`). The app's in-app removal
+//!   passes `--remove` alone, which keeps the admin copy and its record values, so a later
+//!   set-up runs the verified copy with no installer; the uninstaller's hook adds `--uninstall`,
+//!   which also takes the admin copy away, last. The hook adds `--per-machine` only in
 //!   the per-machine installer, chosen when the installer is built; nothing else ever. Who asked
 //!   comes from the process's recorded parent (D-B2), never from an argument.
 //!
-//! `--per-machine` is the one flag without a value, taken by `--remove` and `--adopt`. Every
-//! other flag takes its value as the next argument (never `--flag=value`). Each flag comes once.
+//! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
+//! are the flags without a value. Every other flag takes its value as the next argument (never
+//! `--flag=value`). Each flag comes once.
 //! Anything else is a [`Usage`] error, and the exe exits `Usage`. `--parent` names the process
 //! that asked; the exe checks it against the parent Windows recorded (D-B2), so it never decides
 //! the owner alone. `--data-dir` is written as admin into the record's `DataDir`, so it is held
@@ -58,6 +62,9 @@ pub enum Mode {
         /// `--per-machine`: a per-machine uninstall, which removes every pool the record names,
         /// whoever asked (D-B9 as ruled). Without it, only the record's owner removes anything.
         per_machine: bool,
+        /// `--uninstall`: the uninstaller's removal, which also deletes the admin copy, its
+        /// record values and the refresh task, last. Without it (the app's), they stay.
+        uninstall: bool,
     },
 }
 
@@ -75,7 +82,7 @@ pub struct AdoptUser {
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
-         --data-dir <path> | --per-machine) | --remove [--per-machine] ({0})"
+         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -89,15 +96,21 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut install_dir = None;
     let mut owner_sid = None;
     let mut per_machine = false;
+    let mut uninstall = false;
     while let Some(flag) = args.next() {
         let flag = flag
             .into_string()
             .map_err(|arg| Usage(format!("{} isn't text", arg.to_string_lossy())))?;
-        if flag == PER_MACHINE {
-            if per_machine {
+        if flag == PER_MACHINE || flag == UNINSTALL {
+            let seen = if flag == PER_MACHINE {
+                &mut per_machine
+            } else {
+                &mut uninstall
+            };
+            if *seen {
                 return Err(Usage(format!("{flag} given twice")));
             }
-            per_machine = true;
+            *seen = true;
             continue;
         }
         let slot = match flag.as_str() {
@@ -128,6 +141,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
         return Err(Usage(format!(
             "{mode} takes no --user-install-dir or --owner-sid"
         )));
+    }
+    if uninstall && mode != "--remove" {
+        return Err(Usage(format!("{mode} takes no {UNINSTALL}")));
     }
     if per_machine && !matches!(mode, "--remove" | "--adopt") {
         return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
@@ -169,11 +185,17 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             refuse("--parent", parent.is_some())?;
             refuse("--data-dir", data_dir.is_some())?;
             refuse("--add", add.is_some())?;
-            Ok(Mode::Remove { per_machine })
+            Ok(Mode::Remove {
+                per_machine,
+                uninstall,
+            })
         }
         other => Err(Usage(format!("unknown mode {other:?}"))),
     }
 }
+
+/// The flag the uninstaller's hook adds to `--remove`, and the app never does.
+pub const UNINSTALL: &str = "--uninstall";
 
 /// The flag the per-machine installer's hook adds to `--remove`.
 pub const PER_MACHINE: &str = "--per-machine";

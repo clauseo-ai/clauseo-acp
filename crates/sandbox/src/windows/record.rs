@@ -102,6 +102,12 @@ pub(crate) fn admin_copy_sha256() -> Result<Option<String>, RecordError> {
     read_string(RECORD_KEY, w!("AdminCopySha256"))
 }
 
+/// The admin copy's owner as `--adopt` recorded it (`AdminCopyOwner`: a SID, or `machine`);
+/// `Ok(None)` when the key or the value is missing.
+pub(crate) fn admin_copy_owner() -> Result<Option<String>, RecordError> {
+    read_string(RECORD_KEY, w!("AdminCopyOwner"))
+}
+
 /// The `REG_SZ` `value` of `HKLM\<subkey>`, read in the 64-bit view (`RRF_SUBKEY_WOW6464KEY`,
 /// `RegGetValueW`'s `KEY_WOW64_64KEY`), up to its first NUL. Missing key or value: `Ok(None)`.
 /// Another type, a `REG_EXPAND_SZ` included (refused unexpanded, `RRF_NOEXPAND`):
