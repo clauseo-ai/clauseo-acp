@@ -482,3 +482,62 @@ fn a_stale_set_up_needs_set_up_and_a_failed_permit_fails_the_launch() {
         "the sandbox couldn't permit this agent's network (FwpmFilterAdd0 failed, error 0x5)"
     );
 }
+
+#[test]
+fn each_firewall_trouble_is_named_for_firm_it() {
+    use super::spec::{FIREWALL_UNDER_POLICY, FirewallTrouble};
+    for code in [0x8007_0426, 0x8007_06D9, 0x8007_06BA] {
+        assert_eq!(
+            FirewallTrouble::from_call("x", code),
+            FirewallTrouble::ServiceStopped
+        );
+    }
+    let com = FirewallTrouble::from_call("Rules::Add", 0x8000_4005);
+    assert_eq!(
+        com.words(),
+        "a firewall call failed (Rules::Add, error 0x80004005), so the second \
+         layer of Clauseo's network protection is off; its network filters still enforce"
+    );
+    let policy = FirewallTrouble::GroupPolicy("state 1".to_owned()).words();
+    assert!(policy.starts_with(FIREWALL_UNDER_POLICY) && policy.contains("AllowLocalPolicyMerge"));
+    assert!(
+        FirewallTrouble::ServiceStopped
+            .words()
+            .contains("(mpssvc) isn't running")
+    );
+    assert!(
+        FirewallTrouble::TurnedOff
+            .words()
+            .contains("another firewall product")
+    );
+    for trouble in [
+        FirewallTrouble::ServiceStopped,
+        FirewallTrouble::TurnedOff,
+        com,
+    ] {
+        assert!(
+            trouble.words().contains("network filters still enforce"),
+            "{trouble:?}"
+        );
+    }
+}
+
+#[test]
+fn the_base_filtering_engine_down_is_named() {
+    use super::check::WfpError;
+    for code in [1753, 1722, 1062, 0x8007_06D9] {
+        let down = WfpError {
+            call: "FwpmEngineOpen0",
+            code,
+        };
+        assert!(
+            down.cause()
+                .starts_with("the Base Filtering Engine service (BFE) isn't running")
+        );
+    }
+    let other = WfpError {
+        call: "FwpmFilterAdd0",
+        code: 5,
+    };
+    assert_eq!(other.cause(), "FwpmFilterAdd0 failed (error 0x5)");
+}
