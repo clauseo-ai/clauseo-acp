@@ -117,6 +117,15 @@ fn codex_never_produces_open_url() {
         eventually("the poll ran", || {
             !fx.codex_runs(&["login", "status"]).is_empty()
         });
+        // The poll ended (the next one is armed), so the only run Cancel waits for is the login.
+        eventually("the next poll is armed", || {
+            fx.timer
+                .armed()
+                .iter()
+                .filter(|wait| **wait == POLL)
+                .count()
+                >= 2
+        });
         agents.cancel_sign_in(&codex()).unwrap();
         if method == Method::Browser {
             // The test's callback port is 0, which no login owns: no `/cancel`, so the run is
