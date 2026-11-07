@@ -19,6 +19,9 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use clauseo_protocol::AgentId;
 
 use crate::fileid::same_file;
 use crate::signin::Found;
@@ -33,6 +36,20 @@ const LAWYER_CODEX: &str = ".codex";
 /// The login file in a Codex home (Clauseo's, or a matter's state folder in stage C).
 fn home_file(codex_home: &Path) -> PathBuf {
     codex_home.join(LOGIN_FILE)
+}
+
+/// Tests only: the login file's path in `codex_home`, so a test elsewhere in `src` need not name
+/// it.
+#[cfg(test)]
+pub(crate) fn login_file_for_tests(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
+/// Tests only: writes a dummy (never a credential) at `path`, making its folder.
+#[cfg(test)]
+pub(crate) fn write_for_tests(path: &Path, contents: &[u8]) {
+    crate::write::create_dir_all(path.parent().unwrap()).unwrap();
+    crate::write::write_atomic(path, contents).unwrap();
 }
 
 /// The lawyer's login file, `<lawyer_home>/.codex/<login file>`.
@@ -145,6 +162,62 @@ pub fn unlink_reused_login(codex_home: &Path) -> io::Result<()> {
 /// lawyer's file.
 pub(crate) fn remove_home_login(codex_home: &Path) -> io::Result<()> {
     crate::write::remove_file(&home_file(codex_home))
+}
+
+/// When [`remove_empty_home_login`] looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Empty {
+    /// Right after a kill of a run that used the home: an empty file is that run's cut save.
+    AfterKill,
+    /// Before a status read: an empty file counts only when untouched since `cutoff`, so a
+    /// Codex writing it now (it truncates, then writes) is never cut short.
+    AtStatus {
+        /// The newest modification time an empty file may have.
+        cutoff: SystemTime,
+    },
+}
+
+/// Removes the login file of `codex_home` (a run's own `CODEX_HOME`) when, and only when, a stat
+/// (never an open; on Windows `symlink_metadata` opens a handle with access 0) says it is a file
+/// of 0 bytes, with `when`'s rule; logs fixed words with `agent`. Never while the file is the
+/// lawyer's, reused ([`codex_login_shared`] with `lawyer_home`), and never when the lawyer's home
+/// folder is not known, since that cannot then be told. Returns whether it was removed.
+pub(crate) fn remove_empty_home_login(
+    codex_home: &Path,
+    lawyer_home: Option<&Path>,
+    when: Empty,
+    agent: &AgentId,
+) -> bool {
+    let Some(lawyer_home) = lawyer_home else {
+        return false;
+    };
+    if codex_login_shared(codex_home, lawyer_home) {
+        return false;
+    }
+    let file = home_file(codex_home);
+    let Ok(meta) = std::fs::symlink_metadata(&file) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() != 0 {
+        return false;
+    }
+    if let Empty::AtStatus { cutoff } = when
+        && !meta.modified().is_ok_and(|modified| modified <= cutoff)
+    {
+        return false;
+    }
+    if crate::write::remove_file(&file).is_err() {
+        return false;
+    }
+    match when {
+        Empty::AfterKill => {
+            tracing::warn!(%agent, "codex auth.json was empty after a forced stop; removed");
+        }
+        Empty::AtStatus { .. } => {
+            tracing::warn!(%agent, "codex auth.json was empty at a status read; removed");
+        }
+    }
+    true
 }
 
 /// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of

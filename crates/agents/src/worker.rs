@@ -13,9 +13,12 @@
 //!
 //! Quitting (#386): the job threads are counted as they start and end, and
 //! [`Agents::shutdown`] cancels every job and waits, within a bound, for the count to reach 0.
-//! A job's thread drops its child's handle as it sees the cancel, which kills the child's tree
-//! (npm leads its own process group), so an ended thread has left no child. Once shut down or
-//! dropped, no job starts.
+//! An install's thread drops its child's handle as it sees the cancel, which kills the child's
+//! tree (npm leads its own process group). A sign-in job is stopped gracefully instead, since a
+//! Codex run killed while it saves its login file leaves the file cut (`signin::stopping`): its
+//! runs end as their kinds allow, and what still runs [`KILL_MARGIN`] before the bound is killed,
+//! so an ended thread has left no child. Once shut down or dropped, no job starts; the drop kills
+//! at once.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -35,9 +38,14 @@ use crate::{node, receipt, sysproxy};
 
 mod shared;
 mod signin;
+mod stop;
 
 pub(crate) use self::signin::SigninHub;
 use self::signin::SigninStart;
+
+/// How long before `shutdown`'s bound the sign-in runs still going are killed: the time their
+/// threads then take to end, inside the bound.
+pub(crate) const KILL_MARGIN: Duration = Duration::from_millis(500);
 
 /// The agents' installs. Cheap calls: each hands its work to the worker thread.
 #[derive(Debug)]
@@ -177,24 +185,43 @@ impl Agents {
         self.shared.lock().tries.get(agent).copied()
     }
 
-    /// Stops everything for the app's quit: no job starts from now on, every install and
-    /// sign-in job is cancelled (each kills its child's tree as it sees it), then their threads
-    /// are waited for, at most `wait`. Returns whether every one ended in time; a thread still
-    /// running is left to end by itself. Blocks, so it runs off any UI thread.
+    /// Stops everything for the app's quit, within `wait`: no job starts from now on, and the
+    /// install job is cancelled (it kills its child's tree as it sees it). Every sign-in job is
+    /// stopped gracefully: each run ends as its kind allows (a status or a logout is awaited,
+    /// Codex's browser login gets `GET /cancel`, an app-server its stdin closed), and a job still
+    /// running [`KILL_MARGIN`] before `wait` ends is killed, so its thread can end inside `wait`.
+    /// Then the threads are waited for to the end of `wait`. Returns whether every one ended in
+    /// time; a thread still running is left to end by itself. Blocks, so it runs off any UI
+    /// thread.
     pub fn shutdown(&self, wait: Duration) -> bool {
-        self.stop();
-        self.shared.wait_for_jobs(wait)
+        self.close_installs();
+        let stopped = self.shared.signin.stop_all_gracefully();
+        if stopped.is_empty() {
+            return self.shared.wait_for_jobs(wait);
+        }
+        // The jobs wind down side by side: one wait for them all, then each still going dies.
+        if self.shared.wait_for_jobs(wait.saturating_sub(KILL_MARGIN)) {
+            return true;
+        }
+        for job in &stopped {
+            job.wait_or_kill(Duration::ZERO);
+        }
+        self.shared.wait_for_jobs(KILL_MARGIN)
     }
 
-    /// Closes the worker to new jobs and cancels every running one, install and sign-ins.
-    fn stop(&self) {
-        {
-            let mut inner = self.shared.lock();
-            inner.closed = true;
-            if let Some(running) = inner.current.take() {
-                running.cancel.cancel();
-            }
+    /// Closes the worker to new jobs and cancels the install job.
+    fn close_installs(&self) {
+        let mut inner = self.shared.lock();
+        inner.closed = true;
+        if let Some(running) = inner.current.take() {
+            running.cancel.cancel();
         }
+    }
+
+    /// Closes the worker to new jobs and cancels every running one at once, install and
+    /// sign-ins.
+    fn stop(&self) {
+        self.close_installs();
         self.shared.signin.stop_all();
     }
 
@@ -244,8 +271,12 @@ impl Agents {
         self.start_signin(start)
     }
 
-    /// Cancels `agent`'s sign-in run, or its queued sign-in: a child's tree is killed and the
-    /// state becomes `Failed { code: Cancelled }`. Refused when no sign-in is going or queued.
+    /// Cancels `agent`'s sign-in run, or its queued sign-in, and returns at once. The run ends as
+    /// its kind allows (Codex's browser login gets `GET /cancel`; a status is awaited) and is
+    /// killed 2 s on if it is still going; Codex's device-code login and Claude's login are killed
+    /// at once. Then, for Codex, a status check says how it stands (its `login` deleted the
+    /// login it replaced): the state becomes `Failed { code: Cancelled }` while signed out.
+    /// Refused when no sign-in is going or queued.
     pub fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.shared.signin.cancel(agent)
     }

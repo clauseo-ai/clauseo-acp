@@ -7,8 +7,9 @@
 //! an empty Clauseo folder: [`read_as`]), plus the same `-c` overrides `limits`' reader uses
 //! (`crates/limits/src/readers/codex.rs`, `CODEX_OVERRIDES`): with plugins on, an app-server
 //! starts a git sync into its home at start-up (#203). The talk is `initialize`, then
-//! `account/read`; then the client is dropped, so stdin closes, and the run's tree is killed when
-//! it ends, at its 20 s limit, or on Cancel.
+//! `account/read`; then stdin is closed and the app-server's exit awaited (it may be writing the
+//! login file); its tree is killed at its 20 s limit, on a stop at once, or past the lawyer's
+//! grace, and a 0-byte login file it left is removed.
 //!
 //! Only a `ChatGPT` account is a sign-in this card shows ([`AccountRead::Chatgpt`]): an API key,
 //! Amazon Bedrock or an account kind this build does not know is not "Signed in to `ChatGPT`".
@@ -16,15 +17,20 @@
 use std::ffi::OsString;
 use std::path::Path;
 use std::pin::pin;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use clauseo_codex_appserver::{ClientInfo, GetAccountResponse, connect};
-use clauseo_process::{LaunchSpec, Launched, Timer};
-use futures::future::{Either, join, select};
+use clauseo_process::{AgentStdin, LaunchSpec, Launched, Timer};
+use futures::FutureExt as _;
+use futures::future::join;
+use futures::io::{AsyncWrite, AsyncWriteExt as _};
 
-use crate::cancel::Cancel;
+use crate::cancel::{Cancel, Stop};
 use crate::signin::env::{RunKind, codex_store_args};
 use crate::signin::job::SigninJob;
+use crate::signin::stopping::{self, OnStop, Stopping};
 use crate::status::{Identity, codex_identity};
 
 /// The most the app-server may take to answer: a cold start measured 3.7 s on a Windows VM.
@@ -91,14 +97,33 @@ pub(crate) fn app_server_args(kind: RunKind<'_>) -> Vec<OsString> {
 
 /// The app-server's answer to `initialize` then `account/read`: the response or the call's
 /// error; `None` when it did not start, or was cut short by its limit or by Cancel.
+///
+/// However the talk ends (answered, or the job stopped gracefully) the app-server's stdin is
+/// closed and its exit awaited, since it may be writing Codex's login file (a token refresh): an
+/// idle one exits at once. It is killed only by its limit, the stop at once (the quit's bound)
+/// or the lawyer's grace; after such a kill a 0-byte login file in its home is removed
+/// (`stopping::after_kill`).
 async fn account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> Option<Result<GetAccountResponse, clauseo_codex_appserver::Error>> {
+    if cancel.is_cancelled() {
+        return None;
+    }
     let mut spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
     spec.cwd = cwd.to_path_buf();
+    if let Some(home) = stopping::codex_home_of(&spec.env) {
+        stopping::before_status(
+            &home,
+            spec.lawyer_home.as_deref(),
+            job.now(),
+            &job.ticket.agent,
+        );
+    }
+    let env = spec.env.clone();
+    let lawyer = spec.lawyer_home.clone();
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
     argv.push(spec.script.into_os_string());
     argv.extend(spec.args);
@@ -107,30 +132,117 @@ async fn account<T: Timer + Send + Sync>(
         stdin,
         stdout,
         stderr,
-        handle,
+        mut handle,
         ..
     } = job.launcher.launch(&launch).ok()?;
-    let talk = pin!(async move {
-        let (client, notifications, driver) = connect(stdin, stdout);
+    let stdin = SharedStdin(Arc::new(Mutex::new(stdin)));
+    let writer = stdin.clone();
+    let talk = async move {
+        let (client, notifications, driver) = connect(writer, stdout);
         drop(notifications);
         let calls = async move {
             client.initialize(ClientInfo::clauseo()).await?;
             client.account().await
         };
         Some(join(driver, calls).await.1)
-    });
-    // stderr is drained and never read.
-    let errs = pin!(async move {
-        drop(stderr.drain().await);
-        futures::future::pending::<()>().await;
-    });
-    let cancelled = pin!(cancel.cancelled());
-    let limit = pin!(job.timer.after(spec.limit));
-    let answered = match select(talk, select(errs, select(cancelled, limit))).await {
-        Either::Left((answered, _)) => answered,
-        Either::Right(_) => None,
     };
-    // Kills the app-server's tree if it is still there.
+    // stderr is drained and never read.
+    let mut errs = pin!(
+        async move {
+            drop(stderr.drain().await);
+            futures::future::pending::<()>().await;
+        }
+        .fuse()
+    );
+    let mut limit = pin!(job.timer.after(spec.limit).fuse());
+    let answered = {
+        let mut talk = pin!(talk.fuse());
+        let mut cancelled = pin!(cancel.cancelled().fuse());
+        futures::select! {
+            answered = talk => answered,
+            () = errs => None,
+            () = cancelled => None,
+            () = limit => {
+                drop(handle);
+                stopping::after_kill(APP_SERVER_STOP, &env, lawyer.as_deref(), &job.ticket.agent);
+                return None;
+            }
+        }
+    };
+    // The talk is gone: close stdin, then wait for the exit.
+    drop(stdin.clone().close().await);
+    let grace = cancel.how().and_then(Stop::grace);
+    let mut graced = pin!(
+        async {
+            match grace {
+                Some(grace) => job.timer.after(grace).await,
+                None => futures::future::pending::<()>().await,
+            }
+        }
+        .fuse()
+    );
+    let ended = {
+        let mut exited = pin!(handle.exited().fuse());
+        let mut killed = pin!(cancel.killed().fuse());
+        futures::select! {
+            _ = exited => true,
+            // Never ends: it only keeps stderr drained while the exit is awaited.
+            () = errs => false,
+            () = killed => false,
+            () = graced => false,
+            () = limit => false,
+        }
+    };
+    // Kills what is left of the app-server's tree.
     drop(handle);
+    if !ended {
+        if let Some(how) = cancel.how() {
+            tracing::warn!("{}: codex app-server killed at the bound", how.word());
+        }
+        stopping::after_kill(APP_SERVER_STOP, &env, lawyer.as_deref(), &job.ticket.agent);
+    }
     answered
+}
+
+/// The app-server's stop: its stdin closed and its exit awaited; it may write the login file.
+const APP_SERVER_STOP: OnStop = OnStop {
+    how: Stopping::Wait,
+    what: "codex app-server",
+    writes: true,
+};
+
+/// The app-server's stdin, shared by the client's driver and this module, so the module can
+/// close it once the talk is over (dropping `AgentStdin` alone does not close the pipe: the
+/// handle holds it too).
+#[derive(Clone)]
+struct SharedStdin(Arc<Mutex<AgentStdin>>);
+
+impl SharedStdin {
+    fn lock(&self) -> std::sync::MutexGuard<'_, AgentStdin> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl AsyncWrite for SharedStdin {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut *self.lock()).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut *self.lock()).poll_flush(cx)
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut *self.lock()).poll_close(cx)
+    }
 }

@@ -12,6 +12,8 @@ use clauseo_agents::{
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
+#[cfg(unix)]
+use crate::codex::CANCEL_GRACE;
 use crate::support::{Events, Fixture, Launch, codex, now};
 #[cfg(unix)]
 use crate::support::{claude, eventually};
@@ -407,6 +409,8 @@ fn cancelling_use_it_during_its_account_read_makes_no_link() {
     agents.use_found_login(&codex()).unwrap();
     until_app_servers(&fx, before + 1);
     agents.cancel_sign_in(&codex()).unwrap();
+    // The stalled app-server ignores its closed stdin: killed when the grace passes.
+    fx.timer.fire(CANCEL_GRACE);
     let (_, last) = events.until_end();
     assert_eq!(
         last,
@@ -481,6 +485,7 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
     agents.use_found_login(&codex()).unwrap();
     until_app_servers(&fx, before + 1);
     agents.cancel_sign_in(&codex()).unwrap();
+    fx.timer.fire(CANCEL_GRACE);
     assert_eq!(
         events.state(),
         SigninState::Failed {

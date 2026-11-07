@@ -361,6 +361,8 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
         fx.runs_of("status").len() > before
     });
     agents.cancel_sign_in(&claude()).unwrap();
+    // A status is awaited on Cancel; this one never answers, so it is killed past the grace.
+    fx.timer.fire(std::time::Duration::from_secs(2));
     assert_eq!(
         events.state(),
         SigninState::Failed {
