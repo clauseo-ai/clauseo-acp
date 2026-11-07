@@ -15,12 +15,18 @@
 //!   `ui-effect clipboard-write failed <call> <code>` (the call that failed, `GetLastError`);
 //!   with `atom`, `ui-info atom <name> <n>` (`GlobalFindAtomW`, 0 when none). `token` prints
 //!   all but the atom line too.
-//! - `ui-control`: the harness's positive control, started as the lawyer under the agent's token
-//!   shape (Low, restricted) on the control station's `Default` desktop, outside the runner's
-//!   job: `ui-control station <name>`, `ui-control integrity <sid>`, `ui-control restricted
-//!   <n>`, `ui-control ui-limits <hex>` (information), then `ui-control desktop-create <code>`
-//!   and `ui-control clipboard-write ok` or `ui-control clipboard-write failed <call> <code>`,
-//!   the same two calls as `job-ui`'s effect.
+//! - `ui-control [sa]`: the harness's positive control, started under one of the control
+//!   tokens on the control station's `Default` desktop, outside the runner's job: `ui-control
+//!   station <name>`, `ui-control user <sid>`, `ui-control integrity <sid>`, `ui-control
+//!   restricted <n>`, `ui-control ui-limits <hex>` (information), `ui-control desktop-sa
+//!   default|explicit`, then `ui-control desktop-create <code>` and `ui-control clipboard-write
+//!   ok` or `ui-control clipboard-write failed <call> <code>`, the same two calls as `job-ui`'s
+//!   effect. With `sa`, `CreateDesktopW` gets explicit `SECURITY_ATTRIBUTES` whose DACL names
+//!   the token's user and `SYSTEM`.
+//! - `ui-relay <desktop> <desktop user> <ms>`: the control's closest variant, started by the
+//!   harness as a pool user: makes the agent's token from its own as the inner runner does and
+//!   starts `probe ui-control` with it on `<desktop>`, waiting up to `<ms>`; prints the
+//!   child's lines, then `ui-relay exit <code or None>`, or `ui-relay error <why>`.
 //! - `clipboard-read`: `clipboard-read ok <text>` or `clipboard-read error <why>`.
 //! - `clipboard-write <text>`: `clipboard-write ok` or `clipboard-write error <why>`.
 //! - `find-atom <name>`: `atom <n>`, 0 when `GlobalFindAtomW` finds none.
@@ -31,6 +37,9 @@
 use std::io::BufRead as _;
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
+
+use clauseo_sandbox::windows::sids::Sid;
+use clauseo_sandbox::windows::token::default_dacl;
 
 use super::sys::{say, sleep, start};
 use super::{ui, win};
@@ -81,9 +90,16 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         "ui-control" => {
-            ui_control();
+            ui_control(rest.first().is_some_and(|a| a == "sa"));
             ExitCode::SUCCESS
         }
+        "ui-relay" => match rest {
+            [desktop, user, ms] => {
+                ui_relay(desktop, user, ms);
+                ExitCode::SUCCESS
+            }
+            _ => usage("ui-relay <desktop> <desktop user> <ms>"),
+        },
         "clipboard-read" => {
             match ui::read_text() {
                 Ok(text) => say(&format!("clipboard-read ok {text}")),
@@ -127,7 +143,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         },
         _ => usage(
             "token|wait|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
-             ui-control|clipboard-read|clipboard-write|find-atom|runners|breakaway|handles|desktop",
+             ui-control|ui-relay|clipboard-read|clipboard-write|find-atom|runners|breakaway|\
+             handles|desktop",
         ),
     }
 }
@@ -177,16 +194,20 @@ fn job_ui(atom: Option<&str>) {
 }
 
 /// The positive control's two calls, as `job_ui` makes them, and what tells its token and
-/// station apart (information for the harness, which checks the shape).
-fn ui_control() {
+/// station apart (information for the harness, which checks the shape). With `sa`,
+/// `CreateDesktopW` gets a DACL of the token's user and `SYSTEM`.
+fn ui_control(sa: bool) {
     match super::win_desk::own_station_name() {
         Ok(name) => say(&format!("ui-control station {name}")),
         Err(code) => say(&format!("ui-control station error {code}")),
     }
+    let mut user = None;
     match win::own_token() {
         Ok(facts) => {
+            say(&format!("ui-control user {}", facts.user));
             say(&format!("ui-control integrity {}", facts.integrity));
             say(&format!("ui-control restricted {}", facts.restricted.len()));
+            user = Some(facts.user);
         }
         Err(error) => say(&format!("ui-control token error {}", code(&error))),
     }
@@ -194,16 +215,51 @@ fn ui_control() {
         Ok(limits) => say(&format!("ui-control ui-limits {limits:#x}")),
         Err(error) => say(&format!("ui-control ui-limits error {}", code(&error))),
     }
-    say(&format!(
-        "ui-control desktop-create {}",
-        super::win_desk::create_desktop_code()
-    ));
+    let created = match (sa, user) {
+        (false, _) => {
+            say("ui-control desktop-sa default");
+            super::win_desk::create_desktop_code().to_string()
+        }
+        (true, Some(user)) => {
+            say("ui-control desktop-sa explicit");
+            let sddl = format!("D:(A;;GA;;;{user})(A;;GA;;;SY)");
+            super::win_desk::create_desktop_code_sa(&sddl)
+                .map_or_else(|c| format!("sddl-error {c}"), |c| c.to_string())
+        }
+        (true, None) => "no-user".to_owned(),
+    };
+    say(&format!("ui-control desktop-create {created}"));
     match ui::write_failed("clauseo-ui-control") {
         Ok(()) => say("ui-control clipboard-write ok"),
         Err(failed) => say(&format!(
             "ui-control clipboard-write failed {} {}",
             failed.call, failed.code
         )),
+    }
+}
+
+/// Run as the pool user: the agent's token made from its own (the inner runner's recipe, with
+/// the agent's default DACL for `desktop_user`), and `probe ui-control` under it on `desktop`.
+fn ui_relay(desktop: &str, desktop_user: &str, ms: &str) {
+    let made = (|| {
+        let own = win::own_token().map_err(|e| format!("own token: {}", code(&e)))?;
+        let pool = Sid::parse(&own.user).map_err(|e| e.to_string())?;
+        let lawyer = Sid::parse(desktop_user).map_err(|e| e.to_string())?;
+        let dacl = default_dacl(&pool, &lawyer);
+        let (token, _) = super::win_ctl::shaped_token(super::win_ctl::Shape::Agent, Some(&dacl))?;
+        let exe = std::env::current_exe().map_err(|e| format!("current_exe: {}", code(&e)))?;
+        let cwd = std::env::current_dir().map_err(|e| format!("current_dir: {}", code(&e)))?;
+        let limit = Duration::from_millis(ms.parse().unwrap_or(10_000));
+        super::win_ctl::run_as(&token, desktop, &exe, &["probe", "ui-control"], &cwd, limit)
+    })();
+    match made {
+        Ok(ran) => {
+            for line in &ran.lines {
+                say(line);
+            }
+            say(&format!("ui-relay exit {:?}", ran.code));
+        }
+        Err(why) => say(&format!("ui-relay error {why}")),
     }
 }
 

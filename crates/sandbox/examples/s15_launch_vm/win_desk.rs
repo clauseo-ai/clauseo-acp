@@ -247,11 +247,42 @@ unsafe extern "system" {
 /// The code `CreateDesktopW` gives for a new desktop on this process's own window station; 0
 /// when it was made (it is closed at once). The job's `DESKTOP` UI limit refuses it with 5.
 pub(crate) fn create_desktop_code() -> u32 {
+    create_desktop_with(std::ptr::null())
+}
+
+/// As [`create_desktop_code`], with explicit `SECURITY_ATTRIBUTES` whose descriptor is `sddl`
+/// (the control's variant (c)); `Err` with the code when `sddl` doesn't convert.
+pub(crate) fn create_desktop_code_sa(sddl: &str) -> Result<u32, u32> {
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: the text is a live HSTRING; `descriptor` is a live out-pointer, freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from(sddl),
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+    }
+    .map_err(|e| code_of(&e))?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(0),
+        lpSecurityDescriptor: descriptor.0,
+        bInheritHandle: false.into(),
+    };
+    let code = create_desktop_with((&raw const attributes).cast());
+    // SAFETY: allocated by the conversion with LocalAlloc, freed once, after its last use.
+    unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    Ok(code)
+}
+
+/// [`create_desktop_code`]'s call, with `attributes` (null, or a live `SECURITY_ATTRIBUTES`).
+fn create_desktop_with(attributes: *const std::ffi::c_void) -> u32 {
     let name: Vec<u16> = format!("ClauseoS15Fx-{}", std::process::id())
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    // SAFETY: the name is NUL-terminated and outlives the call; no device, mode or attributes.
+    // SAFETY: the name is NUL-terminated and outlives the call; no device or mode; `attributes`
+    // is null or live for the call (the caller's promise).
     let desktop = unsafe {
         CreateDesktopW(
             name.as_ptr(),
@@ -259,7 +290,7 @@ pub(crate) fn create_desktop_code() -> u32 {
             std::ptr::null(),
             0,
             DESKTOP_READOBJECTS.0,
-            std::ptr::null(),
+            attributes,
         )
     };
     if desktop.is_null() {
@@ -271,8 +302,8 @@ pub(crate) fn create_desktop_code() -> u32 {
 }
 
 /// The control station: the window station `name`, made as `runner/desktop.rs` makes
-/// `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `user_sid`
-/// and `SYSTEM`, labelled Low), and its desktop `Default` (`GENERIC_ALL`, the same descriptor),
+/// `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `SYSTEM`
+/// and `sids`, labelled Low), and its desktop `Default` (`GENERIC_ALL`, the same descriptor),
 /// made with this process switched to it for the call only. Both stay open while it lives, so the
 /// control process can start on `<name>\Default`; closed on drop.
 pub(crate) struct ControlStation {
@@ -282,8 +313,14 @@ pub(crate) struct ControlStation {
 
 impl ControlStation {
     /// Makes the station and its desktop; the call that failed and its code otherwise.
-    pub(crate) fn open(name: &str, user_sid: &str) -> Result<ControlStation, (&'static str, u32)> {
-        let sddl = format!("D:(A;;GA;;;{user_sid})(A;;GA;;;SY)S:(ML;;NW;;;LW)");
+    pub(crate) fn open(name: &str, sids: &[&str]) -> Result<ControlStation, (&'static str, u32)> {
+        let aces = sids.iter().fold(String::new(), |mut aces, sid| {
+            for part in ["(A;;GA;;;", sid, ")"] {
+                aces.push_str(part);
+            }
+            aces
+        });
+        let sddl = format!("D:(A;;GA;;;SY){aces}S:(ML;;NW;;;LW)");
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: the text is a live HSTRING; `descriptor` is a live out-pointer, freed below.
         unsafe {

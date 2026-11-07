@@ -1,9 +1,11 @@
-//! The harness's positive control for the UI-limit effect, of the agent's kind: a Low restricted
-//! token made from the harness's own (the lawyer's) token the way `src/windows/token/os.rs`
-//! makes the agent's from the runner's ([`control_token`]), and a process started with it on the
-//! control station's desktop ([`run_as`]), outside any job of ours. The example can't call the
-//! crate's `pub(in crate::windows)` token code, so the calls are mirrored here. A restricted copy
-//! of the caller's own primary token is one `CreateProcessAsUserW` may assign with no privilege.
+//! The harness's positive control for the UI-limit effect: control tokens made from the caller's
+//! own token, the agent's shape the way `src/windows/token/os.rs` makes the agent's from the
+//! runner's and its looser variants ([`shaped_token`]), and a process started with one on the
+//! control station's desktop ([`run_as`]), outside any job of ours. The caller is the harness
+//! (the lawyer), or the relay it starts as a pool user (`probe ui-relay`). The example can't call
+//! the crate's `pub(in crate::windows)` token code, so the calls are mirrored here. A restricted
+//! copy of the caller's own primary token is one `CreateProcessAsUserW` may assign with no
+//! privilege.
 #![expect(unsafe_code, reason = "FFI to the token, pipe and process calls")]
 
 use std::ffi::c_void;
@@ -20,10 +22,10 @@ use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::{
-    ACL, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetLengthSid, GetSecurityDescriptorDacl,
-    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT,
-    TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
-    TokenDefaultDacl, TokenIntegrityLevel,
+    ACL, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetLengthSid,
+    GetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation,
+    TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE,
+    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenDefaultDacl, TokenIntegrityLevel,
 };
 use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
@@ -78,28 +80,30 @@ impl Drop for LocalSid {
     }
 }
 
-/// The control token, the agent's shape made from the harness's own token:
-/// `CreateRestrictedToken(own, DISABLE_MAX_PRIVILEGE, deny-only {the logon SID}, restricting
-/// {own user, S-1-5-12, S-1-5-32-545, S-1-1-0})`, `TokenIntegrityLevel` [`LOW`], and
-/// `TokenDefaultDacl` `D:(A;;GA;;;<own user>)(A;;GA;;;SY)`. The token and the harness's user's
-/// SID; the call that failed and its code otherwise.
-pub(crate) fn control_token() -> Result<(Owned, String), String> {
+/// Which control token [`shaped_token`] makes from the caller's own token, closest to the agent
+/// first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shape {
+    /// The agent's: `CreateRestrictedToken(own, DISABLE_MAX_PRIVILEGE, deny-only {the logon
+    /// SID}, restricting {own user, S-1-5-12, S-1-5-32-545, S-1-1-0})`, then [`LOW`].
+    Agent,
+    /// The same, left at the caller's own integrity level (no Low).
+    NotLow,
+    /// The same, Low, with no restricting SIDs.
+    Unrestricted,
+    /// A plain copy: `CreateRestrictedToken(own, 0)` with nothing removed, denied or restricted.
+    Plain,
+}
+
+/// The control token `shape` names, made from this process's own token, with `TokenDefaultDacl`
+/// `dacl` (`D:(A;;GA;;;<own user>)(A;;GA;;;SY)` when `None`; none set for [`Shape::Plain`]).
+/// A token made so from the caller's own is one `CreateProcessAsUserW` may assign with no
+/// privilege. The token and the caller's user's SID; the call that failed and its code otherwise.
+pub(crate) fn shaped_token(shape: Shape, dacl: Option<&str>) -> Result<(Owned, String), String> {
     let facts = win::own_token().map_err(|e| {
         let code = e.raw_os_error().unwrap_or(-1);
-        format!("GetTokenInformation (the harness's token) gave {code}")
+        format!("GetTokenInformation (the caller's token) gave {code}")
     })?;
-    let logon: Vec<&str> = facts
-        .groups
-        .iter()
-        .filter(|(_, attributes)| attributes & LOGON_ID == LOGON_ID)
-        .map(|(sid, _)| sid.as_str())
-        .collect();
-    let [logon] = logon.as_slice() else {
-        return Err(format!(
-            "GetTokenInformation(TokenGroups) gave {} logon SIDs, not one",
-            logon.len()
-        ));
-    };
     let mut base = HANDLE::default();
     // `TOKEN_ADJUST_DEFAULT` too: the restricted token takes this handle's rights, and lowering
     // its integrity and setting its default DACL need that right (harness run 42360372752: 5).
@@ -108,32 +112,66 @@ pub(crate) fn control_token() -> Result<(Owned, String), String> {
     unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut base) }
         .map_err(|e| gave("OpenProcessToken", &e))?;
     let base = Owned(base);
-    let deny = [LocalSid::new(logon)?];
-    let mut restricting = vec![LocalSid::new(&facts.user)?];
-    for sid in RESTRICTING {
-        restricting.push(LocalSid::new(sid)?);
+    let plain = shape == Shape::Plain;
+    let mut deny = Vec::new();
+    if !plain {
+        let logon: Vec<&str> = facts
+            .groups
+            .iter()
+            .filter(|(_, attributes)| attributes & LOGON_ID == LOGON_ID)
+            .map(|(sid, _)| sid.as_str())
+            .collect();
+        let [logon] = logon.as_slice() else {
+            return Err(format!(
+                "GetTokenInformation(TokenGroups) gave {} logon SIDs, not one",
+                logon.len()
+            ));
+        };
+        deny.push(LocalSid::new(logon)?);
+    }
+    let mut restricting = Vec::new();
+    if matches!(shape, Shape::Agent | Shape::NotLow) {
+        restricting.push(LocalSid::new(&facts.user)?);
+        for sid in RESTRICTING {
+            restricting.push(LocalSid::new(sid)?);
+        }
     }
     let deny: Vec<SID_AND_ATTRIBUTES> = deny.iter().map(LocalSid::entry).collect();
     let restricting_entries: Vec<SID_AND_ATTRIBUTES> =
         restricting.iter().map(LocalSid::entry).collect();
+    let flags = if plain {
+        CREATE_RESTRICTED_TOKEN_FLAGS(0)
+    } else {
+        DISABLE_MAX_PRIVILEGE
+    };
     let mut token = HANDLE::default();
     // SAFETY: `base` is live with TOKEN_DUPLICATE; the arrays point at SIDs owned by `deny`'s
     // and `restricting`'s `LocalSid`s, which outlive the call; `token` is owned below.
     unsafe {
         CreateRestrictedToken(
             base.0,
-            DISABLE_MAX_PRIVILEGE,
-            Some(&deny),
+            flags,
+            some(&deny),
             None,
-            Some(&restricting_entries),
+            some(&restricting_entries),
             &raw mut token,
         )
     }
     .map_err(|e| gave("CreateRestrictedToken", &e))?;
     let token = Owned(token);
-    set_integrity(&token)?;
-    set_default_dacl(&token, &format!("D:(A;;GA;;;{})(A;;GA;;;SY)", facts.user))?;
+    if matches!(shape, Shape::Agent | Shape::Unrestricted) {
+        set_integrity(&token)?;
+    }
+    if !plain {
+        let own = format!("D:(A;;GA;;;{})(A;;GA;;;SY)", facts.user);
+        set_default_dacl(&token, dacl.unwrap_or(&own))?;
+    }
     Ok((token, facts.user))
+}
+
+/// `entries`, or `None` when there are none.
+fn some(entries: &[SID_AND_ATTRIBUTES]) -> Option<&[SID_AND_ATTRIBUTES]> {
+    (!entries.is_empty()).then_some(entries)
 }
 
 /// Sets `token`'s integrity level to [`LOW`].
@@ -297,7 +335,7 @@ pub(crate) fn run_as(
     cwd: &Path,
     limit: Duration,
 ) -> Result<Ran, String> {
-    let (mut reader, writer) = std::io::pipe().map_err(|e| format!("CreatePipe: {e}"))?;
+    let (reader, writer) = std::io::pipe().map_err(|e| format!("CreatePipe: {e}"))?;
     let write = HANDLE(writer.as_raw_handle());
     // SAFETY: `write` is the live write end `writer` owns.
     unsafe { SetHandleInformation(write, HANDLE_FLAG_INHERIT.0, HANDLE_FLAG_INHERIT) }
@@ -342,6 +380,16 @@ pub(crate) fn run_as(
     drop(attributes);
     drop(writer);
     started.map_err(|e| gave("CreateProcessAsUserW", &e))?;
+    collect(&process, reader, limit)
+}
+
+/// Waits up to `limit` for the started `process` (whose handles this takes), ends it past that,
+/// and reads what it wrote to the pipe `reader` reads; the write end must be closed already.
+pub(crate) fn collect(
+    process: &PROCESS_INFORMATION,
+    mut reader: std::io::PipeReader,
+    limit: Duration,
+) -> Result<Ran, String> {
     drop(Owned(process.hThread));
     let child = Owned(process.hProcess);
     let pid = process.dwProcessId;
@@ -382,7 +430,7 @@ mod tests {
     /// harness's user, `RESTRICTED`, `Users` and `Everyone`.
     #[test]
     fn the_control_token_is_low_and_restricted() {
-        let (token, user) = super::control_token().unwrap();
+        let (token, user) = super::shaped_token(super::Shape::Agent, None).unwrap();
         let facts = super::win::token_facts(token.0).unwrap();
         assert_eq!(facts.integrity, super::LOW);
         assert_eq!(facts.user, user);
@@ -392,5 +440,8 @@ mod tests {
         got.sort();
         expected.sort();
         assert_eq!(got, expected);
+        let (plain, _) = super::shaped_token(super::Shape::Plain, None).unwrap();
+        let plain = super::win::token_facts(plain.0).unwrap();
+        assert_eq!(plain.restricted, Vec::<String>::new());
     }
 }

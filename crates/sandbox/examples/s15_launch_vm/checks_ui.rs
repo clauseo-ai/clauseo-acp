@@ -1,18 +1,17 @@
 //! The rows on the runner job's UI limits: `clipboard` and `atoms`, and the check the
 //! `whoami`, `node-pipes` and `codex` rows make of a probe's `ui-limits` and `ui-effect` lines
-//! ([`ui_limits`]), with the harness's positive control and the atom information.
+//! ([`ui_limits`]), which runs the harness's positive control (`checks_ctl.rs`), and the atom
+//! information.
 
-use std::time::Duration;
-
+use super::checks_ctl::controls;
 use super::launch::{Spec, deadline, launch, summary};
 use super::manifest::Manifest;
 use super::rows::Ctx;
 use super::ui;
 use super::win::UI_LIMITS;
-use super::{win_ctl, win_desk};
 
 /// A random hex text, for the clipboard's text and the atom's name.
-fn random() -> Result<String, String> {
+pub(crate) fn random() -> Result<String, String> {
     let mut bits = [0u8; 8];
     getrandom::fill(&mut bits).map_err(|e| format!("getrandom: {e}"))?;
     Ok(bits.iter().fold(String::new(), |mut text, b| {
@@ -40,12 +39,12 @@ enum UiRead {
 
 /// Checks the UI limits bind the probe that printed `lines` (`probe job-ui`'s, or
 /// `probe token`'s): [`judge`]'s rules, and when it passed on the effect (a `0x0` read), the
-/// harness's positive control ([`controls`]); a control that can't run makes the row INFO.
+/// harness's positive control (`checks_ctl.rs`); a control that can't run makes the row INFO.
 pub(crate) fn ui_limits(ctx: &Ctx<'_>, lines: &[String]) -> Result<String, String> {
     match judge(lines)? {
         UiRead::Exact => Ok(format!("the job's UI limits read exactly {UI_LIMITS:#x}")),
         UiRead::Nested(call) => {
-            let controls = controls(ctx)?;
+            let controls = controls(ctx);
             Ok(format!(
                 "the innermost job reads 0x0 (libuv's, nested): CreateDesktopW on its own \
                  station gave 5 and its clipboard write failed in {call} with 5, so the \
@@ -107,103 +106,6 @@ fn judge(lines: &[String]) -> Result<UiRead, String> {
             "the job's UI limits read 0x0, and its clipboard write gave {clipboard:?}, not a \
              clipboard call failing with 5: the WRITECLIPBOARD limit doesn't bind it"
         )),
-    }
-}
-
-/// How long the control process may run (or the row's limit, when shorter).
-const CONTROL_LIMIT: Duration = Duration::from_secs(30);
-
-/// The positive control for the effect, of the agent's kind: `probe ui-control` started by the
-/// harness with `CreateProcessAsUserW` under a Low restricted token made from its own (the
-/// lawyer's) token, the agent's shape ([`win_ctl::control_token`]), on a fresh window station
-/// `ClauseoS15Ctl-<hex>` made as the outer runner makes `ClauseoRun-…`
-/// ([`win_desk::ControlStation`], open until the process ends), outside any job of ours. Its
-/// `CreateDesktopW` and its clipboard write must both succeed ([`control_verdict`]); then the
-/// agent's 5s are the job's limits. When the process can't start or either step fails, the call
-/// and code go to [`Ctx::info`] and the row is INFO, never PASS.
-fn controls(ctx: &Ctx<'_>) -> Result<String, String> {
-    let station = format!("ClauseoS15Ctl-{}", random()?);
-    ctx.note(&format!(
-        "positive control: probe ui-control, started by the harness under a Low restricted token \
-         made from its own (restricting: its user, S-1-5-12, S-1-5-32-545, S-1-1-0; the logon \
-         SID deny-only; default DACL its user and SYSTEM) on {station}\\Default, a fresh station \
-         made as the outer runner makes ClauseoRun-… (GENERIC_ALL; DACL: the harness's user and \
-         SYSTEM; Low label), outside any job of ours; {}",
-        win_ctl::own_job()
-    ));
-    let verdict = run_control(ctx, &station).and_then(|lines| control_verdict(&lines));
-    match verdict {
-        Ok(()) => Ok(format!(
-            "the control (the agent's token shape on {station}, outside the job) made a desktop \
-             and wrote the clipboard"
-        )),
-        Err(why) => {
-            ctx.info(&format!(
-                "the positive control failed: {why}, so the agent's 5s prove nothing"
-            ));
-            Ok(format!("the control failed ({why})"))
-        }
-    }
-}
-
-/// Makes the control station and token and runs `probe ui-control` on `<station>\Default`; its
-/// lines. The call that failed and its code otherwise.
-fn run_control(ctx: &Ctx<'_>, station: &str) -> Result<Vec<String>, String> {
-    let (token, user) = win_ctl::control_token()?;
-    let held = win_desk::ControlStation::open(station, &user)
-        .map_err(|(call, code)| format!("{call} gave {code} (station {station})"))?;
-    let ran = win_ctl::run_as(
-        &token,
-        &format!("{station}\\Default"),
-        &ctx.manifest.harness_exe(),
-        &["probe", "ui-control"],
-        &ctx.manifest.bin(),
-        ctx.limit.min(CONTROL_LIMIT),
-    );
-    drop(held);
-    let ran = ran?;
-    ctx.note(&format!(
-        "control: pid {}, exit {:?} (None: ended at the limit)",
-        ran.pid, ran.code
-    ));
-    for line in &ran.lines {
-        ctx.note(&format!("control: {line}"));
-    }
-    if ran.code.is_none() {
-        return Err("probe ui-control overran its limit and was ended".to_owned());
-    }
-    Ok(ran.lines)
-}
-
-/// The control's rule, on `probe ui-control`'s lines: it ran on a `ClauseoS15Ctl-` station at
-/// Low with four restricting SIDs (the agent's kind), `ui-control desktop-create 0` and
-/// `ui-control clipboard-write ok`. Otherwise why, naming the call and code.
-fn control_verdict(lines: &[String]) -> Result<(), String> {
-    let get = |key: &str| {
-        lines
-            .iter()
-            .find_map(|l| l.strip_prefix(&format!("ui-control {key} ")))
-            .map(str::trim)
-    };
-    let station = get("station");
-    if !station.is_some_and(|s| s.starts_with("ClauseoS15Ctl-")) {
-        return Err(format!("probe ui-control ran on station {station:?}"));
-    }
-    if get("integrity") != Some(win_ctl::LOW) || get("restricted") != Some("4") {
-        return Err(format!(
-            "probe ui-control's token isn't the agent's shape: integrity {:?}, restricting \
-             SIDs {:?}",
-            get("integrity"),
-            get("restricted")
-        ));
-    }
-    match get("desktop-create") {
-        Some("0") => {}
-        other => return Err(format!("its CreateDesktopW gave {other:?}, not 0")),
-    }
-    match get("clipboard-write") {
-        Some("ok") => Ok(()),
-        other => Err(format!("its clipboard write gave {other:?}, not ok")),
     }
 }
 
@@ -326,7 +228,7 @@ pub(crate) fn atoms(ctx: &Ctx<'_>) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UI_LIMITS, UiRead, control_verdict, judge};
+    use super::{UI_LIMITS, UiRead, judge};
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|l| (*l).to_owned()).collect()
@@ -350,30 +252,5 @@ mod tests {
         assert!(with("ui-effect clipboard-write ok").is_err());
         let open = lines(&["ui-limits 0x0", "ui-effect desktop-create 0"]);
         assert!(judge(&open).is_err());
-    }
-
-    #[test]
-    fn control_counts_only_when_both_steps_work_under_the_agents_shape() {
-        let good = [
-            "ui-control station ClauseoS15Ctl-00",
-            "ui-control integrity S-1-16-4096",
-            "ui-control restricted 4",
-            "ui-control desktop-create 0",
-            "ui-control clipboard-write ok",
-        ];
-        assert_eq!(control_verdict(&lines(&good)), Ok(()));
-        let swap = |at: usize, line: &str| {
-            let mut changed = good;
-            if let Some(slot) = changed.get_mut(at) {
-                *slot = line;
-            }
-            control_verdict(&lines(&changed))
-        };
-        assert!(swap(0, "ui-control station WinSta0").is_err());
-        assert!(swap(1, "ui-control integrity S-1-16-8192").is_err());
-        assert!(swap(2, "ui-control restricted 0").is_err());
-        assert!(swap(3, "ui-control desktop-create 5").is_err());
-        assert!(swap(4, "ui-control clipboard-write failed OpenClipboard 5").is_err());
-        assert!(control_verdict(&lines(&good[..4])).is_err());
     }
 }

@@ -36,6 +36,9 @@ fn main() -> ExitCode {
 #[path = "s15_launch_vm/checks.rs"]
 mod checks;
 #[cfg(windows)]
+#[path = "s15_launch_vm/checks_ctl.rs"]
+mod checks_ctl;
+#[cfg(windows)]
 #[path = "s15_launch_vm/checks_m3.rs"]
 mod checks_m3;
 #[cfg(windows)]
@@ -83,6 +86,9 @@ mod win_ctl;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_desk.rs"]
 mod win_desk;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_logon.rs"]
+mod win_logon;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
