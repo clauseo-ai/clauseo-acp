@@ -21,8 +21,9 @@ use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
+use crate::windows::token::os::shut_object;
 use crate::windows::token::os::{own_token, profile_folder};
-use crate::windows::token::{desktop_sddl, station_sddl};
+use crate::windows::token::{desktop_sddl, runner_process_sddl, runner_thread_sddl, station_sddl};
 use crate::windows::{private_dir, write};
 
 /// How long the inner runner has to connect `ctl`: its logon, which makes the pool user's
@@ -117,6 +118,18 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // `log_on` takes the password and wipes it as it returns.
     let inner =
         log_on(&message.pool_name, password, exe_text, set.base(), &cwd).map_err(logon_failure)?;
+    // Shut the inner runner's process and first thread to its agent (the same pool user) while
+    // it is still suspended, so no agent of this pool user already running opens either in the
+    // moment before the inner shuts itself (`token::os::shut_self`).
+    let shut = shut_object(inner.handle.0, &runner_process_sddl(&desktop))
+        .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(&desktop)));
+    if let Err(error) = shut {
+        inner.kill(RunExit::Token.code());
+        return Err(Failure::new(
+            RunExit::Token,
+            os("the inner runner's DACL", &error),
+        ));
+    }
     if let Err(error) = assign_and_resume(&job, &inner) {
         inner.kill(RunExit::Job.code());
         return Err(Failure::new(
