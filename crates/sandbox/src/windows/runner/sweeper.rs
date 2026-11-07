@@ -2,12 +2,15 @@
 //! the pool user at a session's end (`end.rs`), outside the launch's job, once the job is empty.
 //! It takes nothing but its flag. Its first act, as the inner's, is to shut its own primary token
 //! to all but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`): it is Medium, unrestricted, with the
-//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It kills every process of its own user but itself (no job is kept: the session is
-//! ending) that was created before it was: a next session's processes, started later, are left
-//! alone (`sweep.rs`, which also says why a next inner killing this sweeper loses nothing). It
-//! then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
-//! its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name,
-//! sweep point) and each kind's count, which the outer relays while it lives. It exits 0 when
+//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It
+//! kills every process of its own user but itself (no job is kept: the session is ending) that
+//! was created before it was, or that a process it killed started: a next session's processes,
+//! started later by the next outer and inner, are left alone (`sweep.rs`, which also says why a
+//! next inner killing this sweeper loses nothing). It makes two passes, both before the removal:
+//! the second kills what got past the first, a child of a process the first killed among them.
+//! It then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
+//! its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name, sweep point) and each
+//! kind's count, which the outer relays while it lives. It exits 0 when
 //! everything went, [`RunExit::Sweep`] when anything failed or the time ran out.
 //!
 //! It writes no result file: the run folder admits only the desktop user, `SYSTEM` and
@@ -25,7 +28,7 @@ use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::Point;
-use super::sweep::os::sweep_own;
+use super::sweep::os::end_sweep_own;
 use crate::windows::token::os::{own_token, shut_token_first, user};
 
 /// How long the whole sweep may take.
@@ -73,7 +76,7 @@ fn sweep_all() -> bool {
         Err(error) => return failed("read its token's user", &error),
     };
     let mut log = |line: &str| say(line);
-    let swept = match sweep_own(&me, None, Point::Sweeper, &mut log) {
+    let swept = match end_sweep_own(&me, &mut log) {
         Ok(()) => true,
         Err(error) => {
             say(&format!(

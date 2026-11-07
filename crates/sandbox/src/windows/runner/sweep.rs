@@ -18,7 +18,8 @@
 //!   ends the job itself).
 //! - [`Point::Sweeper`]: the detached end sweeper (`--sweep`, `sweeper.rs`), which keeps
 //!   nothing but itself, and kills only processes created before it was
-//!   ([`Processes::own_start`]).
+//!   ([`Processes::own_start`]) or started by one it killed. It makes two passes
+//!   ([`end_sweep`]).
 //!
 //! At every point but the first, a process that can't be opened, checked or ended is logged and
 //! the sweep goes on with the rest; it is tried again in the sweep's next round and at the next
@@ -32,9 +33,21 @@
 //! a process is found, fails its open, and fails the first act closed.
 //!
 //! **The end sweeper and a next session.** The end sweeper lives up to 60 s, and a next launch
-//! for the same pool user may start meanwhile. It kills only what was created before it started:
-//! the next session's processes start later and are left alone, and a process an escaped one
-//! starts after the sweeper started is killed by the next session's first act or tick. The other
+//! for the same pool user may start meanwhile. It kills only what was created before it started,
+//! and what a process it killed started: the next session's processes start later, from the next
+//! outer (`CreateProcessWithLogonW` names its caller as the parent) and its inner, and are left
+//! alone. A process created after the sweeper whose parent pid (the snapshot's) names a process
+//! this sweep killed, and which was created after that one, is that process's child: every
+//! process killed stays open until the sweep is over, so its pid is never reused meanwhile, and a
+//! process that had the pid before it was created earlier. Such a child is killed in the next
+//! round. A process an escaped one, which no sweep could kill, starts after the sweeper started,
+//! or one a service starts for it (its parent the service), is killed by the next session's
+//! first act or tick.
+//!
+//! **Two passes.** Each pass lists again after any round that killed something, until a round
+//! kills nothing. The end sweeper then makes a second pass, keeping what the first killed (open,
+//! for the parent check): for what got past the first pass's last listing, such as a child whose
+//! parent the first pass killed as it was being created. The other
 //! way round, the next inner's first act kills a sweeper still running (a pool-user process
 //! outside its job), which loses nothing: that inner makes the same cleanup itself
 //! (`leftovers.rs`). Each can open the other: the runners' process DACL grants the desktop
@@ -106,6 +119,40 @@ pub(crate) struct Seen {
     /// Its image's file name, for the log.
     pub(crate) image: String,
     pub(crate) owner: Owner,
+    /// The pid of the process that created it, as the snapshot records it; `None` from a list
+    /// that doesn't give it (`WTSEnumerateProcessesW`).
+    pub(crate) parent: Option<u32>,
+}
+
+/// The processes a sweep killed, held open until the sweep is over: while a handle to a process
+/// is open its pid is never given to another, so a later process whose parent pid names one of
+/// them, created after it was, is its child.
+pub(crate) struct Killed<T> {
+    /// Each one's pid, creation time (when the sweep read it) and open process.
+    entries: Vec<(u32, Option<u64>, T)>,
+}
+
+impl<T> Killed<T> {
+    pub(crate) fn new() -> Killed<T> {
+        Killed {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Their pids, in the order they were killed.
+    pub(crate) fn pids(&self) -> Vec<u32> {
+        self.entries.iter().map(|(pid, _, _)| *pid).collect()
+    }
+
+    /// Whether a process whose parent pid is `parent`, created at `started`, was started by one
+    /// of them: one has that pid and was created at or before it.
+    fn started_by(&self, parent: Option<u32>, started: u64) -> bool {
+        parent.is_some_and(|parent| {
+            self.entries.iter().any(|(pid, created, _)| {
+                *pid == parent && created.is_some_and(|created| created <= started)
+            })
+        })
+    }
 }
 
 /// The system calls a sweep makes.
@@ -174,8 +221,9 @@ pub(crate) enum SweepError {
 }
 
 /// Kills every process of `user` but those in `keep` (this process's own pid) and those in the
-/// job, and, for the end sweeper, those created since it was; each kill and, past the first act,
-/// each failure is a line given to `log`. The pids it killed.
+/// job, and, for the end sweeper, those created since it was but for what a process it killed
+/// started; each kill and, past the first act, each failure is a line given to `log`. The pids it
+/// killed.
 pub(crate) fn sweep<P: Processes>(
     calls: &mut P,
     user: &Sid,
@@ -183,6 +231,41 @@ pub(crate) fn sweep<P: Processes>(
     point: Point,
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<u32>, SweepError> {
+    let mut killed = Killed::new();
+    sweep_with(calls, user, keep, point, &mut killed, log)?;
+    Ok(killed.pids())
+}
+
+/// The end sweeper's sweep: two passes of [`sweep`]'s rounds at [`Point::Sweeper`], the second
+/// keeping what the first killed, so a process one of those started is still known as its
+/// child. Its result is the second pass's, which tries again what the first left; the first
+/// pass's failure is logged. The pids both killed.
+pub(crate) fn end_sweep<P: Processes>(
+    calls: &mut P,
+    user: &Sid,
+    keep: &[u32],
+    log: &mut dyn FnMut(&str),
+) -> Result<Vec<u32>, SweepError> {
+    let mut killed = Killed::new();
+    if let Err(error) = sweep_with(calls, user, keep, Point::Sweeper, &mut killed, log) {
+        log(&format!(
+            "clauseo-sandbox-run: sweep ({}), first pass: {error}",
+            Point::Sweeper
+        ));
+    }
+    sweep_with(calls, user, keep, Point::Sweeper, &mut killed, log)?;
+    Ok(killed.pids())
+}
+
+/// [`sweep`], adding what it kills to `killed`, which may hold an earlier pass's.
+fn sweep_with<P: Processes>(
+    calls: &mut P,
+    user: &Sid,
+    keep: &[u32],
+    point: Point,
+    killed: &mut Killed<P::Process>,
+    log: &mut dyn FnMut(&str),
+) -> Result<(), SweepError> {
     let before = match point {
         Point::Sweeper => Some(calls.own_start().map_err(|e| SweepError::Started {
             pid: keep.first().copied().unwrap_or_default(),
@@ -191,7 +274,6 @@ pub(crate) fn sweep<P: Processes>(
         })?),
         Point::Start | Point::Tick | Point::End => None,
     };
-    let mut killed = Vec::new();
     let mut failures = Failures {
         point,
         logged: BTreeSet::new(),
@@ -218,19 +300,19 @@ pub(crate) fn sweep<P: Processes>(
             list(calls)?
         };
         let mut round = 0usize;
-        for (found, process) in &opened {
+        for (found, process) in opened {
             if !again.iter().any(|s| s.pid == found.pid && is(s, user)) {
                 continue;
             }
-            match spared(calls, process, before) {
-                Ok(true) => continue,
-                Ok(false) => {}
+            let started = match spared(calls, &process, before, found.parent, killed) {
+                Ok(Spared::Yes) => continue,
+                Ok(Spared::No(started)) => started,
                 Err((error, step)) => {
                     failures.add(failed(found, &error, step), log)?;
                     continue;
                 }
-            }
-            if let Err(error) = calls.kill(process) {
+            };
+            if let Err(error) = calls.kill(&process) {
                 failures.add(failed(found, &error, Step::Kill), log)?;
                 continue;
             }
@@ -238,12 +320,12 @@ pub(crate) fn sweep<P: Processes>(
                 "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {} ({})",
                 found.pid, found.image
             ));
-            killed.push(found.pid);
+            killed.entries.push((found.pid, started, process));
             round += 1;
         }
         if round == 0 {
             return match failures.count {
-                0 => Ok(killed),
+                0 => Ok(()),
                 count => Err(SweepError::Left { count }),
             };
         }
@@ -251,20 +333,34 @@ pub(crate) fn sweep<P: Processes>(
     Err(SweepError::StillRunning)
 }
 
-/// Whether `process` is kept: it is in the job, or it started at or after `before`.
+/// What [`spared`] decided.
+enum Spared {
+    /// Kept.
+    Yes,
+    /// Killed; its creation time when the sweep read it.
+    No(Option<u64>),
+}
+
+/// Whether `process` (whose parent pid is `parent`) is kept: it is in the job, or it started at
+/// or after `before` and no process in `killed` started it.
 fn spared<P: Processes>(
     calls: &mut P,
     process: &P::Process,
     before: Option<u64>,
-) -> Result<bool, (io::Error, Step)> {
+    parent: Option<u32>,
+    killed: &Killed<P::Process>,
+) -> Result<Spared, (io::Error, Step)> {
     if calls.in_job(process).map_err(|e| (e, Step::Job))? {
-        return Ok(true);
+        return Ok(Spared::Yes);
     }
     let Some(before) = before else {
-        return Ok(false);
+        return Ok(Spared::No(None));
     };
     let started = calls.started(process).map_err(|e| (e, Step::Started))?;
-    Ok(started >= before)
+    if started >= before && !killed.started_by(parent, started) {
+        return Ok(Spared::Yes);
+    }
+    Ok(Spared::No(Some(started)))
 }
 
 /// A round's failures: the first act's first ends the sweep; past it, each is logged once a

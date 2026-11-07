@@ -3,7 +3,8 @@
 //! - [`Processes::list`]: a Toolhelp snapshot (`CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`,
 //!   which "includes all processes in the system", every session's), each process's user read by
 //!   opening it with `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`. A
-//!   process it can't open, or whose token it can't, is [`Owner::None`].
+//!   process it can't open, or whose token it can't, is [`Owner::None`]. Its parent pid is the
+//!   entry's `th32ParentProcessID`.
 //! - [`Processes::named`]: `WTSEnumerateProcessesW` (level 1), whose service reads each token
 //!   itself, so a process whose DACL shuts its user out still comes with its user. Microsoft
 //!   documents that "the caller must be a member of the Administrators group to enumerate
@@ -44,7 +45,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::BOOL;
 
-use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
+use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, end_sweep, sweep};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, sid_text};
@@ -93,6 +94,18 @@ pub(in crate::windows::runner) fn sweep_own(
     sweep(&mut calls, me, &[own], point, log).map(drop)
 }
 
+/// The end sweeper's two passes over the processes of `me` ([`end_sweep`]), keeping only this
+/// process. Each kill is a line given to `log`.
+pub(in crate::windows::runner) fn end_sweep_own(
+    me: &Sid,
+    log: &mut dyn FnMut(&str),
+) -> Result<(), SweepError> {
+    // SAFETY: no arguments.
+    let own = unsafe { GetCurrentProcessId() };
+    let mut calls = OsProcesses { job: None, me };
+    end_sweep(&mut calls, me, &[own], log).map(drop)
+}
+
 impl Processes for OsProcesses<'_> {
     type Process = Handle;
 
@@ -114,6 +127,7 @@ impl Processes for OsProcesses<'_> {
                     pid: entry.th32ProcessID,
                     image: image(&entry.szExeFile),
                     owner: owner(entry.th32ProcessID),
+                    parent: Some(entry.th32ParentProcessID),
                 }),
                 Err(error) if os_error(&error).raw_os_error() == Some(NO_MORE) => return Ok(seen),
                 Err(error) => return Err(os_error(&error)),
@@ -255,6 +269,7 @@ fn named(entry: &WTS_PROCESS_INFOW) -> io::Result<Seen> {
         pid: entry.ProcessId,
         image,
         owner,
+        parent: None,
     })
 }
 
