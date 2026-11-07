@@ -484,6 +484,12 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   exits 0 having touched nothing; a parent that can't be found exits 3, nothing touched.
   Per-machine, every pool in the record goes, whoever uninstalls, LOCAL SYSTEM under Intune's
   silent `/S` included.
+- **A silent per-user uninstall** (`/S`, stage F on #619) never raises UAC: the hook skips the
+  removal and goes on as after a declined prompt (1223), so `sandbox\` and the record are kept,
+  with one line in the details list (`removeSkippedSilent`) and no box. The set-up is removed by
+  reinstalling and uninstalling interactively, or before the silent uninstall from an elevated
+  prompt with `--remove --per-machine` (an elevated process may remove the whole record, whoever
+  asks; when the owner asks, the ledger work still runs as the owner).
 - **Order**, under the set-up lock, waited for at most 60 s (else exit 5, nothing touched; with
   no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
@@ -508,7 +514,9 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
   change themselves (K1). No walk, label written, hand-back, add or delete.
 - **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
-  the app delete `sandbox\` when the box is ticked. The hook waits 120 s at most and never ends
+  the app delete `sandbox\` when the box is ticked. The hook reads it only after an ended wait
+  (`WAIT_OBJECT_0`) and a successful `GetExitCodeProcess`; a timeout, `WAIT_FAILED` or a failed
+  read counts as a failed removal. The hook waits 120 s at most and never ends
   the exe: each step leaves a state the next run starts from. After a timeout with the box
   ticked, the lawyer sees the usual kept-folder box for `sandbox\` while the tool may still be
   writing there; that is accepted, since the tool keeps its records consistent at every step and
