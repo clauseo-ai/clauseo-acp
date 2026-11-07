@@ -2,19 +2,28 @@
 //! Unelevated: it runs on every Windows CI run.
 #![expect(
     unsafe_code,
-    reason = "FFI to GetTokenInformation and LookupPrivilegeNameW in tests"
+    reason = "FFI to the token, privilege and access-check calls in tests"
 )]
 
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE};
 use windows::Win32::Security::{
-    GetTokenInformation, LookupPrivilegeNameW, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TokenDefaultDacl,
-    TokenGroups, TokenIntegrityLevel, TokenPrivileges, TokenRestrictedSids,
+    AccessCheck, DACL_SECURITY_INFORMATION, DuplicateTokenEx, GENERIC_MAPPING,
+    GROUP_SECURITY_INFORMATION, GetKernelObjectSecurity, GetTokenInformation,
+    LABEL_SECURITY_INFORMATION, LookupPrivilegeNameW, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET,
+    PSECURITY_DESCRIPTOR, SecurityImpersonation, TOKEN_ADJUST_DEFAULT, TOKEN_ALL_ACCESS,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_EXECUTE, TOKEN_GROUPS, TOKEN_IMPERSONATE,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_READ,
+    TOKEN_WRITE, TokenDefaultDacl, TokenGroups, TokenImpersonation, TokenIntegrityLevel,
+    TokenPrivileges, TokenRestrictedSids,
 };
-use windows::Win32::System::SystemServices::{SE_GROUP_ENABLED, SE_GROUP_USE_FOR_DENY_ONLY};
-use windows::core::PWSTR;
+use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
+use windows::Win32::System::SystemServices::{
+    MAXIMUM_ALLOWED, SE_GROUP_ENABLED, SE_GROUP_USE_FOR_DENY_ONLY,
+};
+use windows::core::{BOOL, PWSTR};
 
-use super::{DESKTOP_USER_RIGHTS, TokenSpec, os};
+use super::{AGENT_TOKEN_POOL_RIGHTS, DESKTOP_USER_RIGHTS, TokenSpec, os};
+use crate::windows::acl::object::Handle;
 use crate::windows::sids::Sid;
 use crate::windows::test_pool::{acl_entries, text_of};
 
@@ -210,4 +219,94 @@ fn the_inner_runners_token_sequence_passes_in_order() {
     let agent = os::make(&token, &spec).unwrap();
     assert_eq!(os::user(&agent).unwrap(), me);
     os::shut_later(&token, &desktop).unwrap();
+}
+
+/// N2: the agent, as the kernel checks an open of its own token, gets query, assign and
+/// read-control, and never `TOKEN_ADJUST_DEFAULT`, `TOKEN_DUPLICATE` or `WRITE_DAC`. The token is
+/// made at Medium so no mandatory label takes a right away: the DACL alone decides.
+#[test]
+fn the_agent_cant_set_its_tokens_default_dacl() {
+    let own = os::own_token().unwrap();
+    let user = os::user(&own).unwrap();
+    let logon = os::logon_sid(&own).unwrap();
+    let desktop = sid("S-1-5-21-1-2-3-1001");
+    let mut spec = TokenSpec::for_pool(&user, &logon, &desktop, None).unwrap();
+    spec.integrity = sid("S-1-16-8192");
+    let agent = os::make(&own, &spec).unwrap();
+
+    let information = OWNER_SECURITY_INFORMATION.0
+        | GROUP_SECURITY_INFORMATION.0
+        | DACL_SECURITY_INFORMATION.0
+        | LABEL_SECURITY_INFORMATION.0;
+    let mut needed = 0u32;
+    // SAFETY: no buffer and a zero length ask only for the size, written to `needed`.
+    let sized = unsafe { GetKernelObjectSecurity(agent.0, information, None, 0, &raw mut needed) };
+    assert!(sized.is_err());
+    let mut descriptor = vec![0u64; (needed as usize).div_ceil(8)];
+    // SAFETY: `descriptor` is live, writable, aligned and at least `needed` bytes long.
+    unsafe {
+        GetKernelObjectSecurity(
+            agent.0,
+            information,
+            Some(PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast())),
+            needed,
+            &raw mut needed,
+        )
+    }
+    .unwrap();
+
+    let mut client = HANDLE::default();
+    // SAFETY: the agent token's handle came from its creation with every right; `client` is a
+    // live out-pointer, closed by `Handle` once written.
+    unsafe {
+        DuplicateTokenEx(
+            agent.0,
+            TOKEN_QUERY | TOKEN_IMPERSONATE,
+            None,
+            SecurityImpersonation,
+            TokenImpersonation,
+            &raw mut client,
+        )
+    }
+    .unwrap();
+    let client = Handle(client);
+
+    let mapping = GENERIC_MAPPING {
+        GenericRead: TOKEN_READ.0,
+        GenericWrite: TOKEN_WRITE.0,
+        GenericExecute: TOKEN_EXECUTE.0,
+        GenericAll: TOKEN_ALL_ACCESS.0,
+    };
+    let check = |desired: u32| {
+        let mut privileges = [0u64; 8];
+        let mut privileges_len = u32::try_from(size_of_val(&privileges)).unwrap();
+        let (mut granted, mut status) = (0u32, BOOL::default());
+        // SAFETY: the descriptor has an owner, a group and a DACL, as AccessCheck needs; the
+        // client is an impersonation token opened with TOKEN_QUERY; every out-pointer is live.
+        unsafe {
+            AccessCheck(
+                PSECURITY_DESCRIPTOR(descriptor.as_ptr().cast_mut().cast()),
+                client.0,
+                desired,
+                &raw const mapping,
+                Some(privileges.as_mut_ptr().cast::<PRIVILEGE_SET>()),
+                &raw mut privileges_len,
+                &raw mut granted,
+                &raw mut status,
+            )
+        }
+        .unwrap();
+        status.as_bool().then_some(granted)
+    };
+    assert_eq!(check(MAXIMUM_ALLOWED), Some(AGENT_TOKEN_POOL_RIGHTS));
+    for right in [
+        TOKEN_ADJUST_DEFAULT.0,
+        TOKEN_DUPLICATE.0,
+        TOKEN_IMPERSONATE.0,
+        WRITE_DAC.0,
+        WRITE_OWNER.0,
+    ] {
+        assert_eq!(check(right), None, "0x{right:x}");
+    }
+    assert_eq!(check(TOKEN_QUERY.0), Some(TOKEN_QUERY.0));
 }
