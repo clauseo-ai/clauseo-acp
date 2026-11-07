@@ -96,7 +96,7 @@ fn fresh_calls() -> Vec<String> {
             "program_data",
             "exists DeviceSync",
             "owner_of DeviceSync",
-            "network 1001,1002,1003,1004",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",

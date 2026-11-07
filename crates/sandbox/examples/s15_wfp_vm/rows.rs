@@ -92,6 +92,8 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
         upstream: Upstream::System,
         denials: Arc::new(Quiet),
         record: None,
+        // Tier B opens no browser listener (D10).
+        browser: false,
     })?;
     let token = handle
         .env()
@@ -137,7 +139,6 @@ struct Ports {
     xa: u16,
     pair_a: u16,
     squat: u16,
-    browser_a: u16,
 }
 
 pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
@@ -158,7 +159,6 @@ pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
         xa: unlisted.local_addr()?.port(),
         pair_a: ports::claim_port()?.port(),
         squat: ports::claim_port()?.port(),
-        browser_a: proxy_a.browser_port(),
     };
     let ns = Namespace::production();
     check_launch_in(&ns, a, &[ports.pa, ports.ra, ports.pair_a, ports.squat])?;
@@ -278,7 +278,7 @@ fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
     use Expect::{Measured, NotReached, Reached};
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
     let range = "the range is open to every pool user; the listener's secret is the check";
-    let table: [(String, String, Expect); 8] = [
+    let table: [(String, String, Expect); 7] = [
         (
             "the proxy port".into(),
             format!("proxy:{}:{cred_a}", p.pa),
@@ -312,11 +312,6 @@ fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
         (
             format!("an unlisted listener in the range: {range}"),
             local(p.xa),
-            Measured,
-        ),
-        (
-            format!("the proxy's browser listener: {range}"),
-            local(p.browser_a),
             Measured,
         ),
     ];
