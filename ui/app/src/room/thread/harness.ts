@@ -61,6 +61,9 @@ export type Script = {
   openSettings?: FakeHost["openSettings"];
   /** UC's protection wire (FakeHost's protection): with it the room reads the computer's protection. */
   protection?: FakeHost["protection"];
+  /** The setup wire (FakeHost's setup): with it the room loads the first run, and the
+   * header's plan hears each sign-in. */
+  setup?: FakeHost["setup"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -128,6 +131,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     ...(script.next === undefined ? {} : { next: script.next }),
     ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
     ...(script.protection === undefined ? {} : { protection: script.protection }),
+    ...(script.setup === undefined ? {} : { setup: script.setup }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();
