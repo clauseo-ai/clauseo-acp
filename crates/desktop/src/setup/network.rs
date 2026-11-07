@@ -45,7 +45,7 @@ use std::sync::{Arc, RwLock};
 
 use clauseo_agents::{NPM_REGISTRY, Network, Snapshot};
 use clauseo_protocol::{AgentId, AgentKind};
-use clauseo_sandbox::{Route, Upstream, upstream_for};
+use clauseo_sandbox::{Route, Upstream, UpstreamAnswer, upstream_answer};
 use clauseo_settings::Effective;
 use url::Url;
 
@@ -225,17 +225,26 @@ impl ProxyEnv {
 }
 
 /// The OS's proxy for a target URL, as `http://host:port`, or `None` to go direct. Blocking.
-pub(crate) type OsLookup = dyn Fn(&Url) -> Option<String> + Send + Sync;
+pub(crate) type OsLookup = dyn Fn(&Url) -> OsAnswer + Send + Sync;
 
 /// The sandbox's `Upstream::System` lookup, asked only once the settings and the environment
 /// set no proxy (so it reaches the OS: static settings, PAC and WPAD).
-pub(crate) fn os_lookup(target: &Url) -> Option<String> {
-    match upstream_for(&Upstream::System, target) {
-        Ok(Route::Http { host, port }) if host.contains(':') => {
-            Some(format!("http://[{host}]:{port}"))
+pub(crate) fn os_lookup(target: &Url) -> OsAnswer {
+    os_answer(upstream_answer(&Upstream::System, target))
+}
+
+/// The sandbox's answer as the route takes it: a failed lookup (or a refused one) is no answer,
+/// kept apart from the OS's `DIRECT`.
+fn os_answer(answer: Result<UpstreamAnswer, clauseo_sandbox::Error>) -> OsAnswer {
+    match answer {
+        Ok(UpstreamAnswer::Route(Route::Http { host, port })) if host.contains(':') => {
+            OsAnswer::Proxy(format!("http://[{host}]:{port}"))
         }
-        Ok(Route::Http { host, port }) => Some(format!("http://{host}:{port}")),
-        Ok(Route::Direct) | Err(_) => None,
+        Ok(UpstreamAnswer::Route(Route::Http { host, port })) => {
+            OsAnswer::Proxy(format!("http://{host}:{port}"))
+        }
+        Ok(UpstreamAnswer::Route(Route::Direct)) => OsAnswer::Direct,
+        Ok(UpstreamAnswer::Failed) | Err(_) => OsAnswer::Unknown,
     }
 }
 
@@ -522,7 +531,7 @@ pub(crate) fn shown(proxy: &str) -> String {
 mod ask;
 mod follow;
 
-pub(crate) use ask::ask_all;
+pub(crate) use ask::{Answered, OsAnswer, ask_all, kept_over_unknown};
 mod launch;
 
 pub(crate) use launch::with_loopback;
