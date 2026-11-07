@@ -108,7 +108,7 @@ pub use bookkeeping::{SetAsideBookkeeping, forget_set_aside_bookkeeping};
 #[cfg(test)]
 pub(crate) use fast::open_session;
 #[cfg(any(windows, test))]
-pub(crate) use fast::under_lock;
+pub(crate) use fast::{open_sessions_of, under_lock};
 
 #[cfg(any(windows, test, feature = "test-support"))]
 mod bookkeeping;

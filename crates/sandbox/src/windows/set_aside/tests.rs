@@ -110,6 +110,20 @@ pub(in crate::windows) fn launch_matter_on_test_volume(
         .map_err(|refused| refused.failure)
 }
 
+/// As [`launch_matter_on_test_volume`], with the sessions in `running` still running: a second
+/// session of the matter launched beside them.
+pub(in crate::windows) fn launch_beside_on_test_volume(
+    root: &Path,
+    data: &Path,
+    matter: &clauseo_protocol::MatterId,
+    session: &str,
+    running: &[&str],
+    now: SystemTime,
+) -> Result<Checked, SetAsideFailure> {
+    run::before_launch(&volume(), root, data, matter, session, running, now)
+        .map_err(|refused| refused.failure)
+}
+
 /// `after_session` over the tests' volume for `matter`, as
 /// [`launch_matter_on_test_volume`].
 pub(in crate::windows) fn exit_matter_on_test_volume(

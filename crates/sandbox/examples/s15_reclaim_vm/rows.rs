@@ -122,12 +122,12 @@ impl Ctx {
     }
 
     /// Gives `m` a pool user, as the launcher will (`MatterSids::assign`).
-    fn assign(&self, m: &Matter) -> Result<Sid, String> {
+    fn assign(&self, m: &Matter, session: &str) -> Result<Sid, String> {
         let mut matters = MatterSids::load(&self.data).map_err(|e| e.to_string())?;
         let open = matters.open_sessions().map_err(|e| e.to_string())?;
         let ledger = || self.ledger().map_err(io::Error::other);
         matters
-            .assign(&m.id()?, &self.pool, ledger, &open)
+            .assign(&m.id()?, session, &self.pool, ledger, &open)
             .map_err(|e| e.to_string())
     }
 
@@ -161,7 +161,7 @@ impl Ctx {
         before_launch(&policy, &self.data, &id, &session, &[], self.now())
             .map_err(|e| Refusal::of(&e))?;
         let result = self
-            .assign(m)
+            .assign(m, &session)
             .map_err(Refusal::other)
             .and_then(|_| self.apply(&policy, id));
         let mut ended = Vec::new();

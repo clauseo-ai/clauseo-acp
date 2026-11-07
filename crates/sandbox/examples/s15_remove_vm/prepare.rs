@@ -107,12 +107,12 @@ impl Ctx {
     }
 
     /// Gives `m` a pool user, as the launcher will (`MatterSids::assign`): this registers it.
-    fn assign(&self, m: &Matter) -> Result<Sid, String> {
+    fn assign(&self, m: &Matter, session: &str) -> Result<Sid, String> {
         let mut matters = MatterSids::load(&self.data).map_err(|e| e.to_string())?;
         let open = matters.open_sessions().map_err(|e| e.to_string())?;
         let ledger = || self.ledger().map_err(io::Error::other);
         matters
-            .assign(&m.id()?, &self.pool, ledger, &open)
+            .assign(&m.id()?, session, &self.pool, ledger, &open)
             .map_err(|e| e.to_string())
     }
 
@@ -133,7 +133,7 @@ impl Ctx {
         let session = format!("vmx-{}-{}", m.name, self.ticks.get());
         before_launch(&policy, &self.data, &id, &session, &[], self.now())
             .map_err(|e| format!("before_launch: {e}"))?;
-        let picked = match (self.assign(m), fallback) {
+        let picked = match (self.assign(m, &session), fallback) {
             (Ok(user), _) => Ok((user, "assigned".to_owned())),
             (Err(refused), Some(user)) => Ok((
                 user.clone(),

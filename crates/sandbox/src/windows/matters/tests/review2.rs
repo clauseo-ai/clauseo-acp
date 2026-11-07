@@ -108,17 +108,17 @@ fn assign_refuses_a_new_pick_for_a_matter_with_no_open_session() {
     let one = matter();
     let none = OpenSessions::default();
     let mut sids = sids_in(&temp);
-    let got = sids.assign(&one, &pool(1), reread(&ledger), &none);
+    let got = sids.assign(&one, "s1", &pool(1), reread(&ledger), &none);
     assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
     assert_eq!(sids_in(&temp).pool_user(&one), None);
     open_session(temp.path(), &one, "s1");
     assert_eq!(
-        sids.assign(&one, &pool(1), reread(&ledger), &none),
+        sids.assign(&one, "s1", &pool(1), reread(&ledger), &none),
         Ok(user(1))
     );
     super::pool::close_sessions(temp.path(), &one);
     assert_eq!(
-        sids.assign(&one, &pool(1), reread(&ledger), &none),
+        sids.assign(&one, "s1", &pool(1), reread(&ledger), &none),
         Ok(user(1)),
         "kept"
     );
@@ -138,9 +138,12 @@ fn a_keeping_call_reads_no_ledger() {
         Ok(user(1))
     );
     let unread = || -> io::Result<Ledger> { panic!("a keeping call read the ledger") };
-    assert_eq!(sids.assign(&one, &pool(1), unread, &none), Ok(user(1)));
     assert_eq!(
-        sids_in(&temp).assign(&one, &pool(2), unread, &none),
+        sids.assign(&one, "s1", &pool(1), unread, &none),
+        Ok(user(1))
+    );
+    assert_eq!(
+        sids_in(&temp).assign(&one, "s1", &pool(2), unread, &none),
         Ok(user(1))
     );
 }

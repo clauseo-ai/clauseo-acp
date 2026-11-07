@@ -251,12 +251,15 @@ impl MatterSids {
     ///
     /// The caller marks the launch's session open (`before_launch`) **before** calling this, so
     /// no [`MatterSids::release`] can take the user between this and the session. A new pick
-    /// for a matter with no open session in its set-aside record (read under its set-aside lock)
-    /// is refused with [`Assign::Records`]; a matter that keeps its user needs none (set-up reads
-    /// registered matters' users with no session).
+    /// for a matter whose set-aside record (read under its set-aside lock) doesn't list
+    /// `session` as open is refused with [`Assign::Records`]; a matter that keeps its user needs
+    /// none. A pool user serves one live session at a time: while the record lists another open
+    /// session of the matter, or can't be read, the launch is refused with [`Assign::Busy`]
+    /// ([`assign::busy`]), whether the matter keeps its user or would get a new one.
     pub fn assign(
         &mut self,
         matter: &MatterId,
+        session: &str,
         pool: &[Sid],
         ledger: impl FnOnce() -> io::Result<Ledger>,
         open: &OpenSessions,
@@ -265,6 +268,10 @@ impl MatterSids {
         let owner_of = self.owner_of;
         self.change(|contents, _| {
             let Contents { rows, needs_reset } = contents;
+            let sessions = sessions_open(&data_dir, matter)?;
+            if assign::busy(sessions.as_ref(), session) {
+                return Err(Assign::Busy(*matter));
+            }
             // The launch path: a matter keeping its user reads neither the ledger nor the
             // set-aside trees.
             if let Some(user) = rows.get(matter).and_then(MatterRow::holds)
@@ -284,7 +291,7 @@ impl MatterSids {
             match assign::decide(matter, rows, pool, &held)? {
                 Pick::Kept(user) => Ok((user, false)),
                 Pick::New(user) => {
-                    if !session_open(&data_dir, matter)? {
+                    if !sessions.is_some_and(|open| open.contains(session)) {
                         return Err(Assign::Records(SetupError::Failed(format!(
                             "{matter} has no open session: before_launch marks it before assign"
                         ))));
@@ -384,6 +391,28 @@ impl MatterSids {
 fn session_open(data_dir: &Path, matter: &MatterId) -> Result<bool, SetupError> {
     super::set_aside::under_lock(data_dir, matter, |open| open)
         .map_err(|error| SetupError::Failed(format!("{matter}'s set-aside lock: {error}")))
+}
+
+/// The sessions of `matter` its set-aside record lists as open, read under its set-aside lock;
+/// `None` when the record can't be read.
+#[cfg(any(windows, test))]
+fn sessions_open(
+    data_dir: &Path,
+    matter: &MatterId,
+) -> Result<Option<BTreeSet<String>>, SetupError> {
+    super::set_aside::open_sessions_of(data_dir, matter)
+        .map_err(|error| SetupError::Failed(format!("{matter}'s set-aside lock: {error}")))
+}
+
+/// Off Windows, outside the tests, there are no set-aside records: refused, failing closed.
+#[cfg(not(any(windows, test)))]
+fn sessions_open(
+    _data_dir: &Path,
+    matter: &MatterId,
+) -> Result<Option<BTreeSet<String>>, SetupError> {
+    Err(SetupError::Failed(format!(
+        "{matter}: no set-aside record on this OS"
+    )))
 }
 
 /// Off Windows, outside the tests, there are no set-aside records: refused, failing closed.
