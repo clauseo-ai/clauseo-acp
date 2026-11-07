@@ -42,9 +42,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
-use clauseo_agents::{Clock as _, NPM_REGISTRY, Network, Snapshot, SystemClock};
+use clauseo_agents::{NPM_REGISTRY, Network, Snapshot};
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_sandbox::{Route, Upstream, upstream_for};
 use clauseo_settings::Effective;
@@ -324,48 +323,6 @@ pub(crate) fn os_targets(facts: &NetworkFacts, env: &ProxyEnv, os_fallback: bool
         .collect()
 }
 
-/// `os`'s answer for each of `targets`, all asked at once, each on its own thread: what has
-/// not answered within `budget` counts as none (direct) in this route. A lookup still running
-/// is left to end on its thread (the sandbox bounds each one) and its answer is dropped.
-pub(crate) fn ask_all(
-    targets: BTreeSet<Url>,
-    os: &Arc<OsLookup>,
-    budget: Duration,
-) -> BTreeMap<Url, Option<String>> {
-    let clock = SystemClock;
-    let deadline = clock.monotonic() + budget;
-    let (send, answers) = std::sync::mpsc::channel();
-    let mut asked = 0;
-    for target in targets {
-        let (os, send) = (Arc::clone(os), send.clone());
-        let spawned = std::thread::Builder::new()
-            .name("clauseo-proxy-lookup".to_owned())
-            .spawn(move || {
-                let answer = os(&target);
-                // The route may be made already: then no one reads it.
-                let _sent = send.send((target, answer));
-            });
-        if let Err(err) = spawned {
-            tracing::warn!(%err, "an OS proxy lookup did not start; it goes direct");
-        } else {
-            asked += 1;
-        }
-    }
-    let mut got = BTreeMap::new();
-    while got.len() < asked {
-        let left = deadline.saturating_sub(clock.monotonic());
-        let Ok((target, answer)) = answers.recv_timeout(left) else {
-            tracing::warn!(
-                late = asked - got.len(),
-                "OS proxy lookups past the budget count as direct for this route"
-            );
-            break;
-        };
-        got.insert(target, answer);
-    }
-    got
-}
-
 /// The route for `facts`: the setting's, else the environment's, else (with `os_fallback`)
 /// `os`'s per target host, else none.
 pub(crate) fn resolve(
@@ -562,7 +519,10 @@ pub(crate) fn shown(proxy: &str) -> String {
     }
 }
 
+mod ask;
 mod follow;
+
+pub(crate) use ask::ask_all;
 mod launch;
 
 pub(crate) use launch::with_loopback;

@@ -279,7 +279,7 @@ fn five_slow_lookups_take_about_one_lookups_time() {
         "d.example",
         "e.example",
     ];
-    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5));
+    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5)).got;
     let took = since(asked);
     assert_eq!(answers.len(), 5);
     assert!(
@@ -300,7 +300,7 @@ fn a_lookup_past_the_budget_counts_as_direct_and_the_rest_are_kept() {
     let os = slow_os(Duration::ZERO, Duration::from_secs(3));
     let asked = SystemClock.monotonic();
     let budget = Duration::from_millis(300);
-    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget);
+    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget).got;
     let took = since(asked);
     assert!(took >= budget && took < Duration::from_secs(2), "{took:?}");
     let fast = Url::parse("https://fast.example/").unwrap();
@@ -429,4 +429,52 @@ fn a_stale_route_is_resolved_again_by_itself_for_the_next_launch() {
         );
         crate::test_support::block_on(AsyncIoTimer.after(Duration::from_millis(50)));
     }
+}
+
+/// An OS answer past the budget is not lost: the route is made again once it lands, with the
+/// answers already got and no new lookup, so the launch takes the slow host's proxy.
+#[test]
+fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
+    const LATE_PROXY: &str = "http://wpad-proxy.firm.example:8080";
+    let lookups = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&lookups);
+    let os = move |target: &Url| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if target.host_str() == Some("api.anthropic.com") {
+            futures::executor::block_on(AsyncIoTimer.after(Duration::from_millis(700)));
+            Some(LATE_PROXY.to_owned())
+        } else {
+            Some(OS_PROXY.to_owned())
+        }
+    };
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true)
+        .lookup_budget(Duration::from_millis(200));
+    let network = follow(follower, SystemClock.monotonic());
+    network.update(facts());
+    crate::test_support::block_on(network.ready());
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    assert!(
+        !hook_env(&hook, &claude()).contains_key("HTTPS_PROXY"),
+        "late: direct for now"
+    );
+    let asked = lookups.load(std::sync::atomic::Ordering::SeqCst);
+    let started = SystemClock.monotonic();
+    while hook_env(&hook, &claude())
+        .get("HTTPS_PROXY")
+        .map(String::as_str)
+        != Some(LATE_PROXY)
+    {
+        assert!(
+            since(started) < Duration::from_secs(10),
+            "the late answer never landed"
+        );
+        crate::test_support::block_on(AsyncIoTimer.after(Duration::from_millis(50)));
+    }
+    assert_eq!(
+        lookups.load(std::sync::atomic::Ordering::SeqCst),
+        asked,
+        "made again with no new lookup"
+    );
+    assert_eq!(hook_env(&hook, &codex())["HTTPS_PROXY"], OS_PROXY);
 }
