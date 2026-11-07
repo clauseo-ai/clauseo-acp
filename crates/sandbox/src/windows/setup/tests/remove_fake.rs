@@ -16,6 +16,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
 use crate::windows::set_aside::forget_bookkeeping;
+use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
@@ -186,6 +187,16 @@ impl Removal for Remover {
     fn delete_record(&mut self) -> Result<(), MachineError> {
         self.call("delete_record")?;
         Machine::delete_record(&mut self.m)
+    }
+
+    fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
+        Machine::copy_owner(&mut self.m)
+    }
+
+    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
+        self.call("unregister_stop_task")?;
+        self.m.state.stop_task = None;
+        Ok(())
     }
 
     fn invoker(&self) -> Option<&Sid> {

@@ -17,6 +17,7 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
@@ -495,6 +496,17 @@ impl Machine for FakeMachine {
         for user in users {
             self.stop_resets.remove(user);
         }
+        Ok(())
+    }
+
+    fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
+        Ok(self.state.copy_owner.clone())
+    }
+
+    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        self.call(format!("register_stop_task {}", rid(owner)))?;
+        self.state.stop_task = Some(owner.clone());
         Ok(())
     }
 

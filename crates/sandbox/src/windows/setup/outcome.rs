@@ -185,6 +185,9 @@ pub enum Step {
     /// 4: deleting the profile of a recorded user released from a matter, before its logon
     /// makes it again (`resets.rs`).
     ResetProfile,
+    /// 5: on a per-machine install, registering the SYSTEM task `\Clauseo\SandboxStop` for the
+    /// owner just recorded (`late_steps::stop_task`).
+    StopTask,
 }
 
 impl fmt::Display for Step {
@@ -212,6 +215,7 @@ impl fmt::Display for Step {
             Step::Matters => "reading the registered matters",
             Step::Owners => "making sure no sandbox user owns a protected folder",
             Step::ResetProfile => "resetting a sandbox user's profile",
+            Step::StopTask => "registering the sandbox's stop task",
         })
     }
 }

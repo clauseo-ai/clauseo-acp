@@ -26,6 +26,7 @@ mod remove_set_aside;
 mod resets;
 mod rollback;
 mod stop_resets;
+mod stop_task;
 mod top_up;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};

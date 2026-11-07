@@ -1,6 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, and step 9's change journals.
+//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
+//! stop task once the owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use super::create::Failed;
 use super::journal_plan::{JournalAction, journal_plan};
 use super::machine::{Machine, owned};
 use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
+use super::record_values::CopyOwner;
 use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
@@ -23,6 +25,27 @@ use crate::windows::writer::AclWriter;
 const SYSTEM: &str = "S-1-5-18";
 /// `BUILTIN\Administrators`.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
+
+/// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
+/// record's `AdminCopyOwner` is `machine`), the SYSTEM task `\Clauseo\SandboxStop` is
+/// registered for `owner`, or replaced when it is there, by the same registration `--adopt`
+/// makes per user (`refresh::register_task`). Its descriptor then names `owner` alone, so a
+/// previous owner's start right goes with the replaced one. A per-user install's task is
+/// `--adopt`'s, and an install with no admin copy has no task, so neither is touched here. A
+/// record that can't be read or a registration that fails is [`Step::StopTask`], rolled back.
+pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
+    let failed = |why: String| (Step::StopTask, format!("the task SandboxStop: {why}"));
+    match machine.copy_owner() {
+        Ok(Some(CopyOwner::Machine)) => machine
+            .register_stop_task(owner)
+            .map_err(|error| failed(cause_of(&error))),
+        Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
+        Err(error) => Err(failed(format!(
+            "the record's AdminCopyOwner can't be read ({})",
+            cause_of(&error)
+        ))),
+    }
+}
 
 /// Before step 7: the folders whose denies protect what is below them, which an owner could
 /// undo through its implied `WRITE_DAC` (each pool user's `AppData\LocalLow`, whose deny for the

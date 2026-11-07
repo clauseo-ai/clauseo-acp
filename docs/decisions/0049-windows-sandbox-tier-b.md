@@ -922,8 +922,20 @@ owner may only read and run it), one instance at a time. Its action is the admin
 `--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
 registration fails `--adopt` before the record's admin-copy values are written, as for the
 refresh task. `--remove --uninstall` deletes both tasks, after the values and before the admin
-folder (`refresh::TEARDOWN`). A per-machine install registers neither: it has no owner to name
-in the descriptor.
+folder (`refresh::TEARDOWN`).
+
+**Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
+neither task. The refresh task stays per-user only: IT updates a per-machine install. The stop
+task is registered by the elevated set-up instead, once it has written the record with the
+owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::stop_task`).
+It is the same registration as `--adopt`'s: same principal, argument, limits and descriptor,
+with `OwnerSid` as the owner who may read and run it. Every set-up of the owner registers it
+again, replacing the one there. A new owner's set-up, after a removal, replaces the previous
+owner's task, so only the new owner can start it. A failed registration fails the set-up at
+the step "registering the sandbox's stop task", rolled back like any other step. `--remove`
+deletes the task just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
+removal, with the record kept for the next run. `--remove --uninstall` also deletes it with the
+admin copy.
 
 **The run.** `--stop` (`setup/stop.rs`):
 
