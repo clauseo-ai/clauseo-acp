@@ -771,8 +771,10 @@ for `--reclaim`.
   `READ_CONTROL`, while the inner is still suspended (`CreateProcessWithLogonW` takes no
   descriptor, so the pid exists with the logon's default DACL from its return until then, before
   any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
-  after reading the launch it adds the lawyer's query, shuts every thread it has, and gives its
-  default DACL the threads' entries so a thread the system starts in it later is shut too. No
+  after reading the launch it adds the lawyer's query and shuts every thread it has; once the
+  agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
+  gives its default DACL the threads' entries so a thread the system starts in it later is shut
+  too, and shuts every thread again. No
   agent of the pool user, the new one or one already running, opens its Medium, unrestricted
   token (the harness's `runners` row first found query and duplicate open). The agent's own
   token gets an explicit DACL naming the pool user. Both runner exes are GUI-subsystem, so
