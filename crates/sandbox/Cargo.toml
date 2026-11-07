@@ -99,6 +99,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
 # known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
+# The network filters (src/windows/wfp, S15 PR7): the WFP management calls
+# (NetworkManagement_WindowsFilteringPlatform, whose FwpmEngineOpen0 takes an RPC auth identity:
+# System_Rpc) and the firewall rules through INetFwPolicy2 (NetworkManagement_WindowsFirewall).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -108,6 +111,8 @@ windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_NetworkManagement_NetManagement",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_NetworkManagement_WindowsFirewall",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",
@@ -120,6 +125,7 @@ windows = { workspace = true, features = [
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
   "Win32_System_ProcessStatus",
+  "Win32_System_Rpc",
   "Win32_System_Registry",
   "Win32_System_Services",
   "Win32_System_SystemInformation",
