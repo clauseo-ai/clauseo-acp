@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
+# TEMPORARY with stage E's key file: crates/blocklist holds only keys/ until stage E's crate lands.
+exclude = ["crates/blocklist"]
 # `cargo xtask buildtime` times edits to clauseo-protocol and clauseo-reducer with cargo at the
 # root, so they must be in the default members' graph; until desktop depends on them (through
 # host), they are listed themselves.
