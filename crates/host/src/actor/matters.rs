@@ -194,6 +194,10 @@ pub(super) fn create_matter(
     source: MatterSource,
     details: Details,
 ) {
+    let waits = matches!(source, MatterSource::DefaultLocation);
+    if waits && super::documents::hold_create(actor, ctx, name, &details) {
+        return;
+    }
     let name = name.as_str().to_owned();
     match matter_folder(actor, &source) {
         Ok((folder, true)) => begin_create(actor, ctx.id, (name, details), folder, true),
@@ -258,13 +262,14 @@ fn matter_folder(actor: &Actor, source: &MatterSource) -> Result<(PathBuf, bool)
 }
 
 /// The default matters folder, or `command.invalid` when there is none (no Documents folder,
-/// issue #365).
+/// issue #365), or the retryable `matter.folder_missing` while Documents is still being looked
+/// up past the hold's bound (`documents.rs`: before it, a create waits for the answer).
 pub(super) fn default_location(actor: &Actor) -> Result<PathBuf, Error> {
-    actor
-        .effective
-        .default_matters_dir()
-        .map(Path::to_path_buf)
-        .ok_or_else(no_default_location)
+    match super::documents::default_matters_dir(actor) {
+        Some(location) => Ok(location.to_path_buf()),
+        None if super::documents::pending(actor) => Err(super::documents::not_yet()),
+        None => Err(no_default_location()),
+    }
 }
 
 /// The refusal for a default location the host does not have.

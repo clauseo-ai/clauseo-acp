@@ -10,11 +10,13 @@
 //!   destroys `settings`, so closing `main` still ends the app.
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
-//!   is ready waits for it, and after a failed start gets that start's error. That thread adds
-//!   Documents (`Locations::with_documents`, never on the main thread: a share may be down), then
-//!   runs the host with `Effective::load`, the `PassthroughLauncher`, `refused_folders`, the launch
-//!   profile (`profile.rs`) and egress proxies (`egress.rs`). Exit waits for the start, then
-//!   `HostHandle::shutdown`, `HostJoin::join` and the proxies' stop, on their own thread.
+//!   is ready waits for it, and after a failed start gets that start's error. That thread starts
+//!   the Documents lookup on one more (`host_start::documents_later`: a share may be down), which
+//!   the host takes when it answers; the host runs with the effective settings (`Effective::load`,
+//!   system policy sources), the `PassthroughLauncher`, the refused folders of `refused_folders`,
+//!   the launch profile (`profile.rs`, built on that thread; none when it cannot be built) and
+//!   egress proxies (`egress.rs`). Exit waits for the start, then `HostHandle::shutdown`,
+//!   `HostJoin::join` and the proxies' stop, on their own thread, then exits.
 //! - Every quit runs the agents' stop before the process ends (`quit.rs`): a closed window or
 //!   `AppHandle::exit` through `RunEvent::ExitRequested`; on Unix the first SIGTERM, SIGINT or
 //!   SIGHUP through `AppHandle::exit(0)` (`quit_signals.rs`: caught by handlers on Tauri's
@@ -137,9 +139,9 @@ use std::sync::atomic::Ordering;
 
 use bridge::Bridge;
 use clauseo_host::HostConfig;
-use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_settings::{Locations, PlatformDirs as _, SystemDirs, SystemEnv};
 use host_start::{HostCell, HostStart, host_config, load_effective};
+pub(crate) use host_start::{host_launcher, host_spawn_options};
 pub use jailed::{
     AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Signal, Stages, SystemProbe,
     launch, refusal,
@@ -359,8 +361,11 @@ fn start_host<R: Runtime>(
 ) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
         let began = open::now();
-        let locations = locations.with_documents(&SystemDirs, &SystemEnv);
-        chooser::trace::mark("host start: Documents looked up", began, "");
+        // Off this thread: the host starts without Documents and takes it when it answers.
+        let documents = host_start::documents_later(locations.clone(), began, |at| {
+            at.with_documents(&SystemDirs, &SystemEnv)
+        });
+        chooser::trace::mark("host start: Documents lookup started", began, "");
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
@@ -403,6 +408,7 @@ fn start_host<R: Runtime>(
         let counts = counts::open(&locations, &effective, exe.as_deref());
         let data_dir = effective.data_dir().to_path_buf();
         let config = host_config(effective)
+            .with_documents_later(documents)
             .with_login_check(Arc::new(setup::DesktopLoginCheck::new(
                 SystemDirs.home(),
                 reused,
@@ -445,24 +451,6 @@ fn start_counts<R: Runtime>(app: &AppHandle<R>, counts: clauseo_counts::Counts) 
     state.start(counts.clone());
     let cell = bridge.cell();
     state.run_ticker(|| counts::spawn_ticker(counts, counts::HttpsUpload::new(), cell));
-}
-
-/// The launcher the host starts every agent and plan reader with: it clears the environment
-/// (`SpawnOptions::clear_env`, as `HostConfig::new` requires), so a child gets its spec's
-/// variables and nothing else, and the variables the host drops (`GIT_*`, `SSH_*`, Codex's
-/// dropped names) stay dropped. `home` shows as `~` in stderr tails.
-pub(crate) fn host_launcher(home: Option<std::path::PathBuf>) -> PassthroughLauncher {
-    PassthroughLauncher::new(host_spawn_options(home))
-}
-
-/// [`host_launcher`]'s options: the environment cleared, `home` shown as `~`. S18's sign-in
-/// launcher uses them too (`setup/start.rs`).
-pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptions {
-    let spawn = SpawnOptions::new().clear_env();
-    match home {
-        Some(home) => spawn.home(home),
-        None => spawn,
-    }
 }
 
 /// Stops the usage counts' task, then, off the UI thread, the agents' jobs (`Agents::shutdown`,

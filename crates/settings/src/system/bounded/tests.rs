@@ -126,7 +126,7 @@ impl PlatformDirs for HungShare {
 
 /// The desktop's start: its main thread's path before the first window,
 /// `Locations::resolve_without_documents`, answers at once while the lookup hangs; the
-/// host-start thread's, `Locations::with_documents`, goes on without Documents after the 2 s
+/// Documents thread's, `Locations::with_documents`, goes on without Documents after the 2 s
 /// wait; and a later `Locations::resolve` does not wait again.
 #[test]
 fn a_hung_documents_lookup_holds_resolve_for_the_wait_only() {

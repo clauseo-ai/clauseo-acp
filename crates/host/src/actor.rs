@@ -37,6 +37,7 @@ mod browser_install;
 mod commands;
 mod connectors;
 pub(crate) mod counting;
+pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
@@ -139,6 +140,8 @@ pub(crate) struct Actor {
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
     pub(crate) turn_path: turn::wide::TurnPath,
     pub(crate) refused_folders: Vec<PathBuf>,
+    /// The default matters folder's late answer (`documents.rs`).
+    pub(crate) documents: documents::DocumentsWait,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
     /// names it the same way).
     pub(crate) home: Option<PathBuf>,
@@ -474,6 +477,7 @@ impl Actor {
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             Input::Scratch(input) => scratch::on_input(self, input),
+            Input::Documents(input) => documents::on_input(self, input),
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
             Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),

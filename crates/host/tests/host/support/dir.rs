@@ -208,9 +208,19 @@ impl Dir {
     /// Starts run `run` as on a machine with no Documents folder (issue #365): the folders of
     /// [`Locations::under_home`] with no default matters folder.
     pub(crate) fn start_without_documents(&self, run: u16) -> Running {
+        self.start_without_documents_then(run, |config| config)
+    }
+
+    /// As [`Dir::start_without_documents`], letting `adjust` change the config first (a late
+    /// Documents answer, `HostConfig::with_documents_later`).
+    pub(crate) fn start_without_documents_then(
+        &self,
+        run: u16,
+        adjust: impl FnOnce(HostConfig) -> HostConfig,
+    ) -> Running {
         let clock = Self::clock(run);
         let locations = Locations::under_home(&self.root).without_default_matters_dir();
-        let config = self.config_at(&locations, run, &clock, Arc::new(self.launcher()));
+        let config = adjust(self.config_at(&locations, run, &clock, Arc::new(self.launcher())));
         let (handle, join) =
             Host::start(config).unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
         Running {

@@ -82,8 +82,9 @@
 //!   [`HostConfig::with_clock`], [`HostConfig::with_ids`] and
 //!   [`HostConfig::with_limits_reader`] set the rest). It returns once
 //!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
-//!   and start-up reconciliation has committed. A second start on the same data folder fails
-//!   with `store.locked`.
+//!   and start-up reconciliation has committed. With [`HostConfig::with_documents_later`] it
+//!   does not wait for the default matters folder: the Scratch matter comes once it answers. A
+//!   second start on the same data folder fails with `store.locked`.
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
 //!   [`HostHandle::subscribe_app`], [`HostHandle::subscribe_limits`], [`HostHandle::ack`],

@@ -106,7 +106,7 @@ fn resolve_on_windows_without_documents_succeeds() {
 }
 
 /// The desktop's split start, `without_documents_for` on the main thread and
-/// `with_documents_for` on the host-start thread, gives what `resolve_for` gives, on each OS,
+/// `with_documents_for` on the Documents thread, gives what `resolve_for` gives, on each OS,
 /// with Documents and without, with `CLAUSEO_DATA_DIR` and without. The first part never asks
 /// for Documents: without `CLAUSEO_DATA_DIR` it has no default matters folder.
 #[test]

@@ -243,6 +243,8 @@ pub(crate) enum Input {
     Scan(super::scan::ScanInput),
     /// The Scratch matter's folder scan answered, or start-up's wait for it ended.
     Scratch(super::scratch::ScratchInput),
+    /// The Documents lookup answered, or its bound passed (`documents.rs`).
+    Documents(super::documents::DocumentsInput),
     /// A new matter folder's probe answered (`matters/probe.rs`).
     NewFolder(Box<super::matters::probe::Probed>),
     /// A `LocateFile`'s folder probe answered (`locate.rs`).
@@ -285,6 +287,7 @@ impl std::fmt::Debug for Input {
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
             Self::Scratch(_) => "Scratch",
+            Self::Documents(_) => "Documents",
             Self::NewFolder(_) => "NewFolder",
             Self::Located(_) => "Located",
             Self::BrowserInstall(_) => "BrowserInstall",

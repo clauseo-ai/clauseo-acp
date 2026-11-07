@@ -201,3 +201,30 @@ fn an_open_stream_waiting_when_its_window_closes_keeps_nothing() {
     drop(bridge);
     stop(&cell);
 }
+
+/// The Documents lookup runs off the start: `documents_later` returns while the lookup is held
+/// (a stand-in for a share that does not answer for 10 s), and the answer comes on the receiver
+/// once the lookup ends.
+#[test]
+fn the_documents_lookup_never_holds_the_start() {
+    let data = std::path::Path::new("/data");
+    let early = Locations::under_root(data).without_default_matters_dir();
+    let (release, held) = mpsc::channel::<()>();
+    let mut later = documents_later(early, crate::open::now(), move |_| {
+        let _released = held.recv();
+        Locations::under_root(data)
+    });
+    assert!(matches!(later.try_recv(), Ok(None)), "answered while held");
+    release.send(()).unwrap();
+    let located = block_on(later).unwrap();
+    assert_eq!(located, Locations::under_root(data));
+}
+
+/// A lookup that ends without Documents still answers: the host then has no default matters
+/// folder (issue #365).
+#[test]
+fn a_lookup_without_documents_answers_none() {
+    let early = Locations::under_root(std::path::Path::new("/data")).without_default_matters_dir();
+    let later = documents_later(early, crate::open::now(), |at| at);
+    assert_eq!(block_on(later).unwrap().default_matters_dir(), None);
+}
