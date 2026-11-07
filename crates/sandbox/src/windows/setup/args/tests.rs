@@ -400,3 +400,32 @@ fn refresh_takes_no_argument_at_all() {
     }
     assert!(parsed(&["--remove", "--refresh"]).is_err());
 }
+
+#[test]
+fn stop_takes_no_argument_at_all() {
+    assert_eq!(parsed(&["--stop"]), Ok(Mode::Stop));
+    // No SID, no path, no pid, no flag: the stop reads the pool from the record alone.
+    for extra in [
+        "S-1-5-21-1-2-3-1001",
+        "--owner-sid",
+        "--data-dir",
+        r"C:\Users\x",
+        "--parent",
+        "1234",
+        "--per-machine",
+        "--uninstall",
+        "--stop",
+        "--refresh",
+        "",
+    ] {
+        assert!(parsed(&["--stop", extra]).is_err(), "{extra:?}");
+        assert!(parsed(&["--stop", extra, "x"]).is_err(), "{extra:?}");
+    }
+    for other in ["--remove", "--refresh", "--set-up", "--reclaim", "--adopt"] {
+        assert!(parsed(&[other, "--stop"]).is_err(), "{other}");
+    }
+    // Only the exact flag.
+    for near in ["--Stop", "--stop=", "-stop", "stop", "--stop "] {
+        assert!(parsed(&[near]).is_err(), "{near:?}");
+    }
+}

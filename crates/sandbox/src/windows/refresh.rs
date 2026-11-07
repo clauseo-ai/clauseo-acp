@@ -78,6 +78,8 @@ mod staging;
 #[cfg(windows)]
 pub mod task;
 #[cfg(test)]
+mod task_tests;
+#[cfg(test)]
 mod test_signer;
 pub mod version;
 #[cfg(windows)]
@@ -86,17 +88,17 @@ mod walk;
 mod windows_refresher;
 
 pub use rules::{
-    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, hex, inside_profile, same_path, sddl_matches,
-    task_sddl,
+    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
+    TEARDOWN, Teardown, hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TASK_NAME, TaskError, register_refresh_task, remove_staging,
-    request_admin_refresh, unregister_refresh_task,
+    TASK_FOLDER, TaskError, register_task, remove_staging, request_admin_refresh,
+    request_pool_stop, unregister_task,
 };
 pub use version::version_not_older;
 #[cfg(windows)]
-pub use windows_refresher::{WindowsRefresher, run};
+pub use windows_refresher::{WindowsRefresher, event_log, run};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;

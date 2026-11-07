@@ -1,7 +1,8 @@
-//! The refresh's fixed values and pure rules: the task's argument and limit, the descriptors of
-//! the task and the staging folder (the admin copy's is `admin_copy::LOCKED_FILE_SDDL`, which
-//! `--adopt` gives the first copy), and the comparisons of paths, descriptors
-//! and the install folder against the owner's profile. No Windows call; tested on every OS.
+//! The refresh's fixed values and pure rules: the tasks' arguments and limits, the order the
+//! uninstaller's removal takes them down in, the descriptors of the tasks and the staging folder
+//! (the admin copy's is `admin_copy::LOCKED_FILE_SDDL`, which `--adopt` gives the first copy),
+//! and the comparisons of paths, descriptors and the install folder against the owner's
+//! profile. No Windows call; tested on every OS.
 
 use std::path::Path;
 
@@ -11,10 +12,95 @@ use crate::windows::sids::Sid;
 pub const REFRESH_ARG: &str = "--refresh";
 /// The task's execution limit: 5 minutes.
 pub const EXECUTION_LIMIT: &str = "PT5M";
+/// The stop task's one argument (`setup::stop`): nothing else.
+pub const STOP_ARG: &str = "--stop";
+/// The stop task's execution limit: 2 minutes.
+pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 
-/// The descriptor of the task and its folder: owned by Administrators; protected; SYSTEM and
-/// Administrators full control; the record owner `owner` read and run (`FRFX`), so the app
-/// can ask for a run and can't change or delete the task.
+/// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
+/// fixed argument. Both share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
+/// one instance at a time and the settings `task.rs` gives every task; they differ only in
+/// what [`SystemTask`]'s methods say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemTask {
+    /// `\Clauseo\SandboxRefresh`: the admin copy's refresh (`--refresh`).
+    Refresh,
+    /// `\Clauseo\SandboxStop`: stops every process of the pool's users (`--stop`).
+    Stop,
+}
+
+/// Every task, in the order `--adopt` registers them.
+pub const TASKS: [SystemTask; 2] = [SystemTask::Refresh, SystemTask::Stop];
+
+impl SystemTask {
+    /// Its name in `\Clauseo`.
+    pub fn name(self) -> &'static str {
+        match self {
+            SystemTask::Refresh => "SandboxRefresh",
+            SystemTask::Stop => "SandboxStop",
+        }
+    }
+
+    /// Its action's one argument.
+    pub fn argument(self) -> &'static str {
+        match self {
+            SystemTask::Refresh => REFRESH_ARG,
+            SystemTask::Stop => STOP_ARG,
+        }
+    }
+
+    /// How long a run may take before the Task Scheduler ends it.
+    pub fn execution_limit(self) -> &'static str {
+        match self {
+            SystemTask::Refresh => EXECUTION_LIMIT,
+            SystemTask::Stop => STOP_EXECUTION_LIMIT,
+        }
+    }
+
+    /// Whether it also starts at the record owner's logon; otherwise only on demand.
+    pub fn at_logon(self) -> bool {
+        match self {
+            SystemTask::Refresh => true,
+            SystemTask::Stop => false,
+        }
+    }
+
+    /// Its description, as the Task Scheduler shows it.
+    pub fn description(self) -> &'static str {
+        match self {
+            SystemTask::Refresh => {
+                "Keeps the admin copy of Clauseo's sandbox set-up program current."
+            }
+            SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
+        }
+    }
+}
+
+/// One step of the uninstaller's removal of the admin copy (`setup::admin_remove`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Teardown {
+    /// The record's admin-copy values, first, so no launcher trusts the copy from here on.
+    AdminValues,
+    /// One of the SYSTEM tasks (one that isn't there is fine).
+    Task(SystemTask),
+    /// The refresh's staging folder.
+    Staging,
+    /// Everything left in the admin folder, then the folder.
+    AdminFolder,
+}
+
+/// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
+pub const TEARDOWN: [Teardown; 5] = [
+    Teardown::AdminValues,
+    Teardown::Task(SystemTask::Refresh),
+    Teardown::Task(SystemTask::Stop),
+    Teardown::Staging,
+    Teardown::AdminFolder,
+];
+
+/// The descriptor of every task in [`TASKS`] and of their folder: owned by Administrators;
+/// protected; SYSTEM and Administrators full control; the record owner `owner` read and run
+/// (`FRFX`), so the app can ask for a run and can't change or delete a task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }

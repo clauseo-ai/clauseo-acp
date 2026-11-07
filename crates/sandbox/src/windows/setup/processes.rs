@@ -146,8 +146,9 @@ fn look() -> Result<Vec<(Seen, Option<Handle>)>, MachineError> {
     Ok(listed)
 }
 
-/// The user of the process `process` is open on; `None` when its token can't be read.
-fn user_of(process: &Handle) -> Option<Sid> {
+/// The user of the process `process` is open on; `None` when its token can't be read. The stop
+/// (`stop/windows_stopper.rs`) reads its snapshot's users through it too.
+pub(super) fn user_of(process: &Handle) -> Option<Sid> {
     let mut token = HANDLE::default();
     // SAFETY: the process handle is open with PROCESS_QUERY_LIMITED_INFORMATION; `token` is a
     // live out-pointer, owned by `Handle` once written.
@@ -176,8 +177,9 @@ fn pids() -> Result<Vec<u32>, MachineError> {
 }
 
 /// `SeDebugPrivilege` enabled in this process's token for as long as this guard lives; on drop
-/// the token gets back the state it had before (`PreviousState`), on every return path.
-struct DebugPrivilege {
+/// the token gets back the state it had before (`PreviousState`), on every return path. The stop
+/// holds one for its whole run.
+pub(super) struct DebugPrivilege {
     /// The token, open for `TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY`.
     token: Handle,
     /// The privilege's state before the change; restored on drop.
@@ -187,7 +189,7 @@ struct DebugPrivilege {
 impl DebugPrivilege {
     /// Enables the privilege where the token holds it; `None` when it couldn't (the stop then
     /// still reaches the processes whose DACL lets this token in).
-    fn enable() -> Option<DebugPrivilege> {
+    pub(super) fn enable() -> Option<DebugPrivilege> {
         let mut token = HANDLE::default();
         let access = TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY;
         // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a
