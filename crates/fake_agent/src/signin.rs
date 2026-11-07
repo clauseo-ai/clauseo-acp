@@ -222,6 +222,7 @@ impl Script {
 
 /// Runs the sign-in `mode` with `args`, the arguments after the script, and returns the exit code.
 pub(crate) fn run(mode: Mode, args: &[OsString]) -> i32 {
+    parent::end_with_parent();
     if mode == Mode::CodexAdapter {
         return adapter().unwrap_or_else(|error| {
             stderr_write(&diagnostic(format_args!("{error}")));
@@ -572,5 +573,6 @@ fn stderr_write(text: &str) {
 
 mod app_server;
 mod codex_login;
+mod parent;
 #[cfg(test)]
 mod tests;
