@@ -17,10 +17,13 @@
 //!    the owner, named `ClauseoSbNN` when it resolves. One that fails stops nothing;
 //! 4. passes over the processes until one finds none of the pool's: each takes a snapshot and
 //!    reads each process's user ([`Process`]) from the kernel's process list
-//!    (`WTSEnumerateProcessesExW`), which names it whatever the token's DACL says, with the
-//!    token's user as a cross-check. It picks each process whose user is exactly one of the
-//!    pool's SIDs ([`pick`]; never this process, pid 0 or pid 4), and marks each pool user it
-//!    finds for a reset at once (step 6), before anything is stopped. It then suspends them all,
+//!    (`WTSEnumerateProcessesExW`), with the token's user as a cross-check. The list reads the
+//!    token too: a process whose token's DACL shuts out SYSTEM gets no SID from it (CI run
+//!    42416074600), and the token can't be read either, so its owner names it (below), read
+//!    under `SeDebugPrivilege`, which passes the process's DACL, not the token's. It picks each
+//!    process whose user is exactly one of the pool's SIDs ([`pick`]; never this process, pid 0
+//!    or pid 4), and marks each pool user it finds for a reset at once (step 6), before anything
+//!    is stopped. It then suspends them all,
 //!    and terminates each through the handle its user was read through, so a reused pid can't
 //!    redirect it and a parent can't start another between two terminations. The passes stop
 //!    once one finds no pool user's process, or after [`PASS_LIMIT`]; what is still there then
@@ -157,8 +160,9 @@ const SYSTEM_PID: u32 = 4;
 pub struct Process {
     /// Its process id.
     pub pid: u32,
-    /// Its user as the kernel's process list (`WTSEnumerateProcessesExW`) gave it, past the
-    /// token's DACL; `None` when the list named no SID for it, or didn't list it.
+    /// Its user as the kernel's process list (`WTSEnumerateProcessesExW`) gave it; `None` when
+    /// the list named no SID for it (as for a process whose token's DACL shuts out SYSTEM), or
+    /// didn't list it.
     pub listed: Option<Sid>,
     /// Its token's user, read through the handle; `None` when the token couldn't be read.
     pub token: Option<Sid>,
