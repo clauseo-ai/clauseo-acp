@@ -157,9 +157,10 @@ fn an_inherit_only_entry_grants_nothing_on_the_object() {
 
 #[test]
 fn an_entry_of_a_type_the_check_does_not_read_fails_closed() {
-    // An allow-object entry, even for reading only.
+    // An allow-object entry, even for reading only. It names an object type: without one,
+    // Windows' SDDL parser writes `OA` as a plain allow entry (seen on windows-2025).
     assert_eq!(
-        file("O:BAG:SYD:(A;;FA;;;BA)(OA;;FR;;;BU)"),
+        file("O:BAG:SYD:(A;;FA;;;BA)(OA;;FR;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)"),
         Some(Distrust::Writable)
     );
     // A deny entry only takes rights away.
