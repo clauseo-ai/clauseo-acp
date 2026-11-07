@@ -59,8 +59,8 @@ impl Scratch {
         Self {
             root,
             session,
-            cdp: ports::claim_port().expect("claim the CDP port"),
-            stream: ports::claim_port().expect("claim the stream port"),
+            cdp: ports::claim_browser_port().expect("claim the CDP port"),
+            stream: ports::claim_browser_port().expect("claim the stream port"),
             daemon,
             #[cfg(unix)]
             socket_dir: clauseo_sandbox::BrowserSocketDir::create()
@@ -83,8 +83,8 @@ impl Scratch {
 
 /// macOS and Linux: `base` as the session, no daemon port. Windows: `base` and a counter,
 /// counted up until agent-browser's daemon port for the name (the host's
-/// `browser::session::daemon_port_of`, copied: it is crate-private) is one `claim_port_at`
-/// takes in the jail's range.
+/// `browser::session::daemon_port_of`, copied: it is crate-private) is one
+/// `claim_browser_port_at` takes (any port outside tier B's range that isn't held).
 fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
     if cfg!(unix) {
         return (base.to_owned(), None);
@@ -96,9 +96,7 @@ fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
             hash = (hash << 5).wrapping_sub(hash).wrapping_add(c as i32);
         }
         let port = u16::try_from(49_152 + hash.unsigned_abs() % 16_383).expect("a port");
-        if ports::WINDOWS_PORTS.contains(&port)
-            && let Ok(claim) = ports::claim_port_at(port)
-        {
+        if let Ok(claim) = ports::claim_browser_port_at(port) {
             return (name, Some(claim));
         }
     }

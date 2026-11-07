@@ -991,7 +991,7 @@ only (stage C's `ports`). Chrome, the stream server and agent-browser's daemon b
 agent's first browser tool call (and again after an idle stop), and the stream
 server and the daemon fall back to another port
 when theirs is taken. So a second host on the same machine (two OS users, or two Windows users
-sharing 61080 to 61179) can be handed a port this host claimed but has not bound yet. This
+sharing one loopback range) can be handed a port this host claimed but has not bound yet. This
 host's jailed agent could then reach that host's Chrome on its CDP port, and this host's
 `.port` and `.stream` files never appear, so the guard's checks never fire. The odds are low on
 macOS (two hosts drawing the same ephemeral port in the window before the first tool call); on
@@ -1019,6 +1019,11 @@ name lands in range about once in 164), then fails typed (`ClaimError::NameSearc
 That name is agent-browser's session name, and the port goes to the guard as `--daemon-port`,
 which checks the daemon's `.port` file (guard part, "The ports agent-browser reports"). Upstream issue
 vercel-labs/agent-browser#2313, a daemon port set by the caller, would remove the search.
+
+Amended 2026-11-07 (S15 PR7): tier B's range moved to 46100 to 46199 and is for tier B's
+listeners alone, so the browser claims outside it: `ports::claim_browser_port` for the CDP and
+stream ports, `ports::claim_browser_port_at` for the daemon's, which takes any port of 49152 to
+65534 that isn't held. Nearly every draw now claims; the 200,000-draw bound stays.
 
 **Missing sidecars.** The same prep checks that the browser entry's `clauseo-mcp` (its command)
 and agent-browser (its `--agent-browser` argument) are files. A development build has no
