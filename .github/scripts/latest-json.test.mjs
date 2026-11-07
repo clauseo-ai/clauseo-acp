@@ -19,7 +19,8 @@
 // to passing the generated sidecar overlay last, and checks the sandbox tool's path: its one name
 // (SANDBOX_EXE), its updater signature before NSIS, its .sig in both installers, assemble's checks
 // of the published exe and .sig against both installers and the updater key, and the build env
-// its build.rs reads.
+// its build.rs reads; and every job that passes release.conf.json to passing blocklist.conf.json
+// with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -317,7 +318,7 @@ test("release.yml keeps the workflow rules", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(lintWorkflow(text), []);
   // The lint read the jobs: each name the release depends on is there.
-  for (const job of ["check", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
+  for (const job of ["check", "blocklist", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
     assert.match(text, new RegExp(`^  ${job}:`, "m"), job);
   }
 });
@@ -635,7 +636,7 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);
   assert.ok(assemble.some((line) => line.includes('"$SANDBOX_EXE" > missing.txt')), "latest-json.mjs gets SANDBOX_EXE");
-  // apt-get in assemble only.
+  // apt-get in assemble and blocklist (minisign) only.
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
   }
@@ -664,6 +665,51 @@ test("release.yml's build tells the sandbox's build.rs the mode and, for release
   const conf = JSON.parse(readFileSync(join(here, "..", "..", "crates", "desktop", "tauri.conf.json"), "utf8"));
   const release = conf.plugins.updater.pubkey;
   assert.ok(release === "" || pubFormat(release), "tauri.conf.json's pubkey, once set, is that format");
+});
+
+/**
+ * The jobs that pass release.conf.json, and every way one of them leaves out the block-list
+ * snapshot: a line passing release.conf.json without blocklist.conf.json, no `blocklist` in its
+ * `needs:`, or no blocklist-snapshot download before its first `tauri build` or `tauri bundle`.
+ */
+function snapshotProblems(text) {
+  const checked = [];
+  const problems = [];
+  for (const [, job] of text.matchAll(/^  ([a-z-]+):\s*$/gm)) {
+    const lines = jobCommands(text, job);
+    const release = lines.filter((line) => line.includes("--config release/release.conf.json"));
+    if (release.length === 0) {
+      continue;
+    }
+    checked.push(job);
+    for (const line of release.filter((one) => !one.includes("--config release/blocklist.conf.json"))) {
+      problems.push(`${job}: ${line}`);
+    }
+    if (!/^needs:.*\bblocklist\b/.test(lines.find((line) => line.startsWith("needs:")) ?? "")) {
+      problems.push(`${job}: no blocklist in needs`);
+    }
+    const download = lines.indexOf("name: blocklist-snapshot");
+    const first = lines.findIndex((line) => /\btauri (build|bundle)\b/.test(line));
+    if (download === -1 || download > first) {
+      problems.push(`${job}: no blocklist-snapshot download before its first tauri build or bundle`);
+    }
+  }
+  return { checked, problems };
+}
+
+test("release.yml's builds with release.conf.json take the verified block-list snapshot", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  assert.deepEqual(snapshotProblems(text), { checked: ["build", "sign-windows", "measure-builds"], problems: [] });
+  const broken = (from, to) => {
+    const changed = text.replace(from, to);
+    assert.notEqual(changed, text, from);
+    return snapshotProblems(changed).problems;
+  };
+  assert.equal(broken(/(--config release\/release\.conf\.json) --config release\/blocklist\.conf\.json --no-bundle/, "$1 --no-bundle").length, 1);
+  assert.deepEqual(broken("needs: [check, build, blocklist]", "needs: [check, build]"), ["sign-windows: no blocklist in needs"]);
+  assert.deepEqual(broken(/( {6}# The same verified snapshot)[^]*?path: crates\/desktop\/blocklist\n/, ""), [
+    "sign-windows: no blocklist-snapshot download before its first tauri build or bundle",
+  ]);
 });
 
 test("the workflow lint fails each broken rule", () => {

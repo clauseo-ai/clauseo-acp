@@ -6,6 +6,8 @@ dist/
 # why: ui/app's probe build (pnpm build:probe), served to scripts/webkit-probe.swift
 dist-probe/
 dist-review/
+# why: release.yml's blocklist snapshot, downloaded into place before each release build
+/crates/desktop/blocklist/
 .claude/worktrees/
 CLAUDE.local.md
 *.local.*
