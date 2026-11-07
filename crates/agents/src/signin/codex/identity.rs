@@ -49,24 +49,29 @@ pub(crate) enum AccountRead {
     /// An account that is not a `ChatGPT` sign-in: an API key, Amazon Bedrock, or a kind this
     /// build does not know. Never `SignedIn` or `LoginFound` on this card.
     NotChatgpt,
-    /// No account: the app-server did not start, answered either call with a JSON-RPC error
-    /// (codex-acp's adapter answers `initialize` with -32602), answered `account: null`
-    /// (signed out), or was cut short by its limit or by Cancel.
+    /// A definite answer that there is no account: `account: null` (signed out), or a JSON-RPC
+    /// error to either call (codex-acp's adapter answers `initialize` with -32602): not a login.
     NoAccount,
+    /// No answer: the app-server did not start, closed or broke the protocol before answering,
+    /// or was cut short by its limit or by Cancel. It tells nothing either way.
+    NoAnswer,
 }
 
 /// `account/read` with `kind`'s environment and store argument, in `cwd`: Clauseo's own,
 /// detection's (no store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a
-/// reused session's. A `ChatGPT` account with no email is told apart from a read that failed
-/// (`NoAccount`), which is never a login, and detection never takes it for one with no email.
+/// reused session's. A `ChatGPT` account with no email is told apart from a read that said no
+/// account (`NoAccount`) or got no answer (`NoAnswer`), neither of which is ever a login, and
+/// detection never takes either for one with no email.
 pub(crate) async fn read_as<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> AccountRead {
-    let Some(answered) = account(job, cancel, kind, cwd).await else {
-        return AccountRead::NoAccount;
+    let answered = match account(job, cancel, kind, cwd).await {
+        Some(Ok(answered)) => answered,
+        Some(Err(clauseo_codex_appserver::Error::Rpc { .. })) => return AccountRead::NoAccount,
+        Some(Err(_)) | None => return AccountRead::NoAnswer,
     };
     if answered.account.is_none() {
         return AccountRead::NoAccount;
@@ -84,12 +89,14 @@ pub(crate) fn app_server_args(kind: RunKind<'_>) -> Vec<OsString> {
     args
 }
 
+/// The app-server's answer to `initialize` then `account/read`: the response or the call's
+/// error; `None` when it did not start, or was cut short by its limit or by Cancel.
 async fn account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
-) -> Option<GetAccountResponse> {
+) -> Option<Result<GetAccountResponse, clauseo_codex_appserver::Error>> {
     let mut spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
     spec.cwd = cwd.to_path_buf();
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
@@ -110,7 +117,7 @@ async fn account<T: Timer + Send + Sync>(
             client.initialize(ClientInfo::clauseo()).await?;
             client.account().await
         };
-        join(driver, calls).await.1.ok()
+        Some(join(driver, calls).await.1)
     });
     // stderr is drained and never read.
     let errs = pin!(async move {

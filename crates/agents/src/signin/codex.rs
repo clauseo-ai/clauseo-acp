@@ -5,9 +5,10 @@
 //! `script`, which is codex-acp's ACP adapter: it ignores these commands and exits 0.
 //!
 //! **Confirmed** ([`confirm`]) means both: `login status` exited 0 with its `Logged in using …`
-//! line, and `account/read` then named an account. Exit 0 alone, a run that timed out, a
-//! JSON-RPC error and `account: null` all confirm nothing, and nothing unconfirmed is ever
-//! `SignedIn` (or writes `login-source`).
+//! line, and `account/read` then named a `ChatGPT` account. Nothing unconfirmed is ever
+//! `SignedIn` (or writes `login-source`). Exit 0 alone, a JSON-RPC error and `account: null` are
+//! definite answers, signed out; only a run with no answer at all (it did not start, or was killed
+//! at its limit) confirms nothing either way.
 //!
 //! Every run here has the Own environment: `CODEX_HOME` and, on macOS and Linux, `HOME` set to
 //! the agent's home, `CODEX_API_KEY=""`, and `SSL_CERT_FILE` for the agent's CA.
@@ -283,10 +284,14 @@ async fn confirmed_or_failed<T: Timer + Send + Sync>(
 /// own, so a cancelled sign-in still cleans up), then the home's `auth.json` removed directly
 /// when it is still there (`reuse::remove_home_login`, which never reads it). It is Clauseo's
 /// own home, and the caller holds the lock on Codex's login files. Never while the home's file is
-/// the lawyer's (the guard, [`home_shares_lawyers_login`]): then nothing is touched. `true` when
+/// the lawyer's (the guard, [`super::reuse::codex_login_shared`]), and never when the lawyer's
+/// home folder is not known, since the guard cannot then tell: nothing is touched. `true` when
 /// the home holds no login file afterwards.
 async fn remove_own_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> bool {
-    if home_shares_lawyers_login(job) {
+    let Some(lawyer) = job.config.signin.lawyer_home() else {
+        return false;
+    };
+    if super::reuse::codex_login_shared(&job.home, &lawyer) {
         return false;
     }
     if job.script().is_some() {
@@ -315,10 +320,12 @@ async fn remove_own_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> bool {
 pub(crate) enum Confirmation {
     /// `login status` said signed in and `account/read` named this account.
     Confirmed(Identity),
-    /// `login status` said signed out (it exited non-zero: `Not logged in`, exit 1), or
-    /// `account/read` named an account that is not a `ChatGPT` one.
+    /// A definite "not signed in": `login status` exited non-zero (`Not logged in`, exit 1) or
+    /// exited 0 with no signed-in line (not Codex's CLI answering), or `account/read` answered
+    /// `account: null`, a JSON-RPC error, or an account that is not a `ChatGPT` one.
     SignedOut,
-    /// Nothing either way: no answer, exit 0 with no signed-in line, or no account read.
+    /// No answer at all: a run that did not start, closed before answering, or was killed at its
+    /// limit or by Cancel. It tells nothing either way.
     Unknown,
 }
 
@@ -342,7 +349,7 @@ pub(crate) async fn confirm<T: Timer + Send + Sync>(
         }
         StatusSaid::NoMarker => {
             not(Unconfirmed::NoMarker);
-            Confirmation::Unknown
+            Confirmation::SignedOut
         }
         StatusSaid::NoAnswer => {
             not(Unconfirmed::NoAnswer);
@@ -352,7 +359,8 @@ pub(crate) async fn confirm<T: Timer + Send + Sync>(
 }
 
 /// [`confirm`]'s second half, once `login status` said signed in: `account/read` must name
-/// a `ChatGPT` account. Any other account is signed out for this card.
+/// a `ChatGPT` account. Any other answer (another kind of account, `account: null`, a JSON-RPC
+/// error) is signed out for this card; only no answer is `Unknown`.
 async fn confirm_account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
@@ -373,6 +381,12 @@ async fn confirm_account<T: Timer + Send + Sync>(
         AccountRead::NoAccount => {
             job.note(SigninNote::StatusNotConfirmed {
                 reason: Unconfirmed::NoAccount,
+            });
+            Confirmation::SignedOut
+        }
+        AccountRead::NoAnswer => {
+            job.note(SigninNote::StatusNotConfirmed {
+                reason: Unconfirmed::NoAnswer,
             });
             Confirmation::Unknown
         }

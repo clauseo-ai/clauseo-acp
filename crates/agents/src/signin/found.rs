@@ -11,11 +11,12 @@
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
 //!   confirms the account (`codex::confirm`; signed out is `ReusedSignedOut` too).
-//! - Codex's status confirming nothing either way (no answer, JSON-RPC errors) is asked once more
-//!   ([`confirm_twice`], with its 15 s and 20 s limits); confirming nothing again, the state is
+//! - Codex's status that gets no answer at all (a run killed at its 15 s or 20 s limit, or one
+//!   that did not start) is asked once more ([`confirm_twice`]); no answer again, the state is
 //!   left exactly as it was: never `Failed`, never downgraded (a reuse is not ended, its link
-//!   stays, and nothing restarts), never upgraded, and a `state_kept` note is logged. Only a
-//!   positive "not logged in" signs out.
+//!   stays, and nothing restarts), never upgraded, and a `state_kept` note is logged. A definite
+//!   negative answer signs out at once: "Not logged in", exit 0 with no signed-in line,
+//!   `account: null`, a JSON-RPC error, or an account that is not a `ChatGPT` one.
 //! - otherwise Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
 //! - otherwise, unless `no-reuse` is there, detection (`super::detect`): `LoginFound`, or
 //!   `SignedOut` with what was seen.
@@ -212,8 +213,8 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
 }
 
 /// Codex's own confirmation under `kind` in the home, for the status check: asked once more when
-/// the first confirmed nothing either way (a run killed at its limit, JSON-RPC errors, no
-/// account read), unless the job was cancelled. Still `Unknown` after that, the
+/// the first got no answer at all (a run killed at its limit, or one that did not start),
+/// unless the job was cancelled. Still `Unknown` after that, the
 /// `StatusNotConfirmed { Kept }` note says the state is left as it was. A slow cold start (the
 /// first run warms the CLI) or one stalled run is then no reason to end a reuse or restart the
 /// agents.
