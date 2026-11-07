@@ -289,9 +289,50 @@ pub(crate) fn breakaway(lines: &[String]) -> Result<String, String> {
     }
 }
 
+/// `wts-visibility`, from `probe wts`'s lines (`win_pool::wts_lines`): always INFO, naming what
+/// a pool user's `WTSEnumerateProcessesW` returned next to its Toolhelp snapshot, or the error.
+pub(crate) fn wts_visibility(lines: &[String]) -> Verdict {
+    let toolhelp = match (
+        values(lines, "wts toolhelp").first(),
+        values(lines, "wts toolhelp-error").first(),
+    ) {
+        (Some(n), _) => format!("Toolhelp {n} processes"),
+        (None, Some(code)) => format!("Toolhelp failed ({code})"),
+        (None, None) => "no Toolhelp line".to_owned(),
+    };
+    if let Some(code) = values(lines, "wts enum-error").first() {
+        return Verdict::Info(format!(
+            "as the pool user, WTSEnumerateProcessesW failed with {code}; {toolhelp}"
+        ));
+    }
+    let Some(counts) = values(lines, "wts enum").first().and_then(|rest| {
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        match words.as_slice() {
+            [total, "sid", sid, "own", own] => Some((*total, *sid, *own)),
+            _ => None,
+        }
+    }) else {
+        return Verdict::Info(format!("probe wts printed no wts enum line: {lines:?}"));
+    };
+    let (total, sid, own) = counts;
+    let missing = values(lines, "wts missing").first().map_or_else(
+        || "the Toolhelp processes WTS left out weren't counted".to_owned(),
+        |rest| {
+            let (n, names) = rest.split_once(' ').unwrap_or((rest, ""));
+            format!("{n} Toolhelp processes not in WTS (first: {names})")
+        },
+    );
+    Verdict::Info(format!(
+        "as the pool user: {toolhelp}; WTSEnumerateProcessesW {total} entries, {sid} with a user \
+         SID, {own} the pool user's; {missing}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MID_SESSION_MS, Verdict, at_end, at_start, breakaway, swept, token_config};
+    use super::{
+        MID_SESSION_MS, Verdict, at_end, at_start, breakaway, swept, token_config, wts_visibility,
+    };
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|l| (*l).to_owned()).collect()
@@ -477,5 +518,50 @@ mod tests {
             "breakaway our-job error OpenProcess gave 5",
         ]);
         assert!(breakaway(&failed).is_err());
+    }
+
+    fn info_names(verdict: &Verdict, words: &[&str]) {
+        let Verdict::Info(text) = verdict else {
+            panic!("not INFO: {verdict:?}");
+        };
+        for word in words {
+            assert!(text.contains(word), "{text:?} doesn't name {word:?}");
+        }
+    }
+
+    #[test]
+    fn wts_visibility_is_info_naming_the_counts() {
+        let seen = lines(&[
+            "wts toolhelp 120",
+            "wts enum 41 sid 41 own 3",
+            "wts missing 79 lsass.exe,csrss.exe",
+        ]);
+        info_names(
+            &wts_visibility(&seen),
+            &[
+                "Toolhelp 120",
+                "41 entries",
+                "41 with a user SID",
+                "3 the pool user's",
+                "79",
+            ],
+        );
+        info_names(&wts_visibility(&seen), &["lsass.exe,csrss.exe"]);
+    }
+
+    #[test]
+    fn wts_visibility_is_info_on_an_error_or_no_lines() {
+        let failed = lines(&["wts toolhelp 120", "wts enum-error 5"]);
+        info_names(&wts_visibility(&failed), &["failed with 5", "Toolhelp 120"]);
+        let no_toolhelp = lines(&["wts toolhelp-error 24", "wts enum 3 sid 0 own 0"]);
+        info_names(
+            &wts_visibility(&no_toolhelp),
+            &["Toolhelp failed (24)", "3 entries"],
+        );
+        info_names(&wts_visibility(&[]), &["no wts enum line"]);
+        info_names(
+            &wts_visibility(&lines(&["wts enum 3 sid"])),
+            &["no wts enum line"],
+        );
     }
 }

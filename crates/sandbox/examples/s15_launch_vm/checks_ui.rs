@@ -113,8 +113,7 @@ pub(crate) fn atom_info(ctx: &Ctx<'_>, lines: &[String], name: &str) {
 
 /// Runs probe `args` as A to its end; its stdout.
 fn probe(ctx: &Ctx<'_>, args: &[&str]) -> Result<Vec<String>, String> {
-    let done =
-        launch(ctx.manifest, "A", &Spec::probe(ctx.manifest, args))?.finish(deadline(ctx.limit))?;
+    let done = launch(ctx, "A", &Spec::probe(ctx.manifest, args))?.finish(deadline(ctx.limit))?;
     ctx.note(&format!("A: probe {}: {}", args.join(" "), summary(&done)));
     for line in done.stdout.iter().chain(&done.stderr) {
         ctx.note(&format!("A: {line}"));

@@ -3,8 +3,10 @@
 //! Prepare makes the harness root with `bin\` (the runner, this exe, and node and codex when
 //! given), `logs\`, matters `A` and `B` (each a matter and a state folder), and a data folder
 //! unless one is given or the machine's pool record names one; runs the set-up when no pool is
-//! set up for that data folder; picks two pool users; grants each `(OI)(CI)M` on its own matter
-//! and state folders with the Low label; and records all of it in the manifest.
+//! set up for that data folder; picks three pool users (matter A's, matter B's and matter A's
+//! second, `A2`); grants each `(OI)(CI)M` on its matter folder and its own state folder with the
+//! Low label (A2 gets matter A's folder and `matters\A2\state`); and records all of it in the
+//! manifest.
 //!
 //! Cleanup deletes only what the manifest lists, each by its full path, and runs the set-up's
 //! `--remove` only when prepare ran the set-up. When that fails the pool's record still names
@@ -19,7 +21,7 @@ use clauseo_sandbox::windows::{sandbox_data_dir, sandbox_pool_sids};
 
 use super::cli::Opts;
 use super::launch::{deadline, run_command, text};
-use super::manifest::{Manifest, Pool};
+use super::manifest::{Manifest, Pool, SECOND_A};
 use super::sys::{copy_file, make_dir, output, remove_file, remove_tree, say, write_file};
 use super::win;
 
@@ -58,19 +60,20 @@ pub(crate) fn prepare(opts: &Opts) -> Result<Manifest, String> {
         .pool_pair()
         .map(|(a, b)| (a.clone(), b.clone()))
         .ok_or("no pool pair")?;
+    let second = m.second_a().cloned().ok_or("no third pool user")?;
     for (which, pool) in [("A", &a), ("B", &b)] {
         for dir in [m.matter(which), m.state(which)] {
             make(&mut m, &dir)?;
             m.save().map_err(|e| format!("writing the manifest: {e}"))?;
-            icacls(&dir, &["/grant", &format!("*{}:(OI)(CI)M", pool.sid)])?;
-            icacls(&dir, &["/setintegritylevel", "(OI)(CI)L"])?;
-            say(&format!(
-                "prepare: matter {which} {} granted to {} ({}) with (OI)(CI)M and the Low label",
-                dir.display(),
-                pool.name,
-                pool.sid
-            ));
+            grant(which, &dir, pool)?;
         }
+    }
+    // Matter A's second pool user: the same matter folder, a state folder of its own.
+    let state = m.state(SECOND_A);
+    make(&mut m, &state)?;
+    m.save().map_err(|e| format!("writing the manifest: {e}"))?;
+    for dir in [m.matter(SECOND_A), state] {
+        grant(SECOND_A, &dir, &second)?;
     }
     let mock = root.join(MOCK_FILE);
     write_file(&mock, MOCK.as_bytes()).map_err(|e| format!("writing the mock: {e}"))?;
@@ -81,6 +84,19 @@ pub(crate) fn prepare(opts: &Opts) -> Result<Manifest, String> {
         Manifest::path_in(root).display()
     ));
     Ok(m)
+}
+
+/// Grants `pool` `(OI)(CI)M` on `dir`, session key `which`'s folder, and labels it Low.
+fn grant(which: &str, dir: &Path, pool: &Pool) -> Result<(), String> {
+    icacls(dir, &["/grant", &format!("*{}:(OI)(CI)M", pool.sid)])?;
+    icacls(dir, &["/setintegritylevel", "(OI)(CI)L"])?;
+    say(&format!(
+        "prepare: matter {which} {} granted to {} ({}) with (OI)(CI)M and the Low label",
+        dir.display(),
+        pool.name,
+        pool.sid
+    ));
+    Ok(())
 }
 
 /// Makes `dir` and records it. One already there is refused, never recorded, so cleanup removes
@@ -182,8 +198,8 @@ pub(crate) fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Finds the data folder and two pool users, running the set-up when no pool is set up for the
-/// data folder.
+/// Finds the data folder and three pool users (the set-up makes four), running the set-up when
+/// no pool is set up for the data folder.
 fn find_pool(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
     let recorded = sandbox_data_dir().map_err(|e| e.to_string())?;
     let pool = sandbox_pool_sids().map_err(|e| e.to_string())?;
@@ -200,7 +216,7 @@ fn find_pool(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
         .as_ref()
         .is_some_and(|r| text(r).eq_ignore_ascii_case(&text(&m.data_dir)));
     let mut sids = pool;
-    if sids.len() < 2 || !same {
+    if sids.len() < 3 || !same {
         say(&format!(
             "prepare: no pool is set up for {} (record: {:?}, {} pool users): running the set-up",
             m.data_dir.display(),
@@ -216,7 +232,7 @@ fn find_pool(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
             sids.len()
         ));
     }
-    for sid in sids.iter().take(2) {
+    for sid in sids.iter().take(3) {
         let name = win::account_name(sid.as_str())
             .map_err(|e| format!("LookupAccountSidW({sid}): {e}"))?;
         if pool_number(&name).is_none() {
@@ -227,13 +243,20 @@ fn find_pool(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
             name,
         });
     }
-    match m.pool_pair() {
-        Some((a, b)) => {
+    match (m.pool_pair(), m.second_a()) {
+        (Some((a, b)), Some(second)) => {
             say(&format!("prepare: matter A runs as {} ({})", a.name, a.sid));
             say(&format!("prepare: matter B runs as {} ({})", b.name, b.sid));
+            say(&format!(
+                "prepare: matter A's second session runs as {} ({})",
+                second.name, second.sid
+            ));
             Ok(())
         }
-        None => Err(format!("the pool has {} users; two are needed", sids.len())),
+        _ => Err(format!(
+            "the pool has {} users; three are needed",
+            sids.len()
+        )),
     }
 }
 

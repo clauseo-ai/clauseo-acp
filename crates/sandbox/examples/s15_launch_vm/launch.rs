@@ -18,7 +18,9 @@ use clauseo_sandbox::windows::runner::{LAUNCH_VERSION, LaunchMessage, RunExit};
 use clauseo_sandbox::windows::runner::{runner_args, write_launch};
 use clauseo_sandbox::windows::sids::Sid;
 
-use super::manifest::{Manifest, Pool};
+use super::checks_pool::settle;
+use super::manifest::{Manifest, Pool, SECOND_A};
+use super::rows::Ctx;
 use super::sys::{now, sleep, start};
 use super::win;
 
@@ -86,8 +88,13 @@ pub(crate) fn text(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Matter `which` (`A` or `B`) and its pool user.
+/// Session key `which`'s pool user: `A` and `B` their matters', [`SECOND_A`] matter A's second.
 pub(crate) fn pool_of<'a>(manifest: &'a Manifest, which: &str) -> Result<&'a Pool, String> {
+    if which == SECOND_A {
+        return manifest.second_a().ok_or_else(|| {
+            "the manifest names no third pool user: run cleanup, then prepare".into()
+        });
+    }
     let (a, b) = manifest
         .pool_pair()
         .ok_or("the manifest names no two pool users: run prepare")?;
@@ -199,8 +206,16 @@ pub(crate) struct Finished {
     pub(crate) first_line_ms: Option<u128>,
 }
 
-/// Starts `spec` through the runner as matter `which`'s pool user.
-pub(crate) fn launch(manifest: &Manifest, which: &str, spec: &Spec) -> Result<Running, String> {
+/// Starts `spec` through the runner as session key `which`'s pool user, once no process of
+/// that user is left (`checks_pool::settle`): its last session's end sweeper is done.
+pub(crate) fn launch(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Running, String> {
+    settle(ctx, pool_of(ctx.manifest, which)?)?;
+    launch_now(ctx.manifest, which, spec)
+}
+
+/// [`launch`] without the wait: for `sweep-before-logon`, whose own stray process of the pool
+/// user must still run when the session starts.
+pub(crate) fn launch_now(manifest: &Manifest, which: &str, spec: &Spec) -> Result<Running, String> {
     let message = message(manifest, which, spec)?;
     let file = write_launch(&manifest.data_dir, &message)
         .map_err(|e| format!("write_launch failed: {e}"))?;

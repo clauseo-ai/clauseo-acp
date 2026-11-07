@@ -58,11 +58,24 @@ only when prepare ran the set-up.
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
-`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `end-cleanup`. `clipboard` skips
-in a session with no clipboard the harness can use. `node-pipes` needs `--node`; `codex` needs
-`--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row has a
-limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
+`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `wts-visibility`, `end-cleanup`.
+`clipboard` skips in a session with no clipboard the harness can use. `node-pipes` needs `--node`;
+`codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row
+has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
 process it started.
+
+Prepare picks three pool users: matter A's, matter B's and matter A's second (`A2`), which is
+granted matter A's folder too and has a state folder of its own (`matters\A2\state`). The runner
+serves one live session per pool user: its first act ends every process of its user outside its
+job, its tick does so every 30 s, and its end sweeper (`clauseo-sandbox-run --sweep`, as that
+user) for up to about 60 s after the session. So before the harness starts a session, or a process
+of its own as a pool user (the controls' relay, `end-cleanup`'s `probe items`, the benign
+`probe wait` of `sweep-before-logon`, `wts-visibility`'s probe), it waits until the pool
+rows' listing finds no process of that user left, up to 75 s (a wait is noted; what is left after
+it fails the row, named). Two sessions alive at once never share a pool user: `open-process` and
+`pipes-5` pair A with B, `pipes-same-matter` A with A2. Only variant (g) runs as A's pool user
+while A's session runs (the agent's station names that user alone), so a tick of that session can
+still end it.
 
 The security rows (`checks_sec.rs`, `checks_m3.rs`):
 
@@ -103,7 +116,8 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   UI limit (without that limit the row fails, `no desktop UI limit`). An ACE for A's pool SID
   on `Default` prints `ALERT desktop: …` and fails the row. Without the limit, `SwitchDesktop`
   may switch the session to the agent's empty desktop, so run it on a VM copy only.
-- `pipes-same-matter`: a second agent of A's matter gets 5, not 231, on each of A's pipes.
+- `pipes-same-matter`: a second session of A's matter, as matter A's second pool user (`A2`,
+  since a pool user serves one live session at a time), gets 5, not 231, on each of A's pipes.
 - `m3-hardlink`: makes `<root>\m3\profile\.codex\auth.json` (a fixture) and links to it
   from A's state folder. `codex_link_in_policy` with that stand-in profile refuses the hard
   link (`LinkedLogin`) and a symbolic link (`ReparseLink`); the outer runs the hard link (it
@@ -139,15 +153,22 @@ pool user's, so either listing with one is INFO, naming the count and the images
   `S-1-5-12`, `S-1-5-32-545` and `S-1-1-0`, the integrity is Low and every logon SID is
   deny-only (as `whoami` asserts); FAIL names each that differs; INFO when the token can't be
   read. The logon SID's attributes are printed.
+- `wts-visibility`: information only, always INFO (it never fails, and like any INFO row it
+  turns the result red). The harness runs `probe wts` as A's pool user, outside any job, on a
+  control station of its own, and ends it after 30 s. The probe counts a Toolhelp snapshot's
+  processes; what `WTSEnumerateProcessesW` on `WTS_CURRENT_SERVER_HANDLE` returns (its entries,
+  those with a user SID, those whose SID is the pool user's); and the Toolhelp processes WTS left
+  out, with the first eight image names. A failed call is recorded with its code.
 
 - `end-cleanup` (`checks_cleanup.rs`, verdict in `cleanup_verdict.rs`): before the session, the
   harness, logged on as A's pool user as above, runs `probe items plant <tag>`
   (`probe_items.rs`), which plants that user's own HKCU `Run` and `RunOnce` values, a `.cmd` in
   its Startup folder, a scheduled task (`schtasks /create /xml`, its interactive token, a time
   trigger in 2099, never run) and a suspended BITS job with no files (`bitsadmin /create`), each
-  named `ClauseoS15-<tag>` and running `probe wait`. After the session ends it runs
-  `probe items check` as that user until every item is gone or 30 s pass (the end-of-session
-  sweeper, `clauseo-sandbox-run --sweep`, gets that long). PASS when all are gone; FAIL names the
+  named `ClauseoS15-<tag>` and running `probe wait`. After the session ends it waits until that
+  user has no process left (the end-of-session sweeper, `clauseo-sandbox-run --sweep`, has ended;
+  up to 75 s), then runs `probe items check` as that user until every item is gone or 30 s after
+  the session's end have passed. PASS when all are gone; FAIL names the
   kinds left, or any not planted or not checked; INFO when only the BITS job couldn't be planted.
   At the row's end `probe items remove` deletes whatever is left, and the row notes it.
 
@@ -191,26 +212,27 @@ tries `CreateDesktopW` on its own station, then the clipboard write, and prints 
 its token's user, integrity and restricting SIDs. Every variant's result is printed. The
 variants, closest to the agent first:
 
-- (g) the agent's own token shape on the agent's own station, outside the runner's job, so only
-  the job differs. In `node-pipes`, node prints `node waiting` after `probe job-ui` (which
-  prints `ui-effect station ClauseoRun-<hex>`) and waits for a line on stdin, so the agent's
-  station still exists. The harness starts `probe ui-relay` as matter A's pool user, as for (a),
-  on a fresh control station, and the relay starts `probe ui-control` with the agent's token
-  shape on `ClauseoRun-<hex>\Default` (the station's DACL names the pool user). (g) counts only
-  when it ran on that station, by the name the agent printed, as pool user A, Low, with 4
-  restricting SIDs. When (g) ran, it alone can carry an effect; when it couldn't, the row text
-  says why (the call and its code) and (a) to (d) carry instead. `codex` and `whoami` skip
-  (g): their probe has ended, and the agent's station with it, before the harness reads it.
+- (g) the agent's own token shape on the agent's own station, outside the runner's job, so only the
+  job differs. In `node-pipes`, node prints `node waiting` after `probe job-ui` (which prints
+  `ui-effect station ClauseoRun-<hex>`) and waits for a line on stdin, so the agent's station still
+  exists. The harness starts `probe ui-relay` as matter A's pool user (as (a) does as A2) on a fresh
+  control station, and the relay starts `probe ui-control` with the agent's token shape on
+  `ClauseoRun-<hex>\Default` (the station's DACL names the pool user). (g) counts only when it ran
+  on that station, by the name the agent printed, as pool user A, Low, with 4 restricting SIDs. When
+  (g) ran, it alone can carry an effect; when it couldn't, the row text says why (the call and its
+  code) and (a) to (d) carry instead. `codex` and `whoami` skip (g): their probe has ended, and the
+  agent's station with it, before the harness reads it.
 
-- (a) the agent's own token: the harness reads matter A's pool user's password from
-  `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
-  `probe ui-relay` as that user with `CreateProcessWithLogonW` (`win_logon.rs`), as the outer
-  starts the inner. The relay makes the agent's token from its own as the inner runner's `make`
-  does (restricting the pool user, `S-1-5-12`, `S-1-5-32-545`, `S-1-1-0`; the logon SID
-  deny-only; Low; `DISABLE_MAX_PRIVILEGE`; the agent's default DACL) and starts
-  `probe ui-control` with `CreateProcessAsUserW`. It differs from the agent in not being in the
-  runner's job (also: its station's DACL adds the harness's user, and the token object's own
-  DACL isn't set).
+- (a) the agent's own token shape: the harness reads matter A's second pool user's (`A2`) password
+  from `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
+  `probe ui-relay` as that user (not A's: A's session's tick, or its end sweeper, would end a
+  process of A's user outside the job) with `CreateProcessWithLogonW` (`win_logon.rs`), as the outer
+  starts the inner. The relay makes the agent's token from its own as the inner runner's `make` does
+  (restricting the pool user, `S-1-5-12`, `S-1-5-32-545`, `S-1-1-0`; the logon SID deny-only; Low;
+  `DISABLE_MAX_PRIVILEGE`; the agent's default DACL) and starts `probe ui-control` with
+  `CreateProcessAsUserW`. It differs from the agent in not being in the runner's job and in its pool
+  user (also: its station's DACL adds the harness's user, and the token object's own DACL isn't
+  set).
 - (b) the same shape made from the harness's own (the lawyer's) token (`win_ctl.rs`, restricting
   the lawyer instead of the pool user, default DACL the lawyer and `SYSTEM`). A restricted copy
   of the caller's own primary token needs no privilege to assign.
@@ -233,9 +255,9 @@ rule: atoms belong to a window station, so the agent's `ClauseoRun-…` station 
 atom whatever the job's limits are. The lookup outside the job is the control for the harness's
 own atom; the desktop refusal is the effect that tells the limits apart.
 
-The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows'
-and `breakaway`'s in `pool_verdict.rs`, `end-cleanup`'s in `cleanup_verdict.rs`) run on Windows with
-`cargo test -p clauseo-sandbox --example s15_launch_vm`.
+The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows',
+`breakaway`'s and `wts-visibility`'s in `pool_verdict.rs`, `end-cleanup`'s in
+`cleanup_verdict.rs`) run on Windows with `cargo test -p clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI
 
@@ -254,6 +276,6 @@ exits 1 on `INFO` too. The output is the job's artifact.
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`, `hold`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
 `write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
-`runners`, `breakaway`, `handles`, `desktop`, `items`; and `ui-control` and `ui-relay`, which the
-harness starts itself (the positive control, above). `probe.rs` and `probe_sec.rs` document
-what each prints.
+`runners`, `breakaway`, `handles`, `desktop`, `items`; and `ui-control`, `ui-relay` and `wts`,
+which the harness starts itself (the positive control and `wts-visibility`, above). `probe.rs`
+and `probe_sec.rs` document what each prints.

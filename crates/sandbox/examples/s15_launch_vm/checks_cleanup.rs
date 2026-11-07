@@ -3,17 +3,16 @@
 //! Before the session, the harness, logged on as A's pool user (`win_logon.rs`), plants benign
 //! items with `probe items plant` (`probe_items.rs`): HKCU `Run` and `RunOnce` values, a
 //! Startup-folder `.cmd`, a scheduled task (2099, never run) and a suspended BITS job, each
-//! running the probe's `wait`. After the session ends it checks, as that user again, for up to
-//! [`SWEEP_GRACE`]; at the row's end it removes whatever is left and notes it. The verdict is in
+//! running the probe's `wait`. After the session ends it waits until that user has no process
+//! left (the sweeper has ended, up to `checks_pool::SETTLE`), then checks, as that user again,
+//! until [`SWEEP_GRACE`] after the session's end has passed; at the row's end it removes whatever
+//! is left and notes it. Each `probe items` run waits that way first. The verdict is in
 //! `cleanup_verdict.rs`.
 
 use std::time::Duration;
 
-use clauseo_sandbox::windows::secrets::secret_for;
-use clauseo_sandbox::windows::sids::Sid;
-
 use super::checks::started;
-use super::checks_pool::{end_session, judge};
+use super::checks_pool::{end_session, judge, logon_parts, settle};
 use super::checks_ui::random;
 use super::cleanup_verdict::{self, KINDS};
 use super::launch::{deadline, pool_of};
@@ -21,8 +20,7 @@ use super::manifest::Pool;
 use super::pool_verdict::Verdict;
 use super::rows::Ctx;
 use super::sys::{now, sleep};
-use super::win_desk::ControlStation;
-use super::{win, win_logon};
+use super::win_logon;
 
 /// How long after the session's end the sweeper gets.
 const SWEEP_GRACE: Duration = Duration::from_secs(30);
@@ -31,18 +29,11 @@ const ITEMS_LIMIT: Duration = Duration::from_secs(30);
 
 /// Runs `probe items <step> <tag>` as `pool` (`CreateProcessWithLogonW`, outside any job of
 /// ours, on a control station of its own); its lines, noted. The call that failed otherwise.
+/// It waits for that user to have no process left first (`checks_pool::settle`): after the
+/// session, that is its end sweeper's end, which would otherwise end the check.
 fn items(ctx: &Ctx<'_>, pool: &Pool, step: &str, tag: &str) -> Result<Vec<String>, String> {
-    let lawyer = win::own_token()
-        .map_err(|e| format!("the harness's token: {e}"))?
-        .user;
-    let station = format!("ClauseoS15Ctl-{}", random()?);
-    let held = ControlStation::open(&station, &[lawyer.as_str(), pool.sid.as_str()])
-        .map_err(|(call, code)| format!("{call} gave {code} (station {station})"))?;
-    let sid = Sid::parse(&pool.sid).map_err(|e| e.to_string())?;
-    // The crate's error text never holds the password.
-    let password = secret_for(&ctx.manifest.data_dir, &sid)
-        .map_err(|e| format!("secret_for({}): {e}", pool.sid))?;
-    let desktop = format!("{station}\\Default");
+    settle(ctx, pool)?;
+    let (held, desktop, password) = logon_parts(ctx, pool)?;
     let ran = win_logon::run_with_logon(
         &pool.name,
         password,
@@ -78,8 +69,8 @@ pub(crate) fn end_cleanup(ctx: &Ctx<'_>) -> Result<String, String> {
     let ended = now();
     let mut after = Vec::new();
     while session.is_ok() {
-        // The sweeper may end a check of the pool user's while it runs: try again until the
-        // grace is over.
+        // Each check waits for the sweeper's end first; a check that fails anyway is tried again
+        // until the grace is over.
         after = items(ctx, pool, "check", &tag).unwrap_or_else(|why| {
             ctx.note(&format!("the check didn't run: {why}"));
             Vec::new()

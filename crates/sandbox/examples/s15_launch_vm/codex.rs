@@ -157,7 +157,7 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, S
         path,
         ..Spec::default()
     };
-    let done = launch(m, "A", &spec)?.finish(until)?;
+    let done = launch(ctx, "A", &spec)?.finish(until)?;
     ctx.note(&summary(&done));
     let all: Vec<&String> = done.stdout.iter().chain(&done.stderr).collect();
     for line in all.iter().skip(all.len().saturating_sub(40)) {
