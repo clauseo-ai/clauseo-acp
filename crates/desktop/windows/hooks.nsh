@@ -111,7 +111,8 @@
 ; success or retry (1223, 1618, 1641, 1707, 3010).
 !define CLAUSEO_EXIT_SETUP_EXE_REMOVED 20
 !define CLAUSEO_EXIT_REMOVE_EXE_MISSING 21
-; 22 to 26 are kept for the installers' admin-copy steps.
+; 22 to 26 are the installers' and the per-machine uninstaller's (admin_copy.nsh, safe_temp.nsh,
+; uninstall_in_place.nsh).
 !define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27
 
 ; The rights admin_copy.rs's chain rule counts: CHANGE_RIGHTS on every level below the drive's

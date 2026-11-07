@@ -461,7 +461,7 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
     let refused = defined(&code, "CLAUSEO_EXIT_ADMIN_COPY_REFUSED");
     assert_ne!(installed, uninstalled);
     assert!(![installed, uninstalled].contains(&refused));
-    // The installers' admin-copy steps keep 22 to 26.
+    // The installers' and the per-machine uninstaller's 22 to 26 (admin_copy_ask.rs).
     assert!(!(22..=26).contains(&refused), "{refused}");
     // NSIS's own (0, 1, 2), and what Intune and SCCM read as success, a reboot or a retry.
     for code in [installed, uninstalled, refused] {

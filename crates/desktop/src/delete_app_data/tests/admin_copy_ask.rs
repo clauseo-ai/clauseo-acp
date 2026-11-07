@@ -3,7 +3,7 @@
 //! it, never in update, silent or passive mode; every exit code of `--adopt` has its outcome; and
 //! the words are the provisional ones. The rest is in `admin_copy.rs`.
 
-use super::admin_copy::{ASK, admin_code, assert_run, block, macro_body};
+use super::admin_copy::{ASK, admin_code, assert_run, block, code_of, macro_body};
 use super::sources::{hook_code, line_with, read};
 
 #[test]
@@ -107,8 +107,12 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
 
 #[test]
 fn the_installers_exit_codes_are_their_own() {
-    let code: Vec<String> = hook_code().into_iter().chain(admin_code()).collect();
-    // Every installer exit code the hooks define, by its !define line.
+    let code: Vec<String> = hook_code()
+        .into_iter()
+        .chain(admin_code())
+        .chain(code_of("windows/uninstall_in_place.nsh"))
+        .collect();
+    // Every installer and uninstaller exit code the hooks define, by its !define line.
     let codes: Vec<(String, u32)> = code
         .iter()
         .filter_map(|line| line.strip_prefix("!define CLAUSEO_EXIT_"))
@@ -126,17 +130,19 @@ fn the_installers_exit_codes_are_their_own() {
     assert_eq!(
         admin,
         [
+            &("ADMIN_COPY_REFUSED".to_owned(), 27),
             &("ADMIN_COPY_SKIPPED".to_owned(), 22),
             &("ADMIN_COPY_FAILED".to_owned(), 23),
             &("APP_RUNNING".to_owned(), 24),
             &("TEMP_FAILED".to_owned(), 25)
         ]
     );
-    // Each installer code once (#638's 20 and 21 join these when both land).
+    // Each code once: #638's 20 and 21, these, and the per-machine uninstaller's 26.
     let mut values: Vec<u32> = codes.iter().map(|(_, value)| *value).collect();
     values.sort_unstable();
     values.dedup();
     assert_eq!(values.len(), codes.len(), "{codes:?}");
+    assert_eq!(values, [20, 21, 22, 23, 24, 25, 26, 27], "{codes:?}");
     // Clear of NSIS's 0 to 2, of #638's 20 and 21 (packaging-setup-exe-missing), of the codes
     // Intune and SCCM read as success or retry, and of the elevated instance's 99 and 100 + code.
     let taken = [0, 1, 2, 20, 21, 99, 1223, 1618, 1641, 1707, 3010];

@@ -91,6 +91,9 @@ or `/UPDATE` too):
 | 25 | Per-machine uninstall: nothing uninstalled, because the uninstaller couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
 | 26 | Per-machine uninstall: nothing uninstalled, because it wasn't run from its install folder, as when an option was put after `_?=` (see below) |
 
+A `/S` uninstall, per-user or per-machine, can also return 21 or 27: uninstalled, but the
+protection stays (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)).
+
 The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
 plug-ins included, in a new folder under `C:\Program Files\Clauseo\installer-temp`, which only
 Administrators and SYSTEM can open, and delete it when they finish. The empty `installer-temp`
