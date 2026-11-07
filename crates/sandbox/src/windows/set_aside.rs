@@ -47,7 +47,8 @@
 //! protected DACL, never in the state folder, which the agent can write: `record.json` (the
 //! names and links at the last pass, and the open sessions), `manifest.json` (each item set
 //! aside: [`Entry`]), `set-aside.lock`, which every read and write of the record or the
-//! manifest holds, and one folder per pass named for its UTC time (`YYYYMMDDTHHMMSS-mmmZ`)
+//! manifest holds, and under which the temp files a crash left beside either are removed
+//! (`files.rs`), and one folder per pass named for its UTC time (`YYYYMMDDTHHMMSS-mmmZ`)
 //! holding the items, each at its own path below the matter's root (`<pass>\sub\.git`), so
 //! nested names never clash; a real clash gets `~2` up to `~9`. Each move is written to the
 //! manifest as an intent first and finished after, and each load of the manifest settles an
