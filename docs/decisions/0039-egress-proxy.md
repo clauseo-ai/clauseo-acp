@@ -104,15 +104,17 @@ code departs from the brief.
   WinHTTP lookup, WPAD included, is bounded to 10 s on its own thread, and at most 8 such threads
   live at once in the process (a lookup left running past its bound keeps its slot), so hung
   lookups cannot pile up threads; past that the lookup fails. A failed lookup is kept apart from
-  `DIRECT` (`UpstreamAnswer::Failed`, cached the same 60 s): on Windows, a WPAD lookup that fails
-  with nothing else set is failed, but for WinHTTP's "no WPAD file found" (12180), which is no
-  proxy; WinHTTP reports "no WPAD on this network" and a transient discovery failure with that same
-  code, so a transient one still reads as direct; a connection takes it as direct, and
-  `upstream_answer` hands it to a caller that keeps an earlier answer over a failure (desktop's S17
-  route refresh). `upstream_for` (stage E's connector relay) maps a failure to direct, returns
-  `Result<Route, Error>` and refuses a firm URL that `start_proxy` refuses, so the relay fails
-  visibly rather than going around the firm's proxy. `Upstream`'s `Debug` shows only a fixed URL's
-  scheme, host and port.
+  `DIRECT` (`UpstreamAnswer::Failed`, cached the same 60 s): on Windows, a PAC URL that fails is
+  failed, and so is a WPAD lookup that fails with nothing else set, but for the answers that mean
+  no proxy on this network (12180 no WPAD file found, 12167 a `wpad` name serving no script, 12178
+  the auto-proxy service off; each PAC fetch the service cannot make is retried in process first),
+  which read as direct; WinHTTP reports "no WPAD on this network" and a transient discovery failure
+  with that same code (12180), so a transient one still reads as direct; a connection takes it as
+  direct, and `upstream_answer` hands it to a caller that keeps an earlier answer over a failure
+  (desktop's S17 route refresh). `upstream_for` (stage E's connector relay) maps a failure to
+  direct, returns `Result<Route, Error>` and refuses a firm URL that `start_proxy` refuses, so the
+  relay fails visibly rather than going around the firm's proxy. `Upstream`'s `Debug` shows only a
+  fixed URL's scheme, host and port.
 - **allow and revoke** change a live exact-host list, read on every request. `revoke` removes the
   exact host whether it came from the start list or `allow`, and closes each open tunnel whose
   host the list no longer allows; a `*.domain` entry that still covers the host keeps it and its

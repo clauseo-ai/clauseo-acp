@@ -182,19 +182,44 @@ fn is_within(host: &str, domain: &str) -> bool {
 #[cfg(any(windows, test))]
 const AUTODETECTION_FAILED: u32 = 12_180;
 
-/// What a failed WPAD lookup (`WinHttpGetProxyForUrl` with auto-detect, its Win32 error) means
-/// when nothing else is set (no PAC URL, no static proxy): `ERROR_WINHTTP_AUTODETECTION_FAILED`
-/// (12180) is no proxy, so `DIRECT`; any other error (the PAC file found but not downloaded,
-/// 12167; a timeout, 12002; the WinHTTP service failing, 12178; and the rest) is a failed lookup,
-/// so the caller keeps an earlier answer. `WinHTTP` reports "no WPAD on this network" and a
-/// transient discovery failure with the same code (12180), so a transient one still reads as
-/// direct on a refresh.
+/// `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`.
 #[cfg(any(windows, test))]
-pub(super) fn wpad_only(error: u32) -> Result<Route, String> {
-    if error == AUTODETECTION_FAILED {
-        Ok(Route::Direct)
-    } else {
-        Err(format!("WPAD failed (WinHTTP error {error})"))
+pub(super) const UNABLE_TO_DOWNLOAD_SCRIPT: u32 = 12_167;
+
+/// `ERROR_WINHTTP_AUTOPROXY_SERVICE_ERROR`.
+#[cfg(any(windows, test))]
+pub(super) const AUTOPROXY_SERVICE_ERROR: u32 = 12_178;
+
+/// Where a PAC file came from, for [`pac_error`].
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum PacFrom {
+    /// WPAD (auto-detect), by DHCP and DNS.
+    AutoDetect,
+    /// The PAC URL the settings name.
+    Url,
+}
+
+/// What a failed PAC lookup (`WinHttpGetProxyForUrl`, its Win32 error, after the in-process
+/// retry) means when nothing after it is set. From a PAC URL the firm named, any error is a
+/// failed lookup, so the caller keeps an earlier answer. From auto-detect, "no proxy here" reads
+/// as `DIRECT`: no WPAD file found (12180), a `wpad` name that answers but serves no script
+/// (12167, a home or ISP name answering 404), and the auto-proxy service off (12178), each of
+/// which would otherwise fail every lookup on that network; any other error (a bad script,
+/// 12166; a timeout, 12002; and the rest) is a failed lookup. `WinHTTP` reports "no WPAD on this
+/// network" and a transient discovery failure with the same code (12180), so a transient one
+/// still reads as direct on a refresh.
+#[cfg(any(windows, test))]
+pub(super) fn pac_error(from: PacFrom, error: u32) -> Result<Route, String> {
+    let none_here = [
+        AUTODETECTION_FAILED,
+        UNABLE_TO_DOWNLOAD_SCRIPT,
+        AUTOPROXY_SERVICE_ERROR,
+    ];
+    match from {
+        PacFrom::AutoDetect if none_here.contains(&error) => Ok(Route::Direct),
+        PacFrom::AutoDetect => Err(format!("WPAD failed (WinHTTP error {error})")),
+        PacFrom::Url => Err(format!("the PAC file failed (WinHTTP error {error})")),
     }
 }
 

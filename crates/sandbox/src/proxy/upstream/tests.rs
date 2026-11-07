@@ -9,6 +9,7 @@ use super::parse::{self, BadProxy, Bypass, NoProxy};
 use super::{CACHE_FOR, Env, Lookup, Route, Upstream, UpstreamAnswer};
 use crate::{Clock, Error};
 
+mod failed;
 mod flights;
 mod scheme;
 
@@ -351,33 +352,25 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
     assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
 }
 
-/// A Windows WPAD lookup with nothing else set: "no WPAD file found" (12180) is `DIRECT`; a bad
-/// PAC script (12166), a PAC file found but not downloaded (12167), a timeout (12002), a service
-/// failure (12178), and any code not expected, is a failed lookup, never `DIRECT` (delta review
-/// Medium).
+/// A failed PAC lookup with nothing else set: from auto-detect, "no proxy here" (12180 no WPAD
+/// file, 12167 a `wpad` name with no script, 12178 the service off) is `DIRECT`, and a bad script
+/// (12166), a timeout (12002) and any code not expected are failed; from a PAC URL the firm named,
+/// every error is failed, 12167 included (stage C's review).
 #[test]
-fn a_wpad_error_other_than_no_wpad_file_is_failed_not_direct() {
+fn a_pac_error_is_direct_only_for_no_proxy_here_from_auto_detect() {
+    use super::parse::{PacFrom, pac_error};
     use super::settle;
-    assert_eq!(
-        settle(443, parse::wpad_only(12_180)),
-        UpstreamAnswer::Route(Route::Direct)
-    );
-    for error in [
-        12_166,
-        12_167,
-        12_002,
-        12_178,
-        0,
-        1,
-        12_179,
-        12_181,
-        u32::MAX,
-    ] {
-        assert_eq!(
-            settle(443, parse::wpad_only(error)),
-            UpstreamAnswer::Failed,
-            "{error}"
-        );
+    for error in [12_180, 12_167, 12_178] {
+        let answer = settle(443, pac_error(PacFrom::AutoDetect, error));
+        assert_eq!(answer, UpstreamAnswer::Route(Route::Direct), "{error}");
+    }
+    for error in [12_166, 12_002, 0, 1, 12_179, 12_181, u32::MAX] {
+        let answer = settle(443, pac_error(PacFrom::AutoDetect, error));
+        assert_eq!(answer, UpstreamAnswer::Failed, "auto-detect {error}");
+    }
+    for error in [12_167, 12_178, 12_180, 12_166, 12_002] {
+        let answer = settle(443, pac_error(PacFrom::Url, error));
+        assert_eq!(answer, UpstreamAnswer::Failed, "PAC URL {error}");
     }
 }
 
