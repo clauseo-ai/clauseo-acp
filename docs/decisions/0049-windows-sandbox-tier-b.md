@@ -852,7 +852,12 @@ for `--reclaim`.
     of its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder.
     The inner makes no COM call. The end sweeper removes the same three, then, over COM (MTA) and
     only when no class key is left, scheduled tasks whose principal or author is the pool user,
-    in every folder it can read, and its BITS jobs, cancelled. The Startup folder must lie in the
+    in every folder it can read, and its BITS jobs, cancelled. It gets Task Scheduler's class
+    object straight from System32's `taskschd.dll` (`DllGetClassObject`), so that creation looks
+    up no class at all. BITS is an out-of-process server with no such route, so its
+    `CoCreateInstance` could in principle consult the per-user classes. The class keys' deletion
+    covers that, and right before BITS they are listed again: any key back, or a list that
+    fails, skips BITS. The Startup folder must lie in the
     pool user's profile. It is reached one name at a time relative
     to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
     so a link is deleted and never what it names. Each kind is logged by count alone, with no

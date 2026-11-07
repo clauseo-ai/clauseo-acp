@@ -1,22 +1,32 @@
 //! Task Scheduler's and BITS's halves of the removal (Windows), over COM in this thread.
+//!
+//! Task Scheduler's class object comes straight from System32's `taskschd.dll`
+//! (`DllGetClassObject`), so no per-user class lookup happens. BITS is an out-of-process server,
+//! created as usual.
 #![expect(unsafe_code, reason = "COM calls to Task Scheduler and BITS")]
 
+use std::ffi::c_void;
 use std::io;
-use std::mem::ManuallyDrop;
+use std::mem::{ManuallyDrop, transmute};
+use std::ptr;
 
+use windows::Win32::Foundation::{FreeLibrary, HMODULE};
 use windows::Win32::Networking::BackgroundIntelligentTransferService::{
     BackgroundCopyManager, IBackgroundCopyJob, IBackgroundCopyManager,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, COINIT_MULTITHREADED, CoCreateInstance,
-    CoInitializeEx, CoSetProxyBlanket, CoUninitialize, EOAC_NONE, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    CLSCTX_LOCAL_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoSetProxyBlanket,
+    CoUninitialize, EOAC_NONE, IClassFactory, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
     RPC_C_IMP_LEVEL_IMPERSONATE,
+};
+use windows::Win32::System::LibraryLoader::{
+    GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
 };
 use windows::Win32::System::TaskScheduler::{
     IRegisteredTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
 };
 use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_I4};
-use windows::core::{BSTR, IUnknown, Interface, PCWSTR};
+use windows::core::{BSTR, GUID, HRESULT, IUnknown, Interface, PCWSTR, s, w};
 
 use super::super::names_user;
 use super::Item;
@@ -51,13 +61,61 @@ impl Drop for Com {
     }
 }
 
-/// The tasks whose principal or author is `me` (or `account`), in every folder this user can
-/// read: the root must be readable, a folder below it that isn't is passed over.
-pub(super) fn tasks(me: &Sid, account: &str) -> io::Result<Vec<Item>> {
-    // SAFETY: a plain in-process creation of the Task Scheduler's class.
-    let service: ITaskService =
-        unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
+/// `DllGetClassObject`: the class object for `rclsid`, and `ppv` for its `riid` interface.
+type ClassObjectFn =
+    unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut c_void) -> HRESULT;
+
+/// `taskschd.dll` from System32, loaded. Its class object is code in the module, and the service
+/// and the folders made from it live on after `tasks()` returns: the module is freed only when
+/// this drops, after the removal's last delete.
+pub(super) struct Library(HMODULE);
+
+impl Library {
+    /// Loads `taskschd.dll` from System32 alone.
+    pub(super) fn load() -> io::Result<Library> {
+        // SAFETY: a literal name, searched for in System32 alone; no file handle.
+        let module =
+            unsafe { LoadLibraryExW(w!("taskschd.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }
+                .map_err(|e| os_error(&e))?;
+        Ok(Library(module))
+    }
+
+    /// The Task Scheduler's service, made from the module's own class object: no class is looked
+    /// up in the registry, where a per-user one could stand in for it.
+    fn task_service(&self) -> io::Result<ITaskService> {
+        // SAFETY: a literal name in the module, which is loaded while `self` lives.
+        let export = unsafe { GetProcAddress(self.0, s!("DllGetClassObject")) }
+            .ok_or_else(io::Error::last_os_error)?;
+        // SAFETY: the export is `DllGetClassObject`, with the signature of `ClassObjectFn`.
+        let class_object: ClassObjectFn = unsafe { transmute(export) };
+        let mut ppv = ptr::null_mut();
+        // SAFETY: the GUIDs are live, and `ppv` is a live out-pointer.
+        unsafe { class_object(&TaskScheduler, &IClassFactory::IID, &raw mut ppv) }
+            .ok()
             .map_err(|e| os_error(&e))?;
+        if ppv.is_null() {
+            return Err(io::Error::other("no class factory"));
+        }
+        // SAFETY: a success hands over one reference to the factory, which this takes.
+        let factory: IClassFactory = unsafe { IClassFactory::from_raw(ppv) };
+        // SAFETY: a live factory, with no outer object.
+        unsafe { factory.CreateInstance::<Option<&IUnknown>, ITaskService>(None) }
+            .map_err(|e| os_error(&e))
+    }
+}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        // SAFETY: loaded by `load` and freed once, here.
+        let _freed = unsafe { FreeLibrary(self.0) };
+    }
+}
+
+/// The tasks whose principal or author is `me` (or `account`), in every folder this user can
+/// read: the root must be readable, a folder below it that isn't is passed over. The service
+/// comes from `library`'s class object (see the module doc).
+pub(super) fn tasks(me: &Sid, account: &str, library: &Library) -> io::Result<Vec<Item>> {
+    let service = library.task_service()?;
     let none = VARIANT::default();
     // SAFETY: empty variants: this computer, as this user.
     unsafe { service.Connect(&none, &none, &none, &none) }.map_err(|e| os_error(&e))?;
