@@ -161,6 +161,9 @@ libc = { workspace = true }
 tauri-plugin-updater.workspace = true
 
 [dev-dependencies]
+# S15's setup exe codes, its `--remove` arguments and its lock wait, which the uninstall hook's
+# sources test holds (`windows::setup` is built off Windows with test-support).
+clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 # The TypeScript bindings (src/commands/bindings.rs) are written by a unit test, so tauri-specta,
 # specta and protocol's `specta` feature stay out of the app: the commands carry
 # `#[cfg_attr(test, specta::specta)]`, and tauri's `specta` feature types the Channel.

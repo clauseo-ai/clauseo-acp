@@ -23,7 +23,8 @@
       "deleteAppDataKeptFailed",
       "deleteAppDataFailedUnnamed",
       "policyFolderExists",
-      "policyFolderFailed"
+      "policyFolderFailed",
+      "removeStillRunning"
     ],
     "slots": {
       "$R9": "the data folder",

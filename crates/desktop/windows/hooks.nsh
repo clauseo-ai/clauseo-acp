@@ -15,6 +15,14 @@
 ;    uninstaller asks it to remove what it set up, elevated, so a currentUser uninstall raises one
 ;    UAC prompt. It reads its records under the data folder's `sandbox` folder to take its access
 ;    rules back off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
+;    The per-user installer passes `--remove`: only the Windows user who set the protection up
+;    removes it; anyone else's uninstall exits 0 having touched nothing. The per-machine installer
+;    passes `--remove --per-machine` (chosen when it is built, from the template's INSTALLMODE):
+;    every sandbox user goes, whoever uninstalls, LOCAL SYSTEM under Intune's silent /S included.
+;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
+;    removal and never stops the tool, which finishes later and leaves its records consistent at
+;    every step. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
+;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
 ; 2. When the "Also delete conversations, saved versions and settings" box is ticked, the app
 ;    deletes its data folders itself (`Clauseo.exe --delete-app-data`, delete_app_data.rs), never
 ;    following a link, and the box is cleared so the template's `RmDir /r` never runs: NSIS 3.11's
@@ -25,8 +33,8 @@
 ;    says one line (English.nsh): the kept folder when one is there, never the whole folder with
 ;    the sandbox's records in it; else the whole folder.
 ;
-; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept); the uninstall-declined
-; line is S15a's.
+; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept, removeStillRunning); the
+; uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $COMMONAPPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -62,12 +70,37 @@
     !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
     ; 1. S15's removal, elevated. ExecShellWait gives no exit code, so ShellExecuteExW with
-    ; "runas" and SEE_MASK_NOCLOSEPROCESS (0x40), then wait on the process and read its code.
+    ; "runas" (per-user; "open" per-machine) and SEE_MASK_NOCLOSEPROCESS (0x40), then wait on
+    ; the process and read its code.
     ; SEE_MASK_FLAG_NO_UI (0x400) keeps Windows' own error box away when the call fails; it does
     ; not suppress the consent prompt. A declined prompt (1223) or a policy that blocks the
     ; program (1260) fails the call, exactly like a failed --remove: $R5 stays 0 and the app
     ; keeps `sandbox\`. $R5 is 1 only when the removal ran and exited 0.
     StrCpy $R5 0
+    ; The per-machine installer adds --per-machine (S15 PR4j, stage F). INSTALLMODE is the
+    ; template's compile-time define, so the two installers differ here; never read at run time.
+    ; Only currentUser and perMachine are built ("both" would pick the mode at run time). The
+    ; per-machine uninstaller is elevated already (SYSTEM in session 0 under Intune), so it starts
+    ; the tool with "open", which its manifest runs elevated; "runas" is for the per-user one.
+    ; Inside the macro because the template !includes hooks.nsh (installer.nsi:36) before it
+    ; defines INSTALLMODE (:46): a !if at file scope would see no define.
+    !ifndef INSTALLMODE
+      !error "hooks.nsh needs the template's INSTALLMODE define"
+    !endif
+    !if "${INSTALLMODE}" != "perMachine"
+      !if "${INSTALLMODE}" != "currentUser"
+        !error "hooks.nsh supports only the currentUser and perMachine install modes"
+      !endif
+    !endif
+    !ifndef CLAUSEO_REMOVE
+      !if "${INSTALLMODE}" == "perMachine"
+        !define CLAUSEO_REMOVE "--remove --per-machine"
+        !define CLAUSEO_REMOVE_VERB "open"
+      !else
+        !define CLAUSEO_REMOVE "--remove"
+        !define CLAUSEO_REMOVE_VERB "runas"
+      !endif
+    !endif
     ${If} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
       !if ${NSIS_PTR_SIZE} > 4
@@ -75,14 +108,21 @@
       !endif
       ; cbSize, fMask, hwnd, lpVerb, lpFile, lpParameters, lpDirectory, nShow (SW_HIDE),
       ; hInstApp, lpIDList, lpClass, hkeyClass, dwHotKey, hIcon, hProcess.
-      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "runas", w "$INSTDIR\clauseo-sandbox-setup.exe", w "--remove", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
+      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "${CLAUSEO_REMOVE_VERB}", w "$INSTDIR\clauseo-sandbox-setup.exe", w "${CLAUSEO_REMOVE}", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
       System::Call 'shell32::ShellExecuteExW(p R6) i .R7'
       ${If} $R7 <> 0
         System::Call '*$R6(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
         ${If} $R7 <> 0
           StrCpy $R8 1
-          System::Call 'kernel32::WaitForSingleObject(p R7, i -1)'
-          System::Call 'kernel32::GetExitCodeProcess(p R7, *i .R8)'
+          ; At most 2 minutes (K3). WAIT_TIMEOUT (258): the tool is still running, so $R8 stays
+          ; 1 (failed) and the uninstall carries on. Never TerminateProcess: a removal stopped
+          ; midway is worse than one finishing late. Its exe may then stay in $INSTDIR.
+          System::Call 'kernel32::WaitForSingleObject(p R7, i 120000) i .R3'
+          ${If} $R3 = 258
+            DetailPrint "$(removeStillRunning)"
+          ${Else}
+            System::Call 'kernel32::GetExitCodeProcess(p R7, *i .R8)'
+          ${EndIf}
           System::Call 'kernel32::CloseHandle(p R7)'
           ${If} $R8 = 0
             StrCpy $R5 1
