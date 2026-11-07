@@ -27,12 +27,14 @@ fn doc(name: &str) -> PathBuf {
 /// a key read and locked, but that nothing acts on yet: the `sandbox` and `network` keys,
 /// until the host's sandbox reads them (decision record 0051). (`update.mode` left with R23
 /// PR 5.)
-const COMING: [&str; 5] = [
+const COMING: [&str; 7] = [
     "sandbox.required",
     "sandbox.allow_unprotected_auto",
     "network.upstream_proxy",
     "network.ca_certs",
     "network.allowed_domains",
+    "network.allow_unsafe_site_override",
+    "network.unsafe_site_list_updates",
 ];
 
 /// Every settings key, from the JSON Schema: `<section>.<field>`, and an agent's as

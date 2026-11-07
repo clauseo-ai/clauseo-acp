@@ -194,8 +194,13 @@ source: crates/settings/src/schema/tests.rs
       ]
     },
     "NetworkSettings": {
-      "description": "The `network` section (decision record 0051). Every key is a security key: a policy source\nthat cannot be read leaves no proxy (so the OS's), no CA file and no added domain.",
+      "description": "The `network` section (decision records 0051, 0053). Every key is a security key: a policy\nsource that cannot be read leaves no proxy (so the OS's), no CA file, no added domain and no\nallowing a blocked site; block list updates stay on.",
       "properties": {
+        "allow_unsafe_site_override": {
+          "default": true,
+          "description": "Whether the lawyer may allow a site the block list names (decision record 0053). On by\ndefault.",
+          "type": "boolean"
+        },
         "allowed_domains": {
           "default": [],
           "description": "Host names (`*.` before one allows the names under it) added to every matter's\nallowlist. Set by policy only; empty by default.",
@@ -211,6 +216,11 @@ source: crates/settings/src/schema/tests.rs
           "default": {},
           "description": "A CA file per agent id, as an absolute path, that the agent's network clients trust\nbesides the system's. Empty by default.",
           "type": "object"
+        },
+        "unsafe_site_list_updates": {
+          "default": true,
+          "description": "Whether the host fetches block list updates (decision record 0053). On by default; off,\nthe stored or bundled list stays in use and is never updated. Set by policy only. Locked\non, its default, when a policy source cannot be read: an unreadable policy must not stop\nprotection updates, so a firm that switched it off gets quiet failed fetches (on a\nnetwork that refuses them) while its policy source is unreadable.",
+          "type": "boolean"
         },
         "upstream_proxy": {
           "default": null,
@@ -503,8 +513,10 @@ source: crates/settings/src/schema/tests.rs
     "network": {
       "$ref": "#/$defs/NetworkSettings",
       "default": {
+        "allow_unsafe_site_override": true,
         "allowed_domains": [],
         "ca_certs": {},
+        "unsafe_site_list_updates": true,
         "upstream_proxy": null
       },
       "description": "The firm's network: its proxy, CA files and allowed domains (decision record 0051)."

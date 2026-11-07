@@ -24,6 +24,15 @@
 //!   channel with `try_send` and never waits for; a full channel makes it catch up from its
 //!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
 //! - The Scratch matter: a first start creates it.
+//! - The block list's updates (`blocklist.rs`, decision record 0053), with
+//!   [`HostConfig::with_blocklist`] only: a `clauseo-blocklist` thread, started once the host
+//!   serves and stopped when it ends, loads the newer verified one of the stored pair
+//!   (`<data folder>/blocklist/`) and the bundled snapshot into the shared
+//!   `clauseo_blocklist::Current`, then fetches the published pair every interval, verifies it,
+//!   applies the rollback rule, stores it and swaps it in; any failure keeps the list in use.
+//!   Each round reads the settings as the actor last saw them (`network.unsafe_site_list_updates`
+//!   off skips the fetch; `network.upstream_proxy` routes it); [`block_list_is_stale`] says
+//!   whether the list in use is over 3 days old.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
 //!   activity, `ForgetMatter` (which deletes nothing; an import of the folder brings the matter
@@ -192,7 +201,8 @@
 //! claims, 0029), `getrandom` (Windows browser session names), `async-channel`, `async-io`,
 //! `futures`, `uuid`, `serde` (the updater's marker), `serde_json`, `tracing`,
 //! `tracing-subscriber` (the log file, 0047), `thiserror`, `dunce` and `sha2` (the Codex hook's
-//! trust hash, 0024). Never `tauri`, `tokio` or `agents`.
+//! trust hash, 0024), `blocklist` and `url` (the block list and its fetch's redirects, 0053).
+//! Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!
@@ -214,6 +224,7 @@
 mod actor;
 mod agent;
 mod blob_read;
+mod blocklist;
 pub mod browser;
 mod build;
 mod clock;
@@ -247,6 +258,7 @@ pub use agent::login_link::{
 };
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
+pub use blocklist::{BlockListSeams, BlockListUpdate, block_list_is_stale};
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
@@ -260,8 +272,8 @@ pub use config::{
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{
-    AppSubscription, EventSubscription, Host, HostExit, HostHandle, HostJoin, LocatedFile,
-    Subscription,
+    AppSubscription, BlockedSite, EventSubscription, Host, HostExit, HostHandle, HostJoin,
+    LocatedFile, Subscription,
 };
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;

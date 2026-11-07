@@ -20,5 +20,7 @@ expression: SECURITY_KEYS
   "sandbox.allow_unprotected_auto",
   "network.upstream_proxy",
   "network.ca_certs",
-  "network.allowed_domains"
+  "network.allowed_domains",
+  "network.allow_unsafe_site_override",
+  "network.unsafe_site_list_updates"
 ]

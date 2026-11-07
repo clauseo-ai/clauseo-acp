@@ -93,6 +93,7 @@
 
 #[cfg(test)]
 mod agent_browser_pin;
+mod blocklist;
 mod bridge;
 mod chooser;
 mod commands;
@@ -401,6 +402,7 @@ fn start_host<R: Runtime>(
             config.with_launch_refused(agent, code)
         });
         let config = connectors::with_connectors(config, app.clone(), &data_dir);
+        let config = blocklist::with_blocklist(&app, config);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

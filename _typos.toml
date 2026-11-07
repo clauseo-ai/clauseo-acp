@@ -6,13 +6,16 @@
 # --force-exclude, so these hold for the staged files it names too. The scoreboard scenario is
 # generated: its chunks cut words at random, and its prose is checked where it is written,
 # crates/fake_agent/tests/stdio/scoreboard_prose.rs. The fuzz seeds are inputs libFuzzer mutated:
-# their words are cut and changed on purpose.
+# their words are cut and changed on purpose. The block list's keys and test signatures are base64.
 extend-exclude = [
   "Cargo.lock",
   "ui/pnpm-lock.yaml",
   "*.msgpack",
   "crates/fake_agent/scenarios/scoreboard.jsonl",
   "fuzz/seeds/",
+  "crates/blocklist/keys/*.pub",
+  "crates/blocklist/tests/data/*.pub",
+  "crates/blocklist/tests/data/*.minisig",
 ]
 
 [default]

@@ -43,6 +43,21 @@ pub enum Denial {
         /// How many.
         count: u32,
     },
+    /// A connection the egress proxy refused because the host is on the block list (ADR 0053).
+    /// No allowlist entry lets one through.
+    Blocked {
+        /// The host the agent asked for, as the proxy reads it (lowercase, ASCII, no trailing
+        /// dot; an address without brackets).
+        host: String,
+        /// The port it asked for.
+        port: u16,
+        /// The list entry that matched: the host or a parent domain, or `[address]`.
+        listed: String,
+        /// Why the entry is listed.
+        tag: clauseo_blocklist::Tag,
+        /// When the list that matched was made.
+        generated: clauseo_blocklist::Generated,
+    },
 }
 
 /// The kind of file access refused.

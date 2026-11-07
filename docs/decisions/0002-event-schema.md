@@ -141,6 +141,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `connectors_changed` (`HostEvent`) | `ConnectorsState`, the whole state after a change (R24) | host | no | none; app subscribers, and every app catch-up |
 | `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
 | `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
+| `site_blocked` (`HostEvent`) | block_id, matter, thread?, turn?, host, tag (`SiteTag`), list_generated, override_allowed, count; the egress proxy refused a listed site (0053), re-sent with the same block_id and a higher count when the same site is refused again in the turn | host | no | none; app subscribers only, no catch-up |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
   started. `turn_failed` and `turn_stopped_at_limit` add detail and never replace it;

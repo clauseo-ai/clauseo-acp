@@ -22,7 +22,9 @@
 //! - [`Error`], with [`Error::code`] mapping each variant to a `clauseo_protocol::ErrorCode`.
 //! - The egress proxy, one per agent launch ([`start_proxy`], [`ProxyHandle`]): CONNECT to 443
 //!   and plain `http://` to 80 under an [`Allowlist`], a token on the agent listener, address
-//!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
+//!   checks, the unsafe-site block list (ADR 0053: by name or IP literal, before the allowlist,
+//!   no DNS), the firm's upstream, refusals as [`Denial::Host`] and [`Denial::Blocked`]
+//!   (`Clauseo-Blocked: <tag>` on a plain-http 403). [`ports::bind_loopback`] binds
 //!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
 //!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
 //!   which no bind or claim of this process hands out again until the claim drops (on macOS
@@ -90,7 +92,8 @@
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
-//! - [`start_proxy`] with a [`ProxyConfig`] (lists, [`Upstream`], sink); the handle's ports,
+//! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list, [`Upstream`], sink;
+//!   an unloaded block list blocks nothing and is logged once); the handle's ports,
 //!   `env()`, `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
 //!   [`upstream_for`] routes the host's own HTTPS.
 //! - Unix: [`BrowserSocketDir::create`] (a `flock`ed lock file beside it, then one atomic
@@ -132,9 +135,10 @@
 //! `serde` (denials and findings as JSON), `tracing` (skipped folders, a failed probe, the
 //! watcher), `dunce` (canonical paths without `\\?\`); the proxy's `async-executor`,
 //! `async-io`, `futures`, `blocking`, `httparse`, `url`, `psl`, `getrandom`, `base64` and
-//! `subtle`; on macOS, for the watcher, `async-process` (`log stream`) and `serde_json` (its
-//! lines); on Unix, `rustix` (the open-file limit, and the browser socket folder's effective
-//! user id, lock file and `flock`); on Windows, `socket2` and `windows` (the proxy's
+//! `subtle`, and `blocklist` (the block list it asks); on macOS, for the watcher,
+//! `async-process` (`log stream`) and `serde_json` (its lines); on Unix, `rustix` (the
+//! open-file limit, and the browser socket folder's effective user id, lock file and `flock`);
+//! on Windows, `socket2` and `windows` (the proxy's
 //! listeners, the folder check, the registry and token reads) and `serde_json` (tier B's
 //! records and ACL ledger, built on every OS).
 //!

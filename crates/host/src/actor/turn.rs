@@ -529,6 +529,12 @@ pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
     })
 }
 
+/// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
+pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
+    let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
+    Some(current.turn)
+}
+
 /// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
 pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {

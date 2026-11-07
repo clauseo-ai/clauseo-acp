@@ -55,13 +55,13 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-pub(crate) use reset::refuse;
 use reset::reset;
+pub(crate) use reset::{locked_word, refuse};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 25] = [
+pub(crate) const KEYS: [(&str, Kind); 27] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -87,6 +87,8 @@ pub(crate) const KEYS: [(&str, Kind); 25] = [
     ("network.upstream_proxy", Kind::String),
     ("network.ca_certs", Kind::Object),
     ("network.allowed_domains", Kind::StringArray),
+    ("network.allow_unsafe_site_override", Kind::Boolean),
+    ("network.unsafe_site_list_updates", Kind::Boolean),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -99,8 +101,9 @@ pub(crate) const KEYS: [(&str, Kind); 25] = [
 /// locked, no plan stands, so no endpoint the lawyer chose does. The three `skills` keys lock
 /// at no extra pack, none from a list, and no script (decision record 0040). The `sandbox` keys
 /// lock at not required and no auto mode outside the sandbox, and the `network` keys at no proxy
-/// (so the OS's), no CA file and no added domain (decision record 0051).
-pub(crate) const SECURITY_KEYS: [&str; 18] = [
+/// (so the OS's), no CA file and no added domain (decision record 0051), and at no allowing a
+/// site the block list names, and block list updates on: an unreadable policy must not stop them.
+pub(crate) const SECURITY_KEYS: [&str; 20] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
@@ -119,6 +122,8 @@ pub(crate) const SECURITY_KEYS: [&str; 18] = [
     "network.upstream_proxy",
     "network.ca_certs",
     "network.allowed_domains",
+    "network.allow_unsafe_site_override",
+    "network.unsafe_site_list_updates",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -129,8 +134,12 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 /// The keys only a policy may set (decision record 0040): a `settings.json` value for one is
 /// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
 /// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
-/// firm's (decision record 0051), so without a policy it is empty and adds no domain.
-pub const POLICY_ONLY_KEYS: [&str; 2] = ["skills.curated", "network.allowed_domains"];
+/// firm's (0051), so without a policy it is empty; so is the firm's update off-switch (0053).
+pub const POLICY_ONLY_KEYS: [&str; 3] = [
+    "skills.curated",
+    "network.allowed_domains",
+    "network.unsafe_site_list_updates",
+];
 
 /// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
 /// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of
@@ -201,6 +210,8 @@ pub(crate) enum Leaf {
     /// The whole `network.ca_certs` map: a policy value replaces the user's map, never merges.
     CaCerts(BTreeMap<String, PathBuf>),
     AllowedDomains(Vec<String>),
+    SiteOverride(bool),
+    ListUpdates(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -333,6 +344,8 @@ impl Leaf {
             "network.allowed_domains" => {
                 network::allowed_domains(key, value, unknown).map(Leaf::AllowedDomains)
             }
+            "network.allow_unsafe_site_override" => typed_value(key, value).map(Leaf::SiteOverride),
+            "network.unsafe_site_list_updates" => typed_value(key, value).map(Leaf::ListUpdates),
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -373,6 +386,8 @@ impl Leaf {
             Leaf::UpstreamProxy(_) => "network.upstream_proxy".to_owned(),
             Leaf::CaCerts(_) => "network.ca_certs".to_owned(),
             Leaf::AllowedDomains(_) => "network.allowed_domains".to_owned(),
+            Leaf::SiteOverride(_) => "network.allow_unsafe_site_override".to_owned(),
+            Leaf::ListUpdates(_) => "network.unsafe_site_list_updates".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -425,6 +440,8 @@ impl Leaf {
             Leaf::UpstreamProxy(url) => settings.network.upstream_proxy = url,
             Leaf::CaCerts(certs) => settings.network.ca_certs = certs,
             Leaf::AllowedDomains(hosts) => settings.network.allowed_domains = hosts,
+            Leaf::SiteOverride(on) => settings.network.allow_unsafe_site_override = on,
+            Leaf::ListUpdates(on) => settings.network.unsafe_site_list_updates = on,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

@@ -159,9 +159,10 @@ impl Default for SandboxSettings {
     }
 }
 
-/// The `network` section (decision record 0051). Every key is a security key: a policy source
-/// that cannot be read leaves no proxy (so the OS's), no CA file and no added domain.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+/// The `network` section (decision records 0051, 0053). Every key is a security key: a policy
+/// source that cannot be read leaves no proxy (so the OS's), no CA file, no added domain and no
+/// allowing a blocked site; block list updates stay on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct NetworkSettings {
     /// The firm's proxy, which the egress proxy and agent installs send traffic through: an
@@ -174,6 +175,27 @@ pub struct NetworkSettings {
     /// Host names (`*.` before one allows the names under it) added to every matter's
     /// allowlist. Set by policy only; empty by default.
     pub allowed_domains: Vec<String>,
+    /// Whether the lawyer may allow a site the block list names (decision record 0053). On by
+    /// default.
+    pub allow_unsafe_site_override: bool,
+    /// Whether the host fetches block list updates (decision record 0053). On by default; off,
+    /// the stored or bundled list stays in use and is never updated. Set by policy only. Locked
+    /// on, its default, when a policy source cannot be read: an unreadable policy must not stop
+    /// protection updates, so a firm that switched it off gets quiet failed fetches (on a
+    /// network that refuses them) while its policy source is unreadable.
+    pub unsafe_site_list_updates: bool,
+}
+
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        Self {
+            upstream_proxy: None,
+            ca_certs: BTreeMap::new(),
+            allowed_domains: Vec::new(),
+            allow_unsafe_site_override: true,
+            unsafe_site_list_updates: true,
+        }
+    }
 }
 
 /// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are

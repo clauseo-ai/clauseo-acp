@@ -17,6 +17,9 @@ pub mod entries;
 
 #[path = "view/folder_scan.rs"]
 mod folder_scan;
+#[cfg(test)]
+#[path = "view/site_blocked.rs"]
+mod site_blocked;
 #[path = "view/sync_service.rs"]
 mod sync_service;
 use std::mem::size_of;

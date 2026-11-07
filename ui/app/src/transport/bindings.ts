@@ -458,6 +458,14 @@ export type BlobRef = {
 };
 
 /**
+ *  One blocked site in one turn: the notice `HostEvent::SiteBlocked` re-sends it with a
+ *  higher count when the agent tries the same site again in that turn.
+ * 
+ * It must be a v7 UUID.
+ */
+export type BlockedSiteId = string;
+
+/**
  *  Why a Chrome for Testing download failed. Open: a value a newer host adds decodes to
  *  `Unknown`, which the app shows as a plain failure. The app picks its copy by this code,
  *  never from `message`.
@@ -2416,9 +2424,9 @@ export type HostError = {
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -2428,19 +2436,19 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ account_limits_changed: AccountLimits }) & { browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The whole limits view after a change. Never logged and in no stream: it reaches
  *  `subscribe_limits` subscribers only (R16).
  */
-({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The display settings changed: the whole view after the change. App-wide, never part of
  *  a stream: it reaches app subscribers only.
  */
-({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
  *  App-wide, never logged and in no stream: it reaches app subscribers only, as each state
@@ -2450,34 +2458,34 @@ export type HostEvent =
 ({ browser_install: {
 	/**  Where it stands. */
 	state: BrowserInstallState,
-} }) & { account_limits_changed?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
  *  it reaches app subscribers only.
  */
-({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
  *  list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
  *  it has open.
  */
-({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; update_changed?: never } | 
+({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; update_changed?: never } | 
 /**
  *  How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
  *  stream: it reaches app subscribers only.
  */
-({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The updater's state changed: the whole view after the change (decision record 0037).
  *  App-wide, never part of a stream: it reaches app subscribers only.
  */
-({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never } | 
+({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never } | 
 /**
  *  The connectors' state changed: the whole state after the change (R24). App-wide, never
  *  logged and in no stream: it reaches app subscribers only, and every app catch-up carries
  *  the latest one, as for `SettingsChanged`.
  */
-({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+({ connectors_changed: ConnectorsState }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A turn's web searches looked like Indian case law and the case-law connector is live but
  *  not added (R24): the app offers it under the answer. Once per matter, never after the
@@ -2491,7 +2499,7 @@ export type HostEvent =
 	thread: ThreadId,
 	/**  The turn whose searches fired it. */
 	turn: TurnId,
-} }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  A matter's protection changed (decision record 0051): the sandbox came or went, or why it
  *  is off changed. App-wide, never logged and in no stream: it reaches app subscribers
@@ -2503,7 +2511,33 @@ export type HostEvent =
 	matter: MatterId,
 	/**  Its protection now. */
 	protection: Protection,
-} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; site_blocked?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  The egress proxy refused a site the block list names (decision record 0053): the app
+ *  tells the lawyer. App-wide, never logged and in no stream: it reaches app subscribers
+ *  only, and a catch-up carries none. Once per site per turn: the same site refused again
+ *  in that turn re-sends the event with the same `block_id` and a higher `count`.
+ */
+({ site_blocked: {
+	/**  This site in this turn: a re-sent event keeps it, so the app updates one notice. */
+	block_id: BlockedSiteId,
+	/**  The matter whose agent asked for the site. */
+	matter: MatterId,
+	/**  The thread, when the request could be traced to one; left out when not. */
+	thread?: ThreadId,
+	/**  The turn that was running, if any; left out when none was. */
+	turn?: TurnId,
+	/**  The host name or IP address the agent asked for, as it asked. */
+	host: string,
+	/**  Why the list names it. */
+	tag: SiteTag,
+	/**  When the list in use was made. */
+	list_generated: Timestamp,
+	/**  `network.allow_unsafe_site_override`: the lawyer may allow the site anyway. */
+	override_allowed: boolean,
+	/**  How many times the site was refused in this turn, at least 1. */
+	count: number,
+} }) & { account_limits_changed?: never; browser_install?: never; case_law_hint?: never; caught_up?: never; connectors_changed?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; protection_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -4757,6 +4791,18 @@ export type SignInSource =
 "reused" | 
 /**  Clauseo's own sign-in, a key or an endpoint. */
 "own";
+
+/**
+ *  Why the block list names a site (decision record 0053). A tag from a newer Clauseo decodes
+ *  to `Unknown`.
+ */
+export type SiteTag = 
+/**  A botnet's command server (Feodo Tracker's IP addresses). */
+"malware" | 
+/**  A phishing site. */
+"phishing" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**
  *  A file a checkpoint did not version. Office lock and temp files (`~$*`, `*.tmp`) are never

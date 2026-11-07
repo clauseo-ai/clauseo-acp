@@ -21,7 +21,7 @@ use futures::future::Shared;
 use crate::actor::input::{Input, PlanWrite, Request, SignInRequest};
 use crate::agent::login_link::{self, StopFor};
 use crate::agent::login_splits::{self, LoginSplits};
-use crate::config::HostConfig;
+use crate::config::{HostConfig, SessionKey};
 use crate::error::Error;
 use crate::update::Downloaded;
 
@@ -40,6 +40,18 @@ pub struct LocatedFile {
     pub folder: PathBuf,
     /// The file.
     pub path: PathBuf,
+}
+
+/// A site the egress proxy refused because the block list names it (decision record 0053), as
+/// its sink passes it to [`HostHandle::site_blocked`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedSite {
+    /// The host name or IP address the agent asked for, as it asked.
+    pub host: String,
+    /// Why the list names it.
+    pub tag: clauseo_blocklist::Tag,
+    /// When the list in use was made.
+    pub generated: clauseo_blocklist::Generated,
 }
 
 /// The session host. [`Host::start`] runs it on its own thread, `clauseo-host`.
@@ -485,6 +497,23 @@ impl HostHandle {
     pub async fn limits_login_changed(&self, agent: AgentKind) -> Result<(), HostError> {
         self.call(|reply| Request::SignIn(SignInRequest::LimitsLogin { agent, reply }))
             .await
+    }
+
+    /// The egress proxy refused `site` for `session` (decision record 0053): the host tells the
+    /// main window with `HostEvent::SiteBlocked`, once per site per turn, re-sent with a higher
+    /// count when the site is refused again in that turn. Never waits: when the host is gone or
+    /// its request channel is full, the report is dropped (logged at debug). Rust only.
+    pub fn site_blocked(&self, session: SessionKey, site: BlockedSite) {
+        if let Err(error) = self
+            .requests
+            .try_send(Request::SiteBlocked { session, site })
+        {
+            let why = if error.is_full() { "busy" } else { "gone" };
+            tracing::debug!(
+                why,
+                "egress: a blocked site was not reported: the host is {why}"
+            );
+        }
     }
 
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text

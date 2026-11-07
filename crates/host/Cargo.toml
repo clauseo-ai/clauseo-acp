@@ -34,6 +34,10 @@ clauseo-search = { path = "../search" }
 clauseo-sandbox = { path = "../sandbox" }
 # The case-law relay (connectors.rs, R24): the connector's handle, its MCP POST and the relay token.
 clauseo-connectors = { path = "../connectors" }
+# The unsafe-site block list (ADR 0053): the list in use, its load at start and its updates.
+clauseo-blocklist = { path = "../blocklist" }
+# The block list fetch's redirects: each `Location` resolved against the URL before it.
+url = { workspace = true }
 # Random agent-browser session names on Windows (`browser/session.rs`).
 getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
