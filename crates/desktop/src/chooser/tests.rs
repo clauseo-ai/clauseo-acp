@@ -15,6 +15,7 @@ use super::place::{Place, TYPED_MAX};
 use super::*;
 
 mod choose;
+mod fast;
 mod typed;
 
 const HOME: &str = r"C:\Users\rmehra";
@@ -123,16 +124,27 @@ fn fake_with(desktop: &str, servers: &[&str], slow_drives: bool) -> (Chooser, mp
     (Chooser::with(Arc::new(fake), None), release)
 }
 
-/// A session opened at `now`, with `C:\Windows` refused, and its start points.
-fn open(chooser: &Chooser, now: Instant) -> ChooserStart {
-    let refused = [Path::new(r"C:\Windows").to_path_buf()];
-    let last = Path::new(r"C:\Cases\Acme");
-    chooser
-        .open(Some(Path::new(HOME)), Some(last), &refused, now)
-        .unwrap()
+/// A session and its start points.
+struct Opened {
+    chooser: u32,
+    starts: Vec<StartPoint>,
 }
 
-fn key(start: &ChooserStart, kind: StartKind) -> u8 {
+/// A session opened at `now`, with `C:\Windows` refused, and its start points.
+fn open(chooser: &Chooser, now: Instant) -> Opened {
+    let refused = [Path::new(r"C:\Windows").to_path_buf()];
+    let last = Path::new(r"C:\Cases\Acme");
+    let id = chooser
+        .open(Some(Path::new(HOME)), Some(last), &refused, now)
+        .unwrap()
+        .chooser;
+    Opened {
+        chooser: id,
+        starts: chooser.starts(id, now).unwrap(),
+    }
+}
+
+fn key(start: &Opened, kind: StartKind) -> u8 {
     start.starts.iter().find(|p| p.kind == kind).unwrap().key
 }
 

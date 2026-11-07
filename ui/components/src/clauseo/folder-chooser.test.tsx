@@ -125,6 +125,31 @@ test("a dialog with its title, why it's here, the start points, where it is, and
   expect(q("chooser-heard")?.textContent).toBe("Home, Documents, Matters");
 });
 
+test("before the desktop has read anything it says Looking… for the places and the folders, quietly, then fills in", async () => {
+  const { node, calls } = chooser({ starts: null, listing: null, busy: true });
+  await mount(node);
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(q("chooser-starts-looking")?.textContent).toBe("Looking…");
+  expect(q("chooser-looking")?.textContent).toBe("Looking…");
+  expect(all("chooser-start")).toHaveLength(0);
+  expect(all("chooser-item")).toHaveLength(0);
+  expect(q("chooser-state")).toBeNull();
+  expect(q<HTMLButtonElement>("chooser-up")?.disabled).toBe(true);
+  expect(q<HTMLButtonElement>("chooser-choose")?.disabled).toBe(true);
+  expect(q("chooser-heard")?.textContent).toBe("Looking…");
+  // the places land first; the folders still say Looking…
+  await act(async () => root?.render(chooser({ listing: null, busy: true }).node));
+  expect(q("chooser-starts-looking")).toBeNull();
+  expect(all("chooser-start")).toHaveLength(4);
+  expect(q("chooser-looking")?.textContent).toBe("Looking…");
+  // then the folders
+  await act(async () => root?.render(chooser().node));
+  expect(q("chooser-looking")).toBeNull();
+  expect(all("chooser-item")).toHaveLength(3);
+  expect(q("chooser-heard")?.textContent).toBe("Home, Documents, Matters");
+  expect(calls.go).toEqual([]);
+});
+
 test("arrows move, Enter opens the folder by its index, Backspace goes up", async () => {
   const { node, calls } = chooser();
   await mount(node);

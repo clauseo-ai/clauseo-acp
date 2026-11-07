@@ -6,6 +6,13 @@
   display: flex;
   flex-direction: column;
 }
+/* the places to start, where it is, and the folders */
+.folder-chooser-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .folder-chooser-crumbs {
   display: flex;
   justify-content: flex-end;
@@ -31,9 +38,51 @@
 .folder-chooser-row[data-disabled] {
   color: var(--faint);
 }
-/* a short window: tighter round the edge */
+/* A short window (640 by 480): the chooser takes the window's height, 4 px from its edge; the places to start stand in
+   a column beside the folders, the typed location's label beside its field, and the folders take every row left,
+   six or more at the default text size. */
 @media (max-height: 560px) {
   .folder-chooser {
-    padding: var(--s4);
+    height: calc(100dvh - 2 * var(--s1));
+    max-height: calc(100dvh - 2 * var(--s1));
+    padding: var(--s3) var(--s4);
+  }
+  .folder-chooser-body {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: var(--s2);
+  }
+  .folder-chooser-starts {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    /* as wide while it says Looking… as once the places land, so the folders don't move */
+    min-width: 6rem;
+    max-width: 10rem;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .folder-chooser-where {
+    grid-column: 2;
+    grid-row: 1;
+    margin-top: 0;
+  }
+  .folder-chooser-list {
+    grid-column: 2;
+    grid-row: 2;
+    max-height: none;
+    margin-top: 0;
+  }
+  .folder-chooser-typed {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--s2);
+  }
+  .folder-chooser-acts {
+    margin-top: var(--s3);
   }
 }

@@ -13,18 +13,17 @@ pub(crate) enum PickAnswer {
     Picked { folder: PickedFolder },
     /// The native dialog was cancelled.
     Cancelled,
-    /// The native dialog would stall: choose in the page, starting from these.
+    /// The native dialog would stall: choose in the page, in this session.
     Choose { start: ChooserStart },
 }
 
-/// A chooser session and where it may start.
+/// A chooser session, open at once; where it may start comes from `chooser_starts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(specta::Type))]
 pub(crate) struct ChooserStart {
-    /// The session, for `chooser_list`, `chooser_choose` and `chooser_cancel`.
+    /// The session, for `chooser_starts`, `chooser_list`, `chooser_choose` and
+    /// `chooser_cancel`.
     pub(crate) chooser: u32,
-    /// The places to start from.
-    pub(crate) starts: Vec<StartPoint>,
 }
 
 /// A place to start from.

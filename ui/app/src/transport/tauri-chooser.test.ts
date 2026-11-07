@@ -35,8 +35,10 @@ const picks = () =>
   invoked.map((i) => i.command).filter((c) => c.startsWith("pick_") || c.startsWith("chooser_"));
 
 test("choose hands the session to the page's chooser, whose calls name it, and resolves with what it chose", async () => {
-  const start = { chooser: 7, starts: [{ key: 0, kind: "home", display: "" }] };
+  const start = { chooser: 7 };
+  const starts = [{ key: 0, kind: "home", display: "" }];
   answers.set("pick_folder_or_choose", () => ({ kind: "choose", start }));
+  answers.set("chooser_starts", () => starts);
   answers.set("chooser_list", () => ({
     display: "",
     crumbs: [""],
@@ -50,12 +52,14 @@ test("choose hands the session to the page's chooser, whose calls name it, and r
   await settle();
   const request = store.current();
   expect(request?.start).toEqual(start);
+  await expect(request?.wire.starts()).resolves.toEqual(starts);
   await request?.wire.list({ kind: "start", key: 0 });
   const chosen = await request?.wire.choose();
   if (chosen) request?.chosen(chosen);
   await expect(picked).resolves.toEqual({ folder: "folder-2", display: "Documents" });
   expect(store.current()).toBeNull();
   expect(invoked.filter((i) => i.command.startsWith("chooser_"))).toEqual([
+    { command: "chooser_starts", args: { chooser: 7 } },
     { command: "chooser_list", args: { chooser: 7, go: { kind: "start", key: 0 } } },
     { command: "chooser_choose", args: { chooser: 7 } },
   ]);
