@@ -1,19 +1,14 @@
-//! Small parts of the backend: first run's decision, the plan login a `StartSignIn` asks for,
-//! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers; a retry's
-//! check, and the wait for the first network route before a command that reaches the network
-//! or first run's install.
-
-use std::collections::BTreeSet;
+//! Small parts of the backend: the plan login a `StartSignIn` asks for, the endpoint check
+//! before `SetFirmEndpoint`'s confirm, and its two error answers; a retry's check, and the wait
+//! for the first network route before a command that reaches the network.
 
 use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand};
-use futures::future::{BoxFuture, Either, select};
-use futures::{FutureExt as _, Stream, StreamExt as _};
 
 use super::AgentsBackend;
 
 /// `RetryAgentInstall`: `command.invalid` unless `agent`'s install is `Failed`, `Waiting` or
-/// `Paused`, since it asks nothing; a missing agent installs through `InstallAgent`'s confirm.
+/// `Paused`; a missing agent installs through `InstallAgent` or a sign-in press.
 pub(super) fn retry(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -25,7 +20,7 @@ pub(super) fn retry(
     );
     if !restartable {
         return Err(invalid(format!(
-            "{agent}'s install is not failed, waiting or paused; installing asks first"
+            "{agent}'s install is not failed, waiting or paused; choose the agent to install it"
         )));
     }
     backend.agents.retry(agent, use_system_proxy);
@@ -46,71 +41,6 @@ pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupComman
     );
     if reaches {
         backend.wiring.network.ready().await;
-    }
-}
-
-/// First run's install of `first`, once the first network route has reached `Agents` (as
-/// [`network_first`] waits for it, at most the same bound), so its first download goes through
-/// the resolved proxy and never direct first. The pump runs it beside its events
-/// ([`next_event`]).
-pub(super) fn first_install_after_route(
-    backend: &AgentsBackend,
-    first: AgentId,
-) -> BoxFuture<'_, ()> {
-    async move {
-        backend.wiring.network.ready().await;
-        backend.agents.install(&first);
-    }
-    .boxed()
-}
-
-/// The pump's next event from `source`; meanwhile `pending` (first run's install), when set,
-/// runs, and is cleared once done. It goes first, so one already able to end does before the
-/// events end.
-pub(super) async fn next_event<S: Stream + Unpin>(
-    source: &mut S,
-    pending: &mut Option<BoxFuture<'_, ()>>,
-) -> Option<S::Item> {
-    loop {
-        let Some(install) = pending.as_mut() else {
-            return source.next().await;
-        };
-        match select(install, source.next()).await {
-            Either::Left(((), _)) => *pending = None,
-            Either::Right((event, _)) => return event,
-        }
-    }
-}
-
-/// Which first install states have come in: first run is decided once every agent has one.
-pub(super) struct FirstRun {
-    waiting: BTreeSet<AgentId>,
-    /// Whether an agent's first state was `Ready` or `Managed`.
-    any_present: bool,
-    decided: bool,
-}
-
-impl FirstRun {
-    pub(super) fn new(agents: impl IntoIterator<Item = AgentId>) -> Self {
-        Self {
-            waiting: agents.into_iter().collect(),
-            any_present: false,
-            decided: false,
-        }
-    }
-
-    /// Notes `agent`'s `state`; `true` once, when the last first state came in and none was
-    /// `Ready` or `Managed`: first run.
-    pub(super) fn saw(&mut self, agent: &AgentId, state: &InstallState) -> bool {
-        if self.decided || !self.waiting.remove(agent) {
-            return false;
-        }
-        self.any_present |= matches!(state, InstallState::Ready { .. } | InstallState::Managed);
-        if !self.waiting.is_empty() {
-            return false;
-        }
-        self.decided = true;
-        !self.any_present
     }
 }
 

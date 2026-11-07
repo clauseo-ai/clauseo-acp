@@ -7,8 +7,8 @@
 //! is bound to it then ([`NetworkFollow::bind`]) and given the route resolved so far.
 //!
 //! The first route is awaited ([`NetworkFollow::ready`], at most until [`FIRST_ROUTE_WAIT`] after
-//! the setup's start) before a command that reaches the network (an install, a retry, a sign-in,
-//! first run's install) goes to `Agents`: behind a proxy set only in the OS, a first try that
+//! the setup's start) before a command that reaches the network (an install, a retry, a sign-in)
+//! goes to `Agents`: behind a proxy set only in the OS, a first try that
 //! went direct would be refused by the firm's firewall and counted as a failed try. The start's
 //! `agent.keys_loading` launch refusal is lifted only after it too (`refusal::lift_at_start`), so
 //! no agent launched at start goes direct for its whole life.

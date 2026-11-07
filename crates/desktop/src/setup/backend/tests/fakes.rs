@@ -51,6 +51,8 @@ pub(super) type Journal = Arc<Mutex<Vec<String>>>;
 #[derive(Default)]
 pub(super) struct FakeAgents {
     pub(super) calls: Calls,
+    /// Each agent's install state; one the test set none for is `Ready`, so a sign-in
+    /// starts at once unless the test says the agent is not installed.
     pub(super) states: Mutex<BTreeMap<AgentId, InstallState>>,
     pub(super) installs: Mutex<BTreeMap<AgentId, Installed>>,
     pub(super) signin: Mutex<BTreeMap<AgentId, SigninState>>,
@@ -118,7 +120,10 @@ impl SetupAgents for FakeAgents {
         self.call("retry", agent);
     }
     fn state(&self, agent: &AgentId) -> Option<InstallState> {
-        lock(&self.states).get(agent).cloned()
+        let set = lock(&self.states).get(agent).cloned();
+        Some(set.unwrap_or_else(|| InstallState::Ready {
+            version: "1.0.0".to_owned(),
+        }))
     }
     fn installed(&self, agent: &AgentId) -> Option<Installed> {
         lock(&self.installs).get(agent).cloned()
@@ -488,6 +493,7 @@ pub(super) fn rig_with(
         known,
         signin_gate: Mutex::default(),
         rechecks: Mutex::default(),
+        pending: Mutex::default(),
         wiring: Wiring::new(
             Arc::clone(&readers) as Arc<dyn LeaveReaders>,
             ReusedLogins::default(),

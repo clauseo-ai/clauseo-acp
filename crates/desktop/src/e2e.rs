@@ -12,7 +12,7 @@
 //!   for the confirm) draws the dialog as usual, for runs by hand.
 //! - Setup takes the installs of the agents named in `E2E_AGENTS_MANAGED` (comma-separated ids)
 //!   as the firm's (`Managed`), as a firm policy locking `agents.<id>` does: the e2e app's agents
-//!   are `fake_agent`, so nothing is installed and no first-run download starts. Unset or empty
+//!   are `fake_agent`, so nothing is installed and a sign-in starts at once. Unset or empty
 //!   manages none.
 //! - Setup plays a scripted sign-in for the agents `E2E_FAKE_SIGNIN` names
 //!   (`claude-acp=ok,codex-acp=fail`; `setup/fake_signin.rs`), its `Waiting` held for

@@ -1,5 +1,5 @@
-//! `RetryAgentInstall` asks nothing, so it restarts only a failed, waiting or paused install: a
-//! missing agent is installed through `InstallAgent`'s confirm alone.
+//! `RetryAgentInstall` restarts only a failed, waiting or paused install: a missing agent is
+//! installed only through `InstallAgent` or a sign-in pressed before its install.
 
 use clauseo_agents::InstallState;
 use clauseo_protocol::{CommandOutcome, ErrorCode};
@@ -21,15 +21,15 @@ fn retry_on_a_missing_agent_installs_nothing_and_asks_nothing() {
         )
     };
     for state in [
-        None,
-        Some(InstallState::Missing {
+        InstallState::Ready {
+            version: "1.0.0".to_owned(),
+        },
+        InstallState::Missing {
             download_bytes: 41_500_001,
-        }),
-        Some(InstallState::Installing),
+        },
+        InstallState::Installing,
     ] {
-        if let Some(state) = state.clone() {
-            lock(&rig.agents.states).insert(claude(), state);
-        }
+        lock(&rig.agents.states).insert(claude(), state.clone());
         let answer = block_on(rig.setup().run(MAIN, retry()));
         assert_eq!(
             answer.unwrap_err().code(),
