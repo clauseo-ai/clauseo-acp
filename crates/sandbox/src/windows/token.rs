@@ -152,11 +152,24 @@ pub fn default_dacl(pool_user: &Sid, desktop_user: &Sid) -> String {
     format!("D:(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})")
 }
 
-/// The agent token object's DACL: the pool user (the agent reads its own token) and `SYSTEM` with
-/// full access, the desktop user `TOKEN_QUERY`.
+/// The agent token object's DACL: `D:P(A;;0x20009;;;<pool user>)(A;;GA;;;SY)(A;;0x8;;;<desktop
+/// user>)(A;;RC;;;OW)`. The pool user (the agent reads its own token) gets
+/// [`AGENT_TOKEN_POOL_RIGHTS`] alone: no `TOKEN_ADJUST_DEFAULT`, so the agent can't shut its
+/// default DACL before it asks a service for a process that takes no descriptor of its own (one
+/// outside the job the sweep then couldn't end), and no `WRITE_DAC` or `WRITE_OWNER` to give
+/// itself more; `OWNER RIGHTS` held to `READ_CONTROL` takes away the owner's implied
+/// `WRITE_DAC`. The desktop user gets `TOKEN_QUERY`. The inner runner starts the agent through
+/// the handle `CreateRestrictedToken` gave it, whose rights this DACL, set after, doesn't touch.
 pub fn agent_token_sddl(pool_user: &Sid, desktop_user: &Sid) -> String {
-    format!("D:P(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x8;;;{desktop_user})")
+    format!(
+        "D:P(A;;0x{AGENT_TOKEN_POOL_RIGHTS:x};;;{pool_user})(A;;GA;;;SY)(A;;0x8;;;{desktop_user})\
+         (A;;RC;;;OW)"
+    )
 }
+
+/// What the pool user may do to the agent's token: `READ_CONTROL` (`0x20000`), `TOKEN_QUERY`
+/// (`0x8`) and `TOKEN_ASSIGN_PRIMARY` (`0x1`).
+pub const AGENT_TOKEN_POOL_RIGHTS: u32 = 0x0002_0009;
 
 /// The runners' process DACL, the inner's and the end sweeper's (set by the outer while each is
 /// suspended, and by the inner itself): `SYSTEM` full, the desktop user and the desktop user's

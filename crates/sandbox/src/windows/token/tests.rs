@@ -198,8 +198,18 @@ fn the_agents_own_token_names_the_pool_user() {
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
     assert_eq!(
         spec.token_dacl,
-        format!("D:P(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x8;;;{DESKTOP})")
+        format!("D:P(A;;0x20009;;;{POOL})(A;;GA;;;SY)(A;;0x8;;;{DESKTOP})(A;;RC;;;OW)")
     );
+}
+
+#[test]
+fn the_pool_user_cant_change_the_agents_token() {
+    // TOKEN_ADJUST_DEFAULT (0x80), TOKEN_ADJUST_GROUPS (0x40), TOKEN_ADJUST_PRIVILEGES (0x20),
+    // TOKEN_DUPLICATE (0x2), TOKEN_IMPERSONATE (0x4), WRITE_DAC and WRITE_OWNER.
+    for right in [0x80, 0x40, 0x20, 0x2, 0x4, 0x0004_0000, 0x0008_0000] {
+        assert_eq!(AGENT_TOKEN_POOL_RIGHTS & right, 0, "0x{right:x}");
+    }
+    assert_eq!(AGENT_TOKEN_POOL_RIGHTS, 0x0002_0000 | 0x8 | 0x1);
 }
 
 #[test]
