@@ -325,16 +325,16 @@ pub trait AclWriter {
     /// (its final path and file ID both match) also loses its explicit denies for the desktop user,
     /// a group of its token (enabled or deny-only), `OWNER RIGHTS`, `CREATOR OWNER` or `CREATOR
     /// GROUP`, but never one naming a SID `denies` keeps (the pool users and the pool group: our
-    /// fence); a listed path whose file ID can't be read, from its handle or its folder's listing,
-    /// is refused, so its record stays. Below a taken folder, an inherited copy of such a deny its
-    /// folder no longer gives goes too. A file with more than one link is left as it is. An item
-    /// left with a protected DACL and no explicit entry (only the agent's protection can have made
-    /// it) is unprotected and takes its folder's inherited entries, and so is one whose inherited
-    /// entries still allow one of `others` (or, when taken, deny one of those SIDs); in one write,
-    /// worked out after the strip. Each item is opened with only the owner's implied `READ_CONTROL
-    /// | WRITE_DAC`, and a folder listed only after its write. A child the lawyer can't open or
-    /// list is refused as [`ApplyFailure::ChildShut`], naming it. The default, for writers that
-    /// don't need it, is `Unsupported`.
+    /// fence); a listed path whose file ID can't be read, on its own handle, is refused, so its
+    /// record stays. Below a taken folder, an inherited copy of such a deny its folder no longer
+    /// gives goes too. A file with more than one link is left as it is. An item left with a
+    /// protected DACL and no explicit entry (only the agent's protection can have made it) is
+    /// unprotected and takes its folder's inherited entries, and so is one whose inherited entries
+    /// still allow one of `others` (or, when taken, deny one of those SIDs); in one write, worked
+    /// out after the strip. Each item is opened with only the owner's implied `READ_CONTROL |
+    /// WRITE_DAC`, and a folder listed only after its write. A child the lawyer can't open or list
+    /// is refused as [`ApplyFailure::ChildShut`], naming it. The default, for writers that don't
+    /// need it, is `Unsupported`.
     fn strip_taken(
         &mut self,
         _root: &Path,

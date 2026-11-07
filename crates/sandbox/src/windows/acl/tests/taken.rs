@@ -5,7 +5,7 @@
 //! deny and the DACL's protection stay, and so does an allow the ledger lists as ours (`keep`).
 
 use super::*;
-use crate::test_support::rename;
+use crate::test_support::{remove, rename};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_bytes::DENIED;
 use crate::windows::test_acl::{entries, owner_view};
@@ -140,6 +140,52 @@ fn only_taken_items_lose_the_lawyers_denies_and_kept_ones_stay() {
             path.display()
         );
     }
+}
+
+/// The file ID is read on the item's own handle, so nothing else can lend one: a lawyer's own
+/// file put in under a taken file's name, after that file went, keeps its denies (it isn't the
+/// file taken). A taken file listed under its name in another case is still the one taken, as
+/// NTFS ignores case: its denies go, and it isn't refused.
+#[test]
+fn a_file_swapped_in_under_a_taken_name_keeps_its_denies_and_case_is_ignored() {
+    drop_privileges();
+    let place = Place::new("acl-strip-swap");
+    let me = current_user_sid().unwrap();
+    let gone = dunce::canonicalize(place.dir.file("matter/swapped.txt", "x")).unwrap();
+    let cased = dunce::canonicalize(place.dir.file("matter/cased.txt", "x")).unwrap();
+    let root = dunce::canonicalize(place.at("matter")).unwrap();
+    let (swapped_at, swapped_id) = taken(&gone);
+    let (cased_at, cased_id) = taken(&cased);
+    remove(&gone);
+    let swapped = dunce::canonicalize(place.dir.file("matter/swapped.txt", "mine")).unwrap();
+    let upper = cased_at.with_file_name("CASED.TXT");
+    let listed = TakenIndex::new([(swapped_at, swapped_id), (upper, cased_id)]);
+    for path in [&swapped, &cased] {
+        protect_with(path, &format!("D:P(D;;DE;;;WD)(A;;FA;;;{me})")).unwrap();
+    }
+    let denies = DenyStrip {
+        taken: &listed,
+        kept: &[other()],
+    };
+
+    NtfsAcl::new()
+        .unwrap()
+        .strip_taken(&root, &[other()], &[], true, &denies)
+        .unwrap();
+
+    let denied = |path: &Path| {
+        entries(path)
+            .iter()
+            .any(|e| e.0 == DENIED && e.3.as_str() == "S-1-1-0")
+    };
+    assert!(
+        denied(&swapped),
+        "another file under a taken name keeps its deny"
+    );
+    assert!(
+        !denied(&cased),
+        "the taken file, listed in another case, loses it"
+    );
 }
 
 /// Below a folder `--reclaim` took, whose agent denied the lawyer `WRITE_OWNER` for everything

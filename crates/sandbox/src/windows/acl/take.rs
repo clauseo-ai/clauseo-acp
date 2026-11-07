@@ -22,7 +22,7 @@ use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMA
 use super::object::{Child, Object, reparse_refused};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
-    Descriptor, owner_descriptor, owner_sid, sid_bytes, without_owner_rights,
+    Acl, Descriptor, owner_descriptor, owner_sid, sid_bytes, without_owner_rights,
 };
 use crate::windows::reclaim::walk::{Kind, OwnerTree};
 use crate::windows::sids::Sid;
@@ -151,9 +151,17 @@ impl OwnerTree for NtfsOwners<'_> {
         }
         let control = Descriptor::parse(&new)?.control;
         node.object.set(dacl_info(control), &new)?;
+        // Read back: the DACL must be exactly the one written, entry for entry, protection too.
         let after = node.object.security(DACL_SECURITY_INFORMATION.0)?;
-        if without_owner_rights(&after)?.is_some() {
-            return Err(io::Error::other("an OWNER RIGHTS entry is still there"));
+        let (wrote, read) = (Descriptor::parse(&new)?, Descriptor::parse(&after)?);
+        let entries = |d: &Descriptor<'_>| -> io::Result<Option<Vec<Vec<u8>>>> {
+            let acl = d.dacl.map(Acl::parse).transpose()?;
+            Ok(acl.map(|a| a.aces().iter().map(|ace| ace.to_vec()).collect()))
+        };
+        let same =
+            entries(&wrote)? == entries(&read)? && wrote.dacl_protected() == read.dacl_protected();
+        if !same {
+            return Err(io::Error::other("the DACL read back isn't the one written"));
         }
         Ok(())
     }

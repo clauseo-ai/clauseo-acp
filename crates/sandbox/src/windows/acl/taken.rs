@@ -19,7 +19,11 @@ use std::io;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 
+use windows::Wdk::Storage::FileSystem::{
+    FILE_INTERNAL_INFORMATION, FileInternalInformation, NtQueryInformationFile,
+};
 use windows::Win32::Security::UNPROTECTED_DACL_SECURITY_INFORMATION;
+use windows::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::object::{Handle, Object, reparse_refused};
 use super::walk::{Refused, inherit};
@@ -84,23 +88,12 @@ pub(super) fn strip(
         }
         Err(_denied) => return Err(at(ApplyFailure::ChildShut)),
     };
-    // The root's file ID from its folder's listing too, when it is listed as taken.
-    let wide = PathBuf::from(OsString::from_wide(&path));
-    let listed_id = if lawyer.taken.ids(&wide).is_empty() {
-        None
-    } else {
-        Object::open_folder(above)
-            .and_then(|folder| folder.children())
-            .ok()
-            .and_then(|all| all.into_iter().find(|c| c.name == name).map(|c| c.id))
-    };
     let above = parent.security(READ_ALL).map_err(io)?;
     let item = Item {
         object: &top,
         path: &path,
         above: &above,
         folder: &parent,
-        listed: listed_id,
         refresh: false,
     };
     let taken = one(token, &item, others, lawyer, keep, &mut seen).map_err(at)?;
@@ -142,7 +135,6 @@ pub(super) fn strip(
                 path: &at,
                 above: &above,
                 folder: &folder,
-                listed: Some(child.id),
                 refresh,
             };
             let taken = one(token, &item, others, lawyer, keep, &mut seen)
@@ -181,24 +173,25 @@ fn listable(folder: &Object, name: &[u16], path: &[u16]) -> Result<Option<Object
 }
 
 /// An item opened with its owner's rights alone, its final path, its folder's descriptor (what
-/// it inherits from) and handle, the 64-bit file ID its folder's listing gave it, and whether
-/// it lies below a taken folder.
+/// it inherits from) and the handle it was opened through, and whether it lies below a taken
+/// folder.
 struct Item<'a> {
     object: &'a Object,
     path: &'a [u16],
     above: &'a [u8],
     folder: &'a Object,
-    listed: Option<u64>,
     refresh: bool,
 }
 
 impl Lawyer<'_> {
     /// The SIDs whose denies `item` (at the final path `at`) loses. A taken item, matched by its
-    /// path (as `in_folder` compares) and its file ID both, loses [`Lawyer::mine`]'s, explicit
-    /// and stale inherited copies; anything below a taken folder only its stale inherited copies;
-    /// anything else none. The ID is the item's own (`FileIdInfo`), or else its folder's listing
-    /// (64 bits, NTFS's form of the 128-bit one, on its folder's volume). A listed path whose ID
-    /// can't be read by either way is refused, never passed over: its record stays.
+    /// path (as `in_folder` compares, case ignored as NTFS ignores it) and its file ID both,
+    /// loses [`Lawyer::mine`]'s, explicit and stale inherited copies; anything below a taken
+    /// folder only its stale inherited copies; anything else none. The ID is read on the item's
+    /// own handle, so no other file can lend it one: `FileIdInfo` (128 bits and its volume), or
+    /// else `FileInternalInformation`, which needs no access right (64 bits, NTFS's form of the
+    /// 128-bit one, on the volume of the folder it was opened through). A listed path whose ID
+    /// can't be read either way is refused, never passed over: its record stays.
     fn denied(&self, item: &Item<'_>, at: &Path) -> Result<Denied<'_>, ApplyFailure> {
         let below = Denied {
             explicit: &[],
@@ -208,22 +201,18 @@ impl Lawyer<'_> {
         if ids.is_empty() {
             return Ok(below);
         }
+        let refused = ApplyFailure::Io(io::ErrorKind::PermissionDenied);
         let taken = if let Ok((volume, id)) = item.object.file_id() {
             ids.iter().any(|f| f.volume == volume && f.id == id)
         } else {
-            let refused = ApplyFailure::Io(io::ErrorKind::PermissionDenied);
-            let listed = item.listed.ok_or(refused)?;
             // A 128-bit ID (ReFS) has no 64-bit form to compare with: refused.
             if ids.iter().all(|f| f.id[8..] != [0; 8]) {
                 return Err(refused);
             }
-            let volume = item
-                .folder
-                .file_id()
-                .map_err(|e| ApplyFailure::Io(e.kind()))?
-                .0;
+            let internal = internal_id(item.object).map_err(|_unread| refused)?;
+            let volume = item.folder.file_id().map_err(|_unread| refused)?.0;
             ids.iter()
-                .any(|f| f.volume == volume && listed_is(f, listed))
+                .any(|f| f.volume == volume && listed_is(f, internal))
         };
         Ok(if taken {
             Denied {
@@ -236,8 +225,31 @@ impl Lawyer<'_> {
     }
 }
 
-/// Whether `file`'s 128-bit ID is `listed`, a 64-bit one from a folder's listing: NTFS's 128-bit
-/// ID is its 64-bit one, little-endian, then zeros.
+/// `object`'s 64-bit file ID, from its own handle (`NtQueryInformationFile`,
+/// `FileInternalInformation`, which asks no access right of the handle).
+fn internal_id(object: &Object) -> io::Result<u64> {
+    let mut info = FILE_INTERNAL_INFORMATION::default();
+    let mut status = IO_STATUS_BLOCK::default();
+    let size = u32::try_from(size_of::<FILE_INTERNAL_INFORMATION>()).map_err(io::Error::other)?;
+    // SAFETY: the handle is open; `info` and `status` are live and writable, `info` for `size`
+    // bytes; the query only reads the file's ID.
+    let done = unsafe {
+        NtQueryInformationFile(
+            object.handle().0,
+            &raw mut status,
+            (&raw mut info).cast(),
+            size,
+            FileInternalInformation,
+        )
+    };
+    if done.is_err() {
+        return Err(io::Error::other("the file's ID can't be read"));
+    }
+    Ok(u64::from_ne_bytes(info.IndexNumber.to_ne_bytes()))
+}
+
+/// Whether `file`'s 128-bit ID is `listed`, a 64-bit one: NTFS's 128-bit ID is its 64-bit one,
+/// little-endian, then zeros.
 fn listed_is(file: &FileId, listed: u64) -> bool {
     file.id[..8] == listed.to_le_bytes() && file.id[8..] == [0; 8]
 }
