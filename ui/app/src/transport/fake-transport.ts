@@ -129,6 +129,9 @@ export type FakeHost = {
   releaseDate?: DisplayInfo["release_date"];
   /** Whether display_info says this is a test build; false, a release build's, when left out. */
   testBuild?: boolean;
+  /** The release mode display_info reports: `test` in a test build, `release` otherwise, when
+   * left out. */
+  releaseMode?: DisplayInfo["release_mode"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
   /** UD2: the `folder_scanned` events a `scan_folder` the host took plays, in order, to every app listener. Left out,
@@ -552,6 +555,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       platform: this.host.platform ?? "linux",
       release_date: this.host.releaseDate ?? null,
       test_build: this.host.testBuild ?? false,
+      release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
     };
   }
 

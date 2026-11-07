@@ -72,7 +72,7 @@ describe("Settings at the rail's foot", () => {
 
 describe("the Test build label at the rail's foot", () => {
   test("a test build shows it beside Settings, as a tag that is no control", async () => {
-    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, motion: "reduced" });
+    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, releaseMode: "test", motion: "reduced" });
     await mount(
       <Rail open groups={[]} onSettings={() => {}} testIds={{ settings: "open-settings" }} />,
     );
@@ -84,7 +84,7 @@ describe("the Test build label at the rail's foot", () => {
   });
 
   test("a test build with no Settings still shows it, at the foot", async () => {
-    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, motion: "reduced" });
+    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, releaseMode: "test", motion: "reduced" });
     await mount(<Rail open groups={[]} scratch={{}} />);
     expect(txt(document.querySelector(".room-rail-foot [data-testid='test-build']"))).toBe(
       "Test build",
@@ -98,7 +98,13 @@ describe("the Test build label at the rail's foot", () => {
   });
 
   test("the label reads in Hindi in a Hindi display", async () => {
-    showDisplay({ ...DEFAULT_DISPLAY, lang: "hi", testBuild: true, motion: "reduced" });
+    showDisplay({
+      ...DEFAULT_DISPLAY,
+      lang: "hi",
+      testBuild: true,
+      releaseMode: "test",
+      motion: "reduced",
+    });
     await mount(<Rail open groups={[]} onSettings={() => {}} />);
     expect(txt(document.querySelector("[data-testid='test-build']"))).toBe("टेस्ट बिल्ड");
   });

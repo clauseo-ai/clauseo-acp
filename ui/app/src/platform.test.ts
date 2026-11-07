@@ -11,18 +11,33 @@ test("the host's report decides the platform; only a transport with no host gues
     platform: guessPlatform(),
     release_date: null,
     test_build: false,
+    release_mode: "release",
   });
 });
 
 test("the host's release date comes with its report; a transport with no host has none", async () => {
   expect(
     await hostDisplayInfo(new FakeTransport({ platform: "mac", releaseDate: "2026-11-03" })),
-  ).toEqual({ platform: "mac", release_date: "2026-11-03", test_build: false });
+  ).toEqual({
+    platform: "mac",
+    release_date: "2026-11-03",
+    test_build: false,
+    release_mode: "release",
+  });
 });
 
 test("the host's test-build word comes with its report", async () => {
   expect(await hostDisplayInfo(new FakeTransport({ testBuild: true }))).toMatchObject({
     test_build: true,
+  });
+});
+
+test("the host's release mode comes with its report, and a test build reports test", async () => {
+  expect(await hostDisplayInfo(new FakeTransport({ releaseMode: "dry" }))).toMatchObject({
+    release_mode: "dry",
+  });
+  expect(await hostDisplayInfo(new FakeTransport({ testBuild: true }))).toMatchObject({
+    release_mode: "test",
   });
 });
 

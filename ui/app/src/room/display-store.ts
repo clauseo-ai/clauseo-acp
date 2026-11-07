@@ -11,6 +11,7 @@ import {
   TEXT_SIZES,
   type Display,
   type Platform,
+  type ReleaseMode,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
 import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
@@ -49,18 +50,21 @@ export function uiPatchOf(value: unknown): Partial<UiSettings> {
   return patch;
 }
 
-/** The computer's side of the display: its light and motion preferences, its OS, and whether this is a test build. */
+/** The computer's side of the display: its light and motion preferences, its OS, whether this is
+ * a test build, and its release mode. */
 export type Surroundings = {
   dark: boolean;
   reduced: boolean;
   platform: Platform;
   testBuild?: boolean;
+  releaseMode?: ReleaseMode;
 };
 
 /** The display the settings show on this computer now. */
 export function displayOf(ui: UiSettings, around: Surroundings): Display {
   return {
     testBuild: around.testBuild === true,
+    releaseMode: around.releaseMode ?? "release",
     theme: ui.theme === "dark" || (ui.theme === "system" && around.dark) ? "night" : "day",
     // "automatic" waits on H7's display report, so it is off until then
     render: ui.lite === "lite" ? "lite" : "full",
@@ -79,7 +83,8 @@ const same = (a: Display, b: Display) =>
   a.lang === b.lang &&
   a.textSize === b.textSize &&
   a.platform === b.platform &&
-  a.testBuild === b.testBuild;
+  a.testBuild === b.testBuild &&
+  a.releaseMode === b.releaseMode;
 
 /** What the store reaches: each null where the page has none (a test, a page outside a browser). */
 export type DisplayEnv = {
@@ -125,6 +130,9 @@ export interface DisplayStore {
   setReleaseDate(date: string | null): void;
   /** The host's word on whether this is a test build, once it says: the display shows it (`Display.testBuild`). */
   setTestBuild(testBuild: boolean): void;
+  /** The host's release mode, once it says: the installer button's release page
+   * (`Display.releaseMode`). */
+  setReleaseMode(releaseMode: ReleaseMode): void;
   /** When the view store applies what arrived: every 100 ms in lite, else once a frame. */
   batch(): Batch;
   /** Hears each change to `ui()`, `locked()` or `releaseDate()`: a set, an override, the host's answer, another
@@ -164,6 +172,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
   let releaseDate: string | null = null;
   let testBuild = false;
+  let releaseMode: ReleaseMode = "release";
   const dark = env.matchMedia?.(DARK) ?? null;
   const reduced = env.matchMedia?.(REDUCED) ?? null;
   const ui = (): UiSettings => ({ ...stored, ...over });
@@ -173,6 +182,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
       reduced: reduced?.matches ?? false,
       platform,
       testBuild,
+      releaseMode,
     });
   let current = compute();
   env.start(current);
@@ -292,6 +302,10 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     },
     setTestBuild(next) {
       testBuild = next;
+      apply();
+    },
+    setReleaseMode(next) {
+      releaseMode = next;
       apply();
     },
     batch: () => (current.render === "lite" ? liteBatch : frameBatch),
