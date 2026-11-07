@@ -28,11 +28,18 @@
 //! - A URL the `url` crate cannot parse is let through by tauri-runtime-wry before this sees it;
 //!   a webview never navigates to one.
 //! - `window.open` stays refused by wry, since no window sets `on_new_window`.
+//! - On Windows [`guard`] also gives the window the browser arguments that stop every host name
+//!   lookup (`browser_args`), since a refused navigation still asks DNS for its host there.
 
 use tauri::{Manager, Runtime, Url, WebviewWindowBuilder};
 
+#[cfg(any(windows, test))]
+mod browser_args;
 #[cfg(test)]
 mod tests;
+
+#[cfg(windows)]
+pub use browser_args::keep_no_dns_in_env;
 
 /// The scheme of the origin Tauri serves the app's pages from, with `use_https_scheme(true)`.
 #[cfg(any(windows, target_os = "android"))]
@@ -46,11 +53,14 @@ const APP_HOST: &str = "tauri.localhost";
 #[cfg(not(any(windows, target_os = "android")))]
 const APP_HOST: &str = "localhost";
 
-/// `builder` with a navigation handler that refuses whatever [`allowed`] refuses.
+/// `builder` with a navigation handler that refuses whatever [`allowed`] refuses, and on Windows
+/// the browser arguments that resolve no host name (`browser_args::apply`).
 pub(crate) fn guard<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
     app: &M,
 ) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(windows)]
+    let builder = browser_args::apply(builder, app);
     let dev = dev_url(app.config().build.dev_url.as_ref()).cloned();
     builder.on_navigation(move |url| {
         let allow = allowed(url, dev.as_ref());

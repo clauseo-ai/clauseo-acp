@@ -142,6 +142,8 @@ pub use jailed::{
     AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Signal, Stages, SystemProbe,
     launch, refusal,
 };
+#[cfg(windows)]
+pub use navigation::keep_no_dns_in_env;
 pub use pre_write_guard::guard_requested;
 use profile::{DesktopProfile, with_profile};
 use quit::{Exit, SetupStop};
@@ -526,8 +528,6 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
     // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
     let builder = navigation::guard(csp::on_scripts(builder, app), app);
-    #[cfg(all(windows, feature = "e2e"))]
-    let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
