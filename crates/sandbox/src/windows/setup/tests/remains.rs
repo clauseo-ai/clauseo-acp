@@ -61,17 +61,17 @@ fn made_users_the_ledger_names_stay_in_the_record_after_a_rollback() {
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Marker);
     assert!(failure.rolled_back, "{}", failure.cause);
-    for n in 5..=8 {
+    for n in 9..=12 {
         assert!(
             !machine
                 .state
                 .accounts
-                .contains_key(&format!("ClauseoSb0{n}"))
+                .contains_key(&format!("ClauseoSb{n:02}"))
         );
     }
     // The fence's entries name the new SIDs, so the record keeps them for removal.
     let pool = machine.state.record.clone().unwrap().pool;
-    assert_eq!(pool, (1001..=1008).map(sid).collect::<Vec<_>>());
+    assert_eq!(pool, (1001..=1012).map(sid).collect::<Vec<_>>());
 }
 
 #[test]
@@ -129,16 +129,16 @@ fn without_group(test: &str) -> FakeMachine {
 #[test]
 fn a_group_an_extend_remade_stays_recorded_after_a_failure() {
     let mut machine = without_group("setup-extend-regroup");
-    machine.fail("create_user ClauseoSb05");
+    machine.fail("create_user ClauseoSb09");
     let req = request(&mut machine, 4, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::CreateUser);
     assert!(failure.rolled_back, "{}", failure.cause);
     let group = machine.state.group.clone().unwrap();
-    assert_eq!(group, sid(1005), "the kept users are in it, so it stays");
+    assert_eq!(group, sid(1009), "the kept users are in it, so it stays");
     let record = machine.state.record.clone().unwrap();
     assert_eq!(record.group, group);
-    assert_eq!(record.pool, (1001..=1004).map(sid).collect::<Vec<_>>());
+    assert_eq!(record.pool, (1001..=1008).map(sid).collect::<Vec<_>>());
 }
 
 #[test]
@@ -179,16 +179,16 @@ fn the_run_after_a_failed_re_run_saves_every_users_password() {
     assert!(
         machine
             .calls_since(from)
-            .contains(&"protect_for_owner 1001,1002,1003,1004")
+            .contains(&"protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008")
     );
     secrets_match(&machine.state);
-    assert_eq!(machine.state.secrets.len(), 4);
+    assert_eq!(machine.state.secrets.len(), 8);
 }
 
 #[test]
 fn dead_sids_the_record_keeps_count_toward_the_cap() {
     let (mut machine, mut acl, matters) = pool_with_matters("setup-cap-dead");
-    let req = request(&mut machine, 28, matters.clone());
+    let req = request(&mut machine, 24, matters.clone());
     set_up(&mut machine, &mut acl, &req).unwrap();
     machine.state.accounts.remove("ClauseoSb10");
     let req = request(&mut machine, 0, matters.clone());
@@ -221,8 +221,8 @@ fn secrets_bin_that_cant_be_written_in_a_rollback_stays_as_it_was() {
     set_up_fresh(&mut machine, &mut acl);
     let old = machine.state.secrets.clone();
     // Step 10 fails, then the rollback's own write of the new passwords fails too.
-    machine.fail("protect_for_owner 1001,1002,1003,1004");
-    machine.fail("protect_for_owner 1001,1002,1003,1004");
+    machine.fail("protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008");
+    machine.fail("protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008");
     let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Secrets);

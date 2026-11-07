@@ -32,6 +32,10 @@
 //! ledger entry names it. It refuses while any session is open. An extend (`add` above 0) adds
 //! users and never resets an existing password, but for a user owed a profile reset.
 //!
+//! Every run then tops the pool up to [`MIN_FREE_AFTER_RUN`] free users, cap allowing
+//! (`top_up.rs`): a fresh pool is 8, an extend's `add` is a minimum, and a re-run that adds
+//! users goes the extend way unless a kept user's profile needs the re-run's repair.
+//!
 //! Both reset each recorded user released from a matter (`resets.rs`): its profile deleted, a new
 //! password, one logon that makes the profile again, its `LocalLow` closed by step 7's owner
 //! check and denies; its mark in the owner's `matters.json` is cleared after step 10.
@@ -102,6 +106,7 @@ mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
 pub mod strays;
+mod top_up;
 #[cfg(windows)]
 mod windows_machine;
 
@@ -109,7 +114,7 @@ pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, Servi
 pub use outcome::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
     ERROR_LOGON_TYPE_NOT_GRANTED, JournalOutcome, LOGON_NOT_GRANTED, LOGON_REFUSED,
-    SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, launch_error,
+    SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, TopUp, launch_error,
 };
 // `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
 // import of both would make their shared method names ambiguous in the set-up's tests.
@@ -119,8 +124,11 @@ pub use remove::{
 #[cfg(windows)]
 pub use windows_machine::{Names, WindowsMachine};
 
-/// How many pool users a first set-up makes, and how many an extend adds by default (D-B5).
+/// How many pool users an extend adds by default, and the fewest a set-up makes before the
+/// top-up (D-B5); [`MIN_FREE_AFTER_RUN`] makes a fresh pool 8.
 pub const POOL_START: usize = 4;
+/// The fewest free pool users every elevated run leaves, cap allowing (`top_up.rs`).
+pub const MIN_FREE_AFTER_RUN: usize = 8;
 /// The change journal size set-up gives a volume whose journal is smaller: 256 MiB (0049).
 pub const JOURNAL_MAX: u64 = 256 * 1024 * 1024;
 /// The change journal's allocation delta set-up gives with it: 32 MiB.

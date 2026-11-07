@@ -65,7 +65,7 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         // nothing can use; everything else is as it was.
         let mut after = machine.state.clone();
         if call == "write_marker" {
-            assert_eq!(after.secrets.len(), 4);
+            assert_eq!(after.secrets.len(), 8);
             after.secrets.clear();
         }
         assert_eq!(after, before, "{call}: the machine as it was");
@@ -201,8 +201,8 @@ fn a_failed_shared_write_fails_the_set_up_and_keeps_the_deny() {
     // The deny on the failed target stays (D12); each rolled-back user's `LocalLow` deny came
     // off before its profile went.
     assert!(acl.has(&device_sync, &sid(1000), Rights::DenyWrite));
-    for name in ["ClauseoSb01", "ClauseoSb02", "ClauseoSb03", "ClauseoSb04"] {
-        let local_low = local_low(&machine, name);
+    for name in (1..=8).map(|n| format!("ClauseoSb0{n}")) {
+        let local_low = local_low(&machine, &name);
         assert!(
             acl.aces.iter().all(|(path, ..)| *path != local_low),
             "{name}"
@@ -257,7 +257,7 @@ fn a_failed_re_run_keeps_every_account_that_was_there() {
         machine.state.record, record,
         "nothing recorded before is dropped"
     );
-    for n in 1..=4 {
+    for n in 1..=8 {
         assert!(
             machine
                 .state
