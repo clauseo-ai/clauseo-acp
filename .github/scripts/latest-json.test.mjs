@@ -581,7 +581,7 @@ test("versionString reads a VERSIONINFO string through the PE's resources", () =
   assert.throws(() => versionString(pe.subarray(0, pe.length - 40), "UpdaterKeyId"), /not a readable PE file/);
 });
 
-test("--key-id passes a matching UpdaterKeyId, fails another and warns (3) on none", () => {
+test("--key-id passes a matching UpdaterKeyId, fails another and exits 3 on none, which assemble fails", () => {
   const dir = mkdtempSync(join(tmpdir(), "latest-json-key-id-"));
   const run = (strings, mode) => {
     const exe = join(dir, "tool.exe");
@@ -629,8 +629,13 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   const same = at(assemble, '7z e -so -spd "$installer" "$inner" | cmp - "$published" ||');
   const keyId = at(assemble, 'node .github/scripts/latest-json.mjs --key-id "$exe" "$MODE" || status=$?');
   assert.ok(verified < keyId && keyId < listed, "the key ID is checked with the signatures");
-  assert.match(text, /# TODO\(sandbox-admin-refresh\): a failure once/);
-  assert.ok(assemble.some((line) => line.includes("has no UpdaterKeyId yet") && line.includes('>> "$GITHUB_STEP_SUMMARY"')));
+  // An exe with no UpdaterKeyId (--key-id's 3) fails the job like a wrong one: no warning case.
+  assert.doesNotMatch(text, /TODO\(sandbox-admin-refresh\)/);
+  assert.ok(!assemble.some((line) => line.includes("has no UpdaterKeyId yet")), "no step-summary warning for a missing ID");
+  const missing = assemble.find((line) => line.startsWith("3)"));
+  assert.ok(missing, "assemble handles --key-id's 3");
+  assert.match(missing, /^3\) echo "::error::.* has no UpdaterKeyId, .*"; exit 1 ;;$/);
+  assert.ok(keyId < assemble.indexOf(missing) && assemble.indexOf(missing) < listed);
   const notes = at(assemble, 'echo "## Inside the Windows installers"');
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);
