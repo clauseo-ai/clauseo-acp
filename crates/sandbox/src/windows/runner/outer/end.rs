@@ -10,7 +10,7 @@ use std::io::{BufRead as _, BufReader};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::super::RunExit;
 use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, Swept, needs_pool_stop, wait_empty};
@@ -61,6 +61,19 @@ impl OsSweeper {
 fn pause(poll: Duration) {
     thread::sleep(poll);
 }
+
+/// The monotonic clock's reading, for [`SweeperSteps::now`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the outer measures how much of the host's 2 s after its stdin end is left; the \
+              tests inject the clock (`SweeperSteps::now`)"
+)]
+fn clock() -> Instant {
+    Instant::now()
+}
+
+/// [`SweeperSteps::now`]'s origin: its first reading.
+static ORIGIN: OnceLock<Instant> = OnceLock::new();
 
 impl SweeperSteps for OsSweeper {
     type Sweeper = Process;
@@ -130,6 +143,11 @@ impl SweeperSteps for OsSweeper {
 
     fn log(&self, line: &str) {
         say(line);
+    }
+
+    fn now(&self) -> Duration {
+        let origin = *ORIGIN.get_or_init(clock);
+        clock().saturating_duration_since(origin)
     }
 
     /// At the outer's end, if it lives that long: waits up to [`SWEEP_WAIT`] for the sweeper and

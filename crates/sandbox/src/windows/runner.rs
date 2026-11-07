@@ -36,10 +36,11 @@
 //!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
 //!   (`pool::assign::busy`), so none of those processes is another session's.
 //! - At any end (the inner exiting, once the output drained; the host's stdin ending, once the
-//!   agent, its stdin closed, had 1.5 s to finish; a failure, at once) the outer ends the job,
+//!   agent, its stdin closed, had 1 s to finish; a failure, at once) the outer ends the job,
 //!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`,
 //!   `sweeper.rs`): `--sweep`, the same kills with no job kept and the same removal, on its
-//!   own timeout. A job that doesn't empty starts no sweeper. The sweeper is never in the outer's
+//!   own timeout. A job that doesn't empty starts no sweeper, nor does an end with less than
+//!   500 ms of the host's 2 s after its stdin end left. The sweeper is never in the outer's
 //!   job, so the host ending the outer leaves it running.
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.

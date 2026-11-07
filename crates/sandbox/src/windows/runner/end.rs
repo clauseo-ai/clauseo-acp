@@ -11,7 +11,11 @@
 //! up to [`EMPTY_WAIT`], until no process is left in it: the sweeper's logon opens a gap in which
 //! its process, thread and token carry the logon's default DACL, and nothing of the agent's may be
 //! alive then to open them. A job still holding a process by then starts no sweeper; the next
-//! launch's first act is the backstop. Then the sweeper is started (`CreateProcessWithLogonW`,
+//! launch's first act is the backstop. Once the host's stdin ended, the host ends the outer
+//! [`HOST_BUDGET`] later, so the sweeper is started only while [`SWEEPER_BUDGET`] of that is still
+//! left ([`sweeper_fits`]): a host kill between its logon and its resume would leave it suspended
+//! and unshut. Too late, it is skipped as a job that doesn't empty is, and the session isn't clean.
+//! Then the sweeper is started (`CreateProcessWithLogonW`,
 //! suspended), its process and thread are shut as the inner's are, and it is resumed: it is never
 //! put in this launch's kill-on-close job, so the host ending the outer leaves it running. It
 //! needs nothing from the outer once running (`--sweep`, its own timeout). The guard keeps the
@@ -32,12 +36,19 @@ use super::{RunExit, agent_code};
 /// `crates/process/src/os/windows.rs:54` (private there): what a cancel whose agent didn't exit
 /// within the host's 2 s gives without the end sweeper.
 pub(crate) const HOST_ENDED: u32 = 0xC1A0;
+/// How long the host gives the outer once it closed the outer's stdin, before it ends the outer's
+/// job: `STDIN_GRACE` in `crates/process/src/handle.rs` (private there).
+pub(crate) const HOST_BUDGET: Duration = Duration::from_secs(2);
 /// How long the agent has, once the host's stdin ended and the agent's was closed, to finish
-/// before the outer ends the job: most of the 2 s the host gives the outer.
-pub(crate) const GRACE: Duration = Duration::from_millis(1500);
-/// How long the outer waits for its ended job to empty before it starts the sweeper: what is left
-/// of the host's 2 s after [`GRACE`], with the logon's start left room.
+/// before the outer ends the job: half of [`HOST_BUDGET`], so the job's end and the sweeper's
+/// start fit in the rest.
+pub(crate) const GRACE: Duration = Duration::from_millis(1000);
+/// How long the outer waits for its ended job to empty before it starts the sweeper.
 pub(crate) const EMPTY_WAIT: Duration = Duration::from_millis(400);
+/// How much of [`HOST_BUDGET`] must be left, after the stdin end, for the sweeper's logon, shut
+/// and resume to begin ([`sweeper_fits`]). No harness log yet times those three; the outer's own
+/// logon of the inner, up to the agent's first line, took 123 to 409 ms in the harness's runs.
+pub(crate) const SWEEPER_BUDGET: Duration = Duration::from_millis(500);
 /// How often it looks meanwhile.
 pub(crate) const EMPTY_POLL: Duration = Duration::from_millis(25);
 
@@ -61,6 +72,8 @@ pub(crate) trait SweeperSteps {
     fn keep(&self, sweeper: Self::Sweeper);
     /// A line on the outer's stderr.
     fn log(&self, line: &str);
+    /// The time on a monotonic clock, from any fixed origin: how long ago the host's stdin ended.
+    fn now(&self) -> Duration;
     /// At the outer's end: waits a while for the kept sweeper and says how it ended
     /// ([`Swept::from_exit`]); [`Swept::Unclean`] when none was kept.
     fn wait(&self) -> Swept;
@@ -103,15 +116,35 @@ pub(crate) fn needs_pool_stop(swept: Swept) -> bool {
     swept == Swept::PoolStop
 }
 
+/// Whether the sweeper's start still fits once `since` has passed since the host's stdin ended:
+/// at least [`SWEEPER_BUDGET`] of [`HOST_BUDGET`] is left, so the host's kill of the outer can't
+/// come between the sweeper's logon and its resume in the normal timing.
+pub(crate) fn sweeper_fits(since: Duration) -> bool {
+    HOST_BUDGET.saturating_sub(since) >= SWEEPER_BUDGET
+}
+
 /// Starts the sweeper: the job emptied, then logon, shut, resume, and nothing else (no job). A
 /// job that doesn't empty starts no sweeper: a process of the agent's would be alive in the
-/// sweeper's logon gap. A failure is logged. Whether it started.
-pub(crate) fn start_sweeper<S: SweeperSteps>(steps: &S) -> bool {
+/// sweeper's logon gap. Nor does a start too late after the host's stdin ended (`stdin_ended`,
+/// on [`SweeperSteps::now`]'s clock; [`sweeper_fits`]). A failure is logged. Whether it started.
+pub(crate) fn start_sweeper<S: SweeperSteps>(steps: &S, stdin_ended: Option<Duration>) -> bool {
     if let Err(what) = steps.empty_job() {
-        steps.log(&format!(
-            "clauseo-sandbox-run: no end sweeper: {what}; the next launch's first act sweeps"
-        ));
-        return false;
+        return no_sweeper(steps, &what);
+    }
+    if let Some(ended) = stdin_ended {
+        let since = steps.now().saturating_sub(ended);
+        if !sweeper_fits(since) {
+            let left = HOST_BUDGET.saturating_sub(since).as_millis();
+            return no_sweeper(
+                steps,
+                &format!(
+                    "skipped for time: {left} ms of the host's {} ms after the stdin end were \
+                     left, under the {} ms the sweeper's start needs",
+                    HOST_BUDGET.as_millis(),
+                    SWEEPER_BUDGET.as_millis()
+                ),
+            );
+        }
     }
     let sweeper = match steps.log_on() {
         Ok(sweeper) => sweeper,
@@ -131,6 +164,15 @@ pub(crate) fn start_sweeper<S: SweeperSteps>(steps: &S) -> bool {
     }
     steps.keep(sweeper);
     true
+}
+
+/// No sweeper this session: says why on stderr, as a warning. The session isn't clean, so its
+/// unclean-session marker stays. False, for [`start_sweeper`].
+fn no_sweeper<S: SweeperSteps>(steps: &S, what: &str) -> bool {
+    steps.log(&format!(
+        "clauseo-sandbox-run: warning: no end sweeper: {what}; the next launch's first act sweeps"
+    ));
+    false
 }
 
 /// Asks `active` for the job's process count until it is 0, every `poll` (through `pause`)
@@ -181,6 +223,8 @@ pub(crate) struct EndSweep<S> {
     steps: S,
     /// The end signal that started it, and whether the sweeper started.
     began: OnceLock<(EndSignal, bool)>,
+    /// When the host's stdin ended, on [`SweeperSteps::now`]'s clock.
+    stdin_ended: OnceLock<Duration>,
     /// Whether a sweep of the session found a process of the pool user's it couldn't end.
     escaped: AtomicBool,
     /// Whether a path began the end, for [`EndSweep::wait_begun`].
@@ -193,6 +237,7 @@ impl<S: SweeperSteps> EndSweep<S> {
         EndSweep {
             steps,
             began: OnceLock::new(),
+            stdin_ended: OnceLock::new(),
             escaped: AtomicBool::new(false),
             begun: Mutex::new(false),
             begun_changed: Condvar::new(),
@@ -211,9 +256,18 @@ impl<S: SweeperSteps> EndSweep<S> {
                 *begun = true;
             }
             self.begun_changed.notify_all();
-            (why, start_sweeper(&self.steps))
+            (
+                why,
+                start_sweeper(&self.steps, self.stdin_ended.get().copied()),
+            )
         });
         first
+    }
+
+    /// The host's stdin ended now: from here the host gives the outer [`HOST_BUDGET`], and a
+    /// sweeper starts only while [`sweeper_fits`], on whichever path. The first call counts.
+    pub(crate) fn stdin_ended(&self) {
+        self.stdin_ended.get_or_init(|| self.steps.now());
     }
 
     /// Waits up to `wait` for a path to begin the end; whether one did.
@@ -330,9 +384,10 @@ pub(crate) fn copy(mut from: impl Read, mut to: impl Write) -> CopyEnd {
 
 /// The host's stdin relayed to the agent's. When the host's side ends, the agent's stdin is
 /// closed (`close`), so the agent reads the end of its input, and it has `grace` ([`GRACE`]) to
-/// finish: the inner's exit begins the end meanwhile ([`inner_exited`]), its output and code
-/// kept. When no path began it by then, this one does ([`EndSignal::Stdin`]): the job ends, and
-/// the agent with it, inside the host's 2 s. An agent that closed its own stdin ends nothing.
+/// finish (the stdin end's time is kept first, [`EndSweep::stdin_ended`]): the inner's exit
+/// begins the end meanwhile ([`inner_exited`]), its output and code kept. When no path began it
+/// by then, this one does ([`EndSignal::Stdin`]): the job ends, and the agent with it, inside the
+/// host's 2 s. An agent that closed its own stdin ends nothing.
 pub(crate) fn relay_stdin<S: SweeperSteps, W: Write>(
     from: impl Read,
     to: W,
@@ -342,6 +397,9 @@ pub(crate) fn relay_stdin<S: SweeperSteps, W: Write>(
 ) {
     let mut to = to;
     let ended = copy(from, &mut to);
+    if ended == CopyEnd::Source {
+        end.stdin_ended();
+    }
     close(to);
     if ended == CopyEnd::Source {
         end.wait_begun(grace);

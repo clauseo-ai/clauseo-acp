@@ -34,8 +34,14 @@ fn main() -> ExitCode {
 }
 
 #[cfg(windows)]
+#[path = "s15_launch_vm/cancel_verdict.rs"]
+mod cancel_verdict;
+#[cfg(windows)]
 #[path = "s15_launch_vm/checks.rs"]
 mod checks;
+#[cfg(windows)]
+#[path = "s15_launch_vm/checks_cancel.rs"]
+mod checks_cancel;
 #[cfg(windows)]
 #[path = "s15_launch_vm/checks_cleanup.rs"]
 mod checks_cleanup;
@@ -114,6 +120,9 @@ mod win_pool;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_suspend.rs"]
+mod win_suspend;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_switch.rs"]
 mod win_switch;
