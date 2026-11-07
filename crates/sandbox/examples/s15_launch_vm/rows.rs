@@ -58,6 +58,8 @@ pub(crate) struct Ctx<'a> {
     pub(crate) limit: Duration,
     /// The row's name, for its notes.
     pub(crate) row: &'a str,
+    /// `--interactive-desktop`: `node-pipes` needs each UI effect proven (`gate.rs`).
+    pub(crate) strict: bool,
     /// Why the row can be no more than INFO (a positive control failed); `None` while none has.
     pub(crate) info: Mutex<Option<String>>,
 }
@@ -89,8 +91,9 @@ impl Ctx<'_> {
     }
 }
 
-/// Runs the row `name` under `limit` and prints its verdict line; its outcome.
-pub(crate) fn run_row(name: &str, manifest: &Manifest, limit: Duration) -> Outcome {
+/// Runs the row `name` under `limit` and prints its verdict line; its outcome. `strict` is
+/// `--interactive-desktop`.
+pub(crate) fn run_row(name: &str, manifest: &Manifest, limit: Duration, strict: bool) -> Outcome {
     say(&format!("row {name}: start (limit {} s)", limit.as_secs()));
     let started = now();
     let (send, receive) = mpsc::channel();
@@ -101,6 +104,7 @@ pub(crate) fn run_row(name: &str, manifest: &Manifest, limit: Duration) -> Outco
             manifest: &owned,
             limit,
             row: &row,
+            strict,
             info: Mutex::new(None),
         };
         drop(send.send(body(&ctx)));

@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::checks_ctl::Live;
 use super::launch::{Spec, deadline, launch, pool_of, run_command, summary, text};
 use super::manifest::Manifest;
 use super::prepare::{MOCK_FILE, copy_tree};
@@ -219,7 +220,11 @@ fn job_ui(ctx: &Ctx<'_>, job_file: &Path, atom: &str) -> Result<String, String> 
     for line in &lines {
         ctx.note(&format!("job-ui: {line}"));
     }
-    let limits = super::checks_ui::ui_limits(ctx, &lines)?;
+    let skip = Live::No(
+        "skipped for codex: its shell call and the runner have ended before the harness reads \
+         the job-ui file, and the agent's station with them",
+    );
+    let limits = super::checks_ui::ui_limits(ctx, &lines, skip, false)?;
     super::checks_ui::atom_info(ctx, &lines, atom);
     Ok(limits)
 }
