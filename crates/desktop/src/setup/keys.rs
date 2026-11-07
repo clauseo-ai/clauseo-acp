@@ -43,12 +43,19 @@ use super::KeyWrite;
 use super::admit::key_stored;
 use crate::bridge::lock;
 
+mod loaded;
 pub(super) mod marker;
 mod notes;
 mod reads;
 
+#[cfg(test)]
+pub(crate) use loaded::LoadDone;
+pub(crate) use loaded::{KeysLoaded, needs_keys};
 pub(crate) use marker::KeyMarker;
 pub(crate) use notes::{KeyNote, KeyNotes, NoteSender};
+pub(crate) use reads::FirstLoad;
+#[cfg(test)]
+pub(crate) use reads::LoadOutcome;
 use reads::Marks;
 
 /// How long the setup thread waits for the first load before an agent whose read has not
@@ -116,9 +123,10 @@ impl KeyCache {
         reads::load_all(keychain, agents)
     }
 
-    /// The first load, on the setup thread, waited for at most `bound` on `timer`
-    /// (`keys/reads.rs`); a read that has not answered by then marks the key unreadable only
-    /// when `marker` marks the agent. Each change of a mark, then and later, goes to `notes`.
+    /// The first load as one call, waited for at most `bound` on `timer` (`keys/reads.rs`): the
+    /// tests'. A read that has not answered by then marks the key unreadable only when
+    /// `marker` marks the agent. Each change of a mark, then and later, goes to `notes`.
+    #[cfg(test)]
     pub(crate) fn load_bounded<'a>(
         keychain: Keychain,
         agents: impl IntoIterator<Item = &'a AgentId>,
@@ -128,6 +136,20 @@ impl KeyCache {
         bound: Duration,
     ) -> Self {
         reads::load_bounded(keychain, agents, marker, notes, timer, bound)
+    }
+
+    /// The first load, on the setup thread: each of `agents`' keys read on a thread of its own,
+    /// not waited for. The cache is usable at once and holds each key as its read answers;
+    /// [`FirstLoad::wait`] waits for the reads at most the bound, and a read that has not
+    /// answered by then marks the key unreadable only when `marker` marks the agent. Each
+    /// change of a mark, then and later, goes to `notes`.
+    pub(crate) fn start_load<'a>(
+        keychain: Keychain,
+        agents: impl IntoIterator<Item = &'a AgentId>,
+        marker: KeyMarker,
+        notes: NoteSender,
+    ) -> (Self, FirstLoad) {
+        reads::start_load(keychain, agents, marker, notes)
     }
 
     /// Reads `agent`'s key again when it is marked unreadable and no read of it runs

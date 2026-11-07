@@ -19,7 +19,7 @@ use super::fakes::{HostCall, Rig, command, rig, rig_with};
 use super::{MAIN, claude, codex};
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
-use crate::setup::keys::KeyCache;
+use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::network::{Follower, NetworkFacts, NetworkFollow, ProxyEnv};
 use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::setup::refusal::lift_at_start;
@@ -47,7 +47,14 @@ pub(super) fn inline(agents: Arc<dyn SetupAgents>) -> (NetworkSlot, NetworkFollo
 /// A rig whose first network route has not landed: no settings read yet.
 fn rig_unrouted() -> Rig {
     let keys = KeyCache::load_all(Keychain::memory(), [&claude(), &codex()]);
-    rig_with(true, Keychain::memory(), keys, false, false)
+    rig_with(
+        true,
+        Keychain::memory(),
+        keys,
+        false,
+        false,
+        KeysLoaded::over(),
+    )
 }
 
 #[test]

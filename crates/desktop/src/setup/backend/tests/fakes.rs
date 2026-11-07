@@ -26,7 +26,7 @@ use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
 use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
-use crate::setup::keys::KeyCache;
+use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
 use crate::setup::readers::{LeaveReaders, ReadHold};
@@ -425,28 +425,35 @@ pub(super) fn rig(accept: bool) -> Rig {
 /// [`rig`] whose `KeyCache` loads from `keychain` (a memory one) at start.
 pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
     let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
-    rig_with(accept, keychain, keys, false, true)
+    rig_with(accept, keychain, keys, false, true, KeysLoaded::over())
 }
 
 /// [`rig`] over `keys`, loaded from `keychain` (a memory one) with notes, say.
 pub(super) fn rig_keys(keychain: Keychain, keys: KeyCache) -> Rig {
-    rig_with(true, keychain, keys, false, true)
+    rig_with(true, keychain, keys, false, true, KeysLoaded::over())
+}
+
+/// [`rig`] over `keys`, whose first load is over only once `loaded` says so.
+pub(super) fn rig_loading(keychain: Keychain, keys: KeyCache, loaded: KeysLoaded) -> Rig {
+    rig_with(true, keychain, keys, false, true, loaded)
 }
 
 /// [`rig`] with Claude's `plans.<id>` set by policy when `plan_locked`.
 pub(super) fn rig_locked(plan_locked: bool) -> Rig {
     let keychain = Keychain::memory();
     let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
-    rig_with(true, keychain, keys, plan_locked, true)
+    rig_with(true, keychain, keys, plan_locked, true, KeysLoaded::over())
 }
 
-/// The rig; its first network route lands at once when `routed`.
+/// The rig; its first network route lands at once when `routed`; its keys' first load is over
+/// once `loaded` says so.
 pub(super) fn rig_with(
     accept: bool,
     keychain: Keychain,
     keys: KeyCache,
     plan_locked: bool,
     routed: bool,
+    loaded: KeysLoaded,
 ) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
@@ -504,6 +511,7 @@ pub(super) fn rig_with(
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
         .with_network(follow),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
+        keys_loaded: loaded,
     });
     if routed {
         backend
