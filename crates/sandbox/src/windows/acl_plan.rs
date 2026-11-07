@@ -214,9 +214,7 @@ pub struct AdmittedPlan {
     matter: MatterId,
     owners: Vec<MatterId>,
     grants: Vec<Grant>,
-    /// The subjects of this launch's matter (its pool user, and its matter SID when set) and the
-    /// pool user of each matter whose fence it plans: the pool owners each one's children may
-    /// have (S15 `PR4h`).
+    /// Each planned matter's own subjects: the pool owners its children may have (S15 `PR4h`).
     assigned: Vec<(MatterId, Sid)>,
     pub(crate) entries: Vec<EntryId>,
     pub(crate) created: Vec<EntryId>,
@@ -239,8 +237,7 @@ impl AdmittedPlan {
         &self.owners
     }
 
-    /// The subjects assigned to `matter` (see `assigned`); empty when it is neither this
-    /// launch's matter nor one whose fence it plans.
+    /// The subjects assigned to `matter` (see `assigned`); empty for a matter not planned.
     pub(crate) fn assigned_to(&self, matter: MatterId) -> Vec<Sid> {
         let mine = self.assigned.iter().filter(|(m, _)| *m == matter);
         mine.map(|(_, sid)| sid.clone()).collect()
