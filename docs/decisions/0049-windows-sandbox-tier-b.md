@@ -975,16 +975,18 @@ leaves that profile, both naming the part.
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
   only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
-  shut to it: the outer gives the inner's process and first thread a protected DACL naming
-  `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to `READ_CONTROL`, while the inner is
-  still suspended; the inner, first thing after reading the launch, does the same for its primary
-  token and every thread it has, and drops the pool user from its default DACL so a thread the
-  system starts in it later is shut too. No agent of the pool user, the new one or one already
-  running, opens its Medium, unrestricted token (the harness's `runners` row first found query
-  and duplicate open). The agent's own token gets an explicit DACL naming the pool user. Both
-  runner exes are GUI-subsystem, so neither gets a console host.
-  It makes the agent's profile folders part by part relative to each
-  parent's handle, never through a link.
+  shut to it: the outer reads the inner's token user and gives its process and first thread a
+  protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
+  `READ_CONTROL`, while the inner is still suspended (`CreateProcessWithLogonW` takes no
+  descriptor, so the pid exists with the logon's default DACL from its return until then, before
+  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
+  after reading the launch it adds the lawyer's query, shuts every thread it has, and gives its
+  default DACL the threads' entries so a thread the system starts in it later is shut too. No
+  agent of the pool user, the new one or one already running, opens its Medium, unrestricted
+  token (the harness's `runners` row first found query and duplicate open). The agent's own
+  token gets an explicit DACL naming the pool user. Both runner exes are GUI-subsystem, so
+  neither gets a console host. It makes the agent's profile folders part by part relative to
+  each parent's handle, never through a link.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
