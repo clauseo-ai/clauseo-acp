@@ -30,9 +30,8 @@ use clauseo_protocol::AgentId;
 
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
-use crate::log::InstallLog;
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
-use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+use crate::state::{AgentsEvent, InstallState, Installed};
 
 mod shared;
 mod signin;
@@ -243,6 +242,9 @@ impl Agents {
     /// test can see what a queued sign-in does when an install finishes.
     #[cfg(feature = "test-support")]
     pub fn finish_install_for_tests(&self, agent: &AgentId, installed: Option<Installed>) {
+        use crate::log::InstallLog;
+        use crate::state::{Failure, FailureKind};
+
         let state = match &installed {
             Some(installed) => InstallState::Ready {
                 version: installed.version.clone(),
