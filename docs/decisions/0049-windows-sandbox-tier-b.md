@@ -816,9 +816,12 @@ once after. Results:
 - Harness limits: a restricted token holding neither `Everyone` nor `RESTRICTED` can't start a
   program at all (`0xC0000022`), before or after the filters. The admin's AppContainer child
   failed to reach 1.1.1.1 before the filters too (runs 42351029777 and 42354843371), so the pool
-  user's AppContainer row proves nothing yet. The control now runs in a registered AppContainer
-  profile with `internetClient` and `privateNetworkClientServer`, which Windows Firewall needs
-  to let a package out; until it reaches, that row counts as information only.
+  user's AppContainer row proved nothing then. Run 42356413018 ran the control in a registered
+  AppContainer profile with `internetClient` and `privateNetworkClientServer`, which Windows
+  Firewall needs to let a package out, and it reached before and after the filters. The pool
+  user's AppContainer child didn't start in that run (its probe had no profile loaded to
+  register one in); the spike now starts probes with the user's profile, as a launch does, and
+  a step that never ran counts as information, never a pass. Pending that run.
 - A derived token needs a default DACL its process can open (for example `Everyone`) to start;
   a hijacked agent can set one on its own derived token, so the rows give it one.
 
@@ -899,11 +902,13 @@ under anonymous impersonation is blocked too: whether WFP reads the process's to
 the thread's (the anonymous logon, which holds no `Everyone`), the allow doesn't grant. Only a
 machine with `EveryoneIncludesAnonymous = 1` that WFP reads by thread would let it through; a VM row
 measures it. Removal (`wfp::remove`, which `--remove` runs once every pool account is gone and a
-second sweep has stopped, elevated, any process still running as a pool SID, since `stop_strays`
-only logs a process that won't stop) deletes every filter in the sublayer, foreign ones included,
-every key set-up writes, the sublayer and the provider, in one transaction; then it takes back the
-owner's read grant on the filter container, and removes the firewall rules; a firewall failure there
-is reported, not fatal, as at set-up. It can run again after a partial removal.
+second sweep has stopped, elevated, every process still running as a pool SID (one that won't stop
+ends the run at `RemoveStep::Strays` with exit 4, `RemovedPartly`, the network still on, for a
+re-run), since `stop_strays` only logs a process that won't stop) deletes every filter in the
+sublayer, foreign ones included, every key set-up writes, the sublayer and the provider, in one
+transaction; then it takes back the owner's read grant on the filter container, and removes the
+firewall rules; a firewall failure there is reported, not fatal, as at set-up. It can run again
+after a partial removal.
 
 **For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
 starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent, and map
