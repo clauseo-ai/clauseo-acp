@@ -221,6 +221,12 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
         .create(true)
         .truncate(false)
         .open(path)?;
+    lock_open_for(file, path, wait)
+}
+
+/// [`lock_exclusive_for`] for a lock file the caller already opened (`file`, without following a
+/// link), named by `path` in its error. Dropping the file releases the lock.
+pub(crate) fn lock_open_for(file: File, path: &Path, wait: Duration) -> io::Result<File> {
     let tries = wait.as_millis() / LOCK_RETRY.as_millis() + 1;
     for attempt in 0..tries {
         match file.try_lock() {

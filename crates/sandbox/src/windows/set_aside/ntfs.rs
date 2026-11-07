@@ -67,9 +67,11 @@ use crate::windows::folder::verbatim_wide;
 
 mod forget;
 mod scan;
+mod temps;
 
 pub(super) use forget::{forget_from_sandbox, forget_from_set_aside};
 pub(super) use scan::same_name;
+pub(super) use temps::remove_temps;
 
 /// `ERROR_REPARSE_POINT_ENCOUNTERED`: an open told not to follow a reparse point met one.
 const REPARSE_ENCOUNTERED: i32 = 4395;

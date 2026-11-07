@@ -5,17 +5,19 @@
 //! `set-aside.lock`; a pass that set something aside leaves `manifest.json`, which a restore of
 //! every item empties ([`SET_ASIDE_BOOKKEEPING`]).
 //!
-//! It is all or nothing, in two passes. First every name in the matter's folder is checked: each
-//! must be one of those three (matched ignoring case, as NTFS matches), a plain file (no reparse
-//! point, no folder) with one link, and its contents must let it go ([`contents_allow`]): a record
-//! that lists no open session, a manifest with nothing outstanding (no item set aside and not
-//! restored, no move begun), and a manifest only beside such a record. Anything else (a pass
-//! folder, another name, a hard-linked file, a record still open or a manifest still listing an
-//! item, either unreadable or of another version) leaves the folder exactly as it is. Only then is
-//! each file deleted, and last the folder, which goes only if empty. On NTFS a mark that fails
-//! partway (a read-only file) takes the marks before it off again, so none goes. A record still
-//! open is kept because the next launch checks a crashed session's changes only against it
-//! (`run.rs`): deleting it would let what an agent planted become the next launch's trusted
+//! It is all or nothing, in two passes, under the matter's `set-aside.lock`, taken before the
+//! first pass and held to the deletes, as every writer takes it, so no writer changes the record
+//! meanwhile. First every name in the matter's folder is checked: each must be one of those three
+//! (matched ignoring case, as NTFS matches), a plain file (no reparse point, no folder) with one
+//! link, and its contents must let it go ([`contents_allow`]): a record that lists no open
+//! session, a manifest with nothing outstanding (no item set aside and not restored, no move
+//! begun), and a manifest only beside such a record. Anything else (a pass folder, another name, a
+//! hard-linked file, a record still open or a manifest still listing an item, either unreadable or
+//! of another version) leaves the folder exactly as it is. Only then is each file deleted, and
+//! last the folder, which goes only if empty. On NTFS a mark that fails partway (a read-only file)
+//! takes the marks before it off again, so none goes. A record still open is kept because the next
+//! launch checks a crashed session's changes only against it (`run.rs`): deleting it would let
+//! what an agent planted become the next launch's trusted
 //! starting point.
 //!
 //! On NTFS everything is opened by handle without following a link, each file is read and
@@ -26,11 +28,14 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
+#[cfg(any(windows, test))]
+use std::time::Duration;
 
 #[cfg(any(windows, test))]
 use clauseo_protocol::MatterId;
 
 use super::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
+use crate::windows::write;
 
 /// The most a record or a manifest read here may hold: 64 MiB. A larger one is kept.
 pub(super) const RECORD_CAP: usize = 64 << 20;
@@ -85,21 +90,37 @@ pub(super) fn together(found: &[usize]) -> bool {
 
 /// `--remove`'s call: deletes `matter`'s set-aside bookkeeping under `data_dir` (a data folder
 /// already checked), reached from `<data_dir>\sandbox` with no link on the way, as the module
-/// says. A bookkeeping name that is a link or a folder, or a folder on the way that is a link,
-/// is [`SetAsideFailure::Changed`] and nothing more is deleted.
+/// says, under the matter's lock (waiting as the writers do). A bookkeeping name that is a link
+/// or a folder, or a folder on the way that is a link, is [`SetAsideFailure::Changed`] and nothing
+/// more is deleted; a lock still held is `Io(WouldBlock)`, and nothing is either.
 #[cfg(any(windows, test))]
 pub(crate) fn forget_bookkeeping(
     data_dir: &Path,
     matter: &MatterId,
 ) -> Result<SetAsideBookkeeping, SetAsideFailure> {
+    forget_bookkeeping_within(data_dir, matter, write::LOCK_WAIT)
+}
+
+/// [`forget_bookkeeping`], waiting up to `wait` for the matter's lock (the tests wait less).
+#[cfg(any(windows, test))]
+pub(super) fn forget_bookkeeping_within(
+    data_dir: &Path,
+    matter: &MatterId,
+    wait: Duration,
+) -> Result<SetAsideBookkeeping, SetAsideFailure> {
     let sandbox = data_dir.join(crate::windows::matters::SANDBOX_DIR);
     let name = matter.to_string();
     #[cfg(windows)]
-    return super::ntfs::forget_from_sandbox(&sandbox, OsStr::new(&name), &SET_ASIDE_BOOKKEEPING);
+    return super::ntfs::forget_from_sandbox(
+        &sandbox,
+        OsStr::new(&name),
+        &SET_ASIDE_BOOKKEEPING,
+        wait,
+    );
     #[cfg(not(windows))]
     {
         let set_aside = sandbox.join(SET_ASIDE_DIR);
-        posix::forget(&[&sandbox, &set_aside], &set_aside.join(name))
+        posix::forget(&[&sandbox, &set_aside], &set_aside.join(name), wait)
     }
 }
 
@@ -113,9 +134,14 @@ pub fn forget_set_aside_bookkeeping(
 ) -> Result<SetAsideBookkeeping, SetAsideFailure> {
     debug_assert!(set_aside.ends_with(SET_ASIDE_DIR));
     #[cfg(windows)]
-    return super::ntfs::forget_from_set_aside(set_aside, matter, &SET_ASIDE_BOOKKEEPING);
+    return super::ntfs::forget_from_set_aside(
+        set_aside,
+        matter,
+        &SET_ASIDE_BOOKKEEPING,
+        write::LOCK_WAIT,
+    );
     #[cfg(not(windows))]
-    posix::forget(&[set_aside], &set_aside.join(matter))
+    posix::forget(&[set_aside], &set_aside.join(matter), write::LOCK_WAIT)
 }
 
 /// The tests' stand-in off Windows.
@@ -124,9 +150,11 @@ mod posix {
     use std::io;
     use std::os::unix::fs::MetadataExt as _;
     use std::path::Path;
+    use std::time::Duration;
 
     use super::{SET_ASIDE_BOOKKEEPING, SetAsideBookkeeping, contents_allow, read_first, together};
     use crate::windows::set_aside::SetAsideFailure;
+    use crate::windows::set_aside::files::LOCK_FILE;
     use crate::windows::write;
 
     fn failure(error: &io::Error) -> SetAsideFailure {
@@ -147,10 +175,12 @@ mod posix {
     }
 
     /// Each of `way` checked as a real folder, then `folder`'s names checked as the module
-    /// says, then each deleted, then `folder` when empty.
+    /// says, then each deleted, then `folder` when empty. The matter's lock is taken before its
+    /// names are read, and held until the deletes are done, as on NTFS.
     pub(super) fn forget(
         way: &[&Path],
         folder: &Path,
+        wait: Duration,
     ) -> Result<SetAsideBookkeeping, SetAsideFailure> {
         for step in way {
             if present(step, true)?.is_none() {
@@ -160,6 +190,11 @@ mod posix {
         if present(folder, true)?.is_none() {
             return Ok(SetAsideBookkeeping::NoFolder);
         }
+        let lock = folder.join(LOCK_FILE);
+        if present(&lock, false)?.is_some_and(|meta| meta.nlink() > 1) {
+            return Ok(SetAsideBookkeeping::Left);
+        }
+        let held = write::lock_exclusive_for(&lock, wait).map_err(|error| failure(&error))?;
         // First pass: every name checked; anything that isn't bookkeeping fit to go leaves the
         // folder as it is.
         let mut found = Vec::new();
@@ -193,10 +228,11 @@ mod posix {
         if !together(&places) {
             return Ok(SetAsideBookkeeping::Left);
         }
-        // Second pass: each deleted.
+        // Second pass: each deleted; then the lock goes, and the folder when empty.
         for (_, path) in found {
             write::remove_owned_file(&path).map_err(|error| failure(&error))?;
         }
+        drop(held);
         match write::remove_empty_folder(folder) {
             Ok(()) => Ok(SetAsideBookkeeping::Gone),
             Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {

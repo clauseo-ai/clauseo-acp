@@ -4,13 +4,13 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{after, before, exit, exit_as, launch, list, none, record, volume, world};
 use crate::windows::set_aside::files::{FileId, Place};
 use crate::windows::set_aside::run::{self, Refused, Volume};
 use crate::windows::set_aside::scan::Listed;
-use crate::windows::set_aside::{Reason, SetAsideFailure};
+use crate::windows::set_aside::{Reason, SetAsideFailure, under_lock};
 use crate::windows::test_world::matter_one;
 
 /// Where a stand-in volume's move stops.
@@ -293,4 +293,111 @@ fn a_set_aside_folder_is_handed_back_throughout_whoever_owns_its_top() {
     );
     let inside = moved[0].to.join("hooks/post-checkout");
     assert_eq!(*volume.owned.borrow(), [inside]);
+}
+
+/// A temp `write::write_atomic` gives beside the record, and one beside the manifest.
+const RECORD_TEMP: &str = ".record.json.0123456789abcdef.tmp";
+const MANIFEST_TEMP: &str = ".manifest.json.fedcba9876543210.tmp";
+
+/// The matter's set-aside folder under `data`.
+fn matter_folder(data: &Path) -> PathBuf {
+    data.join("sandbox/set-aside")
+        .join(matter_one().to_string())
+}
+
+/// The names in the matter's set-aside folder under `data`, sorted.
+fn folder_names(data: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(matter_folder(data))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The matter's folder relative to the test world's root, for [`crate::test_support::TempDir`].
+fn matter_rel() -> String {
+    format!("data/sandbox/set-aside/{}", matter_one())
+}
+
+/// Takes the matter's lock as a launch does: the temps a crash left are cleared under it.
+fn lock_matter(data: &Path) {
+    under_lock(data, &matter_one(), |_open| ()).unwrap();
+}
+
+#[test]
+fn a_temp_a_crash_left_beside_the_record_or_manifest_is_cleared_under_the_lock() {
+    let (w, root, data) = world("aside-temps-cleared");
+    before(&root, &data, launch()).unwrap();
+    let settled = folder_names(&data);
+    w.dir.file(
+        &format!("{}/{RECORD_TEMP}", matter_rel()),
+        "{\"version\": 1,",
+    );
+    w.dir
+        .file(&format!("{}/{MANIFEST_TEMP}", matter_rel()), "{");
+    assert_eq!(folder_names(&data).len(), settled.len() + 2);
+    lock_matter(&data);
+    assert_eq!(folder_names(&data), settled);
+    // The record still reads: the temps were never the record.
+    assert!(record(&data).sessions.contains("s1"));
+}
+
+#[test]
+fn a_file_under_another_name_is_left_alone_when_the_temps_are_cleared() {
+    let (w, root, data) = world("aside-temps-other-names");
+    before(&root, &data, launch()).unwrap();
+    let mut expected = folder_names(&data);
+    // Upper-case or short hex, a suffix, a missing dot, another file's temp: none is ours.
+    let others = [
+        ".record.json.0123456789ABCDEF.tmp",
+        ".record.json.0123456789abcde.tmp",
+        ".record.json.0123456789abcdef.tmp.old",
+        "record.json.0123456789abcdef.tmp",
+        ".secrets.bin.0123456789abcdef.tmp",
+        "notes.txt",
+    ];
+    for name in others {
+        w.dir.file(&format!("{}/{name}", matter_rel()), "kept");
+        expected.push(name.to_owned());
+    }
+    expected.sort();
+    lock_matter(&data);
+    assert_eq!(folder_names(&data), expected);
+}
+
+#[test]
+fn a_folder_or_a_link_named_like_a_temp_is_left_alone() {
+    let (w, root, data) = world("aside-temps-links");
+    before(&root, &data, launch()).unwrap();
+    let folder = matter_folder(&data);
+    // A folder named like a manifest temp, holding a file.
+    let inside = w
+        .dir
+        .file(&format!("{}/{MANIFEST_TEMP}/inside.txt", matter_rel()), "x");
+    // A link named like a record temp, to a folder that holds a file.
+    let target = w.dir.dir("elsewhere/target");
+    let kept = w.dir.file("elsewhere/target/keep.txt", "keep");
+    let link = folder.join(RECORD_TEMP);
+    #[cfg(unix)]
+    w.dir
+        .symlink(&format!("{}/{RECORD_TEMP}", matter_rel()), &target);
+    #[cfg(windows)]
+    crate::windows::test_junction::junction(&link, &target).unwrap();
+    // A file with a second hard link, named like a temp.
+    let other = w.dir.file("elsewhere/other.json", "{}");
+    let hard_name = ".manifest.json.1111111111111111.tmp";
+    w.dir
+        .hard_link(&format!("{}/{hard_name}", matter_rel()), &other);
+    lock_matter(&data);
+    assert!(inside.is_file(), "{}", inside.display());
+    assert!(folder.join(MANIFEST_TEMP).is_dir());
+    assert!(
+        std::fs::symlink_metadata(&link).is_ok(),
+        "{}",
+        link.display()
+    );
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), "keep");
+    assert!(folder.join(hard_name).is_file());
+    assert_eq!(std::fs::read_to_string(&other).unwrap(), "{}");
 }
