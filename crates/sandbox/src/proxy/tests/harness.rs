@@ -258,6 +258,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
             kept.added.notify_all();
         })),
         browser: setup.browser,
+        listener: crate::ports::ListenerFor::Other,
     };
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,

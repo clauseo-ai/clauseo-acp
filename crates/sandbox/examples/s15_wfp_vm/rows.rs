@@ -138,6 +138,7 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
         record: None,
         // Tier B opens no browser listener (D10).
         browser: false,
+        listener: ports::ListenerFor::TierB,
     })?;
     let token = handle
         .env()
@@ -192,8 +193,8 @@ pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
     let data_dir = sandbox_data_dir()?.ok_or("the machine record names no data folder")?;
     let (proxy_a, cred_a) = proxy()?;
     let (proxy_b, cred_b) = proxy()?;
-    let relay = ports::bind_loopback()?;
-    let unlisted = ports::bind_loopback()?;
+    let relay = ports::bind_loopback(ports::ListenerFor::TierB)?;
+    let unlisted = ports::bind_loopback(ports::ListenerFor::TierB)?;
     let ports = Ports {
         pa: proxy_a.port(),
         pb: proxy_b.port(),

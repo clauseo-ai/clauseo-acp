@@ -7,10 +7,12 @@
 //! starting at a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind so no other
 //! process can bind the same port. Every listener binds `127.0.0.1` only.
 //!
-//! The range is for tier B's listeners alone, since every pool user's agent reaches it: the
-//! proxy's, R24's relay, and what a tier-B launch binds later ([`claim_port`],
-//! [`claim_port_at`]). The browser's ports, and anything else that isn't tier B, are claimed
-//! outside it ([`claim_browser_port`], [`claim_browser_port_at`]).
+//! The range is for tier B's listeners alone, since every pool user's agent reaches it: a
+//! tier-B launch's proxy agent listener and R24 relay ([`bind_loopback`] with
+//! [`ListenerFor::TierB`]), and what a tier-B launch binds later ([`claim_port`],
+//! [`claim_port_at`]). A tier-C launch's listeners, the proxy's browser listener always, and the
+//! browser's ports bind or are claimed outside it ([`ListenerFor::Other`],
+//! [`claim_browser_port`], [`claim_browser_port_at`]).
 //!
 //! A [`PortClaim`] holds a port in a process-wide registry until it drops. Nothing is bound
 //! while it is held, so the registry keeps this process's own listeners and claims apart:
@@ -132,24 +134,45 @@ impl Drop for PortClaim {
     }
 }
 
-/// Binds a listener on `127.0.0.1` for one launch, never on a claimed or retired port. Its port
-/// is retired as it binds: the listener holds it while it lives, and once it closes no later
-/// launch of this process gets it. A jailed child of this launch that outlived it keeps the rule
-/// for this port, and the proxy's browser listener takes no token.
+/// Who a loopback listener is for, which decides its port on Windows (S15 PR7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerFor {
+    /// A tier-B launch's agent: on Windows a free port in [`TIER_B_PORTS`], the only ports its
+    /// static permit opens. Every pool user reaches it, so it must check a secret.
+    TierB,
+    /// Anything else: a tier-C launch's listeners, and the proxy's browser listener, which
+    /// takes no token, always. The port a bind of `127.0.0.1:0` gets, asked again when it lands
+    /// in [`TIER_B_PORTS`] or on a held port, so no pool user's static permit reaches it.
+    Other,
+}
+
+/// Binds a listener on `127.0.0.1` for one launch, for `whom` ([`ListenerFor`]), never on a
+/// claimed or retired port. Its port is retired as it binds: the listener holds it while it
+/// lives, and once it closes no later launch of this process gets it. A jailed child of this
+/// launch that outlived it keeps the rule for this port, and the proxy's browser listener takes
+/// no token.
 #[cfg(not(windows))]
-pub fn bind_loopback() -> io::Result<TcpListener> {
+pub fn bind_loopback(whom: ListenerFor) -> io::Result<TcpListener> {
     let mut held = Held::lock();
-    let listener = imp::bind(&held)?;
+    let listener = match whom {
+        ListenerFor::TierB => imp::bind(&held)?,
+        ListenerFor::Other => outside_tier_b(&held, || imp::bind_port(0))?,
+    };
     held.retired.insert(listener.local_addr()?.port());
     Ok(listener)
 }
 
-/// Binds a listener on `127.0.0.1` for one tier-B launch, on a free port in [`TIER_B_PORTS`]
-/// that is not claimed. When none binds, the error names the range and says what may hold it.
-/// Windows retires nothing (see the module header).
+/// Binds a listener on `127.0.0.1` for one launch, for `whom` ([`ListenerFor`]): a tier-B
+/// launch's on a free port in [`TIER_B_PORTS`] that is not claimed (when none binds, the error
+/// names the range and says what may hold it), anything else's outside it. Windows retires
+/// nothing (see the module header).
 #[cfg(windows)]
-pub fn bind_loopback() -> io::Result<TcpListener> {
-    imp::bind(&Held::lock())
+pub fn bind_loopback(whom: ListenerFor) -> io::Result<TcpListener> {
+    let held = Held::lock();
+    match whom {
+        ListenerFor::TierB => imp::bind(&held),
+        ListenerFor::Other => outside_tier_b(&held, || imp::bind_port(0)),
+    }
 }
 
 /// Claims a free loopback port for a listener a tier-B launch binds later (tier B only: every

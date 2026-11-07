@@ -113,6 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         denials: Arc::new(StderrSink),
         record: Some(Arc::new(record)),
         browser: true,
+        listener: clauseo_sandbox::ports::ListenerFor::Other,
     };
     let handle = start_proxy(config)?;
     let token = handle

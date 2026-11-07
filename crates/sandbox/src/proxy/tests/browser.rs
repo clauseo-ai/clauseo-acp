@@ -63,3 +63,39 @@ fn loopback_ports_without_the_browser_bind_one_listener() {
     assert_eq!(handle.browser_port(), None);
     assert_eq!(policy.proxy_ports(), &[handle.port()]);
 }
+
+#[test]
+fn a_tier_c_proxy_s_listeners_and_any_browser_listener_stay_out_of_tier_b_s_range() {
+    use crate::ports::{ListenerFor, TIER_B_PORTS};
+    for (listener, browser) in [
+        (ListenerFor::Other, true),
+        (ListenerFor::Other, false),
+        (ListenerFor::TierB, true),
+    ] {
+        let mut config = ProxyConfig::new(
+            Allowlist::default(),
+            Allowlist::default(),
+            Upstream::Direct,
+            Arc::new(Sink::default()),
+        );
+        config.browser = browser;
+        config.listener = listener;
+        let handle = start_proxy(config).unwrap();
+        if let Some(port) = handle.browser_port() {
+            assert!(!TIER_B_PORTS.contains(&port), "browser {port}");
+        }
+        if listener == ListenerFor::Other {
+            assert!(
+                !TIER_B_PORTS.contains(&handle.port()),
+                "agent {}",
+                handle.port()
+            );
+        } else if cfg!(windows) {
+            assert!(
+                TIER_B_PORTS.contains(&handle.port()),
+                "agent {}",
+                handle.port()
+            );
+        }
+    }
+}
