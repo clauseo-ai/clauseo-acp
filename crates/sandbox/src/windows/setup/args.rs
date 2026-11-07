@@ -4,9 +4,11 @@
 //! - `--set-up --parent <pid> --data-dir <path> [--add <n>]`: set up, re-run or extend
 //!   (`--add`, 1 to [`POOL_CAP`]). The data folder is a plain drive-letter path (`C:\...`).
 //! - `--reclaim --parent <pid>`: the elevated clean-up (`PR4i`).
-//! - `--adopt --user-install-dir <path> (--data-dir <path> | --per-machine)`: run by the
-//!   installer's elevated step from the admin copy it just placed (`admin_copy`): lock the
-//!   admin folder, record the copy's hash and the install folder, then, per user, set up.
+//! - `--adopt --user-install-dir <path> (--owner-sid <sid> --data-dir <path> | --per-machine)`:
+//!   run by the installer's elevated step from the admin copy it just placed (`admin_copy`):
+//!   lock the admin folder, record the copy's hash and the install folder, then, per user, set
+//!   up. `--owner-sid` and `--data-dir` come from the unelevated installer, the lawyer's own;
+//!   `--adopt` checks the SID against that process's token (`adopt.rs`).
 //! - `--remove [--per-machine]`: the uninstall (`PR4j`). The hook adds `--per-machine` only in
 //!   the per-machine installer, chosen when the installer is built; nothing else ever. Who asked
 //!   comes from the process's recorded parent (D-B2), never from an argument.
@@ -24,6 +26,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::windows::pool::POOL_CAP;
+use crate::windows::sids::Sid;
 
 /// What the exe was asked to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,9 +49,9 @@ pub enum Mode {
     Adopt {
         /// The app's install folder (`--user-install-dir`), recorded as `UserInstallDir`.
         user_install_dir: PathBuf,
-        /// The installing user's data folder (`--data-dir`), for the set-up that follows; `None`
-        /// with `--per-machine`, which sets nobody up.
-        data_dir: Option<PathBuf>,
+        /// The lawyer the unelevated installer names, for the set-up that follows; `None` with
+        /// `--per-machine`, which sets nobody up.
+        user: Option<AdoptUser>,
     },
     /// `--remove`.
     Remove {
@@ -58,12 +61,21 @@ pub enum Mode {
     },
 }
 
+/// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptUser {
+    /// `--owner-sid`: the unelevated installer's own user.
+    pub owner_sid: Sid,
+    /// `--data-dir`: that user's data folder.
+    pub data_dir: PathBuf,
+}
+
 /// Why a command line isn't one the exe takes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
-         --reclaim --parent <pid> | --adopt --user-install-dir <path> (--data-dir <path> | \
-         --per-machine) | --remove [--per-machine] ({0})"
+         --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
+         --data-dir <path> | --per-machine) | --remove [--per-machine] ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -75,6 +87,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut data_dir = None;
     let mut add = None;
     let mut install_dir = None;
+    let mut owner_sid = None;
     let mut per_machine = false;
     while let Some(flag) = args.next() {
         let flag = flag
@@ -92,6 +105,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             "--data-dir" => &mut data_dir,
             "--add" => &mut add,
             "--user-install-dir" => &mut install_dir,
+            "--owner-sid" => &mut owner_sid,
             other => return Err(Usage(format!("unknown argument {other:?}"))),
         };
         if slot.is_some() {
@@ -110,8 +124,10 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             Ok(())
         }
     };
-    if install_dir.is_some() && mode != "--adopt" {
-        return Err(Usage(format!("{mode} takes no --user-install-dir")));
+    if (install_dir.is_some() || owner_sid.is_some()) && mode != "--adopt" {
+        return Err(Usage(format!(
+            "{mode} takes no --user-install-dir or --owner-sid"
+        )));
     }
     if per_machine && !matches!(mode, "--remove" | "--adopt") {
         return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
@@ -132,14 +148,21 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
         "--adopt" => {
             refuse("--parent", parent.is_some())?;
             refuse("--add", add.is_some())?;
-            if per_machine == data_dir.is_some() {
-                return Err(Usage(format!(
-                    "--adopt takes --data-dir or {PER_MACHINE}, one of them"
-                )));
-            }
+            let user = match (per_machine, owner_sid, data_dir) {
+                (true, None, None) => None,
+                (false, Some(sid), Some(dir)) => Some(AdoptUser {
+                    owner_sid: sid_of(&sid)?,
+                    data_dir: data_dir_of(Some(dir))?,
+                }),
+                _ => {
+                    return Err(Usage(format!(
+                        "--adopt takes --owner-sid and --data-dir, or {PER_MACHINE} alone"
+                    )));
+                }
+            };
             Ok(Mode::Adopt {
                 user_install_dir: path_of("--user-install-dir", install_dir)?,
-                data_dir: data_dir.map(|dir| data_dir_of(Some(dir))).transpose()?,
+                user,
             })
         }
         "--remove" => {
@@ -163,6 +186,12 @@ fn parent_of(value: Option<OsString>) -> Result<u32, Usage> {
         Ok(pid) if pid != 0 && text.bytes().all(|byte| byte.is_ascii_digit()) => Ok(pid),
         _ => Err(Usage(format!("--parent {text:?} isn't a process ID"))),
     }
+}
+
+/// `--owner-sid`: a SID in its text form (`S-1-5-21-...`).
+fn sid_of(value: &OsString) -> Result<Sid, Usage> {
+    let text = value.to_str().unwrap_or_default();
+    Sid::parse(text).map_err(|_not_a_sid| Usage(format!("--owner-sid {text:?} isn't a SID")))
 }
 
 /// `--add`: 1 to [`POOL_CAP`].

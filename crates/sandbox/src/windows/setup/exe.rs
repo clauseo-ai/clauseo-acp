@@ -24,11 +24,12 @@
 //!
 //! `--adopt` (`adopt.rs`) runs only from the admin copy, which the installer just placed:
 //! it locks the admin folder, records the copy's hash and the install folder, and, per user,
-//! runs `--set-up` for the recorded parent's user in this process.
+//! runs `--set-up` in this process for the lawyer the unelevated installer named and its token
+//! confirms (`Owner::of_installer`).
 //!
-//! After a `--remove` that leaves no tier-B owner on the machine, the admin copy is removed
-//! last (`admin_remove.rs`); a failure there is logged and the exit stays the removal's, as
-//! what is left is only administrators' to change.
+//! After a `--remove` that leaves no pool owner on the machine, the admin copy is removed last
+//! (`admin_remove.rs`), by the removal of the install that placed it only; a failure there is
+//! logged and the exit stays the removal's, as what is left is only administrators' to change.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -49,6 +50,7 @@ use super::result_file::{self, SetupResult};
 use super::windows_machine::{Names, WindowsMachine};
 use super::{SetupRequest, owner_failure, set_up};
 use crate::windows::NtfsAcl;
+use crate::windows::admin_copy::copy_removable;
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::sids::Sid;
 
@@ -87,10 +89,13 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
         },
         Mode::Adopt {
             user_install_dir,
-            data_dir,
+            user,
         } => {
-            let target = match data_dir {
-                Some(data_dir) => Target::User { data_dir },
+            let target = match user {
+                Some(user) => Target::User {
+                    owner_sid: user.owner_sid,
+                    data_dir: user.data_dir,
+                },
                 None => Target::Machine,
             };
             run_adopt(Names::production(), &user_install_dir, &target)
@@ -213,11 +218,12 @@ pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool
         }
     };
     let record_key = names.record_key.clone();
+    let invoker_sid = invoker.as_ref().map(|owner| owner.sid().clone());
     let mut machine = WindowsRemoval::new(names, invoker);
     match remove(&mut machine, &mut acl, per_machine) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
-            remove_admin_copy_if_unowned(&record_key);
+            remove_admin_copy_if_theirs(&record_key, per_machine, invoker_sid.as_ref());
             SetupExit::Removed
         }
         Err(failure) => {
@@ -227,16 +233,23 @@ pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool
     }
 }
 
-/// The admin copy's removal (`admin_remove.rs`), once the record under `record_key` names no
-/// owner: a per-user removal by someone who isn't the owner keeps the owner's copy.
-fn remove_admin_copy_if_unowned(record_key: &str) {
-    match super::record_write::read(record_key) {
-        Ok(None) => {
-            if let Err(error) = remove_admin_copy(record_key) {
-                tracing::error!(%error, "the admin copy couldn't be removed in full");
+/// The admin copy's removal (`admin_remove.rs`), when `admin_copy::copy_removable` says so:
+/// the pool under `record_key` has no owner left, and this removal is the one of the install
+/// that placed the copy (`AdminCopyOwner`): a per-machine one for `machine`, the lawyer's own
+/// per-user one (`invoker`) for theirs.
+fn remove_admin_copy_if_theirs(record_key: &str, per_machine: bool, invoker: Option<&Sid>) {
+    let read = super::record_write::read(record_key)
+        .and_then(|pool| Ok((pool, super::record_write::read_admin(record_key)?)));
+    match read {
+        Ok((pool, (copy_owner, _version))) => {
+            if copy_removable(pool.is_some(), copy_owner.as_ref(), per_machine, invoker) {
+                if let Err(error) = remove_admin_copy(record_key) {
+                    tracing::error!(%error, "the admin copy couldn't be removed in full");
+                }
+            } else {
+                tracing::info!("the admin copy isn't this removal's to take; it stays");
             }
         }
-        Ok(Some(_)) => tracing::info!("tier B still has an owner; its admin copy stays"),
         Err(error) => tracing::error!(%error, "the record can't be read; the admin copy stays"),
     }
 }

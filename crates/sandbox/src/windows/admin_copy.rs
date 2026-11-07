@@ -15,6 +15,8 @@
 //!    it gives any other account write, append, delete (of it or of a child), `WRITE_DAC`,
 //!    `WRITE_OWNER` or a generic right that holds one of those ([`level_safe`]): else
 //!    [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter: they only take rights away;
+//!    The admin folder holds nothing but the copy, its signature and the staging folder
+//!    ([`expected_entry`]): a DLL planted beside the copy is refused too;
 //! 3. the copy's SHA-256 is the recorded one: else [`Blocked::AdminCopyChanged`].
 //!
 //! The folder check comes before the hash: a copy in a folder others can change proves nothing
@@ -26,6 +28,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::acl_bytes::{self, Acl, Descriptor};
+use super::setup::record_values::CopyOwner;
+use super::sids::Sid;
 use crate::Blocked;
 
 #[cfg(test)]
@@ -42,6 +46,13 @@ mod tests;
 pub const ADMIN_DIR: [&str; 2] = ["Clauseo", "Sandbox"];
 /// The set-up program's file name, the same in the admin folder as beside the app.
 pub const SETUP_EXE: &str = "clauseo-sandbox-setup.exe";
+/// The copy's detached signature, which the refresh task (S15 tier B PR 3) may keep beside it.
+pub const SETUP_SIG: &str = "clauseo-sandbox-setup.exe.sig";
+/// The refresh task's staging folder in the admin folder (PR 3).
+pub const STAGING: &str = "staging";
+/// This build's version: `tauri.conf.json`'s `version` (`build.rs`), the exe's `FileVersion`,
+/// recorded as `AdminCopyVersion`.
+pub const APP_VERSION: &str = env!("CLAUSEO_APP_VERSION");
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -58,6 +69,8 @@ const WRITE_DATA: u32 = 0x2;
 const APPEND_DATA: u32 = 0x4;
 /// `FILE_DELETE_CHILD`.
 const DELETE_CHILD: u32 = 0x40;
+/// `FILE_WRITE_ATTRIBUTES`.
+const WRITE_ATTRIBUTES: u32 = 0x100;
 /// `DELETE`.
 const DELETE: u32 = 0x1_0000;
 /// `WRITE_DAC`.
@@ -74,6 +87,7 @@ const GENERIC_WRITE: u32 = 0x4000_0000;
 pub const CHANGE_RIGHTS: u32 = WRITE_DATA
     | APPEND_DATA
     | DELETE_CHILD
+    | WRITE_ATTRIBUTES
     | DELETE
     | WRITE_DAC
     | WRITE_OWNER
@@ -124,6 +138,34 @@ pub trait AdminCopyFs {
     fn sha256(&self, path: &Path) -> io::Result<String>;
     /// The record's `AdminCopySha256`, when it holds one.
     fn recorded_sha256(&self) -> io::Result<Option<String>>;
+    /// The names of what is in the folder `dir`.
+    fn entries(&self, dir: &Path) -> io::Result<Vec<String>>;
+    /// Whether the record names a pool owner (`OwnerSid`) other than this process's user.
+    fn another_owner(&self) -> io::Result<bool>;
+}
+
+/// What a tier-B launch (`check_launch`) and every elevated start (`UserSetup`) check first:
+/// a pool owned by another Windows user is [`Blocked::OtherAccount`] (D5's one owner), then
+/// [`check`]. A record that can't be read is left to the checks after it: the set-up itself
+/// enforces the owner.
+pub fn check_launchable(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
+    match fs.another_owner() {
+        Ok(true) => {
+            tracing::warn!("tier B is set up for another account on this computer");
+            return Err(Blocked::OtherAccount);
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "the record's owner can't be read"),
+    }
+    check(fs)
+}
+
+/// Whether `name` may be in the admin folder: the copy, its signature, the staging folder.
+/// `--adopt` deletes anything else there, and [`check`] refuses while anything else is.
+pub fn expected_entry(name: &str) -> bool {
+    [SETUP_EXE, SETUP_SIG, STAGING]
+        .iter()
+        .any(|expected| name.eq_ignore_ascii_case(expected))
 }
 
 /// The admin folder under `program_files`.
@@ -162,6 +204,17 @@ pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
         }
     };
     check_chain(fs, &program_files, &exe)?;
+    match fs.entries(&admin_dir(&program_files)) {
+        Ok(names) if names.iter().all(|name| expected_entry(name)) => {}
+        Ok(_) => {
+            tracing::warn!("the admin folder holds something besides the copy");
+            return Err(Blocked::AdminCopyUnsafe);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the admin folder can't be listed");
+            return Err(Blocked::AdminCopyUnsafe);
+        }
+    }
     if !is_sha256_hex(&recorded) {
         tracing::warn!("the admin copy's recorded hash isn't a SHA-256");
         return Err(Blocked::AdminCopyChanged);
@@ -341,4 +394,96 @@ pub fn inside(child: &Path, parent: &Path) -> bool {
         && child
             .get(base.len()..)
             .is_some_and(|tail| tail.starts_with('\\'))
+}
+
+/// Whether `--remove` deletes the admin copy (one owner, of one kind): only once the pool has no
+/// owner left (`pool_owned` false), and only for the install that placed it: a per-machine
+/// removal (`per_machine`) for [`CopyOwner::Machine`], the lawyer's own per-user removal
+/// (`invoker`) for theirs. A copy no one is recorded as owning stays: it is inert, and only
+/// administrators can change it.
+pub fn copy_removable(
+    pool_owned: bool,
+    copy_owner: Option<&CopyOwner>,
+    per_machine: bool,
+    invoker: Option<&Sid>,
+) -> bool {
+    if pool_owned {
+        return false;
+    }
+    match copy_owner {
+        Some(CopyOwner::Machine) => per_machine,
+        Some(CopyOwner::User(owner)) => !per_machine && invoker == Some(owner),
+        None => false,
+    }
+}
+
+/// Whether `candidate` is no older than `recorded`, both versions as `tauri.conf.json` writes
+/// them (`1.2.3`, `1.2.3-beta.1`; build metadata after `+` ignored): `--adopt` and the refresh
+/// task (PR 3) never replace a copy with an older one. The numeric parts compare first, up to
+/// four (a missing one is 0); with equal parts a release beats a pre-release, and two
+/// pre-releases compare part by part as semver does (numbers below words). A version that
+/// doesn't parse is never "not older": the safe side.
+pub fn version_not_older(recorded: &str, candidate: &str) -> bool {
+    match (Version::parse(recorded), Version::parse(candidate)) {
+        (Some(recorded), Some(candidate)) => candidate >= recorded,
+        _ => false,
+    }
+}
+
+/// A version as [`version_not_older`] compares it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Version {
+    core: [u64; 4],
+    /// `true` for a release, so it sorts above any pre-release of the same core.
+    release: bool,
+    pre: Vec<PreId>,
+}
+
+/// One dot-separated pre-release identifier; numbers sort below words.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PreId {
+    Number(u64),
+    Word(String),
+}
+
+impl Version {
+    fn parse(text: &str) -> Option<Version> {
+        let text = text.split('+').next().unwrap_or_default();
+        let (core_text, pre_text) = match text.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (text, None),
+        };
+        let parts: Vec<u64> = core_text
+            .split('.')
+            .map(|part| {
+                part.bytes()
+                    .all(|b| b.is_ascii_digit())
+                    .then(|| part.parse().ok())
+                    .flatten()
+            })
+            .collect::<Option<_>>()?;
+        if parts.is_empty() || parts.len() > 4 {
+            return None;
+        }
+        let mut core = [0; 4];
+        for (slot, part) in core.iter_mut().zip(parts) {
+            *slot = part;
+        }
+        let pre = match pre_text {
+            Some(pre) => pre
+                .split('.')
+                .map(|id| match id.parse() {
+                    _ if id.is_empty() => None,
+                    Ok(n) if id.bytes().all(|b| b.is_ascii_digit()) => Some(PreId::Number(n)),
+                    _ => Some(PreId::Word(id.to_owned())),
+                })
+                .collect::<Option<Vec<_>>>()?,
+            None => Vec::new(),
+        };
+        Some(Version {
+            core,
+            release: pre_text.is_none(),
+            pre,
+        })
+    }
 }

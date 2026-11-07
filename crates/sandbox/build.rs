@@ -47,6 +47,13 @@ const BIN: &str = "clauseo-sandbox-setup";
 
 fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=build.rs");
+    // Every target: the app's version, which `--adopt` records as `AdminCopyVersion`
+    // (`windows::admin_copy::APP_VERSION`), the same string as the exe's `FileVersion`.
+    let dir = std::env::var("CARGO_MANIFEST_DIR")?;
+    println!(
+        "cargo:rustc-env=CLAUSEO_APP_VERSION={}",
+        conf_field(Path::new(&dir), "/version")?
+    );
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.ends_with("-windows-msvc") {
         for arg in [
@@ -63,7 +70,6 @@ fn main() -> Result<(), Error> {
         ] {
             println!("cargo:rustc-link-arg-bin={BIN}={arg}");
         }
-        let dir = std::env::var("CARGO_MANIFEST_DIR")?;
         let manifest = Path::new(&dir).join("setup.manifest");
         println!("cargo:rerun-if-changed={}", manifest.display());
         println!(
@@ -73,6 +79,17 @@ fn main() -> Result<(), Error> {
         version_info(Path::new(&dir))?;
     }
     Ok(())
+}
+
+/// The string at `pointer` in `crates/desktop/tauri.conf.json`.
+fn conf_field(dir: &Path, pointer: &str) -> Result<String, Error> {
+    let conf = dir.join("../desktop/tauri.conf.json");
+    println!("cargo:rerun-if-changed={}", conf.display());
+    let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&conf)?)?;
+    let value = conf.pointer(pointer).and_then(serde_json::Value::as_str);
+    Ok(value
+        .ok_or(format!("tauri.conf.json has no string at {pointer}"))?
+        .to_owned())
 }
 
 /// Writes the setup exe's `VERSIONINFO` `.rc` into `OUT_DIR` and links it into that exe.

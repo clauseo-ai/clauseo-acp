@@ -67,6 +67,9 @@ pub enum SetupExit {
     /// 8: `--adopt` ran from anywhere but the admin copy's own path
     /// (`%ProgramFiles%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`); nothing was touched.
     NotAdminCopy,
+    /// 9: `--adopt` found a newer admin copy recorded (`AdminCopyVersion`) than its own
+    /// version, and left it as it was.
+    Downgrade,
 }
 
 impl SetupExit {
@@ -81,7 +84,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 9] = [
+    pub const ALL: [SetupExit; 10] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -91,6 +94,7 @@ impl SetupExit {
         SetupExit::DataDirNotOwned,
         SetupExit::NotElevated,
         SetupExit::NotAdminCopy,
+        SetupExit::Downgrade,
     ];
 
     /// The process exit code.
@@ -105,6 +109,7 @@ impl SetupExit {
             SetupExit::DataDirNotOwned => 6,
             SetupExit::NotElevated => 7,
             SetupExit::NotAdminCopy => 8,
+            SetupExit::Downgrade => 9,
         }
     }
 

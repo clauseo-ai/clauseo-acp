@@ -28,15 +28,17 @@ use windows::Win32::Security::{
     PSECURITY_DESCRIPTOR, PSID,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL,
+    VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 use super::{AdminCopyFs, Found, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
-use crate::windows::record::admin_copy_sha256;
+use crate::windows::record::{admin_copy_sha256, current_user_sid, sandbox_owner_sid};
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
@@ -64,11 +66,85 @@ impl AdminCopyFs for WindowsAdminCopy {
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         admin_copy_sha256().map_err(io::Error::other)
     }
+
+    fn another_owner(&self) -> io::Result<bool> {
+        let Some(owner) = sandbox_owner_sid().map_err(io::Error::other)? else {
+            return Ok(false);
+        };
+        Ok(owner != current_user_sid()?.as_str())
+    }
+
+    fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
+        std::fs::read_dir(dir)?
+            .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+            .collect()
+    }
 }
 
-/// The admin copy's path once it passes [`super::check`] on this machine.
+/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`: every entry but the
+/// expected ones (`expected_entry`, each of its own kind) deleted, a link deleted as itself and
+/// never followed; then `dir` and everything left in it given the locked owner and DACL, read
+/// back exactly ([`lock_down`]), so no older file keeps its own entries or owner.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "deletes what the admin folder, only administrators' to change, mustn't hold"
+)]
+pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
+    if found(dir)? != Found::Folder || found(exe)? != Found::File {
+        return Err(io::Error::other(
+            "the admin folder or copy isn't a plain folder and file",
+        ));
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        let kind = found(&path)?;
+        let wanted = if name.eq_ignore_ascii_case(super::STAGING) {
+            Found::Folder
+        } else {
+            Found::File
+        };
+        if super::expected_entry(&name) && kind == wanted {
+            continue;
+        }
+        match kind {
+            Found::Folder => std::fs::remove_dir_all(&path)?,
+            Found::File => std::fs::remove_file(&path)?,
+            // A link to a folder goes with `remove_dir`, any other with `remove_file`.
+            Found::Link => {
+                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
+            }
+            Found::Missing => {}
+        }
+    }
+    lock_tree(dir)
+}
+
+/// [`lock_down`] on `dir` and, below it, on every folder and file; a link below is deleted.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "deletes a link in the staging folder, only administrators' to change"
+)]
+fn lock_tree(dir: &Path) -> io::Result<()> {
+    lock_down(dir, true)?;
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        match found(&path)? {
+            Found::Folder => lock_tree(&path)?,
+            Found::File => lock_down(&path, false)?,
+            Found::Link => {
+                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
+            }
+            Found::Missing => {}
+        }
+    }
+    Ok(())
+}
+
+/// The admin copy's path once this machine passes [`super::check_launchable`].
 pub(crate) fn check_here() -> Result<PathBuf, crate::Blocked> {
-    super::check(&WindowsAdminCopy)
+    super::check_launchable(&WindowsAdminCopy)
 }
 
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment,
@@ -168,6 +244,48 @@ pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// The final path of this process's own image: `current_exe()` opened following every link on
+/// the way, then `GetFinalPathNameByHandleW` (normalized, drive-letter form), so a junction or
+/// link anywhere in the path gives the place the image really is.
+pub(crate) fn running_image() -> io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    let target: Vec<u16> = exe.as_os_str().encode_wide().chain(once(0)).collect();
+    // SAFETY: `target` is NUL-terminated and outlives the call; no security attributes or
+    // template are passed, and the handle is owned by `Handle` from here.
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(target.as_ptr()),
+            FILE_READ_ATTRIBUTES.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .map(Handle)
+    .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        // SAFETY: the handle is open and `buffer` is writable for its length.
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                handle.0,
+                &mut buffer,
+                GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0),
+            )
+        };
+        match usize::try_from(length).unwrap_or(0) {
+            0 => return Err(io::Error::last_os_error()),
+            n if n < buffer.len() => {
+                buffer.truncate(n);
+                return Ok(PathBuf::from(OsString::from_wide(&buffer)));
+            }
+            n => buffer.resize(n + 1, 0),
+        }
+    }
 }
 
 /// `path`'s owner and DACL as a self-relative descriptor, read from the name itself.

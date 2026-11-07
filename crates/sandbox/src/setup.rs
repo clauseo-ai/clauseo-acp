@@ -95,9 +95,36 @@ pub enum Blocked {
     /// A folder on the way to the admin copy, or the copy itself, has an owner other than
     /// SYSTEM, Administrators or `TrustedInstaller`, or lets another account change it.
     AdminCopyUnsafe,
-    /// `--adopt` found tier B set up for another Windows account on this computer (D5's one
-    /// owner), and changed nothing.
+    /// Tier B is set up for another Windows account on this computer (D5's one owner): a launch
+    /// or set-up by a second user (`windows::admin_copy::check_owner`), and `--adopt`'s exit 2,
+    /// which changes nothing.
     OtherAccount,
+}
+
+impl Blocked {
+    /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
+    /// exhaustive, and the test of the names lists this.
+    pub const ALL: [Blocked; 6] = [
+        Blocked::LogonRight,
+        Blocked::Policy,
+        Blocked::AdminCopyMissing,
+        Blocked::AdminCopyChanged,
+        Blocked::AdminCopyUnsafe,
+        Blocked::OtherAccount,
+    ];
+
+    /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
+    /// for the host to carry into the protocol (`Error::cause`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Blocked::LogonRight => "logon_right",
+            Blocked::Policy => "policy",
+            Blocked::AdminCopyMissing => "admin_copy_missing",
+            Blocked::AdminCopyChanged => "admin_copy_changed",
+            Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
+            Blocked::OtherAccount => "other_account",
+        }
+    }
 }
 
 impl std::fmt::Display for Blocked {

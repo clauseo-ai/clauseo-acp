@@ -96,6 +96,8 @@ pub(crate) struct Fake {
     pub(crate) paths: BTreeMap<String, (Found, Vec<u8>)>,
     pub(crate) hash: String,
     pub(crate) recorded: Option<String>,
+    /// Whether the record names another pool owner.
+    pub(crate) another: bool,
     /// Every path asked about, in order.
     pub(crate) asked: RefCell<Vec<PathBuf>>,
 }
@@ -109,6 +111,7 @@ impl Fake {
             paths: BTreeMap::new(),
             hash: HASH.to_owned(),
             recorded: Some(HASH.to_owned()),
+            another: false,
             asked: RefCell::new(Vec::new()),
         };
         fake.set(&program_files, Found::Folder, program_files_dacl());
@@ -161,5 +164,20 @@ impl AdminCopyFs for Fake {
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         Ok(self.recorded.clone())
+    }
+
+    fn another_owner(&self) -> io::Result<bool> {
+        Ok(self.another)
+    }
+
+    fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
+        let prefix = format!("{}\\", key(dir));
+        Ok(self
+            .paths
+            .keys()
+            .filter_map(|path| path.strip_prefix(&prefix))
+            .filter(|rest| !rest.contains('\\'))
+            .map(str::to_owned)
+            .collect())
     }
 }
