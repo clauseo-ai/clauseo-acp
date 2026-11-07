@@ -64,11 +64,13 @@ fn a_written_launch_file_is_one_the_outer_runner_reads() {
 #[test]
 fn the_message_carries_the_spec_and_the_policy() {
     let place = Place::new("runner-from-policy");
-    folders(&place, &["matter", "state", "notes", "tmp"]);
+    // The session's temp folder must be `<data_dir>\run\<session>\tmp`.
+    let tmp = r"data\run\s1\tmp";
+    folders(&place, &["matter", "state", "notes", tmp]);
     let policy = Policy::builder(place.at("matter"), place.at("state"))
         .home(place.at("home"))
         .notes(place.at("notes"))
-        .tmpdir(place.at("tmp"))
+        .tmpdir(place.at(tmp))
         .build()
         .unwrap();
     let bundle = place.at("roots.pem");
@@ -83,9 +85,9 @@ fn the_message_carries_the_spec_and_the_policy() {
         [("SystemRoot".to_owned(), r"C:\Windows".to_owned())]
     );
     assert_eq!(message.state, place.at("state").to_str().unwrap());
-    assert_eq!(message.tmpdir.as_deref(), place.at("tmp").to_str());
+    assert_eq!(message.tmpdir.as_deref(), place.at(tmp).to_str());
     assert_eq!(message.ca_bundle.as_deref(), bundle.to_str());
-    for granted in ["matter", "state", "notes", "tmp"] {
+    for granted in ["matter", "state", "notes", tmp] {
         let path = place.at(granted);
         assert!(
             message.granted.iter().any(|g| g == path.to_str().unwrap()),
