@@ -218,6 +218,18 @@ pub fn runner_default_dacl(desktop_user: &Sid) -> String {
 /// adds the desktop user's `TOKEN_QUERY` once the launch names them.
 pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 
+/// The end sweeper's threads' DACL (`runner/sweeper.rs`): `SYSTEM` full and `OWNER RIGHTS` held
+/// to `READ_CONTROL`, nobody else. Unlike the inner's ([`runner_thread_sddl`]) it names no
+/// desktop user: the sweeper takes nothing but `--sweep`, so it doesn't know that user, and the
+/// outer needs nothing of its threads (it waits on the sweeper's process handle, which it holds
+/// from the logon).
+pub const SWEEPER_THREAD_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
+
+/// The end sweeper's default DACL once shut: [`SWEEPER_THREAD_SDDL`]'s entries, so a thread the
+/// system starts in it later (COM's and RPC's, for the scheduled tasks and BITS jobs) is shut
+/// too, and the pool user, its owner, keeps no implied `WRITE_DAC`.
+pub const SWEEPER_DEFAULT_DACL: &str = "D:(A;;GA;;;SY)(A;;RC;;;OW)";
+
 /// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when
 /// the launch restricts with one), labelled Low so the Low agent may draw on it; no logon SID and
 /// no desktop user, so neither the lawyer's processes nor another runner's agent can open it
