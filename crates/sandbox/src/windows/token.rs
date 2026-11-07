@@ -77,6 +77,9 @@ pub struct TokenSpec {
     pub integrity: Sid,
     /// The default DACL, as SDDL: what every object the agent makes with no descriptor gets.
     pub default_dacl: String,
+    /// The agent token object's own DACL, set explicitly ([`agent_token_sddl`]), so it never
+    /// depends on what the inner runner's (shut) token passes on.
+    pub token_dacl: String,
 }
 
 impl TokenSpec {
@@ -112,6 +115,7 @@ impl TokenSpec {
             deny_only: vec![logon.clone()],
             integrity: known(LOW_INTEGRITY)?,
             default_dacl: default_dacl(pool_user, desktop_user),
+            token_dacl: agent_token_sddl(pool_user, desktop_user),
         })
     }
 }
@@ -135,6 +139,37 @@ impl fmt::Display for TokenSpec {
 /// user>)`, the spike's `pool` mode (`s15-spikes-userpool/s15.c:182`).
 pub fn default_dacl(pool_user: &Sid, desktop_user: &Sid) -> String {
     format!("D:(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})")
+}
+
+/// The agent token object's DACL: the pool user (the agent reads its own token) and `SYSTEM` with
+/// full access, the desktop user `TOKEN_QUERY`.
+pub fn agent_token_sddl(pool_user: &Sid, desktop_user: &Sid) -> String {
+    format!("D:P(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x8;;;{desktop_user})")
+}
+
+/// The inner runner's own process DACL (set by the outer while the inner is suspended, and by the
+/// inner itself): `SYSTEM` full, the desktop user wait, query and end, `OWNER RIGHTS` held to
+/// `READ_CONTROL`, and no pool user, so the agent (the same user) opens nothing of it.
+pub fn runner_process_sddl(desktop_user: &Sid) -> String {
+    format!("D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})(A;;RC;;;OW)")
+}
+
+/// The inner runner's threads' DACL: `SYSTEM` full, the desktop user `SYNCHRONIZE`, `OWNER
+/// RIGHTS` held to `READ_CONTROL`.
+pub fn runner_thread_sddl(desktop_user: &Sid) -> String {
+    format!("D:P(A;;GA;;;SY)(A;;0x100000;;;{desktop_user})(A;;RC;;;OW)")
+}
+
+/// The inner runner's primary token's DACL: `SYSTEM` full, the desktop user `TOKEN_QUERY`,
+/// `OWNER RIGHTS` held to `READ_CONTROL`.
+pub fn runner_token_sddl(desktop_user: &Sid) -> String {
+    format!("D:P(A;;GA;;;SY)(A;;0x8;;;{desktop_user})(A;;RC;;;OW)")
+}
+
+/// The inner runner's default DACL once shut: what its later objects (a thread the system starts
+/// in it) get: `SYSTEM` and the desktop user, no pool user.
+pub fn runner_default_dacl(desktop_user: &Sid) -> String {
+    format!("D:(A;;GA;;;SY)(A;;GA;;;{desktop_user})")
 }
 
 /// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when

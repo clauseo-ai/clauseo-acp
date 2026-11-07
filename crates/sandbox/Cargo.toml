@@ -113,7 +113,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (NetworkManagement_IpHelper).
 # The runner (S15 PR5, src/windows/{runner,token,pipe}): the named pipes (System_Pipes), its
 # private desktop (System_StationsAndDesktops, whose CreateDesktopW needs Graphics_Gdi), the
-# error mode (System_Diagnostics_Debug) and the kill-on-close job (System_JobObjects).
+# error mode (System_Diagnostics_Debug), the kill-on-close job (System_JobObjects), and the
+# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -139,6 +140,7 @@ windows = { workspace = true, features = [
   "Win32_System_Ioctl",
   "Win32_System_Com",
   "Win32_System_Diagnostics_Debug",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_LibraryLoader",
   "Win32_System_Ole",
   "Win32_System_Pipes",

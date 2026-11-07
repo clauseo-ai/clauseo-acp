@@ -9,7 +9,9 @@ use std::io;
 use std::iter::once;
 use std::ptr::null_mut;
 
-use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, HANDLE, HLOCAL, LocalFree,
+};
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
     ConvertStringSidToSidW, SDDL_REVISION_1, SE_KERNEL_OBJECT, SetSecurityInfo,
@@ -21,8 +23,14 @@ use windows::Win32::Security::{
     TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
     TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
 };
+use windows::Win32::Storage::FileSystem::WRITE_DAC;
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+};
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
-use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentProcessId, OpenProcessToken, OpenThread, THREAD_ACCESS_RIGHTS,
+};
 use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -230,32 +238,81 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
     let token = Handle(token);
     set_integrity(&token, &spec.integrity)?;
     set_default_dacl(&token, &spec.default_dacl)?;
+    set_kernel_dacl(token.0, &LocalDescriptor::new(&spec.token_dacl)?)?;
     Ok(token)
 }
 
-/// Shuts the inner runner's own process, its thread and its primary token to the agent, which runs
-/// as the same pool user: each gets a protected DACL naming `SYSTEM` and the desktop user only,
-/// with `OWNER RIGHTS` held to `READ_CONTROL` so the pool user, their owner, keeps no implied
-/// `WRITE_DAC`. The desktop user may wait on, query and end the process (`0x101001`) and query the
-/// token. Called after the agent's token is made and before the agent starts; the handles this
-/// runner already holds keep their access. The harness's `runners` row found the agent opening
-/// this token for query and duplicate before.
+/// Shuts the inner runner to its agent, which runs as the same pool user: its primary token, its
+/// process and every thread it has get protected DACLs naming `SYSTEM` and the desktop user only
+/// (`token::runner_*_sddl`, `OWNER RIGHTS` held to `READ_CONTROL` so the pool user, their owner,
+/// keeps no implied `WRITE_DAC`), and its default DACL drops the pool user, so a thread the system
+/// starts in it later is shut too. The outer runner set the process's and the first thread's DACL
+/// already, while the inner was suspended; this runs first thing after the launch is read, before
+/// the agent's token is made (whose own DACL is set explicitly, `TokenSpec::token_dacl`). The
+/// handles this runner holds keep their access.
 pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
-    let process = LocalDescriptor::new(&format!(
-        "D:P(A;;GA;;;SY)(A;;0x{:x};;;{desktop_user})(A;;RC;;;OW)",
-        super::DESKTOP_USER_RIGHTS
-    ))?;
-    let thread = LocalDescriptor::new(&format!(
-        "D:P(A;;GA;;;SY)(A;;0x100000;;;{desktop_user})(A;;RC;;;OW)"
-    ))?;
-    let primary = LocalDescriptor::new(&format!(
-        "D:P(A;;GA;;;SY)(A;;0x8;;;{desktop_user})(A;;RC;;;OW)"
-    ))?;
-    // SAFETY: the pseudo-handles of this process and thread need no close and carry every right.
-    let (own_process, own_thread) = unsafe { (GetCurrentProcess(), GetCurrentThread()) };
-    set_kernel_dacl(own_process, &process)?;
-    set_kernel_dacl(own_thread, &thread)?;
-    set_kernel_dacl(token.0, &primary)
+    use super::{runner_default_dacl, runner_process_sddl, runner_thread_sddl, runner_token_sddl};
+
+    set_kernel_dacl(
+        token.0,
+        &LocalDescriptor::new(&runner_token_sddl(desktop_user))?,
+    )?;
+    set_default_dacl(token, &runner_default_dacl(desktop_user))?;
+    // SAFETY: the pseudo-handle of this process needs no close and carries every right.
+    let own_process = unsafe { GetCurrentProcess() };
+    set_kernel_dacl(
+        own_process,
+        &LocalDescriptor::new(&runner_process_sddl(desktop_user))?,
+    )?;
+    let thread = LocalDescriptor::new(&runner_thread_sddl(desktop_user))?;
+    for id in own_threads()? {
+        // SAFETY: a thread of this process, opened by its id with WRITE_DAC; the handle is owned
+        // by `Handle` and closed on drop.
+        let opened = unsafe { OpenThread(THREAD_ACCESS_RIGHTS(WRITE_DAC.0), false, id) };
+        match opened {
+            Ok(handle) => set_kernel_dacl(Handle(handle).0, &thread)?,
+            // A thread that ended since the snapshot needs nothing.
+            Err(error) if error.code() == ERROR_INVALID_PARAMETER.to_hresult() => {}
+            Err(error) => return Err(os_error(&error)),
+        }
+    }
+    Ok(())
+}
+
+/// Sets the protected DACL of `sddl` on the kernel object `handle` (the outer runner's full-access
+/// handles to the suspended inner runner's process and thread).
+pub(in crate::windows) fn shut_object(handle: HANDLE, sddl: &str) -> io::Result<()> {
+    set_kernel_dacl(handle, &LocalDescriptor::new(sddl)?)
+}
+
+/// The ids of this process's threads, from a Toolhelp snapshot.
+fn own_threads() -> io::Result<Vec<u32>> {
+    // SAFETY: a snapshot of every thread; the handle is owned by `Handle` and closed on drop.
+    let snapshot = Handle(
+        unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }.map_err(|e| os_error(&e))?,
+    );
+    // SAFETY: no arguments.
+    let me = unsafe { GetCurrentProcessId() };
+    let mut entry = THREADENTRY32 {
+        dwSize: u32::try_from(size_of::<THREADENTRY32>()).map_err(io::Error::other)?,
+        ..THREADENTRY32::default()
+    };
+    let mut ids = Vec::new();
+    // SAFETY: the snapshot is live and `entry` is sized for the calls.
+    let mut more = unsafe { Thread32First(snapshot.0, &raw mut entry) }.is_ok();
+    while more {
+        if entry.th32OwnerProcessID == me {
+            ids.push(entry.th32ThreadID);
+        }
+        // SAFETY: as above.
+        more = unsafe { Thread32Next(snapshot.0, &raw mut entry) }.is_ok();
+    }
+    if ids.is_empty() {
+        return Err(io::Error::other(
+            "no thread of this process in the snapshot",
+        ));
+    }
+    Ok(ids)
 }
 
 /// Gives the kernel object `handle` the protected DACL of `descriptor`.
