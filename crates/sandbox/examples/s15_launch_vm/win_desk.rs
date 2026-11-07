@@ -242,6 +242,29 @@ unsafe extern "system" {
         access: u32,
         attributes: *const std::ffi::c_void,
     ) -> *mut std::ffi::c_void;
+    /// As `CreateDesktopW`, with the desktop's heap size in KB.
+    fn CreateDesktopExW(
+        name: *const u16,
+        device: *const u16,
+        mode: *const std::ffi::c_void,
+        flags: u32,
+        access: u32,
+        attributes: *const std::ffi::c_void,
+        heap_kb: u32,
+        reserved: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+}
+
+/// The heap the probes' desktops ask for, in KB. Every control variant, the lawyer's plain token
+/// included, got 8 (`ERROR_NOT_ENOUGH_MEMORY`) from `CreateDesktopW` with the default heap on a
+/// fresh station in CI's session 0 (harness run 42367294132): a second desktop of the default
+/// size doesn't fit there. A small heap asks for little, so a refusal is about access, not room.
+const SMALL_HEAP_KB: u32 = 128;
+
+/// `CreateDesktopW`'s code with the default heap, printed as information beside the
+/// small-heap code [`create_desktop_code`] gives.
+pub(crate) fn create_desktop_default_heap_code() -> u32 {
+    create_desktop_sized(std::ptr::null(), None)
 }
 
 /// The code `CreateDesktopW` gives for a new desktop on this process's own window station; 0
@@ -275,8 +298,14 @@ pub(crate) fn create_desktop_code_sa(sddl: &str) -> Result<u32, u32> {
     Ok(code)
 }
 
-/// [`create_desktop_code`]'s call, with `attributes` (null, or a live `SECURITY_ATTRIBUTES`).
+/// [`create_desktop_code`]'s call, with `attributes` (null, or a live `SECURITY_ATTRIBUTES`),
+/// on a [`SMALL_HEAP_KB`] heap.
 fn create_desktop_with(attributes: *const std::ffi::c_void) -> u32 {
+    create_desktop_sized(attributes, Some(SMALL_HEAP_KB))
+}
+
+/// `CreateDesktopExW` with `heap_kb`, or `CreateDesktopW` (the default heap) with `None`.
+fn create_desktop_sized(attributes: *const std::ffi::c_void, heap_kb: Option<u32>) -> u32 {
     let name: Vec<u16> = format!("ClauseoS15Fx-{}", std::process::id())
         .encode_utf16()
         .chain(std::iter::once(0))
@@ -284,14 +313,26 @@ fn create_desktop_with(attributes: *const std::ffi::c_void) -> u32 {
     // SAFETY: the name is NUL-terminated and outlives the call; no device or mode; `attributes`
     // is null or live for the call (the caller's promise).
     let desktop = unsafe {
-        CreateDesktopW(
-            name.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            DESKTOP_READOBJECTS.0,
-            attributes,
-        )
+        match heap_kb {
+            Some(heap_kb) => CreateDesktopExW(
+                name.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                DESKTOP_READOBJECTS.0,
+                attributes,
+                heap_kb,
+                std::ptr::null(),
+            ),
+            None => CreateDesktopW(
+                name.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                DESKTOP_READOBJECTS.0,
+                attributes,
+            ),
+        }
     };
     if desktop.is_null() {
         return u32::try_from(last()).unwrap_or(u32::MAX);
