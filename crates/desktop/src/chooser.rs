@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use clauseo_protocol::{ErrorCode, HostError};
 
-pub(crate) use choose::{NativeFolderConfirm, choose_folder};
+pub(crate) use choose::{NativeFolderConfirm, choose_folder, pick_fixed};
 use listing::{DRIVES_WAIT, Drives, LIST_WAIT, Machine, bounded, folders, on_network};
 use place::Place;
 use stall::{KnownFolders, PROBE_WAIT, Probes};

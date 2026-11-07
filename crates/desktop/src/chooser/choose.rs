@@ -10,8 +10,8 @@ use clauseo_protocol::HostError;
 use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};
 
-use super::Chooser;
 use super::listing::{LIST_WAIT, bounded};
+use super::{Chooser, PickAnswer};
 use crate::bridge::Bridge;
 use crate::dialogs::{BoxFuture, LastPick, Picker};
 use crate::picked::PickedFolder;
@@ -111,6 +111,19 @@ impl Picker for Chosen {
         let folder = self.0.clone();
         Box::pin(async move { Some(folder) })
     }
+}
+
+/// Picks `folder` through `Bridge::pick_folder`, as the native picker's pick: the e2e build's
+/// `E2E_MATTER_DIR` (`stall::Route::Fixed`), so its specs never see the chooser.
+pub(crate) async fn pick_fixed(
+    bridge: &Bridge,
+    folder: PathBuf,
+    home: Option<&Path>,
+) -> Result<PickAnswer, HostError> {
+    Ok(match bridge.pick_folder(&Chosen(folder), home).await? {
+        Some(folder) => PickAnswer::Picked { folder },
+        None => PickAnswer::Cancelled,
+    })
 }
 
 /// Chooses the folder session `chooser` shows: checks it is still a folder and no link (on a

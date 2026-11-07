@@ -527,7 +527,7 @@ fn sessions_are_replaced_expire_and_are_bounded() {
 #[test]
 fn off_windows_the_pick_never_chooses() {
     for setting in [Some("app"), Some("native"), None] {
-        assert_eq!(route(cfg!(windows), setting, || true), Route::Native);
+        assert_eq!(route(false, cfg!(windows), setting, || true), Route::Native);
     }
     assert!(!Chooser::system().would_stall());
 }
