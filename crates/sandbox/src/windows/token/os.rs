@@ -252,7 +252,11 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
 /// already, while the inner was suspended; this runs first thing after the launch is read, before
 /// the agent's token is made (whose own DACL is set explicitly, `TokenSpec::token_dacl`). The
 /// handles this runner holds keep their access.
-pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
+pub(in crate::windows) fn shut_self(
+    token: &Handle,
+    desktop_user: &Sid,
+    logon: &Sid,
+) -> io::Result<()> {
     use super::{runner_process_sddl, runner_thread_sddl, runner_token_sddl};
 
     set_kernel_dacl(
@@ -263,7 +267,7 @@ pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::R
     let own_process = unsafe { GetCurrentProcess() };
     set_kernel_dacl(
         own_process,
-        &LocalDescriptor::new(&runner_process_sddl(desktop_user))?,
+        &LocalDescriptor::new(&runner_process_sddl(desktop_user, logon))?,
     )?;
     shut_threads(&runner_thread_sddl(desktop_user))
 }

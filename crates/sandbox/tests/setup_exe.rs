@@ -175,9 +175,10 @@ fn assert_static_imports_load_from_system32_only(exe: &str) {
 #[cfg(all(windows, target_env = "msvc"))]
 const DELAYED: [&str; 2] = ["netapi32.dll", "userenv.dll"];
 
-/// The runner exe's: it makes no `Net*` call, so it doesn't import `netapi32.dll`.
+/// The runner exe's: it makes no `Net*` call, so it doesn't import `netapi32.dll`; the sweep
+/// lists processes with `wtsapi32.dll`.
 #[cfg(all(windows, target_env = "msvc"))]
-const RUN_DELAYED: [&str; 1] = ["userenv.dll"];
+const RUN_DELAYED: [&str; 2] = ["userenv.dll", "wtsapi32.dll"];
 
 /// The normal imports the loader may resolve before `main`, when `DependentLoadFlags` covers
 /// only the import itself and not what it imports. Each is a `KnownDLL` on Windows 10 and 11

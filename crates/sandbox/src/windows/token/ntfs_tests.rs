@@ -14,7 +14,7 @@ use windows::Win32::Security::{
 use windows::Win32::System::SystemServices::{SE_GROUP_ENABLED, SE_GROUP_USE_FOR_DENY_ONLY};
 use windows::core::PWSTR;
 
-use super::{DESKTOP_USER_RIGHTS, TokenSpec, os};
+use super::{DESKTOP_USER_RIGHTS, OWNER_WRITES, TokenSpec, os};
 use crate::windows::sids::Sid;
 use crate::windows::test_pool::{acl_entries, text_of};
 
@@ -142,9 +142,13 @@ fn the_agent_token_holds_what_the_spec_says_when_read_back() {
     assert_eq!(
         entries,
         [
+            // ACCESS_DENIED_ACE_TYPE first.
+            (1, 0, OWNER_WRITES, user.clone()),
             (0, 0, GENERIC_ALL, user),
             (0, 0, GENERIC_ALL, sid("S-1-5-18")),
             (0, 0, DESKTOP_USER_RIGHTS, desktop),
+            // OWNER RIGHTS held to READ_CONTROL.
+            (0, 0, 0x0002_0000, sid("S-1-3-4")),
         ]
     );
 }
@@ -198,7 +202,7 @@ fn the_inner_runners_token_sequence_passes_in_order() {
     let me = os::user(&token).unwrap();
     let logon = os::logon_sid(&token).unwrap();
     os::shut_token_first(&token).unwrap();
-    os::shut_self(&token, &me).unwrap();
+    os::shut_self(&token, &me, &logon).unwrap();
     let spec = TokenSpec::for_pool(&me, &logon, &me, None).unwrap();
     let agent = os::make(&token, &spec).unwrap();
     assert_eq!(os::user(&agent).unwrap(), me);
