@@ -240,8 +240,8 @@ build 26100):
     is the fail-closed choice: such a child isn't set aside, since it opens fine and only its
     owner can't be changed, and moving another matter's agent's item out of sight would hide
     the problem. The matter's own pool user owning its files is expected, and a child the lawyer
-    can't open takes the set-aside path below. **Tier B still needs PR4i**: its elevated
-    hand-back takes ownership of the roots and children the lawyer's own hand-back can't.
+    can't open takes the set-aside path below. PR4i's elevated clean-up takes ownership of the
+    roots and children the lawyer's own hand-back can't ("The elevated clean-up", below).
   - Every hand-back (these, the protected items', the owner pass, forget's) writes the owner
     first, then the cleaned DACL, through the one no-follow handle, and reads the item again
     through it: an owner other than the desktop user, or an explicit allow left for a pool SID
@@ -685,6 +685,40 @@ Where the call fails, the launch walks in full.
 it's already larger (`FSCTL_CREATE_USN_JOURNAL`, `MaximumSize` 256 MB, `AllocationDelta` 32 MB):
 capped there, never shrinking one. The default 32 MB held about 400,000 records in S15's
 measurements; a wrap only costs a full walk, so a larger journal makes them rarer.
+
+### The elevated clean-up (PR4i)
+
+A launch refused as `PoolOwned` (root or child) or as `ChildShut` it couldn't set aside records
+its item in the ledger. So does a forget whose hand-back stays owed. `UserSetup::reclaim` then
+runs the setup exe's `--reclaim` behind one prompt. It takes the owner from its verified parent
+(D-B2) and reads the data folder from the machine's record. It reads the ledger and
+`matters.json` as the owner. On each object a pool SID of the record owns, where the owner's own
+token lacks `READ_CONTROL`, `WRITE_DAC` or `WRITE_OWNER`, it sets the owner to the lawyer and
+writes nothing else.
+
+The owner writes those files, so they bound nothing. Access bounds the walk instead (K1):
+
+- A root must lie in a matter root the ledger records, both resolved by handle.
+- A root must not be a volume's root, nor hold or lie in a pool user's profile.
+- A root must be a pool user's, or one the owner can list.
+- The walk enters only folders a pool user owns or the owner can list, so
+  `SeBackupPrivilege` never opens what neither could.
+
+The app then runs a narrow hand-back as the lawyer, on those trees only. It takes off only the
+explicit allows of pool users other than the matter's own. It keeps every other entry, the
+protection, and the allows the ledger lists as ours. An item left protected with no explicit
+entry, which only the agent's protection can have made, is unprotected and takes the matter's
+inherited entries, fence included. After that, the app retries the forget or the launch.
+
+**Accepted: a `PoolOwned` root outside every recorded matter root needs a manual
+take-ownership.** Examples are a new matter's own folder at its first launch, a sibling, or the
+parent. The clean-up refuses such a root, since the ledger can't vouch for it. The remedy the
+host and app give is: forget the matter and add it again; if the lawyer can't take it back, take
+ownership by hand as an administrator.
+
+**Set-aside restore stays unelevated.** It must raise no prompt. A restored item whose hand-over
+fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
+for `--reclaim`.
 
 ## Consequences
 

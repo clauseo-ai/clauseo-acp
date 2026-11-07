@@ -185,6 +185,15 @@ crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+# The elevated clean-up (S15 PR4i): its privilege guard, the tests reading the token back and a
+# path's short name, the strip that only the Windows hand-back calls, and the VM harness's FFI.
+crates/sandbox/src/windows/acl/privilege.rs - unsafe_code
+crates/sandbox/src/windows/acl/privilege/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl/take/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl_bytes/steps.rs stripped dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs bare dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs taken_write dead_code
+crates/sandbox/examples/s15_reclaim_vm/win.rs - unsafe_code
 # The apply layer's NTFS tests (S15 PR3b): win-01's timing row.
 crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_costs clippy::disallowed_methods
 # The pool user's writes a nested protected item's deny must refuse (S15 PR4a2): the test plays

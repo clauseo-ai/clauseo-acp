@@ -468,7 +468,12 @@ fn trimmed(token: &Handle, parent: &[u8], child: &[u8], folder: bool) -> io::Res
 /// inheritable ones: explicit entries kept, a protected DACL left as it is
 /// (`CreatePrivateObjectSecurityEx` with `SEF_DACL_AUTO_INHERIT`, as Windows' own
 /// propagation does). Only the DACL and its control bits of the result are used.
-fn inherit(token: &Handle, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
+pub(super) fn inherit(
+    token: &Handle,
+    parent: &[u8],
+    child: &[u8],
+    folder: bool,
+) -> io::Result<Vec<u8>> {
     let mut parent = words(parent);
     let mut child = words(child);
     let mut new = PSECURITY_DESCRIPTOR::default();

@@ -91,6 +91,11 @@ pub mod preflight;
 pub mod processes;
 #[cfg(windows)]
 pub mod profile;
+#[cfg(windows)]
+mod reclaim_run;
+#[cfg(test)]
+#[cfg(windows)]
+mod reclaim_tests;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;

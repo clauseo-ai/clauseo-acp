@@ -1,6 +1,6 @@
 //! The token calls behind [`Owner`](super::Owner): this process's recorded parent and creation
-//! time, the parent's token duplicated for impersonation, and the impersonation itself. Every
-//! handle is closed by a guard.
+//! time, the parent's token duplicated for impersonation, the impersonation itself, and what the
+//! token gets on a file (`AccessCheck`, S15 `PR4i`). Every handle is closed by a guard.
 #![expect(
     unsafe_code,
     reason = "FFI to the process, token and impersonation calls"
@@ -11,21 +11,27 @@ use std::ffi::c_void;
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
 use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::Security::{
-    CheckTokenMembership, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, DuplicateTokenEx,
-    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, ImpersonateLoggedOnUser,
+    AccessCheck, CheckTokenMembership, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE,
+    DuplicateTokenEx, GENERIC_MAPPING, GetSidSubAuthority, GetSidSubAuthorityCount,
+    GetTokenInformation, ImpersonateLoggedOnUser, PRIVILEGE_SET, PSECURITY_DESCRIPTOR,
     RevertToSelf, SECURITY_IMPERSONATION_LEVEL, SID_AND_ATTRIBUTES, SecurityImpersonation,
     SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_DUPLICATE, TOKEN_ELEVATION,
     TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
     TOKEN_QUERY, TokenElevation, TokenElevationType, TokenElevationTypeFull, TokenImpersonation,
     TokenImpersonationLevel, TokenIntegrityLevel,
 };
+use windows::Win32::Storage::FileSystem::{
+    FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, GetProcessTimes, OpenProcess, OpenProcessToken,
     OpenThreadToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows::core::BOOL;
 
 use super::super::accounts::LocalSid;
 use super::{MEDIUM_RID, MachineError, needs_lowering};
+use crate::windows::acl::object::words;
 use crate::windows::record::user_of;
 use crate::windows::sids::Sid;
 
@@ -368,6 +374,43 @@ impl Token {
         }
         .map_err(|error| os("GetTokenInformation", &error))?;
         Ok(level)
+    }
+
+    /// What this token gets on a file whose self-relative descriptor (owner, group, DACL and
+    /// label) is `descriptor`: `AccessCheck` asked for `MAXIMUM_ALLOWED` with the files' generic
+    /// mapping, so the integrity label counts as it does at an open (S15 `PR4i`). Nothing
+    /// granted is 0.
+    pub(super) fn granted(&self, descriptor: &[u8]) -> Result<u32, MachineError> {
+        /// `MAXIMUM_ALLOWED`: every right the descriptor gives the token.
+        const MAXIMUM_ALLOWED: u32 = 0x0200_0000;
+        let mapping = GENERIC_MAPPING {
+            GenericRead: FILE_GENERIC_READ.0,
+            GenericWrite: FILE_GENERIC_WRITE.0,
+            GenericExecute: FILE_GENERIC_EXECUTE.0,
+            GenericAll: FILE_ALL_ACCESS.0,
+        };
+        let mut aligned = words(descriptor);
+        // Room for the privileges the check reports using: far more than it ever lists.
+        let mut used = [0_u64; 32];
+        let mut length = u32::try_from(size_of_val(&used)).unwrap_or(0);
+        let (mut granted, mut status) = (0_u32, BOOL(0));
+        // SAFETY: `aligned` holds a valid self-relative descriptor and lives for the call; the
+        // token is an impersonation token open with TOKEN_QUERY; the mapping, `used` (`length`
+        // bytes) and the out-pointers are live.
+        unsafe {
+            AccessCheck(
+                PSECURITY_DESCRIPTOR(aligned.as_mut_ptr().cast()),
+                self.0,
+                MAXIMUM_ALLOWED,
+                &raw const mapping,
+                Some(used.as_mut_ptr().cast::<PRIVILEGE_SET>()),
+                &raw mut length,
+                &raw mut granted,
+                &raw mut status,
+            )
+        }
+        .map_err(|error| os("AccessCheck", &error))?;
+        Ok(if status.as_bool() { granted } else { 0 })
     }
 }
 

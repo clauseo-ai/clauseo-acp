@@ -17,8 +17,10 @@
 //! parent too (`Owner::of_parent`, the hook passing no `--parent`); one that can't be found is
 //! no one, which a per-user removal refuses and a per-machine one doesn't need. `--per-machine`
 //! from a process that is neither elevated nor LOCAL SYSTEM exits `Usage`, nothing touched. It
-//! writes no result file: the hook reads only the exit code. `--reclaim` is `PR4i`'s; until
-//! then it fails.
+//! writes no result file: the hook reads only the exit code.
+//!
+//! `--reclaim` takes its owner from the recorded parent too and its data folder from the
+//! machine's record, resolved the same way (`reclaim_run.rs`, S15 `PR4i`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,8 @@ use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
 use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
 use super::owner::{Owner, this_process};
+use super::reclaim_run::run_reclaim;
+use super::record_write::RECORD_KEY;
 use super::remove::{WindowsRemoval, per_machine_allowed, remove};
 use super::result_file::{self, SetupResult};
 use super::windows_machine::{Names, WindowsMachine};
@@ -63,10 +67,13 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
                 SetupExit::Failed
             }
         },
-        Mode::Reclaim { .. } => {
-            tracing::error!("--reclaim isn't built yet (S15 PR4i)");
-            SetupExit::Failed
-        }
+        Mode::Reclaim { parent } => match Owner::of_parent(Some(parent)) {
+            Ok(owner) => run_reclaim(&owner, RECORD_KEY),
+            Err(error) => {
+                tracing::error!(%error, "the user who asked for the clean-up can't be found");
+                SetupExit::Failed
+            }
+        },
         Mode::Remove { per_machine } => {
             if per_machine && !may_remove_per_machine() {
                 tracing::error!("--per-machine needs an elevated process or LOCAL SYSTEM");
@@ -142,7 +149,7 @@ fn request_and_run(
 /// link below the drive's root, a folder at the end) and owned by `owner`: its final path, which
 /// is what is recorded and used from then on. Otherwise the exit and why: one owned by anyone
 /// else is [`SetupExit::DataDirNotOwned`]; one that can't be resolved so is `Usage`.
-fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, (SetupExit, String)> {
+pub(super) fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, (SetupExit, String)> {
     let usage = |error: String| (SetupExit::Usage, error);
     let (canonical, folder_owner) = owner
         .run_as(|| resolve_folder(given))

@@ -19,6 +19,8 @@
 //! - `setup` (S15 `PR4d`): the elevated set-up's steps and rollback over its `Machine` seam,
 //!   with the setup exe's exit codes (`SetupExit`), and the exe's own work (`PR4h`).
 //! - `UserSetup` (Windows, `PR4h`): `SandboxSetup` for the app, starting the setup exe.
+//! - [`reclaim`] (S15 `PR4i`): the elevated clean-up's targets, picked from the ledger, its
+//!   owner-only walk over a seam (`acl/take.rs` on Windows), and the lawyer's hand-back after.
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
 //!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
@@ -66,6 +68,7 @@ pub mod matters;
 pub mod pool;
 #[cfg(windows)]
 mod private_dir;
+pub mod reclaim;
 #[cfg(windows)]
 mod record;
 pub mod secrets;
