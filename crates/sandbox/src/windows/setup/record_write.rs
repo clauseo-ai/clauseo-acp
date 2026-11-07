@@ -4,6 +4,8 @@
 //! write sets its owner (`BUILTIN\Administrators`) and protected DACL ([`RECORD_SDDL`]) again,
 //! so a key made some other way, or by someone else, gets them
 //! too. The values are [`record_values::encode`]'s; reads go through the `record.rs` readers.
+//! The stop task's writes (`ResetSids` and the `Stop*` values) open the key without making it,
+//! so a stop still running after `--remove` can't bring the key back.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry calls")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
@@ -23,8 +25,7 @@ use super::lock::Descriptor;
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
     CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
-    RawRecord, RegValue, SETUP_VALUES, STOP_COMPLETED, STOP_SEQUENCE, USER_INSTALL_DIR,
-    resets_with, resets_without, sids_value,
+    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -142,34 +143,30 @@ pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
         .map_err(|error| MachineError::Other(format!("the record's ResetSids: {error}")))
 }
 
-/// Adds `users` to the record's `ResetSids`, keeping what it lists; the key made and secured as
-/// [`write`] does. The stop task calls it as SYSTEM, under the set-up lock.
+/// Adds `users` to the record's `ResetSids`, keeping what it lists, in the key as it is: never
+/// made ([`open_existing`]). The stop task calls it as SYSTEM, under the set-up lock.
 pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineError> {
     let listed = read_reset_sids(key)?;
     let all = resets_with(&listed, users);
     if all == listed {
         return Ok(());
     }
-    set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&all))
+    set_value(&open_existing(key)?, RESET_SIDS, &sids_value(&all))
 }
 
-/// Writes the stop's completion and returns the new sequence: `StopSequence` read (0 when
-/// absent) and written one higher, and `StopCompleted` as `at` (a `FILETIME`)
-/// ([`STOP_SEQUENCE`], [`STOP_COMPLETED`]), the key made and secured as [`write`] does. The
-/// stop task calls it as SYSTEM, under the set-up lock, only on a run that ends 0, so no two
-/// stops read the same sequence.
-pub(crate) fn write_stop_completed(key: &str, at: u64) -> Result<u64, MachineError> {
+/// The stop's `REG_QWORD` value `name` of `HKLM\<key>` (`StopNext`, `StopSequence`):
+/// `None` when it, or the key, is missing; one of another type is an error.
+pub(crate) fn read_stop_value(key: &str, name: &str) -> Result<Option<u64>, MachineError> {
     let subkey = HSTRING::from(key);
-    let name = HSTRING::from(STOP_SEQUENCE);
-    let seen = read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)?;
-    let next = seen
-        .unwrap_or(0)
-        .checked_add(1)
-        .ok_or_else(|| MachineError::Other("the record's StopSequence is at its end".to_owned()))?;
-    let opened = open_secured(key)?;
-    set_value(&opened, STOP_SEQUENCE, &RegValue::Qword(next))?;
-    set_value(&opened, STOP_COMPLETED, &RegValue::Qword(at))?;
-    Ok(next)
+    let name = HSTRING::from(name);
+    read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
+}
+
+/// Sets the stop's `REG_QWORD` value `name` (`StopNext`, `StopCompleted`, `StopSequence`)
+/// in `HKLM\<key>` as it is: never made, so a stop still running after `--remove` can't bring
+/// the key back ([`open_existing`]). The stop task calls it as SYSTEM, under the set-up lock.
+pub(crate) fn write_stop_value(key: &str, name: &str, value: u64) -> Result<(), MachineError> {
+    set_value(&open_existing(key)?, name, &RegValue::Qword(value))
 }
 
 /// Takes `done`, the users a set-up has reset, off the record's `ResetSids`, deleting the value
@@ -215,8 +212,37 @@ fn open_secured(key: &str) -> Result<Key, MachineError> {
         )
     };
     check("RegCreateKeyExW", made)?;
-    let opened = Key(opened);
-    // Before any value: a key that was already there gets the owner and DACL first.
+    secure(Key(opened), &descriptor)
+}
+
+/// `HKLM\<key>` opened to set values only when it is there, secured as [`open_secured`] does;
+/// a missing key is an error, and is never made. The stop's writes go through it.
+fn open_existing(key: &str) -> Result<Key, MachineError> {
+    let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
+    let subkey = HSTRING::from(key);
+    let mut opened = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            KEY_SET_VALUE | KEY_QUERY_VALUE | WRITE_DAC | WRITE_OWNER | KEY_WOW64_64KEY,
+            &raw mut opened,
+        )
+    };
+    if open == ERROR_FILE_NOT_FOUND {
+        return Err(MachineError::Other(
+            "the record's key is gone, so nothing was written".to_owned(),
+        ));
+    }
+    check("RegOpenKeyExW", open)?;
+    secure(Key(opened), &descriptor)
+}
+
+/// `opened` with its owner (Administrators) and DACL (`descriptor`) set again, before any
+/// value: a key that was already there gets them first.
+fn secure(opened: Key, descriptor: &Descriptor) -> Result<Key, MachineError> {
     // SAFETY: the key is open with WRITE_DAC and WRITE_OWNER; the descriptor is valid and
     // self-relative, and its owner is a group the elevated token may assign.
     let secured = unsafe {

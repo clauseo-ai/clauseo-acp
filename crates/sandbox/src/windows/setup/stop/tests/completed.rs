@@ -1,6 +1,6 @@
-//! The stop's completion (step 7): only a run that ends 0 counts `StopSequence` up and writes
-//! `StopCompleted`, under the set-up lock; a run that ends 48 or 49, or one the task's end
-//! interrupts, never does, and leaves an earlier pair as it is.
+//! The stop's completion (step 7): only a run that ends 0 writes `StopCompleted`, then
+//! `StopSequence` as the number it reserved, under the set-up lock; a run that ends 48 or 49, or
+//! one the task's end interrupts, never does, and leaves an earlier pair as it is.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -16,26 +16,50 @@ fn a_run_that_ends_0_writes_the_completion_last_and_under_the_lock() {
     fake.jobs = Ok(vec![Some(sid(1011))]);
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(
-        fake.completed.map(|(_, sequence)| sequence),
+        fake.completed().map(|(_, sequence)| sequence),
         Some(1),
         "a first stop writes 1"
     );
-    assert_eq!(fake.done.last().map(String::as_str), Some("completed"));
+    assert_eq!(
+        fake.done.last().map(String::as_str),
+        Some("set StopSequence")
+    );
     assert!(!fake.held, "the lock is given back");
 }
 
 #[test]
-fn each_completed_stop_counts_the_sequence_up_by_one() {
+fn two_successive_stops_write_the_sequence_1_then_2() {
     let mut fake = Fake::new(&[1010]);
     fake.snapshots = vec![Ok(Vec::new())];
     assert_eq!(stop(&mut fake), StopExit::Done);
-    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(1));
+    assert_eq!(fake.completed().map(|(_, sequence)| sequence), Some(1));
     assert_eq!(stop(&mut fake), StopExit::Done);
-    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(2));
-    // From an earlier record's sequence, one up.
-    fake.completed = Some((7, 41));
+    assert_eq!(fake.completed().map(|(_, sequence)| sequence), Some(2));
+    assert_eq!(fake.values.get(STOP_NEXT), Some(&3));
+    // The number written is the one reserved from StopNext, not the old sequence and one.
+    fake.values.insert(STOP_NEXT, 42);
     assert_eq!(stop(&mut fake), StopExit::Done);
-    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(42));
+    assert_eq!(fake.completed().map(|(_, sequence)| sequence), Some(42));
+    assert_eq!(fake.values.get(STOP_NEXT), Some(&43));
+}
+
+#[test]
+fn a_sequence_already_past_the_reserved_number_is_never_lowered() {
+    let mut fake = Fake::new(&[1010]);
+    fake.snapshots = vec![Ok(Vec::new())];
+    fake.set_completed(Some((7, 41)));
+    assert_eq!(stop(&mut fake), StopExit::NotMarked);
+    assert_eq!(fake.completed(), Some((7, 41)), "neither value written");
+    assert_eq!(
+        fake.values.get(STOP_NEXT),
+        Some(&2),
+        "but the number was reserved"
+    );
+    let (error, line) = &fake.logged[0];
+    assert!(
+        *error && line.contains("StopSequence is already 41"),
+        "{line}"
+    );
 }
 
 #[test]
@@ -45,7 +69,7 @@ fn the_stamp_is_when_the_clean_pass_began_not_when_it_is_written() {
     // step begins at 2 s, and the completion is written then.
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
     assert_eq!(stop(&mut fake), StopExit::Done);
-    let (at, _) = fake.completed.unwrap();
+    let (at, _) = fake.completed().unwrap();
     assert_eq!(
         at,
         filetime(Duration::from_secs(1)),
@@ -58,7 +82,7 @@ fn the_stamp_is_when_the_clean_pass_began_not_when_it_is_written() {
     fake.snapshots = vec![Ok(Vec::new())];
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(
-        fake.completed.map(|(at, _)| at),
+        fake.completed().map(|(at, _)| at),
         Some(filetime(Duration::ZERO))
     );
 }
@@ -69,9 +93,9 @@ fn a_run_that_ends_48_writes_no_completion() {
     let mut fake = Fake::new(&[1010]);
     fake.snapshots = vec![Ok(busy())];
     fake.refuse = vec![10, 16];
-    fake.completed = EARLIER;
+    fake.set_completed(EARLIER);
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
-    assert_eq!(fake.completed, EARLIER);
+    assert_eq!(fake.completed(), EARLIER);
     // A process whose user can't be read.
     let mut fake = Fake::new(&[1010]);
     let unread = Process {
@@ -80,17 +104,17 @@ fn a_run_that_ends_48_writes_no_completion() {
         ..Process::default()
     };
     fake.snapshots = vec![Ok(vec![unread])];
-    fake.completed = EARLIER;
+    fake.set_completed(EARLIER);
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
-    assert_eq!(fake.completed, EARLIER);
+    assert_eq!(fake.completed(), EARLIER);
     // A pool user's BITS job that won't cancel.
     let mut fake = Fake::new(&[1010]);
     fake.jobs = Ok(vec![Some(sid(1010))]);
     fake.jobs_refuse = vec![0];
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
-    assert_eq!(fake.completed, None);
+    assert_eq!(fake.completed(), None);
     assert!(
-        !fake.done.contains(&"completed".to_owned()),
+        !fake.done.contains(&"set StopSequence".to_owned()),
         "{:?}",
         fake.done
     );
@@ -102,15 +126,22 @@ fn a_run_that_ends_49_writes_no_completion() {
     let mut fake = Fake::new(&[1010]);
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
     fake.marks = Marks::WriteFails;
-    fake.completed = EARLIER;
+    fake.set_completed(EARLIER);
     assert_eq!(stop(&mut fake), StopExit::NotMarked);
-    assert_eq!(fake.completed, EARLIER);
-    // The completion's own write fails: 49 too, never 0.
+    assert_eq!(fake.completed(), EARLIER);
+    // The completion's own write fails: 49 too, never 0, and StopSequence is left as it was.
     let mut fake = Fake::new(&[1010]);
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
     fake.marks = Marks::CompletionFails;
+    fake.values.insert(STOP_SEQUENCE, 0);
     assert_eq!(stop(&mut fake), StopExit::NotMarked);
-    assert_eq!(fake.completed, None);
+    assert_eq!(
+        fake.values.get(STOP_SEQUENCE),
+        Some(&0),
+        "StopSequence unchanged"
+    );
+    assert_eq!(fake.completed(), None);
+    assert!(!fake.done.contains(&"set StopSequence".to_owned()));
     assert!(!fake.held);
     let (error, line) = &fake.logged[0];
     assert!(
@@ -123,14 +154,14 @@ fn a_run_that_ends_49_writes_no_completion() {
 fn a_run_the_tasks_end_interrupts_writes_no_completion_but_keeps_its_marks() {
     let mut fake = Fake::new(&[1010, 1011]);
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
-    fake.completed = EARLIER;
+    fake.set_completed(EARLIER);
     // Ended mid-pass, at the second termination: nothing after it runs.
     fake.end_at = Some(12);
     let ended = catch_unwind(AssertUnwindSafe(|| stop(&mut fake)));
     assert!(ended.is_err(), "the run was ended");
-    assert_eq!(fake.completed, EARLIER);
+    assert_eq!(fake.completed(), EARLIER);
     assert!(
-        !fake.done.contains(&"completed".to_owned()),
+        !fake.done.contains(&"set StopSequence".to_owned()),
         "{:?}",
         fake.done
     );

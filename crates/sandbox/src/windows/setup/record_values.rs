@@ -97,19 +97,31 @@ pub const RESET_SIDS: &str = "ResetSids";
 /// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the last completed
 /// stop's last clean observation began (the pass that found no pool user's process, or the BITS
 /// enumeration, whichever began first), not when it was written; written only by a run that
-/// ends 0 (every pool user's process gone, every pool BITS job cancelled, `ResetSids` written).
-/// A run that is ended, interrupted or exits non-zero never writes it and leaves an earlier one
-/// as it is. Outside [`MachineRecord`]; deleted with the
-/// set-up's values.
+/// ends 0 (every pool user's process gone, every pool BITS job cancelled, `ResetSids` written),
+/// just before [`STOP_SEQUENCE`]. A run that is ended, interrupted or exits non-zero never
+/// writes it and leaves an earlier one as it is. For diagnostics only: no clearing trusts it.
+/// Outside [`MachineRecord`]; deleted with the set-up's values.
 pub const STOP_COMPLETED: &str = "StopCompleted";
-/// `StopSequence` (`REG_QWORD`): how many stops have completed, counted up by one with each
-/// [`STOP_COMPLETED`], under the same set-up lock (0 when absent). The follow-up's unclean-session
-/// marker records the sequence it saw and clears only once `StopSequence` is greater, so nothing
-/// trusts the clock; `StopCompleted` is for diagnostics. Deleted with the set-up's values.
+/// `StopSequence` (`REG_QWORD`): the number the last completed stop reserved from
+/// [`STOP_NEXT`], written after [`STOP_COMPLETED`] under the same set-up lock, only by a run
+/// that ends 0 and never lower than it was. Deleted with the set-up's values.
 pub const STOP_SEQUENCE: &str = "StopSequence";
+/// `StopNext` (`REG_QWORD`, 1 when absent): the number the next stop reserves. Each `--stop`
+/// reads it under the set-up lock before its first process snapshot, keeps it as its `n` and
+/// writes it one higher, whatever the run then does; a completed run writes `n` as
+/// [`STOP_SEQUENCE`]. The task runs one instance at a time, so no two reservations overlap.
+///
+/// The rule for the follow-up's unclean-session marker: it records `StopNext` as it reads it
+/// when it is written (M), and must read it under the set-up lock, so it can't interleave with a
+/// reservation's read-then-write and record a stale M. The F4 refusal and the marker clear only
+/// when `StopSequence >= M`: a stop reserved its number after the marker existed and then
+/// completed, so its observation began after the marker. `--remove` deletes `StopNext`,
+/// `StopSequence` and `StopCompleted` with the record and should clear the markers too, so no
+/// marker outlives its set-up.
+pub const STOP_NEXT: &str = "StopNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 8] = [
+pub const SETUP_VALUES: [&str; 9] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -118,6 +130,7 @@ pub const SETUP_VALUES: [&str; 8] = [
     RESET_SIDS,
     STOP_COMPLETED,
     STOP_SEQUENCE,
+    STOP_NEXT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -436,10 +449,12 @@ mod tests {
         assert!(SETUP_VALUES.contains(&RESET_SIDS));
         // So do its completion's.
         assert_eq!(
-            (STOP_COMPLETED, STOP_SEQUENCE),
-            ("StopCompleted", "StopSequence")
+            (STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT),
+            ("StopCompleted", "StopSequence", "StopNext")
         );
-        assert!(SETUP_VALUES.contains(&STOP_COMPLETED) && SETUP_VALUES.contains(&STOP_SEQUENCE));
+        for name in [STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT] {
+            assert!(SETUP_VALUES.contains(&name), "{name}");
+        }
     }
 
     #[test]

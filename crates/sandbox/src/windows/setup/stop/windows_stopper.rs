@@ -54,8 +54,8 @@ const ANY_SESSION: u32 = 0xFFFF_FFFE;
 const INFO_LEVEL_1: u32 = 1;
 
 windows::core::link!("ntdll.dll" "system" fn NtSuspendProcess(process: HANDLE) -> NTSTATUS);
-/// How long the stop waits for the set-up lock before it marks the users, in milliseconds: well
-/// inside the task's 2-minute limit.
+/// How long the stop waits for the set-up lock (to reserve its number, mark the users, or write
+/// its completion), in milliseconds: well inside the task's 2-minute limit.
 const LOCK_WAIT_MS: u32 = 30_000;
 
 /// `--stop`: [`stop`] over a [`WindowsStopper`].
@@ -213,8 +213,12 @@ impl Stopper for WindowsStopper {
         u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime)
     }
 
-    fn record_completed(&mut self, at: u64) -> Result<u64, Failed> {
-        record_write::write_stop_completed(RECORD_KEY, at).map_err(|error| error.to_string())
+    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
+        record_write::read_stop_value(RECORD_KEY, name).map_err(|error| error.to_string())
+    }
+
+    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
+        record_write::write_stop_value(RECORD_KEY, name, value).map_err(|error| error.to_string())
     }
 
     fn log(&mut self, error: bool, line: &str) {
