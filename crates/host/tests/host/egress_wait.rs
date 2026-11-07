@@ -486,6 +486,17 @@ fn the_browser_slot_stays_taken_during_the_wait() {
         },
         "the waiting session still holds its slot"
     );
+    let opens = || {
+        calls(&log)
+            .iter()
+            .filter(|call| call.starts_with("open"))
+            .count()
+    };
+    assert_eq!(
+        opens(),
+        2,
+        "a launch left without the browser opens no proxy"
+    );
     drop(chrome);
     closes
         .recv_timeout(Duration::from_secs(30))

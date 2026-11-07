@@ -61,6 +61,13 @@ impl EgressProxy for Recording {
     ) -> Result<(), clauseo_sandbox::Error> {
         assert!(config.allow.contains("api.anthropic.com"), "{config:?}");
         assert!(config.allow.contains("sci.gov.in"), "{config:?}");
+        // Stage C's rule: the host opens a proxy only for a launch that offers the browser, and
+        // binds its token-free browser listener; a launch without one opens none (the tests
+        // `no_proxy_opens_*` and `the_browser_slot_stays_taken_during_the_wait`).
+        assert!(
+            config.browser,
+            "a proxy opened without its browser listener"
+        );
         self.calls
             .lock()
             .unwrap()

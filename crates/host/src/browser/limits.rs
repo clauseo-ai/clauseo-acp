@@ -84,6 +84,11 @@ impl BrowserSlots {
         self.releasing.remove(&session)
     }
 
+    /// Whether a slot is free for a session that holds none.
+    pub(crate) fn any_free(&self) -> bool {
+        self.held.len() < self.limit
+    }
+
     /// Whether `session` has no slot now but one may come free once a removal that runs ends.
     pub(crate) fn releasing(&self, session: SessionKey) -> bool {
         !self.free_for(session) && !self.releasing.is_empty()
