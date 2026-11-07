@@ -88,3 +88,20 @@ fn a_success_after_expiry_replaces_a_cached_failure() {
     assert_eq!(lookup.answer(Https, "example.test", 443), proxied);
     assert_eq!(calls.load(Ordering::SeqCst), 2, "the success is cached");
 }
+
+/// The egress proxy's probe is [`reachable`](super::super::reachable) unless a test swaps it: a
+/// bound loopback listener answers within the cap, a closed port does not.
+#[test]
+fn the_lookups_probe_is_the_real_one() {
+    let cap = Duration::from_secs(1);
+    let lookup = Lookup::new(Upstream::System).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let open = listener.local_addr().unwrap().port();
+    assert!(lookup.reachable("127.0.0.1", open, cap), "a listener");
+    let closed = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    assert!(!lookup.reachable("127.0.0.1", closed, cap), "a closed port");
+}

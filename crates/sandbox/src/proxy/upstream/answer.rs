@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use url::Url;
 
-use super::{Env, Lookup, Route, Scheme, Source, System, os_route};
+use super::{Env, Lookup, Route, Scheme, Source, System, os_route, reachable};
 use crate::{Error, SystemClock};
 
 /// An upstream lookup's answer for [`upstream_answer`]: a route, or `Failed` when the OS was
@@ -195,6 +195,7 @@ pub fn upstream_answer(upstream: &super::Upstream, url: &Url) -> Result<Upstream
                 Box::new(os_route),
                 Box::new(SystemClock::new()),
             ))),
+            reach: Box::new(reachable),
         })
     } else {
         made = Lookup::new(upstream.clone())?;
