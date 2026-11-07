@@ -460,3 +460,8 @@ crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disall
 crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
 crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
 crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line clippy::disallowed_methods
+# Throwaway spike for S15 PR7's review item 1 (branch exp-wfp-denyonly only, never merged).
+crates/sandbox/examples/wfp_denyonly_spike/tokens.rs - unsafe_code
+crates/sandbox/examples/wfp_denyonly_spike/tokens.rs net clippy::disallowed_methods
+crates/sandbox/examples/wfp_denyonly_spike/tokens.rs netsh clippy::disallowed_methods
+crates/sandbox/examples/wfp_denyonly_spike/sids.rs - unsafe_code

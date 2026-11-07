@@ -1,0 +1,40 @@
+# Throwaway spike for S15 PR7's review item 1 (branch exp-wfp-denyonly only): installs tier B's
+# WFP filters for a throwaway user on a hosted runner (elevated, BFE running) and checks which
+# tokens they catch. Never merged.
+name: exp-wfp-denyonly
+
+on:
+  push:
+    branches: [exp-wfp-denyonly]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Build the spike
+        run: cargo build -p clauseo-sandbox --example wfp_denyonly_spike --locked
+      - name: Copy it where the throwaway user and an AppContainer can run it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\s15spike | Out-Null
+          Copy-Item target\debug\examples\wfp_denyonly_spike.exe C:\s15spike\
+          icacls C:\s15spike /grant "*S-1-5-32-545:(OI)(CI)RX" "*S-1-15-2-1:(OI)(CI)RX"
+      - name: Run the spike
+        shell: pwsh
+        run: C:\s15spike\wfp_denyonly_spike.exe | Tee-Object -FilePath spike-${{ matrix.runner }}.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: spike-${{ matrix.runner }}
+          path: spike-${{ matrix.runner }}.txt
