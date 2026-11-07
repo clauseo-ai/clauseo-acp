@@ -17,11 +17,14 @@ use std::path::Path;
 use std::ptr;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0};
-use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, SDDL_REVISION_1,
+};
 use windows::Win32::Security::{
-    CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, GetTokenInformation, PSID,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
-    TOKEN_USER, TokenUser,
+    ACL, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, GetSecurityDescriptorDacl,
+    GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+    SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL,
+    TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER, TokenDefaultDacl, TokenUser,
 };
 use windows::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows::Win32::System::Threading::{
@@ -135,7 +138,7 @@ fn wait(info: &PROCESS_INFORMATION) -> Result<u32, String> {
 /// The child under this process's token with its user SID deny-only.
 fn deny_only(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
     let mut token = HANDLE::default();
-    let access = TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY;
+    let access = TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT;
     // SAFETY: the pseudo-handle needs no close; `token` is closed below.
     unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut token) }
         .map_err(|e| format!("OpenProcessToken: {e}"))?;
@@ -174,6 +177,11 @@ fn deny_only(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
                 )
             }
             .map_err(|e| format!("CreateRestrictedToken: {e}"))?;
+            if let Err(why) = open_default_dacl(derived) {
+                // SAFETY: made above, closed once.
+                drop(unsafe { CloseHandle(derived) });
+                return Err(why);
+            }
             let startup = STARTUPINFOW {
                 cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or_default(),
                 ..STARTUPINFOW::default()
@@ -204,6 +212,43 @@ fn deny_only(exe: &Path, line: &mut [u16]) -> Result<u32, String> {
     // SAFETY: opened above, closed once.
     drop(unsafe { CloseHandle(token) });
     result
+}
+
+/// Gives `token` the default DACL {`Everyone`, `RESTRICTED`, `SYSTEM`}. With the user SID
+/// deny-only, the token's own default DACL (its user) no longer lets the process open itself, so
+/// it wouldn't start; a hijacked agent can make the same change to its own derived token.
+fn open_default_dacl(token: HANDLE) -> Result<(), String> {
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a live string and out-pointer; freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from("D:(A;;GA;;;WD)(A;;GA;;;RC)(A;;GA;;;SY)"),
+            SDDL_REVISION_1,
+            &raw mut sd,
+            None,
+        )
+    }
+    .map_err(|e| format!("the default DACL: {e}"))?;
+    let (mut present, mut defaulted) = (windows::core::BOOL(0), windows::core::BOOL(0));
+    let mut acl: *mut ACL = ptr::null_mut();
+    // SAFETY: `sd` is valid; the out-pointers are live.
+    let read = unsafe {
+        GetSecurityDescriptorDacl(sd, &raw mut present, &raw mut acl, &raw mut defaulted)
+    };
+    let dacl = TOKEN_DEFAULT_DACL { DefaultDacl: acl };
+    let size = u32::try_from(size_of::<TOKEN_DEFAULT_DACL>()).unwrap_or_default();
+    // SAFETY: `dacl` points into `sd`, alive until freed below.
+    let set = read.and_then(|()| unsafe {
+        SetTokenInformation(
+            token,
+            TokenDefaultDacl,
+            (&raw const dacl).cast::<c_void>(),
+            size,
+        )
+    });
+    // SAFETY: from the conversion, freed once.
+    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    set.map_err(|e| format!("SetTokenInformation (default DACL): {e}"))
 }
 
 /// The child as an `AppContainer` process with the internetClient capability.
