@@ -508,13 +508,9 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
         env:
           CLAUSEO_ELEVATED_TESTS: "1"
-          # Quarantined on Windows ARM64 only (clauseo-acp-private#464): on windows-11-arm the three
-          # logon tests wait in LogonUserW past nextest's 30 s bound; x64 still runs them.
-          ARM64_QUARANTINE: >-
-            ${{ matrix.target == 'aarch64-pc-windows-msvc' && ' & not (package(clauseo-sandbox) & test(/^windows::setup::logon::tests::elevated_(a_wrong_password|an_account_not_named|log_on_once)_/))' || '' }}
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E "test(/(^|::)elevated_/)${ARM64_QUARANTINE}" --test-threads 1 --no-tests=fail
+          cargo nextest run --workspace --profile ci --run-ignored only -E "test(/(^|::)elevated_/)" --test-threads 1 --no-tests=fail
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
