@@ -20,7 +20,9 @@ struct Failure(RunExit, String);
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str) -> u32 {
-    restrict_dll_search();
+    if restrict_dll_search().is_err() {
+        return RunExit::DllSearch.code();
+    }
     quiet_errors();
     // First of all, before a pipe is opened: shut this runner's own token to all but SYSTEM. The
     // outer runner read its user while it was suspended; the launch adds the desktop user below.

@@ -49,7 +49,13 @@ impl Failure {
 /// The outer runner's whole run; its exit code. `exe` is this program's own path, which the
 /// inner runner runs as the pool user.
 pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
-    restrict_dll_search();
+    if let Err(error) = restrict_dll_search() {
+        say(&format!(
+            "clauseo-sandbox-run: {}",
+            os("SetDefaultDllDirectories", &error)
+        ));
+        return RunExit::DllSearch.code();
+    }
     match outer(launch_file, exe) {
         Ok(code) => code,
         Err(Failure(exit, what)) => {
@@ -95,13 +101,14 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
     // desktop UI limit: no process in it may make or switch desktops. They live as long as this
     // process.
-    let station_name = format!(
-        "ClauseoRun-{}",
-        set.base()
-            .strip_prefix(crate::windows::pipe::PIPE_PREFIX)
-            .and_then(|hex| hex.get(..16))
-            .unwrap_or("desktop")
-    );
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(|error| {
+        Failure::new(
+            RunExit::Token,
+            format!("the window station's name: random failed ({error})"),
+        )
+    })?;
+    let station_name = super::station_name(random);
     let matter = message.matter_sid.as_ref();
     let agent_desktop = AgentDesktop::create(
         &station_name,
