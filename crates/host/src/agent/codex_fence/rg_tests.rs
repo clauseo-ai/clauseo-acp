@@ -1,9 +1,18 @@
 //! Round 6's D1: the Codex fence's deny globs run through the real ripgrep command bubblewrap
-//! uses to expand them (codex-rs `linux-sandbox/src/bwrap.rs`, `split_pattern_for_ripgrep` at
-//! :746-773, `expand_unreadable_globs_with_ripgrep` at :700-744, `ripgrep_files` at :810-850),
-//! from a working folder that is not `agent-state`, as the sandbox helper starts in the command's
-//! folder. The split is mirrored here (codex-rs is not a dependency); ripgrep is the system's.
-//! Skipped when `rg` is not installed (CI has it).
+//! uses to expand them, from a working folder that is not `agent-state`, as the sandbox helper
+//! starts in the command's folder. ripgrep is the system's; the split and the command line are
+//! mirrored, since codex-rs is not a dependency. The mirror is pinned to the Codex the host
+//! runs, rust-v0.162.1, `codex-rs/linux-sandbox/src/bwrap.rs`:
+//! - `MAX_UNREADABLE_GLOB_MATCHES` at :62;
+//! - `expand_unreadable_globs_with_ripgrep` at :891 (the grouping by root, the cap);
+//! - `split_pattern_for_ripgrep` at :947-974 (`escape_unclosed_glob_classes` at :976 is not
+//!   mirrored: no pattern here holds `[`);
+//! - `ripgrep_files` at :1011-1033 (`--no-config --files --hidden --no-ignore --null`,
+//!   `--max-depth` from the profile's `glob_scan_max_depth`, read at :504-505).
+//!
+//! A Codex bump re-reads those lines.
+//! Without `rg` the tests are skipped by hand, but fail when `CI` is set, so they never skip
+//! quietly there.
 
 #![expect(
     clippy::disallowed_methods,
@@ -14,12 +23,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::STATE_GLOBS;
+use super::{GLOB_SCAN_MAX_DEPTH, STATE_GLOBS};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
-/// codex-rs `split_pattern_for_ripgrep` (bwrap.rs:746-773): the static part before the first
-/// glob character, up to its last `/`, is the search root; the rest is ripgrep's glob.
+/// codex-rs `split_pattern_for_ripgrep` (bwrap.rs:947-974 at rust-v0.162.1): the static part
+/// before the first glob character, up to its last `/`, is the search root; the rest is
+/// ripgrep's glob.
 fn split(pattern: &str) -> Option<(PathBuf, String)> {
     let first = pattern.find(['*', '?', '[', ']'])?;
     let prefix = pattern.get(..first)?;
@@ -41,7 +51,8 @@ fn split(pattern: &str) -> Option<(PathBuf, String)> {
 }
 
 /// The fence's globs as Codex expands them under `data`: grouped by search root, one
-/// `rg --files --hidden --no-ignore --null --glob …` per root, run in `cwd`. `None` without rg.
+/// `rg --no-config --files --hidden --no-ignore --null --max-depth <GLOB_SCAN_MAX_DEPTH>
+/// --glob …` per root, run in `cwd`. `None` without rg.
 fn expand(data: &Path, cwd: &Path) -> Option<Vec<PathBuf>> {
     let mut by_root: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     for glob in STATE_GLOBS {
@@ -54,14 +65,28 @@ fn expand(data: &Path, cwd: &Path) -> Option<Vec<PathBuf>> {
         let mut command = Command::new("rg");
         command
             .current_dir(cwd)
-            .args(["--files", "--hidden", "--no-ignore", "--null"]);
+            .args([
+                "--no-config",
+                "--files",
+                "--hidden",
+                "--no-ignore",
+                "--null",
+            ])
+            .arg("--max-depth")
+            .arg(GLOB_SCAN_MAX_DEPTH.to_string());
         for glob in &globs {
             command.arg("--glob").arg(glob);
         }
         command.arg("--").arg(&root);
         let output = match command.output() {
             Ok(output) => output,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                assert!(
+                    std::env::var_os("CI").is_none(),
+                    "ripgrep (rg) is not installed on this CI runner: the deny-glob tests need it"
+                );
+                return None;
+            }
             Err(error) => panic!("rg: {error}"),
         };
         assert!(
@@ -123,6 +148,93 @@ fn the_deny_globs_match_a_later_matters_logins_from_any_working_folder() {
     for file in &spared {
         assert!(!found.contains(file), "{} matched", file.display());
     }
+}
+
+/// The matches a matter's state adds after the clean, with a live session: Codex's login link
+/// and `config.toml`, one live shell snapshot, and Claude's `.claude.json`. `.env` is cleaned,
+/// `history.jsonl` is the TUI's only, and Claude's store is the login home's.
+const MATCHES_PER_MATTER: usize = 4;
+
+/// The names under `agent-state/<matter>` the globs can match within [`GLOB_SCAN_MAX_DEPTH`]
+/// (4), whoever writes them: the 6 login names at depth 3 (`codex-acp/{auth.json,.env,
+/// config.toml,history.jsonl}`, `claude-acp/{.credentials.json,.claude.json}`), and the same 6
+/// one folder down, under each of the matter folder's 3 entries (`codex-acp`, `claude-acp`,
+/// `notes`), which only the host makes (`**/` spans one folder at depth 4). The shell writes
+/// only `notes`, Claude also its `claude-acp`. Plus that matter's live shell snapshots
+/// (`codex-acp/shell_snapshots/*`, depth 4), which Codex's own process writes, one per live
+/// session here.
+const PLANTABLE_PER_MATTER: usize = 6 + 3 * 6 + 1;
+
+/// Codex fails every sandboxed command past 8192 glob matches (`MAX_UNREADABLE_GLOB_MATCHES`,
+/// bwrap.rs:62).
+const CODEX_GLOB_CAP: usize = 8192;
+
+/// The 8192-cap headroom and the depth cap, through the real split and rg. One matter is heavy
+/// with files that are not logins (hundreds of transcripts, logs, notes, tool results), has
+/// every name the globs can match within the depth cap, and has plants one folder deeper: 300
+/// `notes/x<n>/codex-acp/auth.json` (stage C's cross-matter shutdown) and a snapshot in a
+/// subfolder. Only the [`PLANTABLE_PER_MATTER`] names match, so no matter can push the others
+/// past the cap; a matter with only its own files matches [`MATCHES_PER_MATTER`], so 2,000
+/// matters stay under it.
+#[test]
+fn the_deny_globs_stay_under_codexs_match_cap() {
+    let dir = TempDir::new("codex-fence-rg-cap");
+    let data = dir.path().join("data");
+    let matter = data.join("agent-state").join("m-heavy");
+    let quiet = data.join("agent-state").join("m-quiet");
+    let logins = [
+        "codex-acp/auth.json",
+        "codex-acp/.env",
+        "codex-acp/config.toml",
+        "codex-acp/history.jsonl",
+        "claude-acp/.credentials.json",
+        "claude-acp/.claude.json",
+    ];
+    let mut matching: Vec<PathBuf> = logins.iter().map(|name| matter.join(name)).collect();
+    for entry in ["codex-acp", "claude-acp", "notes"] {
+        matching.extend(logins.iter().map(|name| matter.join(entry).join(name)));
+    }
+    matching.push(matter.join("codex-acp/shell_snapshots/live.sh"));
+    let own: Vec<PathBuf> = [
+        "codex-acp/auth.json",
+        "codex-acp/config.toml",
+        "codex-acp/shell_snapshots/live.sh",
+        "claude-acp/.claude.json",
+    ]
+    .iter()
+    .map(|name| quiet.join(name))
+    .collect();
+    let mut others = vec![
+        matter.join("codex-acp/shell_snapshots/deeper/s.sh"),
+        matter.join("codex-acp/state_5.sqlite"),
+        matter.join("codex-acp/logs_2.sqlite"),
+    ];
+    for n in 0..300 {
+        others.push(matter.join(format!("notes/x{n}/codex-acp/auth.json")));
+        others.push(matter.join(format!("codex-acp/sessions/2026/11/07/rollout-{n}.jsonl")));
+        others.push(matter.join(format!("codex-acp/log/codex-{n}.log")));
+        others.push(matter.join(format!("claude-acp/projects/p/s-{n}.jsonl")));
+        others.push(matter.join(format!("notes/note-{n}.md")));
+        others.push(quiet.join(format!("codex-acp/tmp/arg0/codex-arg0{n}/apply_patch")));
+    }
+    for file in matching.iter().chain(&own).chain(&others) {
+        write::create_dir_all(file.parent().unwrap()).unwrap();
+        write::write_file(file, b"x").unwrap();
+    }
+    let elsewhere = dir.path().join("elsewhere");
+    write::create_dir_all(&elsewhere).unwrap();
+    let Some(mut found) = expand(&data, &elsewhere) else {
+        println!("rg is not installed: skipped");
+        return;
+    };
+    found.sort();
+    let mut expected: Vec<PathBuf> = matching.iter().chain(&own).cloned().collect();
+    expected.sort();
+    assert_eq!(found, expected);
+    assert_eq!(matching.len(), PLANTABLE_PER_MATTER);
+    assert_eq!(own.len(), MATCHES_PER_MATTER);
+    const { assert!(MATCHES_PER_MATTER * 2_000 < CODEX_GLOB_CAP) };
+    const { assert!(PLANTABLE_PER_MATTER * 300 < CODEX_GLOB_CAP) };
 }
 
 /// The cost of the globs at each sandboxed command, timed by hand (ignored): 20 matters, each

@@ -93,6 +93,9 @@ fn compiled(keys: &Map<String, Value>) -> (Vec<(PathBuf, String)>, Vec<String>) 
         .as_object()
         .expect("a filesystem table");
     for (key, value) in filesystem {
+        if key == "glob_scan_max_depth" {
+            continue;
+        }
         match value {
             Value::String(mode) => exact.push((PathBuf::from(key), mode.clone())),
             Value::Object(scoped) => {
@@ -243,6 +246,8 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
     let filesystem = keys["permissions"][PROFILE]["filesystem"]
         .as_object()
         .unwrap();
+    // Round 7: the globs' scan depth, which caps what a matter can make them match.
+    assert_eq!(filesystem["glob_scan_max_depth"], json!(4));
     let base = data().to_str().unwrap().to_owned();
     let scoped = filesystem[&base].as_object().expect("rules under <data>");
     for subpath in [
@@ -500,6 +505,8 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         .expect("rules scoped under the literal data folder");
     assert_eq!(scoped.get("search.sqlite"), Some(&json!("deny")));
     assert_eq!(scoped.get("agent-state/**/codex-acp/auth.json"), None);
+    let filesystem = &keys["permissions"][PROFILE]["filesystem"];
+    assert_eq!(filesystem.get("glob_scan_max_depth"), None);
 }
 
 #[test]
