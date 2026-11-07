@@ -42,6 +42,7 @@ import type {
   UiCount,
   ViewPosition,
 } from "./protocol.ts";
+import { Lane } from "./lane.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import type { SetupFeed } from "./setup-feed.ts";
 
@@ -49,6 +50,20 @@ import type { SetupFeed } from "./setup-feed.ts";
 const sendSetup = async (command: SetupCommand) =>
   (await import("./setup-feed.ts")).sendSetup(command);
 import { Subscriptions } from "./subscriptions.ts";
+
+/** How many background calls (reads, subscriptions, counts) may be in flight at once. WebView2 lets the page hold six
+ * requests to the IPC; with three for the background and one for the ack, a lawyer's action always finds one free. */
+export const BACKGROUND_SLOTS = 3;
+
+/** The commands `dispatch` sends without the lawyer asking: they go in the background lane. */
+const BACKGROUND_COMMANDS = new Set(["refresh_limits", "mark_seen"]);
+
+/** Whether `command` is one the page sends on its own, not a lawyer's action. */
+function isBackground(command: CommandEnvelope): boolean {
+  const body = command.command as unknown;
+  const kind = typeof body === "string" ? body : Object.keys(body as object)[0];
+  return kind !== undefined && BACKGROUND_COMMANDS.has(kind);
+}
 
 type Answer<T> = { status: "ok"; data: T } | { status: "error"; error: unknown };
 
@@ -92,6 +107,12 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   /** Whether the message being read handed a batch to a subscriber. */
   #carried = false;
   #sendQueued = false;
+  /** An `ack` is in flight: the next waits for it, so acks hold at most one request. */
+  #ackInFlight = false;
+  /** Something new to ack came while one was in flight. */
+  #ackAgain = false;
+  /** The background calls' lane (lane.ts): reads, subscriptions and counts, never a lawyer's action. */
+  readonly #background = new Lane(BACKGROUND_SLOTS);
   /** `onDispatch` listeners; none in release. */
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   #frameQueued = false;
@@ -119,11 +140,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       {
         subscribe: async (stream, after) => {
           await this.#open();
-          await call(commands.subscribe(stream, after));
+          await this.#background.run(() => call(commands.subscribe(stream, after)));
         },
         unsubscribe: async (stream) => {
           await this.#open();
-          await call(commands.unsubscribe(stream));
+          await this.#background.run(() => call(commands.unsubscribe(stream)));
         },
       },
       warn,
@@ -209,11 +230,20 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#open().then(send, send);
   }
 
+  /** `#afterOpen`, then the background lane: a read the page makes on its own never holds more than its share of the
+   * IPC's requests, however long the desktop takes to answer it. */
+  #inBackground<T>(send: () => Promise<T>): Promise<T> {
+    const queued = () => this.#background.run(send);
+    return this.#open().then(queued, queued);
+  }
+
   /** Subscribes the channel to the app-wide events, once per open channel; after a failed attempt the next listener
    * (or the next open) tries again. */
   #subscribeApp(): Promise<void> {
     if (this.#appReady === null) {
-      const ready = this.#open().then(() => call(commands.subscribeApp()).then(() => undefined));
+      const ready = this.#open().then(() =>
+        this.#background.run(() => call(commands.subscribeApp())).then(() => undefined),
+      );
       this.#appReady = ready;
       ready.catch((e: unknown) => {
         this.#warn(`subscribe_app failed: ${JSON.stringify(toHostError(e))}`);
@@ -255,8 +285,13 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     });
   }
 
-  /** One bridge call with the positions waiting and the messages processed, when there is anything new. */
+  /** One bridge call with the positions waiting and the messages processed, when there is anything new. While one is
+   * in flight the next waits for it, and then carries everything new since. */
   #send(): void {
+    if (this.#ackInFlight) {
+      this.#ackAgain = true;
+      return;
+    }
     const messages = Math.min(
       this.#processedBefore ?? this.#reader.messages,
       this.#reader.unfinishedSince ?? this.#reader.messages,
@@ -265,9 +300,15 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     const positions = [...this.#positions.values()];
     this.#positions.clear();
     this.#ackedMessages = Math.max(this.#ackedMessages, messages);
-    call(commands.ack(positions, messages)).catch((e: unknown) =>
-      this.#warn(`ack failed: ${JSON.stringify(toHostError(e))}`),
-    );
+    this.#ackInFlight = true;
+    call(commands.ack(positions, messages))
+      .catch((e: unknown) => this.#warn(`ack failed: ${JSON.stringify(toHostError(e))}`))
+      .finally(() => {
+        this.#ackInFlight = false;
+        if (!this.#ackAgain) return;
+        this.#ackAgain = false;
+        this.#send();
+      });
   }
 
   ack(stream: StreamId, position: ViewPosition): void {
@@ -295,10 +336,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
 
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     for (const listener of this.#dispatched) listener(command);
-    return this.#afterOpen(() => call(commands.dispatch(command)));
+    const send = () => call(commands.dispatch(command));
+    return isBackground(command) ? this.#inBackground(send) : this.#afterOpen(send);
   }
   query(query: HostQuery): Promise<QueryResult> {
-    return this.#afterOpen(() => call(commands.query(query)));
+    return this.#inBackground(() => call(commands.query(query)));
   }
   async answerPermission(
     thread: ThreadId,
@@ -331,7 +373,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     });
   }
   displayInfo(): Promise<DisplayInfo> {
-    return call(commands.displayInfo());
+    return this.#background.run(() => call(commands.displayInfo()));
   }
   async openExternal(url: string): Promise<void> {
     await call(commands.openExternal(url));
@@ -403,7 +445,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {
-    await this.#afterOpen(() => call(commands.countUi(event)));
+    await this.#inBackground(() => call(commands.countUi(event)));
   }
 }
 
