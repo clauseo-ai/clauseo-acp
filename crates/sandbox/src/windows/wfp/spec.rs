@@ -26,8 +26,8 @@ use std::net::Ipv4Addr;
 
 use super::check::NetworkGap;
 pub use super::rules::{
-    Direction, FIREWALL_UNDER_POLICY, FirewallOutcome, LOOPBACK_ADDRESSES, NON_LOOPBACK_ADDRESSES,
-    RuleProtocol, RuleSpec, outside_range, rule_names, rule_users,
+    Direction, FIREWALL_UNDER_POLICY, FirewallOutcome, FirewallTrouble, LOOPBACK_ADDRESSES,
+    NON_LOOPBACK_ADDRESSES, RuleProtocol, RuleSpec, outside_range, rule_names, rule_users,
 };
 use crate::ports::WINDOWS_PORTS;
 use crate::windows::sids::Sid;
