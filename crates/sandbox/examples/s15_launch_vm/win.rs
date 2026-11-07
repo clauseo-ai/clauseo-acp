@@ -216,7 +216,7 @@ fn privileges(token: HANDLE) -> io::Result<Vec<(String, u32)>> {
 }
 
 /// `sid` as text.
-fn sid_text(sid: PSID) -> io::Result<String> {
+pub(crate) fn sid_text(sid: PSID) -> io::Result<String> {
     let mut text = PWSTR::null();
     // SAFETY: `sid` points at a valid SID for the call; `text` is a live out-pointer.
     unsafe { ConvertSidToStringSidW(sid, &raw mut text) }.map_err(|e| os(&e))?;

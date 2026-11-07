@@ -10,6 +10,7 @@ use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
 use super::launch::{Running, Spec, deadline, launch, pool_of, run_command, summary};
+use super::manifest::SECOND_A;
 use super::pool_verdict;
 use super::probe_sec::{PIPE_OBJECT_PREFIX, REFUSED, THREAD_RIGHTS, TOKEN_RIGHTS};
 use super::rows::Ctx;
@@ -274,11 +275,7 @@ fn conhosts(
 /// either way. While the probe waits, the harness duplicates that job's handle from the outer
 /// runner and checks the child with `IsProcessInJob` (or the job's pid list), then closes it.
 pub(crate) fn breakaway(ctx: &Ctx<'_>) -> Result<String, String> {
-    let mut a = launch(
-        ctx.manifest,
-        "A",
-        &Spec::probe(ctx.manifest, &["breakaway"]),
-    )?;
+    let mut a = launch(ctx, "A", &Spec::probe(ctx.manifest, &["breakaway"]))?;
     let until = deadline(ctx.limit);
     let first = a.line_after("breakaway ", until);
     let pid = first
@@ -513,17 +510,18 @@ fn winsta0(ctx: &Ctx<'_>, first: &dyn Fn(&str) -> Option<String>, bad: &mut Vec<
 /// Starts `probe desktop` as A; it waits after `desktop done`, so the DACLs are read while it
 /// runs.
 fn started_desktop(ctx: &Ctx<'_>) -> Result<Running, String> {
-    let running = launch(ctx.manifest, "A", &Spec::probe(ctx.manifest, &["desktop"]))?;
+    let running = launch(ctx, "A", &Spec::probe(ctx.manifest, &["desktop"]))?;
     ctx.note(&format!("A: probe desktop, outer pid {}", running.pid()));
     Ok(running)
 }
 
-/// The `pipes-same-matter` row: a second agent of A's matter (the same pool user) gets 5, not
-/// 231, opening each of A's four pipes: the pipes' Medium no-read-up label stops a Low agent of
-/// the very user the DACL grants.
+/// The `pipes-same-matter` row: a second session of A's matter gets 5, not 231, opening each of
+/// A's four pipes. A pool user serves one live session at a time (the runner's first act ends
+/// every other process of its user), so the second session runs as matter A's second pool user
+/// (`A2`, granted A's matter folder too), as the host would run it.
 pub(crate) fn pipes_same_matter(ctx: &Ctx<'_>) -> Result<String, String> {
     let (mut a, _pid) = started(ctx, "A", &["wait"])?;
-    let result = pipes_as(ctx, "A");
+    let result = pipes_as(ctx, SECOND_A);
     a.kill();
-    result.map(|note| format!("{note} (the same pool user as A: the label stopped it)"))
+    result.map(|note| format!("{note} (a second session of A's matter, as its second pool user)"))
 }
