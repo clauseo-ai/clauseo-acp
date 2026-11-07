@@ -48,6 +48,10 @@ struct Fake {
     items: Vec<Item>,
     owner_writes: Vec<(PathBuf, Sid)>,
     fail_owner_write: Option<PathBuf>,
+    /// Every write of the seam, in order: `("ow", path)` for an `OWNER RIGHTS` drop, `("owner",
+    /// path)` for an owner.
+    writes: Vec<(&'static str, PathBuf)>,
+    fail_owner_rights: Option<PathBuf>,
     /// Paths that resolve to another final path (a short name, a junction on the way).
     aliases: BTreeMap<PathBuf, PathBuf>,
     /// Every item whose owner, rights or children were asked for.
@@ -128,11 +132,21 @@ impl OwnerTree for Fake {
         Ok(self.items[*node].granted)
     }
 
+    fn drop_owner_rights(&mut self, node: &usize) -> io::Result<()> {
+        let path = self.items[*node].path.clone();
+        if self.fail_owner_rights.as_ref() == Some(&path) {
+            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        }
+        self.writes.push(("ow", path));
+        Ok(())
+    }
+
     fn set_owner(&mut self, node: &usize, owner: &Sid) -> io::Result<()> {
         let path = self.items[*node].path.clone();
         if self.fail_owner_write.as_ref() == Some(&path) {
             return Err(io::Error::from(io::ErrorKind::PermissionDenied));
         }
+        self.writes.push(("owner", path.clone()));
         self.owner_writes.push((path, owner.clone()));
         self.items[*node].owner = owner.clone();
         Ok(())
@@ -200,9 +214,13 @@ fn only_what_a_pool_user_owns_and_the_lawyer_cant_hand_back_changes_owner() {
     assert_eq!(fake.owner_of("m/colleague.txt"), sid(COLLEAGUE));
     assert_eq!(fake.owner_of("m/junction/beyond.txt"), sid(POOL_A));
     assert_eq!(fake.owner_of("m/linked.txt"), sid(POOL_A));
-    // No DACL changed: the seam has no call that could.
+    // No DACL changed but by the seam's one DACL call, the `OWNER RIGHTS` drop, made on each
+    // taken item just before its owner and on nothing else.
     let after: Vec<&'static str> = fake.items.iter().map(|i| i.dacl).collect();
     assert_eq!(after, before);
+    let mut pairs = fake.writes.chunks(2).map(|w| (w[0].clone(), w[1].clone()));
+    assert!(pairs.all(|(ow, owner)| ow.0 == "ow" && owner.0 == "owner" && ow.1 == owner.1));
+    assert_eq!(fake.writes.len(), 6, "{:?}", fake.writes);
     let want = Reclaimed {
         visited: 7,
         taken: 3,
@@ -371,4 +389,18 @@ fn a_missing_root_is_nothing_and_an_owner_in_the_pool_takes_nothing() {
     let pooled = walk_as(&mut fake, "m", true, &sid(POOL_A));
     assert_eq!(pooled.roots_refused, 1);
     assert_eq!(fake.owner_writes, []);
+}
+
+/// An item whose `OWNER RIGHTS` entries can't be taken off isn't taken: its owner stays, and the
+/// failure is counted. Its owner would otherwise be the lawyer with no owner's rights to show.
+#[test]
+fn an_item_whose_owner_rights_cant_be_dropped_isnt_taken() {
+    let mut fake = matter();
+    fake.fail_owner_rights = Some(p("m/moved.txt"));
+
+    let seen = walk(&mut fake, "m", true);
+
+    assert_eq!(fake.owner_of("m/moved.txt"), sid(POOL_B));
+    assert!(!fake.writes.iter().any(|w| w.1 == p("m/moved.txt")));
+    assert_eq!((seen.taken, seen.failed), (2, 1));
 }

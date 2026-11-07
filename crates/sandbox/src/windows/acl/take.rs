@@ -4,9 +4,11 @@
 //! each child by its name relative to its folder's handle (`OBJ_DONT_REPARSE`), its final path
 //! its folder's plus `\name`, and each folder's final path checked again before it is listed.
 //! Run with `SeBackupPrivilege` and `SeRestorePrivilege` enabled (`privilege.rs`), the opens get
-//! `READ_CONTROL`, the listing and `WRITE_OWNER` whatever the DACL says, as a backup-intent open
-//! does. The one write is the owner (`OWNER_SECURITY_INFORMATION` alone, on that handle), read
-//! back after; each object re-owned is kept by its final path and file ID, for the result.
+//! `READ_CONTROL`, the listing, `WRITE_DAC` and `WRITE_OWNER` whatever the DACL says, as a
+//! backup-intent open does. The writes, on that handle: the owner (`OWNER_SECURITY_INFORMATION`
+//! alone), read back after; and just before it, when the DACL holds an `OWNER RIGHTS` entry, the
+//! DACL without those entries and with every other byte as it was (`without_owner_rights`), read
+//! back after too. Each object re-owned is kept by its final path and file ID, for the result.
 //! Paths are resolved by handle (`resolve`), so a short name, a different case or a
 //! junction on the way is checked as the final path it reaches.
 
@@ -15,11 +17,13 @@ use std::io;
 use std::os::windows::ffi::OsStringExt as _;
 use std::path::{Path, PathBuf};
 
-use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 
 use super::object::{Child, Object, reparse_refused};
-use super::{READ_ALL, same_path};
-use crate::windows::acl_bytes::{owner_descriptor, owner_sid, sid_bytes};
+use super::{READ_ALL, dacl_info, same_path};
+use crate::windows::acl_bytes::{
+    Descriptor, owner_descriptor, owner_sid, sid_bytes, without_owner_rights,
+};
 use crate::windows::reclaim::walk::{Kind, OwnerTree};
 use crate::windows::sids::Sid;
 use crate::windows::writer::{ApplyFailure, FileId};
@@ -132,6 +136,26 @@ impl OwnerTree for NtfsOwners<'_> {
     fn granted(&mut self, node: &Node) -> io::Result<u32> {
         let descriptor = node.object.security(READ_ALL)?;
         (self.granted)(&descriptor)
+    }
+
+    fn drop_owner_rights(&mut self, node: &Node) -> io::Result<()> {
+        let current = node.object.security(DACL_SECURITY_INFORMATION.0)?;
+        let Some(new) = without_owner_rights(&current)? else {
+            return Ok(());
+        };
+        if !node.object.write_dac {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the clean-up's handle got no WRITE_DAC",
+            ));
+        }
+        let control = Descriptor::parse(&new)?.control;
+        node.object.set(dacl_info(control), &new)?;
+        let after = node.object.security(DACL_SECURITY_INFORMATION.0)?;
+        if without_owner_rights(&after)?.is_some() {
+            return Err(io::Error::other("an OWNER RIGHTS entry is still there"));
+        }
+        Ok(())
     }
 
     fn set_owner(&mut self, node: &Node, owner: &Sid) -> io::Result<()> {

@@ -142,6 +142,46 @@ fn offending(ace: &[u8], others: &[Vec<u8>], mine: &[Vec<u8>]) -> bool {
     }
 }
 
+/// What `--reclaim` writes on an item it takes, before its owner (S15 `PR4i` follow-up): the DACL
+/// without every entry naming `OWNER RIGHTS` (S-1-3-4), allow or deny, explicit or marked
+/// inherited, of any type that names a SID; every other entry byte for byte, in its order, and
+/// the DACL's revision and control bits as they were. An `OWNER RIGHTS` entry takes the owner's
+/// implied `READ_CONTROL | WRITE_DAC` away, so with one the lawyer couldn't open the item even
+/// once it owns it. `None` when there is none, or no DACL. Built for Windows and the tests.
+#[cfg(any(windows, test))]
+pub(crate) fn without_owner_rights(descriptor: &[u8]) -> io::Result<Option<Vec<u8>>> {
+    /// `OWNER RIGHTS`, as bytes: revision 1, one sub-authority, authority 3, RID 4.
+    const OWNER_RIGHTS: [u8; 12] = [1, 1, 0, 0, 0, 0, 0, 3, 4, 0, 0, 0];
+    let now = Descriptor::parse(descriptor)?;
+    let Some(dacl) = now.dacl else {
+        return Ok(None);
+    };
+    let dacl = Acl::parse(dacl)?;
+    let names_it = |ace: &&[u8]| any_sid(ace) == Some(OWNER_RIGHTS.as_slice());
+    if !dacl.aces().iter().any(names_it) {
+        return Ok(None);
+    }
+    let kept: Vec<&[u8]> = dacl
+        .aces()
+        .iter()
+        .copied()
+        .filter(|ace| !names_it(ace))
+        .collect();
+    let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
+    let new = render(dacl.revision, &kept);
+    Ok(Some(build_descriptor(now.control & bits, Some(&new), None)))
+}
+
+/// An entry's SID, for every type that names one: the plain, callback and label types, and the
+/// object types (allow and deny, plain and callback).
+#[cfg(any(windows, test))]
+fn any_sid(ace: &[u8]) -> Option<&[u8]> {
+    match kind(ace) {
+        5 | DENIED_OBJECT | 11 | DENIED_CALLBACK_OBJECT => object_sid(ace),
+        _ => sid(ace),
+    }
+}
+
 /// `ACCESS_DENIED_OBJECT_ACE_TYPE`.
 const DENIED_OBJECT: u8 = 6;
 /// `ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE`.

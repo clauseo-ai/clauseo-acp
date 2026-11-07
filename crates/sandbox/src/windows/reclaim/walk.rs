@@ -1,7 +1,8 @@
 //! `--reclaim`'s walk (S15 `PR4i`) over a seam, [`OwnerTree`], so it is tested on every OS; its
 //! Windows side is `acl/take.rs`. The seam can read an object's owner and what the desktop
-//! user's own token would get on it, and write its owner; it has no call that writes a DACL, an
-//! allow or a label, so the walk can't (K1).
+//! user's own token would get on it, and write its owner; its one other write takes the
+//! `OWNER RIGHTS` entries off an object it takes, just before the owner, and nothing else. It has
+//! no call that grants, adds an entry or writes a label, so the walk can't (K1).
 //!
 //! What the walk may reveal and enter is bounded by access, not by the owner's files (K1). The
 //! root is resolved by handle to its final path, and so is each bound (the matter roots the
@@ -16,8 +17,10 @@
 //! name. A folder is entered only when a pool SID owns it or the owner can list it; a folder
 //! neither is never entered and never counted. An object a pool SID from the machine's record
 //! owns, on which the desktop user lacks a right the hand-back needs (`READ_CONTROL`,
-//! `WRITE_DAC` or `WRITE_OWNER`), gets the owner as its owner, and nothing else. A file no pool
-//! SID owns that the owner can't read is counted as left, never touched. One a pool user owns
+//! `WRITE_DAC` or `WRITE_OWNER`), loses its `OWNER RIGHTS` entries (which would take its new
+//! owner's implied rights away) and gets the owner as its owner, and nothing else; one whose
+//! entries can't be taken off isn't taken. A file no pool SID owns that the owner can't read is
+//! counted as left, never touched. One a pool user owns
 //! that the desktop user can hand back is left to that hand-back.
 
 use std::io;
@@ -51,7 +54,8 @@ pub enum Kind {
     Linked,
 }
 
-/// The objects the walk reads and re-owns. The only write is [`OwnerTree::set_owner`].
+/// The objects the walk reads and re-owns. The writes are [`OwnerTree::set_owner`] and, just
+/// before it, [`OwnerTree::drop_owner_rights`].
 pub trait OwnerTree {
     /// An object opened as itself.
     type Node;
@@ -74,6 +78,10 @@ pub trait OwnerTree {
     fn owner(&mut self, node: &Self::Node) -> io::Result<Sid>;
     /// What the desktop user's own token gets on `node` ([`HAND_BACK`]'s rights and [`LIST`]).
     fn granted(&mut self, node: &Self::Node) -> io::Result<u32>;
+    /// Takes every `OWNER RIGHTS` (S-1-3-4) entry off `node`'s DACL, allow or deny, explicit or
+    /// inherited, and changes nothing else; with none, writes nothing. Called on what is taken
+    /// only, just before [`OwnerTree::set_owner`].
+    fn drop_owner_rights(&mut self, node: &Self::Node) -> io::Result<()>;
     /// Makes `owner` the owner of `node`, and changes nothing else.
     fn set_owner(&mut self, node: &Self::Node, owner: &Sid) -> io::Result<()>;
 }
@@ -232,7 +240,10 @@ fn visit<T: OwnerTree>(
     }
     seen.visited += 1;
     if pooled && granted & HAND_BACK != HAND_BACK {
-        match tree.set_owner(node, scope.owner) {
+        let taken = tree
+            .drop_owner_rights(node)
+            .and_then(|()| tree.set_owner(node, scope.owner));
+        match taken {
             Ok(()) => seen.taken += 1,
             Err(_) => seen.failed += 1,
         }

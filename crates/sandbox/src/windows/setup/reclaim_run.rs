@@ -17,7 +17,9 @@
 //!    naming it.
 //! 6. Each tree is walked ([`take_ownership`] over `acl/take.rs`), entering only what a pool
 //!    user owns or the owner can list: what a pool SID of the record owns and the owner can't
-//!    hand back (`Owner::granted`) gets the owner as its owner, and nothing else changes (K1).
+//!    hand back (`Owner::granted`) loses its `OWNER RIGHTS` entries (`drop_owner_rights`, which
+//!    would take the new owner's implied rights away) and gets the owner as its owner, and
+//!    nothing else changes (K1).
 //! 7. `setup-result.json` is written as the owner: 0 when nothing failed; else the counts, of
 //!    what the walks reached only, with how many items were taken. Before it, as the owner too,
 //!    `reclaim-taken.json` lists each item taken (`taken_file.rs`), so the app's hand-back strips
