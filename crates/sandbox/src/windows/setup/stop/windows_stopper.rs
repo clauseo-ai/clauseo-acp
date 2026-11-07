@@ -207,10 +207,13 @@ impl Stopper for WindowsStopper {
         record_write::add_reset_sids(RECORD_KEY, users).map_err(|error| error.to_string())
     }
 
-    fn record_completed(&mut self) -> Result<(), Failed> {
+    fn now(&mut self) -> u64 {
         // SAFETY: GetSystemTimeAsFileTime only reads the clock.
         let now = unsafe { GetSystemTimeAsFileTime() };
-        let at = u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime);
+        u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime)
+    }
+
+    fn record_completed(&mut self, at: u64) -> Result<(), Failed> {
         record_write::write_stop_completed(RECORD_KEY, at).map_err(|error| error.to_string())
     }
 

@@ -94,10 +94,12 @@ impl CopyOwner {
 /// again. Outside [`MachineRecord`]. The next set-up resets each listed user of the pool, even
 /// one a matter holds, once no session is open (`resets.rs`), and takes it off the list.
 pub const RESET_SIDS: &str = "ResetSids";
-/// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the stop task last
-/// completed, written only by a run that ends 0 (every pool user's process gone, every pool BITS
-/// job cancelled, `ResetSids` written). A run that is ended, interrupted or exits non-zero never
-/// writes it and leaves an earlier one as it is. Outside [`MachineRecord`]; deleted with the
+/// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the last completed
+/// stop's last clean observation began (the pass that found no pool user's process, or the BITS
+/// enumeration, whichever began first), not when it was written; written only by a run that
+/// ends 0 (every pool user's process gone, every pool BITS job cancelled, `ResetSids` written).
+/// A run that is ended, interrupted or exits non-zero never writes it and leaves an earlier one
+/// as it is. Outside [`MachineRecord`]; deleted with the
 /// set-up's values.
 pub const STOP_COMPLETED: &str = "StopCompleted";
 /// `StopLeft` (`REG_DWORD`): the pool users' processes and jobs the completed stop left,

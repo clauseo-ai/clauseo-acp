@@ -47,8 +47,11 @@
 //!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
 //!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
 //!    at most;
-//! 7. only then, on a run that will end 0, writes `StopCompleted` (when, a `FILETIME`) and
+//! 7. only then, on a run that will end 0, writes `StopCompleted` and
 //!    `StopLeft` (0) into the record under the set-up lock (`record_values::STOP_COMPLETED`).
+//!    `StopCompleted` is when the last clean observation began, not when it is written: the
+//!    earlier of the pass that found no pool user's process (after which nothing was stopped)
+//!    and the BITS step's enumeration, so a pool process started after it isn't claimed covered.
 //!    A run the task's end kills, or one that ends non-zero, never writes them and leaves an
 //!    earlier pair as it is; a write that fails, or a lock that stays held, is 49.
 //!
@@ -281,8 +284,11 @@ pub trait Stopper {
     fn unlock(&mut self);
     /// Adds `users` to the record's `ResetSids`, keeping what it lists.
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
-    /// Writes the record's `StopCompleted` (now) and `StopLeft` (0), under the set-up lock.
-    fn record_completed(&mut self) -> Result<(), Failed>;
+    /// The wall clock, as a `FILETIME` (100 ns since 1601, UTC).
+    fn now(&mut self) -> u64;
+    /// Writes the record's `StopCompleted` (`at`, a `FILETIME`) and `StopLeft` (0), under the
+    /// set-up lock.
+    fn record_completed(&mut self, at: u64) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -318,6 +324,10 @@ struct Passes {
     jobs_failed: usize,
     /// The BITS list reached [`JOBS_CAP`], so jobs past it may not have been read.
     jobs_capped: bool,
+    /// When the last pass began (`Stopper::now`) whose snapshot found no pool user's process.
+    clean_at: Option<u64>,
+    /// When the BITS step's enumeration began.
+    jobs_at: Option<u64>,
 }
 
 /// Runs the stop as the module says.
@@ -391,7 +401,12 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     if let Some(why) = passes.mark_failed {
         return Err((StopExit::NotMarked, format!("{counts}; {why}")));
     }
-    completed(fs).map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
+    // The earlier clean observation: nothing the record claims covered started before it.
+    let clean = passes.clean_at.into_iter().chain(passes.jobs_at).min();
+    let Some(at) = clean else {
+        return not_stopped("no pass found the pool clear");
+    };
+    completed(fs, at).map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
     let retried = passes.retried;
     Ok(format!(
         "the sandbox's stop: {counts}; {} users marked for a profile reset ({retried} retried)",
@@ -422,6 +437,7 @@ fn allowed(fs: &mut impl Stopper) -> Result<(), Refusal> {
 fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
     let began = fs.elapsed();
     loop {
+        let at = fs.now();
         let seen = fs
             .snapshot()
             .map_err(|why| format!("a process snapshot failed: {why}"))?;
@@ -438,6 +454,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
             .extend(picked.stop.iter().map(|(_, user)| user.clone()));
         mark_new(fs, passes);
         if picked.stop.is_empty() {
+            passes.clean_at = Some(at);
             return Ok(());
         }
         if fs.elapsed().saturating_sub(began) >= PASS_LIMIT {
@@ -473,6 +490,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
 /// the error; a cancel that fails, or an owner that can't be read, is counted; a list of
 /// [`JOBS_CAP`] jobs is marked `jobs_capped` once the pool's jobs in it are cancelled.
 fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
+    passes.jobs_at = Some(fs.now());
     let owners = fs
         .bits_jobs()
         .map_err(|why| format!("the BITS jobs couldn't be listed: {why}"))?;
@@ -523,13 +541,14 @@ fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
     }
 }
 
-/// Step 7: `StopCompleted` and `StopLeft` written under the set-up lock, once everything
-/// before has passed. The lock's wait may come a second time here only when a set-up took the
-/// lock after the marks; a run the task's limit ends meanwhile writes nothing.
-fn completed(fs: &mut impl Stopper) -> Result<(), String> {
+/// Step 7: `StopCompleted` (`at`, the last clean observation) and `StopLeft` written under
+/// the set-up lock, once everything before has passed. The lock's wait may come a second time
+/// here only when a set-up took the lock after the marks; a run the task's limit ends meanwhile
+/// writes nothing.
+fn completed(fs: &mut impl Stopper, at: u64) -> Result<(), String> {
     let written = match fs.lock() {
         Ok(true) => {
-            let written = fs.record_completed();
+            let written = fs.record_completed(at);
             fs.unlock();
             written
         }
