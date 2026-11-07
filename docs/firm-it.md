@@ -767,7 +767,10 @@ Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, which sets up and
 Windows protection (section 1); on our test machine, as `Trojan:Win32/Bearfoos.A!ml`, a false
 positive. Without it the protection can't be set up, or removed by the uninstaller.
 
-- **Installing:** if the file is gone after copying, the install stays and says so; `/S` exits 20.
+- **Installing:** if the copy Clauseo runs is gone after copying, the install stays and says so;
+  `/S` exits 20. That copy is the one in `C:\Program Files\Clauseo\Sandbox` when the install ran
+  Safe workspace's elevated step, else the one in the install folder: after a declined prompt,
+  with Clauseo running, or for a per-user `/S`, `/P` or `/UPDATE` install.
 - **Uninstalling:** if the file is gone and the protection was set up (the key
   `HKLM\SOFTWARE\Clauseo\Sandbox` exists), the uninstaller says the sandbox's hidden accounts are
   still on the computer; with `/S` it exits 21 instead. The rest of the uninstall carries on.

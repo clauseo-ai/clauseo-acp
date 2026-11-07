@@ -101,6 +101,12 @@
 ; 1 once a wait for the set-up timed out (outcome 7, or CLAUSEO_ADMIN_TIMED_OUT per machine): the
 ; finish page then unticks and hides its "Run Clauseo" box (CLAUSEO_FINISH_SHOW).
 Var ClauseoAdminTimedOut
+; 1 once the admin section ran in this install: the per-machine installer's admin copy step got
+; past its Clauseo-running check, or the per-user installer's elevated instance started and didn't
+; find Clauseo running (97). Launches then run the admin copy, so hooks.nsh's check for a set-up
+; program Windows security removed (setupExeRemoved) looks at CLAUSEO_ADMIN_DIR's copy; left 0 (a
+; declined prompt, /S, /P, /UPDATE, Clauseo running), it looks at the one in $INSTDIR.
+Var ClauseoAdminSectionRan
 
 ; The elevated installers' protected temporary folder, made first in each elevated path, and the
 ; elevated instance's branch, which the template inserts first in .onInit.
@@ -359,6 +365,7 @@ Var ClauseoAdminTimedOut
       System::Call 'shell32::ShellExecuteExW(p R5) i .R7 ?e'
       Pop $R9
       ${If} $R7 <> 0
+        StrCpy $ClauseoAdminSectionRan 1
         DetailPrint "$(adminCopyWorking)"
         System::Call '*$R5(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
         ${If} $R7 <> 0
@@ -388,6 +395,7 @@ Var ClauseoAdminTimedOut
       StrCpy $R6 5
     ${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}
       StrCpy $R6 6
+      StrCpy $ClauseoAdminSectionRan 0
     ${EndIf}
     ${If} $R6 <> 4
     ${AndIf} $R6 <> 5
@@ -473,6 +481,7 @@ Var ClauseoAdminTimedOut
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
     ${EndIf}
   ${Else}
+    StrCpy $ClauseoAdminSectionRan 1
     !insertmacro CLAUSEO_RECORD_CHECK ""
     ${If} $R1 = 1
       ; Another user's per-user install placed the copy: --adopt would refuse (2); the copy stays.

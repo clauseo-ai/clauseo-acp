@@ -210,6 +210,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
         "${EndIf}",
         "${Else}",
+        "StrCpy $ClauseoAdminSectionRan 1",
         "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
         "${If} $R1 = 1",
         "StrCpy $R8 ${CLAUSEO_ADOPT_OTHER_ACCOUNT}",

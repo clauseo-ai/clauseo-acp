@@ -1,13 +1,17 @@
 //! What the sources must keep when Windows security removed the sandbox's set-up program
-//! (`clauseo-sandbox-setup.exe`): both installers check for it after installing and say so, the
+//! (`clauseo-sandbox-setup.exe`): both installers check for the copy launches run after installing
+//! (the admin copy once the admin section ran, else the one in `$INSTDIR`) and say so, the
 //! uninstaller says so when it finds its admin copy (the one its removal starts) gone after a
 //! set-up, each with a box or, under `/S`, an exit code of its own that `docs/firm-it.md` lists.
 
+use super::admin_copy::{ASK, admin_code, assert_run, macro_body};
 use super::sources::{hook_code, line_with, preuninstall, read};
 
 const SETUP_EXE: &str = "\"$INSTDIR\\clauseo-sandbox-setup.exe\"";
 /// The admin copy in Program Files, the one the uninstaller's removal starts (`hooks.nsh`).
 const ADMIN_EXE: &str = "\"${CLAUSEO_ADMIN_EXE}\"";
+/// The same copy as `admin_copy.nsh` names it, which the installers check after the admin section.
+const ADMIN_COPY: &str = "\"${CLAUSEO_ADMIN_DIR}\\clauseo-sandbox-setup.exe\"";
 
 /// The post-install macro's code lines.
 fn postinstall(code: &[String]) -> &[String] {
@@ -35,12 +39,18 @@ fn defined(code: &[String], name: &str) -> u32 {
 fn both_installers_check_for_the_set_up_program_last_and_keep_the_install() {
     let code = hook_code();
     let body = postinstall(&code);
-    // After the per-machine block's !endif, so the per-user installer runs it too.
-    let check = line_with(body, &["${IfNot} ${FileExists}", SETUP_EXE]);
+    // After the per-machine block's !endif, so the per-user installer runs it too, and after the
+    // admin section, which both installers end that block with.
+    let check = body.iter().rposition(|line| line == "Push $R7").unwrap();
     let last_endif = body.iter().rposition(|line| line == "!endif").unwrap();
-    assert!(last_endif < check, "{body:?}");
+    assert_eq!(last_endif + 1, check, "{body:?}");
     let expected = [
-        format!("${{IfNot}} ${{FileExists}} {SETUP_EXE}"),
+        "Push $R7".to_owned(),
+        format!("StrCpy $R7 {SETUP_EXE}"),
+        "${If} $ClauseoAdminSectionRan = 1".to_owned(),
+        format!("StrCpy $R7 {ADMIN_COPY}"),
+        "${EndIf}".to_owned(),
+        "${IfNot} ${FileExists} \"$R7\"".to_owned(),
         "DetailPrint \"$(setupExeRemoved)\"".to_owned(),
         "${If} ${Silent}".to_owned(),
         "SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}".to_owned(),
@@ -48,9 +58,76 @@ fn both_installers_check_for_the_set_up_program_last_and_keep_the_install() {
         "MessageBox MB_ICONEXCLAMATION|MB_OK \"$(setupExeRemoved)\"".to_owned(),
         "${EndIf}".to_owned(),
         "${EndIf}".to_owned(),
+        "Pop $R7".to_owned(),
     ];
     // The macro's last lines: nothing after it rolls the install back.
     assert_eq!(body[check..], expected, "{body:?}");
+}
+
+#[test]
+fn the_installers_check_the_admin_copy_only_when_the_admin_section_ran() {
+    let admin = admin_code();
+    // Set in three places only, besides its declaration.
+    let sets: Vec<&String> = admin
+        .iter()
+        .filter(|line| line.contains("ClauseoAdminSectionRan"))
+        .collect();
+    assert_eq!(
+        sets,
+        [
+            "Var ClauseoAdminSectionRan",
+            "StrCpy $ClauseoAdminSectionRan 1",
+            "StrCpy $ClauseoAdminSectionRan 0",
+            "StrCpy $ClauseoAdminSectionRan 1",
+        ],
+        "{admin:?}"
+    );
+    // Per user: once the elevated instance started (a declined prompt fails ShellExecuteExW), and
+    // never in the /UPDATE, /S or /P branch, which ends at the interactive branch's ${Else}.
+    let ask = macro_body(&admin, ASK);
+    assert_run(
+        ask,
+        &[
+            "System::Call 'shell32::ShellExecuteExW(p R5) i .R7 ?e'",
+            "Pop $R9",
+            "${If} $R7 <> 0",
+            "StrCpy $ClauseoAdminSectionRan 1",
+        ],
+    );
+    let skip = line_with(ask, &["${ElseIf} ${Silent}"]);
+    let interactive = skip + line_with(&ask[skip..], &["${Else}"]);
+    assert!(interactive < line_with(ask, &["StrCpy $ClauseoAdminSectionRan 1"]));
+    // Cleared when the elevated instance found Clauseo running (97): it wrote nothing.
+    assert_run(
+        ask,
+        &[
+            "${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}",
+            "StrCpy $R6 6",
+            "StrCpy $ClauseoAdminSectionRan 0",
+        ],
+    );
+    // Per machine: every run past the Clauseo-running check, updates included.
+    let machine = macro_body(&admin, "CLAUSEO_ADMIN_COPY_MACHINE");
+    assert_run(
+        machine,
+        &[
+            "${Else}",
+            "StrCpy $ClauseoAdminSectionRan 1",
+            "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
+        ],
+    );
+    // The copy checked is the one the uninstaller and the app start.
+    let dir = &admin[line_with(&admin, &["!define CLAUSEO_ADMIN_DIR "])];
+    let dir = dir.strip_prefix("!define CLAUSEO_ADMIN_DIR \"").unwrap();
+    let exe = format!(
+        "{}\\clauseo-sandbox-setup.exe\"",
+        dir.strip_suffix('"').unwrap()
+    );
+    let code = hook_code();
+    assert_eq!(
+        code[line_with(&code, &["!define CLAUSEO_ADMIN_EXE "])],
+        format!("!define CLAUSEO_ADMIN_EXE \"{exe}")
+    );
 }
 
 #[test]

@@ -51,8 +51,9 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe w
 ; removeExeMissing: the uninstaller found S15's set-up program (clauseo-sandbox-setup.exe) gone,
 ; most likely quarantined by Windows security, while the machine's record shows a set-up, so it
 ; couldn't run --remove. A box; under /S a details line and exit code 21. setupExeRemoved: an
-; installer found that program gone right after writing it; the install stays. A box; under /S a
-; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
+; installer found the copy launches run gone right after writing it (the admin copy in Program Files
+; once the admin section ran, else the one in the install folder); the install stays. A box; under
+; /S a details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
 LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
 ; removeAdminCopyRefused: the uninstaller found S15's set-up program in Program Files, but a
 ; folder on its way or the file itself can be changed by more than administrators, or its SHA-256

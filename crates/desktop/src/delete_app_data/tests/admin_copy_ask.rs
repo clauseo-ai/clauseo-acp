@@ -95,7 +95,11 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
     assert_run(body, &["${If} $R9 = 258", "StrCpy $R6 7"]);
     assert_run(
         body,
-        &["${If} $R7 <> 0", "DetailPrint \"$(adminCopyWorking)\""],
+        &[
+            "${If} $R7 <> 0",
+            "StrCpy $ClauseoAdminSectionRan 1",
+            "DetailPrint \"$(adminCopyWorking)\"",
+        ],
     );
     assert!(
         body[..interactive]
@@ -175,6 +179,7 @@ fn every_exit_code_of_adopt_has_its_outcome() {
             "StrCpy $R6 5",
             "${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}",
             "StrCpy $R6 6",
+            "StrCpy $ClauseoAdminSectionRan 0",
             "${EndIf}",
             "${If} $R6 <> 4",
             "${AndIf} $R6 <> 5",
