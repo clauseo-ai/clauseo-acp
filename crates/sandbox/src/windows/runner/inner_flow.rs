@@ -1,0 +1,115 @@
+//! The inner runner's order (M1), apart from its calls so the tests hold it on every OS. Once the
+//! outer resumes it, and before it reads the launch or makes anything:
+//!
+//! 1. it sweeps its own user's processes ([`Point::Start`]), keeping only itself: a process of
+//!    the pool user's that opened this runner's process, thread or token between the logon and
+//!    the outer's shut, or one this logon set off (a task, a BITS job), is killed before any code
+//!    of the launch's runs. Its failure fails the launch closed ([`RunExit::Sweep`]) and starts no
+//!    agent;
+//! 2. it removes what the pool user could have left to start at a logon (`leftovers.rs`), the
+//!    same removal the end sweeper makes: the backstop for an end sweeper that never ran. Its
+//!    failure is logged;
+//! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
+//! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
+//!    once more when it exited ([`Point::End`]), both keeping the job's processes; a failure there
+//!    is logged, and a tick's is tried again at the next.
+//!
+//! No code of this runner's runs before 1 but the DLL search's limit, the error mode and the shut
+//! of its own token, and the only token anyone could have opened before then is this runner's
+//! own, as the pool user it already is.
+
+use std::time::Duration;
+
+use super::RunExit;
+use super::frame::InnerReport;
+use super::sweep::{Point, SweepError, TICK};
+
+/// A failure before the agent ran: the exit code and what failed (a call and its code).
+pub(crate) type Failure = (RunExit, String);
+
+/// The inner's calls; Windows' are `inner.rs`'s.
+pub(crate) trait Inner {
+    /// The handle to the launch's job the outer gave this runner.
+    type Job;
+    /// The running agent.
+    type Agent;
+    /// Sweeps this user's processes at `point`, keeping this process and, with `job`, the job's;
+    /// each kill goes to [`Inner::log`].
+    fn sweep(&mut self, point: Point, job: Option<&Self::Job>) -> Result<(), SweepError>;
+    /// Removes the leftovers (`leftovers::remove_all`), logging their counts.
+    fn clean(&mut self);
+    /// A line for the outer: held until `ctl` is open, then sent on it.
+    fn log(&mut self, line: &str);
+    /// Opens `ctl` and sends the lines held so far.
+    fn connect(&mut self) -> Result<(), RunExit>;
+    /// Reads the launch and shuts this runner to the agent; the job handle it names.
+    fn read_launch(&mut self) -> Result<Self::Job, Failure>;
+    /// Makes the agent's token and folders and starts it.
+    fn start(&mut self) -> Result<Self::Agent, Failure>;
+    /// The agent's pid.
+    fn pid(&self, agent: &Self::Agent) -> u32;
+    /// Waits up to `interval` for the agent; its exit code once it exited.
+    fn wait(&mut self, agent: &Self::Agent, interval: Duration) -> Option<u32>;
+    /// Ends the agent with `code`.
+    fn kill(&mut self, agent: &Self::Agent, code: u32);
+    /// Sends `report` on `ctl`; whether it went.
+    fn report(&mut self, report: &InnerReport) -> bool;
+}
+
+/// The inner runner's run after its token is shut; its exit code: the agent's, or a
+/// [`RunExit`] code.
+pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
+    let swept = inner.sweep(Point::Start, None);
+    if swept.is_ok() {
+        inner.clean();
+    }
+    if let Err(exit) = inner.connect() {
+        return swept.map_or(RunExit::Sweep, |()| exit).code();
+    }
+    if let Err(error) = swept {
+        return failed(inner, (RunExit::Sweep, at(Point::Start, &error)));
+    }
+    let job = match inner.read_launch() {
+        Ok(job) => job,
+        Err(failure) => return failed(inner, failure),
+    };
+    let agent = match inner.start() {
+        Ok(agent) => agent,
+        Err(failure) => return failed(inner, failure),
+    };
+    let pid = inner.pid(&agent);
+    if !inner.report(&InnerReport::Started { pid }) {
+        inner.kill(&agent, RunExit::Pipe.code());
+    }
+    let code = loop {
+        if let Some(code) = inner.wait(&agent, TICK) {
+            break code;
+        }
+        if let Err(error) = inner.sweep(Point::Tick, Some(&job)) {
+            inner.log(&format!("clauseo-sandbox-run: {}", at(Point::Tick, &error)));
+        }
+    };
+    if let Err(error) = inner.sweep(Point::End, Some(&job)) {
+        inner.log(&format!("clauseo-sandbox-run: {}", at(Point::End, &error)));
+    }
+    // The outer may be gone already; the exit code says it anyway.
+    inner.report(&InnerReport::Exited { code });
+    code
+}
+
+/// Reports `failure` (the outer may be gone already) and gives its exit code.
+fn failed<I: Inner>(inner: &mut I, (exit, what): Failure) -> u32 {
+    inner.report(&InnerReport::Failed {
+        exit: exit.code(),
+        what,
+    });
+    exit.code()
+}
+
+/// A sweep's failure at `point`, as the log says it.
+pub(crate) fn at(point: Point, error: &SweepError) -> String {
+    format!("sweep ({point}): {error}")
+}
+
+#[cfg(test)]
+mod tests;

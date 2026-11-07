@@ -508,3 +508,36 @@ fn the_firm_ca_files_come_from_the_launch_alone() {
         })
     ));
 }
+
+#[test]
+fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
+    let args = |list: &[&str]| -> Vec<std::ffi::OsString> {
+        list.iter().map(std::ffi::OsString::from).collect()
+    };
+    assert_eq!(mode(&args(&["--sweep"])), Some(Mode::Sweep));
+    assert_eq!(
+        mode(&args(&[
+            "--launch",
+            r"C:\data\sandbox\run\0123456789abcdef.json"
+        ])),
+        Some(Mode::Launch(PathBuf::from(
+            r"C:\data\sandbox\run\0123456789abcdef.json"
+        )))
+    );
+    assert_eq!(
+        mode(&args(&["--inner", "clauseo-run-0123"])),
+        Some(Mode::Inner("clauseo-run-0123".to_owned()))
+    );
+    for wrong in [
+        &[][..],
+        &["--sweep", "x"],
+        &["--sweep", "--inner", "b"],
+        &["--Sweep"],
+        &["sweep"],
+        &["--launch"],
+        &["--inner"],
+        &["--inner", "b", "--sweep"],
+    ] {
+        assert_eq!(mode(&args(wrong)), None, "{wrong:?}");
+    }
+}

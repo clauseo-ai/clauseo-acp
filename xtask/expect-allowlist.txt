@@ -541,6 +541,8 @@ crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code

@@ -3,17 +3,16 @@
 
 use std::io::{self, Write as _};
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use super::desktop::AgentDesktop;
+use super::end::{EndSignal, EndSweep, copy, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, end_job, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
-use super::sweep::os::OsProcesses;
-use super::sweep::{Point, TICK, watch};
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::acl::object::Handle;
 use crate::windows::matters::SANDBOX_DIR;
@@ -21,13 +20,17 @@ use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
-use crate::windows::sids::Sid;
 use crate::windows::token::os::{own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
+use end::OsSweeper;
 use steps::Start;
 
+mod end;
 mod steps;
+
+/// The end sweeper's guard, shared with the stdin relay's thread.
+type End = Arc<EndSweep<OsSweeper>>;
 
 /// How long the inner runner has to connect `ctl`: its logon, which makes the pool user's
 /// profile the first time (about 1.7 s on the VM, `s15-spikes-userpool.md`), included.
@@ -36,6 +39,8 @@ const FIRST_CONNECT: Duration = Duration::from_secs(60);
 const NEXT_CONNECT: Duration = Duration::from_secs(15);
 /// How long the agent's output may still drain once the inner runner exited.
 const DRAIN: Duration = Duration::from_secs(2);
+/// The most `Log` lines read from `ctl` while waiting for one report.
+const LOG_CAP: usize = 100_000;
 
 /// A runner failure: its exit code and what to say on stderr.
 struct Failure(RunExit, String);
@@ -70,12 +75,42 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let data_dir = data_dir_of(launch_file)?;
     let desktop =
         current_user_sid().map_err(|e| Failure::new(RunExit::BadLaunch, os("user", &e)))?;
+    let exe_text = exe
+        .to_str()
+        .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
+    // The inner runner and the end sweeper start in System32, a folder the Low agent can't
+    // write (no DLL planted in their current folder); the inner gets the agent's folder over
+    // `ctl`.
+    let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
+    // From here every end path starts the detached end sweeper first (`end.rs`).
+    let end: End = Arc::new(EndSweep::new(OsSweeper {
+        data_dir,
+        pool_user: message.pool_user.clone(),
+        pool_name: message.pool_name.clone(),
+        desktop,
+        exe: exe_text.to_owned(),
+        cwd,
+        kept: Mutex::new(None),
+    }));
+    let result = session(&message, &end);
+    if result.is_err() {
+        end.trigger(EndSignal::Failed);
+        end.steps().wait();
+    }
+    result
+}
+
+/// The launch once read: the checks, the pipes, the job, the desktop, the start of the inner
+/// runner, and `serve`.
+fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
+    let sweeper = end.steps();
+    let (data_dir, desktop) = (&sweeper.data_dir, sweeper.desktop.clone());
     let profile = own_profile().map_err(|e| Failure::new(RunExit::BadLaunch, os("profile", &e)))?;
-    refuse_codex_reuse(&message, &profile)?;
-    let env = agent_env(&message, &profile)
+    refuse_codex_reuse(message, &profile)?;
+    let env = agent_env(message, &profile)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
-    let env = super::ca::with_firm_ca(&message, &desktop, env, say);
-    let folders = super::env::profile_folders(&message)
+    let env = super::ca::with_firm_ca(message, &desktop, env, say);
+    let folders = super::env::profile_folders(message)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
     let set = PipeSet::random().map_err(|e| Failure::new(RunExit::Pipe, os("random", &e)))?;
     let sddl = pipe_sddl(&desktop, &message.pool_user);
@@ -87,7 +122,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let job = kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?;
     // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
     // launch's alone, and a SID the pool doesn't hold is a bad launch.
-    let password = secret_for(&data_dir, &message.pool_user).map_err(|error| match error {
+    let password = secret_for(data_dir, &message.pool_user).map_err(|error| match error {
         SecretError::NoSecret { .. } => Failure::new(RunExit::NoSecret, super::PASSWORD_LOST),
         SecretError::Io(_) => Failure::new(RunExit::Logon, error.to_string()),
         SecretError::NotInPool { .. } => Failure::new(RunExit::BadLaunch, error.to_string()),
@@ -95,9 +130,6 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         | SecretError::Malformed(_)
         | SecretError::Dpapi { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
     })?;
-    let exe_text = exe
-        .to_str()
-        .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
     // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
     // desktop UI limit: no process in it may make or switch desktops. They live as long as this
     // process.
@@ -122,22 +154,23 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
             os(&format!("the agent's window station: {call}"), &e),
         )
     })?;
-    // The inner runner starts in System32, a folder its Low agent can't write (no DLL planted in
-    // its current folder), and gets the agent's folder over `ctl`.
-    let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
-    // Sweep (a), the logon, the user's check, the job, the shut, sweep (b), then the resume
-    // (`start.rs`): no process of the pool user but this inner runner lives once it runs.
+    // The logon, the user's check, the job, the job handle given, the shut, then the resume
+    // (`start.rs`); the inner's first act is the sweep of every other process of the pool user's.
     let mut steps = Start {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
         desktop: &desktop,
         password: Some(password),
-        exe: exe_text,
+        exe: &sweeper.exe,
         base: set.base(),
-        cwd: &cwd,
+        cwd: &sweeper.cwd,
         job: &job,
+        given: None,
     };
     let inner = start(&mut steps)?;
+    let given = steps
+        .given
+        .ok_or_else(|| Failure::new(RunExit::Job, "the job handle wasn't given"))?;
     let launch = InnerLaunch {
         pool_user: message.pool_user.clone(),
         desktop_user: desktop,
@@ -151,23 +184,16 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
+        job: given,
     };
-    let result = serve(&inner, &job, pipes, &launch);
-    // `serve` returns only on a failure (`relay` exits the process): the job's processes end,
-    // then sweep (c), and `job` drops.
+    let result = serve(&inner, &job, pipes, &launch, end);
+    // `serve` returns only on a failure (`relay` exits the process): the end sweeper first, then
+    // the job's processes end, and `job` drops.
+    end.trigger(EndSignal::Failed);
     let code = result.as_ref().err().map_or(RunExit::Spawn, |f| f.0);
     end_job(&job, code.code());
-    sweep_end(&job, &message.pool_user);
     drop(job);
     result
-}
-
-/// Sweep (c): every process of the pool user is killed at session end; a failure is a line on
-/// stderr, and the run ends as it would have.
-fn sweep_end(job: &Handle, pool_user: &Sid) {
-    if let Err(what) = steps::sweep_at(job, pool_user, &[], Point::End) {
-        say(&format!("clauseo-sandbox-run: {what}"));
-    }
 }
 
 /// Connects and checks each pipe, sends the launch, relays the agent's stdio until the inner
@@ -177,23 +203,32 @@ fn serve(
     job: &Handle,
     pipes: Vec<ServerPipe>,
     launch: &InnerLaunch,
+    end: &End,
 ) -> Result<u32, Failure> {
     let Ok([ctl, stdin, stdout, stderr]) = <[ServerPipe; 4]>::try_from(pipes) else {
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
-    // The client is the inner runner's process, whose token user was checked before it ran.
-    accept(&ctl, inner, FIRST_CONNECT)?;
-    write_frame(&ctl, launch).map_err(|e| Failure::new(RunExit::Pipe, os("ctl write", &e)))?;
+    // The client is the inner runner's process, whose token user was checked before it ran. It
+    // connects once its first-act sweep and cleanup are done; one that exited first said why in
+    // its exit code.
+    if let Err(failure) = accept(&ctl, inner, FIRST_CONNECT) {
+        return Err(inner_exit(inner).unwrap_or(failure));
+    }
+    if let Err(error) = write_frame(&ctl, launch) {
+        // An inner whose first-act sweep failed reported it and exited without reading.
+        let failure = Failure::new(RunExit::Pipe, os("ctl write", &error));
+        return Err(reported(&ctl, inner).unwrap_or(failure));
+    }
     for pipe in [&stdin, &stdout, &stderr] {
         if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
             // An inner runner that failed before it opened its pipes said why on `ctl`.
             return Err(reported(&ctl, inner).unwrap_or(failure));
         }
     }
-    match read_frame::<InnerReport>(&ctl) {
+    match next_report(&ctl) {
         Ok(InnerReport::Started { .. }) => {}
         Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
-        Ok(InnerReport::Exited { .. }) => {
+        Ok(InnerReport::Exited { .. } | InnerReport::Log { .. }) => {
             return Err(Failure::new(
                 RunExit::Pipe,
                 "the inner runner skipped its start report",
@@ -201,15 +236,42 @@ fn serve(
         }
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    relay(inner, job, &launch.pool_user, &ctl, [stdin, stdout, stderr])
+    relay(inner, job, ctl, [stdin, stdout, stderr], end)
+}
+
+/// The next report on `ctl` that isn't a `Log` line; each `Log` line goes to stderr.
+fn next_report(ctl: &ServerPipe) -> io::Result<InnerReport> {
+    for _ in 0..LOG_CAP {
+        match read_frame::<InnerReport>(ctl)? {
+            InnerReport::Log { line } => say(&line),
+            report @ (InnerReport::Started { .. }
+            | InnerReport::Failed { .. }
+            | InnerReport::Exited { .. }) => return Ok(report),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "too many log lines",
+    ))
 }
 
 /// The failure the inner runner reported on `ctl`, if it did.
 fn reported(ctl: &ServerPipe, inner: &Process) -> Option<Failure> {
-    match read_frame::<InnerReport>(ctl) {
+    match next_report(ctl) {
         Ok(InnerReport::Failed { exit, what }) => Some(failed(inner, exit, &what)),
-        Ok(InnerReport::Started { .. } | InnerReport::Exited { .. }) | Err(_) => None,
+        Ok(InnerReport::Started { .. } | InnerReport::Exited { .. } | InnerReport::Log { .. })
+        | Err(_) => inner_exit(inner),
     }
+}
+
+/// The inner runner's own failure from its exit code, once it exited with one of [`RunExit`]'s.
+fn inner_exit(inner: &Process) -> Option<Failure> {
+    let code = inner.wait(Some(Duration::ZERO)).ok().flatten()?;
+    let exit = RunExit::from_code(code)?;
+    Some(Failure::new(
+        exit,
+        format!("the inner runner exited (0x{code:08X})"),
+    ))
 }
 
 /// The inner runner's own failure: its `RunExit` code when it is one, after it exited.
@@ -240,23 +302,25 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 
 /// Relays this process's stdin to the agent's and the agent's stdout and stderr to this
 /// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
-/// closes when this process's stdin ends, so the agent reads the end of its input. Once the
-/// inner runner exited, the output has [`DRAIN`] to finish; then the job is ended, which closes
-/// what a lingering descendant still holds, and the output gets [`DRAIN`] again. While the
-/// inner runner runs, the pool user's processes outside the job are swept every [`TICK`];
-/// once it exited, all of them (sweep (c)).
+/// closes when this process's stdin ends, so the agent reads the end of its input. `ctl`'s `Log`
+/// lines (the inner's sweeps) go to stderr meanwhile. The end sweeper starts first when the
+/// host's stdin ends or the inner runner exits. Once the inner exited, the output has [`DRAIN`]
+/// to finish; then the job is ended, which closes what a lingering descendant still holds, and the
+/// output gets [`DRAIN`] again.
 fn relay(
     inner: &Process,
     job: &Handle,
-    pool_user: &Sid,
-    ctl: &ServerPipe,
+    ctl: ServerPipe,
     [stdin, stdout, stderr]: [ServerPipe; 3],
+    end: &End,
 ) -> Result<u32, Failure> {
     let spawned = |what: &io::Error| Failure::new(RunExit::Pipe, os("relay thread", what));
     // It may stay blocked on the host's pipe; the process ends without it.
+    let host_end = Arc::clone(end);
     thread::Builder::new()
         .spawn(move || {
-            copy(io::stdin().lock(), &stdin);
+            // The end sweeper first when the host's stdin ends, then the agent's stdin closes.
+            relay_stdin(io::stdin().lock(), &stdin, &host_end, drop);
             drop(stdin);
         })
         .map_err(|e| spawned(&e))?;
@@ -277,15 +341,20 @@ fn relay(
             .map_err(|e| spawned(&e))?;
     }
     drop(done);
-    let mut calls = OsProcesses { job };
-    let mut log = |line: &str| say(line);
-    let ended = |interval| match inner.wait(Some(interval)) {
-        Ok(None) => None,
-        Ok(Some(code)) => Some(Some(code)),
-        Err(_) => Some(None),
-    };
-    let code = watch(&mut calls, pool_user, &[inner.pid], TICK, ended, &mut log)
+    let (report, reports) = mpsc::channel();
+    thread::Builder::new()
+        .spawn(move || {
+            if let Ok(last) = next_report(&ctl) {
+                let _sent = report.send(last);
+            }
+        })
+        .map_err(|e| spawned(&e))?;
+    let code = inner
+        .wait(None)
+        .ok()
+        .flatten()
         .map_or(RunExit::Spawn.code(), super::agent_code);
+    end.trigger(EndSignal::InnerExited);
     let mut left = 2;
     for ended_job in [false, true] {
         if ended_job {
@@ -295,8 +364,8 @@ fn relay(
             left -= 1;
         }
     }
-    sweep_end(job, pool_user);
-    tell_status(ctl, code);
+    tell_status(reports.recv_timeout(DRAIN).ok().as_ref(), code);
+    end.steps().wait();
     exit_now(code)
 }
 
@@ -304,12 +373,12 @@ fn relay(
 /// which process ended so: the agent (its `Exited` report came on `ctl`) or the inner runner.
 /// `0xC0000142` (`STATUS_DLL_INIT_FAILED`) at start means a DLL, user32 most often, couldn't
 /// start in it: a window station or desktop its token can't open.
-fn tell_status(ctl: &ServerPipe, code: u32) {
-    let which = match read_frame::<InnerReport>(ctl) {
-        Ok(InnerReport::Exited { code: agent }) if agent >= 0xC000_0000 => {
+fn tell_status(report: Option<&InnerReport>, code: u32) {
+    let which = match report {
+        Some(InnerReport::Exited { code: agent }) if *agent >= 0xC000_0000 => {
             format!("the agent ended at Windows status 0x{agent:08X}")
         }
-        Ok(InnerReport::Exited { .. }) => return,
+        Some(InnerReport::Exited { .. }) => return,
         _ if code >= 0xC000_0000 => {
             format!("the inner runner ended at Windows status 0x{code:08X}")
         }
@@ -327,23 +396,6 @@ fn tell_status(ctl: &ServerPipe, code: u32) {
 fn exit_now(code: u32) -> ! {
     // Windows takes the exit code as the u32 it is; `from_ne_bytes` keeps its bits.
     std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()))
-}
-
-/// Copies `from` to `to` until either end closes, flushing each piece.
-fn copy(mut from: impl io::Read, mut to: impl io::Write) {
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        let read = match from.read(&mut buffer) {
-            Ok(0) | Err(_) => return,
-            Ok(read) => read,
-        };
-        let Some(piece) = buffer.get(..read) else {
-            return;
-        };
-        if to.write_all(piece).and_then(|()| to.flush()).is_err() {
-            return;
-        }
-    }
 }
 
 /// Reads the launch file, if the desktop user owns it and only the desktop user, `SYSTEM` and
