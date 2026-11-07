@@ -4,7 +4,7 @@
 //! and the seam's `launcher` is called, both on a `clauseo-codex-fs` thread
 //! ([`off_actor_or_undo`]) waited on for [`LAUNCH_WAIT`] on the host clock. The work that waits
 //! for the agent stays held on the thread's `preparing` meanwhile, so the host keeps answering.
-//! The answer comes back as [`TurnInput::Sandboxed`]; the agent then spawns once, through the
+//! The answer comes back as [`SandboxInput::Sandboxed`]; the agent then spawns once, through the
 //! launcher the seam gave (one launcher per agent launch: its policy is fixed).
 //!
 //! A refused policy or an error from the seam fails the launch with the error's `code()`
@@ -25,7 +25,8 @@
 //! removal, and what it moved gives one more notice.
 //!
 //! The policy is B2's minimum: the matter folder read-write, the session's `run/<session>/tmp`
-//! as `TMPDIR`, the agent's install folder read and run. R17 PR-C adds the per-agent state
+//! as `TMPDIR`, the agent's install folder (its program's, links followed) read and run. R17
+//! PR-C adds the per-agent state
 //! folders (until then the state folder is the session's `work` folder); PR-D the CA files,
 //! skills, the browser sidecar and the login files.
 
@@ -83,10 +84,10 @@ impl fmt::Debug for SandboxSession {
 
 /// The policy of one agent launch: `matter` (the folder the thread's matter row stores, as the
 /// agent runs in it, `agent::session_folder`) read-write, the session's `run/<session>/tmp`
-/// as its `TMPDIR` (never the run folder itself), and the agent's `install` folder read and
-/// run. The state folder is the session's `work` folder until R17 PR-C's per-agent state
-/// folders. R17 PR-C and PR-D extend this function. File system calls (`build` walks the
-/// matter): off the actor.
+/// as its `TMPDIR` (never the run folder itself), and the agent's `install` folder
+/// ([`install_folder`]) read and run. The state folder is the session's `work` folder until
+/// R17 PR-C's per-agent state folders. R17 PR-C and PR-D extend this function. File system
+/// calls (`build` walks the matter): off the actor.
 pub(crate) fn launch_policy(
     matter: &Path,
     run: &RunFolders,
@@ -118,8 +119,8 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let install = match install_folder(actor, thread) {
-        Ok(install) => install,
+    let command = match command(actor, thread) {
+        Ok(command) => command,
         Err(error) => {
             discard(actor, thread, prepared.run, None);
             agents::fail_all(actor, thread, waiting, &error);
@@ -130,13 +131,13 @@ pub(super) fn start(
         discard(actor, thread, prepared.run, None);
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
     let key = prepared.run.key;
+    state.preparing = Some(Box::new(Preparing { id, key, waiting }));
     let running = running(actor, key);
     let clock = Arc::clone(&actor.clock);
     let denials: Arc<dyn DenialSink> = Arc::new(LoggedDenials { matter: key.matter });
     let ask = Ask {
-        install,
+        command,
         running,
         opts,
         denials,
@@ -155,7 +156,8 @@ pub(super) fn start(
                     let moved = moved_names(&late);
                     undo_late(*late);
                     if !moved.is_empty() {
-                        let late = Input::Turn(TurnInput::SetAsideLate { thread, moved });
+                        let late = SandboxInput::SetAsideLate { thread, moved };
+                        let late = Input::Turn(TurnInput::Sandbox(late));
                         // The actor may be gone by then; nobody is left to tell.
                         let _gone = post.try_send(late);
                     }
@@ -165,7 +167,11 @@ pub(super) fn start(
         .await;
         // The thread did not answer in time, did not start or panicked (logged there).
         let result = answered.unwrap_or_else(|_unanswered| Err(unanswered()));
-        Input::Turn(TurnInput::Sandboxed { thread, id, result })
+        Input::Turn(TurnInput::Sandbox(SandboxInput::Sandboxed {
+            thread,
+            id,
+            result,
+        }))
     });
 }
 
@@ -217,31 +223,87 @@ fn moved_names(prepared: &Prepared) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The keys of `key`'s matter's other sessions whose agents still run: every other thread of
-/// the matter holding a run folder (from its agent's launch until it ended), sorted.
-fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
+/// The launcher a launch spawns through: the one the sandbox's launchers gave it (`jail`),
+/// else the host's (`host`).
+pub(crate) fn launcher<'a>(
+    jail: Option<&'a Sandboxed>,
+    host: &'a dyn Launcher,
+) -> &'a dyn Launcher {
+    jail.map_or(host, |jail| &*jail.launcher)
+}
+
+/// What the sandbox's launchers' work off the actor posts back ([`on_sandbox_input`]).
+#[derive(Debug)]
+pub(crate) enum SandboxInput {
+    /// A launch's sandbox launcher `id` answered.
+    Sandboxed {
+        thread: ThreadId,
+        id: u64,
+        result: Result<Box<Prepared>, Error>,
+    },
+    /// Names a launch's seam moved (matter-relative) whose answer came after the wait.
+    SetAsideLate {
+        thread: ThreadId,
+        moved: Vec<String>,
+    },
+    /// A sandboxed session's `after_session` ended, having moved `moved` (matter-relative
+    /// names), and then its run folder's removal, as `TurnInput::RunRemoved` says.
+    SessionEnded {
+        thread: ThreadId,
+        key: SessionKey,
+        freed: bool,
+        moved: Vec<String>,
+    },
+}
+
+/// Takes what the sandbox's launchers' work posted back.
+pub(crate) fn on_sandbox_input(actor: &mut Actor, input: SandboxInput) {
+    match input {
+        SandboxInput::Sandboxed { thread, id, result } => on_sandboxed(actor, thread, id, result),
+        SandboxInput::SetAsideLate { thread, moved } => on_set_aside_late(actor, thread, &moved),
+        SandboxInput::SessionEnded {
+            thread,
+            key,
+            freed,
+            moved,
+        } => on_session_ended(actor, thread, key, freed, &moved),
+    }
+}
+
+/// The keys of `key`'s matter's other sessions that may run an agent: every other thread of
+/// the matter with a launch in its checks or at the seam (`preparing`), or holding a run folder
+/// (from its agent's spawn until the session is discarded), sorted. A launch still being
+/// prepared counts, so a concurrent launch never takes it for a crashed one.
+pub(super) fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
     let mut running: Vec<SessionKey> = actor
         .threads
         .values()
-        .filter_map(|entry| entry.turn.run.as_ref())
-        .map(|run| run.key)
+        .flat_map(|entry| {
+            let state = &entry.turn;
+            let preparing = state.preparing.as_ref().map(|preparing| preparing.key);
+            preparing
+                .into_iter()
+                .chain(state.run.as_ref().map(|run| run.key))
+        })
         .filter(|other| other.matter == key.matter && other.thread != key.thread)
         .collect();
     running.sort_unstable();
+    running.dedup();
     running
 }
 
-/// What the seam is asked with besides the launch: the agent's install folder, the matter's
-/// other running sessions, the spawn options and the denial sink.
+/// What the seam is asked with besides the launch: the agent's program (its install folder is
+/// found from it off the actor), the matter's other running sessions, the spawn options and
+/// the denial sink.
 struct Ask {
-    install: PathBuf,
+    command: PathBuf,
     running: Vec<SessionKey>,
     opts: SpawnOptions,
     denials: Arc<dyn DenialSink>,
 }
 
-/// The agent's install folder: the folder of its program (`command`, an absolute path).
-fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
+/// The agent's program (`command`), which must be an absolute path with a folder.
+fn command(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let row = &actor.check_thread(thread)?.row;
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
@@ -249,10 +311,11 @@ fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    Path::new(&settings.command)
+    let command = Path::new(&settings.command);
+    command
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
-        .map(Path::to_path_buf)
+        .map(|_| command.to_path_buf())
         .ok_or_else(|| {
             Error::refused(
                 ErrorCode::AgentLaunchFailed,
@@ -261,19 +324,43 @@ fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
         })
 }
 
-/// On the seam's thread: the policy, then the seam's launcher. On a failure the run folder is
-/// taken back here, before the answer goes out.
+/// The agent's install folder: the folder of its program with every link followed, so a
+/// `/opt/homebrew/bin/claude` link grants the real install and not all of `bin`. File system
+/// calls: off the actor.
+pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
+    dunce::canonicalize(command)
+        .ok()
+        .and_then(|real| real.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            Error::refused(
+                ErrorCode::AgentLaunchFailed,
+                "The sandbox couldn't start the agent: its program wasn't found.",
+            )
+        })
+}
+
+/// On the seam's thread: the install folder, the policy, then the seam's launcher. On a
+/// failure the run folder is taken back here, before the answer goes out.
 fn make(
     launchers: &dyn SandboxLaunchers,
     mut held: UndoOnDrop<Box<Prepared>, fn(Box<Prepared>)>,
     ask: Ask,
 ) -> Result<Box<Prepared>, Error> {
+    let install = match install_folder(&ask.command) {
+        Ok(install) => install,
+        Err(error) => {
+            tracing::warn!("the sandbox found no program for the agent's launch");
+            // The run folder goes here, on the seam's thread.
+            drop(held);
+            return Err(error);
+        }
+    };
     let Some(prepared) = held.get_mut() else {
         return Err(unanswered());
     };
     let key = prepared.run.key;
     let matter = key.matter;
-    let made = launch_policy(&prepared.stored, &prepared.run, &ask.install).and_then(|policy| {
+    let made = launch_policy(&prepared.stored, &prepared.run, &install).and_then(|policy| {
         let launch = launchers.launcher(
             policy.clone(),
             &matter,
@@ -401,18 +488,19 @@ pub(crate) fn on_sandboxed(
 }
 
 /// The session `key`'s agent has exited: the seam's `after_session` with the launch's policy,
-/// once, off the actor, waited on as a run folder's removal is (it counts as one for shutdown),
-/// and the launch's launcher dropped there after it. What it moved comes back matter-relative
-/// for [`on_session_ended`].
+/// once, off the actor, bounded, and the launch's launcher dropped there after it; then
+/// `removal`, the run folder's, so the seam sees the session's folders as the agent left them
+/// (the removal is counted for shutdown by the caller, and this ends it). What it moved comes
+/// back matter-relative for [`on_session_ended`].
 pub(super) fn after_session(
     actor: &mut Actor,
     thread: ThreadId,
     key: SessionKey,
     session: SandboxSession,
+    removal: impl Future<Output = bool> + 'static,
 ) {
     let clock = Arc::clone(&actor.clock);
     let job = Job::short("the sandbox's after-session", Some(key.matter));
-    actor.work.run_removals += 1;
     actor.spawn_post(async move {
         let done = off_actor(clock, job, move || {
             let SandboxSession {
@@ -431,7 +519,13 @@ pub(super) fn after_session(
             tracing::warn!(%thread, %error, "the sandbox's after-session call did not answer");
             Vec::new()
         });
-        Input::Turn(TurnInput::SessionEnded { thread, moved })
+        let freed = removal.await;
+        Input::Turn(TurnInput::Sandbox(SandboxInput::SessionEnded {
+            thread,
+            key,
+            freed,
+            moved,
+        }))
     });
 }
 
@@ -449,11 +543,17 @@ pub(crate) fn on_set_aside_late(actor: &mut Actor, thread: ThreadId, moved: &[St
     notice::log(actor, thread, moved, notice::When::BeforeLaunch);
 }
 
-/// A session's `after_session` ended: it counts as a removal done, and the names it moved
+/// A session's `after_session` and then its run folder's removal ended: the removal ends as
+/// [`super::on_run_removed`] says (`freed`: whether the run was freed), and the names it moved
 /// (matter-relative) give one notice on the thread while the host serves.
-pub(crate) fn on_session_ended(actor: &mut Actor, thread: ThreadId, moved: &[String]) {
-    // Its own removal of the shutdown count; the run folder's removal ends the run's.
-    actor.work.run_removals = actor.work.run_removals.saturating_sub(1);
+pub(crate) fn on_session_ended(
+    actor: &mut Actor,
+    thread: ThreadId,
+    key: SessionKey,
+    freed: bool,
+    moved: &[String],
+) {
+    super::on_run_removed(actor, key, freed);
     if moved.is_empty() {
         return;
     }
