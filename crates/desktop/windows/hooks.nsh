@@ -67,9 +67,12 @@
 ; context to all around its work (NSIS has no COMMONAPPDATA; the old name was taken as text).
 ; A folder that is already there is left as it is.
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
-; Then both installers check that clauseo-sandbox-setup.exe is still in $INSTDIR: Windows security
-; can remove it as it is written. Gone, they say so (setupExeRemoved): a box, or under /S a line
-; in the details list and exit code CLAUSEO_EXIT_SETUP_EXE_REMOVED. The install stays.
+; Then both installers check that clauseo-sandbox-setup.exe is still there, the copy launches run:
+; the admin copy in CLAUSEO_ADMIN_DIR when the admin section ran in this install
+; (ClauseoAdminSectionRan, admin_copy.nsh), else the one in $INSTDIR. Windows security can remove
+; it as it is written. Gone, they say so (setupExeRemoved): a box, or under /S a line in the
+; details list and exit code CLAUSEO_EXIT_SETUP_EXE_REMOVED. The install stays. A per-user copy
+; missing beside an admin copy only holds up the next refresh (S15 PR 3), so it isn't said.
 ;
 ; The language (English or Hindi, windows/nsis/*.nsh). NSIS fixes the pages' language after
 ; .onInit and un.onInit (NSIS 3.11 Source/exehead/Ui.c:396-397, set_language; Docs/src/var.but:54
@@ -731,8 +734,14 @@
   !endif
   ; Both installers: the sandbox's set-up program still there. Windows security can quarantine it
   ; as it is written; the install stays as it is, and the person or IT is told. Under /S no box:
-  ; a details line and the exit code, for Intune or SCCM.
-  ${IfNot} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+  ; a details line and the exit code, for Intune or SCCM. The copy checked is the one launches
+  ; run: the admin copy once the admin section ran, else the one beside the app.
+  Push $R7
+  StrCpy $R7 "$INSTDIR\clauseo-sandbox-setup.exe"
+  ${If} $ClauseoAdminSectionRan = 1
+    StrCpy $R7 "${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe"
+  ${EndIf}
+  ${IfNot} ${FileExists} "$R7"
     DetailPrint "$(setupExeRemoved)"
     ${If} ${Silent}
       SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
@@ -740,4 +749,5 @@
       MessageBox MB_ICONEXCLAMATION|MB_OK "$(setupExeRemoved)"
     ${EndIf}
   ${EndIf}
+  Pop $R7
 !macroend
