@@ -85,13 +85,13 @@ fn only_taken_items_lose_the_lawyers_denies_and_kept_ones_stay() {
     let moved_to = moved.with_file_name("after.txt");
     rename(&moved, &moved_to);
     let dacl = format!(
-        "D:P(D;;WO;;;{me})(D;;FA;;;WD)(D;;FA;;;{OTHER})(D;;DE;;;BU)(D;;DE;;;{group})\
+        "D:P(D;;WO;;;{me})(D;;FA;;;WD)(D;;FA;;;{OTHER})(D;;SD;;;BU)(D;;SD;;;{group})\
          (A;;FA;;;{me})(A;;FA;;;{OTHER})"
     );
     // The root first: setting its DACL by name carries its inherited entries down.
     let left_alone = [&root, &mine, &other_id, &moved_to, &linked];
     for path in left_alone {
-        auto_inherit_with(path, "D:(D;;DE;;;WD)").unwrap();
+        auto_inherit_with(path, "D:(D;;SD;;;WD)").unwrap();
     }
     protect_with(&shut, &dacl).unwrap();
     let kept = [
@@ -161,7 +161,7 @@ fn a_file_swapped_in_under_a_taken_name_keeps_its_denies_and_case_is_ignored() {
     let upper = cased_at.with_file_name("CASED.TXT");
     let listed = TakenIndex::new([(swapped_at, swapped_id), (upper, cased_id)]);
     for path in [&swapped, &cased] {
-        protect_with(path, &format!("D:P(D;;DE;;;WD)(A;;FA;;;{me})")).unwrap();
+        protect_with(path, &format!("D:P(D;;SD;;;WD)(A;;FA;;;{me})")).unwrap();
     }
     let denies = DenyStrip {
         taken: &listed,
@@ -200,7 +200,7 @@ fn below_a_taken_folder_the_copies_of_its_denies_go() {
     let below = dunce::canonicalize(place.dir.file("matter/work/below.txt", "x")).unwrap();
     let work = dunce::canonicalize(place.at("matter/work")).unwrap();
     let root = dunce::canonicalize(place.at("matter")).unwrap();
-    auto_inherit_with(&below, "D:(D;;DE;;;WD)").unwrap();
+    auto_inherit_with(&below, "D:(D;;SD;;;WD)").unwrap();
     // Set by name, so the copy reaches the file below.
     protect_with(&work, &format!("D:P(D;OICI;WO;;;{me})(A;OICI;FA;;;{me})")).unwrap();
     assert!(
