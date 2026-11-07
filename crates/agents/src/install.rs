@@ -227,7 +227,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                 }
                 Err(err) => err,
             };
-            log_failed_try(agent, &run, &err);
+            log_failed_try(agent, &run, &err, TRIES);
             match err.next {
                 Next::Cancelled => return,
                 Next::Offline => {

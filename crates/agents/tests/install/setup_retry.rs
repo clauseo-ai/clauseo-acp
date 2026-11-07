@@ -20,16 +20,17 @@ use crate::support::{A_PACKAGES, Events, Fixture, agent_a};
 /// The first `npm ci` in its place: npm's own error line for a locked file, and exit 1.
 const LOCKED_NPM: &str = "console.error('npm error code EBUSY'); process.exit(1);";
 
-/// The passthrough launcher with the first `npm ci` replaced by [`LOCKED_NPM`].
+/// The passthrough launcher with the first `failures` `npm ci` runs replaced by [`LOCKED_NPM`].
 struct FailOnce {
     inner: PassthroughLauncher,
     ci_runs: AtomicUsize,
+    failures: usize,
 }
 
 impl Launcher for FailOnce {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         let is_ci = spec.args().iter().any(|arg| arg == "ci");
-        if !is_ci || self.ci_runs.fetch_add(1, Ordering::SeqCst) > 0 {
+        if !is_ci || self.ci_runs.fetch_add(1, Ordering::SeqCst) >= self.failures {
             return self.inner.launch(spec);
         }
         trace(format_args!(
@@ -74,10 +75,10 @@ impl<'a> MakeWriter<'a> for Log {
     }
 }
 
-#[test]
-fn a_set_up_that_fails_once_is_retried_with_no_second_download_and_logged() {
+/// The app log, captured from every thread: global, as the job runs on its own thread; nextest
+/// runs each test in its own process.
+fn capture() -> Log {
     let log = Log::default();
-    // Global, as the job runs on its own thread; nextest runs each test in its own process.
     tracing::subscriber::set_global_default(
         tracing_subscriber::fmt()
             .with_writer(log.clone())
@@ -85,14 +86,27 @@ fn a_set_up_that_fails_once_is_retried_with_no_second_download_and_logged() {
             .finish(),
     )
     .unwrap();
-    let fx = Fixture::new("setup-retry");
+    log
+}
+
+/// `Agents` on `fx` with the first `failures` `npm ci` runs locked, and its events.
+fn start(fx: &Fixture, failures: usize) -> (Agents, Events) {
     let launcher: Arc<dyn Launcher> = Arc::new(FailOnce {
         inner: PassthroughLauncher::new(SpawnOptions::new()),
         ci_runs: AtomicUsize::new(0),
+        failures,
     });
     let (agents, events) = Agents::start(fx.config.clone(), launcher, fx.timer.clone());
     let events = Events(events);
     events.first_states();
+    (agents, events)
+}
+
+#[test]
+fn a_set_up_that_fails_once_is_retried_with_no_second_download_and_logged() {
+    let log = capture();
+    let fx = Fixture::new("setup-retry");
+    let (agents, events) = start(&fx, 1);
     agents.install(&agent_a());
     fx.timer.fire_next(Duration::from_secs(2));
     let (_, last) = events.until_end(&agent_a());
@@ -113,4 +127,21 @@ fn a_set_up_that_fails_once_is_retried_with_no_second_download_and_logged() {
         text.contains("install: set-up discarded: temp folder removed after the try failed"),
         "{text}"
     );
+}
+
+/// The third failed set-up ends the job: its line says it gives up, not that it retries; the
+/// two before it say they retry.
+#[test]
+fn the_last_failed_try_says_it_gives_up() {
+    let log = capture();
+    let fx = Fixture::new("setup-gives-up");
+    let (agents, events) = start(&fx, 3);
+    agents.install(&agent_a());
+    fx.timer.fire_next(Duration::from_secs(2));
+    fx.timer.fire_next(Duration::from_secs(8));
+    let (_, last) = events.until_end(&agent_a());
+    assert!(matches!(last, InstallState::Failed(_)), "{last:?}");
+    let text = log.text();
+    assert_eq!(text.matches("transient, retrying").count(), 2, "{text}");
+    assert_eq!(text.matches("giving up after 3 tries").count(), 1, "{text}");
 }

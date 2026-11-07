@@ -233,10 +233,17 @@ fn io_cause(err: &io::Error) -> &'static str {
 
 /// The app log's line for a failed try, in fixed words: the step, npm's exit code, the cause and
 /// whether the job tries again. No detail and no path: the download log holds those.
-pub(crate) fn log_failed_try(agent: &AgentId, run: &Run, err: &TryError) {
+/// `max_tries` is the job's limit: the try that reaches it says it gives up, not that it retries.
+pub(crate) fn log_failed_try(agent: &AgentId, run: &Run, err: &TryError, max_tries: u32) {
     if err.next == Next::Cancelled {
         return;
     }
+    let counted = run.tries + 1;
+    let verdict = if err.next == Next::Retry && counted >= max_tries {
+        format!("giving up after {counted} tries")
+    } else {
+        err.next.verdict().to_owned()
+    };
     let step = err.step.map_or("unknown", Step::word);
     let cause = err.cause.unwrap_or("unknown");
     let npm_exit = err
@@ -249,8 +256,7 @@ pub(crate) fn log_failed_try(agent: &AgentId, run: &Run, err: &TryError) {
         npm_exit = %npm_exit,
         cause,
         status = ?err.status,
-        "install: try failed at {step}: {cause}; {}",
-        err.next.verdict()
+        "install: try failed at {step}: {cause}; {verdict}"
     );
 }
 
