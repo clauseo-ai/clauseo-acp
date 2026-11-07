@@ -150,8 +150,10 @@ pub(super) fn plain(path: &Path) -> PathBuf {
 /// entry not on the way down is removed by std, never entered here: a reparse point as a link,
 /// a folder with `remove_dir_all` (which opens nothing through a link), a file with
 /// `remove_file`. Only the folder on the way down is entered, the same way. What is at the end
-/// of the way down stays as [`stays_whole`] says with `whole`, but a `sandbox` that is a link
-/// with `whole` is unlinked by handle and reported ([`unlink_sandbox`]). Answers what is left
+/// of the way down stays whole with `whole` (`sandbox`, not looked into), but a `sandbox` that is
+/// a link is then unlinked by handle and reported ([`unlink_sandbox`]); without it (the
+/// set-aside), a real folder stays unless it holds only bookkeeping (`set_aside::clear`), and a
+/// link or a file goes like any other entry. Answers what is left
 /// in it ([`Left`]); `Err` when `folder` was not entered (reported).
 fn empty_folder(
     folder: &Path,
@@ -179,8 +181,14 @@ fn empty_folder(
                 left.add(unlink_sandbox(path, report));
                 continue;
             }
-            if rest.is_empty() && stays_whole(&path, &meta, whole) {
+            if rest.is_empty() && whole {
+                // `sandbox`, whatever it is, is not looked into.
                 left.kept = Some(path);
+                continue;
+            }
+            if rest.is_empty() && !is_link(&meta) && meta.is_dir() {
+                // The set-aside: kept unless it holds only bookkeeping (`set_aside.rs`).
+                left.add(super::set_aside::clear(path, report));
                 continue;
             }
             if !rest.is_empty() && !is_link(&meta) && meta.is_dir() {
@@ -192,7 +200,7 @@ fn empty_folder(
                 }
                 continue;
             }
-            // A link, a file, or an empty `set-aside`: removed like any other entry.
+            // A link or a file: removed like any other entry.
         }
         remove_entry(&path, &meta, report);
     }
@@ -201,12 +209,13 @@ fn empty_folder(
 
 /// What [`empty_folder`] left in a folder on purpose.
 #[derive(Default)]
-struct Left {
+pub(super) struct Left {
     /// The folder that stays, the uninstaller names it as kept: `sandbox`, or the set-aside.
-    kept: Option<PathBuf>,
+    pub(super) kept: Option<PathBuf>,
     /// Something else that must not go and is no kept folder: a linked `sandbox` that is a
-    /// reparse point of another kind, or one the handle could not open (each reported).
-    held: bool,
+    /// reparse point of another kind, or one the handle could not open, or a set-aside's
+    /// bookkeeping that could not go (each reported).
+    pub(super) held: bool,
 }
 
 impl Left {
@@ -267,19 +276,6 @@ fn named(path: &Path, name: &str) -> bool {
     path.file_name()
         .and_then(OsStr::to_str)
         .is_some_and(|listed| listed.eq_ignore_ascii_case(name))
-}
-
-/// Whether the entry at the end of the way down stays as it is: always when `whole` (`sandbox`:
-/// whatever it is, it is not looked into), else (the set-aside) unless it is a real, empty
-/// folder.
-fn stays_whole(path: &Path, meta: &Metadata, whole: bool) -> bool {
-    if whole {
-        return true;
-    }
-    let empty = !is_link(meta)
-        && meta.is_dir()
-        && std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
-    !empty
 }
 
 /// Removes one entry by std: a reparse point as a link, a folder with `remove_dir_all`, a file

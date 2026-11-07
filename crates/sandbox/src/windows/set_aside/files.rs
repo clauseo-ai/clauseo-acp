@@ -29,13 +29,13 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::names::{Links, Names, keyed};
-use super::{Entry, SET_ASIDE_DIR, SetAsideFailure};
+use super::{Entry, SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
 
-const RECORD_FILE: &str = "record.json";
+const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 const MANIFEST_FILE: &str = "manifest.json";
-const LOCK_FILE: &str = "set-aside.lock";
+const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
 /// The version both files are written in and the only one read.
 const VERSION: u32 = 1;
 

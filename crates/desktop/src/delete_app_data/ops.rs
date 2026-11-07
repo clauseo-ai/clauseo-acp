@@ -262,6 +262,11 @@ pub(super) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// Removes the folder `path` only when it is empty (std's `remove_dir`): never recursive.
+pub(super) fn remove_dir(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir(path)
+}
+
 /// Removes the folder `path` and everything in it with std, which opens each entry by handle
 /// without following a reparse point and removes read-only entries.
 pub(super) fn remove_dir_all(path: &Path) -> io::Result<()> {

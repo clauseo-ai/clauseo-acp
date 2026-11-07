@@ -251,6 +251,13 @@ pub(crate) fn remove_owned_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the folder `path` when it is empty (`rmdir`, which never follows a link nor
+/// recurses). The tests' stand-in for the set-aside's forget on NTFS (`set_aside/bookkeeping.rs`).
+#[cfg(all(test, not(windows)))]
+pub(crate) fn remove_empty_folder(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir(path)
+}
+
 /// Replaces the file `path` with `bytes` in one step: the bytes go to a new file beside it
 /// (`.<name>.<16 hex>.tmp`, made with `create_new`, so nothing there already is opened), are
 /// flushed to disk, and the new file is renamed over `path` (`MoveFileExW` with

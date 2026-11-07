@@ -5,6 +5,7 @@
 
 mod make;
 mod sandbox_link;
+mod set_aside;
 mod sources;
 #[cfg(windows)]
 mod windows;

@@ -32,8 +32,12 @@
 //! - What stays, in the local folder only, found by name ignoring case (Windows file names):
 //!   `sandbox`, whole and unlooked-into, unless [`SANDBOX_REMOVED`] (S15's records, which its
 //!   `--remove` needs to take its access rules back off the lawyer's folders); with it,
-//!   `sandbox\set-aside` (the lawyer's own files that tier B moved aside) unless it is a real,
-//!   empty folder. A `sandbox` that is a link goes as a link and nothing behind it is kept:
+//!   `sandbox\set-aside` (the lawyer's own files that tier B moved aside) unless it is a real
+//!   folder holding nothing but Clauseo's bookkeeping: real folders, one per matter, each holding
+//!   only regular files named exactly `record.json` or `set-aside.lock`, which every tier-B
+//!   launch leaves. Those files go by `remove_file` and the emptied folders by `remove_dir`,
+//!   each folder pinned while it is looked into (`set_aside.rs`); anything else there keeps it
+//!   whole. A `sandbox` that is a link goes as a link and nothing behind it is kept:
 //!   with [`SANDBOX_REMOVED`] like any other link; without it, by handle
 //!   (`ops::unlink_name_surrogate`): the reparse tag is read on the handle that deletes, only a
 //!   junction or a symbolic link is removed, any other reparse point is kept, and either way it
@@ -49,6 +53,8 @@
 
 #[cfg(any(windows, test))]
 mod ops;
+#[cfg(any(windows, test))]
+mod set_aside;
 #[cfg(test)]
 mod tests;
 #[cfg(any(windows, test))]

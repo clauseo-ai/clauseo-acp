@@ -16,8 +16,11 @@ use super::*;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, LOW_LABEL_SID};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
+use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::sids::Reserved;
+use crate::windows::write;
 use crate::windows::writer::FileId;
+use crate::windows::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR};
 
 fn matter(id: &str) -> MatterId {
     id.parse().unwrap()
@@ -134,6 +137,104 @@ fn as_the_owner_every_matter_is_forgotten_as_the_owner_then_the_record_goes() {
     assert_eq!(ledger.entries().count(), 0);
     assert_eq!(ledger.set_aside_entries(), 0);
     assert!(m1.starts_with(machine.m.dir.path()));
+    assert_all_gone(&machine, &acl);
+}
+
+/// `<data_dir>\sandbox\set-aside\<matter>`, made, holding what every launch leaves there.
+fn bookkeeping(data_dir: &Path, matter: MatterId) -> PathBuf {
+    let set_aside = data_dir.join(SANDBOX_DIR).join(SET_ASIDE_DIR);
+    write::make_sandbox_dir(&set_aside).unwrap();
+    let folder = set_aside.join(matter.to_string());
+    write::make_sandbox_dir(&folder).unwrap();
+    for name in SET_ASIDE_BOOKKEEPING {
+        write::write_atomic(&folder.join(name), b"{}").unwrap();
+    }
+    folder
+}
+
+/// A pass folder in the matter's set-aside `folder` holding a moved `.git\HEAD`, and its
+/// manifest: the lawyer's files.
+fn moved_files(folder: &Path) -> PathBuf {
+    let git = folder.join("20261107T101500-000Z").join(".git");
+    write::make_sandbox_dir(&git).unwrap();
+    write::write_atomic(&git.join("HEAD"), b"ref: refs/heads/main").unwrap();
+    write::write_atomic(&folder.join("manifest.json"), b"{}").unwrap();
+    git.join("HEAD")
+}
+
+#[test]
+fn as_the_owner_a_forgotten_matters_bookkeeping_goes_and_its_moved_files_stay() {
+    let (mut machine, mut acl) = pool("remove-ledger-set-aside", Some(owner()));
+    let data_dir = machine.m.data_dir();
+    owners_matter(&machine);
+    let m2 = matters(&machine).join("m2");
+    let allow = grant(
+        &m2,
+        &pool_sid(1003),
+        Rights::Modify,
+        Inherit::Tree,
+        PathKind::Matter,
+    );
+    record(&data_dir, matter_two(), vec![allow], None);
+    // Bookkeeping only: it goes, and the matter's folder with it.
+    let one = bookkeeping(&data_dir, matter_one());
+    // Bookkeeping beside a pass's moved files: only the bookkeeping goes.
+    let two = bookkeeping(&data_dir, matter_two());
+    let head = moved_files(&two);
+    // A matter the ledger doesn't name was never forgotten: its bookkeeping stays.
+    let unnamed = matter("01890a5d-ac96-774b-8cce-b302099a8059");
+    let three = bookkeeping(&data_dir, unnamed);
+
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+    assert_eq!(machine.forgot, [matter_one(), matter_two()]);
+    assert!(
+        std::fs::symlink_metadata(&one).is_err(),
+        "{}",
+        one.display()
+    );
+    for name in SET_ASIDE_BOOKKEEPING {
+        assert!(!two.join(name).exists(), "{name}");
+        assert!(three.join(name).exists(), "{name}");
+    }
+    assert_eq!(std::fs::read(&head).unwrap(), b"ref: refs/heads/main");
+    assert!(two.join("manifest.json").exists());
+    assert_all_gone(&machine, &acl);
+}
+
+#[test]
+fn as_an_administrator_no_set_aside_bookkeeping_is_ever_deleted() {
+    // The owner absent (another administrator, or LOCAL SYSTEM): K1, nothing deleted in the
+    // owner's folders. The fake also asserts the call is made only acting as the owner.
+    let admin = Sid::parse(OTHER_OWNER).unwrap();
+    for invoker in [Some(admin), None] {
+        let (mut machine, mut acl) = pool("remove-ledger-set-aside-admin", invoker);
+        let data_dir = machine.m.data_dir();
+        let m1 = owners_matter(&machine);
+        machine.admin_owned = vec![m1];
+        let one = bookkeeping(&data_dir, matter_one());
+        let removed = remove(&mut machine, &mut acl, true).unwrap();
+        assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+        assert_eq!(machine.forgot, Vec::<MatterId>::new());
+        for name in SET_ASIDE_BOOKKEEPING {
+            assert!(one.join(name).exists(), "{name}");
+        }
+    }
+}
+
+#[test]
+fn as_the_owner_a_bookkeeping_name_that_is_a_folder_is_left_and_the_removal_still_finishes() {
+    let (mut machine, mut acl) = pool("remove-ledger-set-aside-folder", Some(owner()));
+    let data_dir = machine.m.data_dir();
+    owners_matter(&machine);
+    let one = bookkeeping(&data_dir, matter_one());
+    let [record_name, _] = SET_ASIDE_BOOKKEEPING;
+    write::remove_owned_file(&one.join(record_name)).unwrap();
+    write::make_sandbox_dir(&one.join(record_name)).unwrap();
+    write::write_atomic(&one.join(record_name).join("kept.txt"), b"x").unwrap();
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+    assert!(one.join(record_name).join("kept.txt").exists());
     assert_all_gone(&machine, &acl);
 }
 

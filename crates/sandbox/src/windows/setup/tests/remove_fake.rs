@@ -8,11 +8,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use clauseo_protocol::MatterId;
+
 use super::fake::{FakeAcl, FakeMachine, OWNER, rid, rids};
 use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
+use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
@@ -85,6 +88,8 @@ pub(super) struct Remover {
     pub(super) token: ParentToken,
     /// What another set-up does to the record while the removal waits for the lock.
     pub(super) after_lock: Option<Change>,
+    /// The matters whose set-aside bookkeeping was deleted, in order.
+    pub(super) forgot: Vec<MatterId>,
     base: PathBuf,
 }
 
@@ -103,6 +108,7 @@ impl Remover {
             acted: false,
             token: ParentToken::Standard,
             after_lock: None,
+            forgot: Vec::new(),
             base,
         }
     }
@@ -276,6 +282,17 @@ impl Removal for Remover {
 
     fn surroundings(&mut self) -> &mut dyn Surroundings {
         Machine::surroundings(&mut self.m)
+    }
+
+    fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError> {
+        assert!(
+            self.m.acting.get(),
+            "a set-aside's bookkeeping is deleted only as the owner"
+        );
+        self.forgot.push(*matter);
+        forget_bookkeeping(&self.m.data_dir(), matter)
+            .map(drop)
+            .map_err(|failure| MachineError::Other(failure.to_string()))
     }
 
     fn admins_ledger(

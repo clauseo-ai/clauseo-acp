@@ -123,8 +123,8 @@ pub use record::{
     RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
 };
 pub use set_aside::{
-    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason, SET_ASIDE_DIR,
-    SetAsideFailure,
+    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,
+    SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure,
 };
 #[cfg(windows)]
 pub use set_aside::{
