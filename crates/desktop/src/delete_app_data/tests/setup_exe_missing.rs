@@ -88,14 +88,14 @@ fn the_uninstaller_says_the_protection_stays_when_the_set_up_program_is_gone() {
 
 #[test]
 fn the_two_messages_are_the_drafts_and_name_no_path() {
-    let removed = "\"Windows security removed part of Clauseo (its sandbox set-up program) while \
-                   installing. Clauseo won't start AI agents on this computer until it's restored. \
-                   Whoever looks after this computer can restore it; the steps are in Clauseo's \
-                   notes for IT.\"";
-    let missing = "\"Clauseo couldn't remove its sandbox because Windows security removed its \
-                   set-up program. The sandbox's hidden user accounts are still on this computer. \
-                   Whoever looks after this computer can remove them; the steps are in Clauseo's \
-                   notes for IT.\"";
+    let removed = "\"Windows security removed part of Clauseo while it was installing: the \
+                   program that sets up the Safe workspace. Until it's restored, Clauseo won't \
+                   start Claude or ChatGPT in the Safe workspace. Whoever looks after this \
+                   computer can restore it. Clauseo's notes for IT explain how.\"";
+    let missing = "\"Clauseo couldn't remove the Safe workspace, because Windows security removed \
+                   the program that sets it up. The Safe workspace's hidden Windows accounts are \
+                   still on this computer. Whoever looks after this computer can remove them. \
+                   Clauseo's notes for IT explain how.\"";
     assert_eq!(english("setupExeRemoved"), removed);
     assert_eq!(english("removeExeMissing"), missing);
     for text in [removed, missing] {

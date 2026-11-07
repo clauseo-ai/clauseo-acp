@@ -50,10 +50,9 @@ LangString removeSkippedSilent ${LANG_HINDI} "Clauseo ने सुरक्ष�
 ; most likely quarantined by Windows security, while the machine's record shows a set-up, so it
 ; couldn't run --remove. A box; under /S a details line and exit code 21. setupExeRemoved: an
 ; installer found that program gone right after writing it; the install stays. A box; under /S a
-; details line and exit code 20. Drafts, for the app thread and stage F (2026-11-07).
-; PLACEHOLDER (Hindi from the app thread)
-LangString removeExeMissing ${LANG_HINDI} "Clauseo couldn't remove its sandbox because Windows security removed its set-up program. The sandbox's hidden user accounts are still on this computer. Whoever looks after this computer can remove them; the steps are in Clauseo's notes for IT."
-LangString setupExeRemoved ${LANG_HINDI} "Windows security removed part of Clauseo (its sandbox set-up program) while installing. Clauseo won't start AI agents on this computer until it's restored. Whoever looks after this computer can restore it; the steps are in Clauseo's notes for IT."
+; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
+LangString removeExeMissing ${LANG_HINDI} "Clauseo सुरक्षित कार्यक्षेत्र नहीं हटा सका, क्योंकि Windows सुरक्षा ने उसे सेट अप करने वाला प्रोग्राम हटा दिया। सुरक्षित कार्यक्षेत्र के छिपे हुए Windows खाते अभी भी इस कंप्यूटर पर हैं। इस कंप्यूटर की देखरेख करने वाला व्यक्ति उन्हें हटा सकता है। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
+LangString setupExeRemoved ${LANG_HINDI} "इंस्टॉल होते समय Windows सुरक्षा ने Clauseo का एक हिस्सा हटा दिया: वह प्रोग्राम जो सुरक्षित कार्यक्षेत्र सेट अप करता है। जब तक इसे वापस नहीं लाया जाता, Clauseo सुरक्षित कार्यक्षेत्र में Claude या ChatGPT शुरू नहीं करेगा। इस कंप्यूटर की देखरेख करने वाला व्यक्ति इसे वापस ला सकता है। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
