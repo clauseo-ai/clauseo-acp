@@ -21,7 +21,7 @@ fn pool() -> PoolUser {
 
 fn folders(place: &Place, names: &[&str]) {
     for name in names {
-        make_agent_folder(&place.at(name)).unwrap();
+        make_agent_folder(&place.root, &place.at(name)).unwrap();
     }
 }
 

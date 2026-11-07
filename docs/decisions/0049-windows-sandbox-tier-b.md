@@ -741,14 +741,25 @@ for `--reclaim`.
   goes into a job with `KILL_ON_JOB_CLOSE` and no breakaway before it runs; the job's one handle
   is the outer's, so ending the outer (the host's job does) ends the inner runner and the agent's
   whole tree. Error 1058 (Secondary Logon disabled) is `SetUpFailed` with set-up's own cause.
+  The inner runner starts in System32 and both runners keep DLL loads to System32, so the agent
+  can't plant a DLL for the Medium inner runner. An agent exit code in the runner's own range
+  comes back as `AgentReserved`, never as a runner or set-up failure. The host removes the
+  launch file if the outer exits without having removed it. If the outer is killed between the
+  logon and the job, a suspended inner runner is left that never runs.
+- **UI limits on the job:** reading and writing the clipboard, global atoms, other processes'
+  USER handles, system parameters, display settings and exiting Windows. WinSta0, not the
+  desktop, owns the clipboard and the global atom table, so the private desktop alone doesn't
+  keep the agent from the lawyer's; Chromium's sandbox sets the same limits. Not the desktop
+  limit: the inner runner makes its desktop after it joins the job.
 - **The token** is (B) as above, made by the inner runner from its own token with
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode` and makes a private
   desktop for `SYSTEM` and the pool user, labelled Low; the agent inherits only its three pipes.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
-  only, with an explicit protected DACL naming the lawyer and the pool user and nothing else, so
-  another matter's agent gets error 5. Before it sends a byte it checks each client is the inner
+  only, with an explicit protected DACL giving the lawyer and the pool user read and write and no
+  one else anything, so another matter's agent gets error 5, and a Medium label with no-read-up
+  and no-write-up, so a Low agent of the same matter can't open one by name either. Before it sends a byte it checks each client is the inner
   runner's process, and that process's token user the pool user. The launch goes over `ctl`,
   never the command line, which `CreateProcessWithLogonW` caps at 1024 characters.
 - **The environment.** `USERPROFILE`, `HOME`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`
@@ -768,7 +779,9 @@ for `--reclaim`.
   no CA to add.
 - **M3.** Tier B never grants on, links from or points at the lawyer's `~\.codex`: a launch whose
   paths or `CODEX_HOME` lie in it, or whose credential link is its `auth.json` by file ID, is
-  refused (`codex_reuse_in_policy` before apply, the outer runner again before logon).
+  refused (`codex_reuse_in_policy` before apply, the outer runner again before logon), and so
+  is a credential link that is a symbolic link. The path checks compare text: a short 8.3 name of
+  the lawyer's profile folder isn't caught, a known gap.
 
 ## Consequences
 
