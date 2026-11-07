@@ -99,6 +99,8 @@ pub(super) struct FakeMachine {
     pub(super) needs_reset: BTreeSet<Sid>,
     /// The users the reuse rule holds back after the resets, as `held_users` reads them.
     pub(super) held: BTreeSet<Sid>,
+    /// The `resets` each `held_users` call was given.
+    pub(super) held_for: Vec<Vec<Sid>>,
     pub(super) faults: ProfileFaults,
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
@@ -479,8 +481,14 @@ impl Machine for FakeMachine {
         Ok(())
     }
 
-    fn held_users(&mut self, _pool: &[Sid], _trusted: &[Sid]) -> Result<Vec<Sid>, MachineError> {
+    fn held_users(
+        &mut self,
+        _pool: &[Sid],
+        _trusted: &[Sid],
+        resets: &[Sid],
+    ) -> Result<Vec<Sid>, MachineError> {
         self.owner_call("held_users")?;
+        self.held_for.push(resets.to_vec());
         Ok(self.held.iter().cloned().collect())
     }
 

@@ -77,7 +77,7 @@ pub(super) fn run(
     check_owner(before.as_ref(), &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
     let resets = resets_due(machine, before.as_ref())?;
-    let held = top_up::held(machine, before.as_ref())?;
+    let held = top_up::held(machine, before.as_ref(), &resets)?;
     preflight(machine)?;
     let mut plan = plan_pool(machine, before.as_ref(), req, resets, &held)?;
     plan.matters = matters;

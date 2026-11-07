@@ -61,6 +61,22 @@ fn three_marked_and_two_free_make_five_free_so_it_adds_three() {
     );
     assert!(machine.needs_reset.is_empty());
     assert_eq!(machine.state.record.clone().unwrap().pool.len(), 11);
+    let resets: Vec<Sid> = (1004..=1006).map(sid).collect();
+    assert_eq!(
+        machine.held_for,
+        [resets],
+        "counted against the resets it acts on"
+    );
+}
+
+#[test]
+fn every_user_held_adds_the_full_shortfall() {
+    // As an unreadable ledger, session lock or set-aside manifest leaves it.
+    let (mut machine, mut acl) = pool_holding("topup-all-held", 1001..=1008);
+    let req = request(&mut machine, 0, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.top_up, top_up(0, 8, 0));
+    assert_eq!(report.made.len(), 8);
 }
 
 #[test]

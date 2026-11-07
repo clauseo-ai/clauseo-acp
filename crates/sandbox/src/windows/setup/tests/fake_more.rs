@@ -186,6 +186,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         no_local_low: BTreeSet::new(),
         needs_reset: BTreeSet::new(),
         held: BTreeSet::new(),
+        held_for: Vec::new(),
         faults: ProfileFaults::default(),
         next_rid: 1000,
         passwords: 0,

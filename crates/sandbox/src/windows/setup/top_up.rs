@@ -25,20 +25,22 @@ use super::outcome::{SetupFailure, Step, TopUp, cause_of};
 use crate::windows::pool::{MachineRecord, PoolUser};
 use crate::windows::sids::Sid;
 
-/// The recorded users the reuse rule holds back once this run's resets are done, read as the
-/// owner (`Machine::held_users`); none without a record. A `matters.json` that can't be read
+/// The recorded users the reuse rule holds back once this run has reset `resets` (the list it
+/// acts on, so no user counts free that it won't reset), read as the owner
+/// (`Machine::held_users`); none without a record. A `matters.json` that can't be read
 /// fails at [`Step::Matters`], before anything changes, as
 /// [`resets_due`](super::resets::resets_due) does.
 pub(super) fn held(
     machine: &mut impl Machine,
     record: Option<&MachineRecord>,
+    resets: &[Sid],
 ) -> Result<Vec<Sid>, SetupFailure> {
     let Some(record) = record else {
         return Ok(Vec::new());
     };
     let mut trusted = record.pool.clone();
     trusted.push(record.group.clone());
-    owned(machine, |m| m.held_users(&record.pool, &trusted)).map_err(|error| {
+    owned(machine, |m| m.held_users(&record.pool, &trusted, resets)).map_err(|error| {
         SetupFailure::early(
             Step::Matters,
             format!("the sandbox users in use: {}", cause_of(&error)),
