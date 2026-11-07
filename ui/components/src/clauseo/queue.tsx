@@ -158,7 +158,8 @@ const SHOWN = 2;
  * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). */
 export function QueueStrip({
   items,
-  held = null,
+  held: heldProp = null,
+  resume = null,
   note = null,
   onEdit,
   onRemove,
@@ -170,6 +171,9 @@ export function QueueStrip({
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
+  /** The resume cue's line (R20b): it takes the head, over a held line, and alone it is the strip with no queued
+   * message; null for none. */
+  resume?: string | null;
   /** A refused press's words and its code, under the head; null for none. */
   note?: { words: string; code: string } | null;
   onEdit: OnEdit;
@@ -197,6 +201,8 @@ export function QueueStrip({
     focusOut.current = onFocusOut;
     sayTo.current = onSay;
   });
+  // the resume cue wins over the hold's line: while it shows, the head says only that
+  const held = resume === null ? heldProp : null;
   const n = items.length;
   const rest = n - SHOWN;
   const showing = open || rest <= 0 ? items : items.slice(0, SHOWN);
@@ -259,24 +265,35 @@ export function QueueStrip({
     .filter((x) => x !== null)
     .join(" ");
   const head =
-    held === null || held.kind === "held" || !nextable
-      ? count
-      : w.m(
-          held.kind === "stopped"
-            ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
-            : held.kind === "not_allowed"
-              ? "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send."
-              : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
-          { time: w.clock(held.at) },
-        );
+    resume !== null
+      ? resume
+      : held === null || held.kind === "held" || !nextable
+        ? count
+        : w.m(
+            held.kind === "stopped"
+              ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
+              : held.kind === "not_allowed"
+                ? "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send."
+                : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
+            { time: w.clock(held.at) },
+          );
   // what the host's region says: the head, then a refused press's words; nothing once the queue is empty
   const said =
-    n === 0 ? "" : [head, why, note?.words].filter((x) => x != null && x !== "").join(" ");
+    n === 0
+      ? (resume ?? "")
+      : [head, why, note?.words].filter((x) => x != null && x !== "").join(" ");
   useLayoutEffect(() => {
     sayTo.current?.(said);
   }, [said]);
   useLayoutEffect(() => () => sayTo.current?.(""), []);
-  if (n === 0) return null;
+  if (n === 0)
+    return resume === null ? null : (
+      <section className="queue" data-testid={testIds?.resume}>
+        <p className="queue-say">
+          <Say>{resume}</Say>
+        </p>
+      </section>
+    );
   return (
     <section
       ref={section}

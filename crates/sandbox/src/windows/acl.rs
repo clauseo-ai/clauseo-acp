@@ -47,6 +47,9 @@ use object::{Handle, Object, os_error};
 use walk::{Foreign, Mode};
 
 pub(in crate::windows) mod object;
+pub(in crate::windows) mod privilege;
+pub(in crate::windows) mod take;
+mod taken;
 mod walk;
 
 /// What every read here asks for: owner, group, DACL and label, all under `READ_CONTROL`.
@@ -249,6 +252,22 @@ impl AclWriter for NtfsAcl {
             Some(target) => restore_on(&target, grant, label),
             None => Ok(()),
         }
+    }
+
+    fn strip_taken(
+        &mut self,
+        root: &Path,
+        others: &[Sid],
+        keep: &[(PathBuf, Sid)],
+        whole: bool,
+    ) -> Result<Walked, ApplyFailure> {
+        let me = sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?);
+        let others: Vec<Vec<u8>> = others.iter().map(sid_bytes).collect();
+        self.refused = None;
+        taken::strip(&self.token, root, &others, &me, keep, whole).map_err(|(failure, at)| {
+            self.refused = at.map(|wide| PathBuf::from(OsString::from_wide(&wide)));
+            failure
+        })
     }
 }
 

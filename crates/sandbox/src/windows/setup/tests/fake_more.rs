@@ -1,5 +1,6 @@
 //! More of the set-up's fakes (split from `fake.rs`): the surroundings the fence's walks get,
-//! how the call lines name a folder, and the profile faults the reset tests inject.
+//! how the call lines name a folder, the profile faults the reset tests inject, and
+//! [`FakeMachine::new`] (`new_machine`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -8,6 +9,13 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME};
+use crate::test_support::TempDir;
+use crate::windows::setup::{LogonRight, ServiceStart};
 
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
@@ -152,4 +160,56 @@ pub(super) struct State {
     pub(super) profiles: BTreeMap<Sid, PathBuf>,
     pub(super) marker: Option<Marker>,
     pub(super) secrets: BTreeMap<Sid, String>,
+}
+
+/// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
+/// folder and a 32 MiB journal on [`VOLUME`].
+pub(super) fn new_machine(test: &str) -> FakeMachine {
+    let dir = TempDir::new(test);
+    dir.dir("ProgramData/Microsoft/DeviceSync");
+    dir.dir("data");
+    let owner = Account {
+        sid: Sid::parse(OWNER).unwrap(),
+        password: "the owner's".to_owned(),
+        groups: BTreeSet::new(),
+        hidden: false,
+    };
+    FakeMachine {
+        dir,
+        calls: Vec::new(),
+        fails: Vec::new(),
+        panic_on: None,
+        state: State {
+            accounts: BTreeMap::from([(OWNER_NAME.to_owned(), owner)]),
+            group: None,
+            record: None,
+            profiles: BTreeMap::new(),
+            marker: None,
+            secrets: BTreeMap::new(),
+        },
+        written: Vec::new(),
+        temporary: BTreeSet::new(),
+        seclogon: ServiceStart::Manual,
+        logon_right: LogonRight::Allowed,
+        lock_held: false,
+        sessions_open: false,
+        journals: BTreeMap::from([(PathBuf::from(VOLUME), Some(32 << 20))]),
+        owner_sid_for: None,
+        owner: Sid::parse(OWNER).unwrap(),
+        acting: Rc::new(Cell::new(false)),
+        outside_owner: Vec::new(),
+        refuse_owner: false,
+        matters: Vec::new(),
+        owners: BTreeMap::new(),
+        self_owned_local_low: BTreeSet::new(),
+        stuck_owners: BTreeSet::new(),
+        no_local_low: BTreeSet::new(),
+        needs_reset: BTreeSet::new(),
+        held: BTreeSet::new(),
+        held_for: Vec::new(),
+        faults: ProfileFaults::default(),
+        next_rid: 1000,
+        passwords: 0,
+        around: Around::default(),
+    }
 }

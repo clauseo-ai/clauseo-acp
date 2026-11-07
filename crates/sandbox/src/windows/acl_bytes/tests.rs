@@ -572,3 +572,6 @@ fn a_clean_hand_back_is_accepted_inherited_entries_aside() {
     let inherited = inherited(HB_OTHER, Rights::Modify);
     assert!(handed(&read_back(HB_ME, &[&inherited])));
 }
+
+/// S15 `PR4i`: what `--reclaim` took.
+mod taken;

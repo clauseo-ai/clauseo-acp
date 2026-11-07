@@ -15,7 +15,7 @@ fn at(machine: &FakeMachine, from: usize, line: &str) -> usize {
         .unwrap_or_else(|| panic!("no {line} in {calls:?}"))
 }
 
-/// A pool of four, set up, with `marked` owed a profile reset and the entries on its `LocalLow`
+/// A pool of eight, set up, with `marked` owed a profile reset and the entries on its `LocalLow`
 /// gone, as deleting its profile takes them.
 fn pool_with_a_reset_owed(test: &str, marked: u32) -> (FakeMachine, FakeAcl) {
     let mut machine = FakeMachine::new(test);
@@ -59,7 +59,7 @@ fn an_extend_resets_a_marked_user_before_its_logon_and_closes_its_local_low_agai
         "log_on_once ClauseoSb01",
         "owner_of ClauseoSb01",
         "program_data",
-        "protect_for_owner 1001,1005,1006,1007,1008",
+        "protect_for_owner 1001,1009,1010,1011,1012",
         "reset_done 1001",
         "write_marker",
     ];
@@ -71,7 +71,7 @@ fn an_extend_resets_a_marked_user_before_its_logon_and_closes_its_local_low_agai
     );
     assert!(report.shared.added.iter().any(|grant| grant.path == closed));
     // The others are left as an extend leaves them.
-    for n in 2..=4 {
+    for n in 2..=8 {
         assert!(
             !machine
                 .calls_since(from)
@@ -115,7 +115,7 @@ fn a_re_run_resets_a_marked_user_too_and_no_other() {
         at(&machine, from, "delete_profile 1003") < at(&machine, from, "log_on_once ClauseoSb03")
     );
     assert_eq!(report.profiles_reset, Ok(vec![pool_user(3)]));
-    assert_eq!(report.reset.len(), 4, "a re-run resets every password");
+    assert_eq!(report.reset.len(), 8, "a re-run resets every password");
     assert!(machine.needs_reset.is_empty());
 }
 
@@ -195,7 +195,7 @@ fn a_failed_reset_keeps_the_mark() {
     assert!(why.contains("injected: reset_done"), "{why}");
     assert_eq!(machine.needs_reset, marked());
     assert!(machine.state.marker.is_some());
-    assert_eq!(rid(&report.made[0].sid), "1005");
+    assert_eq!(rid(&report.made[0].sid), "1009");
 }
 
 #[test]
@@ -330,6 +330,6 @@ fn a_remade_profile_in_another_case_is_the_same_folder() {
 #[test]
 fn a_failed_password_save_keeps_the_mark() {
     failing_reset("setup-reset-secrets", Step::Secrets, |machine| {
-        machine.fail("protect_for_owner 1002,1005,1006,1007,1008");
+        machine.fail("protect_for_owner 1002,1009,1010,1011,1012");
     });
 }

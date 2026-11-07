@@ -428,13 +428,19 @@ impl Actor {
         Ok(ticket)
     }
 
-    /// One request from a handle (`requests.rs`).
+    /// One request from a handle (`requests.rs`), then the idle clocks brought up to date.
     fn on_request(&mut self, request: Request) {
         requests::on_request(self, request);
+        turn::idle_tick(self);
     }
 
-    /// One internal input.
+    /// One internal input, then the idle clocks brought up to date (`turn/idle.rs`).
     fn on_input(&mut self, input: Input) {
+        self.on_input_only(input);
+        turn::idle_tick(self);
+    }
+
+    fn on_input_only(&mut self, input: Input) {
         match input {
             Input::Committed { ticket, result } => streams::on_committed(self, ticket, result),
             Input::Reopened { stream, result } => streams::on_reopened(self, stream, result),
@@ -456,6 +462,7 @@ impl Actor {
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
             Input::SnoozeWake { generation } => triage::on_wake(self, generation),
+            Input::IdleDeadline { generation } => turn::idle_due(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             Input::Scratch(input) => scratch::on_input(self, input),

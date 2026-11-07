@@ -13,8 +13,9 @@
 //! - [`TurnHandle`] is written by the host thread when a turn starts and ends; a relay thread
 //!   reads it when it counts a call.
 //! - [`RelayEvents`] hears what the host shows: a credential that ended, out of credit, and a
-//!   paid result (a balance read is due). [`ConnectorEvents`] is the host's own, bound to its
-//!   actor at start (`wiring.rs`).
+//!   paid result (a balance read is due); and each forwarded message's start and end
+//!   ([`RelayEvents::call`]), which the idle stop counts as the agent's work (R20b).
+//!   [`ConnectorEvents`] is the host's own, bound to its actor at start (`wiring.rs`).
 //! - `hint.rs` decides when a turn's web searches look like case law (the hint, PR6); the
 //!   relay's `CaseLawFound` feeds the thread's sources (`sources/case_law.rs`).
 //! - `state.rs` holds what the app sees of the connector (PR5): the credential, the balance, out
@@ -79,6 +80,14 @@ pub enum RelayEvent {
         /// `structuredContent.balance_credits`, when it is a whole number.
         balance_credits: Option<i64>,
     },
+    /// A message the relay forwards started or ended (`RelayEvents::call`): the idle stop
+    /// counts it as the session's agent at work, in a turn or between turns (R20b).
+    Call {
+        /// The session whose message it is.
+        session: SessionKey,
+        /// Whether it started or ended.
+        call: RelayCall,
+    },
     /// A `search_law` or `read_document` call answered without an error: what it found, for
     /// the thread's sources (`sources/case_law.rs` joins it to the agent's tool call).
     CaseLawFound {
@@ -87,6 +96,15 @@ pub enum RelayEvent {
         /// What the call found.
         found: CaseLawFound,
     },
+}
+
+/// A forwarded message's start or end ([`RelayEvent::Call`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayCall {
+    /// It was vetted and goes to the connector.
+    Started,
+    /// Its answers are written (or it failed): the relay is done with it.
+    Ended,
 }
 
 /// The case-law tools whose results become sources.
@@ -171,5 +189,11 @@ pub trait RelayEvents: Send + Sync {
     /// plus from the reply to its last line written. The bench reads it; the default drops it.
     fn overhead(&self, took: Duration) {
         let _ = took;
+    }
+
+    /// A message of `session` the relay forwards started or ended, in pairs; the host's sink
+    /// passes it on as [`RelayEvent::Call`] (the idle stop). The default drops it.
+    fn call(&self, session: SessionKey, call: RelayCall) {
+        let _ = (session, call);
     }
 }

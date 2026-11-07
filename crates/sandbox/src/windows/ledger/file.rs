@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::reclaims::{ReclaimSlot, read_reclaim, render_reclaims};
 use super::{Entry, HandbackOwed, LEDGER_VERSION};
 use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::sids::{Reserved, Sid};
@@ -80,6 +81,8 @@ pub(super) struct State {
     pub(super) slots: Vec<Slot>,
     /// The hand-backs `forget_matter` still owes (S15 `PR3b` round 2, N5).
     pub(super) handbacks: Vec<OwedSlot>,
+    /// The clean-ups a refused launch left for `--reclaim` (S15 `PR4i`, `reclaims.rs`).
+    pub(super) reclaims: Vec<ReclaimSlot>,
     pub(super) next_id: u64,
     pub(super) extra: Map<String, Value>,
 }
@@ -89,6 +92,7 @@ impl State {
         State {
             slots: Vec::new(),
             handbacks: Vec::new(),
+            reclaims: Vec::new(),
             next_id: 1,
             extra: Map::new(),
         }
@@ -171,7 +175,30 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(State::empty()),
         Err(error) => return Err(error),
     };
-    let Value::Object(mut top) = serde_json::from_slice(&bytes).map_err(invalid)? else {
+    parse_state(&bytes, trust)
+}
+
+/// The ledger `bytes` hold, read by the caller from the file at `path` (`--remove` opens it
+/// relative to its checked folder's handle, never by path); each entry checked as
+/// [`Ledger::open`](super::Ledger::open) checks it. A later change reads the file again.
+#[cfg(windows)]
+pub(crate) fn from_bytes(
+    path: std::path::PathBuf,
+    bytes: &[u8],
+    trusted: &[Sid],
+    reserved: &Reserved,
+) -> io::Result<super::Ledger> {
+    let trust = Trust {
+        trusted: trusted.to_vec(),
+        reserved: reserved.clone(),
+    };
+    let state = parse_state(bytes, &trust)?;
+    Ok(super::Ledger { path, trust, state })
+}
+
+/// The ledger's contents from its file's `bytes`, each entry checked against `trust`.
+fn parse_state(bytes: &[u8], trust: &Trust) -> io::Result<State> {
+    let Value::Object(mut top) = serde_json::from_slice(bytes).map_err(invalid)? else {
         return Err(invalid("the ACL ledger is not a JSON object"));
     };
     let version = match top.remove("version") {
@@ -194,6 +221,11 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
         Some(Value::Array(items)) => items.into_iter().map(|v| read_owed(v, trust)).collect(),
         Some(_) => return Err(invalid("the ACL ledger's hand-backs are not a list")),
     };
+    let reclaims: Vec<ReclaimSlot> = match top.remove("reclaims") {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items.into_iter().map(read_reclaim).collect(),
+        Some(_) => return Err(invalid("the ACL ledger's clean-ups are not a list")),
+    };
     let stored_next = top.remove("next_id").and_then(|n| n.as_u64()).unwrap_or(1);
     let highest = slots
         .iter()
@@ -214,6 +246,7 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
     Ok(State {
         slots,
         handbacks,
+        reclaims,
         next_id,
         extra: top,
     })
@@ -257,6 +290,10 @@ pub(super) fn render(state: &State) -> io::Result<Vec<u8>> {
             });
         }
         top.insert("handbacks".to_owned(), Value::Array(owed));
+    }
+    if !state.reclaims.is_empty() {
+        let reclaims = render_reclaims(&state.reclaims).map_err(invalid)?;
+        top.insert("reclaims".to_owned(), Value::Array(reclaims));
     }
     for (key, value) in &state.extra {
         top.entry(key.clone()).or_insert_with(|| value.clone());

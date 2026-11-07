@@ -14,7 +14,7 @@ use clauseo_connectors::{ConnectorHandle, Connectors, MemoryStore, Origin, Secre
 use clauseo_protocol::{MatterId, ThreadId, Timestamp};
 use serde_json::{Value, json};
 
-use super::super::super::{FixedOffset, RelayEvent, RelayEvents};
+use super::super::super::{FixedOffset, RelayCall, RelayEvent, RelayEvents};
 use super::super::{RelayConfig, RelaySession, Relays};
 use crate::ManualClock;
 use crate::config::SessionKey;
@@ -290,6 +290,8 @@ pub(super) fn error_text(reply: &Value) -> &str {
 pub(super) struct Recorder {
     pub(super) events: Mutex<Vec<RelayEvent>>,
     pub(super) overheads: Mutex<Vec<Duration>>,
+    /// Each forwarded message's start and end (the idle stop's), apart from the events.
+    pub(super) calls: Mutex<Vec<(SessionKey, RelayCall)>>,
 }
 
 impl RelayEvents for Recorder {
@@ -299,6 +301,10 @@ impl RelayEvents for Recorder {
 
     fn overhead(&self, took: Duration) {
         self.overheads.lock().unwrap().push(took);
+    }
+
+    fn call(&self, session: SessionKey, call: RelayCall) {
+        self.calls.lock().unwrap().push((session, call));
     }
 }
 

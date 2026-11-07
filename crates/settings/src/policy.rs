@@ -10,10 +10,15 @@
 //! their parser is the one that sees that nothing is forced and returns [`PolicyRead`]; a
 //! `policy.json` that exists can still fail to parse, so its parser returns a `Result`. A new
 //! store picks the shape that says what it can report.
+//!
+//! Each OS's `policy.json` is read through a [`TrustedFilePolicy`]: only when an administrator
+//! (root on macOS and Linux) owns it and its folder and no one else can change them. A file that
+//! fails is ignored, as if absent, with one host log warning; the rule is in [`trust`]'s doc.
 
 pub mod file;
 pub mod managed_prefs;
 pub mod registry;
+pub mod trust;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -26,6 +31,8 @@ use crate::leaf::{self, Leaf};
 use crate::lock_reason::LockReason;
 use crate::warning::Warning;
 use std::path::PathBuf;
+
+pub use trust::TrustedFilePolicy;
 
 /// One place policy can come from.
 pub trait PolicySource {
@@ -109,17 +116,18 @@ pub struct FilePolicy<F> {
 }
 
 /// The policy sources of this OS, strongest first: on Windows the registry, on macOS managed
-/// preferences, then the OS's `policy.json`. No variable moves them.
+/// preferences, then the OS's `policy.json`, read only when an administrator owns it
+/// ([`TrustedFilePolicy`]). No variable moves them.
 pub fn system_policy_sources() -> Vec<Box<dyn PolicySource>> {
     #[cfg(windows)]
     return windows::sources();
     #[cfg(target_os = "macos")]
     return macos::sources();
     #[cfg(not(any(windows, target_os = "macos")))]
-    return vec![Box::new(FilePolicy::new(
-        PathBuf::from("/etc/clauseo/policy.json"),
-        crate::SystemFiles,
-    ))];
+    return vec![Box::new(
+        TrustedFilePolicy::owned_by(PathBuf::from("/etc/clauseo/policy.json"), 0)
+            .with_parent_check(),
+    )];
 }
 
 impl PolicyValues {

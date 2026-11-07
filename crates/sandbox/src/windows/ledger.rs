@@ -59,11 +59,15 @@ use super::writer::Label;
 
 mod file;
 mod held;
+mod label;
 mod outcome;
 mod owed;
+mod reclaims;
 mod recorded;
 mod settle;
 
+#[cfg(windows)]
+pub(crate) use file::from_bytes;
 use file::{Known, Slot, State, Trust, invalid, read_state};
 #[cfg(test)]
 pub(crate) use held::ByPath;
@@ -71,8 +75,10 @@ pub(crate) use held::ByPath;
 use held::ByPath;
 use held::Held;
 pub(crate) use held::Shares;
+pub(crate) use label::is_our_label;
 pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
 pub use owed::HandbackOwed;
+pub use reclaims::{ReclaimOwed, Stuck};
 pub use recorded::RecordedFile;
 
 /// The ledger's file name in `<data_dir>\sandbox`.
@@ -409,6 +415,25 @@ impl Ledger {
         self.update(false, |state| Ok((owed::clear(state, matter), ())))
     }
 
+    /// Records under the lock, once, that `matter`'s launch refused at `path` (`reclaims.rs`).
+    pub fn owe_reclaim(&mut self, matter: MatterId, path: PathBuf, why: Stuck) -> io::Result<()> {
+        let owed = reclaims::checked(matter, path, why)?;
+        self.update(true, |state| Ok((reclaims::owe(state, owed), ())))
+    }
+
+    /// The clean-ups owed, as last read, in file order.
+    pub fn reclaims_owed(&self) -> Vec<ReclaimOwed> {
+        reclaims::listed(&self.state).cloned().collect()
+    }
+
+    /// Clears `matter`'s clean-ups owed under the lock; with none listed, touches nothing.
+    pub(crate) fn clear_reclaims(&mut self, matter: MatterId) -> io::Result<()> {
+        if !reclaims::listed(&self.state).any(|owed| owed.matter == matter) {
+            return Ok(());
+        }
+        self.update(false, |state| Ok((reclaims::clear(state, matter), ())))
+    }
+
     /// Records `label` as the explicit label entry `id`'s path had before ours: written before
     /// our label is (L4). Only an entry `plan` added, still pending, with none recorded yet, and
     /// never our own label ([`is_our_label`], N7).
@@ -561,27 +586,6 @@ impl Ledger {
         }
         result
     }
-}
-
-/// Whether `label` is the Low label a [`Rights::LowLabel`] grant reaching `inherit` writes (on
-/// a folder or a file): our own, never to be recorded as the lawyer's earlier label (N7).
-pub(crate) fn is_our_label(label: &Label, inherit: Inherit) -> bool {
-    /// `INHERITED_ACE`, which a label read may carry.
-    const INHERITED: u8 = 0x10;
-    /// `S-1-16-4096`'s level.
-    const LOW: u32 = 4096;
-    let ours: &[u8] = match inherit {
-        Inherit::ThisOnly => &[0],
-        // Object and container inherit on a folder; none on a file.
-        Inherit::Tree => &[0, 0x3],
-        // Object inherit, inherit only, no propagation.
-        Inherit::FilesInFolder => &[0xd],
-        // Object and container inherit, inherit only: what is below a folder.
-        Inherit::Below => &[0xb],
-    };
-    label.level == LOW
-        && label.mask == Rights::LowLabel.mask()
-        && ours.contains(&(label.flags & !INHERITED))
 }
 
 /// Whether two entries name the same permission entry: path, SID, rights and inheritance.

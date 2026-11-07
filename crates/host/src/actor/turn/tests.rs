@@ -3,6 +3,11 @@
 mod agents;
 mod closed;
 mod failures;
+mod idle;
+mod idle_busy;
+mod idle_cap;
+mod idle_checks;
+mod idle_work;
 mod last_chunk;
 mod leading;
 mod limit_read;

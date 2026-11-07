@@ -3,13 +3,18 @@
 //! daemon and Chrome's debugging port).
 //!
 //! macOS and Linux bind `127.0.0.1` on a port the OS picks. Windows binds a free port in
-//! [`WINDOWS_PORTS`], the range that set-up's filters leave open and that each launch's dynamic
-//! permit narrows to that launch's own ports (S15), starting at a random offset, with
-//! `SO_EXCLUSIVEADDRUSE` set before each bind so no other process can bind the same port.
+//! [`TIER_B_PORTS`], the range set-up's static permits open to every pool user (S15 PR7),
+//! starting at a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind so no other
+//! process can bind the same port. Every listener binds `127.0.0.1` only.
+//!
+//! The range is for tier B's listeners alone, since every pool user's agent reaches it: the
+//! proxy's, R24's relay, and what a tier-B launch binds later ([`claim_port`],
+//! [`claim_port_at`]). The browser's ports, and anything else that isn't tier B, are claimed
+//! outside it ([`claim_browser_port`], [`claim_browser_port_at`]).
 //!
 //! A [`PortClaim`] holds a port in a process-wide registry until it drops. Nothing is bound
 //! while it is held, so the registry keeps this process's own listeners and claims apart:
-//! [`bind_loopback`], [`claim_port`] and [`claim_port_at`] never hand out a claimed port.
+//! [`bind_loopback`] and the four claims never hand out a claimed port.
 //!
 //! On macOS and Linux a dropped claim retires its port instead of freeing it, and so does every
 //! port [`bind_loopback`] hands out, as it binds. Retired ports
@@ -26,8 +31,15 @@ use std::net::TcpListener;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// The loopback ports a Windows listener may take.
-pub const WINDOWS_PORTS: std::ops::RangeInclusive<u16> = 61080..=61179;
+/// The loopback ports tier B's listeners take on Windows, and the only ones set-up's static
+/// permits open to a pool user (S15 PR7). Below 49152, where Windows' dynamic range starts by
+/// default, so the OS never hands them to another program's port-0 bind; clear of the
+/// listeners known to sit below it (`WinRM` 47001, the `ASP.NET` state service 42424,
+/// `EtherNet/IP` 44818, `BACnet` 47808, SQL Server's browser 1434) and of any port IANA
+/// registers. Set-up and
+/// every tier-B launch refuse a machine whose dynamic range, or whose excluded port ranges
+/// (Hyper-V, WSL, Docker), overlap it (`wfp::check_ports`).
+pub const TIER_B_PORTS: std::ops::RangeInclusive<u16> = 46100..=46199;
 
 /// The ports claimed now, by live [`PortClaim`]s.
 static CLAIMED: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());
@@ -132,18 +144,20 @@ pub fn bind_loopback() -> io::Result<TcpListener> {
     Ok(listener)
 }
 
-/// Binds a listener on `127.0.0.1` for one launch, on a free port in [`WINDOWS_PORTS`] that is
-/// not claimed. When none binds, the error names the range and says what may hold it. Windows
-/// retires nothing (see the module header).
+/// Binds a listener on `127.0.0.1` for one tier-B launch, on a free port in [`TIER_B_PORTS`]
+/// that is not claimed. When none binds, the error names the range and says what may hold it.
+/// Windows retires nothing (see the module header).
 #[cfg(windows)]
 pub fn bind_loopback() -> io::Result<TcpListener> {
     imp::bind(&Held::lock())
 }
 
-/// Claims a free loopback port for the session. macOS and Linux: the port the OS gives a bind
-/// of `127.0.0.1:0`, asked again when it is already claimed or retired. Windows: a free port in
-/// [`WINDOWS_PORTS`] that is not claimed, tested with the same `SO_EXCLUSIVEADDRUSE` bind as
-/// [`bind_loopback`]. The test listener is closed before this returns.
+/// Claims a free loopback port for a listener a tier-B launch binds later (tier B only: every
+/// pool user reaches it on Windows; the browser claims with [`claim_browser_port`]). macOS and
+/// Linux: the port the OS gives a bind of `127.0.0.1:0`, asked again when it is already claimed
+/// or retired. Windows: a free port in [`TIER_B_PORTS`] that is not claimed, tested with the
+/// same `SO_EXCLUSIVEADDRUSE` bind as [`bind_loopback`]. The test listener is closed before
+/// this returns.
 pub fn claim_port() -> io::Result<PortClaim> {
     let mut held = Held::lock();
     let port = imp::bind(&held)?.local_addr()?.port();
@@ -151,9 +165,9 @@ pub fn claim_port() -> io::Result<PortClaim> {
     Ok(PortClaim { port })
 }
 
-/// Claims `port`, for a port whose number someone else chose (agent-browser's Windows daemon
-/// port, a hash of its session name). [`io::ErrorKind::InvalidInput`] for port 0, and on
-/// Windows for a port outside [`WINDOWS_PORTS`]; [`io::ErrorKind::AddrInUse`] when it is
+/// Claims `port`, whose number someone else chose, for tier B only (the browser's daemon port
+/// goes through [`claim_browser_port_at`]). [`io::ErrorKind::InvalidInput`] for port 0, and on
+/// Windows for a port outside [`TIER_B_PORTS`]; [`io::ErrorKind::AddrInUse`] when it is
 /// claimed or retired, or a test bind of it fails. The caller picks another (a new session
 /// name).
 pub fn claim_port_at(port: u16) -> io::Result<PortClaim> {
@@ -164,17 +178,102 @@ pub fn claim_port_at(port: u16) -> io::Result<PortClaim> {
         ));
     }
     #[cfg(windows)]
-    if !WINDOWS_PORTS.contains(&port) {
+    if !TIER_B_PORTS.contains(&port) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
                 "port {port} is outside {}..={}",
-                WINDOWS_PORTS.start(),
-                WINDOWS_PORTS.end()
+                TIER_B_PORTS.start(),
+                TIER_B_PORTS.end()
             ),
         ));
     }
     claim_at_with(port, imp::bind_port)
+}
+
+/// The ports of [`TIER_B_PORTS`] Windows refuses to bind on `127.0.0.1` or `::1`
+/// (`PermissionDenied`, `WSAEACCES`): an excluded port range (Hyper-V, WSL and Docker reserve
+/// them). Ports in `listening`, which a listener holds, and ports this process holds are
+/// skipped; each test bind closes at once. Windows publishes no call that lists the excluded
+/// ranges (`netsh int ipv4 show excludedportrange` reads the TCP/IP stack's private store), and
+/// the documented reservation calls, `CreatePersistentTcpPortReservation` and
+/// `LookupPersistentTcpPortReservation`, only make or look up one exact range, so a bind is the
+/// test.
+#[cfg(windows)]
+pub(crate) fn refused_ports(listening: &BTreeSet<u16>) -> Vec<u16> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    let held = Held::lock();
+    let refused = |port: u16| {
+        [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ]
+        .into_iter()
+        .any(|ip| {
+            matches!(TcpListener::bind((ip, port)),
+                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
+        })
+    };
+    TIER_B_PORTS
+        .filter(|port| !listening.contains(port) && !held.contains(*port))
+        .filter(|port| refused(*port))
+        .collect()
+}
+
+/// How many binds may land on a held or tier-B port before a browser claim gives up.
+const BROWSER_TRIES: usize = 64;
+
+/// Claims a free loopback port outside [`TIER_B_PORTS`], for a listener that isn't tier B's:
+/// Chrome's debugging port, agent-browser's stream server. The port a bind of `127.0.0.1:0`
+/// gets, asked again when it is claimed, retired, or in [`TIER_B_PORTS`] (where the OS hands
+/// out ports only on a machine whose dynamic range covers them, which tier B refuses). The test
+/// listener closes before this returns.
+pub fn claim_browser_port() -> io::Result<PortClaim> {
+    let mut held = Held::lock();
+    let port = outside_tier_b(&held, || imp::bind_port(0))?
+        .local_addr()?
+        .port();
+    held.claimed.insert(port);
+    Ok(PortClaim { port })
+}
+
+/// Claims `port`, whose number someone else chose (agent-browser's Windows daemon port, a hash
+/// of its session name), for a listener that isn't tier B's. [`io::ErrorKind::InvalidInput`]
+/// for port 0 or a port in [`TIER_B_PORTS`]; [`io::ErrorKind::AddrInUse`] when it is claimed
+/// or retired, or a test bind of it fails. The caller picks another (a new session name).
+pub fn claim_browser_port_at(port: u16) -> io::Result<PortClaim> {
+    if port == 0 || TIER_B_PORTS.contains(&port) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "port {port} can't be claimed for the browser: 0 and {}..={} are refused",
+                TIER_B_PORTS.start(),
+                TIER_B_PORTS.end()
+            ),
+        ));
+    }
+    claim_at_with(port, imp::bind_port)
+}
+
+/// The first listener from `next` on a port `held` doesn't hold, outside [`TIER_B_PORTS`].
+/// Listeners on other ports stay open until one is found, so the OS can't hand them back.
+fn outside_tier_b(
+    held: &Held,
+    mut next: impl FnMut() -> io::Result<TcpListener>,
+) -> io::Result<TcpListener> {
+    let mut rejected = Vec::new();
+    for _ in 0..BROWSER_TRIES {
+        let listener = next()?;
+        let port = listener.local_addr()?.port();
+        if !held.contains(port) && !TIER_B_PORTS.contains(&port) {
+            return Ok(listener);
+        }
+        rejected.push(listener);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AddrInUse,
+        format!("{BROWSER_TRIES} loopback binds in a row landed on held or tier-B ports"),
+    ))
 }
 
 /// [`claim_port_at`] after its range checks, with the test bind given as `bind_port`: the
@@ -209,7 +308,7 @@ fn first_free(
     held: &Held,
     mut bind_port: impl FnMut(u16) -> io::Result<TcpListener>,
 ) -> io::Result<TcpListener> {
-    let mut last = io::Error::new(io::ErrorKind::AddrInUse, "no free port in 61080 to 61179");
+    let mut last = io::Error::new(io::ErrorKind::AddrInUse, "no free port in the tier-B range");
     for port in candidates.filter(|port| !held.contains(*port)) {
         match bind_port(port) {
             Ok(listener) => return Ok(listener),
@@ -227,7 +326,7 @@ fn first_free(
     Err(range_exhausted(&last))
 }
 
-/// The error when every port in [`WINDOWS_PORTS`] failed, keeping the last failure's kind.
+/// The error when every port in [`TIER_B_PORTS`] failed, keeping the last failure's kind.
 #[cfg(any(windows, test))]
 fn range_exhausted(last: &io::Error) -> io::Error {
     io::Error::new(
@@ -236,8 +335,8 @@ fn range_exhausted(last: &io::Error) -> io::Error {
             "no loopback port in {}..={} could be bound (last error: {last}); another program, \
              or a Windows port reservation (Hyper-V, WSL or Docker; see `netsh int ipv4 show \
              excludedportrange protocol=tcp`), may hold the range",
-            WINDOWS_PORTS.start(),
-            WINDOWS_PORTS.end()
+            TIER_B_PORTS.start(),
+            TIER_B_PORTS.end()
         ),
     )
 }
@@ -290,18 +389,18 @@ mod imp {
         SO_EXCLUSIVEADDRUSE, SOCKET, SOL_SOCKET, setsockopt,
     };
 
-    use super::{Held, WINDOWS_PORTS, first_free};
+    use super::{Held, TIER_B_PORTS, first_free};
 
     /// The backlog of each listener.
     const BACKLOG: i32 = 128;
 
-    /// A listener on a free port of [`WINDOWS_PORTS`] that `held` does not hold.
+    /// A listener on a free port of [`TIER_B_PORTS`] that `held` does not hold.
     pub(super) fn bind(held: &Held) -> io::Result<TcpListener> {
-        let count = WINDOWS_PORTS.len();
+        let count = TIER_B_PORTS.len();
         let mut random = [0u8; 2];
         getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
         let offset = usize::from(u16::from_le_bytes(random)) % count;
-        let ports = WINDOWS_PORTS.skip(offset).chain(WINDOWS_PORTS.take(offset));
+        let ports = TIER_B_PORTS.skip(offset).chain(TIER_B_PORTS.take(offset));
         first_free(ports, held, bind_port)
     }
 
@@ -341,199 +440,4 @@ mod imp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn binds_loopback() {
-        let listener = bind_loopback().unwrap();
-        let address = listener.local_addr().unwrap();
-        assert!(address.ip().is_loopback(), "{address}");
-        assert_ne!(address.port(), 0);
-        #[cfg(windows)]
-        assert!(WINDOWS_PORTS.contains(&address.port()), "{address}");
-    }
-
-    #[test]
-    fn a_full_range_names_itself_and_the_windows_reservations() {
-        let last = io::Error::from(io::ErrorKind::PermissionDenied);
-        let error = range_exhausted(&last);
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-        let text = error.to_string();
-        assert!(text.contains("61080..=61179"), "{text}");
-        assert!(text.contains("another program"), "{text}");
-        assert!(
-            text.contains("netsh int ipv4 show excludedportrange protocol=tcp"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn two_claims_differ_and_each_is_loopback_bindable() {
-        let (a, b) = (claim_port().unwrap(), claim_port().unwrap());
-        assert_ne!(a.port(), b.port());
-        assert_ne!(a.port(), 0);
-        #[cfg(windows)]
-        assert!(WINDOWS_PORTS.contains(&a.port()), "{a:?}");
-        assert!(format!("{a:?}").contains(&a.port().to_string()), "{a:?}");
-    }
-
-    #[test]
-    fn a_claimed_port_is_never_handed_out_again() {
-        let claim = claim_port().unwrap();
-        for _ in 0..32 {
-            let listener = bind_loopback().unwrap();
-            assert_ne!(listener.local_addr().unwrap().port(), claim.port());
-            assert_ne!(claim_port().unwrap().port(), claim.port());
-        }
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn a_bind_that_lands_on_a_claimed_port_is_asked_again() {
-        let claim = claim_port().unwrap();
-        // The claim binds nothing, so the test can put a listener on its port.
-        let mut listeners = vec![imp::bind_port(claim.port()).unwrap()].into_iter();
-        let got = imp::first_unheld(&Held::lock(), || {
-            listeners.next().map_or_else(|| imp::bind_port(0), Ok)
-        })
-        .unwrap();
-        assert_ne!(got.local_addr().unwrap().port(), claim.port());
-        let all_claimed = imp::first_unheld(&Held::lock(), || imp::bind_port(claim.port()));
-        assert!(all_claimed.is_err(), "the port was bound twice");
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn a_closed_listener_port_is_not_handed_out_again() {
-        let listener = bind_loopback().unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let error = claim_port_at(port).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-        for _ in 0..200 {
-            assert_ne!(claim_port().unwrap().port(), port);
-        }
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn a_released_claim_is_not_handed_out_again() {
-        let claim = claim_port().unwrap();
-        let port = claim.port();
-        drop(claim);
-        let error = claim_port_at(port).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-        for _ in 0..200 {
-            let next = claim_port().unwrap();
-            assert_ne!(next.port(), port);
-        }
-        // The OS may hand the port back to a bind of port 0; the retired port is asked again.
-        for _ in 0..200 {
-            let listener = bind_loopback().unwrap();
-            assert_ne!(listener.local_addr().unwrap().port(), port);
-        }
-    }
-
-    #[test]
-    fn the_candidate_loop_never_binds_a_claimed_port() {
-        let claim = claim_port().unwrap();
-        // The lock is held across the loop: the hook binds a socket and never touches the
-        // registry.
-        let held = Held::lock();
-        // A free port other than the claim's, so the loop's only skip is the claimed one.
-        let other = loop {
-            let port = TcpListener::bind("127.0.0.1:0")
-                .unwrap()
-                .local_addr()
-                .unwrap()
-                .port();
-            if port != claim.port() && !held.contains(port) {
-                break port;
-            }
-        };
-        let mut tried = Vec::new();
-        let got = first_free([claim.port(), other].into_iter(), &held, |port| {
-            tried.push(port);
-            TcpListener::bind("127.0.0.1:0")
-        })
-        .unwrap();
-        assert_eq!(tried, vec![other]);
-        drop(got);
-        let mut tried = Vec::new();
-        let none = first_free([claim.port()].into_iter(), &held, |port| {
-            tried.push(port);
-            TcpListener::bind("127.0.0.1:0")
-        });
-        assert!(none.is_err());
-        assert_eq!(tried, Vec::<u16>::new());
-    }
-
-    #[test]
-    fn claim_at_checks_the_registry_before_its_test_bind() {
-        let claim = claim_port().unwrap();
-        let mut binds = 0;
-        let error = claim_at_with(claim.port(), |_| {
-            binds += 1;
-            TcpListener::bind("127.0.0.1:0")
-        })
-        .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-        assert_eq!(binds, 0);
-    }
-
-    #[test]
-    fn claim_at_refuses_a_claimed_port_and_a_listening_one() {
-        let claim = claim_port().unwrap();
-        let error = claim_port_at(claim.port()).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-        let listener = bind_loopback().unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let error = claim_port_at(port).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-        let error = claim_port_at(0).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{error}");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn dropping_a_claim_frees_its_port() {
-        let claim = claim_port().unwrap();
-        let port = claim.port();
-        assert!(claim_port_at(port).is_err());
-        drop(claim);
-        let again = claim_port_at(port).unwrap();
-        assert_eq!(again.port(), port);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn claim_at_refuses_a_port_outside_the_windows_range() {
-        for port in [61_079, 61_180, 80] {
-            let error = claim_port_at(port).unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{port}: {error}");
-        }
-        let start = claim_port_at(*WINDOWS_PORTS.start());
-        let end = claim_port_at(*WINDOWS_PORTS.end());
-        for claim in [start, end] {
-            match claim {
-                Ok(claim) => assert!(WINDOWS_PORTS.contains(&claim.port())),
-                Err(error) => assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}"),
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_second_bind_with_reuseaddr_fails() {
-        use socket2::{Domain, Protocol, Socket, Type};
-        let listener = bind_loopback().unwrap();
-        let address = listener.local_addr().unwrap();
-        let other = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
-        other.set_reuse_address(true).unwrap();
-        assert!(
-            other.bind(&address.into()).is_err(),
-            "{address} bound twice"
-        );
-    }
-}
+mod tests;

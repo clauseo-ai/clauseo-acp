@@ -30,7 +30,7 @@ use crate::sent::SentView;
 mod ended;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{log_detach, on_ended, stop};
+pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -69,7 +69,7 @@ pub(super) struct Agent {
     pub(super) info: Option<AgentInfo>,
     pub(super) waiting: Vec<Waiting>,
     /// Work that came while it was stopping: a new agent takes it after `Ended`.
-    after_stop: Vec<Waiting>,
+    pub(super) after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
     /// Why it is being stopped, which picks the detach a stop logs.
@@ -111,6 +111,8 @@ pub(super) struct Agent {
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
+    /// Its idle clock and config calls in flight (`idle.rs`).
+    pub(super) idle: super::idle::Mark,
 }
 
 /// What a Codex agent's launch recorded.
@@ -172,6 +174,7 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
+    super::idle::make_room(actor, thread);
     launch_checks::prepare(actor, thread, waiting, keys_wait);
 }
 
@@ -238,10 +241,12 @@ pub(super) fn launch_now(
         forced_ask,
         plan_notes,
         denied_data_folder: 0,
+        idle: super::idle::Mark::default(),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
     }
+    super::idle::launched(actor, thread);
 }
 
 /// A new agent id (a Codex launch's preparation takes one too).
@@ -421,6 +426,9 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             ..
         }
     ) || matches!(&reply, AgentReply::Steer(steered) if steered.closed());
+    if same && matches!(&reply, AgentReply::Config { .. } | AgentReply::Mode { .. }) {
+        super::idle::call_ended(actor, thread);
+    }
     if same
         && closed
         && let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
@@ -510,10 +518,13 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
             );
             actor.finish_command(ctx.id, Err(error));
         }
-        Waiting::Config(ctx, option, value) => call(actor, thread, id, async move {
-            let result = client.set_config_option(&session, option, value).await;
-            AgentReply::Config { ctx, result }
-        }),
+        Waiting::Config(ctx, option, value) => {
+            super::idle::call_started(actor, thread);
+            call(actor, thread, id, async move {
+                let result = client.set_config_option(&session, option, value).await;
+                AgentReply::Config { ctx, result }
+            });
+        }
         Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
             let error = Error::refused(
                 ErrorCode::CommandInvalid,
@@ -524,10 +535,13 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
             );
             actor.finish_command(ctx.id, Err(error));
         }
-        Waiting::Mode(ctx, mode) => call(actor, thread, id, async move {
-            let result = client.set_mode(&session, mode.clone()).await;
-            AgentReply::Mode { ctx, mode, result }
-        }),
+        Waiting::Mode(ctx, mode) => {
+            super::idle::call_started(actor, thread);
+            call(actor, thread, id, async move {
+                let result = client.set_mode(&session, mode.clone()).await;
+                AgentReply::Mode { ctx, mode, result }
+            });
+        }
     }
 }
 

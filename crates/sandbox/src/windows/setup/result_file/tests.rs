@@ -41,6 +41,7 @@ fn the_file_round_trips_and_is_replaced_and_removed() {
         step: None,
         cause: None,
         blocked: None,
+        taken: None,
     };
     write(&data, &done).unwrap();
     assert_eq!(read(&data), Ok(Some(done)));
@@ -276,6 +277,7 @@ fn state_is_blocked_after_a_blocked_run_until_a_later_set_up_is_ready() {
         step: None,
         cause: None,
         blocked: None,
+        taken: None,
     };
     write(&data, &done).unwrap();
     assert_eq!(

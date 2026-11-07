@@ -133,7 +133,7 @@ fn an_owner_that_cant_be_impersonated_fails_the_set_up_and_rolls_it_back() {
 
     // Refused only later, at secrets.bin: what this run made is rolled back.
     let mut machine = FakeMachine::new("setup-owner-refused-late");
-    machine.fail("protect_for_owner 1001,1002,1003,1004");
+    machine.fail("protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008");
     let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Secrets);

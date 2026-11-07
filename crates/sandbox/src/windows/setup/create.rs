@@ -8,10 +8,11 @@ use std::path::PathBuf;
 use super::late_steps::{fence, journals, network, own_protected, refuse_pool_owner, registered};
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
-    LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, cause_of,
+    LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, TopUp, cause_of,
 };
 use super::resets::{self, resets_due};
 use super::rollback::{Made, Run, roll_back};
+use super::top_up;
 use super::{POOL_START, SetupRequest};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
@@ -45,6 +46,8 @@ struct Plan {
     matters: Vec<RegisteredMatter>,
     /// The recorded users owed a profile reset (`resets.rs`), read after the lock.
     resets: Vec<Sid>,
+    /// What `make` holds for the top-up (`top_up.rs`).
+    top_up: TopUp,
 }
 
 /// What the users' steps hand on: each live user's profile and the passwords set this run.
@@ -74,10 +77,10 @@ pub(super) fn run(
     check_owner(before.as_ref(), &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
     let resets = resets_due(machine, before.as_ref())?;
+    let held = top_up::held(machine, before.as_ref(), &resets)?;
     preflight(machine)?;
-    let mut plan = plan_pool(machine, before.as_ref(), req)?;
+    let mut plan = plan_pool(machine, before.as_ref(), req, resets, &held)?;
     plan.matters = matters;
-    plan.resets = resets;
     let mut run = Run::new(before);
     match change(machine, acl, req, &plan, &mut run) {
         Ok(report) => Ok(report),
@@ -152,16 +155,22 @@ fn preflight(machine: &mut impl Machine) -> Result<(), SetupFailure> {
 /// rather than touch another account. A dead SID stays while a ledger entry names it (or the
 /// ledger can't be read), else it goes. Each dead SID the marker lists was a live pool user at
 /// the last set-up and is made again under a new SID; with no current marker, every dead SID is.
-/// A set-up makes enough for [`POOL_START`] users at least; an extend makes `add` more; neither
-/// goes past [`POOL_CAP`] SIDs in the record, dead ones kept for the ledger included. A re-run
-/// with users to reset refuses while a session is open.
+/// A set-up makes enough for [`POOL_START`] users at least; an extend makes `add` more; then
+/// each tops up to [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free users (`top_up.rs`,
+/// `held` the users in use); none goes past [`POOL_CAP`] SIDs in the record, dead ones kept
+/// for the ledger included. A re-run with users to reset refuses while a session is open.
 fn plan_pool(
     machine: &mut impl Machine,
     before: Option<&MachineRecord>,
     req: &SetupRequest,
+    resets: Vec<Sid>,
+    held: &[Sid],
 ) -> Result<Plan, SetupFailure> {
     let pool_failure = |cause: String| SetupFailure::early(Step::Pool, cause);
-    let mut plan = Plan::default();
+    let mut plan = Plan {
+        resets,
+        ..Plan::default()
+    };
     let mut dead = Vec::new();
     for sid in before
         .map(|record| record.pool.as_slice())
@@ -228,10 +237,8 @@ fn plan_pool(
     };
     // Dead SIDs kept in the record count too, so `PoolSids` never holds more than the cap.
     let room = usize::from(POOL_CAP).saturating_sub(plan.base.len());
-    plan.make = wanted
-        .min(usize::from(POOL_CAP))
-        .saturating_sub(kept)
-        .min(room);
+    let base = wanted.min(usize::from(POOL_CAP)).saturating_sub(kept);
+    (plan.make, plan.top_up) = top_up::count(&plan.kept, held, base, room);
     if add > 0 && plan.make == 0 {
         return Err(pool_failure(format!(
             "the pool's record already holds {} sandbox users, the most there can be",
@@ -318,6 +325,7 @@ fn change(
         fenced,
         fence_skipped,
         journals,
+        top_up: plan.top_up.clone(),
         network,
     })
 }

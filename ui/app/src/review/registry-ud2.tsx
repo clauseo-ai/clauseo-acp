@@ -100,6 +100,8 @@ type Scene = {
   title?: string;
   /** The Claude plan's sign-in, on the setup wire (the first run, which gives the card). */
   signIn?: SignIn;
+  /** The thread's resuming_since (R20b): the time a resume after an idle stop began. */
+  resuming?: number;
 };
 
 /** The room with the one matter and its one thread, over the setup wire. */
@@ -110,6 +112,7 @@ function sceneHost(s: Scene): () => FakeTransport {
     if (s.held === true) head.header!.queue_held = true;
     if (s.reason !== undefined) head.header!.queue_held_reason = s.reason;
     if (s.title !== undefined) head.header!.title = s.title;
+    if (s.resuming !== undefined) head.header!.resuming_since = s.resuming;
     const events: SetupEvent[] = [
       { setup_info: { keys_available: true } },
       { agent_install_progress: { agent: "claude-acp", state: { ready: { version: "0.1.0" } } } },
@@ -216,6 +219,18 @@ const UPDATING = room({
   ],
   held: true,
   reason: "update",
+});
+
+/** A thread restarting after an idle stop: its header says when the resume began, long enough ago that the cue shows. */
+const RESUMING = room({
+  entries: [
+    userMessage(2, 1, "What does clause nine of the lease say about notice?"),
+    agentText(3, 1, "Clause nine asks for three months' notice in writing."),
+    step(4),
+    userMessage(5, 2, "Draft the notice for the landlord."),
+  ],
+  status: "starting",
+  resuming: 2000,
 });
 
 const entry = (id: string, words: WordsRef, screen: string, render: () => ReactNode): Entry => ({
@@ -371,4 +386,5 @@ export const UD2: Entry[] = [
     "matters/held-update",
     UPDATING,
   ),
+  entry("UD2-58", matterWords("Getting {plan} ready."), "room/resume-cue", RESUMING),
 ];

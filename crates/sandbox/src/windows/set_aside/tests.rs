@@ -97,6 +97,32 @@ pub(in crate::windows) fn launch_on_test_volume(
         .map_err(|refused| refused.failure)
 }
 
+/// `before_launch` over the tests' volume for `matter`, nothing else running: the VM
+/// harness's launch order, dry-run off Windows (S15 `PR4i`).
+pub(in crate::windows) fn launch_matter_on_test_volume(
+    root: &Path,
+    data: &Path,
+    matter: &clauseo_protocol::MatterId,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, SetAsideFailure> {
+    run::before_launch(&volume(), root, data, matter, session, &[], now)
+        .map_err(|refused| refused.failure)
+}
+
+/// `after_session` over the tests' volume for `matter`, as
+/// [`launch_matter_on_test_volume`].
+pub(in crate::windows) fn exit_matter_on_test_volume(
+    root: &Path,
+    data: &Path,
+    matter: &clauseo_protocol::MatterId,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, SetAsideFailure> {
+    run::after_session(&volume(), root, data, matter, session, now)
+        .map_err(|refused| refused.failure)
+}
+
 /// `after_session` over the tests' volume, as [`launch_on_test_volume`].
 pub(in crate::windows) fn exit_on_test_volume(
     root: &Path,

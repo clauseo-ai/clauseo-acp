@@ -34,6 +34,7 @@ use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
+use super::reclaim::{hand_back_targets, targets};
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::setup::SetupExit;
 use super::setup::args::quote;
@@ -74,10 +75,49 @@ impl UserSetup {
         self.set_up(n)
     }
 
-    /// The elevated clean-up (D-B10, `PR4i`): one prompt.
+    /// The elevated clean-up (D-B10, S15 `PR4i`): one prompt. `--reclaim` makes this user the
+    /// owner of what a sandbox user owns and this user can't hand back, in the trees the ledger
+    /// owes a clean-up (`reclaim::targets`), and changes nothing else; then, unelevated, the
+    /// same trees are handed back (`reclaim::hand_back_targets`), which cleans what was taken
+    /// of its old owner's entries. The app then retries each owed `forget_matter` first, then
+    /// the launch that refused.
+    ///
+    /// The hand-back runs when the exe is done, and also when it failed partway having taken
+    /// something (`taken` in its result file), so nothing it took is left uncleaned; the exe's
+    /// failure is still what this returns then.
     pub fn reclaim(&self) -> Result<(), SetupError> {
         let parent = std::process::id();
-        self.run_reading(&format!("--reclaim --parent {parent}"))
+        let (code, read) = self.run_raw(&format!("--reclaim --parent {parent}"))?;
+        let taken = read
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .and_then(|r| r.taken);
+        let partial = code == u32::from(SetupExit::Failed.as_code()) && taken.unwrap_or(0) > 0;
+        let handed = (code == 0 || partial).then(|| self.hand_back_reclaimed());
+        result_file::outcome(code, Some(&read))?;
+        handed.unwrap_or(Ok(()))
+    }
+
+    /// The unelevated half of [`UserSetup::reclaim`]: the ledger read again, as this user, and
+    /// each target handed back with the record's pool users.
+    fn hand_back_reclaimed(&self) -> Result<(), SetupError> {
+        let failed =
+            |why: String| SetupError::Failed(format!("handing back what was taken: {why}"));
+        let (pool, trusted) = pool_and_trusted().map_err(failed)?;
+        let reserved = Reserved::of_this_machine()?;
+        let ledger = Ledger::open(ledger_path(&self.data_dir), &trusted, &reserved)
+            .map_err(|e| failed(format!("the permission ledger: {e}")))?;
+        let found = targets(&ledger, MatterSids::load(&self.data_dir)?.rows());
+        let mut acl = NtfsAcl::new().map_err(|e| failed(e.to_string()))?;
+        let handed = hand_back_targets(&mut acl, &found, &pool);
+        if handed.refused.is_empty() {
+            return Ok(());
+        }
+        Err(failed(format!(
+            "{} items still can't be handed back; launch or forget the matter to see which",
+            handed.refused.len()
+        )))
     }
 
     /// `--set-up`, with `--add` when `add` is above 0.
@@ -99,6 +139,15 @@ impl UserSetup {
     /// Starts the exe with `params` and reads its result file after: the last run's removed
     /// first, so a run that writes none is never read as another's.
     fn run_reading(&self, params: &str) -> Result<(), SetupError> {
+        let (code, read) = self.run_raw(params)?;
+        result_file::outcome(code, Some(&read))
+    }
+
+    /// [`UserSetup::run_reading`]'s run: the exit code and the result file as read after.
+    fn run_raw(
+        &self,
+        params: &str,
+    ) -> Result<(u32, Result<Option<SetupResult>, String>), SetupError> {
         result_file::remove(&self.data_dir).map_err(|error| {
             SetupError::Failed(format!(
                 "the last set-up's result can't be cleared: {error}"
@@ -124,7 +173,7 @@ impl UserSetup {
             }
             Err(error) => return Err(error),
         };
-        result_file::outcome(code, Some(&result_file::read(&self.data_dir)))
+        Ok((code, result_file::read(&self.data_dir)))
     }
 }
 
@@ -150,10 +199,7 @@ impl SandboxSetup for UserSetup {
     )]
     fn forget_matter(&self, matter: &MatterId) -> Result<(), SetupError> {
         let failed = |why: String| SetupError::Failed(format!("forgetting {matter}: {why}"));
-        let mut trusted: Vec<Sid> = sandbox_pool_sids().map_err(|e| failed(e.to_string()))?;
-        if let Some(group) = sandbox_group_sid().map_err(|e| failed(e.to_string()))? {
-            trusted.push(Sid::parse(&group).map_err(|e| failed(e.to_string()))?);
-        }
+        let (_, trusted) = pool_and_trusted().map_err(failed)?;
         let reserved = Reserved::of_this_machine()?;
         let mut ledger = Ledger::open(ledger_path(&self.data_dir), &trusted, &reserved)
             .map_err(|e| failed(format!("the permission ledger: {e}")))?;
@@ -175,6 +221,16 @@ impl SandboxSetup for UserSetup {
         let code = launch(&self.exe, "--remove")?;
         result_file::outcome(code, None)
     }
+}
+
+/// The record's pool users, and the SIDs a ledger trusts: those and their group.
+fn pool_and_trusted() -> Result<(Vec<Sid>, Vec<Sid>), String> {
+    let pool: Vec<Sid> = sandbox_pool_sids().map_err(|e| e.to_string())?;
+    let mut trusted = pool.clone();
+    if let Some(group) = sandbox_group_sid().map_err(|e| e.to_string())? {
+        trusted.push(Sid::parse(&group).map_err(|e| e.to_string())?);
+    }
+    Ok((pool, trusted))
 }
 
 /// The started process's handle, closed on drop.

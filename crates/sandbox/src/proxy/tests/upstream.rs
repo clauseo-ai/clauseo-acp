@@ -215,6 +215,7 @@ fn debug_of_a_config_never_shows_the_upstream_password_or_path() {
         ),
         denials: std::sync::Arc::new(super::harness::Sink::default()),
         record: None,
+        browser: false,
     };
     let debug = format!("{config:?}");
     assert!(debug.contains("Fixed(http://proxy.test:8080)"), "{debug}");
@@ -239,6 +240,7 @@ fn a_fixed_upstream_must_be_a_bare_http_url() {
             upstream: Upstream::Fixed(url::Url::parse(bad).unwrap()),
             denials: std::sync::Arc::new(super::harness::Sink::default()),
             record: None,
+            browser: false,
         };
         let error = start_proxy(config).unwrap_err();
         assert!(matches!(error, Error::ProxyConfig(_)), "{bad}: {error}");

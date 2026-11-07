@@ -209,18 +209,57 @@ already there, create or fix it from an elevated Command Prompt:
 
 ```bat
 mkdir "%ProgramData%\Clauseo"
-icacls "%ProgramData%\Clauseo" /setowner *S-1-5-32-544
-icacls "%ProgramData%\Clauseo" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX
+icacls "%ProgramData%\Clauseo" /setowner "*S-1-5-32-544"
+icacls "%ProgramData%\Clauseo" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
 ```
 
-(`mkdir` says the folder exists when it does; carry on with the rest.) The SIDs are SYSTEM,
+or from an elevated PowerShell, as an Intune script runs (each grant is quoted, since PowerShell
+reads `(OI)` itself otherwise):
+
+```powershell
+New-Item -ItemType Directory -Force "$env:ProgramData\Clauseo" | Out-Null
+icacls "$env:ProgramData\Clauseo" /setowner "*S-1-5-32-544"
+icacls "$env:ProgramData\Clauseo" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
+```
+
+(`mkdir` says the folder exists when it does; carry on with the rest.) Delete anything in an
+existing folder that your IT team didn't put there. The SIDs are SYSTEM,
 Administrators and Users, so the commands work in any Windows language. Check it with
-`icacls "%ProgramData%\Clauseo"`: it lists only `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`,
+`icacls "%ProgramData%\Clauseo"` (PowerShell: `icacls "$env:ProgramData\Clauseo"`): it lists only `NT AUTHORITY\SYSTEM:(OI)(CI)(F)`,
 `BUILTIN\Administrators:(OI)(CI)(F)` and `BUILTIN\Users:(OI)(CI)(RX)`, none marked `(I)`
 (the names are in the system's language). Remove any other entry with
 `icacls "%ProgramData%\Clauseo" /remove:g <name>`. `dir /q "%ProgramData%"` shows the owner
 beside `Clauseo`: `BUILTIN\Administrators`. Then put `policy.json` in it from the same elevated
 prompt.
+
+**Who must own `policy.json`.** The file and its folder must be owned by Administrators/SYSTEM
+(root on macOS and Linux) and not writable by users. A file that fails is ignored, as if it were
+not there, and the host log says why ([decision 0009](decisions/0009-policy-layer.md)).
+
+- **Windows:** `C:\ProgramData\Clauseo` must be owned by Administrators, with a protected ACL
+  (SYSTEM and Administrators full control, Users read). A per-machine install creates it that
+  way; the commands to create or repair it by hand are in the section "The policy folder on
+  Windows". A folder a user created first (or an empty one they swapped in) is theirs, and the
+  firm's file in it is ignored. The file must have one name (no hard link) and must stay readable
+  by Users, which the folder's ACL gives it: a file Users cannot read is ignored, since a user
+  could plant one. Its owner must be Administrators or SYSTEM; a file written by the built-in
+  Administrator account, or with UAC off, can be owned by that account's own SID and is then
+  ignored, so set its owner to Administrators.
+- **macOS:** deploy policy through device management (managed preferences, the preferred route),
+  or create the folder as root before any user does:
+  `sudo mkdir -p "/Library/Application Support/Clauseo"`,
+  `sudo chown root:wheel "/Library/Application Support/Clauseo"`,
+  `sudo chmod 755 "/Library/Application Support/Clauseo"`. An admin user can create that folder
+  without a password, and a folder they create is not root's, so the file in it would be
+  ignored. ACLs added with `chmod +a` are not seen by the check.
+- **Linux:** `/etc/clauseo` as root, mode 755, file 644, as usual. On NixOS, files under `/etc`
+  are symlinks into the store, so a policy deployed that way is ignored.
+  To enforce the policy, restrict unprivileged user namespaces
+  (`kernel.unprivileged_userns_clone=0`, or AppArmor's userns restriction, on by default in
+  Ubuntu 24.04): inside one (`unshare -r`) a user's Clauseo sees the policy as ignored or absent.
+- **Every OS:** the policy binds the Clauseo builds you deploy. Clauseo is open source, so a user
+  who can run their own build is not bound by it; enforce which builds run with application
+  allowlisting (MDM, WDAC, Santa).
 
 **What a policy value does.** It replaces the user's value and shows as locked in the app: Settings
 shows the policy's value with its choices greyed out and the line "Managed by your organisation"
@@ -395,6 +434,25 @@ a wall between matters. The agent may read Clauseo's `profile` folder: it holds 
 built-in plugin, the same for every matter. Run folders and matters created after a session started are not in
 that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
 ([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
+
+## 9. Windows protection: a matter folder Clauseo can't take back
+
+With Clauseo's Windows protection (tier B), each matter's agent runs as its own local account
+(`ClauseoSb01`, `ClauseoSb02`, and so on). If a matter's folder ends up owned by one of those
+accounts, Clauseo refuses to open the matter and first tries to give the folder back to the
+lawyer. "Set up protection again" (one Windows prompt) takes back items inside the matters
+Clauseo has recorded. A folder outside all of them, such as one an agent made that was then added
+as a new matter, can't be taken back that way. An administrator does it by hand:
+
+1. Open PowerShell as administrator.
+2. Give the folder, the folder only, to the lawyer:
+   `icacls "D:\Matters\Example" /setowner "CONTOSO\jsmith"`
+3. List its entries with `icacls "D:\Matters\Example"`. If an account whose name starts with
+   `ClauseoSb` is listed, remove its entry: `icacls "D:\Matters\Example" /remove "ClauseoSb03"`
+4. Open the matter in Clauseo again.
+
+Don't add `/T` or use `takeown /r`: Clauseo hands back what is inside the folder at its next
+launch, and a recursive change can alter permissions your firm set on the files.
 
 ## Later
 

@@ -1,5 +1,7 @@
-//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 61080-61179, where its
-//! launch's egress proxy and listed ports are, and nothing else.
+//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 46100-46199
+//! (`ports::TIER_B_PORTS`), where its launch's egress proxy and listed ports are, and nothing
+//! else. Set-up and each launch check the machine's dynamic and excluded port ranges against
+//! it, and each launch the listeners in it ([`check_ports`]).
 //!
 //! - **Set-up** (elevated, the setup exe's network step, [`install`]): Clauseo's WFP provider and
 //!   sublayer; block filters that catch every token holding a pool user's or the pool group's
@@ -39,7 +41,10 @@ mod grant_probe;
 #[cfg(windows)]
 mod install;
 #[cfg(windows)]
+mod os_ports;
+#[cfg(windows)]
 mod permit;
+mod port_check;
 pub mod rules;
 mod sddl;
 pub mod spec;
@@ -48,11 +53,14 @@ pub use check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, WfpError, check_setup, classify,
 };
 #[cfg(windows)]
-pub use grant_probe::{GrantProbe, probe_owner_grants};
+pub use grant_probe::{GrantProbe, foreign_test_filter, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
+pub use os_ports::check_ports;
+#[cfg(windows)]
 pub use permit::{check_launch, check_launch_in};
+pub use port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
 pub use spec::{FirewallOutcome, FirewallTrouble, Namespace, NetworkReport, NetworkSetup};
 
 /// Removes Clauseo's network set-up ([`remove`] in [`Namespace::production`]), elevated, with

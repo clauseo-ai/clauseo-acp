@@ -1,7 +1,9 @@
 //! The set-up engine against [`fake::FakeMachine`] and [`fake::FakeAcl`], on every OS: the
 //! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), the
-//! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`), and the network
-//! step (`network.rs`, S15 PR7).
+//! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`) and the top-up to
+//! [`MIN_FREE_AFTER_RUN`] free users (`top_up.rs`); and `--remove` over the same fake
+//! (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`); and the network step
+//! (`network.rs`, S15 PR7).
 
 use std::path::PathBuf;
 
@@ -19,8 +21,12 @@ mod network;
 mod owner;
 mod registered;
 mod remains;
+mod remove;
+mod remove_fake;
+mod remove_ledger;
 mod resets;
 mod rollback;
+mod top_up;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};
 
@@ -51,7 +57,7 @@ fn local_low(machine: &FakeMachine, name: &str) -> PathBuf {
     machine.profile_path(name).join("AppData").join("LocalLow")
 }
 
-/// The calls a fresh set-up of four users makes, in order.
+/// The calls a fresh set-up of [`MIN_FREE_AFTER_RUN`] (8) users makes, in order.
 fn fresh_calls() -> Vec<String> {
     let mut calls: Vec<String> = [
         "lock",
@@ -66,7 +72,7 @@ fn fresh_calls() -> Vec<String> {
     .map(str::to_owned)
     .collect();
     let mut recorded = Vec::new();
-    for n in 1..=4u32 {
+    for n in 1..=8u32 {
         let name = format!("ClauseoSb0{n}");
         recorded.push((1000 + n).to_string());
         calls.extend([
@@ -78,7 +84,7 @@ fn fresh_calls() -> Vec<String> {
             format!("log_on_once {name}"),
         ]);
     }
-    for n in 1..=4 {
+    for n in 1..=8 {
         calls.extend([
             format!("exists ClauseoSb0{n}"),
             format!("owner_of ClauseoSb0{n}"),
@@ -89,11 +95,11 @@ fn fresh_calls() -> Vec<String> {
             "program_data",
             "exists DeviceSync",
             "owner_of DeviceSync",
-            "network 1001,1002,1003,1004",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",
-            "protect_for_owner 1001,1002,1003,1004",
+            "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008",
             "write_marker",
             "unlock",
         ]

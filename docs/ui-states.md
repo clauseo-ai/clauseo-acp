@@ -36,6 +36,12 @@ Detach reasons are in the log only (`agent_session_detached`, read through `Subs
 entry carries them: `DetachReason::Exited`, `DetachReason::Closed`, `DetachReason::Restarting`,
 `DetachReason::IdleStopped`, and `DetachReason::Unknown`.
 
+Resuming after an idle stop: `HeaderEntry.resuming_since` is set while the thread's status is
+`Starting` because a send resumed it, and cleared when the status leaves `Starting` or the agent
+attaches again. The app may show a "resuming" cue while it is set, after about 300 ms. The 300 ms
+threshold belongs to the app, not the host: the host only sends the time. The status itself stays
+`Starting`; the field is not a status.
+
 ## 2. Transcript entries
 
 Entries sort by `order`. Text streams through `ViewPatchBody::AppendText`; everything else arrives as

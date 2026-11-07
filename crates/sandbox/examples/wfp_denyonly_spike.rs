@@ -3,7 +3,7 @@
 //!
 //! It makes a throwaway local user and group, installs tier B's real filters for them
 //! (`wfp::install` in a test namespace: blocks that deny the group and the user, matched
-//! `NOT_EQUAL`, and the user's static permit for 127.0.0.1 TCP 61080-61179), removes the
+//! `NOT_EQUAL`, and the user's static permit for 127.0.0.1 TCP 46100-46199), removes the
 //! firewall rules so only WFP is measured, then starts a probe under each token and tries a
 //! loopback listener outside the range and one inside it. One line per row:
 //!
@@ -68,6 +68,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let code = probe::run(&exe, steps);
         note(&format!("exit {code:#x}"));
         std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()));
+    }
+    if let Some(("listen", [port])) = args.split_first().map(|(c, r)| (c.as_str(), r)) {
+        // A listener under another program's file, for the remote-user rows; killed by the spike.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port.parse::<u16>()?))?;
+        for stream in listener.incoming() {
+            drop(stream);
+        }
+        return Ok(());
     }
     spike::run(&exe)
 }
@@ -143,7 +151,8 @@ mod spike {
         let owner = Sid::parse(&admin_sid)?;
         cleanup.owner = Some(owner.clone());
         let outside = TcpListener::bind("127.0.0.1:0")?;
-        let inside = (61080..=61179)
+        let inside = clauseo_sandbox::ports::TIER_B_PORTS
+            .clone()
             .find_map(|p| TcpListener::bind(("127.0.0.1", p)).ok())
             .ok_or("no range port")?;
         let (o, i) = (outside.local_addr()?.port(), inside.local_addr()?.port());
@@ -192,7 +201,12 @@ mod spike {
         let check_pool = check_launch_in(&ns(), &user_s, &[world.i]).map_err(|e| e.to_string());
         let check_admin = check_launch_in(&ns(), &owner, &[world.i]).map_err(|e| e.to_string());
         let after = measure(&world, exe, &check_pool, &check_admin);
+        let remote =
+            super::later::remote_rows(&world.pool, &world.user_sid, world.i, exe, &world.desktop);
         for (total, more) in tally.iter_mut().zip(after) {
+            *total += more;
+        }
+        for (total, more) in tally.iter_mut().zip(remote) {
             *total += more;
         }
         say(&format!(
@@ -429,3 +443,11 @@ mod spike {
 #[cfg(windows)]
 #[path = "wfp_denyonly_spike/sids.rs"]
 mod sids;
+
+#[cfg(windows)]
+#[path = "wfp_denyonly_spike/remote.rs"]
+mod remote;
+
+#[cfg(windows)]
+#[path = "wfp_denyonly_spike/later.rs"]
+mod later;

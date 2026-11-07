@@ -13,9 +13,9 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
     let mut machine = FakeMachine::new("setup-extend");
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
-    let old: Vec<(String, String)> = (1..=4)
+    let old: Vec<(String, String)> = (1..=8)
         .map(|n| {
-            let name = format!("ClauseoSb0{n}");
+            let name = format!("ClauseoSb{n:02}");
             let password = machine.state.accounts[&name].password.clone();
             (name, password)
         })
@@ -30,17 +30,18 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
         "read_record",
         "registered_matters",
         "resets_due",
+        "held_users",
         "seclogon",
         "logon_right",
     ]
     .map(str::to_owned)
     .into();
-    expected.extend((1001..=1004).map(|r| format!("account_name {r}")));
+    expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
     expected.push("group".to_owned());
-    expected.extend((1001..=1004).map(|r| format!("profile_of {r}")));
-    let mut recorded: Vec<String> = (1001..=1004).map(|r| r.to_string()).collect();
-    for n in 5..=8u32 {
-        let name = format!("ClauseoSb0{n}");
+    expected.extend((1001..=1008).map(|r| format!("profile_of {r}")));
+    let mut recorded: Vec<String> = (1001..=1008).map(|r| r.to_string()).collect();
+    for n in 9..=12u32 {
+        let name = format!("ClauseoSb{n:02}");
         recorded.push((1000 + n).to_string());
         expected.extend([
             format!("account_sid {name}"),
@@ -51,10 +52,10 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
             format!("log_on_once {name}"),
         ]);
     }
-    for n in 1..=8 {
+    for n in 1..=12 {
         expected.extend([
-            format!("exists ClauseoSb0{n}"),
-            format!("owner_of ClauseoSb0{n}"),
+            format!("exists ClauseoSb{n:02}"),
+            format!("owner_of ClauseoSb{n:02}"),
         ]);
     }
     expected.extend(
@@ -63,10 +64,10 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
             "exists DeviceSync",
             "owner_of DeviceSync",
             "ledger",
-            "network 1001,1002,1003,1004,1005,1006,1007,1008",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012",
             "journal_volumes",
             "journal_size C:",
-            "protect_for_owner 1005,1006,1007,1008",
+            "protect_for_owner 1009,1010,1011,1012",
             "write_marker",
             "unlock",
         ]
@@ -75,16 +76,17 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
     assert_eq!(machine.calls_since(from), expected);
 
     let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
-    assert_eq!(made, (1005..=1008).map(sid).collect::<Vec<_>>());
+    assert_eq!(made, (1009..=1012).map(sid).collect::<Vec<_>>());
+    assert_eq!((report.top_up.free_before, report.top_up.added), (8, 0));
     assert!(report.reset.is_empty(), "an extend resets no password");
     for (name, password) in &old {
         assert_eq!(&machine.state.accounts[name].password, password, "{name}");
         let sid = &machine.state.accounts[name].sid;
         assert_eq!(&machine.state.secrets[sid], password, "{name}'s blob kept");
     }
-    assert_eq!(machine.state.secrets.len(), 8);
-    assert_eq!(machine.state.record.clone().unwrap().pool.len(), 8);
-    assert_eq!(machine.state.marker.clone().unwrap().pool.len(), 8);
+    assert_eq!(machine.state.secrets.len(), 12);
+    assert_eq!(machine.state.record.clone().unwrap().pool.len(), 12);
+    assert_eq!(machine.state.marker.clone().unwrap().pool.len(), 12);
 
     // Every registered matter's folders deny every new user; never the matter's own.
     let fenced = report.fenced.unwrap();
@@ -134,20 +136,21 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
         "read_record",
         "registered_matters",
         "resets_due",
+        "held_users",
         "seclogon",
         "logon_right",
     ]
     .map(str::to_owned)
     .into();
-    expected.extend((1001..=1004).map(|r| format!("account_name {r}")));
+    expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
     expected.extend(["sessions_open", "group"].map(str::to_owned));
-    for n in 1..=4 {
+    for n in 1..=8 {
         let name = format!("ClauseoSb0{n}");
         expected.extend(
             ["set_password", "add_to_group", "hide", "log_on_once"].map(|c| format!("{c} {name}")),
         );
     }
-    for n in 1..=4 {
+    for n in 1..=8 {
         expected.extend([
             format!("exists ClauseoSb0{n}"),
             format!("owner_of ClauseoSb0{n}"),
@@ -158,10 +161,10 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
             "program_data",
             "exists DeviceSync",
             "owner_of DeviceSync",
-            "network 1001,1002,1003,1004",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008",
             "journal_volumes",
             "journal_size C:",
-            "protect_for_owner 1001,1002,1003,1004",
+            "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008",
             "write_marker",
             "unlock",
         ]
@@ -206,12 +209,15 @@ fn a_re_run_makes_a_deleted_account_again_under_a_new_sid() {
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.made.len(), 1);
     assert_eq!(report.made[0].name, "ClauseoSb02");
-    assert_eq!(report.made[0].sid, sid(1005));
+    assert_eq!(report.made[0].sid, sid(1009));
     assert_eq!(report.dropped, [sid(1002)], "no ledger entry names it");
     assert_eq!(report.kept_dead, []);
     let record = machine.state.record.clone().unwrap();
-    assert_eq!(record.pool, [sid(1001), sid(1003), sid(1004), sid(1005)]);
-    assert_eq!(report.reset.len(), 3);
+    let mut pool = vec![sid(1001)];
+    pool.extend((1003..=1009).map(sid));
+    assert_eq!(record.pool, pool);
+    assert_eq!(report.reset.len(), 7);
+    assert_eq!(report.top_up.added, 0, "the user made again keeps 8 free");
 }
 
 #[test]
@@ -231,12 +237,12 @@ fn a_dead_sid_the_ledger_names_stays_recorded_and_is_made_again_once() {
     assert_eq!(report.made.len(), 1);
     assert_eq!(
         (report.made[0].name.as_str(), &report.made[0].sid),
-        ("ClauseoSb06", &sid(1009))
+        ("ClauseoSb06", &sid(1013))
     );
     let record = machine.state.record.clone().unwrap();
     assert!(record.pool.contains(&sid(1006)), "its entries stay trusted");
-    assert!(record.pool.contains(&sid(1009)));
-    assert_eq!(report.pool.len(), 8);
+    assert!(record.pool.contains(&sid(1013)));
+    assert_eq!(report.pool.len(), 12);
     assert!(
         !machine
             .state
@@ -248,7 +254,7 @@ fn a_dead_sid_the_ledger_names_stays_recorded_and_is_made_again_once() {
     );
     for matter in &matters {
         let root = canonical(&matter.folders.root);
-        assert!(acl.has(&root, &sid(1009), Rights::DenyReadWrite));
+        assert!(acl.has(&root, &sid(1013), Rights::DenyReadWrite));
     }
 
     // Run again: the dead SID was made again already, so nothing more is made.

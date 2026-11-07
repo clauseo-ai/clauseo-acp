@@ -41,8 +41,10 @@ use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
 #[cfg(test)]
 pub(super) use held::queue_held;
-pub(super) use held::sync_held;
+#[cfg(test)]
+pub(super) use held::set_requeue_for_test;
 pub(crate) use held::{queue_hold, sync_all_held};
+pub(super) use held::{sync_held, waits};
 pub(crate) use install::{any_active, any_running, cancel_all, release};
 pub(super) use restore::restore;
 pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};

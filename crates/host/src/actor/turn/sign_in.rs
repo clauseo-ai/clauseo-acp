@@ -96,7 +96,7 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
         let idle = state(actor, thread)
             .is_some_and(|state| state.current.is_none() && state.agent.is_some());
         if idle {
-            agents::stop(actor, thread);
+            agents::hold_stop(actor, thread);
         }
         queue::resume_sign_in(actor, thread);
         // A head sent now that the hold kept back starts too.
@@ -126,7 +126,8 @@ fn stop(actor: &mut Actor, agent: &AgentId, why: StopFor) {
             // Its answer, when it comes, is stale: the run folder it made is removed then.
             agents::fail_all(actor, thread, preparing.waiting, &Error::Closed);
         }
-        agents::stop(actor, thread);
+        // An idle stop under way becomes this one: the agent detaches `Closed`, once.
+        agents::hold_stop(actor, thread);
         // A held queue now waits for the login's switch.
         queue::sync_held(actor, thread);
     }

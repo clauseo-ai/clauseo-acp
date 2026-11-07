@@ -1,5 +1,6 @@
 //! What the turn path keeps for the whole host, beside each thread's own state.
 
+use super::idle::IdleClock;
 use super::launch_checks::RunSweep;
 use super::sign_in::StopWaits;
 
@@ -10,4 +11,16 @@ pub(crate) struct TurnPath {
     pub(crate) run_sweep: RunSweep,
     /// The `stop_agents` calls waiting for their agents' ends (`sign_in/stops.rs`).
     pub(super) stops: StopWaits,
+    /// The idle stop's settings, live agents and its one deadline (`idle.rs`).
+    pub(super) idle: IdleClock,
+}
+
+impl TurnPath {
+    /// The turn path's state at start-up, with the idle stop's settings.
+    pub(crate) fn new(idle: crate::config::IdleStop) -> Self {
+        Self {
+            idle: IdleClock::new(idle),
+            ..Self::default()
+        }
+    }
 }

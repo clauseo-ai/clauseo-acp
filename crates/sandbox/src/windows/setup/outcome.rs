@@ -52,9 +52,11 @@ pub enum SetupExit {
     OtherOwner,
     /// 3: the set-up failed; the cause is in `setup-result.json`.
     Failed,
-    /// 4: `--remove` removed only part of the set-up.
+    /// 4: `--remove` removed only part of the set-up: the record stays, with `Removing` set and
+    /// every pool SID, and so does the ledger, for the next run to finish.
     RemovedPartly,
-    /// 5: another set-up holds the machine-wide lock.
+    /// 5: another set-up holds the machine-wide lock (for `--remove`, still after its 60 s
+    /// wait), and nothing was touched.
     LockHeld,
     /// 6: the data folder isn't owned by the user who asked (one an elevated run made, owned
     /// by Administrators, for one); no result file is written there.
@@ -62,6 +64,16 @@ pub enum SetupExit {
 }
 
 impl SetupExit {
+    /// 0 for `--remove`: everything it set up is gone, or there was nothing of the asker's to
+    /// remove (no record; a per-user uninstall by someone who isn't the owner, D-B9). The one
+    /// code the uninstall hook reads as success (`$R8 = 0`). The same code as
+    /// [`SetupExit::Done`], so no number is used twice for two meanings.
+    #[expect(
+        non_upper_case_globals,
+        reason = "read as a variant beside RemovedPartly, as the hook's test names it"
+    )]
+    pub const Removed: SetupExit = SetupExit::Done;
+
     /// Every exit, in code order.
     pub const ALL: [SetupExit; 7] = [
         SetupExit::Done,
@@ -294,8 +306,26 @@ pub struct SetupReport {
     pub fence_skipped: Vec<(MatterId, String)>,
     /// Each volume's change journal; `Err` when the volumes couldn't be listed, and why.
     pub journals: Result<Vec<(PathBuf, JournalOutcome)>, String>,
+    /// What the run did to leave [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free users
+    /// (`top_up.rs`).
+    pub top_up: TopUp,
     /// The network filters and the pool users they cover, and whether the firewall rules take
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
+}
+
+/// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool
+/// users (`top_up.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TopUp {
+    /// The recorded users counted free before this run made any: their accounts exist and the
+    /// reuse rule (`pool::assign`) would hand them out once this run's resets are done.
+    pub free_before: usize,
+    /// The users made for the rule, beyond those the set-up, the re-run or the requested `add`
+    /// makes; they are in [`SetupReport::made`] too.
+    pub added: usize,
+    /// How many more the rule wanted that the cap ([`POOL_CAP`](crate::windows::pool::POOL_CAP)
+    /// SIDs in the record) left out; 0 when none. Not a failure.
+    pub short: usize,
 }

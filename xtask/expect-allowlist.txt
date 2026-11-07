@@ -185,6 +185,15 @@ crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+# The elevated clean-up (S15 PR4i): its privilege guard, the tests reading the token back and a
+# path's short name, the strip that only the Windows hand-back calls, and the VM harness's FFI.
+crates/sandbox/src/windows/acl/privilege.rs - unsafe_code
+crates/sandbox/src/windows/acl/privilege/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl/take/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl_bytes/steps.rs stripped dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs bare dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs taken_write dead_code
+crates/sandbox/examples/s15_reclaim_vm/win.rs - unsafe_code
 # The apply layer's NTFS tests (S15 PR3b): win-01's timing row.
 crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_costs clippy::disallowed_methods
 # The pool user's writes a nested protected item's deny must refuse (S15 PR4a2): the test plays
@@ -247,6 +256,8 @@ crates/process/tests/spawn_options.rs console_processes unsafe_code
 crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_methods
 crates/settings/tests/disk/write.rs - clippy::disallowed_methods
 crates/settings/src/policy/windows.rs - unsafe_code
+# The pause between retries of a held policy.json (#590): Windows only, on a plain thread.
+crates/settings/src/policy/windows/acl.rs pause clippy::disallowed_methods
 crates/settings/src/policy/macos/tests.rs UserDomain::set unsafe_code
 crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_methods
 crates/settings/src/system/windows.rs - unsafe_code
@@ -254,6 +265,7 @@ crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code
 crates/settings/src/system/tests.rs windows_without_documents clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_roaming_unchecked clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_local_app_data_unchecked clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::disallowed_methods
 crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
 crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
@@ -430,13 +442,14 @@ crates/sandbox/src/windows/setup/lock.rs back_off clippy::disallowed_methods
 crates/sandbox/src/windows/setup/record_write.rs - unsafe_code
 crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::disallowed_methods
 # The set-up's logon, profile, preflight, process and journal calls (S15 PR4f); the profile
-# delete's bounded wait; the elevated tests' token read and their `net user` and PowerShell.
+# delete's bounded wait; the elevated tests' token read, their marker files and the hive load's
+# retry wait.
 crates/sandbox/src/windows/setup/ffi.rs - unsafe_code
 crates/sandbox/src/windows/setup/journal.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon.rs - unsafe_code
-crates/sandbox/src/windows/setup/logon/tests.rs powershell clippy::disallowed_methods
-crates/sandbox/src/windows/setup/logon/tests.rs delete_account clippy::disallowed_methods
-crates/sandbox/src/windows/setup/logon/tests.rs TestUser::named clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests/reset.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests/reset.rs leave_marker clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests/reset.rs wait clippy::disallowed_methods
 crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
 # S15 PR7: the network filters' WFP calls, the owner's grants on them, a launch's reads of
 # them, and the firewall rules through COM.
@@ -445,6 +458,7 @@ crates/sandbox/src/windows/wfp/engine/read.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/security.rs - unsafe_code
 crates/sandbox/src/windows/wfp/firewall.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/conditions.rs - unsafe_code
+crates/sandbox/src/windows/wfp/os_ports.rs - unsafe_code
 # S15 PR7's VM harness: the pool user's logon, the (B) token and the probe's start.
 crates/sandbox/examples/s15_wfp_vm/launch.rs - unsafe_code
 # Its probe's derived-token children and ICMP echo, and the accept loop's pause.
@@ -459,10 +473,18 @@ crates/sandbox/src/windows/user_setup.rs - unsafe_code
 crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disallowed_methods
 crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
 crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
+# The --remove VM harness (S15 PR4j): its FFI, and the reg query and PowerShell lists it reads.
+crates/sandbox/examples/s15_remove_vm/win.rs - unsafe_code
+crates/sandbox/examples/s15_remove_vm/snapshot.rs capture clippy::disallowed_methods
 crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line clippy::disallowed_methods
+# S15 PR4j: `SetupExit::Removed`, the exit 0 the uninstall hook reads, as an alias of `Done`
+# named like the variants beside it, so no exit code is used twice.
+crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
 # Throwaway spike for S15 PR7's review item 1 (branch exp-wfp-denyonly only, never merged).
 crates/sandbox/examples/wfp_denyonly_spike/tokens.rs - unsafe_code
 crates/sandbox/examples/wfp_denyonly_spike/tokens.rs net clippy::disallowed_methods
 crates/sandbox/examples/wfp_denyonly_spike/tokens.rs netsh clippy::disallowed_methods
 crates/sandbox/examples/wfp_denyonly_spike/sids.rs - unsafe_code
 crates/sandbox/examples/wfp_denyonly_spike.rs note clippy::disallowed_methods
+crates/sandbox/examples/wfp_denyonly_spike/remote.rs - unsafe_code
+crates/sandbox/examples/wfp_denyonly_spike/later.rs foreign_listener clippy::disallowed_methods

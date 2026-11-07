@@ -20,8 +20,22 @@ use super::machine::MachineError;
 #[cfg(windows)]
 mod token;
 
+#[cfg(windows)]
+pub(crate) use token::this_process;
 #[cfg(all(windows, test))]
 pub(crate) use token::thread_has_token;
+
+/// The Medium mandatory level's relative id (`S-1-16-8192`): a standard user's.
+pub(crate) const MEDIUM_RID: u32 = 0x2000;
+
+/// Whether a token holds more than a standard user's and must be lowered before `--remove`
+/// acts with it on the owner's files (S15 `PR4j`): a full elevated token (`full`),
+/// Administrators enabled (`admins`), or an integrity level (`integrity`, its relative id)
+/// above Medium. A per-machine uninstall's parent is the elevated uninstaller, and the ledger it
+/// would act on is a file malware running as the owner can write.
+pub(crate) fn needs_lowering(full: bool, admins: bool, integrity: u32) -> bool {
+    full || admins || integrity > MEDIUM_RID
+}
 
 /// The process to take the owner from: `recorded`, the parent Windows recorded for this process.
 /// `claimed` (the app's `--parent`) must be that process; with none, `recorded` is used. 0 (no
@@ -83,6 +97,21 @@ impl Owner {
         Ok(Owner { sid, token })
     }
 
+    /// Whether the owner's token holds more than a standard user's ([`needs_lowering`]).
+    pub fn elevated(&self) -> Result<bool, MachineError> {
+        self.token.elevated()
+    }
+
+    /// The owner with a standard user's copy of its token: Administrators deny-only, Medium
+    /// integrity, checked after. `--remove` acts on the owner's files only with a token that
+    /// isn't elevated, this one or the parent's own.
+    pub fn lowered(&self) -> Result<Owner, MachineError> {
+        Ok(Owner {
+            sid: self.sid.clone(),
+            token: self.token.lowered()?,
+        })
+    }
+
     /// The owner's SID: the record's `OwnerSid` and the marker's `user_sid`.
     pub fn sid(&self) -> &crate::windows::sids::Sid {
         &self.sid
@@ -108,6 +137,13 @@ impl Owner {
     pub fn run_as<T>(&self, f: impl FnOnce() -> T) -> Result<T, MachineError> {
         let _as_owner = self.impersonate()?;
         Ok(f())
+    }
+
+    /// What the owner's own token gets on a file whose security descriptor (owner, group, DACL
+    /// and label, self-relative) is `descriptor`: what the owner's unelevated hand-back can do
+    /// there. `--reclaim` takes only what the owner can't hand back (S15 `PR4i`).
+    pub fn granted(&self, descriptor: &[u8]) -> Result<u32, MachineError> {
+        self.token.granted(descriptor)
     }
 }
 
@@ -159,6 +195,22 @@ mod tests {
     }
 
     #[test]
+    fn a_token_is_lowered_when_elevated_admin_or_above_medium() {
+        assert!(!needs_lowering(false, false, MEDIUM_RID));
+        assert!(!needs_lowering(false, false, 0x1000), "Low");
+        assert!(
+            needs_lowering(true, false, MEDIUM_RID),
+            "a full elevated token"
+        );
+        assert!(
+            needs_lowering(false, true, MEDIUM_RID),
+            "Administrators enabled"
+        );
+        assert!(needs_lowering(false, false, 0x3000), "High");
+        assert!(needs_lowering(false, true, 0x4000), "SYSTEM");
+    }
+
+    #[test]
     fn a_parent_created_after_this_process_is_a_reused_id() {
         assert_eq!(check_created(100, 200), Ok(()));
         assert_eq!(check_created(199, 200), Ok(()));
@@ -203,6 +255,20 @@ mod tests {
             }));
             assert!(unwound.is_err());
             assert!(!thread_has_token(), "the guard reverted during the unwind");
+        }
+
+        #[test]
+        fn the_lowered_owner_acts_as_a_standard_user() {
+            // CI's runner is an unfiltered administrator: its own token is elevated.
+            let owner = Owner::of_this_process().unwrap();
+            let lowered = owner.lowered().unwrap();
+            assert_eq!(lowered.sid(), owner.sid());
+            let standard = lowered.run_as(super::super::token::thread_is_standard);
+            assert_eq!(standard, Ok(true));
+            // No privilege of the elevated token is carried, SeChangeNotifyPrivilege aside.
+            let extra = lowered.run_as(super::super::token::thread_extra_privileges);
+            assert_eq!(extra, Ok(Some(0)));
+            assert!(!thread_has_token());
         }
 
         #[test]

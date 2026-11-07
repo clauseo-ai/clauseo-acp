@@ -154,7 +154,7 @@ impl Dir {
     ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
-        HostConfig::new(effective, launcher)
+        crate::idle_stop::off(HostConfig::new(effective, launcher))
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))

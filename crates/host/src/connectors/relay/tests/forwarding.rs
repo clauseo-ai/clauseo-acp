@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::super::super::{RelayEvent, texts};
+use super::super::super::{RelayCall, RelayEvent, texts};
 use super::support::*;
 
 #[test]
@@ -248,4 +248,37 @@ fn only_the_answer_to_the_request_is_passed_on() {
     assert_eq!(agent.recv(), answer);
     agent.send_value(&request(3, "ping"));
     assert_eq!(agent.recv()["id"], 3, "one line for request 2, no more");
+}
+
+/// Each message the relay forwards is a call the idle stop counts: it starts before the
+/// connector is asked and ends once its answer is written. A line refused before forwarding
+/// (not JSON) is no call.
+#[test]
+fn each_forwarded_message_starts_and_ends_a_call() {
+    let rig = rig();
+    rig.sign_in();
+    let mut agent = rig.agent();
+    agent.send("not json");
+    assert_eq!(agent.recv()["error"]["code"], -32700);
+    let flight = rig.session.shared().first_flight().unwrap();
+    flight.wait_idle();
+    assert!(rig.events.calls.lock().unwrap().is_empty());
+    agent.send_value(&request(1, "tools/list"));
+    assert_eq!(agent.recv()["id"], 1);
+    // Each one ended before the next is sent, so the order is fixed.
+    flight.wait_idle();
+    agent.send_value(&call(2, "search_law"));
+    assert_eq!(agent.recv()["result"]["isError"], false);
+    flight.wait_idle();
+    let calls = rig.events.calls.lock().unwrap().clone();
+    let key = rig.key;
+    assert_eq!(
+        calls,
+        vec![
+            (key, RelayCall::Started),
+            (key, RelayCall::Ended),
+            (key, RelayCall::Started),
+            (key, RelayCall::Ended),
+        ]
+    );
 }

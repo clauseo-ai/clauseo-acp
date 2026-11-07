@@ -12,9 +12,17 @@ code departs from the brief.
 ## Decision
 
 - **One proxy per launch, two listeners** on `127.0.0.1` sharing one list and one sink
-  (`start_proxy`, `ProxyHandle::port` and `browser_port`). Both bind through
-  `sandbox::ports::bind_loopback`: port 0 on macOS and Linux; on Windows a free port in 61080 to
-  61179 from a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind (`socket2` makes the
+  (`start_proxy`, `ProxyHandle::port` and `browser_port`). The browser listener takes no
+  token, so it is bound only when `ProxyConfig::browser` is set (false from `ProxyConfig::new`),
+  which the host sets from whether the session has the browser, not from `Loopback` (which
+  also carries non-browser ports such as the case-law relay's); otherwise `browser_port` is
+  `None` (added 2026-11-07: tier B, which has no browser (D10), permits every pool user the
+  whole Windows loopback range, so a token-free listener there would let one matter's agent
+  send traffic under another's list).
+  agent-browser and Chrome reach it as `http://127.0.0.1:<port>`, which carries no
+  credential (`--proxy-server` takes none), so it still asks for no token. Both bind through
+  `sandbox::ports::bind_loopback`: port 0 on macOS and Linux; on Windows a free port in 46100 to
+  46199 from a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind (`socket2` makes the
   socket; `setsockopt` from `windows`' `Win32_Networking_WinSock`). Stage E's connector relay
   binds through the same function.
 - **Runtime.** One thread per proxy, `clauseo-proxy`, runs `async_io::block_on` over an
@@ -152,7 +160,7 @@ Departures from the brief:
   launch cannot take the host's file descriptors.
 - Through an upstream, names are also resolved locally for the address check (see Address
   check); the brief checks only IP literals there.
-- The Windows port allocator's error, when every port in 61080 to 61179 fails, names the range and
+- The Windows port allocator's error, when every port in 46100 to 46199 fails, names the range and
   says another program or a Windows port reservation (Hyper-V, WSL or Docker; `netsh int ipv4
   show excludedportrange protocol=tcp`) may hold it.
 
@@ -180,12 +188,12 @@ Departures from the brief:
 Amended 2026-11-03: port claims. The browser needs loopback ports that agent-browser's daemon and
 Chrome bind later, in the jail, so they cannot be listeners the host holds. `ports::claim_port`
 returns a `PortClaim`: on macOS and Linux the port a bind of `127.0.0.1:0` got (closed before it
-returns), on Windows a free port in 61080 to 61179 tested with the same `SO_EXCLUSIVEADDRUSE` bind.
+returns), on Windows a free port in 46100 to 46199 tested with the same `SO_EXCLUSIVEADDRUSE` bind.
 Each claim sits in a process-wide registry until it drops, and `bind_loopback`, `claim_port` and
 `claim_port_at` never hand out a registered port (on macOS and Linux a bind that lands on one is
 asked again, the rejected listeners held open meanwhile; on Windows registered ports are skipped).
 `ports::claim_port_at(port)` is for agent-browser's Windows daemon port, whose number is a hash of
-its session name: it refuses a port outside 61080 to 61179 on Windows (`InvalidInput`), and gives
+its session name: it refuses a port outside 46100 to 46199 on Windows (`InvalidInput`), and gives
 `AddrInUse` when the port is registered or a test bind fails, so the caller draws a new session
 name; it checks the registry before its test bind, so it never binds a claimed port. Interim,
 until agent-browser takes a port option upstream. The registry keeps this process's claims apart
@@ -201,6 +209,14 @@ kernel picked it: if the kernel hands back a claimed port (it hands out only por
 it is held for an instant under the registry lock and the bind asked again, and a launch binding
 that exact port in that instant fails, but cannot take it over. On Windows the candidate loop skips
 claimed ports before any bind.
+
+Amended 2026-11-07 (S15 PR7): the Windows range is `ports::TIER_B_PORTS`, 46100 to 46199, moved
+below Windows' dynamic range (49152 and up by default) so the OS never hands its ports to other
+programs, and kept for tier B's listeners alone: set-up's static permits open it to every pool
+user. `claim_port` and `claim_port_at` are for tier B only. The browser claims outside the
+range: `claim_browser_port` (a bind of `127.0.0.1:0`, asked again when it lands in the range or
+on a held port) and `claim_browser_port_at` (refuses 0 and the range). 0049 says how tier B
+checks the machine's dynamic and excluded port ranges and the listeners in its range.
 
 Amended 2026-11-03: private-address refusals come before the allowlist. On both listeners and in
 both forms (CONNECT and absolute-form `http://`), a host that is an IP literal in any form the

@@ -1,15 +1,25 @@
-//! The local accounts and groups whose names start with a prefix, for the `elevated_` tests'
-//! sweep (`NetUserEnum`, `NetLocalGroupEnum`, level 0). Tests only.
-#![expect(unsafe_code, reason = "FFI to the Win32 account enumeration calls")]
+//! The local accounts and groups whose names start with a prefix, and the `ProfileList` subkeys,
+//! for the `elevated_` tests' sweep (`NetUserEnum`, `NetLocalGroupEnum` level 0, `RegEnumKeyExW`).
+//! Tests only.
+#![expect(
+    unsafe_code,
+    reason = "FFI to the Win32 account and profile enumeration calls"
+)]
 
+use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
 use windows::Win32::NetworkManagement::NetManagement::{
     FILTER_NORMAL_ACCOUNT, LOCALGROUP_INFO_0, MAX_PREFERRED_LENGTH, NERR_Success,
     NetLocalGroupEnum, NetUserEnum, USER_INFO_0,
 };
-use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, RegEnumKeyExW, RegOpenKeyExW,
+};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::MachineError;
 use super::accounts::{Kind, NetBuffer};
+use super::ffi::PROFILE_LIST;
+use super::record_write::{Key, check};
 
 /// The names of this machine's local accounts of kind `kind` that start with `prefix`.
 pub(crate) fn names_starting(prefix: &str, kind: Kind) -> Result<Vec<String>, MachineError> {
@@ -69,6 +79,53 @@ pub(crate) fn names_starting(prefix: &str, kind: Kind) -> Result<Vec<String>, Ma
         if name.starts_with(prefix) {
             names.push(name);
         }
+    }
+    Ok(names)
+}
+
+/// The subkey names of `HKLM`'s `ProfileList`: one per profile, named by its SID.
+pub(crate) fn profile_sids() -> Result<Vec<String>, MachineError> {
+    let subkey = HSTRING::from(PROFILE_LIST);
+    let mut opened = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated and lives for the call; `opened` is a live
+    // out-pointer, closed by `Key`.
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            KEY_READ | KEY_WOW64_64KEY,
+            &raw mut opened,
+        )
+    };
+    check("RegOpenKeyExW", open)?;
+    let key = Key(opened);
+    let mut names = Vec::new();
+    for index in 0u32.. {
+        let mut name = [0u16; 256];
+        let mut len = 256u32;
+        // SAFETY: `name` is live and `len` units long for the call, and `len` is a live
+        // out-pointer; the class and the last-write time are not asked for.
+        let status = unsafe {
+            RegEnumKeyExW(
+                key.0,
+                index,
+                Some(PWSTR(name.as_mut_ptr())),
+                &raw mut len,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        if status == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        check("RegEnumKeyExW", status)?;
+        let units = name
+            .get(..usize::try_from(len).unwrap_or(0))
+            .unwrap_or_default();
+        names.push(String::from_utf16_lossy(units));
     }
     Ok(names)
 }

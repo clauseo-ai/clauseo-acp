@@ -68,15 +68,17 @@ impl SetupReader for Engine {
         }
     }
 
-    fn sublayer(&mut self, key: u128) -> Result<bool, ReadError> {
+    fn sublayer(&mut self, key: u128) -> Result<Option<u16>, ReadError> {
         let guid = GUID::from_u128(key);
         let mut found: *mut FWPM_SUBLAYER0 = ptr::null_mut();
         // SAFETY: the key is a live GUID; `found` is a live out-pointer, freed below.
         let code = unsafe { FwpmSubLayerGetByKey0(self.handle, &raw const guid, &raw mut found) };
+        // SAFETY: on success `found` is WFP's sublayer, live until freed below.
+        let weight = unsafe { found.as_ref() }.map(|sublayer| sublayer.weight);
         free(found);
         match code {
-            0 => Ok(true),
-            c if is(c, &[FWP_E_SUBLAYER_NOT_FOUND, FWP_E_NOT_FOUND]) => Ok(false),
+            0 => Ok(weight),
+            c if is(c, &[FWP_E_SUBLAYER_NOT_FOUND, FWP_E_NOT_FOUND]) => Ok(None),
             c => Err(("FwpmSubLayerGetByKey0", c)),
         }
     }
@@ -177,6 +179,10 @@ unsafe fn read_filter(filter: &FWPM_FILTER0) -> Result<FoundFilter, ReadError> {
             persistent: (filter.flags & FWPM_FILTER_FLAG_PERSISTENT).0 != 0,
             clear_action_right: (filter.flags & FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT).0 != 0,
         },
+        other_flags: filter.flags.0
+            & !(FWPM_FILTER_FLAG_PERSISTENT.0 | FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT.0),
+        // SAFETY: the provider key is WFP's GUID, or null.
+        provider: unsafe { filter.providerKey.as_ref() }.map(GUID::to_u128),
         conditions: found,
     })
 }

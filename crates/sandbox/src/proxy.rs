@@ -1,5 +1,6 @@
-//! The egress proxy: one per agent launch, on two loopback listeners, the jailed agent's only way
-//! out and the browser's way out in every tier.
+//! The egress proxy: one per agent launch, the jailed agent's only way out and the browser's way
+//! out in every tier. It listens on loopback for the agent, and for the browser too when the
+//! launch has one ([`ProxyConfig::browser`]; never on tier B, decision D10).
 //!
 //! It allows a CONNECT to port 443 of a host on the launch's allowlist and a plain `http://`
 //! request to port 80 of one, chains to the firm's proxy when there is one, never looks inside
@@ -65,6 +66,32 @@ pub struct ProxyConfig {
     /// Called once per request with what the proxy did (the example's JSON lines). Never
     /// carries the token or a header.
     pub record: Option<Record>,
+    /// Whether to bind the browser listener; false from [`ProxyConfig::new`]. The host sets it
+    /// from whether this session has the browser (the browser entry it loads as available),
+    /// never from the policy's [`Loopback`](crate::Loopback), which also carries non-browser
+    /// ports such as the case-law relay's. That listener takes no token, so a launch without
+    /// the browser (tier B, decision D10) must not open one: another matter's agent could send
+    /// traffic through it under this launch's list.
+    pub browser: bool,
+}
+
+impl ProxyConfig {
+    /// A config with no record callback and no browser listener.
+    pub fn new(
+        allow: Allowlist,
+        silent: Allowlist,
+        upstream: Upstream,
+        denials: Arc<dyn DenialSink>,
+    ) -> ProxyConfig {
+        ProxyConfig {
+            allow,
+            silent,
+            upstream,
+            denials,
+            record: None,
+            browser: false,
+        }
+    }
 }
 
 impl fmt::Debug for ProxyConfig {
@@ -74,6 +101,7 @@ impl fmt::Debug for ProxyConfig {
             .field("silent", &self.silent)
             .field("upstream", &self.upstream)
             .field("record", &self.record.is_some())
+            .field("browser", &self.browser)
             .finish_non_exhaustive()
     }
 }
@@ -227,7 +255,12 @@ pub(crate) fn start_with(
         Ok((Async::new(listener).map_err(Error::ProxyStart)?, port))
     };
     let (agent, port) = bind()?;
-    let (browser, browser_port) = bind()?;
+    let (browser, browser_port) = if config.browser {
+        let (listener, port) = bind()?;
+        (Some(listener), Some(port))
+    } else {
+        (None, None)
+    };
     let shared = Arc::new(Shared::new(config.allow));
     let parts = server::Parts {
         shared: Arc::clone(&shared),
@@ -243,7 +276,7 @@ pub(crate) fn start_with(
     let (stop, stopped) = oneshot::channel();
     let thread = thread::Builder::new()
         .name("clauseo-proxy".to_owned())
-        .spawn(move || server::run(parts, &agent, &browser, stopped))
+        .spawn(move || server::run(parts, &agent, browser.as_ref(), stopped))
         .map_err(Error::ProxyStart)?;
     Ok(ProxyHandle {
         port,
@@ -255,10 +288,10 @@ pub(crate) fn start_with(
     })
 }
 
-/// A running proxy. Dropping it stops the thread, closes both listeners and ends every tunnel.
+/// A running proxy. Dropping it stops the thread, closes its listeners and ends every tunnel.
 pub struct ProxyHandle {
     port: u16,
-    browser_port: u16,
+    browser_port: Option<u16>,
     token: Token,
     shared: Arc<Shared>,
     stop: Option<oneshot::Sender<()>>,
@@ -281,8 +314,9 @@ impl ProxyHandle {
         self.port
     }
 
-    /// The browser listener's port (no token; held to its matter by the jail's port rule).
-    pub fn browser_port(&self) -> u16 {
+    /// The browser listener's port (no token; held to its matter by the jail's port rule), or
+    /// `None` when [`ProxyConfig::browser`] was false and no browser listener was bound.
+    pub fn browser_port(&self) -> Option<u16> {
         self.browser_port
     }
 

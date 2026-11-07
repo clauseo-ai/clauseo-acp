@@ -1,8 +1,9 @@
 //! The rows (S15 PR7, orchestrator ruling 2026-11-07): set-up's blocks catch every pool token,
-//! derived ones included, everywhere outside 127.0.0.1:61080-61179; inside the range a static
+//! derived ones included, everywhere outside 127.0.0.1:46100-46199; inside the range a static
 //! permit lets every pool user reach every listener, and the listeners' per-launch secrets keep
 //! matters apart (those rows are `measured`); the owner may read set-up's filters and change
-//! none.
+//! none; a launch refuses a filter set-up didn't write and a listener in the range that isn't
+//! this app's (`foreign`).
 
 use std::error::Error;
 use std::net::TcpListener;
@@ -11,7 +12,9 @@ use std::sync::Arc;
 
 use base64::Engine;
 use clauseo_sandbox::windows::sids::Sid;
-use clauseo_sandbox::windows::wfp::{Namespace, check_launch_in, probe_owner_grants};
+use clauseo_sandbox::windows::wfp::{
+    Namespace, check_launch_in, foreign_test_filter, probe_owner_grants,
+};
 use clauseo_sandbox::windows::{sandbox_data_dir, sandbox_pool_sids};
 use clauseo_sandbox::{
     Allowlist, Denial, DenialSink, ProxyConfig, ProxyHandle, Reachability, Upstream, ports,
@@ -73,6 +76,47 @@ pub(crate) fn status() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// `foreign check`, as the desktop user: a launch's check must refuse, while another Windows
+/// user runs `listen <port in 46100-46199>` (a listener that isn't this app's) or after
+/// `foreign add` (a filter set-up didn't write; does the owner's enumeration see it?).
+/// `foreign add` and `foreign remove`, elevated: that filter, persistent, in our sublayer.
+pub(crate) fn foreign(rest: &[String]) -> Result<(), Box<dyn Error>> {
+    let ns = Namespace::production();
+    match rest.first().map(String::as_str) {
+        Some("add") => {
+            foreign_test_filter(&ns, false)?;
+            say("added; run `foreign check` as the desktop user, then `foreign remove` here");
+        }
+        Some("remove") => {
+            foreign_test_filter(&ns, true)?;
+            say("removed");
+        }
+        Some("check") => {
+            let pool = sandbox_pool_sids()?;
+            let a = pool
+                .first()
+                .ok_or("the machine record lists no pool user")?;
+            let checked = check_launch_in(&ns, a, &[]);
+            let got = match &checked {
+                Ok(()) => "allowed".to_owned(),
+                Err(error) => format!("refused ({error})"),
+            };
+            let what = "a launch with a foreign filter or listener present";
+            report(
+                "A",
+                a.as_str(),
+                what,
+                "check",
+                Expect::NotReached,
+                &got,
+                Some(checked.is_err()),
+            );
+        }
+        _ => return Err("usage: foreign add | check | remove".into()),
+    }
+    Ok(())
+}
+
 /// A listener on `127.0.0.1:<port>` that accepts until killed.
 pub(crate) fn listen(rest: &[String]) -> Result<(), Box<dyn Error>> {
     let port: u16 = rest.first().ok_or("listen needs a port")?.parse()?;
@@ -92,6 +136,8 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
         upstream: Upstream::System,
         denials: Arc::new(Quiet),
         record: None,
+        // Tier B opens no browser listener (D10).
+        browser: false,
     })?;
     let token = handle
         .env()
@@ -107,7 +153,6 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
 /// The optional rows' arguments.
 #[derive(Default)]
 struct Options {
-    foreign: Option<u16>,
     share: Option<String>,
     inbound: Option<u16>,
     smb_host: Option<String>,
@@ -118,7 +163,6 @@ fn options(rest: &[String]) -> Result<Options, Box<dyn Error>> {
     let mut options = Options::default();
     for pair in rest.chunks(2) {
         match pair {
-            [flag, value] if flag == "--foreign" => options.foreign = Some(value.parse()?),
             [flag, value] if flag == "--share" => options.share = Some(value.clone()),
             [flag, value] if flag == "--inbound" => options.inbound = Some(value.parse()?),
             [flag, value] if flag == "--smb-host" => options.smb_host = Some(value.clone()),
@@ -137,7 +181,6 @@ struct Ports {
     xa: u16,
     pair_a: u16,
     squat: u16,
-    browser_a: u16,
 }
 
 pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
@@ -158,7 +201,6 @@ pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
         xa: unlisted.local_addr()?.port(),
         pair_a: ports::claim_port()?.port(),
         squat: ports::claim_port()?.port(),
-        browser_a: proxy_a.browser_port(),
     };
     let ns = Namespace::production();
     check_launch_in(&ns, a, &[ports.pa, ports.ra, ports.pair_a, ports.squat])?;
@@ -196,11 +238,11 @@ fn matter_a_rows(p: &Ports, cred_a: &str, cred_b: &str, options: &Options) -> Ve
     rows
 }
 
-/// A's rows outside 127.0.0.1:61080-61179, where set-up's blocks must hold.
+/// A's rows outside 127.0.0.1:46100-46199, where set-up's blocks must hold.
 fn outside_rows(p: &Ports) -> Vec<Row> {
     use Expect::{Filtered, Measured, NotReached};
     let s = |text: &str| text.to_owned();
-    let table: [(&str, String, Expect); 16] = [
+    let table: Vec<(&str, String, Expect)> = vec![
         (
             "curl out direct (HTTP to example.com)",
             s("http:example.com"),
@@ -261,6 +303,32 @@ fn outside_rows(p: &Ports) -> Vec<Row> {
             NotReached,
         ),
         (
+            "a child with its local groups deny-only (the pool group among them), out",
+            s("derived:denyonlygroups:connect:1.1.1.1:443"),
+            NotReached,
+        ),
+        (
+            "a child with its user and local groups deny-only, loopback outside the range",
+            s("derived:denyonlyall:connect:127.0.0.1:445"),
+            NotReached,
+        ),
+        (
+            "a deny-only-user child to A's own proxy (the permit is for the user, enabled)",
+            format!("derived:denyonly:connect:127.0.0.1:{}", p.pa),
+            NotReached,
+        ),
+        (
+            "an AppContainer child of a deny-only-user token, out",
+            s("derived:lowboxdenyonly:connect:1.1.1.1:443"),
+            NotReached,
+        ),
+        (
+            "a socket under anonymous impersonation, out (gets through only if \
+             EveryoneIncludesAnonymous=1 and WFP reads the thread's token)",
+            s("anon:1.1.1.1:443"),
+            NotReached,
+        ),
+        (
             r"the (B) token against \\localhost\C$",
             s(r"share:\\localhost\C$"),
             NotReached,
@@ -278,7 +346,7 @@ fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
     use Expect::{Measured, NotReached, Reached};
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
     let range = "the range is open to every pool user; the listener's secret is the check";
-    let table: [(String, String, Expect); 8] = [
+    let table: [(String, String, Expect); 7] = [
         (
             "the proxy port".into(),
             format!("proxy:{}:{cred_a}", p.pa),
@@ -314,11 +382,6 @@ fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
             local(p.xa),
             Measured,
         ),
-        (
-            format!("the proxy's browser listener: {range}"),
-            local(p.browser_a),
-            Measured,
-        ),
     ];
     table
         .into_iter()
@@ -329,16 +392,6 @@ fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
 /// A's rows that need an operator's argument.
 fn optional_rows(options: &Options) -> Vec<Row> {
     let mut rows = Vec::new();
-    let range = "the range is open to every pool user; the listener's secret is the check";
-    if let Some(port) = options.foreign {
-        let what = format!("another Windows user's listener (two-user row): {range}");
-        rows.push(row(
-            "A",
-            &what,
-            format!("connect:127.0.0.1:{port}"),
-            Expect::Measured,
-        ));
-    }
     if let Some(path) = &options.share {
         rows.push(row(
             "A",

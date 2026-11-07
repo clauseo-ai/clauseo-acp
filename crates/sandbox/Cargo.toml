@@ -101,7 +101,10 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
 # The network filters (src/windows/wfp, S15 PR7): the WFP management calls
 # (NetworkManagement_WindowsFilteringPlatform, whose FwpmEngineOpen0 takes an RPC auth identity:
-# System_Rpc) and the firewall rules through INetFwPolicy2 (NetworkManagement_WindowsFirewall).
+# System_Rpc) and the firewall rules through INetFwPolicy2 (NetworkManagement_WindowsFirewall);
+# tier B's port check (src/windows/wfp/os_ports.rs): the dynamic range from WMI (System_Wmi,
+# System_Ole, System_Variant) and the listeners from GetExtendedTcpTable
+# (NetworkManagement_IpHelper).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -110,6 +113,7 @@ windows = { workspace = true, features = [
   "Wdk_System_Threading",
   "Win32_Foundation",
   "Win32_Globalization",
+  "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_NetManagement",
   "Win32_NetworkManagement_WindowsFilteringPlatform",
   "Win32_NetworkManagement_WindowsFirewall",
@@ -124,6 +128,7 @@ windows = { workspace = true, features = [
   "Win32_System_Ioctl",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
   "Win32_System_ProcessStatus",
   "Win32_System_Rpc",
   "Win32_System_Registry",
@@ -131,7 +136,9 @@ windows = { workspace = true, features = [
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
+  "Win32_System_Variant",
   "Win32_System_WindowsProgramming",
+  "Win32_System_Wmi",
   "Win32_UI_Shell",
 ] }
 
@@ -142,6 +149,10 @@ insta = { workspace = true }
 clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
+
+# The S15 PR4j VM harness (examples/s15_remove_vm) lists each matter file's SHA-256.
+[target.'cfg(windows)'.dev-dependencies]
+sha2 = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).

@@ -92,7 +92,7 @@ pub(super) async fn open(
         browser_install,
         header_tools: super::header_tools::HeaderTools::default(),
         pack_generations: BTreeMap::new(),
-        turn_path: super::turn::wide::TurnPath::default(),
+        turn_path: super::turn::wide::TurnPath::new(parts.idle),
         refused_folders: parts.refused_folders,
         home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),
         home: parts.home_folder,

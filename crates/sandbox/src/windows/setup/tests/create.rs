@@ -14,14 +14,18 @@ fn a_fresh_run_calls_every_step_in_order() {
 
     assert_eq!(machine.calls, fresh_calls());
     let names: Vec<&str> = report.pool.iter().map(|u| u.name.as_str()).collect();
-    assert_eq!(
-        names,
-        ["ClauseoSb01", "ClauseoSb02", "ClauseoSb03", "ClauseoSb04"]
-    );
+    let eight: Vec<String> = (1..=8).map(|n| format!("ClauseoSb0{n}")).collect();
+    assert_eq!(names, eight);
     assert_eq!(report.made, report.pool);
+    let top_up = TopUp {
+        free_before: 0,
+        added: 4,
+        short: 0,
+    };
+    assert_eq!(report.top_up, top_up);
     assert_eq!(report.reset, []);
     assert!(report.group_made);
-    let pool: Vec<Sid> = (1001..=1004).map(sid).collect();
+    let pool: Vec<Sid> = (1001..=1008).map(sid).collect();
     let group = sid(1000);
     assert_eq!(
         machine.state.record,
@@ -264,10 +268,10 @@ fn an_account_with_a_free_pool_name_is_skipped_never_adopted() {
     );
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
     let names: Vec<&str> = report.pool.iter().map(|u| u.name.as_str()).collect();
-    assert_eq!(
-        names,
-        ["ClauseoSb01", "ClauseoSb03", "ClauseoSb04", "ClauseoSb05"]
-    );
+    let expected: Vec<String> = [1, 3, 4, 5, 6, 7, 8, 9]
+        .map(|n| format!("ClauseoSb0{n}"))
+        .into();
+    assert_eq!(names, expected);
     assert_eq!(
         report.skipped_names,
         [("ClauseoSb02".to_owned(), stranger.clone())]

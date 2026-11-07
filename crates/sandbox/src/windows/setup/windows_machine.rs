@@ -79,7 +79,7 @@ impl Names {
 
     /// The real account name of the engine's `name`: a pool name with [`Names::users`] for
     /// its prefix; any other name as it is.
-    fn real(&self, name: &str) -> String {
+    pub(super) fn real(&self, name: &str) -> String {
         match (pool_number(name), name.strip_prefix(POOL_PREFIX)) {
             (Some(_), Some(digits)) => format!("{}{digits}", self.users),
             _ => name.to_owned(),
@@ -87,7 +87,7 @@ impl Names {
     }
 
     /// The engine's name for the real account name `real`, the inverse of [`Names::real`].
-    fn engine(&self, real: String) -> String {
+    pub(super) fn engine(&self, real: String) -> String {
         match real.strip_prefix(self.users.as_str()) {
             Some(digits) if pool_number(&format!("{POOL_PREFIX}{digits}")).is_some() => {
                 format!("{POOL_PREFIX}{digits}")
@@ -160,10 +160,11 @@ impl std::fmt::Debug for WindowsMachine {
 }
 
 /// The thread acting as the owner: set while it lives, cleared on drop (a panic's included).
-struct Acting(Rc<Cell<bool>>);
+/// `--remove`'s machine (`remove/windows_removal.rs`) keeps its flag the same way.
+pub(super) struct Acting(Rc<Cell<bool>>);
 
 impl Acting {
-    fn set(flag: &Rc<Cell<bool>>) -> Acting {
+    pub(super) fn set(flag: &Rc<Cell<bool>>) -> Acting {
         flag.set(true);
         Acting(Rc::clone(flag))
     }
@@ -389,6 +390,22 @@ impl Machine for WindowsMachine {
         })
     }
 
+    fn held_users(
+        &mut self,
+        pool: &[Sid],
+        trusted: &[Sid],
+        resets: &[Sid],
+    ) -> Result<Vec<Sid>, MachineError> {
+        owned(self, |m| {
+            let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
+            let ledger = m.ledger(trusted);
+            if let Err(error) = &ledger {
+                tracing::warn!(%error, "the ledger can't be read; every sandbox user is in use");
+            }
+            Ok(matters.held_after_resets(pool, ledger, resets))
+        })
+    }
+
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {
         let opened = self.as_owner(|m| {
             // As the owner, so this machine's reservations name the owner, not the admin.
@@ -424,7 +441,9 @@ impl Machine for WindowsMachine {
 
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
         // Elevated, never as the owner: WFP and the firewall are the machine's.
-        // Any WFP failure, the Base Filtering Engine not running included, fails the set-up.
+        // Any WFP failure, the Base Filtering Engine not running included, fails the set-up, and
+        // so does a machine whose dynamic or excluded port ranges overlap tier B's ports.
+        wfp::check_ports(false).map_err(|gap| MachineError::Other(gap.to_string()))?;
         wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Other(error.cause()))
     }
 

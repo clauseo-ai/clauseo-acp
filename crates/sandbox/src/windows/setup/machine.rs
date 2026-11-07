@@ -174,6 +174,17 @@ pub trait Machine {
     /// Clears the reset mark of each of `users` in the owner's `matters.json`
     /// (`MatterSids::reset_done`), as the owner, once their profiles are made again and closed.
     fn reset_done(&mut self, users: &[Sid]) -> Result<(), MachineError>;
+    /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
+    /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
+    /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls
+    /// it as the owner, once the lock is held, over a recorded pool. A missing `matters.json`
+    /// holds none; one that can't be read is the error.
+    fn held_users(
+        &mut self,
+        pool: &[Sid],
+        trusted: &[Sid],
+        resets: &[Sid],
+    ) -> Result<Vec<Sid>, MachineError>;
     /// The owner's ledger, `<data_dir>\sandbox\acl-ledger.json`, opened trusting `trusted` (the
     /// pool users and the group) against this machine's reserved accounts.
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger>;

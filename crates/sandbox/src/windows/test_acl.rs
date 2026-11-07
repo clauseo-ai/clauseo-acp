@@ -1,9 +1,13 @@
 //! Tests' helpers for the permission writes on NTFS: a canonical temp folder, grants, and the
 //! entries a path holds. For this crate's Windows tests only.
 
+use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
+use windows::Win32::Security::DACL_SECURITY_INFORMATION;
+
 use super::acl::descriptor;
+use super::acl::object::Object;
 use super::acl_bytes::{Acl, Descriptor, INHERITED, flags, kind, mask, sid, sid_text};
 use super::acl_plan::{Grant, Inherit, Rights, Sid};
 use super::admit::PathKind;
@@ -58,6 +62,28 @@ pub(crate) fn has(path: &Path, sid: &str, inherited: bool) -> bool {
     entries(path)
         .iter()
         .any(|(_, f, _, s)| s.as_str() == sid && (f & INHERITED != 0) == inherited)
+}
+
+/// `path`'s DACL read as its owner alone, opened relative to its folder's handle with only
+/// `READ_CONTROL | WRITE_DAC` (`Object::open_owned`): whether it is protected, and its entries
+/// as [`entries`] gives them. For an item whose DACL lets the reader nothing more, where
+/// [`entries`] and [`protected`] (which ask `SYNCHRONIZE` and `FILE_READ_ATTRIBUTES` too)
+/// are denied. Its folder must open for the reader.
+pub(crate) fn owner_view(path: &Path) -> (bool, Vec<(u8, u8, u32, Sid)>) {
+    let (Some(folder), Some(name)) = (path.parent(), path.file_name()) else {
+        panic!("no folder or name");
+    };
+    let name: Vec<u16> = name.encode_wide().collect();
+    let object = Object::open(folder).unwrap().open_owned(&name).unwrap();
+    let bytes = object.security(DACL_SECURITY_INFORMATION.0).unwrap();
+    let read = Descriptor::parse(&bytes).unwrap();
+    let mut out = Vec::new();
+    for ace in Acl::parse(read.dacl.unwrap()).unwrap().aces() {
+        if let (Some(m), Some(s)) = (mask(ace), sid(ace).and_then(sid_text)) {
+            out.push((kind(ace), flags(ace), m, s));
+        }
+    }
+    (read.dacl_protected(), out)
 }
 
 /// Whether `path`'s DACL is protected.

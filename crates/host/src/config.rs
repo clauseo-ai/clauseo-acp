@@ -26,8 +26,13 @@ use crate::update::{NoUpdater, Updater};
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
+mod idle;
+pub(crate) use idle::IdleStop;
+pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
 mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
+mod parts;
+pub(crate) use parts::{ConfigParts, UpdateSeams};
 mod wiring;
 pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
@@ -95,46 +100,7 @@ pub struct HostConfig {
     counts: Option<Counts>,
     search: SearchSeams,
     update: UpdateSeams,
-}
-
-/// A `HostConfig` taken apart by the host thread.
-pub(crate) struct ConfigParts {
-    pub(crate) effective: Effective,
-    pub(crate) launcher: Arc<dyn Launcher>,
-    pub(crate) profile: Box<dyn ProfileHook>,
-    pub(crate) refused_folders: Vec<PathBuf>,
-    pub(crate) home_folder: Option<PathBuf>,
-    pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) ids: Box<dyn IdSource>,
-    pub(crate) patch_window_bytes: usize,
-    pub(crate) managed_mcp: PathBuf,
-    pub(crate) app_capacity: usize,
-    pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
-    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
-    pub(crate) pre_write_guard: Option<PathBuf>,
-    /// The limits reader a caller set; `None` builds the default at start-up.
-    pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
-    pub(crate) wiring: LaunchWiring,
-    pub(crate) scan_walk: crate::actor::scan::Walk,
-    pub(crate) scratch: crate::actor::scratch::Seams,
-    /// The usage counts a caller set; `None` counts nothing.
-    pub(crate) counts: Option<Counts>,
-    /// The search thread's test seams.
-    pub(crate) search: SearchSeams,
-    /// The updater and what its machine starts from.
-    pub(crate) update: UpdateSeams,
-}
-
-/// The updater and what its machine starts from (decision record 0037).
-pub(crate) struct UpdateSeams {
-    pub(crate) updater: Arc<dyn Updater>,
-    /// The seed of the check delays; `None` seeds from the clock at start.
-    pub(crate) jitter_seed: Option<u64>,
-    /// The app's version, which `UpdateView::current` shows and the marker compares.
-    pub(crate) app_version: String,
-    /// The store's close reports a failure once it has closed (`with_failing_close`).
-    #[cfg(feature = "test-support")]
-    pub(crate) fail_close: bool,
+    idle: IdleStop,
 }
 
 impl HostConfig {
@@ -176,6 +142,7 @@ impl HostConfig {
                 #[cfg(feature = "test-support")]
                 fail_close: false,
             },
+            idle: IdleStop::default(),
         }
     }
 
@@ -324,6 +291,26 @@ impl HostConfig {
     /// The desktop fills it.
     pub fn with_machine_memory(mut self, bytes: u64) -> Self {
         self.wiring.browser_slots = BrowserSlots::new(Some(bytes));
+        self.idle.memory = Some(bytes);
+        self
+    }
+
+    /// How long an agent with nothing pending stays live (default [`IDLE_LIMIT`], 300 s).
+    pub fn with_idle_limit(mut self, limit: std::time::Duration) -> Self {
+        self.idle.limit = limit;
+        self
+    }
+
+    /// Agents live at once on a machine of 8 GB or less (default [`LIVE_AGENTS`], 2).
+    pub fn with_live_agents(mut self, agents: usize) -> Self {
+        self.idle.live_agents = agents;
+        self
+    }
+
+    /// How long an agent must be idle before the live-agents cap may stop it for another
+    /// thread's launch (default [`CAP_MIN_IDLE`], 60 s); with none, the launch passes the cap.
+    pub fn with_cap_min_idle(mut self, min_idle: std::time::Duration) -> Self {
+        self.idle.cap_min_idle = min_idle;
         self
     }
 
@@ -584,6 +571,7 @@ impl HostConfig {
             counts: self.counts,
             search: self.search,
             update: self.update,
+            idle: self.idle,
         }
     }
 }

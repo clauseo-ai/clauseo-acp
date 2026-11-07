@@ -25,22 +25,25 @@ use windows::Win32::Security::{
     SetKernelObjectSecurity,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, ExtendedFileIdType, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_BOTH_DIR_INFO,
-    FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO, FILE_LIST_DIRECTORY,
-    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo,
-    FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
-    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumePathNameW, OPEN_EXISTING,
-    OpenFileById, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC,
-    WRITE_OWNER,
+    CreateFileW, ExtendedFileIdType, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO,
+    FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
+    FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    GetVolumePathNameW, OPEN_EXISTING, OpenFileById, READ_CONTROL, ReadFile, SYNCHRONIZE,
+    VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
 
 use crate::windows::folder::verbatim_wide;
 use crate::windows::writer::{ApplyFailure, FileId};
+
+mod listing;
+
+use listing::listed;
 
 /// `IsReparseTagNameSurrogate`: the tag's name-surrogate bit (junctions, symbolic links).
 const NAME_SURROGATE: u32 = 0x2000_0000;
@@ -67,6 +70,8 @@ pub(in crate::windows) struct Object {
 pub(in crate::windows) struct Child {
     pub(in crate::windows) name: Vec<u16>,
     pub(in crate::windows) folder: bool,
+    /// Whether the listing said it is a reparse point (a junction, a link, a placeholder).
+    pub(in crate::windows) reparse: bool,
     pub(in crate::windows) id: u64,
 }
 
@@ -89,7 +94,37 @@ impl Object {
     /// word for it).
     pub(in crate::windows) fn open_child(&self, name: &[u16], folder: bool) -> io::Result<Object> {
         let extra = SYNCHRONIZE.0 | if folder { LIST } else { 0 };
-        ladder(extra, |access| open_at(&self.handle, name, access))
+        ladder(extra, |access| open_at(&self.handle, name, access, true))
+    }
+
+    /// Opens `name` in this folder relative to its handle, never following a link, with exactly
+    /// `READ_CONTROL | WRITE_DAC` (S15 `PR4i`): what an owner is implied to have, and no more,
+    /// so an item whose DACL lets only someone else in still opens for its owner. No
+    /// `SYNCHRONIZE` (the handle is asynchronous, used only for the security calls) and no
+    /// `FILE_READ_ATTRIBUTES`: whether it is a folder and its links come from
+    /// `FileStandardInfo`, which needs no right; whether it is a reparse point isn't read (the
+    /// caller has the listing's word for it), and it is opened itself if it is one.
+    pub(in crate::windows) fn open_owned(&self, name: &[u16]) -> io::Result<Object> {
+        let handle = open_at(&self.handle, name, READ_CONTROL.0 | WRITE_DAC.0, false)?;
+        let mut standard = FILE_STANDARD_INFO::default();
+        // SAFETY: the handle is open and `standard` is valid and writable for its size.
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileStandardInfo,
+                (&raw mut standard).cast(),
+                u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0),
+            )
+        }
+        .map_err(|e| os_error(&e))?;
+        Ok(Object {
+            handle,
+            folder: standard.Directory,
+            links: standard.NumberOfLinks,
+            tag: None,
+            write_dac: true,
+            write_owner: false,
+        })
     }
 
     /// The file whose 128-bit ID `id` names, opened by that ID (`OpenFileById`,
@@ -293,6 +328,51 @@ impl Object {
         id_info(&self.handle)
     }
 
+    /// The plain file `name` in this folder, opened relative to its handle ([`open_at`], never
+    /// through a link) for reading, and read whole; `None` when it is missing. A reparse point,
+    /// a folder, a file with another name, or one over `cap` bytes is refused.
+    pub(in crate::windows) fn read_child(
+        &self,
+        name: &[u16],
+        cap: usize,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0;
+        let handle = match open_at(&self.handle, name, access, true) {
+            Ok(handle) => handle,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let file = Object::describe(handle, false, false)?;
+        if file.folder || file.tag.is_some() || file.links > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a plain file",
+            ));
+        }
+        let mut bytes = vec![0u8; cap.saturating_add(1)];
+        let mut filled = 0;
+        loop {
+            let mut read = 0u32;
+            let room = bytes.get_mut(filled..).unwrap_or_default();
+            // SAFETY: the handle is open for synchronous reads with FILE_READ_DATA; `room` is
+            // a live, writable slice and `read` a live out-pointer.
+            unsafe { ReadFile(file.handle.0, Some(room), Some(&raw mut read), None) }
+                .map_err(|e| os_error(&e))?;
+            if read == 0 {
+                break;
+            }
+            filled += usize::try_from(read).map_err(io::Error::other)?;
+            if filled > cap {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "larger than its cap",
+                ));
+            }
+        }
+        bytes.truncate(filled);
+        Ok(Some(bytes))
+    }
+
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's
     /// `ensure_handle_is_not_filesystem_root`).
     pub(in crate::windows) fn is_volume_root(&self) -> io::Result<bool> {
@@ -368,51 +448,6 @@ fn ladder(extra: u32, mut open: impl FnMut(u32) -> io::Result<Handle>) -> io::Re
     Err(denied)
 }
 
-/// Adds the names in one `FILE_ID_BOTH_DIR_INFO` chain, `bytes`, to `out`.
-fn listed(bytes: &[u8], out: &mut Vec<Child>) -> io::Result<()> {
-    let attributes_at = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileAttributes);
-    let length_at = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileNameLength);
-    let name_at = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
-    let id_at = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileId);
-    let short = || io::Error::new(io::ErrorKind::InvalidData, "a short folder listing");
-    let mut at = 0_usize;
-    loop {
-        let entry = bytes.get(at..).ok_or_else(short)?;
-        let next = read_u32(entry, 0).ok_or_else(short)?;
-        let attributes = read_u32(entry, attributes_at).ok_or_else(short)?;
-        let length = usize::try_from(read_u32(entry, length_at).ok_or_else(short)?)
-            .map_err(io::Error::other)?;
-        let id = read_u64(entry, id_at).ok_or_else(short)?;
-        let raw = entry.get(name_at..name_at + length).ok_or_else(short)?;
-        let name: Vec<u16> = raw
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| u16::from_le_bytes(*pair))
-            .collect();
-        let dots = name == [u16::from(b'.')] || name == [u16::from(b'.'), u16::from(b'.')];
-        if !dots && !name.is_empty() {
-            out.push(Child {
-                name,
-                folder: attributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0,
-                id,
-            });
-        }
-        if next == 0 {
-            return Ok(());
-        }
-        at += usize::try_from(next).map_err(io::Error::other)?;
-    }
-}
-
-fn read_u32(bytes: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
-}
-
-fn read_u64(bytes: &[u8], at: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?))
-}
-
 /// Opens `wide` (verbatim, NUL-terminated) for `access`, never following a link.
 fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
     let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
@@ -436,8 +471,10 @@ fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
 /// Opens `name` (one path part, no NUL) in the folder `dir` for `access`, relative to its
 /// handle, opening a reparse point itself rather than what it names. `OBJ_DONT_REPARSE` as
 /// well, after Codex's `no_reparse_dir.rs` (`open_no_reparse`, at e7f32cf): any reparse met
-/// on the way fails the open ([`reparse_refused`]) rather than being followed.
-fn open_at(dir: &Handle, name: &[u16], access: u32) -> io::Result<Handle> {
+/// on the way fails the open ([`reparse_refused`]) rather than being followed. A `synchronous`
+/// handle (`FILE_SYNCHRONOUS_IO_NONALERT`) needs `SYNCHRONIZE` in `access`; one that isn't is
+/// for the security calls alone.
+fn open_at(dir: &Handle, name: &[u16], access: u32, synchronous: bool) -> io::Result<Handle> {
     let bytes = u16::try_from(name.len() * 2)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let unicode = UNICODE_STRING {
@@ -455,8 +492,10 @@ fn open_at(dir: &Handle, name: &[u16], access: u32) -> io::Result<Handle> {
     let mut handle = HANDLE::default();
     let mut status = IO_STATUS_BLOCK::default();
     let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-    let options =
-        FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT;
+    let mut options = FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT;
+    if synchronous {
+        options |= FILE_SYNCHRONOUS_IO_NONALERT;
+    }
     // SAFETY: `unicode` points into `name`, which outlives the call and is never written;
     // `attributes` and the out-pointers are live; the folder's handle is open; the handle
     // made is owned by `Handle` from here.

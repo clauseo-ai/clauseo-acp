@@ -49,7 +49,7 @@ pub(super) fn ledger_naming(temp: &TempDir, matter: MatterId, sid: &Sid) -> Ledg
 }
 
 /// A ledger owing a hand-back for `sid`: trusted when `matter` is a matter id, kept when not.
-fn ledger_owing(temp: &TempDir, matter: &str, sid: &Sid) -> Ledger {
+pub(super) fn ledger_owing(temp: &TempDir, matter: &str, sid: &Sid) -> Ledger {
     let json = format!(
         r#"{{"version":1,"entries":[],"handbacks":[{{"matter":"{matter}","pool":"{sid}"}}]}}"#
     );

@@ -159,9 +159,12 @@ pub enum ApplyFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Owned {
     /// A root the plan denies on: a matter, state or notes folder, a registered matter's, a
-    /// sibling, the parent. Remedy: the lawyer takes ownership of the folder as an administrator
-    /// (its Properties, Security, Advanced, Owner), or runs set-up again once its elevated
-    /// hand-back lands (S15 `PR4i`); then launches again.
+    /// sibling, the parent. Remedy: the elevated clean-up (`UserSetup::reclaim`, S15 `PR4i`),
+    /// for which the refusal records the item in the ledger, when the root lies in a matter
+    /// root the ledger records. Otherwise (a new matter's own folder, a sibling, the parent)
+    /// the clean-up refuses it: forget the matter and add it again; if the lawyer can't take
+    /// it back, take ownership by hand as an administrator (its Properties, Security, Advanced,
+    /// Owner). Then launch again.
     Root,
     /// A file or folder inside a matter's tree that a pool user other than the matter's own
     /// owns (one the lawyer moved in from another matter, say), whose hand-back failed. That
@@ -313,4 +316,25 @@ pub trait AclWriter {
     /// Puts `label` back as the explicit label on `grant`'s path (a Low label grant), in place
     /// of ours or of none; another explicit label set since is left as it is.
     fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure>;
+    /// The hand-back after `--reclaim` (S15 `PR4i`), and nothing else calls it: `root` (and,
+    /// when `whole`, everything below it, through each folder's handle, never following a
+    /// link) that the desktop user owns loses its explicit plain allows for `others` (the pool
+    /// users but the matter's own), and nothing more: every other entry and the DACL's
+    /// protection stay, and so does an allow `keep` lists on that path (our own entries'). A
+    /// file with more than one link is left as it is. An item left with a protected DACL and no
+    /// explicit entry (only the agent's protection can have made it) is unprotected and takes
+    /// its folder's inherited entries, and so is one whose inherited entries still allow one of
+    /// `others`; in one write, worked out after the strip. Each item is opened with only the
+    /// owner's implied `READ_CONTROL | WRITE_DAC`, and a folder listed only after its write. A
+    /// child the lawyer can't open or list is refused as [`ApplyFailure::ChildShut`], naming it.
+    /// The default, for writers that don't need it, is `Unsupported`.
+    fn strip_taken(
+        &mut self,
+        _root: &Path,
+        _others: &[Sid],
+        _keep: &[(PathBuf, Sid)],
+        _whole: bool,
+    ) -> Result<Walked, ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
 }

@@ -116,7 +116,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.checkpoint_failed":
     "Clauseo couldn't save a version of this matter's papers, so this change can't be undone.",
   "matter.folder_missing":
-    "This matter's folder can't be found. It may have moved, or its drive isn't connected.",
+    "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
     "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",

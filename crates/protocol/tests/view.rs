@@ -406,6 +406,24 @@ fn queue_held_defaults_to_false() {
 }
 
 #[test]
+fn resuming_since_is_left_out_when_none_and_read_when_missing() {
+    // A header with no resume writes no field, and a header from before the field reads `None`.
+    let plain = serde_json::to_value(header()).unwrap();
+    assert!(plain["header"].get("resuming_since").is_none(), "{plain}");
+    let mut fields = plain["header"].as_object().unwrap().clone();
+    let entry: HeaderEntry = serde_json::from_value(fields.clone().into()).unwrap();
+    assert_eq!(entry.resuming_since, None);
+    // With the field, it reads back as the same timestamp.
+    let since = Timestamp::new(1_760_000_000_000).unwrap();
+    fields.insert(
+        "resuming_since".to_owned(),
+        serde_json::to_value(since).unwrap(),
+    );
+    let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
+    assert_eq!(entry.resuming_since, Some(since));
+}
+
+#[test]
 fn steer_joins_turn_and_background_default_when_missing() {
     // A stored header from before `steer_joins_turn` decodes with it false.
     let header = serde_json::to_value(header()).unwrap();

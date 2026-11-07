@@ -347,7 +347,10 @@ pub(crate) fn system() -> Result<Token, String> {
         let found = named.is_ok()
             && path.to_ascii_lowercase().ends_with("\\winlogon.exe")
             // SAFETY: the process handle is open; `token` is closed by `Token`.
-            && unsafe { OpenProcessToken(process, TOKEN_DUPLICATE | TOKEN_QUERY, &raw mut token) }.is_ok();
+            && unsafe {
+                OpenProcessToken(process, TOKEN_DUPLICATE | TOKEN_QUERY, &raw mut token)
+            }
+            .is_ok();
         // SAFETY: opened above, closed once.
         drop(unsafe { CloseHandle(process) });
         if found {

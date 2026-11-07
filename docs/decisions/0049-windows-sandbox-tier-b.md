@@ -240,8 +240,8 @@ build 26100):
     is the fail-closed choice: such a child isn't set aside, since it opens fine and only its
     owner can't be changed, and moving another matter's agent's item out of sight would hide
     the problem. The matter's own pool user owning its files is expected, and a child the lawyer
-    can't open takes the set-aside path below. **Tier B still needs PR4i**: its elevated
-    hand-back takes ownership of the roots and children the lawyer's own hand-back can't.
+    can't open takes the set-aside path below. PR4i's elevated clean-up takes ownership of the
+    roots and children the lawyer's own hand-back can't ("The elevated clean-up", below).
   - Every hand-back (these, the protected items', the owner pass, forget's) writes the owner
     first, then the cleaned DACL, through the one no-follow handle, and reads the item again
     through it: an owner other than the desktop user, or an explicit allow left for a pool SID
@@ -472,6 +472,56 @@ standard user can write. Swapping the exe itself stays open in a per-user instal
 install closes both, since only administrators can write its folder under Program Files (PR4j's
 `--per-machine`, with stage F).
 
+### Removal (`--remove`, PR4j)
+
+The uninstaller's hook runs `clauseo-sandbox-setup.exe --remove` elevated (`runas`). The
+per-machine installer, already elevated, opens it with `open` and adds `--per-machine`, chosen
+when it is built (the template's `INSTALLMODE`; only `currentUser` and `perMachine` build,
+stage F), never at run time. `--per-machine` runs only in an elevated or SYSTEM process. The exe
+takes the user who asked from its recorded parent (D-B2), never from an argument.
+
+- **Who removes (D-B9 as ruled).** Per-user, only the record's owner. Anyone else's uninstall
+  exits 0 having touched nothing; a parent that can't be found exits 3, nothing touched.
+  Per-machine, every pool in the record goes, whoever uninstalls, LOCAL SYSTEM under Intune's
+  silent `/S` included.
+- **Order**, under the set-up lock, waited for at most 60 s (else exit 5, nothing touched; with
+  no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
+  `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
+  `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
+  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record. The
+  first failure stops the run: exit 4, the record kept with `Removing` and every pool SID (so a
+  later run still trusts the ledger), the ledger kept. A re-run skips what is gone.
+- **The ledger, as the owner** (the parent is the owner): `DataDir`, which the owner can
+  influence, is checked as `--data-dir` is and used only while acting as the owner; every matter
+  is forgotten (`forget_matter`) acting as the owner, with a standard user's token: an elevated
+  parent's (the per-machine uninstaller's) is copied with Administrators deny-only, no privilege
+  but `SeChangeNotifyPrivilege` and Medium integrity first. If that fails, a per-machine run takes
+  the administrator's path below; a per-user run exits 3, nothing touched. Anything left keeps
+  the record.
+- **The ledger, as an administrator for an absent owner** (per-machine; no impersonation): the
+  ledger is read from a `DataDir` the owner owns, opened relative to its checked `sandbox`
+  folder's handle, and never written. The only change is removing one access entry, for an entry
+  that names a recorded pool SID or the group, is no label, records no file by ID, lies in a
+  matter folder the ledger records (not a drive's root), and whose folder, checked right before,
+  has no junction or link on the way, is the owner's, and passes the gate's folder check; and
+  taking the recorded Low label off each such matter folder's root (removing a label only
+  tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
+  change themselves (K1). No walk, label written, hand-back, add or delete.
+- **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
+  the app delete `sandbox\` when the box is ticked. The hook waits 120 s at most and never ends
+  the exe: each step leaves a state the next run starts from. After a timeout with the box
+  ticked, the lawyer sees the usual kept-folder box for `sandbox\` while the tool may still be
+  writing there; that is accepted, since the tool keeps its records consistent at every step and
+  reinstalling then uninstalling recovers.
+- **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
+
+**Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
+even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which
+hold nothing (K10). The Low label comes off each matter folder's root, but its inherited copies
+below the root stay (no walk runs for an absent owner), as do labels on folders that fail the
+check: there a Low-integrity process of the owner's may still write where the owner can. The
+owner's own uninstall first, or the per-user install, avoids it.
+
 ### Shared writable places
 
 A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:
@@ -636,57 +686,154 @@ it's already larger (`FSCTL_CREATE_USN_JOURNAL`, `MaximumSize` 256 MB, `Allocati
 capped there, never shrinking one. The default 32 MB held about 400,000 records in S15's
 measurements; a wrap only costs a full walk, so a larger journal makes them rarer.
 
+### The elevated clean-up (PR4i)
+
+A launch refused as `PoolOwned` (root or child) or as `ChildShut` it couldn't set aside records
+its item in the ledger. So does a forget whose hand-back stays owed. `UserSetup::reclaim` then
+runs the setup exe's `--reclaim` behind one prompt. It takes the owner from its verified parent
+(D-B2) and reads the data folder from the machine's record. It reads the ledger and
+`matters.json` as the owner. On each object a pool SID of the record owns, where the owner's own
+token lacks `READ_CONTROL`, `WRITE_DAC` or `WRITE_OWNER`, it sets the owner to the lawyer and
+writes nothing else.
+
+The owner writes those files, so they bound nothing. Access bounds the walk instead (K1):
+
+- A root must lie in a matter root the ledger records, both resolved by handle.
+- A root must not be a volume's root, nor hold or lie in a pool user's profile.
+- A root must be a pool user's, or one the owner can list.
+- The walk enters only folders a pool user owns or the owner can list, so
+  `SeBackupPrivilege` never opens what neither could.
+
+The app then runs a narrow hand-back as the lawyer, on those trees only. It takes off only the
+explicit allows of pool users other than the matter's own. It keeps every other entry, the
+protection, and the allows the ledger lists as ours. An item left protected with no explicit
+entry, which only the agent's protection can have made, is unprotected and takes the matter's
+inherited entries, fence included. After that, the app retries the forget or the launch.
+
+**Accepted: a `PoolOwned` root outside every recorded matter root needs a manual
+take-ownership.** Examples are a new matter's own folder at its first launch, a sibling, or the
+parent. The clean-up refuses such a root, since the ledger can't vouch for it. The remedy the
+host and app give is: forget the matter and add it again; if the lawyer can't take it back, take
+ownership by hand as an administrator.
+
+**Set-aside restore stays unelevated.** It must raise no prompt. A restored item whose hand-over
+fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
+for `--reclaim`.
+
 ### The network (PR7)
 
-`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 61080-61179,
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46199,
 where its launch's egress proxy and listed ports are, and nothing else. Rulings: the
-orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals).
+orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals,
+the range moved).
 
-**Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP
-transaction: Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in
-the sublayer deleted, foreign ones included; six block filters; and one static permit per pool
-user. The blocks cover every connect over IPv4 and IPv6 (loopback and the range included), every
-inbound connection that isn't loopback, and ICMP at resource assignment, each clearing its action
-right. Each block's `ALE_USER_ID` condition matches `NOT_EQUAL` over
-`(D;;CC;;;<group>)(D;;CC;;;<each pool user>)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)`:
-it is true when an access check doesn't grant `CC`, and a deny entry also matches a deny-only
-SID. So a pool process that makes its user SID or the group deny-only in a derived token (no
-privilege needed) is still blocked; review item 1. The allows keep every other token out of the
-block: `Everyone`, `RESTRICTED` for a restricted token's second pass, and the two application
-package groups for `AppContainer` and LPAC apps. A non-pool restricted token whose restricting set
-holds neither `Everyone` nor `RESTRICTED` fails the second pass and is blocked too; the spike
-measures this collateral. Each static permit, at a weight above the blocks, is `127.0.0.1`, TCP,
-remote ports 61080-61179, with an `ALE_USER_ID` `EQUAL` allow for that one user: a derived token
-that escapes the allow loses the permit and falls to the block. Then come the owner's grants,
-**read-only, no control**: `READ|ENUM` on the filter container, and `READ` on our provider,
-sublayer and filters. There is no ADD, ADD_LINK, WRITE or DELETE anywhere, so the lawyer can't
-add, change or remove a WFP filter. The disclosure is small: the lawyer's processes can enumerate
-the machine's WFP filters, which shows other products' filter metadata but gives no control.
-Last come four Windows Firewall rules naming the pool: block everything that isn't loopback, both
-ways; block loopback UDP; block loopback TCP outside 61080-61179. A re-run or an extend rewrites
-it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
+**The range** (`ports::TIER_B_PORTS`, 46100-46199) is for tier B's listeners alone: the proxy's,
+R24's relay, and what a tier-B launch claims (`claim_port`, `claim_port_at`). It sits below 49152,
+where Windows' dynamic range starts by default, so the OS never hands its ports to another
+program's port-0 bind, and clear of the listeners known below it (WinRM 47001, the ASP.NET state
+service 42424, EtherNet/IP 44818, BACnet 47808, SQL Server's browser 1434) and of IANA's
+registrations. The browser claims outside it (`claim_browser_port`, `claim_browser_port_at`;
+agent-browser's daemon port is 49152-65534), so Chrome's debugging port, from this or a concurrent
+tier-C session, never lands there. Set-up and every launch check the machine against the range
+(`wfp::check_ports`) and refuse tier B, named, on an overlap:
+- **Windows' TCP dynamic range**, read from WMI: `MSFT_NetTCPSetting` in `ROOT\StandardCimv2`,
+  `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts`, every setting's (the class
+  behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"). For IT:
+  `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
+- **Excluded port ranges** (Hyper-V, WSL and Docker reserve blocks, sometimes below 49152).
+  Windows publishes no call that lists them: `netsh int ipv4 show excludedportrange` reads the
+  TCP/IP stack's private store, and the documented calls, `CreatePersistentTcpPortReservation`
+  and `LookupPersistentTcpPortReservation`, only make or look up one exact range. So each port of
+  the range nobody listens on is test-bound on `127.0.0.1` and `::1`; `WSAEACCES` marks it
+  excluded (`ports::refused_ports`).
+- **At each launch, the listeners**: every TCP listener in the range, IPv4 and IPv6, any address
+  (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's or a process
+  running this process's own program file (`QueryFullProcessImageNameW`, compared without case):
+  the proxy and the relay run in the host. Anything else, `http.sys` as System included, refuses
+  the launch (`NetworkGap::ForeignListener`, naming the program).
+
+**Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP transaction:
+Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in the sublayer
+deleted, foreign ones included; six block filters; and one static permit per pool user. The blocks
+cover every connect over IPv4 and IPv6 (loopback and the range included), every inbound connection
+that isn't loopback, and ICMP at resource assignment, each clearing its action right. Each block's
+`ALE_USER_ID` condition matches `NOT_EQUAL` over `(D;;CC;;;<group>)(D;;CC;;;<each pool
+user>)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)`: it is true when an access check
+doesn't grant `CC`, and a deny entry also matches a deny-only SID. So a pool process that makes its
+user SID or the group deny-only in a derived token (no privilege needed) is still blocked; review
+item 1. The allows keep every other token out of the block: `Everyone`, `RESTRICTED` for a
+restricted token's second pass, and the two application package groups for `AppContainer` and LPAC
+apps. A non-pool restricted token whose restricting set holds neither `Everyone` nor `RESTRICTED`
+fails the second pass and is blocked too; the spike measures this collateral. Each static permit, at
+a weight above the blocks, is `127.0.0.1`, TCP, remote ports 46100-46199, with an `ALE_USER_ID`
+`EQUAL` allow for that one user: a derived token that escapes the allow loses the permit and falls
+to the block. Then come the owner's grants, **read-only, no control**: `READ|ENUM` on the filter
+container, and `READ` on our provider, sublayer and filters. There is no ADD, ADD_LINK, WRITE or
+DELETE anywhere, so the lawyer can't add, change or remove a WFP filter. Implicit owner rights would
+undo that, so set-up reads back the owner of the provider, the sublayer and each filter:
+Administrators or SYSTEM, or the set-up fails, named (the policy "System objects: Default owner for
+objects created by members of the Administrators group" set to the creator would make the lawyer the
+owner). The disclosure is small: the lawyer's processes can enumerate the machine's WFP filters,
+which shows other products' filter metadata but gives no control. Last come four Windows Firewall
+rules naming the pool: block everything that isn't loopback, both ways; block loopback UDP; block
+loopback TCP outside 46100-46199. A re-run or an extend rewrites it all for the whole pool. A WFP
+failure fails the set-up at `Step::Network`.
+
+**Measured** (spike run 42351029777, branch `exp-wfp-denyonly` at `7d66a922b`, GitHub's
+`windows-2025` and `windows-11-arm` runners, 23 rows passing on each). The spike installs these
+filters for a throwaway user and group with `wfp::install`, deletes the firewall rules so only WFP
+is measured, and runs a probe under each token. Each non-pool row ran once before the filters and
+once after. Results:
+- WFP accepted `NOT_EQUAL` over the descriptor, and the launch check passed for the pool user and
+  refused the admin.
+- With no filters, every token reached, the pool user's deny-only child included.
+- With the filters:
+  - the plain pool token, the (B) token, a pool token restricted without `Everyone` and a
+    Low-integrity pool token were blocked outside the range and reached loopback inside it;
+  - **the deny-only-user child and the deny-only user-and-group child were blocked outside and
+    inside**;
+  - the pool user's AppContainer child was blocked;
+  - the admin's own token, the admin restricted with `RESTRICTED`, and SYSTEM still reached (no
+    collateral there).
+- Harness limits: a restricted token holding neither `Everyone` nor `RESTRICTED` can't start a
+  program at all (`0xC0000022`), before or after the filters. The admin's AppContainer child
+  failed to reach 1.1.1.1 before the filters too, so that row isn't attributable.
+- A derived token needs a default DACL its process can open (for example `Everyone`) to start;
+  a hijacked agent can set one on its own derived token, so the rows give it one.
 
 **Each launch** (`check_launch`, as the desktop user) checks before the agent starts, and adds
 nothing:
 - the provider and the sublayer are there;
-- every filter in the sublayer is one of set-up's, exactly: key, layer, action, weight, flags,
-  match types and conditions;
+- the sublayer is at set-up's weight;
+- every filter in the sublayer is one of set-up's, exactly: key, provider, layer, action, weight,
+  every flag bit (a disabled filter refuses), match types and conditions;
 - every block denies the matter's pool user;
-- the user has its static permit.
+- the user has its static permit, and every permit names a user the blocks deny (the pool);
+- the machine's dynamic and excluded port ranges, and the listeners in the range ("The range").
 
 A foreign filter, a change, a missing object or a refused read refuses the launch with
-`Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do,
-with `agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
-61080-61179, or WFP not answering. The ports `Policy::proxy_ports` and `Loopback::Ports` name
-narrow nothing at the WFP layer, but are still checked to be inside the range, so a launch never
-counts on a port the firewall blocks. No agent runs unfiltered.
+`Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do, with
+`agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
+46100-46199, WFP not answering, or the range overlapped, reserved or held by a foreign listener. The
+ports `Policy::proxy_ports` and `Loopback::Ports` name narrow nothing at the WFP layer, but are
+still checked to be inside the range, so a launch never counts on a port the firewall blocks. No
+agent runs unfiltered.
 
 **Inside the range, the listeners' secrets are the check.** Every pool user reaches every
-listener on `127.0.0.1:61080-61179`, other matters' included. S16's proxy demands its per-launch
+listener on `127.0.0.1:46100-46199`, other matters' included. S16's proxy demands its per-launch
 token, and R24's relay its token file. **Accepted risk:** a listener an agent makes in the range
 (or one it puts on another matter's listed port before that port is bound, review item 7; S16's
 `SO_EXCLUSIVEADDRUSE` is out of PR7's scope) is reachable from another matter's agent: a
-collusion channel between two hijacked agents, like the pipes (D11).
+collusion channel between two hijacked agents, like the pipes (D11). **Accepted risk:** a foreign
+program that binds a fixed port in the range after a launch's check is reachable from that
+launch's agent until the next launch refuses; the range is out of the OS's hands, so only a
+program asking for that port by number can do it.
+
+**Defence in depth, a spike** (`exp-wfp-denyonly`): a filter at `ALE_AUTH_RECV_ACCEPT_V4` that
+blocks a connection whose remote user (`FWPM_CONDITION_ALE_REMOTE_USER_ID`) is a pool user to any
+local program but the host (`FWPM_CONDITION_ALE_APP_ID`). If Windows fills the remote user for
+loopback, it covers a foreign listener wherever it lands; if not, it is dropped, and this record
+says why. Pending the run.
 
 **When the firewall fails.** WFP is the boundary: any WFP call that fails, the Base Filtering
 Engine not running included (named for IT: set BFE to start automatically), fails the set-up, so
@@ -724,11 +871,16 @@ VM row measures it.
   WebDAV. The row runs on a Windows 11 copy if there is one, else on win-01 (Server 2025, no
   WebClient), and says which.
 
-**Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. Removal
-(`wfp::remove_network`, for `PR4j`'s `--remove`) deletes every filter in the sublayer, foreign
+**Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. A socket opened
+under anonymous impersonation is blocked too: whether WFP reads the process's token (a pool user) or
+the thread's (the anonymous logon, which holds no `Everyone`), the allow doesn't grant. Only a
+machine with `EveryoneIncludesAnonymous = 1` that WFP reads by thread would let it through; a VM row
+measures it. Removal (`wfp::remove`, which `--remove` runs once every pool account is gone, since
+`stop_strays` only logs a process that won't stop) deletes every filter in the sublayer, foreign
 ones included, every key set-up writes, the sublayer and the provider, in one transaction; then it
-takes back the owner's read grant on the filter container, and removes the firewall rules. It can
-run again after a partial removal.
+takes back the owner's read grant on the filter container, and removes the firewall rules; a
+firewall failure there is reported, not fatal, as at set-up. It can run again after a partial
+removal.
 
 **For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
 starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent, and map
@@ -745,9 +897,9 @@ starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent
 - A lawyer without admin rights can't answer the set-up prompt, so no pool is made and the
   machine stays on tier C. Firms often lock admin rights down, so this is common. A "B-minus"
   tier (the lawyer's own token at Low integrity, no accounts, no prompt) may follow v1.
-- Uninstall (S15a, fix 5) removes, for each pool user, the profile and then the account, then the
-  entries naming pool SIDs, from the ledger. Deleting the account first leaves its profile folder
-  and `ProfileList` key behind.
+- Uninstall (S15 PR4j, "Removal" above) removes, for each pool user, its `LocalLow` deny, its
+  profile and then its account, then `DeviceSync`'s deny, the ledger's entries, the group and the
+  record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
 

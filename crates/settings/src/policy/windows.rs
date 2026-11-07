@@ -1,15 +1,19 @@
-//! Windows' policy sources: the registry, then `ProgramData\Clauseo\policy.json`. This module
-//! only collects the registry's raw values; [`super::registry::parse`] reads them.
+//! Windows' policy sources: the registry, then `ProgramData\Clauseo\policy.json`, read only
+//! when an administrator owns it ([`acl`]). This module only collects the registry's raw values;
+//! [`super::registry::parse`] reads them.
 #![expect(unsafe_code, reason = "FFI to the OS policy store")]
 
+mod acl;
 #[cfg(test)]
 mod tests;
 
+pub(super) use acl::trust;
+
 use super::registry::{self, KEY, RegValue, SOURCE};
-use super::{FilePolicy, PolicyRead, PolicySource};
+use super::{PolicyRead, PolicySource, TrustedFilePolicy};
+use crate::SystemDirs;
 use crate::error::Error;
 use crate::locations::{KnownFolder, PlatformDirs as _};
-use crate::{SystemDirs, SystemFiles};
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, REG_DWORD, REG_MULTI_SZ, REG_SZ,
@@ -17,12 +21,12 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PWSTR};
 
-/// The registry, then the `policy.json` in the `ProgramData` known folder.
+/// The registry, then the `policy.json` in the `ProgramData` known folder, read only when it
+/// and `ProgramData\Clauseo` pass the trust check ([`TrustedFilePolicy`]).
 pub(super) fn sources() -> Vec<Box<dyn PolicySource>> {
     let file: Box<dyn PolicySource> = match SystemDirs.known_folder(KnownFolder::ProgramData) {
-        Some(data) => Box::new(FilePolicy::new(
+        Some(data) => Box::new(TrustedFilePolicy::admin_owned(
             data.join("Clauseo").join("policy.json"),
-            SystemFiles,
         )),
         None => Box::new(NoProgramData),
     };
