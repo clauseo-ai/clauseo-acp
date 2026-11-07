@@ -94,6 +94,22 @@ impl SetupAgents for Networks {
     fn use_different_account(&self, _agent: &AgentId) -> Result<(), clauseo_agents::SigninError> {
         Ok(())
     }
+    fn use_different_account_switching(
+        &self,
+        _agent: &AgentId,
+    ) -> Result<(), clauseo_agents::SigninError> {
+        Ok(())
+    }
+    fn sign_in_switching(
+        &self,
+        _agent: &AgentId,
+        _method: clauseo_agents::Method,
+    ) -> Result<(), clauseo_agents::SigninError> {
+        Ok(())
+    }
+    fn replaces_own_login(&self, _agent: &AgentId) -> bool {
+        false
+    }
     fn signin_state(&self, _agent: &AgentId) -> Option<clauseo_agents::SigninState> {
         None
     }

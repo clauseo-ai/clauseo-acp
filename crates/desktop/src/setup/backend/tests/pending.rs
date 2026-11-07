@@ -62,7 +62,7 @@ fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
 }
 
 fn pending(rig: &Rig, agent: &AgentId) -> Option<Press> {
-    lock(&rig.backend.pending).get(agent).copied()
+    lock(&rig.backend.pending).get(agent).map(|kept| kept.press)
 }
 
 /// The sign-in states sent for `agent` on `events`.

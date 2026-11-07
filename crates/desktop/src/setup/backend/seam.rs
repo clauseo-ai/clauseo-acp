@@ -20,6 +20,10 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn installed(&self, agent: &AgentId) -> Option<Installed>;
     /// `Agents::sign_in`.
     fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError>;
+    /// `Agents::sign_in_switching`: after the lawyer's yes to `Ask::SwitchAccount`.
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError>;
+    /// `Agents::replaces_own_login`.
+    fn replaces_own_login(&self, agent: &AgentId) -> bool;
     /// `Agents::cancel_sign_in`.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::paste_code`.
@@ -34,6 +38,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn use_found_login(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::use_different_account`.
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError>;
+    /// `Agents::use_different_account_switching`: after the lawyer's yes.
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::signin_state`.
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState>;
     /// `Agents::sign_in_going`.
@@ -65,6 +71,12 @@ impl SetupAgents for Agents {
     fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         Agents::sign_in(self, agent, method)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        Agents::sign_in_switching(self, agent, method)
+    }
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        Agents::replaces_own_login(self, agent)
+    }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         Agents::cancel_sign_in(self, agent)
     }
@@ -85,6 +97,9 @@ impl SetupAgents for Agents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         Agents::use_different_account(self, agent)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        Agents::use_different_account_switching(self, agent)
     }
     fn sign_in_going(&self, agent: &AgentId) -> bool {
         Agents::sign_in_going(self, agent)

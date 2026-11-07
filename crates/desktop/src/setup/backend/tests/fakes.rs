@@ -9,10 +9,11 @@ use std::time::Duration;
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
     AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    Source,
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
+use clauseo_protocol::{AgentId, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
@@ -29,14 +30,16 @@ use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
-use crate::setup::readers::{LeaveReaders, ReadHold};
+use crate::setup::readers::LeaveReaders;
 use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod readers;
 mod ui;
 
+pub(super) use self::readers::FakeReaders;
 pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
 
@@ -135,6 +138,24 @@ impl SetupAgents for FakeAgents {
         };
         self.reserve(name, agent, true)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        let name = match method {
+            Method::DeviceCode => "sign_in_device_code_switching",
+            _ => "sign_in_switching",
+        };
+        self.reserve(name, agent, true)
+    }
+    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login.
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        agent.as_str() == "codex-acp"
+            && matches!(
+                lock(&self.signin).get(agent),
+                Some(SigninState::SignedIn {
+                    source: Source::Own,
+                    ..
+                })
+            )
+    }
     /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.answer("cancel_sign_in", agent)?;
@@ -162,6 +183,9 @@ impl SetupAgents for FakeAgents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.reserve("use_different_account", agent, true)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.reserve("use_different_account_switching", agent, true)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()
@@ -191,38 +215,6 @@ pub(super) struct FakeCounts(pub(super) Mutex<Vec<Event>>);
 impl SetupCounts for FakeCounts {
     fn bump(&self, event: Event) {
         lock(&self.0).push(event);
-    }
-}
-
-/// The limits readers' hold and entries, journaled.
-pub(super) struct FakeReaders {
-    pub(super) journal: Journal,
-    pub(super) entries: Mutex<Vec<(AgentKind, Option<AgentLaunch>)>>,
-    /// The agents last told blocked, not journaled.
-    pub(super) blocked: Mutex<Option<BTreeSet<AgentId>>>,
-}
-
-/// A fake hold: journals its release.
-struct FakeHold(Journal);
-
-impl Drop for FakeHold {
-    fn drop(&mut self) {
-        lock(&self.0).push("readers.release".to_owned());
-    }
-}
-
-impl LeaveReaders for FakeReaders {
-    fn hold(&self, _agent: AgentKind) -> BoxFuture<'static, ReadHold> {
-        lock(&self.journal).push("readers.hold".to_owned());
-        let hold = ReadHold::new(FakeHold(Arc::clone(&self.journal)));
-        Box::pin(std::future::ready(hold))
-    }
-    fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
-        lock(&self.journal).push("readers.set_entry".to_owned());
-        lock(&self.entries).push((agent, launch));
-    }
-    fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
-        *lock(&self.blocked) = Some(blocked);
     }
 }
 

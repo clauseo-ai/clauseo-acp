@@ -57,7 +57,7 @@ use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
-use self::pending::Press;
+use self::pending::{Kept, Press};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -97,7 +97,7 @@ pub(crate) struct AgentsBackend {
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
     /// memory only, so none outlives a quit.
-    pub(crate) pending: Mutex<BTreeMap<AgentId, Press>>,
+    pub(crate) pending: Mutex<BTreeMap<AgentId, Kept>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
@@ -149,9 +149,9 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
-                if !switch::switch_first(self, &agent, &info.name).await {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
-                }
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
@@ -160,9 +160,8 @@ impl AgentsBackend {
                     tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
                     return Ok(());
                 }
-                if !pending::keep_press(self, &agent, Press::SignIn(method)) {
-                    agents
-                        .sign_in(&agent, method)
+                if !pending::keep_press(self, &agent, Press::SignIn(method), switch) {
+                    switch::sign_in(agents, &agent, method, switch)
                         .map_err(|error| signin_error(&error))?;
                     tracing::info!(%agent, method = ?method, "sign-in started");
                     self.replaced(&agent);
@@ -186,15 +185,14 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
-                if !switch::switch_first(self, &agent, &info.name).await {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
-                }
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
-                    agents
-                        .sign_in(&agent, Method::DeviceCode)
+                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode), switch) {
+                    switch::sign_in(agents, &agent, Method::DeviceCode, switch)
                         .map_err(|error| signin_error(&error))?;
                     tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
                     self.replaced(&agent);
@@ -218,14 +216,16 @@ impl AgentsBackend {
             }
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 if self.reused(&agent) {
                     leave::leave_first(self, &agent, leave::After::Rule).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::DifferentAccount) {
-                    agents
-                        .use_different_account(&agent)
+                if !pending::keep_press(self, &agent, Press::DifferentAccount, switch) {
+                    switch::use_different(agents, &agent, switch)
                         .map_err(|error| signin_error(&error))?;
                     self.replaced(&agent);
                 }

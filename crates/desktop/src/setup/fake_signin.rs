@@ -291,6 +291,15 @@ impl SetupAgents for FakeSignin {
             None => self.real.sign_in(agent, method),
         }
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        match self.script(agent) {
+            Some(_) => self.sign_in(agent, method),
+            None => self.real.sign_in_switching(agent, method),
+        }
+    }
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        self.script(agent).is_none() && self.real.replaces_own_login(agent)
+    }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         if self.script(agent).is_none() {
             return self.real.cancel_sign_in(agent);
@@ -345,6 +354,12 @@ impl SetupAgents for FakeSignin {
                 Ok(())
             }
             None => self.real.use_different_account(agent),
+        }
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        match self.script(agent) {
+            Some(_) => self.use_different_account(agent),
+            None => self.real.use_different_account_switching(agent),
         }
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
