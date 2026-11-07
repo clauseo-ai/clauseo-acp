@@ -9,8 +9,10 @@ use std::time::Duration;
 use clauseo_sandbox::windows::secrets::secret_for;
 use clauseo_sandbox::windows::sids::Sid;
 
+use super::checks_pool::settle;
 use super::checks_ui::random;
 use super::gate::{self, Control, Got, Judged, Rank};
+use super::manifest::Pool;
 use super::rows::Ctx;
 use super::win_ctl::{self, Ran, Shape};
 use super::{win, win_desk, win_logon};
@@ -23,9 +25,10 @@ const RELAY_MARGIN: Duration = Duration::from_secs(5);
 /// Whose token a variant's process runs under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
-    /// Matter A's pool user: the harness starts `probe ui-relay` as that user with
-    /// `CreateProcessWithLogonW` (as the outer runner starts the inner), and the relay makes the
-    /// agent's token from its own (as the inner runner does) and starts `probe ui-control`.
+    /// A pool user (A's for (g), matter A's second for (a), `control_pool`): the harness starts
+    /// `probe ui-relay` as that user with `CreateProcessWithLogonW` (as the outer runner starts
+    /// the inner), and the relay makes the agent's token from its own (as the inner runner does)
+    /// and starts `probe ui-control`.
     Pool,
     /// The harness's own (the lawyer's) token, made into `Shape` ([`win_ctl::shaped_token`]).
     Lawyer(Shape),
@@ -53,8 +56,9 @@ const VARIANTS: [Variant; 6] = [
         key: 'a',
         source: Source::Pool,
         sa: false,
-        differs: "only in not being in the runner's job: the pool user's own token, made into \
-                  the agent's by the inner runner's recipe (restricting the pool user, S-1-5-12, \
+        differs: "only in not being in the runner's job and in its pool user (matter A's second, \
+                  A2, so the sweep of A's live session can't end it): that pool user's own token, \
+                  made into the agent's by the inner runner's recipe (restricting it, S-1-5-12, \
                   S-1-5-32-545, S-1-1-0; the logon SID deny-only; Low; DISABLE_MAX_PRIVILEGE; \
                   the agent's default DACL), started through CreateProcessWithLogonW and a relay \
                   as the outer and inner runners start the agent; besides, its station's DACL \
@@ -118,8 +122,8 @@ const G: Variant = Variant {
     sa: false,
     differs: "only in not being in the runner's job: the agent's token shape (pool user A, Low, \
               the four restricting SIDs, the logon SID deny-only) made by a relay running as \
-              the pool user, as for (a), and started on the agent's own ClauseoRun-<hex>\\Default \
-              while the agent waits",
+              pool user A, as (a)'s relay does as A2, and started on the agent's own \
+              ClauseoRun-<hex>\\Default while the agent waits",
     restricted: 4,
     low: true,
 };
@@ -266,7 +270,7 @@ fn agent_station(lines: &[String]) -> Result<&str, String> {
 /// Runs `variant` (its `probe ui-control` on `on`) and reads it: its shape check and its
 /// three results. The call that failed and its code when it didn't run.
 fn one(ctx: &Ctx<'_>, variant: &Variant, lawyer: &str, on: Station<'_>) -> Result<Control, String> {
-    let pool = ctx.manifest.pools.first().map(|p| p.sid.as_str());
+    let pool = control_pool(ctx, on).map(|p| p.sid.as_str());
     let user = match variant.source {
         Source::Pool => pool.unwrap_or("(no pool user)"),
         Source::Lawyer(_) => lawyer,
@@ -288,6 +292,17 @@ fn one(ctx: &Ctx<'_>, variant: &Variant, lawyer: &str, on: Station<'_>) -> Resul
         shape: shape(variant, user, &lines, on).map_err(|why| format!("{why} ({seen})")),
         got: gate::read(&lines, "ui-control"),
     })
+}
+
+/// The pool user a [`Source::Pool`] variant runs as: on the agent's own station (g), matter A's,
+/// whose user the station's DACL names; elsewhere (a), matter A's second (`A2`), since the
+/// runner's sweep ends any process of A's user outside the job while A's session runs, and its
+/// end sweeper after it.
+fn control_pool<'m>(ctx: &Ctx<'m>, on: Station<'_>) -> Option<&'m Pool> {
+    match on {
+        Station::Agent(_) => ctx.manifest.pools.first(),
+        Station::Control | Station::Interactive => ctx.manifest.second_a(),
+    }
 }
 
 /// Makes `variant`'s station and token and runs `probe ui-control` there (for (g), the relay on a
@@ -315,11 +330,10 @@ fn run_variant(
     };
     let ran: Ran = match variant.source {
         Source::Pool => {
-            let pool = ctx
-                .manifest
-                .pools
-                .first()
-                .ok_or("the manifest names no pool user")?;
+            let pool = control_pool(ctx, on).ok_or("the manifest names no such pool user")?;
+            if !matches!(on, Station::Agent(_)) {
+                settle(ctx, pool)?;
+            }
             let sid = Sid::parse(&pool.sid).map_err(|e| e.to_string())?;
             let held = open(&[lawyer, pool.sid.as_str()])?;
             // The crate's error text never holds the password.
