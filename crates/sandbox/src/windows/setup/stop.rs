@@ -1,6 +1,6 @@
 //! `clauseo-sandbox-setup.exe --stop` (0049, "Stopping the pool's processes"), run by the SYSTEM
-//! task `\Clauseo\SandboxStop`: stops every process whose token user is a pool user, whatever
-//! its DACL says. The runner's sweeps stop a matter's processes as the pool user; a process that
+//! task `\Clauseo\SandboxStop`: stops every process whose user is a pool user, whatever its DACL
+//! says. The runner's sweeps stop a matter's processes as the pool user; a process that
 //! shut its own DACL survives them and could stay alive into the next logon. SYSTEM, with
 //! `SeDebugPrivilege`, opens it regardless.
 //!
@@ -15,14 +15,24 @@
 //! 3. holds every SID to the pool-user check (`strays::check_pool_sid`, as `processes.rs` does
 //!    before a profile delete): a local account of this machine, not built in, not SYSTEM, not
 //!    the owner, named `ClauseoSbNN` when it resolves. One that fails stops nothing;
-//! 4. takes a process snapshot, picks each process whose token user is exactly one of the pool's
-//!    SIDs (`strays::to_stop`, never this process, pid 0 or pid 4, never a process whose user
-//!    couldn't be read) and terminates each through the handle its user was read through, so a
-//!    reused pid can't redirect it; then does it all again, for what started meanwhile or didn't
-//!    end;
-//! 5. adds each pool user it found running to the record's `ResetSids`, under the set-up lock (a
-//!    bounded wait), so the next set-up deletes and remakes its profile before the user runs
-//!    anything again (`resets.rs`): what the stopped process left in its profile goes with it.
+//! 4. passes over the processes until one finds none of the pool's: each takes a snapshot and
+//!    reads each process's user ([`Process`]) from the kernel's process list
+//!    (`WTSEnumerateProcessesExW`), which names it whatever the token's DACL says, with the
+//!    token's user as a cross-check, and the process object's owner when neither gave one. It
+//!    picks each process whose user is exactly one of the pool's SIDs ([`pick`]; never this
+//!    process, pid 0 or pid 4), suspends them all, then terminates each through the handle its
+//!    user was read through, so a reused pid can't redirect it and a parent can't start another
+//!    between two terminations. The passes stop once one finds no pool user's process, or after
+//!    [`PASS_LIMIT`]; what is still there then is left (48). A process whose user no source gave
+//!    is never stopped, but counts as unknown (48), unless it also can't be opened to be
+//!    terminated (a protected process: one a pool user started would still be named by the list);
+//! 5. cancels every BITS job a pool user owns (`BG_JOB_ENUM_ALL_USERS`, each job's owner), even
+//!    when no process was found: a pool user's job doesn't run, but stays queued until it is
+//!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48;
+//! 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`, under the
+//!    set-up lock (a bounded wait), so the next set-up deletes and remakes its profile before the
+//!    user runs anything again (`resets.rs`): what the stopped process left in its profile goes
+//!    with it.
 //!
 //! The reset itself isn't done here: it sets a new password, which only the owner's
 //! `secrets.bin` may hold (DPAPI, as the owner), and its open-session check and its `LocalLow`
@@ -33,15 +43,20 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
-use super::strays::{Seen, to_stop};
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
+mod windows_bits;
+#[cfg(windows)]
 pub(crate) mod windows_stopper;
+#[cfg(windows)]
+#[cfg(test)]
+mod windows_tests;
 
 /// The stop's exit codes. They start at 45, after [`RefreshExit`]'s 44, so the one exe never
 /// gives one number two meanings; codes are appended from here on, never renumbered.
@@ -58,8 +73,9 @@ pub enum StopExit {
     NoRecord,
     /// 47: a SID `PoolSids` lists isn't a pool user's; nothing was stopped.
     NotPool,
-    /// 48: a pool user's process was still there after the second pass, or a process snapshot
-    /// couldn't be taken.
+    /// 48: a pool user's process was still there when the passes ran out of time, a process's
+    /// user couldn't be read, a pool user's BITS job wasn't cancelled (or a job's owner couldn't
+    /// be read), or a process snapshot or the BITS list couldn't be taken.
     NotStopped,
     /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids` (the
     /// set-up lock stayed held, or the write failed).
@@ -92,6 +108,89 @@ pub struct Pool {
 /// A failed effect: what failed, as a line for the log.
 pub type Failed = String;
 
+/// How long the passes go on while each still finds a pool user's process: well inside the
+/// task's 2-minute limit, with the lock's 30 s wait after it.
+pub const PASS_LIMIT: Duration = Duration::from_secs(60);
+
+/// The idle process's pid.
+const IDLE_PID: u32 = 0;
+/// The System process's pid.
+const SYSTEM_PID: u32 = 4;
+
+/// One process as a snapshot saw it: its user as each source gave it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Process {
+    /// Its process id.
+    pub pid: u32,
+    /// Its user as the kernel's process list (`WTSEnumerateProcessesExW`) gave it, past the
+    /// token's DACL; `None` when the list named no SID for it, or didn't list it.
+    pub listed: Option<Sid>,
+    /// Its token's user, read through the handle; `None` when the token couldn't be read.
+    pub token: Option<Sid>,
+    /// Its process object's owner, read when the token couldn't be; `None` when not read.
+    /// A standard user can't make another account the owner of a process.
+    pub owner: Option<Sid>,
+    /// It was opened with `PROCESS_TERMINATE`.
+    pub can_stop: bool,
+}
+
+/// What [`pick`] made of a process's user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum User {
+    /// Read: the list's SID, or the token's or owner's when the list gave none.
+    Known(Sid),
+    /// No source gave one, or the list and the token disagree.
+    Unknown,
+    /// Not looked at: this process, pid 0 or 4, or one with no user from any source that can't
+    /// be opened to be terminated, even with `SeDebugPrivilege` (a protected process; one a pool
+    /// user started would still be named by the list).
+    Exempt,
+}
+
+/// `process`'s user, as [`User`] says.
+fn user_of(process: &Process, own_pid: u32) -> User {
+    if [own_pid, IDLE_PID, SYSTEM_PID].contains(&process.pid) {
+        return User::Exempt;
+    }
+    match (&process.listed, &process.token, &process.owner) {
+        (Some(listed), Some(token), _) if listed != token => User::Unknown,
+        (Some(user), _, _) | (None, Some(user), _) | (None, None, Some(user)) => {
+            User::Known(user.clone())
+        }
+        (None, None, None) if process.can_stop => User::Unknown,
+        (None, None, None) => User::Exempt,
+    }
+}
+
+/// What one snapshot holds for the stop.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Picked {
+    /// Each process whose user is one of the pool's SIDs, with that user, in the order seen,
+    /// each pid once.
+    pub stop: Vec<(u32, Sid)>,
+    /// The processes whose user couldn't be read ([`User::Unknown`]).
+    pub unknown: usize,
+}
+
+/// The processes of `seen` to stop, and those whose user is unknown, as [`user_of`] reads
+/// each; SIDs are compared exactly. `own_pid` is this process.
+pub fn pick(seen: &[Process], pool: &[Sid], own_pid: u32) -> Picked {
+    let mut picked = Picked::default();
+    let mut looked: Vec<u32> = Vec::new();
+    for process in seen {
+        if looked.contains(&process.pid) {
+            continue;
+        }
+        looked.push(process.pid);
+        match user_of(process, own_pid) {
+            User::Known(user) if pool.contains(&user) => picked.stop.push((process.pid, user)),
+            User::Unknown => picked.unknown += 1,
+            User::Known(_) | User::Exempt => {}
+        }
+    }
+    picked
+}
+
 /// Every effect of the stop. The real one reads the record and the admin copy's path itself, so
 /// no method takes a SID or a path the caller chose, but the pool the record gave.
 pub trait Stopper {
@@ -105,13 +204,27 @@ pub trait Stopper {
     fn pool(&mut self) -> Result<Option<Pool>, Failed>;
     /// Whether every SID of `pool.users` passes the pool-user check (`strays::check_pool_sid`).
     fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed>;
-    /// Every running process with its token user, from a fresh snapshot; the handles it opened
-    /// replace the last snapshot's, for [`Stopper::terminate`].
-    fn snapshot(&mut self) -> Result<Vec<Seen>, Failed>;
+    /// Every running process with its user as each source gave it, from a fresh snapshot; the
+    /// handles it opened replace the last snapshot's, for [`Stopper::suspend`] and
+    /// [`Stopper::terminate`].
+    fn snapshot(&mut self) -> Result<Vec<Process>, Failed>;
     /// This process's id.
     fn own_pid(&mut self) -> u32;
+    /// Suspends `pid` through the handle the last snapshot read its user through. Nothing
+    /// resumes it: it is terminated next.
+    fn suspend(&mut self, pid: u32) -> Result<(), Failed>;
     /// Terminates `pid` through the handle the last snapshot read its user through.
     fn terminate(&mut self, pid: u32) -> Result<(), Failed>;
+    /// The time since the stop began, from a monotonic clock.
+    fn elapsed(&mut self) -> Duration;
+    /// Waits a moment before the next pass, after a termination failed, so a process that
+    /// refuses isn't asked again at once.
+    fn pause(&mut self);
+    /// Every BITS job on this machine, all users', each as its owner: `None` when it couldn't
+    /// be read. The list replaces the last one, for [`Stopper::cancel_job`].
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed>;
+    /// Cancels the job at `at` in the last list, which removes it.
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed>;
     /// Waits a bounded time for the set-up lock and keeps it until [`Stopper::unlock`]:
     /// `Ok(false)` when another still holds it.
     fn lock(&mut self) -> Result<bool, Failed>;
@@ -126,14 +239,23 @@ pub trait Stopper {
 /// What the passes did.
 #[derive(Debug, Default)]
 struct Passes {
-    /// The pool users seen running, in either pass.
+    /// The pool users seen running, in any pass: stopped or not.
     found: BTreeSet<Sid>,
-    /// Processes terminated, both passes.
+    /// Snapshots taken.
+    taken: usize,
+    /// Processes terminated.
     stopped: usize,
-    /// Terminations that failed in the first pass.
-    first_failed: usize,
-    /// Terminations that failed in the second pass: processes still there.
+    /// Terminations that failed, each retried in the next pass.
+    retried: usize,
+    /// Pool users' processes the last snapshot found once [`PASS_LIMIT`] had passed.
     left: usize,
+    /// Processes whose user the last snapshot couldn't read.
+    unknown: usize,
+    /// The pool users' BITS jobs cancelled.
+    jobs_cancelled: usize,
+    /// BITS jobs not cancelled: a pool user's whose cancel failed, or one whose owner couldn't
+    /// be read.
+    jobs_failed: usize,
 }
 
 /// Runs the stop as the module says.
@@ -163,27 +285,38 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     fs.check_pool(&pool)
         .map_err(|why| (StopExit::NotPool, format!("nothing was stopped: {why}")))?;
     let mut passes = Passes::default();
-    let first = pass(fs, &pool.users, &mut passes, false);
-    let second = pass(fs, &pool.users, &mut passes, true);
+    let ran = run_passes(fs, &pool.users, &mut passes);
+    let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
     let counts = format!(
-        "{} pool users, {} found running, {} processes stopped, {} left",
+        "{} pool users, {} found running, {} processes stopped in {} passes, {} left, {} unknown, \
+         {} BITS jobs cancelled, {} not",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,
-        passes.left
+        passes.taken,
+        passes.left,
+        passes.unknown,
+        passes.jobs_cancelled,
+        passes.jobs_failed
     );
     let marked = mark(fs, &passes.found);
-    if let Err(why) = first.and(second) {
-        return Err((StopExit::NotStopped, format!("{counts}; {why}")));
+    let not_stopped = |why: &str| Err((StopExit::NotStopped, format!("{counts}; {why}")));
+    if let Err(why) = ran.and(cancelled) {
+        return not_stopped(&why);
+    }
+    if passes.jobs_failed > 0 {
+        return not_stopped("a BITS job wasn't cancelled, or its owner couldn't be read");
     }
     if passes.left > 0 {
-        let why = "a pool user's process was still there after the second pass";
-        return Err((StopExit::NotStopped, format!("{counts}; {why}")));
+        return not_stopped("a pool user's process was still there when the passes' time ran out");
+    }
+    if passes.unknown > 0 {
+        return not_stopped("a process's user couldn't be read, so it may be a pool user's");
     }
     marked.map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
-    let tried = passes.first_failed;
+    let retried = passes.retried;
     Ok(format!(
-        "the sandbox's stop: {counts}; {} users marked for a profile reset ({tried} retried)",
+        "the sandbox's stop: {counts}; {} users marked for a profile reset ({retried} retried)",
         passes.found.len()
     ))
 }
@@ -202,39 +335,76 @@ fn allowed(fs: &mut impl Stopper) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Step 4, once: a snapshot, then each pool user's process terminated, counted in `passes`.
-/// A snapshot that can't be taken is the error; a failed termination is counted, and the
-/// `second` pass's are the processes left.
-fn pass(
-    fs: &mut impl Stopper,
-    pool: &[Sid],
-    passes: &mut Passes,
-    second: bool,
-) -> Result<(), String> {
-    let seen = fs
-        .snapshot()
-        .map_err(|why| format!("a process snapshot failed: {why}"))?;
-    let own = fs.own_pid();
-    let mut failed = 0;
-    for pid in to_stop(&seen, pool, own) {
-        let user = seen.iter().find(|process| process.pid == pid);
-        if let Some(user) = user.and_then(|process| process.user.clone()) {
-            passes.found.insert(user);
+/// Step 4: passes until a snapshot finds no pool user's process, or until [`PASS_LIMIT`] has
+/// passed, counted in `passes`. Each pass suspends every pool user's process it found, then
+/// terminates each; one past the limit stops nothing more and counts what it found as left. A
+/// snapshot that can't be taken is the error.
+fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
+    let began = fs.elapsed();
+    loop {
+        let seen = fs
+            .snapshot()
+            .map_err(|why| format!("a process snapshot failed: {why}"))?;
+        passes.taken += 1;
+        let own = fs.own_pid();
+        let picked = pick(&seen, pool, own);
+        passes.unknown = picked.unknown;
+        passes
+            .found
+            .extend(picked.stop.iter().map(|(_, user)| user.clone()));
+        if picked.stop.is_empty() {
+            return Ok(());
         }
-        match fs.terminate(pid) {
-            Ok(()) => passes.stopped += 1,
-            Err(_why) => failed += 1,
+        if fs.elapsed().saturating_sub(began) >= PASS_LIMIT {
+            passes.left = picked.stop.len();
+            return Ok(());
+        }
+        // All of them first, so none can start another while the others are terminated; one
+        // that won't suspend is still terminated.
+        for (pid, _) in &picked.stop {
+            drop(fs.suspend(*pid));
+        }
+        let mut refused = false;
+        for (pid, _) in &picked.stop {
+            match fs.terminate(*pid) {
+                Ok(()) => passes.stopped += 1,
+                Err(_why) => {
+                    passes.retried += 1;
+                    refused = true;
+                }
+            }
+        }
+        if refused {
+            fs.pause();
         }
     }
-    if second {
-        passes.left = failed;
-    } else {
-        passes.first_failed = failed;
+}
+
+/// Step 5: every BITS job a pool user owns is cancelled, its owner added to `passes.found`;
+/// another user's is left alone. It runs whatever the passes found: a pool user's job outlives
+/// its processes, and the session's end leaves nothing else to stop. A list that can't be read is
+/// the error; a cancel that fails, or an owner that can't be read, is counted.
+fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
+    let owners = fs
+        .bits_jobs()
+        .map_err(|why| format!("the BITS jobs couldn't be listed: {why}"))?;
+    for (at, owner) in owners.iter().enumerate() {
+        match owner {
+            Some(owner) if pool.contains(owner) => {
+                passes.found.insert(owner.clone());
+                match fs.cancel_job(at) {
+                    Ok(()) => passes.jobs_cancelled += 1,
+                    Err(_why) => passes.jobs_failed += 1,
+                }
+            }
+            Some(_) => {}
+            None => passes.jobs_failed += 1,
+        }
     }
     Ok(())
 }
 
-/// Step 5: `found` added to `ResetSids` under the set-up lock; nothing to do when it is empty.
+/// Step 6: `found` added to `ResetSids` under the set-up lock; nothing to do when it is empty.
 fn mark(fs: &mut impl Stopper, found: &BTreeSet<Sid>) -> Result<(), String> {
     if found.is_empty() {
         return Ok(());

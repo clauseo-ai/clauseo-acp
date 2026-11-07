@@ -118,7 +118,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
 # log lines in the Event Log (System_EventLog). The stop task's process snapshot
 # (src/windows/setup/stop/windows_stopper.rs): CreateToolhelp32Snapshot
-# (System_Diagnostics_ToolHelp).
+# (System_Diagnostics_ToolHelp), each process's user from WTSEnumerateProcessesExW
+# (System_RemoteDesktop), and the pool users' BITS jobs it cancels
+# (Networking_BackgroundIntelligentTransferService).
 [target.'cfg(windows)'.dependencies]
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
@@ -133,6 +135,7 @@ windows = { workspace = true, features = [
   "Win32_NetworkManagement_NetManagement",
   "Win32_NetworkManagement_WindowsFilteringPlatform",
   "Win32_NetworkManagement_WindowsFirewall",
+  "Win32_Networking_BackgroundIntelligentTransferService",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",
@@ -150,6 +153,7 @@ windows = { workspace = true, features = [
   "Win32_System_ProcessStatus",
   "Win32_System_Rpc",
   "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
   "Win32_System_Services",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",

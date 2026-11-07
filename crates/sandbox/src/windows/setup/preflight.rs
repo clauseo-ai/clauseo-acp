@@ -284,7 +284,7 @@ fn open_policy(access: i32) -> Result<Policy, MachineError> {
 /// # Safety
 ///
 /// `sid` points to a valid SID for the call.
-unsafe fn sid_text(sid: PSID) -> Result<Option<Sid>, MachineError> {
+pub(super) unsafe fn sid_text(sid: PSID) -> Result<Option<Sid>, MachineError> {
     let mut text = PWSTR::null();
     // SAFETY: `sid` is valid, as the contract says; `text` is a live out-pointer, owned by
     // `Local` once written.

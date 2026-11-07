@@ -1,39 +1,62 @@
 //! The stop's real [`Stopper`]: the record in `HKLM\SOFTWARE\Clauseo\Sandbox` (64-bit view), the
 //! admin copy's path under `FOLDERID_ProgramFiles`, a Toolhelp process snapshot with each
-//! process's token user, `TerminateProcess` through the handle that user was read through, the
-//! set-up lock, and the Event Log.
+//! process's user from the kernel's process list (`WTSEnumerateProcessesExW`), its token and its
+//! owner, `NtSuspendProcess` and `TerminateProcess` through the handle that user was read
+//! through, the set-up lock, and the Event Log.
 #![expect(
     unsafe_code,
-    reason = "FFI to the Toolhelp snapshot, OpenProcess and TerminateProcess"
+    reason = "FFI to the Toolhelp snapshot, the WTS process list, OpenProcess and TerminateProcess"
 )]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{HANDLE, NTSTATUS, WAIT_OBJECT_0};
+use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFO_EXW, WTSEnumerateProcessesExW, WTSFreeMemoryExW,
+    WTSTypeProcessInfoLevel1,
 };
+use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::System::Threading::{
+    GetCurrentProcessId, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, Sleep, TerminateProcess,
+    WaitForSingleObject,
+};
+use windows::core::PWSTR;
 
-use super::{Failed, Pool, StopExit, Stopper, stop};
+use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
+
+use super::windows_bits::{self, Com};
+use super::{Failed, Pool, Process, StopExit, Stopper, stop};
 use crate::windows::acl::object::Handle;
 use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, SetupMutex};
 use crate::windows::setup::machine::MachineError;
 use crate::windows::setup::owner::this_process;
-use crate::windows::setup::processes::{DebugPrivilege, check_pool, user_of};
+use crate::windows::setup::preflight::sid_text;
+use crate::windows::setup::processes::{DebugPrivilege, check_pool, owner_of, user_of};
 use crate::windows::setup::record_write::{self, RECORD_KEY};
-use crate::windows::setup::strays::Seen;
 use crate::windows::sids::Sid;
 
 /// The exit code a stopped process gets.
 const STOPPED_EXIT: u32 = 1;
-/// How long each stopped process is waited for, in milliseconds.
-const EXIT_WAIT_MS: u32 = 3_000;
+/// How long each stopped process is waited for, in milliseconds: one still there is terminated
+/// again by the next pass.
+const EXIT_WAIT_MS: u32 = 1_000;
+/// The pause before the next pass after a termination failed, in milliseconds.
+const PAUSE_MS: u32 = 250;
+/// `WTS_ANY_SESSION`: every session's processes.
+const ANY_SESSION: u32 = 0xFFFF_FFFE;
+/// `WTS_PROCESS_INFO_LEVEL_1`: each process with its user's SID.
+const INFO_LEVEL_1: u32 = 1;
+
+windows::core::link!("ntdll.dll" "system" fn NtSuspendProcess(process: HANDLE) -> NTSTATUS);
 /// How long the stop waits for the set-up lock before it marks the users, in milliseconds: well
 /// inside the task's 2-minute limit.
 const LOCK_WAIT_MS: u32 = 30_000;
@@ -48,9 +71,15 @@ pub(crate) struct WindowsStopper {
     /// `SeDebugPrivilege`, enabled for the whole run where the token holds it (SYSTEM's does).
     _debug: Option<DebugPrivilege>,
     /// The last snapshot's processes that could be opened to be terminated, by pid.
-    handles: Vec<(u32, Handle)>,
+    handles: Opened,
     /// The set-up lock, while held.
     held: Option<Held>,
+    /// `GetTickCount64` when the stop began.
+    began_ms: u64,
+    /// The last BITS list's jobs, for [`Stopper::cancel_job`]; dropped before [`Self::com`].
+    jobs: Vec<IBackgroundCopyJob>,
+    /// COM on this thread, once the BITS jobs are listed.
+    com: Option<Com>,
 }
 
 impl WindowsStopper {
@@ -59,6 +88,10 @@ impl WindowsStopper {
             _debug: DebugPrivilege::enable(),
             handles: Vec::new(),
             held: None,
+            // SAFETY: GetTickCount64 only reads the tick count.
+            began_ms: unsafe { GetTickCount64() },
+            jobs: Vec::new(),
+            com: None,
         }
     }
 }
@@ -91,36 +124,30 @@ impl Stopper for WindowsStopper {
         check_pool(&pool.users, &pool.owner).map_err(|error| error.to_string())
     }
 
-    fn snapshot(&mut self) -> Result<Vec<Seen>, Failed> {
+    fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.handles.clear();
-        let mut seen = Vec::new();
-        for pid in snapshot_pids()? {
-            let full = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
-            // SAFETY: OpenProcess takes plain values; the handle is owned by `Handle` from here.
-            let opened = unsafe { OpenProcess(full, false, pid) }.map(|h| (Handle(h), true));
-            let opened = opened.or_else(|_no_terminate| {
-                // SAFETY: as above, with the query right alone.
-                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
-                    .map(|h| (Handle(h), false))
-            });
-            let Ok((handle, can_stop)) = opened else {
-                seen.push(Seen { pid, user: None });
-                continue;
-            };
-            seen.push(Seen {
-                pid,
-                user: user_of(&handle),
-            });
-            if can_stop {
-                self.handles.push((pid, handle));
-            }
-        }
+        let (seen, handles) = processes()?;
+        self.handles = handles;
         Ok(seen)
     }
 
     fn own_pid(&mut self) -> u32 {
         // SAFETY: GetCurrentProcessId only reads this process's id.
         unsafe { GetCurrentProcessId() }
+    }
+
+    fn suspend(&mut self, pid: u32) -> Result<(), Failed> {
+        let Some((_, handle)) = self.handles.iter().find(|(at, _)| *at == pid) else {
+            return Err("not opened for suspension".to_owned());
+        };
+        // SAFETY: the handle is open on the process whose user was read; one opened without
+        // PROCESS_SUSPEND_RESUME gets an error status back, nothing more.
+        let status = unsafe { NtSuspendProcess(handle.0) };
+        if status.is_ok() {
+            Ok(())
+        } else {
+            Err(format!("NtSuspendProcess failed ({:#010x})", status.0))
+        }
     }
 
     fn terminate(&mut self, pid: u32) -> Result<(), Failed> {
@@ -136,6 +163,30 @@ impl Stopper for WindowsStopper {
         } else {
             Err("it hadn't exited when the wait ran out".to_owned())
         }
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        // SAFETY: GetTickCount64 only reads the tick count.
+        let now = unsafe { GetTickCount64() };
+        Duration::from_millis(now.saturating_sub(self.began_ms))
+    }
+
+    fn pause(&mut self) {
+        // SAFETY: a plain wait of this thread.
+        unsafe { Sleep(PAUSE_MS) };
+    }
+
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.jobs.clear();
+        self.com.get_or_insert_with(Com::new);
+        let (jobs, owners) = windows_bits::jobs()?.into_iter().unzip();
+        self.jobs = jobs;
+        Ok(owners)
+    }
+
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        let job = self.jobs.get(at).ok_or_else(|| "no such job".to_owned())?;
+        windows_bits::cancel(job)
     }
 
     fn lock(&mut self) -> Result<bool, Failed> {
@@ -160,6 +211,163 @@ impl Stopper for WindowsStopper {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+}
+
+/// The handles that can suspend and terminate a process, by pid.
+pub(super) type Opened = Vec<(u32, Handle)>;
+
+/// Every running process, as [`Process`] says, with the handles that can terminate one, by pid.
+///
+/// Each pid of a Toolhelp snapshot is opened, its token's user read through that handle, and
+/// its owner when the token can't be read. One that has already exited is dropped. Then the
+/// kernel's process list gives each process's user: it is read only once every handle is open,
+/// and a pid isn't reused while a handle to its process is open, so each entry for an opened pid
+/// is the process that handle is on. A process the list names but the snapshot didn't (started
+/// since) is added with no handle, so a pool user's keeps the passes going. A list that can't be
+/// read leaves the token and the owner to say whose each process is.
+pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
+    let mut seen = Vec::new();
+    // Every handle stays open until the list is read, the query-only ones too.
+    let mut held = Vec::new();
+    let mut exited = Vec::new();
+    for pid in snapshot_pids()? {
+        let Some((process, handle)) = look_at(pid) else {
+            exited.push(pid);
+            continue;
+        };
+        seen.push(process);
+        if let Some(handle) = handle {
+            held.push((pid, handle));
+        }
+    }
+    match listed_users() {
+        Ok(listed) => {
+            for process in &mut seen {
+                process.listed = listed.get(&process.pid).cloned().flatten();
+            }
+            for (pid, listed) in listed {
+                let known = exited.contains(&pid) || seen.iter().any(|p| p.pid == pid);
+                if !known {
+                    seen.push(Process {
+                        pid,
+                        listed,
+                        ..Process::default()
+                    });
+                }
+            }
+        }
+        Err(why) => tracing::warn!(%why, "the process list's users couldn't be read"),
+    }
+    let can_stop: Vec<u32> = seen.iter().filter(|p| p.can_stop).map(|p| p.pid).collect();
+    held.retain(|(pid, _)| can_stop.contains(pid));
+    Ok((seen, held))
+}
+
+/// `pid` opened and read, with its handle; `None` when it has already exited. A process that
+/// can't be opened at all is seen with no user and no handle.
+pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
+    let stop = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
+    let tries: [(PROCESS_ACCESS_RIGHTS, bool); 3] = [
+        (
+            stop | PROCESS_SUSPEND_RESUME | PROCESS_ACCESS_RIGHTS(READ_CONTROL.0),
+            true,
+        ),
+        (stop, true),
+        (PROCESS_QUERY_LIMITED_INFORMATION, false),
+    ];
+    let opened = tries.iter().find_map(|(access, can_stop)| {
+        // SAFETY: OpenProcess takes plain values; the handle is owned by `Handle` from here.
+        let handle = unsafe { OpenProcess(*access, false, pid) }.ok()?;
+        Some((Handle(handle), *can_stop))
+    });
+    let Some((handle, can_stop)) = opened else {
+        let process = Process {
+            pid,
+            ..Process::default()
+        };
+        return Some((process, None));
+    };
+    // SAFETY: a zero wait on a live handle; one without SYNCHRONIZE fails, and is kept.
+    if can_stop && unsafe { WaitForSingleObject(handle.0, 0) } == WAIT_OBJECT_0 {
+        return None;
+    }
+    let token = user_of(&handle);
+    let owner = if token.is_none() {
+        owner_of(&handle)
+    } else {
+        None
+    };
+    let process = Process {
+        pid,
+        listed: None,
+        token,
+        owner,
+        can_stop,
+    };
+    Some((process, Some(handle)))
+}
+
+/// The kernel's process list (`WTSEnumerateProcessesExW`, level 1, every session): each pid
+/// with its user's SID, `None` where the list names none, leaving out a process with no thread
+/// (one that has exited, kept by a handle). An administrator gets every process's SID, read by
+/// the kernel from the token whatever the token's DACL says.
+fn listed_users() -> Result<BTreeMap<u32, Option<Sid>>, Failed> {
+    let mut level = INFO_LEVEL_1;
+    let mut info = PWSTR::null();
+    let mut count = 0u32;
+    // SAFETY: this machine's server handle; `level`, `info` and `count` are live
+    // out-pointers; the list is freed by `List` once written.
+    unsafe {
+        WTSEnumerateProcessesExW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            &raw mut level,
+            ANY_SESSION,
+            &raw mut info,
+            &raw mut count,
+        )
+    }
+    .map_err(|error| format!("WTSEnumerateProcessesExW failed ({})", error.code().0))?;
+    let list = List(info, count);
+    let entries: &[WTS_PROCESS_INFO_EXW] = if list.0.is_null() {
+        &[]
+    } else {
+        // SAFETY: level 1 wrote `count` WTS_PROCESS_INFO_EXW entries at `info`, aligned and
+        // live until `list` drops, after this slice's last use.
+        unsafe {
+            std::slice::from_raw_parts(
+                list.0.0.cast::<WTS_PROCESS_INFO_EXW>(),
+                usize::try_from(count).unwrap_or(0),
+            )
+        }
+    };
+    let mut users = BTreeMap::new();
+    for entry in entries.iter().filter(|entry| entry.NumberOfThreads > 0) {
+        let user = if entry.pUserSid.0.is_null() {
+            None
+        } else {
+            // SAFETY: a non-null pUserSid is a valid SID inside the live list.
+            unsafe { sid_text(entry.pUserSid) }.ok().flatten()
+        };
+        users.insert(entry.ProcessId, user);
+    }
+    drop(list);
+    Ok(users)
+}
+
+/// A level-1 process list from `WTSEnumerateProcessesExW` and its entry count, freed on drop.
+struct List(PWSTR, u32);
+
+impl Drop for List {
+    fn drop(&mut self) {
+        if self.0.is_null() {
+            return;
+        }
+        // SAFETY: the list WTSEnumerateProcessesExW wrote at level 1, with its count, freed once.
+        let freed = unsafe { WTSFreeMemoryExW(WTSTypeProcessInfoLevel1, self.0.0.cast(), self.1) };
+        if let Err(error) = freed {
+            tracing::debug!(code = error.code().0, "WTSFreeMemoryExW failed");
+        }
     }
 }
 
