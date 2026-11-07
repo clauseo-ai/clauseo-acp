@@ -20,6 +20,8 @@ const CODEX_PORT_VAR: &str = "FAKE_CODEX_PORT";
 const CODEX_CANCELLED: &str = "Login cancelled";
 /// The file a login `/cancel` ended leaves in its home: the tests' proof the request came.
 const CANCELLED_FILE: &str = "fake-login-cancelled";
+/// The file `slow-save` leaves in its home once the whole login file is written.
+const SAVE_FINISHED_FILE: &str = "fake-save-finished";
 /// The line `slow-save` prints as its callback arrives, before it starts writing.
 const CODEX_CALLBACK_RECEIVED: &str = "callback received";
 
@@ -96,5 +98,7 @@ fn slow_save(folder: &Path, pause: Duration) -> io::Result<()> {
     file.flush()?;
     crate::run::effects::pause(pause);
     file.write_all(back)?;
-    file.flush()
+    file.flush()?;
+    // The tests' proof the save ran to its end, whatever happens to the file after.
+    write::write(folder.join(SAVE_FINISHED_FILE), b"")
 }
