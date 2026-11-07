@@ -231,6 +231,24 @@ pub const SWEEPER_THREAD_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 /// too, and the pool user, its owner, keeps no implied `WRITE_DAC`.
 pub const SWEEPER_DEFAULT_DACL: &str = "D:(A;;GA;;;SY)(A;;RC;;;OW)";
 
+/// What the end sweeper's own user may do to its primary token for the COM step, once its sweep
+/// left no process of that user: `TOKEN_QUERY` (`0x8`), `TOKEN_DUPLICATE` (`0x2`) and
+/// `TOKEN_IMPERSONATE` (`0x4`), the rights the calls that read, copy and take on a token document
+/// (`GetTokenInformation`: `TOKEN_QUERY`; `DuplicateTokenEx`: `TOKEN_DUPLICATE`;
+/// `ImpersonateLoggedOnUser`: `TOKEN_QUERY` with `TOKEN_DUPLICATE` on a primary token,
+/// `TOKEN_IMPERSONATE` on an impersonation one), which COM and RPC make on the caller's own token
+/// to give a call its identity. With the token shut to `SYSTEM`, Task Scheduler and BITS both
+/// failed with `E_OUTOFMEMORY` (14), as the inner's did when it still made COM calls after its
+/// own token's shut, before its threads' and default DACL's. No `TOKEN_ADJUST_*`,
+/// `TOKEN_ASSIGN_PRIMARY`, `WRITE_DAC` or `WRITE_OWNER`.
+pub const SWEEPER_COM_TOKEN_RIGHTS: u32 = 0x0000_000e;
+
+/// The end sweeper's primary token's DACL for the COM step: [`RUNNER_TOKEN_FIRST_SDDL`]'s
+/// entries and the pool user's [`SWEEPER_COM_TOKEN_RIGHTS`] (`runner/sweeper_flow.rs`).
+pub fn sweeper_com_token_sddl(pool_user: &Sid) -> String {
+    format!("D:P(A;;GA;;;SY)(A;;0x{SWEEPER_COM_TOKEN_RIGHTS:x};;;{pool_user})(A;;RC;;;OW)")
+}
+
 /// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when
 /// the launch restricts with one), labelled Low so the Low agent may draw on it; no logon SID and
 /// no desktop user, so neither the lawyer's processes nor another runner's agent can open it

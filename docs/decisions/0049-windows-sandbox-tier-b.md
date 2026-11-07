@@ -871,7 +871,12 @@ for `--reclaim`.
     the job's when its pid is in the list and it was created (`GetProcessTimes`) no earlier than
     the inner: nothing created before the inner can be in its job, so such a process holds a
     reused pid and is killed. A list that can't be read fails the sweep: the tick logs it and
-    tries again at the next. At both, and in
+    tries again at the next. A process whose kill is refused is looked at again every 100 ms
+    for up to 2 s after the round's kills, and one that exited by itself meanwhile is no failure,
+    at any point, the first act's included: a console host (`conhost.exe`) of the pool user's
+    refuses `TerminateProcess` with 5 and exits once its last client is gone, which the round
+    may just have killed (the harness's `sweep-before-logon` row failed the first act so). No
+    image name is special. At both, and in
     the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
     goes on with the rest; the sweep's next round and the next tick try it again. One that can't
     be opened or ended is also an escapee (below).
@@ -907,7 +912,25 @@ for `--reclaim`.
     every process of the pool user but itself that was created before it was (`GetProcessTimes`
     against its own start), or that a process it killed started, with no job exemption because
     the session is ending. It makes that sweep twice, both passes before the cleanup, and then
-    makes the same cleanup, all on its own 60 s limit. It logs to its stderr, which
+    makes the same cleanup, all on its own 60 s limit. The order is shut, sweep, widen, classes,
+    COM (`runner/sweeper_flow.rs`). Its token stays shut to `SYSTEM` while anything of the pool
+    user could be alive to open it, through both passes. COM can't work with it shut: Task
+    Scheduler and BITS both failed with `E_OUTOFMEMORY` (14) on every session's end in the
+    harness, as the inner's did when it still made COM calls after its own token's shut (before
+    its threads' and default DACL's). So only once both passes went with no failure, which leaves
+    nothing of the pool user that the sweep could end, does the sweeper widen its own token's
+    DACL for the COM step: its user gets `TOKEN_QUERY`, `TOKEN_DUPLICATE` and
+    `TOKEN_IMPERSONATE` (`token::SWEEPER_COM_TOKEN_RIGHTS`), the rights the calls that read,
+    copy and take on a token document, and nothing that adjusts it, assigns it to a process or
+    changes its DACL or owner. Then it removes the per-user classes (before any COM, so no class
+    registered there runs in it), the `Run` and `RunOnce` values and the Startup entries, then
+    the scheduled tasks and BITS jobs over COM. A sweep that failed, or a widening that did,
+    leaves the token shut and skips COM: the tasks and BITS jobs wait for a later end sweeper.
+    What the sweep spares, a next session's runners and agent started after the sweeper, may be
+    alive while the token is widened. Its runners are trusted code of ours, and its agent is Low,
+    so a Medium token it opens can't be impersonated past identification, and its token lacks
+    `SeAssignPrimaryTokenPrivilege` and `SeImpersonatePrivilege` to start a process with one.
+    It logs to its stderr, which
     the outer relays while it lives; on a cancel nobody reads it. Its exit code says whether
     everything went, and the outer logs a failure if it is still alive to see it. It writes no
     result file. The run folder admits only the lawyer, `SYSTEM` and Administrators, and a file

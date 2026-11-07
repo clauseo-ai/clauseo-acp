@@ -10,8 +10,11 @@
 //! started later by the next outer and inner, are left alone (`sweep.rs`, which also says why a
 //! next inner killing this sweeper loses nothing). It makes two passes, both before the removal:
 //! the second kills what got past the first, a child of a process the first killed among them.
-//! It then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
-//! its own [`SWEEP_LIMIT`]. Its stderr gets each kill (pid, image name, sweep point) and each
+//! Only when both went with no failure (nothing of its user that it sweeps is left) does it
+//! give its user the token rights COM needs (`token::SWEEPER_COM_TOKEN_RIGHTS`). It then removes
+//! what that user could leave to start at its next logon (`leftovers.rs`), the scheduled tasks
+//! and BITS jobs (over COM) only when the token was widened, all on its own [`SWEEP_LIMIT`]. The
+//! order is `sweeper_flow.rs`'s. Its stderr gets each kill (pid, image name, sweep point) and each
 //! kind's count, which the outer relays while it lives. It exits 0 when
 //! everything went, [`RunExit::Escapee`] when a process of its user's couldn't be opened or
 //! ended (`sweep::end_sweeper_exit`), [`RunExit::Sweep`] when anything else failed or the time
@@ -27,13 +30,17 @@ use std::thread;
 use std::time::Duration;
 
 use super::RunExit;
-use super::inner_flow::at;
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
+use super::sweep::SweepError;
 use super::sweep::os::end_sweep_own;
-use super::sweep::{Point, end_sweeper_exit};
-use crate::windows::token::os::{own_token, shut_sweeper, shut_token_first, user};
+use super::sweeper_flow::{SweeperActs, run};
+use crate::windows::acl::object::Handle;
+use crate::windows::sids::Sid;
+use crate::windows::token::os::{
+    own_token, shut_sweeper, shut_token_first, user, widen_sweeper_for_com,
+};
 
 /// How long the whole sweep may take.
 const SWEEP_LIMIT: Duration = Duration::from_secs(60);
@@ -61,47 +68,68 @@ pub fn run_sweep() -> u32 {
     })
 }
 
-/// The token's shut, the kills, then the removal; the exit code.
-fn sweep_all() -> u32 {
-    // First of all, as the inner's first act: shut this process's own token to all but SYSTEM.
-    let token = match own_token() {
-        Ok(token) => token,
-        Err(error) => return failed("read its token", &error),
-    };
-    if let Err(error) = shut_token_first(&token) {
-        return failed("shut its token", &error);
-    }
-    // Then its threads and later objects, the main thread blocked on this one included, before
-    // any sweep or COM call starts one.
-    if let Err(error) = shut_sweeper(&token) {
-        return failed("shut its threads", &error);
-    }
-    let me = match user(&token) {
-        Ok(me) => me,
-        Err(error) => return failed("read its token's user", &error),
-    };
-    let mut log = |line: &str| say(line);
-    let kills = end_sweep_own(&me, &mut log);
-    if let Err(error) = &kills {
-        say(&format!(
-            "clauseo-sandbox-run: {}",
-            at(Point::Sweeper, error)
-        ));
-    }
-    let mut calls = OsLeftovers::new(&token, me);
-    let removed = remove_all(&mut calls, &Kind::ALL, "end sweeper", &mut log);
-    end_sweeper_exit(&kills, removed)
+/// The end sweeper's acts on Windows: its own token, opened with every right, and its user once
+/// read.
+struct OsActs {
+    token: Handle,
+    me: Option<Sid>,
 }
 
-/// Says the sweeper couldn't do `what`; [`RunExit::Sweep`].
-fn failed(what: &str, error: &io::Error) -> u32 {
-    let code = error
-        .raw_os_error()
-        .map_or_else(|| error.kind().to_string(), |c| c.to_string());
-    say(&format!(
-        "clauseo-sandbox-run: the end sweeper can't {what} ({code})"
-    ));
-    RunExit::Sweep.code()
+impl SweeperActs for OsActs {
+    fn shut(&mut self) -> Result<(), (&'static str, io::Error)> {
+        // First of all, as the inner's first act: shut this process's own token to all but
+        // SYSTEM.
+        shut_token_first(&self.token).map_err(|e| ("shut its token", e))?;
+        // Then its threads and later objects, the main thread blocked on this one included,
+        // before any sweep or COM call starts one.
+        shut_sweeper(&self.token).map_err(|e| ("shut its threads", e))?;
+        self.me = Some(user(&self.token).map_err(|e| ("read its token's user", e))?);
+        Ok(())
+    }
+
+    fn sweep(&mut self, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
+        let me = self.me().map_err(|e| SweepError::List(e.to_string()))?;
+        end_sweep_own(me, log)
+    }
+
+    fn widen_for_com(&mut self) -> io::Result<()> {
+        widen_sweeper_for_com(&self.token, self.me()?)
+    }
+
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool {
+        let Ok(me) = self.me().cloned() else {
+            return false;
+        };
+        let mut calls = OsLeftovers::new(&self.token, me);
+        remove_all(&mut calls, kinds, "end sweeper", log)
+    }
+}
+
+impl OsActs {
+    /// Its user, read by [`SweeperActs::shut`], which runs first.
+    fn me(&self) -> io::Result<&Sid> {
+        self.me
+            .as_ref()
+            .ok_or_else(|| io::Error::other("its user wasn't read"))
+    }
+}
+
+/// Opens its token, then runs the acts in order (`sweeper_flow::run`); the exit code.
+fn sweep_all() -> u32 {
+    let token = match own_token() {
+        Ok(token) => token,
+        Err(error) => {
+            let code = error
+                .raw_os_error()
+                .map_or_else(|| error.kind().to_string(), |c| c.to_string());
+            say(&format!(
+                "clauseo-sandbox-run: the end sweeper can't read its token ({code})"
+            ));
+            return RunExit::Sweep.code();
+        }
+    };
+    let mut acts = OsActs { token, me: None };
+    run(&mut acts, &mut |line| say(line))
 }
 
 /// One line on stderr, the pipe the outer reads while it lives.
