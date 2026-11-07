@@ -24,7 +24,8 @@
 //!   then renamed to it. The name hashes the bytes and the pool, so a new export never renames
 //!   over a file an agent holds open; a file already there with the same bytes is used as it
 //!   is, and one that can't be read or differs is passed over for a numbered name. Older
-//!   machine bundles are then removed, best-effort; one still open stays.
+//!   machine bundles are then removed ([`stale`]) once past [`STALE_AFTER`] and not among the
+//!   newest two, so a live session's `SSL_CERT_FILE` keeps working; one still open stays.
 //! - The cache (Windows, `ensure`): once per process, and again when the pool's SIDs change or the
 //!   file is gone.
 //!
@@ -34,6 +35,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -59,6 +61,39 @@ pub const CA_FILE: &str = "roots.pem";
 /// that is `Bundle::path`.
 pub fn path(data_dir: &Path) -> PathBuf {
     data_dir.join(CA_DIR).join(CA_FILE)
+}
+
+/// How long an old machine bundle stays at least, by its last write: a live session's
+/// `SSL_CERT_FILE` may still name it.
+pub const STALE_AFTER: Duration = Duration::from_hours(7 * 24);
+
+/// Which of the files `files` (name and last write) in the bundle folder an export that wrote
+/// `keep` removes at `now`: machine bundles ([`machine_name`], numbered too) and the old
+/// `roots.pem`, never `keep`, never one of the newest two of them, and only one last written more
+/// than [`STALE_AFTER`] before `now`. Merged bundles and anything else are never named.
+pub fn stale(files: &[(String, SystemTime)], keep: &str, now: SystemTime) -> Vec<String> {
+    let mut bundles: Vec<&(String, SystemTime)> = files
+        .iter()
+        .filter(|(name, _)| {
+            name == CA_FILE
+                || (name.starts_with("machine-")
+                    && Path::new(name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("pem")))
+        })
+        .collect();
+    bundles.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    bundles
+        .into_iter()
+        .skip(2)
+        .filter(|(name, written)| {
+            name != keep
+                && now
+                    .duration_since(*written)
+                    .is_ok_and(|age| age > STALE_AFTER)
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 /// What [`filter_roots`] kept, as PEM, and how many distinct certificates each rule dropped.
