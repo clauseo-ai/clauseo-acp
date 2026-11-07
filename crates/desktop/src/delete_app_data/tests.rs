@@ -3,6 +3,7 @@
 //! contract says. On Windows the folder links are junctions (`make.rs`); elsewhere symbolic links
 //! stand in, so the walk's logic runs on every CI OS.
 
+mod admin_copy_hook;
 mod make;
 mod nsis_names;
 mod sandbox_link;

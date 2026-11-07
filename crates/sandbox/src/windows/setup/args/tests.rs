@@ -63,11 +63,36 @@ fn each_mode_parses_in_full() {
     );
     assert_eq!(
         parsed(&["--remove"]),
-        Ok(Mode::Remove { per_machine: false })
+        Ok(Mode::Remove {
+            per_machine: false,
+            uninstall: false
+        })
     );
     assert_eq!(
         parsed(&["--remove", "--per-machine"]),
-        Ok(Mode::Remove { per_machine: true })
+        Ok(Mode::Remove {
+            per_machine: true,
+            uninstall: false
+        })
+    );
+    for line in [
+        &["--remove", "--uninstall", "--per-machine"][..],
+        &["--remove", "--per-machine", "--uninstall"][..],
+    ] {
+        assert_eq!(
+            parsed(line),
+            Ok(Mode::Remove {
+                per_machine: true,
+                uninstall: true
+            })
+        );
+    }
+    assert_eq!(
+        parsed(&["--remove", "--uninstall"]),
+        Ok(Mode::Remove {
+            per_machine: false,
+            uninstall: true
+        })
     );
     let dir = r"C:\Users\l\AppData\Local\Clauseo";
     let data = r"C:\Users\l\AppData\Local\chat.clauseo";
@@ -189,6 +214,10 @@ fn every_bad_form_is_a_usage_error() {
             "--per-machine",
         ],
         &["--reclaim", "--parent", "1", "--per-machine"],
+        // --uninstall belongs to --remove only, once.
+        &["--remove", "--uninstall", "--uninstall"],
+        &["--uninstall", "--remove"],
+        &["--reclaim", "--parent", "1", "--uninstall"],
     ];
     for line in bad {
         assert!(parsed(line).is_err(), "{line:?} parsed");

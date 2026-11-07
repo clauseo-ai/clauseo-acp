@@ -37,7 +37,8 @@ use windows::Win32::UI::Shell::{
 use windows::core::{PCWSTR, w};
 
 use super::NtfsAcl;
-use super::admin_copy::os::check_here;
+use super::admin_copy::os::{StateAdminCopy, check_here};
+use super::admin_copy::protection_state;
 use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
@@ -205,13 +206,18 @@ impl UserSetup {
 }
 
 impl SandboxSetup for UserSetup {
-    /// The marker and record's state, or [`SetupState::Blocked`] while the last set-up was
-    /// blocked and nothing is set up since (`result_file::state_with`). Never writes: the result
-    /// file is read unchanged, and ignored unless it is this user's alone
+    /// The admin copy first (`admin_copy::protection_state`): a copy missing, changed or unsafe
+    /// is [`SetupState::Blocked`] with that cause, before any set-up is tried. With the copy
+    /// fine, the marker and record's state, or [`SetupState::Blocked`] while the last set-up was
+    /// blocked and nothing is set up since (`result_file::state_with`). The copy's hash is kept
+    /// for its file identity between calls (`StateAdminCopy`). Never writes: the result file is
+    /// read unchanged, and ignored unless it is this user's alone
     /// (`result_file::read_unchanged`); `run` repairs it.
     fn state(&self) -> SetupState {
         let last = result_file::read_unchanged(&self.data_dir);
-        result_file::state_with(setup_state(&self.data_dir), &last)
+        let marker = setup_state(&self.data_dir);
+        let combined = result_file::state_with(marker.clone(), &last);
+        protection_state(&StateAdminCopy, marker, combined)
     }
 
     fn run(&self) -> Result<(), SetupError> {
