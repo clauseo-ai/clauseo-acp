@@ -722,33 +722,62 @@ for `--reclaim`.
 
 ### The network (PR7)
 
-`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 61080-61179,
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46199,
 where its launch's egress proxy and listed ports are, and nothing else. Rulings: the
-orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals).
+orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals,
+the range moved).
 
-**Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP
-transaction: Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in
-the sublayer deleted, foreign ones included; six block filters; and one static permit per pool
-user. The blocks cover every connect over IPv4 and IPv6 (loopback and the range included), every
-inbound connection that isn't loopback, and ICMP at resource assignment, each clearing its action
-right. Each block's `ALE_USER_ID` condition matches `NOT_EQUAL` over
-`(D;;CC;;;<group>)(D;;CC;;;<each pool user>)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)`:
-it is true when an access check doesn't grant `CC`, and a deny entry also matches a deny-only
-SID. So a pool process that makes its user SID or the group deny-only in a derived token (no
-privilege needed) is still blocked; review item 1. The allows keep every other token out of the
-block: `Everyone`, `RESTRICTED` for a restricted token's second pass, and the two application
-package groups for `AppContainer` and LPAC apps. A non-pool restricted token whose restricting set
-holds neither `Everyone` nor `RESTRICTED` fails the second pass and is blocked too; the spike
-measures this collateral. Each static permit, at a weight above the blocks, is `127.0.0.1`, TCP,
-remote ports 61080-61179, with an `ALE_USER_ID` `EQUAL` allow for that one user: a derived token
-that escapes the allow loses the permit and falls to the block. Then come the owner's grants,
-**read-only, no control**: `READ|ENUM` on the filter container, and `READ` on our provider,
-sublayer and filters. There is no ADD, ADD_LINK, WRITE or DELETE anywhere, so the lawyer can't
-add, change or remove a WFP filter. The disclosure is small: the lawyer's processes can enumerate
-the machine's WFP filters, which shows other products' filter metadata but gives no control.
-Last come four Windows Firewall rules naming the pool: block everything that isn't loopback, both
-ways; block loopback UDP; block loopback TCP outside 61080-61179. A re-run or an extend rewrites
-it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
+**The range** (`ports::TIER_B_PORTS`, 46100-46199) is for tier B's listeners alone: the proxy's,
+R24's relay, and what a tier-B launch claims (`claim_port`, `claim_port_at`). It sits below 49152,
+where Windows' dynamic range starts by default, so the OS never hands its ports to another
+program's port-0 bind, and clear of the listeners known below it (WinRM 47001, the ASP.NET state
+service 42424, EtherNet/IP 44818, BACnet 47808, SQL Server's browser 1434) and of IANA's
+registrations. The browser claims outside it (`claim_browser_port`, `claim_browser_port_at`;
+agent-browser's daemon port is 49152-65534), so Chrome's debugging port, from this or a concurrent
+tier-C session, never lands there. Set-up and every launch check the machine against the range
+(`wfp::check_ports`) and refuse tier B, named, on an overlap:
+- **Windows' TCP dynamic range**, read from WMI: `MSFT_NetTCPSetting` in `ROOT\StandardCimv2`,
+  `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts`, every setting's (the class
+  behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"). For IT:
+  `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
+- **Excluded port ranges** (Hyper-V, WSL and Docker reserve blocks, sometimes below 49152).
+  Windows publishes no call that lists them: `netsh int ipv4 show excludedportrange` reads the
+  TCP/IP stack's private store, and the documented calls, `CreatePersistentTcpPortReservation`
+  and `LookupPersistentTcpPortReservation`, only make or look up one exact range. So each port of
+  the range nobody listens on is test-bound on `127.0.0.1` and `::1`; `WSAEACCES` marks it
+  excluded (`ports::refused_ports`).
+- **At each launch, the listeners**: every TCP listener in the range, IPv4 and IPv6, any address
+  (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's or a process
+  running this process's own program file (`QueryFullProcessImageNameW`, compared without case):
+  the proxy and the relay run in the host. Anything else, `http.sys` as System included, refuses
+  the launch (`NetworkGap::ForeignListener`, naming the program).
+
+**Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP transaction:
+Clauseo's persistent provider and sublayer (weight `0xFFFE`); every filter already in the sublayer
+deleted, foreign ones included; six block filters; and one static permit per pool user. The blocks
+cover every connect over IPv4 and IPv6 (loopback and the range included), every inbound connection
+that isn't loopback, and ICMP at resource assignment, each clearing its action right. Each block's
+`ALE_USER_ID` condition matches `NOT_EQUAL` over `(D;;CC;;;<group>)(D;;CC;;;<each pool
+user>)(A;;CC;;;WD)(A;;CC;;;RC)(A;;CC;;;AC)(A;;CC;;;S-1-15-2-2)`: it is true when an access check
+doesn't grant `CC`, and a deny entry also matches a deny-only SID. So a pool process that makes its
+user SID or the group deny-only in a derived token (no privilege needed) is still blocked; review
+item 1. The allows keep every other token out of the block: `Everyone`, `RESTRICTED` for a
+restricted token's second pass, and the two application package groups for `AppContainer` and LPAC
+apps. A non-pool restricted token whose restricting set holds neither `Everyone` nor `RESTRICTED`
+fails the second pass and is blocked too; the spike measures this collateral. Each static permit, at
+a weight above the blocks, is `127.0.0.1`, TCP, remote ports 46100-46199, with an `ALE_USER_ID`
+`EQUAL` allow for that one user: a derived token that escapes the allow loses the permit and falls
+to the block. Then come the owner's grants, **read-only, no control**: `READ|ENUM` on the filter
+container, and `READ` on our provider, sublayer and filters. There is no ADD, ADD_LINK, WRITE or
+DELETE anywhere, so the lawyer can't add, change or remove a WFP filter. Implicit owner rights would
+undo that, so set-up reads back the owner of the provider, the sublayer and each filter:
+Administrators or SYSTEM, or the set-up fails, named (the policy "System objects: Default owner for
+objects created by members of the Administrators group" set to the creator would make the lawyer the
+owner). The disclosure is small: the lawyer's processes can enumerate the machine's WFP filters,
+which shows other products' filter metadata but gives no control. Last come four Windows Firewall
+rules naming the pool: block everything that isn't loopback, both ways; block loopback UDP; block
+loopback TCP outside 46100-46199. A re-run or an extend rewrites it all for the whole pool. A WFP
+failure fails the set-up at `Step::Network`.
 
 **Measured** (spike run 42351029777, branch `exp-wfp-denyonly` at `7d66a922b`, GitHub's
 `windows-2025` and `windows-11-arm` runners, 23 rows passing on each). The spike installs these
@@ -775,24 +804,36 @@ once after. Results:
 **Each launch** (`check_launch`, as the desktop user) checks before the agent starts, and adds
 nothing:
 - the provider and the sublayer are there;
-- every filter in the sublayer is one of set-up's, exactly: key, layer, action, weight, flags,
-  match types and conditions;
+- the sublayer is at set-up's weight;
+- every filter in the sublayer is one of set-up's, exactly: key, provider, layer, action, weight,
+  every flag bit (a disabled filter refuses), match types and conditions;
 - every block denies the matter's pool user;
-- the user has its static permit.
+- the user has its static permit, and every permit names a user the blocks deny (the pool);
+- the machine's dynamic and excluded port ranges, and the listeners in the range ("The range").
 
 A foreign filter, a change, a missing object or a refused read refuses the launch with
-`Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do,
-with `agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
-61080-61179, or WFP not answering. The ports `Policy::proxy_ports` and `Loopback::Ports` name
-narrow nothing at the WFP layer, but are still checked to be inside the range, so a launch never
-counts on a port the firewall blocks. No agent runs unfiltered.
+`Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do, with
+`agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
+46100-46199, WFP not answering, or the range overlapped, reserved or held by a foreign listener. The
+ports `Policy::proxy_ports` and `Loopback::Ports` name narrow nothing at the WFP layer, but are
+still checked to be inside the range, so a launch never counts on a port the firewall blocks. No
+agent runs unfiltered.
 
 **Inside the range, the listeners' secrets are the check.** Every pool user reaches every
-listener on `127.0.0.1:61080-61179`, other matters' included. S16's proxy demands its per-launch
+listener on `127.0.0.1:46100-46199`, other matters' included. S16's proxy demands its per-launch
 token, and R24's relay its token file. **Accepted risk:** a listener an agent makes in the range
 (or one it puts on another matter's listed port before that port is bound, review item 7; S16's
 `SO_EXCLUSIVEADDRUSE` is out of PR7's scope) is reachable from another matter's agent: a
-collusion channel between two hijacked agents, like the pipes (D11).
+collusion channel between two hijacked agents, like the pipes (D11). **Accepted risk:** a foreign
+program that binds a fixed port in the range after a launch's check is reachable from that
+launch's agent until the next launch refuses; the range is out of the OS's hands, so only a
+program asking for that port by number can do it.
+
+**Defence in depth, a spike** (`exp-wfp-denyonly`): a filter at `ALE_AUTH_RECV_ACCEPT_V4` that
+blocks a connection whose remote user (`FWPM_CONDITION_ALE_REMOTE_USER_ID`) is a pool user to any
+local program but the host (`FWPM_CONDITION_ALE_APP_ID`). If Windows fills the remote user for
+loopback, it covers a foreign listener wherever it lands; if not, it is dropped, and this record
+says why. Pending the run.
 
 **When the firewall fails.** WFP is the boundary: any WFP call that fails, the Base Filtering
 Engine not running included (named for IT: set BFE to start automatically), fails the set-up, so
@@ -830,11 +871,16 @@ VM row measures it.
   WebDAV. The row runs on a Windows 11 copy if there is one, else on win-01 (Server 2025, no
   WebClient), and says which.
 
-**Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. Removal
-(`wfp::remove`, which `--remove` runs right after stopping the pool users' processes) deletes every filter in the sublayer, foreign
+**Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. A socket opened
+under anonymous impersonation is blocked too: whether WFP reads the process's token (a pool user) or
+the thread's (the anonymous logon, which holds no `Everyone`), the allow doesn't grant. Only a
+machine with `EveryoneIncludesAnonymous = 1` that WFP reads by thread would let it through; a VM row
+measures it. Removal (`wfp::remove`, which `--remove` runs once every pool account is gone, since
+`stop_strays` only logs a process that won't stop) deletes every filter in the sublayer, foreign
 ones included, every key set-up writes, the sublayer and the provider, in one transaction; then it
-takes back the owner's read grant on the filter container, and removes the firewall rules. It can
-run again after a partial removal.
+takes back the owner's read grant on the filter container, and removes the firewall rules; a
+firewall failure there is reported, not fatal, as at set-up. It can run again after a partial
+removal.
 
 **For the host (R17 PR-E).** Per tier-B launch, once the policy is built and before the runner
 starts: `check_launch(&pool_user_sid, &policy)`; on `Err`, don't start the agent, and map
