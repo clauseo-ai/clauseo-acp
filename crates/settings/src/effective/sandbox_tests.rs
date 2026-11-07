@@ -20,6 +20,15 @@ const KEYS: [&str; 5] = [
     "network.allowed_domains",
 ];
 
+/// The `network` section as an unreadable source locks it: the defaults, but no allowing a
+/// blocked site (decision record 0053).
+fn network_locked() -> NetworkSettings {
+    NetworkSettings {
+        allow_unsafe_site_override: false,
+        ..NetworkSettings::default()
+    }
+}
+
 /// `settings.json` with each key away from its default (`allowed_domains`, which it may not
 /// set, included).
 fn lawyers() -> MemFiles {
@@ -148,7 +157,7 @@ fn an_unreadable_policy_source_locks_each_key_at_its_safe_value() {
         let settings = effective.settings();
         assert!(!settings.sandbox.allow_unprotected_auto);
         assert!(!settings.sandbox.required);
-        assert_eq!(settings.network, NetworkSettings::default());
+        assert_eq!(settings.network, network_locked());
         for key in KEYS {
             assert!(effective.is_locked(key), "{key}");
             assert!(
@@ -277,7 +286,7 @@ fn a_policy_section_that_is_not_an_object_locks_its_keys_at_their_safe_values() 
             assert!(!settings.sandbox.allow_unprotected_auto && !settings.sandbox.required);
             assert!(settings.network.upstream_proxy.is_some());
         } else {
-            assert_eq!(settings.network, NetworkSettings::default());
+            assert_eq!(settings.network, network_locked());
             assert!(settings.sandbox.allow_unprotected_auto && settings.sandbox.required);
         }
     }

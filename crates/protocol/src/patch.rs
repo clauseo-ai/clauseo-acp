@@ -14,10 +14,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope, FolderScanned,
-    HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId, Protection,
-    ProtectionView, Seq, SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView,
-    ViewEntry, ViewEpoch,
+    AccountLimits, BlockedSiteId, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope,
+    FolderScanned, HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId,
+    Protection, ProtectionView, Seq, SettingsView, SiteTag, StreamId, ThreadId, ThreadsChanged,
+    Timestamp, TurnId, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -199,6 +199,32 @@ pub enum HostEvent {
     ProtectionViewChanged {
         /// The view now.
         view: ProtectionView,
+    },
+    /// The egress proxy refused a site the block list names (decision record 0053): the app
+    /// tells the lawyer. App-wide, never logged and in no stream: it reaches app subscribers
+    /// only, and a catch-up carries none. Once per site per turn: the same site refused again
+    /// in that turn re-sends the event with the same `block_id` and a higher `count`.
+    SiteBlocked {
+        /// This site in this turn: a re-sent event keeps it, so the app updates one notice.
+        block_id: BlockedSiteId,
+        /// The matter whose agent asked for the site.
+        matter: MatterId,
+        /// The thread, when the request could be traced to one; left out when not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadId>,
+        /// The turn that was running, if any; left out when none was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn: Option<TurnId>,
+        /// The host name or IP address the agent asked for, as it asked.
+        host: String,
+        /// Why the list names it.
+        tag: SiteTag,
+        /// When the list in use was made.
+        list_generated: Timestamp,
+        /// `network.allow_unsafe_site_override`: the lawyer may allow the site anyway.
+        override_allowed: bool,
+        /// How many times the site was refused in this turn, at least 1.
+        count: u32,
     },
 }
 

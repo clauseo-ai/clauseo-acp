@@ -501,8 +501,7 @@ fn unread(host: &Running) -> clauseo_host::AppSubscription {
 /// Whether `event` is a frame of the whole state.
 fn whole(event: &HostEvent) -> bool {
     match event {
-        // A scan's event carries its whole state so far; the last one is part of the catch-up.
-        // The update view is whole too (0037), though nothing publishes it yet.
+        // Whole: a scan's state so far (last in the catch-up) and the update view (0037, unsent).
         HostEvent::SettingsChanged(_)
         | HostEvent::FolderScanned(_)
         | HostEvent::UpdateChanged(_)
@@ -517,7 +516,8 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::BrowserInstall { .. }
         | HostEvent::CaseLawHint { .. }
         | HostEvent::ProtectionChanged { .. }
-        | HostEvent::ProtectionViewChanged { .. } => false,
+        | HostEvent::ProtectionViewChanged { .. }
+        | HostEvent::SiteBlocked { .. } => false,
     }
 }
 

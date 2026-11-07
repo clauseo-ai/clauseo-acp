@@ -5,7 +5,8 @@ use clauseo_protocol::{FolderRefId, Principal};
 
 use super::input::Request;
 use super::{
-    Actor, HostPhase, app, commands, limits, locate, papers, query, settings, shutdown, subs, turn,
+    Actor, HostPhase, app, blocked, commands, limits, locate, papers, query, settings, shutdown,
+    subs, turn,
 };
 use crate::principal::{Access, authorize};
 
@@ -117,6 +118,7 @@ pub(super) fn on_request(actor: &mut Actor, request: Request) {
             let _gone = reply.send(written);
         }
         Request::SignIn(request) => turn::sign_in_request(actor, request),
+        Request::SiteBlocked { session, site } => blocked::site_blocked(actor, session, site),
         Request::Shutdown { reply } => {
             match authorize(&Principal::LocalDesktop, Access::Shutdown) {
                 Ok(()) => shutdown::begin_shutdown(actor, Some(reply)),

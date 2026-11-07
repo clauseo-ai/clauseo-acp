@@ -224,7 +224,8 @@ wire_types! {
         UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
     ids::{
-        AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
+        AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,
+        ContentId,
         ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
@@ -245,7 +246,7 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     protection::{
-        NotProtectedCause, Protection, ProtectionTier, ProtectionView, ProtectionWork,
+        NotProtectedCause, Protection, ProtectionTier, ProtectionView, ProtectionWork, SiteTag,
         UnsupportedWhy,
     },
     query::{

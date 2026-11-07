@@ -133,6 +133,7 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
     let handle = start_proxy(ProxyConfig {
         allow: Allowlist::exact("example.com")?,
         silent: Allowlist::default(),
+        block: Arc::default(),
         upstream: Upstream::System,
         denials: Arc::new(Quiet),
         record: None,

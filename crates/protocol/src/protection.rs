@@ -13,11 +13,25 @@
 //!   changes: the detection, the work in progress, `retry_asks_admin`, or either setting.
 //! - Nothing here names a Windows account or a SID: [`NotProtectedCause::PoolFull`] carries
 //!   counts only. The host logs the accounts, on the host only.
+//! - [`SiteTag`] is open: why the block list names a site the egress proxy refused (decision
+//!   record 0053), carried by the app event `HostEvent::SiteBlocked`.
 
 use serde::{Deserialize, Serialize};
 
 use crate::Timestamp;
 use crate::open_enum::{enum_with_names, open_data_enum, open_unit_enum};
+
+open_unit_enum! {
+    /// Why the block list names a site (decision record 0053). A tag from a newer Clauseo decodes
+    /// to `Unknown`.
+    pub enum SiteTag {
+        /// A botnet's command server (Feodo Tracker's IP addresses).
+        Malware,
+        /// A phishing site.
+        Phishing,
+    }
+    test mod site_tag;
+}
 
 enum_with_names! {
     /// How strongly this computer can sandbox an agent (`docs/threat-model.md`, the tiers).

@@ -254,6 +254,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Not protected: a cause from a newer Clauseo | `NotProtectedCause::Unknown` | show as Not protected |
 | This computer's protection (0051) | `HostQuery::Protection` returns `QueryResult::Protection` | `tier`, `computer` (a `Protection`), `required`, `unprotected_auto_allowed`; `command.invalid` until the host builds it |
 | Remove the sandbox's set-up (0051) | `HostCommand::RemoveSandboxSetup` | one administrator prompt; `command.invalid` until the host builds it |
+| Site blocked: the agent asked for a site the block list names (0053) | `HostEvent::SiteBlocked` | `host`, `tag` (`phishing`, `malware`; `unknown` from a newer Clauseo), `list_generated`, `override_allowed`; one notice per `block_id`, its `count` updated when re-sent; no UI yet |
 | Matter idle | `MatterStatus::Idle` | nothing runs, nothing to read |
 | Matter working | `MatterStatus::Working` | a thread's turn starts, runs or waits for the writer |
 | Matter needs a permission | `MatterStatus::NeedsPermission` | outranks every other status |

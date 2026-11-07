@@ -158,6 +158,11 @@ uuid_id! {
     /// One run of a view; a new epoch tells the client to drop its copy and start again.
     pub struct ViewEpoch(v7);
 }
+uuid_id! {
+    /// One blocked site in one turn: the notice `HostEvent::SiteBlocked` re-sends it with a
+    /// higher count when the agent tries the same site again in that turn.
+    pub struct BlockedSiteId(v7);
+}
 
 /// A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64
 /// lowercase hex characters, and every other format (`MessagePack`) its 32 bytes, so the stored

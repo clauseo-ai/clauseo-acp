@@ -109,6 +109,8 @@ pub(super) async fn open(
         streams: BTreeMap::new(),
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
+        blocked: Box::default(),
+        blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),
         triage: super::triage::Triage::new(),
         lists: super::app_lists::Lists::default(),
