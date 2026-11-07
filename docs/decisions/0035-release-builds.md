@@ -116,9 +116,21 @@ Developer ID.
   the line with a time estimate, waits for QU.8. The minimum lives in `tauri.conf.json`; the
   module's copy is held to it by a test. A version string it cannot read lets the app start, so
   the check never refuses a runtime that may work.
-- **English only.** The dialog and the installer ship in English; new words are English-only for
-  now. The installer's `languages` is `["English"]` (Hindi, in PR 1, is dropped): Tauri 2.12.2
-  has no Hindi for its own 27 messages, and the Hindi drafts are deferred. No language picker.
+- **English and Hindi in the installer** (stage F, 2026-11-07; the dialog is still English
+  only). The installer's `languages` is `["English", "Hindi"]`, English first as NSIS's
+  fallback, with no language picker. Tauri 2.12.2 has no Hindi of its own, so
+  `crates/desktop/windows/nsis/Hindi.nsh` is ours: the same 37 keys as `English.nsh` in the same
+  order, which tests hold equal, and a test that fails until every value holds Devanagari (the
+  app thread's provisional Hindi replaces the English placeholders). On a Tauri upgrade, copy its
+  new template keys into both files. The language is chosen by
+  `HKCU\Software\Clauseo\UiLanguage` (`en` or `hi`, which the app writes), then by Windows'
+  display language, as far as NSIS allows: it fixes the pages' language right after `.onInit`
+  and `un.onInit`, and Tauri's template gives neither a hook. So the installer follows Windows'
+  display language only; the uninstaller follows the value `hooks.nsh`'s `NSIS_HOOK_POSTINSTALL`
+  writes at every install and update (the template's `Installer Language`, which its
+  `un.onInit` reads): `UiLanguage` then, else the installer's own language. Without that value
+  a two-language uninstaller would show NSIS's picker. Deleting the data on uninstall deletes
+  `UiLanguage` too; keeping it keeps the value.
 - **Stock installer pages.** Tauri's MUI pages as they come, no custom `installer.nsi`: page
   words of our own would need a template kept in step with every Tauri upgrade. The words list's
   per-machine lines are parked with it. The uninstall-declined line is S15a's.
@@ -129,7 +141,7 @@ Developer ID.
   first and Tauri's 26 other messages as 2.12.2 ships them, except that three name the product
   with `${PRODUCTNAME}` where Tauri's file has a literal `{{product_name}}` (language files are
   included, not rendered). On a Tauri upgrade, copy its `English.nsh` again and keep that fix;
-  tests count the 27 keys (31 since S20 added the uninstall hook's four lines, below), refuse any
+  tests count the keys (37: Tauri's 27 and Clauseo's 10, in both language files), refuse any
   `{{`, and hold the label to one line (60 characters; the box is 400 x 25 px).
 - **The dialog's look** (from the Windows 11 VM's run): `cxWidth` 280 dialog units, so the main
   instruction fits on one line, and the exe's own icon (tauri-build's

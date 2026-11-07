@@ -34,15 +34,15 @@ LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete a
 ; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
 LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $APPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
 LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy. Your IT team can create it."
-; removeStillRunning: S15's removal of Clauseo's protection (clauseo-sandbox-setup.exe --remove)
+; removeStillRunning: S15's removal of the Safe workspace (clauseo-sandbox-setup.exe --remove)
 ; was still running when the uninstaller stopped waiting for it, after 2 minutes; it carries on
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
 ; Provisional (stage F, 2026-11-07).
-LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its protection. It finishes on its own."
+LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing the Safe workspace. It finishes on its own."
 ; removeSkippedSilent: a silent per-user uninstall (/S) can't ask for the UAC prompt that removing
-; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
+; the Safe workspace needs, so it skips the removal and keeps the sandbox folder. In the
 ; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
-LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
+LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe workspace, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
 ; removeExeMissing: the uninstaller found S15's set-up program (clauseo-sandbox-setup.exe) gone,
 ; most likely quarantined by Windows security, while the machine's record shows a set-up, so it
 ; couldn't run --remove. A box; under /S a details line and exit code 21. setupExeRemoved: an

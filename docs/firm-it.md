@@ -23,8 +23,10 @@ Each release on GitHub ([decision 0035](decisions/0035-release-builds.md), "Arte
 The install guides for the people at the firm, with each warning and the clicks past it:
 [Windows](install/windows.md) and [macOS](install/macos.md).
 
-Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages, in English only
-(decision 0035, "PR 2"). Seen on Windows Server 2025 (build 26100) on 2026-11-03, with the
+Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages, in English and
+Hindi (decision 0035): the installer follows Windows' display language, and the uninstaller the
+language chosen in the app (`HKCU\Software\Clauseo\UiLanguage`, `en` or `hi`) at the last install
+or update. Seen on Windows Server 2025 (build 26100) on 2026-11-03, with the
 0.0.0 dry-run installers:
 
 - The per-machine installer raises a UAC prompt, installs `Clauseo.exe` and `uninstall.exe` in
