@@ -79,8 +79,13 @@ converted document. From there they can call any IPC command the page can reach.
   link between the check and the open, and so open a document of a listed type outside the matter;
   and script in the page can open the matter's documents without a click
   ([0026](decisions/0026-open-and-reveal.md))
-- `designed`: The webview never navigates (no navigation guard yet; every link click is cancelled
-  in the renderer)
+- `built`: The webview never navigates away from the app: both windows refuse any top-level
+  navigation but the app's own origin, `about:blank` and `about:srcdoc` (and `devUrl` in a
+  development build only), so page script cannot send data out with `location.href` or a
+  `meta refresh` (`crates/desktop/src/navigation.rs`); every link click is also cancelled in the
+  renderer. Known gap: `<link rel=dns-prefetch>` and `preconnect`, which the CSP does not cover,
+  can still put a name of the page's choosing into a DNS query (and, for preconnect, a TLS
+  handshake); no WebView2 switch or WKWebView API reliably turns both off
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
 
 ## Agents
