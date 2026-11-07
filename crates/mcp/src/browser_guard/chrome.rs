@@ -34,10 +34,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
-use super::downloads::Mover;
+use super::downloads::{Held, Mover};
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
-use super::{Child, ChildStderr, env, logon, pause, quiet};
+use super::{Child, ChildStderr, env, pause, quiet};
 use crate::write;
 
 /// How long Chrome has to print its `DevTools` endpoint.
@@ -182,13 +182,15 @@ pub(crate) fn launch(
 
 impl Chrome {
     /// Waits for Chrome's endpoint, at most `wait` ([`START_WAIT`] but in tests), checks it is on
-    /// the claimed port and starts the download mover. Every [`parent::POLL`] it also looks
-    /// whether the guard's parent has gone, and gives up if so.
+    /// the claimed port and starts the download mover, which records held downloads in `held`.
+    /// Every [`parent::POLL`] it also looks whether the guard's parent has gone, and gives up if
+    /// so.
     pub(crate) fn endpoint(
         &mut self,
         cdp_port: u16,
         wait: Duration,
         parent: &Parent,
+        held: Arc<Held>,
     ) -> Result<String, String> {
         let inbox = self
             .starting
@@ -228,7 +230,11 @@ impl Chrome {
             }
         };
         check_endpoint(&endpoint, cdp_port)?;
-        self.mover = Some(Mover::start(self.staging.clone(), self.downloads.clone()));
+        self.mover = Some(Mover::start(
+            self.staging.clone(),
+            self.downloads.clone(),
+            held,
+        ));
         Ok(endpoint)
     }
 
@@ -347,87 +353,6 @@ pub(crate) fn remove_profile(profile: &Path) {
         "could not delete Chrome's profile {}",
         profile.display()
     ));
-}
-
-/// Keeps `profile` when an earlier start of this run made it (a real folder, not a link), with
-/// its staging folder, and merges [`quiet::preferences`] and [`logon::preferences`] into the
-/// `Default/Preferences` Chrome rewrote, and [`logon::ready_local_state`] into its `Local
-/// State`, so every start of the run gets them; else makes it from nothing, with
-/// `Default/Preferences` sending downloads to `staging` and those services off, and
-/// [`logon::local_state`] as `Local State`, so Chrome makes no failed Windows logon.
-///
-/// agent-browser's launch let every download through (`Browser.setDownloadBehavior` `allow`);
-/// connected to the guard's Chrome it sets `default` (`browser.rs:2563-2574`), so Chrome's own
-/// rules apply. One of them holds a download over `http://` of a "high-risk" type (`.md`,
-/// `.pdf`, ...) as `*.crdownload` until someone clicks Keep, which never happens headless.
-/// Chrome waives that rule where the page's "insecure content" setting is allow, so the profile
-/// allows it for `http://` pages only: there no content is mixed, so nothing else changes. A
-/// download over `http://` from an `https://` page stays blocked, as in Chrome by default.
-pub(super) fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result<()> {
-    let file = profile.join("Default").join("Preferences");
-    match std::fs::symlink_metadata(profile) {
-        Ok(found) if found.is_dir() => {
-            if !std::fs::symlink_metadata(staging).is_ok_and(|found| found.is_dir()) {
-                drop(write::remove_file(staging));
-                write::create_dir_all(staging)?;
-            }
-            write::create_dir_all(&profile.join("Default"))?;
-            // Chrome's own rewrite, or ours again if it is gone or unreadable.
-            let mut preferences = std::fs::read(&file)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .filter(serde_json::Value::is_object)
-                .unwrap_or_else(|| first_preferences(staging, downloads));
-            merge(&mut preferences, quiet::preferences());
-            merge(&mut preferences, logon::preferences());
-            let local_state = profile.join("Local State");
-            let kept = std::fs::read(&local_state)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-            write::write(&local_state, logon::ready_local_state(kept).to_string())?;
-            return write::write(&file, preferences.to_string());
-        }
-        Ok(_) => write::remove_dir_all(profile).or_else(|_| write::remove_file(profile))?,
-        Err(_) => {}
-    }
-    write::create_dir_all(&profile.join("Default"))?;
-    write::create_dir_all(staging)?;
-    write::write(
-        &profile.join("Local State"),
-        logon::local_state().to_string(),
-    )?;
-    write::write(&file, first_preferences(staging, downloads).to_string())
-}
-
-/// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above,
-/// [`quiet::preferences`] and [`logon::preferences`].
-fn first_preferences(staging: &Path, downloads: &Path) -> serde_json::Value {
-    let mut preferences = serde_json::json!({
-        "download": {
-            "default_directory": staging,
-            "prompt_for_download": false,
-            "directory_upgrade": true,
-        },
-        "savefile": {"default_directory": downloads},
-        "profile": {"content_settings": {"exceptions": {"mixed_script": {
-            "http://*:*,*": {"setting": 1},
-        }}}},
-    });
-    merge(&mut preferences, quiet::preferences());
-    merge(&mut preferences, logon::preferences());
-    preferences
-}
-
-/// Puts `from`'s entries into `into`, object by object: what `into` has beside them stays.
-fn merge(into: &mut serde_json::Value, from: serde_json::Value) {
-    match (into, from) {
-        (serde_json::Value::Object(into), serde_json::Value::Object(from)) => {
-            for (key, value) in from {
-                merge(into.entry(key).or_insert(serde_json::Value::Null), value);
-            }
-        }
-        (into, from) => *into = from,
-    }
 }
 
 /// Chrome's arguments, in order.
@@ -582,6 +507,10 @@ fn quote(tail: &[String]) -> String {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+mod profile;
+
+pub(super) use profile::ready_profile;
 
 #[cfg(test)]
 mod tests;

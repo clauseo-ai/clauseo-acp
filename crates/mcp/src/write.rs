@@ -32,6 +32,34 @@ pub(crate) fn open_read_no_follow(file: &Path) -> io::Result<std::fs::File> {
     options.open(file)
 }
 
+/// Reads `file` whole, refusing a link at the name: on Unix `O_NOFOLLOW` (a symlink fails with
+/// `ELOOP`; `O_NONBLOCK` keeps a FIFO from blocking the open), on Windows the reparse point
+/// itself (`FILE_FLAG_OPEN_REPARSE_POINT`); then anything but a plain file is refused. The kept
+/// profile's `Default/Preferences` and `Local State` (`browser_guard/chrome/profile.rs`).
+pub(crate) fn read_no_follow(file: &Path) -> io::Result<Vec<u8>> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        /// `FILE_FLAG_OPEN_REPARSE_POINT`.
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(OPEN_REPARSE_POINT);
+    }
+    let mut opened = options.open(file)?;
+    if !opened.metadata()?.is_file() {
+        return Err(io::Error::other("not a plain file"));
+    }
+    let mut bytes = Vec::new();
+    io::Read::read_to_end(&mut opened, &mut bytes)?;
+    Ok(bytes)
+}
+
 /// `fs::create_dir_all`: Chrome's profile folders (`browser_guard/chrome.rs`).
 pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
@@ -73,6 +101,12 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// `fs::remove_dir`: a link to a folder (a Windows junction) where Chrome's profile needs a real
+/// folder (`browser_guard/chrome/profile.rs`); it removes the link, never what it points at.
+pub(crate) fn remove_dir(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir(path)
+}
+
 /// A finished download into the downloads folder (`browser_guard/downloads.rs`): moves the file
 /// `from` to `to` within one file system, failing with `AlreadyExists` rather than replacing
 /// anything at `to` (`fs::rename` replaces a file on every OS). On Unix `fs::hard_link`, which
@@ -99,6 +133,72 @@ pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 mod windows;
+
+/// Writes `contents` to `file` through a new temporary file beside it, renamed over `file`,
+/// never writing through a link at `file`'s name: the kept Chrome profile's `Default/Preferences`
+/// and `Local State` (`browser_guard/chrome/profile.rs`). Temporary files an earlier write left
+/// (one killed midway) are removed first, and each write's own name is new ([`temporary_name`]),
+/// so a leftover never fails a later write. On Unix every step is relative to `file`'s folder,
+/// opened once with `O_NOFOLLOW` (`write/unix.rs`: `openat`, `renameat`); elsewhere each step
+/// resolves the path again (`create_new`, then `fs::rename`).
+pub(crate) fn replace_beside(file: &Path, contents: &[u8]) -> io::Result<()> {
+    let name = file
+        .file_name()
+        .ok_or_else(|| io::Error::other("no file name"))?;
+    let folder = file.parent().ok_or_else(|| io::Error::other("no folder"))?;
+    #[cfg(unix)]
+    {
+        unix::replace_in_folder(folder, name, contents)
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::Write;
+        let prefix = temporary_prefix(name);
+        if let Ok(entries) = std::fs::read_dir(folder) {
+            for entry in entries.flatten() {
+                if entry
+                    .file_name()
+                    .as_encoded_bytes()
+                    .starts_with(prefix.as_encoded_bytes())
+                {
+                    // Gone already, or not a file: left, harmless.
+                    drop(std::fs::remove_file(entry.path()));
+                }
+            }
+        }
+        let temporary = folder.join(temporary_name(name));
+        let mut new = std::fs::File::create_new(&temporary)?;
+        let written = new.write_all(contents);
+        drop(new);
+        let replaced = written.and_then(|()| std::fs::rename(&temporary, file));
+        if replaced.is_err() {
+            // Only this write's own temporary file; one that cannot go now goes next time.
+            drop(std::fs::remove_file(&temporary));
+        }
+        replaced
+    }
+}
+
+/// The start of every temporary name [`replace_beside`] gives `name`: `.<name>.clauseo-new`.
+fn temporary_prefix(name: &std::ffi::OsStr) -> std::ffi::OsString {
+    let mut prefix = std::ffi::OsString::from(".");
+    prefix.push(name);
+    prefix.push(".clauseo-new");
+    prefix
+}
+
+/// One write's own temporary name: the prefix, this process's id and a number no earlier call
+/// in this process had, `.<name>.clauseo-new-<pid>-<n>`.
+fn temporary_name(name: &std::ffi::OsStr) -> std::ffi::OsString {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut temporary = temporary_prefix(name);
+    temporary.push(format!("-{}-{n}", std::process::id()));
+    temporary
+}
+
+#[cfg(unix)]
+mod unix;
 
 /// `setxattr`: a download's `com.apple.quarantine` mark (`browser_guard/downloads/marks.rs`),
 /// on the file itself, never through a symlink.

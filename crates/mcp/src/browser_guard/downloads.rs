@@ -17,6 +17,9 @@
 //! (`marks.rs`): the mover waits for Chrome's mark, makes sure of it in staging, and only then
 //! moves the file. Where the drive cannot hold a mark, downloads are held back ([`Sweeper`]).
 //!
+//! A download Chrome holds for a confirmation (an executable, `held.rs`) is never delivered: the
+//! agent is told in its next tool result, and the file is deleted from staging when Chrome stops.
+//!
 //! Why not Chrome's `Browser.setDownloadBehavior` with `allowAndName`, which saves files by
 //! GUID so the page's name never touches the disk: the behaviour is one per browser context,
 //! the last client to set it wins, and agent-browser sets `default` each time it connects
@@ -26,13 +29,17 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::write;
 
+mod held;
 mod marks;
+
+pub(crate) use held::Held;
 
 /// Names no download may take, compared without ASCII case: the matter root's write-denied
 /// names, `clauseo_sandbox::policy::PROTECTED_NAMES` (this crate may not depend on the sandbox;
@@ -81,10 +88,12 @@ pub(crate) struct Mover {
 }
 
 impl Mover {
-    /// Starts moving from `staging` to `downloads` every [`POLL`].
-    pub(crate) fn start(staging: PathBuf, downloads: PathBuf) -> Mover {
+    /// Starts moving from `staging` to `downloads` every [`POLL`], recording each held download
+    /// in `held`.
+    pub(crate) fn start(staging: PathBuf, downloads: PathBuf, held: Arc<Held>) -> Mover {
         let (stop, stopped) = mpsc::channel::<()>();
         let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), MARK_WAIT);
+        sweeper.held = Some(held);
         let thread = thread::spawn(move || {
             while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(POLL) {
                 sweeper.sweep();
@@ -100,7 +109,7 @@ impl Mover {
     }
 
     /// Stops the thread, then moves what finished since its last look, waiting no more for a
-    /// mark: Chrome has stopped.
+    /// mark, and deletes the held downloads: Chrome has stopped.
     pub(crate) fn finish(mut self) {
         drop(self.stop.take());
         let joined = self.thread.take().map(JoinHandle::join);
@@ -114,13 +123,16 @@ impl Mover {
         };
         sweeper.wait = 0;
         sweeper.sweep();
+        held::clear(&self.staging);
     }
 }
 
-/// One sweep after Chrome has stopped (the reaper's, on Unix): [`Sweeper::sweep`] with no wait.
+/// One sweep after Chrome has stopped (the reaper's, on Unix): [`Sweeper::sweep`] with no wait,
+/// then the held downloads deleted.
 #[cfg(any(unix, test))]
 pub(crate) fn sweep(staging: &Path, downloads: &Path) {
     Sweeper::new(staging.to_owned(), downloads.to_owned(), 0).sweep();
+    held::clear(staging);
 }
 
 /// The mover's state from one sweep to the next.
@@ -137,6 +149,10 @@ pub(crate) struct Sweeper {
     marks_work: Option<bool>,
     /// The probe ([`marks::probe`]; the tests inject a failure).
     probe: fn(&Path) -> io::Result<()>,
+    /// Where each held download is recorded, once (the reaper's sweep has none).
+    held: Option<Arc<Held>>,
+    /// The held downloads seen, with how many sweeps in a row each was seen.
+    held_seen: HashMap<PathBuf, u32>,
 }
 
 impl Sweeper {
@@ -158,6 +174,8 @@ impl Sweeper {
             unmarkable: HashSet::new(),
             marks_work: None,
             probe,
+            held: None,
+            held_seen: HashMap::new(),
         }
     }
 
@@ -166,13 +184,25 @@ impl Sweeper {
     /// reach, before the move, which keeps it. A file without Chrome's mark first waits
     /// [`Sweeper::wait`] sweeps. Where no mark can be written (Windows and macOS), nothing is
     /// moved: the files stay in staging, deleted with the profile, and the downloads folder
-    /// gets [`BLOCKED_NOTE`]. A file that cannot be moved now is left for the next sweep.
+    /// gets [`BLOCKED_NOTE`]. A file that cannot be moved now is left for the next sweep. A file
+    /// Chrome holds for confirmation ([`held::is_held`]) is recorded once, when it is still there
+    /// at its [`held::HELD_SWEEPS`]th sweep in a row, and never moved.
     pub(crate) fn sweep(&mut self) {
         let Ok(entries) = std::fs::read_dir(&self.staging) else {
             return;
         };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
+            if held::is_held(&name) {
+                let sweeps = self.held_seen.entry(entry.path()).or_insert(0);
+                *sweeps = sweeps.saturating_add(1);
+                if *sweeps == held::HELD_SWEEPS
+                    && let Some(held) = &self.held
+                {
+                    held.record();
+                }
+                continue;
+            }
             if in_progress(&name) || name == marks::PROBE {
                 continue;
             }
@@ -208,6 +238,7 @@ impl Sweeper {
         let exists = |path: &PathBuf| std::fs::symlink_metadata(path).is_ok();
         self.waited.retain(|path, _| exists(path));
         self.unmarkable.retain(exists);
+        self.held_seen.retain(|path, _| exists(path));
     }
 
     /// Whether marks can be written in the staging folder, probed once. When not, notes it and

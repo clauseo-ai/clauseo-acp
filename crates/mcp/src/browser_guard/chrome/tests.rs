@@ -136,7 +136,7 @@ fn the_profile_keeps_the_download_preferences_and_quiets_whole() {
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     let quiet = super::quiet::preferences();
     let quiet = quiet.as_object().unwrap();
-    let logon = super::logon::preferences();
+    let logon = super::super::logon::preferences();
     let logon = logon.as_object().unwrap();
     for own in ["download", "savefile", "profile"] {
         assert!(!quiet.contains_key(own), "quiet sets {own}");

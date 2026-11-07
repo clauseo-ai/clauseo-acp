@@ -149,7 +149,7 @@ fn a_signed_in_session_gets_a_relay_and_a_private_token_file_gone_with_its_folde
     super::end(&run);
     assert_eq!(
         hello(run.case_law.relay().unwrap().port(), &token),
-        r#"{"clauseo_relay":1,"ok":false,"error":"closed"}"#
+        r#"{"clauseo_relay":1,"ok":false,"error":"bad_token"}"#
     );
     run.remove();
     assert!(!run.relay_token.exists());
@@ -272,7 +272,7 @@ fn a_relay_ended_before_the_launch_refuses_and_says_why() {
     ));
     assert_eq!(
         hello(port, &token),
-        r#"{"clauseo_relay":1,"ok":false,"error":"closed"}"#
+        r#"{"clauseo_relay":1,"ok":false,"error":"bad_token"}"#
     );
     let run = RunFolders { case_law, ..run };
     assert_eq!(super::redacted(&run), std::slice::from_ref(&token));

@@ -26,6 +26,9 @@ mod env;
 #[path = "guard/filter.rs"]
 mod filter;
 #[cfg(test)]
+#[path = "guard/held.rs"]
+mod held;
+#[cfg(test)]
 #[path = "guard/lazy.rs"]
 mod lazy;
 #[cfg(test)]

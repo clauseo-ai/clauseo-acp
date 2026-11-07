@@ -163,7 +163,8 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
 }
 
 /// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
-/// read, but the reply to the close request, and nothing once the guard has ended this start
+/// read (a tool call's result with the held-download note added, `downloads/held.rs`), but the
+/// reply to the close request, and nothing once the guard has ended this start
 /// (it answered what was in flight itself). After each line, every one of the port checks.
 /// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
 /// [`Event::PortRefused`].
@@ -194,14 +195,16 @@ pub(crate) fn pump_child(
             send(events, Event::CloseAnswered);
             continue;
         }
-        {
+        let call = {
             let mut state = lock(&shared.state);
             if state.generation != generation {
                 continue;
             }
-            if let Some(id) = reply_id(&line) {
-                state.answered(&id);
-            }
+            reply_id(&line).is_some_and(|id| state.answered(&id))
+        };
+        // A tool call's result carries the note on held downloads (`downloads/held.rs`).
+        if call && let Some(noted) = shared.held.note_into(&line) {
+            line = noted;
         }
         line.push(b'\n');
         if agent_reads && emit(&shared.out, &line).is_err() {

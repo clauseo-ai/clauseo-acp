@@ -1,10 +1,17 @@
 //! The handshake: the first line on a connection, `{"clauseo_relay":1,"token":"<64 hex>",
 //! "connector":"<name>"}`, checked as strictly as `clauseo-mcp connector` checks the answer:
 //! exactly these three keys, version 1, a token of 64 lowercase hex characters and a connector
-//! name of 1 to 32 lowercase letters, digits or hyphens (not starting with one). A hello that
-//! fails the shape, is over `MAX_HELLO_BYTES` or does not end within [`HANDSHAKE_TIMEOUT`]
-//! closes the connection unanswered; a well-formed one is answered `ok`, or refused with a code
-//! and closed. The hello is never logged, echoed or kept: it holds the token.
+//! name of 1 to 32 lowercase letters, digits or hyphens (not starting with one). A hello over
+//! `MAX_HELLO_BYTES`, or one that does not end within [`HANDSHAKE_TIMEOUT`], closes the
+//! connection unanswered.
+//!
+//! Until the token passes, every refusal is one answer, `bad_token`, then the close: a hello of
+//! the wrong shape, another version, a wrong token and a revoked session's are told apart only in
+//! the host's log ([`Refusal::Unauthenticated`]). Sandboxed matters can reach each other's
+//! loopback ports, and the token is the boundary, so a client without it learns nothing of this
+//! session's state (decision record 0050, "The hello"). Past the token, the answer is specific:
+//! `unsupported_version`, `wrong_connector`, or `busy` or `closed` from `Session::promote`.
+//! The hello is never logged, echoed or kept: it holds the token.
 
 use std::io::{self, BufRead};
 use std::net::TcpStream;
@@ -13,8 +20,7 @@ use std::sync::{Arc, Mutex};
 use futures::channel::oneshot;
 use futures::future::{self, Either};
 use serde::Deserialize;
-use serde::de::IgnoredAny;
-use serde_json::Value;
+use serde_json::Number;
 
 use super::super::limits::HANDSHAKE_TIMEOUT;
 use super::super::texts;
@@ -25,7 +31,10 @@ use super::{Session, hang_up, lock};
 pub(crate) enum Refusal {
     /// Closed with no answer; the reason is for the log.
     Silent(&'static str),
-    /// Answered with this code, then closed.
+    /// Before the token passed: answered `bad_token` whatever the reason, then closed; the
+    /// reason is for the log only.
+    Unauthenticated(&'static str),
+    /// Past the token: answered with this code, then closed.
     Answer(&'static str),
 }
 
@@ -114,51 +123,43 @@ impl Watchdog {
 }
 
 /// Checks a hello line against `session`. The token is compared in constant time with this
-/// listener's own, so a token of another listener is `bad_token`.
+/// listener's own, so a token of another listener is `bad_token`; a revoked session (its token
+/// forgotten, `Session::close`) refuses every token the same way. Only a hello whose token
+/// passes hears what else is wrong with it: another version, then another connector.
 pub(crate) fn check(session: &Session, line: &[u8]) -> Result<(), Refusal> {
-    let hello = parse(line)?;
+    let hello = parse(line).map_err(Refusal::Unauthenticated)?;
     match session.token_matches(hello.token) {
-        Err(()) => Err(Refusal::Answer(texts::CLOSED)),
-        Ok(false) => Err(Refusal::Answer(texts::BAD_TOKEN)),
-        Ok(true) if hello.connector != session.hub.connector.known().id => {
-            Err(Refusal::Answer(texts::WRONG_CONNECTOR))
-        }
-        Ok(true) => Ok(()),
+        Err(()) => return Err(Refusal::Unauthenticated(texts::CLOSED)),
+        Ok(false) => return Err(Refusal::Unauthenticated(texts::BAD_TOKEN)),
+        Ok(true) => {}
     }
+    if hello.version.as_u64() != Some(1) {
+        return Err(Refusal::Answer(texts::UNSUPPORTED_VERSION));
+    }
+    if hello.connector != session.hub.connector.known().id {
+        return Err(Refusal::Answer(texts::WRONG_CONNECTOR));
+    }
+    Ok(())
 }
 
-/// The hello's version alone, read first so that a newer client hears `unsupported_version`.
-#[derive(Deserialize)]
-struct Version {
-    clauseo_relay: Option<Value>,
-}
-
-/// A hello: exactly these keys, each once. The strings borrow from the line, so the token is
-/// not copied; one with an escape does not parse, and neither field may hold one.
+/// A hello: exactly these keys, each once, the version a number. The strings borrow from the
+/// line, so the token is not copied; one with an escape does not parse, and neither field may
+/// hold one.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Hello<'a> {
     #[serde(rename = "clauseo_relay")]
-    _version: IgnoredAny,
+    version: Number,
     token: &'a str,
     connector: &'a str,
 }
 
-/// The shape check. A `clauseo_relay` that is a number other than 1 is `unsupported_version`;
-/// any other fault is a silent close.
-fn parse(line: &[u8]) -> Result<Hello<'_>, Refusal> {
-    const BAD: Refusal = Refusal::Silent("bad_hello");
-    let Ok(version) = serde_json::from_slice::<Version>(line) else {
-        return Err(BAD);
-    };
-    match version.clauseo_relay {
-        Some(Value::Number(version)) if version.as_u64() == Some(1) => {}
-        Some(Value::Number(_)) => return Err(Refusal::Answer(texts::UNSUPPORTED_VERSION)),
-        _ => return Err(BAD),
-    }
+/// The shape check; its `Err` is the reason for the log, `bad_hello`. Any number passes as the
+/// version here: [`check`] answers another one only once the token has passed.
+fn parse(line: &[u8]) -> Result<Hello<'_>, &'static str> {
     match serde_json::from_slice::<Hello<'_>>(line) {
         Ok(hello) if is_token(hello.token) && is_connector_name(hello.connector) => Ok(hello),
-        _ => Err(BAD),
+        _ => Err("bad_hello"),
     }
 }
 

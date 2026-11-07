@@ -1,5 +1,6 @@
 //! The session's lifetime: `end` revokes the token before it returns (so the token file can go
-//! next) and closes the connections, a handshake then gets `closed`, and once the relay is
+//! next) and closes the connections, a handshake then gets `bad_token` whatever its token (a
+//! client without the token learns nothing of the session's state), and once the relay is
 //! stopped nothing is accepted.
 
 use std::net::TcpStream;
@@ -17,7 +18,7 @@ fn after_end_the_token_no_longer_works_though_its_file_would_still_exist() {
     let mut late = Agent::connect(&rig.session);
     assert_eq!(
         late.hello(rig.token.expose(), "case-law"),
-        Some(json!({"clauseo_relay": 1, "ok": false, "error": "closed"}))
+        Some(json!({"clauseo_relay": 1, "ok": false, "error": "bad_token"}))
     );
     assert!(late.closed());
     // The connection that was open is closed, and nothing it sends is forwarded.
@@ -27,13 +28,13 @@ fn after_end_the_token_no_longer_works_though_its_file_would_still_exist() {
 }
 
 #[test]
-fn closed_is_answered_whatever_the_token_while_the_session_ends() {
+fn an_ended_session_answers_any_token_as_a_wrong_one() {
     let rig = rig();
     rig.session.end();
     let mut agent = Agent::connect(&rig.session);
     assert_eq!(
         agent.hello(&"1".repeat(64), "case-law"),
-        Some(json!({"clauseo_relay": 1, "ok": false, "error": "closed"}))
+        Some(json!({"clauseo_relay": 1, "ok": false, "error": "bad_token"}))
     );
 }
 
