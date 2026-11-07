@@ -24,14 +24,14 @@ fn install(agent: &AgentId, state: InstallState) -> AgentsEvent {
     }
 }
 
-fn ready() -> InstallState {
+pub(super) fn ready() -> InstallState {
     InstallState::Ready {
         version: "1.0.0".to_owned(),
     }
 }
 
 /// `agent` is not installed: `Missing`, as S18 says at start.
-fn not_installed(rig: &Rig, agent: &AgentId) {
+pub(super) fn not_installed(rig: &Rig, agent: &AgentId) {
     lock(&rig.agents.states).insert(
         agent.clone(),
         InstallState::Missing {
@@ -48,7 +48,7 @@ fn press(rig: &Rig, name: &str, agent: &AgentId, fields: &serde_json::Value) {
 
 /// The pump takes `states` for `agent`, in order; the install is `Ready` from the first
 /// `Ready` on.
-fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
+pub(super) fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
     if states
         .iter()
         .any(|state| matches!(state, InstallState::Ready { .. }))
@@ -62,12 +62,12 @@ fn pump(rig: &Rig, agent: &AgentId, states: Vec<InstallState>) {
     block_on(rig.backend.pump(futures::stream::iter(events)));
 }
 
-fn pending(rig: &Rig, agent: &AgentId) -> Option<Press> {
+pub(super) fn pending(rig: &Rig, agent: &AgentId) -> Option<Press> {
     lock(&rig.backend.pending).get(agent).map(|kept| kept.press)
 }
 
 /// The sign-in states sent for `agent` on `events`.
-fn sign_ins(events: Vec<SetupEvent>, agent: &AgentId) -> Vec<SignIn> {
+pub(super) fn sign_ins(events: Vec<SetupEvent>, agent: &AgentId) -> Vec<SignIn> {
     events
         .into_iter()
         .filter_map(|event| match event {
