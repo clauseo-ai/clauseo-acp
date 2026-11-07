@@ -889,7 +889,15 @@ for `--reclaim`.
     the agent's output first has up to 2 s per stream to drain, then the job ends, then the output
     gets 2 s again for what a descendant held. When the host's stdin ends (the host's cancel
     ladder closes it, then gives the outer 2 s before it ends the outer's job), the outer closes
-    the agent's stdin, so the agent reads the end of its input, and gives it 1 s: if the inner
+    the agent's stdin, so the agent reads the end of its input, and gives it 1 s from the stdin
+    end. The outer reads its stdin on a thread of its own and hands the pieces, over a bounded
+    channel (256 pieces of up to 64 KiB), to the thread that writes the agent's stdin, so it
+    sees the end, and the deadline starts, when the host's stdin ends, even while that write is
+    blocked on an agent that isn't reading. The writer closes the agent's stdin once it has handed
+    over what came before the end. A write still blocked when the 1 s runs out fails once the job's
+    end takes its pipe's other end. Only past 16 MiB that the agent hasn't read does the reader
+    wait too, and then it sees the end late. An agent that closed its own stdin ends nothing; the
+    host's stdin end is still seen. If the inner
     exits meanwhile, its code and output are kept and the order is the inner exit's; if not, the
     job ends then, and the 400 ms emptying wait follows. On either order, once the stdin ended
     the sweeper's logon starts only while at least 500 ms of the host's 2 s is left

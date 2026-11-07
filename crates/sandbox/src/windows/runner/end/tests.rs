@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use super::stdin_tests::Fed;
 use super::*;
 use crate::windows::runner::sweep::SWEPT;
 
@@ -365,11 +366,13 @@ fn the_sweeper_starts_only_while_its_budget_of_the_hosts_two_seconds_is_left() {
 fn a_sweeper_too_late_after_the_stdin_end_is_skipped_and_the_session_isnt_clean() {
     let last = HOST_BUDGET.checked_sub(SWEEPER_BUDGET).unwrap();
     let ms = Duration::from_millis(1);
-    // The stdin end is read at 0, the clock again once the job emptied.
-    let end = EndSweep::new(clocked(&[Duration::ZERO, last]));
+    // The stdin end is read at 0, the clock again for the grace left once the agent's stdin
+    // closed, and again once the job emptied.
+    let zero = Duration::ZERO;
+    let end = EndSweep::new(clocked(&[zero, zero, last]));
     relay_stdin(&b""[..], io::sink(), &end, SHORT, drop);
     assert_eq!(end.steps().done(), lines(&STARTED));
-    let end = EndSweep::new(clocked(&[Duration::ZERO, last + ms]));
+    let end = EndSweep::new(clocked(&[zero, zero, last + ms]));
     relay_stdin(&b""[..], io::sink(), &end, SHORT, drop);
     // The job still ended and emptied first; then no logon at all: no sweeper to leave suspended.
     assert_eq!(end.steps().done(), skipped(499));
@@ -441,10 +444,32 @@ impl io::Write for Closed {
 }
 
 #[test]
-fn the_agent_closing_its_stdin_starts_no_sweeper() {
+fn the_agent_closing_its_stdin_ends_nothing_but_the_hosts_stdin_end_still_counts() {
     let end = EndSweep::new(Record::default());
-    relay_stdin(&b"request\n"[..], Closed, &end, SHORT, drop);
-    assert_eq!(end.steps().done(), Vec::<String>::new());
+    let (feed, fed) = mpsc::channel::<Vec<u8>>();
+    let (closed, agent_closed) = mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let close = |_| {
+                end.steps().log("agent stdin closed");
+                closed.send(()).unwrap();
+            };
+            relay_stdin(Fed(fed), Closed, &end, SHORT, close);
+        });
+        feed.send(b"request\n".to_vec()).unwrap();
+        agent_closed.recv().unwrap();
+        // The agent refused the write and its stdin closed: nothing else, while the host's stdin
+        // is still open and still read.
+        feed.send(b"more\n".to_vec()).unwrap();
+        assert_eq!(end.steps().done(), lines(&["log agent stdin closed"]));
+        assert_eq!(end.began(), None);
+        drop(feed);
+    });
+    // The host's stdin then ended: its grace ran out, and the job's end and the sweeper followed.
+    let mut want = lines(&["log agent stdin closed"]);
+    want.extend(lines(&STARTED));
+    assert_eq!(end.steps().done(), want);
+    assert_eq!(end.began(), Some(EndSignal::Stdin));
     assert_eq!(copy(&b""[..], io::sink()), CopyEnd::Source);
     assert_eq!(copy(&b"x"[..], Closed), CopyEnd::Destination);
 }
