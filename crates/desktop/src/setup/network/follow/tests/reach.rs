@@ -12,6 +12,7 @@ use clauseo_agents::{Clock as _, SystemClock};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use url::Url;
 
+use super::super::super::ask::PROBE_CAP;
 use super::super::super::{NetworkSlot, OsAnswer, ProxyEnv};
 use super::super::{Follower, NetworkFollow};
 use super::{OS_PROXY, claude, facts, hook_env, since};
@@ -100,8 +101,8 @@ fn proxy_of(hook: &SetupHook) -> Option<String> {
     hook_env(hook, &claude()).get("HTTPS_PROXY").cloned()
 }
 
-/// Over `PROBE_CAP` (1 s), so a probe starts only when an answer asks for one, or a lookup is
-/// still running 1 s before the budget ends, as with the real 4.75 s.
+/// Over `PROBE_CAP` (1 s) and its 200 ms margin, so a probe starts only when an answer asks for
+/// one, or a lookup is still running 1.2 s before the budget ends, as with the real 4.75 s.
 const BUDGET: Duration = Duration::from_millis(1_500);
 
 /// VPN off: the PAC URL on the firm's server fails (no answer), and the kept proxy does not take
@@ -138,14 +139,15 @@ fn a_failed_lookup_with_the_proxy_reachable_keeps_it() {
 }
 
 /// A lookup that hangs past the budget (a PAC host that drops packets): the proxy is probed
-/// while it runs, and the route made within the budget goes direct when it does not answer.
+/// while it runs, and the route made within the budget goes direct when it does not answer, even
+/// when its probe takes the whole cap (a proxy that drops packets too).
 #[test]
 fn a_hanging_lookup_with_the_proxy_unreachable_goes_direct_within_the_budget() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
     let probe = Probe::reachable(false);
     let budget = BUDGET;
     let (network, hook) = inline(&os, &probe, budget);
-    *lock(&probe.takes) = Duration::from_millis(900);
+    *lock(&probe.takes) = PROBE_CAP;
     os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::from_secs(3));
     let started = SystemClock.monotonic();
     assert_eq!(network.refresher()().and_then(|n| n.proxy), None);
