@@ -248,7 +248,10 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   a link as a link, a folder with `remove_dir_all`, a file with `remove_file`. It walks by hand
   only toward what it keeps.
 - **What it keeps.** `sandbox` (S15's records), unless `--sandbox-removed`, and
-  `sandbox\set-aside` whenever it holds anything.
+  `sandbox\set-aside` whenever it holds anything but Clauseo's own bookkeeping: a matter's
+  folder holding only `record.json` with no open session, `set-aside.lock`, and a
+  `manifest.json` listing no item still set aside, each a plain file with one link, counts as
+  empty and goes, by handle (`crates/desktop/src/delete_app_data/set_aside.rs`).
 - **Exit codes and messages.** 0 deleted; 2 or 3 a folder kept and all else gone; 4 a folder
   kept and something else left; 1 refused or something left with nothing kept. The uninstaller
   shows one box unless silent (`English.nsh`): `deleteAppDataKept` naming the kept folder,

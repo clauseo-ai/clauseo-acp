@@ -1,21 +1,23 @@
 //! The set-aside at the end of the way down with `--sandbox-removed`
 //! (`<data>\sandbox\set-aside`): kept whole when it holds anything of the lawyer's, deleted when
 //! it holds only Clauseo's own bookkeeping. Every tier-B launch leaves `record.json` and
-//! `set-aside.lock` in `set-aside\<matter>\` ([`SET_ASIDE_BOOKKEEPING`]); counting those as the
-//! lawyer's files would show the Kept box to every lawyer who used tier B.
+//! `set-aside.lock` in `set-aside\<matter>\`, and a pass that set something aside leaves
+//! `manifest.json`, which a restore of every item empties ([`SET_ASIDE_BOOKKEEPING`]); counting
+//! those as the lawyer's files would show the Kept box to every lawyer who used tier B.
 //!
 //! It counts as empty when each entry in it is a real folder (no reparse point) holding only
-//! regular files (no reparse point, no folder) named exactly `record.json` or `set-aside.lock`.
-//! Anything else (a pass folder with moved files, a manifest, any other name, a name with a
+//! regular files (no reparse point, no folder) named exactly `record.json`, `set-aside.lock` or
+//! `manifest.json`. Anything else (a pass folder with moved files, any other name, a name with a
 //! trailing dot or space, a link, a folder under a bookkeeping name, an entry that cannot be
 //! listed or read) keeps the whole set-aside, untouched. Each folder is pinned while it is listed
 //! (`ops::pin_folder`: refused if a reparse point).
 //!
 //! The deletion itself is the sandbox crate's (`forget_set_aside_bookkeeping`), one matter at a
 //! time and by handle, never through a link: the set-aside opened as itself, the matter's folder
-//! and each file relative to it, each refused if a reparse point; a record that still lists an
-//! open session, or can't be read, or a file with another hard link, leaves that matter's
-//! folder, and the set-aside is then kept. The pins are closed first, since they share reads
+//! and each file relative to it, each refused if a reparse point, all checked before any is
+//! deleted; a record that still lists an open session, a manifest that still lists an item set
+//! aside, either unreadable, or a file with another hard link, leaves that matter's folder as it
+//! is, and the set-aside is then kept. The pins are closed first, since they share reads
 //! only. Last, the emptied set-aside goes by `remove_dir` by its path, which removes only an
 //! empty folder, or a link put in its place as the link alone; nothing here recurses.
 

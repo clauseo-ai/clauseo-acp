@@ -96,10 +96,12 @@ use serde::{Deserialize, Serialize};
 /// The set-aside's folder in the sandbox folder (`<data_dir>\sandbox\set-aside\<matter>`). Public
 /// so the uninstaller keeps it by this name, not by a copy of the string.
 pub const SET_ASIDE_DIR: &str = "set-aside";
-/// The set-aside's own bookkeeping in each matter's folder, which every launch leaves: the record
-/// and the lock (`files.rs`). Public so the uninstaller counts a matter's folder holding only
-/// these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`).
-pub const SET_ASIDE_BOOKKEEPING: [&str; 2] = ["record.json", "set-aside.lock"];
+/// The set-aside's own bookkeeping in each matter's folder (`files.rs`): the record and the lock,
+/// which every launch leaves, and the manifest, which a pass that set something aside leaves and
+/// a restore of every item empties. Public so the uninstaller counts a matter's folder holding
+/// only these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`),
+/// each only when its contents allow (a closed record, a manifest with nothing outstanding).
+pub const SET_ASIDE_BOOKKEEPING: [&str; 3] = ["record.json", "set-aside.lock", "manifest.json"];
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;

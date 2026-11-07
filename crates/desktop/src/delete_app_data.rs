@@ -34,10 +34,11 @@
 //!   `--remove` needs to take its access rules back off the lawyer's folders); with it,
 //!   `sandbox\set-aside` (the lawyer's own files that tier B moved aside) unless it is a real
 //!   folder holding nothing but Clauseo's bookkeeping: real folders, one per matter, each holding
-//!   only regular files named exactly `record.json` or `set-aside.lock`, which every tier-B
-//!   launch leaves. Those files go by handle (the sandbox crate's `forget_set_aside_bookkeeping`,
-//!   which also keeps a matter whose record still lists an open session or has another hard
-//!   link), the emptied set-aside by `remove_dir` (`set_aside.rs`); anything else there keeps it
+//!   only regular files named exactly `record.json`, `set-aside.lock` (which every tier-B launch
+//!   leaves) or `manifest.json`. Those files go by handle (the sandbox crate's
+//!   `forget_set_aside_bookkeeping`, which also keeps a matter whose record still lists an open
+//!   session, whose manifest still lists an item set aside, or with a hard-linked file), the
+//!   emptied set-aside by `remove_dir` (`set_aside.rs`); anything else there keeps it
 //!   whole. A `sandbox` that is a link goes as a link and nothing behind it is kept:
 //!   with [`SANDBOX_REMOVED`] like any other link; without it, by handle
 //!   (`ops::unlink_name_surrogate`): the reparse tag is read on the handle that deletes, only a
