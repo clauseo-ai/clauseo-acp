@@ -101,9 +101,10 @@ fn a_stale_prep_never_removes_the_newer_launch_folder() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// N3: the first launch finds `run` set aside in one rename, makes its folders at once, and the
-/// earlier run's folders (and a `run.old-*` an earlier start left) are deleted in the
-/// background; a link of that name is not followed.
+/// N3: the first launch finds `run` set aside in one rename into the parking folder
+/// (`<data>/set-aside`, round 6), makes its folders at once, and the earlier run's folders (and a
+/// legacy `run.old-*` an earlier start left) are deleted in the background; a link of that name
+/// is not followed.
 #[test]
 fn the_start_up_sweep_sets_run_aside_and_deletes_it_in_the_background() {
     let data = scratch("sweep");
@@ -124,7 +125,15 @@ fn the_start_up_sweep_sets_run_aside_and_deletes_it_in_the_background() {
         names(&data)
             .iter()
             .all(|name| !name.starts_with("run.old-")),
-        "the set-aside folders are deleted"
+        "the legacy set-aside folders are deleted"
+    );
+    // Round 6: everything is parked in `<data>/set-aside`, which stays, emptied.
+    let parking = data.join("set-aside");
+    assert!(write::is_real_dir(&parking));
+    assert_eq!(
+        names(&parking),
+        Vec::<String>::new(),
+        "the parked folders are deleted"
     );
     assert!(live.work.is_dir(), "the live launch's folders stay");
     // Once per host start: a second launch sweeps nothing.

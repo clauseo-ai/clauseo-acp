@@ -148,6 +148,18 @@ pub(crate) fn fence_denied(state: &Path, kind: AgentKind) -> Vec<PathBuf> {
     }
 }
 
+/// The data folder's parking folder (round 6): every folder set aside goes there in one rename,
+/// the earlier run's `run` (`launch_checks/sweep.rs`) and a state folder's tree too deep to
+/// remove (`handle.rs`), and the next start's run sweep deletes what it holds. Made by the
+/// sweep before any launch and kept; every fence denies it whole, an existing path, so what is
+/// set aside there after a fence was built is covered too; no jail is ever granted it.
+pub(crate) const SET_ASIDE_DIR: &str = "set-aside";
+
+/// `<data>/set-aside` ([`SET_ASIDE_DIR`]).
+pub(crate) fn set_aside_dir(data: &Path) -> PathBuf {
+    data.join(SET_ASIDE_DIR)
+}
+
 /// `<data>/agent-state`.
 pub(crate) fn state_root(data: &Path) -> PathBuf {
     data.join(STATE_ROOT)

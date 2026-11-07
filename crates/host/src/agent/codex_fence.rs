@@ -92,8 +92,12 @@ const AGENTS_DENIED: [&str; 6] = [
     "npmrc-global",
 ];
 
-/// The run sweep's set-aside folders (`launch_checks/sweep.rs`), as a glob under `<data>`.
-pub(crate) const SET_ASIDE_GLOB: &str = "run.old-*";
+/// The run sweep's legacy set-aside folders at the data folder's top, from before the parking
+/// folder (`run.old-<n>`): denied by name when they exist at the launch. Everything set aside
+/// now goes into `<data>/set-aside`, denied whole ([`rules`]), never by glob: a glob rooted at
+/// `<data>` would have ripgrep walk the whole data folder at every command and list every file
+/// of a set-aside run against the 8192-match cap.
+pub(crate) const SET_ASIDE_PREFIX: &str = "run.old-";
 
 /// The folder holding every session's run folder, denied whole. `agent-state` is denied entry
 /// by entry ([`state_denies`]), so the own state folder's `tmp` stays readable.
@@ -127,26 +131,35 @@ fn state_always_denied() -> Vec<String> {
     names
 }
 
-/// Deny globs under `<data>`, for every matter, one made after the launch included (round 5):
-/// another matter's Codex login link, `.env`, `config.toml`, transcripts, prompt history, log
-/// and databases, and every matter's Claude state folder. codex-rs keeps glob entries (deny
-/// entries) when it rebuilds each turn's policy (`protocol/src/permissions.rs`
-/// `from_legacy_sandbox_policy_preserving_deny_entries`), and bubblewrap expands them at each
-/// command (`linux-sandbox/src/bwrap.rs:241-245`), so a matter made mid-session is covered from
-/// the next command. A glob entry is deny only, with no exception syntax, so `agent-state/*/**`
-/// with the own `tmp` and `notes` left out cannot be written; another matter's `notes` made
-/// after the launch stays readable (the named residual), since the own notes must stay
-/// writable and a glob deny wins over it.
-pub(crate) const STATE_GLOBS: [&str; 9] = [
-    "agent-state/*/codex-acp/auth.json",
-    "agent-state/*/codex-acp/.env",
-    "agent-state/*/codex-acp/config.toml",
-    "agent-state/*/codex-acp/sessions/**",
-    "agent-state/*/codex-acp/archived_sessions/**",
-    "agent-state/*/codex-acp/history.jsonl",
-    "agent-state/*/codex-acp/log/**",
-    "agent-state/*/codex-acp/*.sqlite*",
-    "agent-state/*/claude-acp/**",
+/// Deny globs under `<data>`, for every matter, one made after the launch included (rounds 5
+/// and 6): every matter's Codex login link, `.env`, `config.toml`, prompt history and live
+/// shell snapshots, and Claude's login store and `.claude.json`.
+///
+/// - Codex keeps glob entries (deny entries) when it rebuilds each turn's policy
+///   (`protocol/src/permissions.rs` `from_legacy_sandbox_policy_preserving_deny_entries`).
+///   Seatbelt turns each into a regex; bubblewrap expands them at each command with ripgrep
+///   (`linux-sandbox/src/bwrap.rs` `expand_unreadable_globs_with_ripgrep`): each pattern is split
+///   at its first glob character (`split_pattern_for_ripgrep`), the static part is the search
+///   root (here `<data>/agent-state`), and `rg --files --glob <rest> -- <root>` runs in the
+///   command's working folder. ripgrep reads a glob holding `/` relative to its working folder,
+///   so each pattern's rest starts with `**/`, which matches from anywhere (round 6's D1; the
+///   real command is run in `codex_fence/rg_tests.rs`).
+/// - A glob is deny only, with no exception syntax, so `agent-state/*/**` with the own `tmp`
+///   and `notes` left out cannot be written, and ripgrep lists files only, so each pattern names
+///   files, not a folder. Transcripts, logs and databases of a matter made after the launch, and
+///   its `notes`, stay readable (the named residuals): a broad pattern would count every such
+///   file of every matter against Codex's cap of 8192 matches (`MAX_UNREADABLE_GLOB_MATCHES`,
+///   bwrap.rs:734-738), past which every sandboxed command fails closed.
+/// - All patterns share one search root, so ripgrep walks `agent-state` once per command
+///   (bwrap.rs groups them by root).
+pub(crate) const STATE_GLOBS: [&str; 7] = [
+    "agent-state/**/codex-acp/auth.json",
+    "agent-state/**/codex-acp/.env",
+    "agent-state/**/codex-acp/config.toml",
+    "agent-state/**/codex-acp/history.jsonl",
+    "agent-state/**/codex-acp/shell_snapshots/*",
+    "agent-state/**/claude-acp/.credentials.json",
+    "agent-state/**/claude-acp/.claude.json",
 ];
 
 /// The `agent-state` denies of a Codex launch whose state folder is `state` under `data`, read
@@ -192,6 +205,19 @@ pub(crate) fn state_denies(data: &Path, state: &Path) -> Vec<PathBuf> {
     if !listed {
         tracing::warn!("a state folder could not be listed: agent-state is denied whole");
         return vec![root];
+    }
+    // Legacy `run.old-*` at the data folder's top, which the sweep moves into the parking
+    // folder at the host's start: denied by name if one is still there.
+    if let Ok(entries) = std::fs::read_dir(data) {
+        for entry in entries.flatten() {
+            let legacy = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(SET_ASIDE_PREFIX));
+            if legacy {
+                denied.push(entry.path());
+            }
+        }
     }
     for name in state_always_denied() {
         let path = state.join(name);
@@ -267,13 +293,16 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(SESSION_PARENTS.iter().map(|name| data.join(name)));
+    // The parking folder whole, an existing path (made by the run sweep before any launch): on
+    // bubblewrap the mask covers what is set aside there later too (round 6).
+    denied.push(crate::agent::state_folder::set_aside_dir(data));
     denied.extend(session.state_denies.iter().cloned());
     denied
 }
 
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
 /// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the session's
-/// run folder, notes and state folder as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
+/// run folder and notes as `write`, scoped under `<data>`, plus [`STATE_GLOBS`]
 /// when the data folder's path holds no glob character (a scoped glob reads its base as glob text;
 /// decision record 0030 names the gap). A rule outside `<data>` is keyed by its own path. Empty on
 /// Windows (`windows`). A path that is not UTF-8 is left out with a warning; the launch already
@@ -314,11 +343,9 @@ pub(crate) fn keys(
     }
     if base.contains(['*', '?', '[', ']', '{', '}']) {
         tracing::warn!(
-            "the data folder's path holds a glob character: run.old-* and later matters' \
-             state stay readable"
+            "the data folder's path holds a glob character: later matters' logins stay readable"
         );
     } else {
-        scoped.insert(SET_ASIDE_GLOB.to_owned(), Value::from("deny"));
         for glob in STATE_GLOBS {
             scoped.insert(glob.to_owned(), Value::from("deny"));
         }
@@ -334,6 +361,9 @@ pub(crate) fn keys(
     keys
 }
 
+#[cfg(test)]
+#[path = "codex_fence/rg_tests.rs"]
+mod rg_tests;
 #[cfg(test)]
 #[path = "codex_fence/state_tests.rs"]
 mod state_tests;
