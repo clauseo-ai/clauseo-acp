@@ -25,11 +25,16 @@ pub(crate) type Canonicalize = Arc<dyn Fn(&Path) -> io::Result<PathBuf> + Send +
 /// canonicalise failed or ran out of time.
 static RESOLVED: Mutex<Option<HashMap<PathBuf, PathBuf>>> = Mutex::new(None);
 
+/// Held by the one check that resolves new entries, from finding them to keeping the answers,
+/// so a check that comes meanwhile waits for it (at most the wait) and then finds them known,
+/// and no entry is canonicalised twice. The canonicalise threads never take it.
+static RESOLVING: Mutex<()> = Mutex::new(());
+
 /// `refused` in order, each entry as [`RESOLVED`] keeps it; the entries not there yet are
-/// canonicalised by `canonicalize` first, at most `wait` in all. A canonicalise still running
-/// after the wait is left to finish on its thread, detached: it holds no lock, only the sending
-/// end of a channel nobody reads. Two checks that both meet a new entry both resolve it; the
-/// answers agree, so that only costs time.
+/// canonicalised by `canonicalize` first, at most `wait` in all, under [`RESOLVING`]. A
+/// canonicalise still running after the wait is left to finish on its thread, detached: it holds
+/// no lock, only the sending end of a channel nobody reads. When any entry ran out of time, one
+/// warning gives how many (never the paths).
 pub(crate) fn resolved_entries(
     refused: &[PathBuf],
     canonicalize: &Canonicalize,
@@ -39,17 +44,29 @@ pub(crate) fn resolved_entries(
         let cache = RESOLVED.lock().unwrap_or_else(PoisonError::into_inner);
         cache.as_ref().and_then(|map| map.get(entry).cloned())
     };
-    let new: Vec<PathBuf> = refused
-        .iter()
-        .filter(|entry| known(entry).is_none())
-        .cloned()
-        .collect();
-    if !new.is_empty() {
-        let answers = resolve_all(&new, canonicalize, wait);
-        let mut cache = RESOLVED.lock().unwrap_or_else(PoisonError::into_inner);
-        cache
-            .get_or_insert_with(HashMap::new)
-            .extend(new.into_iter().zip(answers));
+    let unknown = || -> Vec<PathBuf> {
+        refused
+            .iter()
+            .filter(|entry| known(entry).is_none())
+            .cloned()
+            .collect()
+    };
+    if !unknown().is_empty() {
+        let _resolving = RESOLVING.lock().unwrap_or_else(PoisonError::into_inner);
+        let new = unknown();
+        if !new.is_empty() {
+            let (answers, timed_out) = resolve_all(&new, canonicalize, wait);
+            if timed_out > 0 {
+                tracing::warn!(
+                    timed_out,
+                    "refused folders did not answer in time; compared by their path as written"
+                );
+            }
+            let mut cache = RESOLVED.lock().unwrap_or_else(PoisonError::into_inner);
+            cache
+                .get_or_insert_with(HashMap::new)
+                .extend(new.into_iter().zip(answers));
+        }
     }
     refused
         .iter()
@@ -58,9 +75,14 @@ pub(crate) fn resolved_entries(
 }
 
 /// `entries` canonicalised, each on a thread of its own, at most `wait` in all; an entry whose
-/// canonicalise fails, does not answer within `wait`, or gets no thread, as written. The wait is
+/// canonicalise fails, does not answer within `wait`, or gets no thread, as written. With them,
+/// how many did not answer within `wait`. The wait is
 /// one more thread's `recv_timeout` on a channel nobody sends on, so no clock is read.
-fn resolve_all(entries: &[PathBuf], canonicalize: &Canonicalize, wait: Duration) -> Vec<PathBuf> {
+fn resolve_all(
+    entries: &[PathBuf],
+    canonicalize: &Canonicalize,
+    wait: Duration,
+) -> (Vec<PathBuf>, usize) {
     let mut answers: Vec<PathBuf> = entries.to_vec();
     let (sender, receiver) = mpsc::channel::<Option<(usize, PathBuf)>>();
     let mut pending = 0_usize;
@@ -90,7 +112,7 @@ fn resolve_all(entries: &[PathBuf], canonicalize: &Canonicalize, wait: Duration)
             }
         });
     if timed.is_err() {
-        return answers;
+        return (answers, 0);
     }
     while pending > 0 {
         match receiver.recv() {
@@ -105,5 +127,5 @@ fn resolve_all(entries: &[PathBuf], canonicalize: &Canonicalize, wait: Duration)
         }
     }
     drop(stop);
-    answers
+    (answers, pending)
 }
