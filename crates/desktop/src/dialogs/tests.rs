@@ -103,3 +103,49 @@ fn rfd_keeps_its_gtk_backend_and_not_the_portal() {
         "rfd takes the xdg portal:{entry}"
     );
 }
+
+/// The picker opens beside the last pick, else at home, each only when it is a non-empty
+/// absolute path. The paths are not on disk: the helper must not stat them.
+#[test]
+fn the_picker_starts_beside_the_last_pick_or_at_home() {
+    let root = Path::new(if cfg!(windows) { r"C:\" } else { "/" });
+    let home = root.join("Users").join("rohan");
+    let parent = home.join("Matters");
+    let matter = parent.join("Smith");
+    let relative = Path::new("Matters").join("Smith");
+    let (home, matter, parent) = (home.as_path(), matter.as_path(), parent.as_path());
+    // Beside the last pick, the parent of the folder picked.
+    assert_eq!(
+        start_folder(Some(matter), Some(home)),
+        Some(parent.to_path_buf())
+    );
+    // A last pick at the root has no parent: home.
+    assert_eq!(
+        start_folder(Some(root), Some(home)),
+        Some(home.to_path_buf())
+    );
+    // No last pick: home.
+    assert_eq!(start_folder(None, Some(home)), Some(home.to_path_buf()));
+    // A last pick whose parent is relative, or empty, is no start: home.
+    assert_eq!(
+        start_folder(Some(relative.as_path()), Some(home)),
+        Some(home.to_path_buf())
+    );
+    assert_eq!(
+        start_folder(Some(Path::new("")), Some(home)),
+        Some(home.to_path_buf())
+    );
+    // A good last pick wins over an unusable home.
+    assert_eq!(
+        start_folder(Some(matter), Some(Path::new("rohan"))),
+        Some(parent.to_path_buf())
+    );
+    // Neither usable: none.
+    assert_eq!(start_folder(None, Some(Path::new(""))), None);
+    assert_eq!(start_folder(None, Some(Path::new("Users/rohan"))), None);
+    assert_eq!(
+        start_folder(Some(relative.as_path()), Some(Path::new("rohan"))),
+        None
+    );
+    assert_eq!(start_folder(None, None), None);
+}

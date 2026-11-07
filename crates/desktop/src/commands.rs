@@ -216,9 +216,14 @@ pub(crate) async fn answer_permission<R: Runtime>(
 pub(crate) async fn pick_folder<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
+    last: State<'_, crate::dialogs::LastPick>,
 ) -> Result<Option<PickedFolder>, HostError> {
-    let picker = crate::dialogs::NativePicker::new(app);
     let home = SystemDirs.home();
+    let start = crate::dialogs::start_folder(last.get().as_deref(), home.as_deref());
+    // Windows only: its dialog would otherwise open on Documents, which may sit on a share that
+    // is down. Elsewhere the OS's own remembered folder stays.
+    let start = if cfg!(windows) { start } else { None };
+    let picker = crate::dialogs::NativePicker::new(app, start, &last);
     bridge.pick_folder(&picker, home.as_deref()).await
 }
 
