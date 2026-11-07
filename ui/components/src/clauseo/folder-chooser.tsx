@@ -4,7 +4,9 @@
 // Enter or a press opening one, Backspace going up; a typed location and Go; then Cancel and Choose this folder, which
 // chooses the folder shown, never the highlighted one. Folders Clauseo refuses are listed greyed with why, and don't
 // open. Escape cancels; focus stays inside. It opens over New matter: Base UI's Escape stops at the chooser, and a
-// press outside doesn't close it. The words are words-matters.ts's.
+// press outside doesn't close it. It shows before the desktop knows where it may start or what the first folder holds:
+// "Looking…" stands, quiet, where each is still on its way. In a short window the places to start stand in a column
+// beside the folders, and the folders take the height left (room/folder-chooser.css). The words are words-matters.ts's.
 import { Dialog as Base } from "@base-ui/react/dialog";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../lib/cn.ts";
@@ -76,7 +78,8 @@ function highlightOf(next: ChooserListing, last: ChooserListing | null): number 
 
 export type FolderChooserProps = {
   open: boolean;
-  starts: readonly ChooserStartPoint[];
+  /** The places to start; null while the desktop reads the drives. */
+  starts: readonly ChooserStartPoint[] | null;
   /** The folder shown; null before the first listing lands. */
   listing: ChooserListing | null;
   /** A listing is on its way: the folders shown stay, quiet, and nothing moves until it lands. */
@@ -173,11 +176,14 @@ export function FolderChooser({
   const crumbs = listing?.crumbs ?? [];
   const where = crumbs.map((c) => (c === "" ? w.m("Home") : c));
   // what a screen reader hears as the chooser changes: the wait, a folder that didn't open, or where it is now
+  const looking = w.m("Looking…");
   const heard = waiting
     ? w.m("Waiting for you to confirm…")
-    : busy
-      ? ""
-      : (stateLine ?? where.join(", "));
+    : listing === null
+      ? looking
+      : busy
+        ? ""
+        : (stateLine ?? where.join(", "));
 
   return (
     <Base.Root
@@ -206,120 +212,142 @@ export function FolderChooser({
             </Say>
           </Base.Description>
 
-          <div className="mt-s3 flex flex-wrap gap-s1-5" data-testid="chooser-starts">
-            {starts.map((s) => (
-              <Button
-                key={s.key}
-                kind="tone"
-                size="small"
-                disabled={still}
-                data-testid="chooser-start"
-                onClick={() => go({ kind: "start", key: s.key })}
-              >
-                {s.kind === "drive" ? <span lang="en">{s.display}</span> : w.m(START_WORDS[s.kind])}
-              </Button>
-            ))}
-          </div>
-
-          <div className="mt-s3 flex items-center gap-s2 min-w-0">
-            <Button
-              kind="quiet"
-              size="small"
-              disabled={still || atRoot || listing === null}
-              data-testid="chooser-up"
-              onClick={() => go({ kind: "up" })}
-            >
-              {w.m("Up")}
-            </Button>
-            <p
-              className="folder-chooser-crumbs min-w-0 flex-1 text-small-row text-primary"
-              title={where.join(" › ")}
-              data-testid="chooser-where"
-            >
-              {where.map((c, i) => (
-                <span key={i} className="whitespace-nowrap">
-                  {i > 0 && (
-                    <span aria-hidden="true" className="px-s1 text-faint">
-                      ›
-                    </span>
-                  )}
-                  {crumbs[i] === "" ? <Say>{c}</Say> : <span lang="en">{c}</span>}
-                </span>
-              ))}
-            </p>
-          </div>
-
-          <div className="folder-chooser-list mt-s2" aria-busy={still || undefined}>
+          <div className="folder-chooser-body mt-s3">
             <div
-              ref={list}
-              id={listId}
-              role="listbox"
-              tabIndex={0}
-              aria-label={where.join(", ")}
-              aria-activedescendant={items.length > 0 ? `${listId}-${at}` : undefined}
-              aria-describedby={stateLine === null ? undefined : lineId}
-              className={cn("outline-none", busy && "opacity-60")}
-              data-testid="chooser-list"
-              onKeyDown={onListKey}
+              className="folder-chooser-starts flex flex-wrap gap-s1-5"
+              data-testid="chooser-starts"
             >
-              {items.map((item, i) => (
-                <div
-                  key={`${i}-${item.name}`}
-                  id={`${listId}-${i}`}
-                  role="option"
-                  aria-selected={i === at}
-                  aria-disabled={item.refused || undefined}
-                  data-highlighted={i === at ? "" : undefined}
-                  data-disabled={item.refused ? "" : undefined}
-                  data-testid="chooser-item"
-                  className={cn(row, "folder-chooser-row")}
-                  onPointerDown={(e) => {
-                    // the list keeps the focus: a press opens, as Enter does
-                    e.preventDefault();
-                    list.current?.focus();
-                    setHi({ of: listing, at: i });
-                  }}
-                  onClick={() => openRow(i)}
+              {starts === null && (
+                <p
+                  className="flex min-h-control-small items-center text-small text-muted"
+                  data-testid="chooser-starts-looking"
                 >
-                  <IconFolder size={16} className="shrink-0 text-muted" />
-                  <span lang="en" className="min-w-0 flex-1 truncate">
-                    {item.name}
-                  </span>
-                  {item.refused && (
-                    <span className={cn(rowNote, "shrink-0")}>
-                      <Say>{w.m("Can't be a matter")}</Say>
-                    </span>
+                  <Say>{looking}</Say>
+                </p>
+              )}
+              {starts?.map((s) => (
+                <Button
+                  key={s.key}
+                  kind="tone"
+                  size="small"
+                  disabled={still}
+                  data-testid="chooser-start"
+                  onClick={() => go({ kind: "start", key: s.key })}
+                >
+                  {s.kind === "drive" ? (
+                    <span lang="en">{s.display}</span>
+                  ) : (
+                    w.m(START_WORDS[s.kind])
                   )}
-                </div>
+                </Button>
               ))}
             </div>
-            {listing?.state.kind === "folders" && listing.state.more && (
-              <p className={cn(rowNote, "px-s3 py-s1-5")} data-testid="chooser-more">
-                <Say>{w.m("Some folders aren't shown.")}</Say>
+
+            <div className="folder-chooser-where mt-s3 flex items-center gap-s2 min-w-0">
+              <Button
+                kind="quiet"
+                size="small"
+                disabled={still || atRoot || listing === null}
+                data-testid="chooser-up"
+                onClick={() => go({ kind: "up" })}
+              >
+                {w.m("Up")}
+              </Button>
+              <p
+                className="folder-chooser-crumbs min-w-0 flex-1 text-small-row text-primary"
+                title={where.join(" › ")}
+                data-testid="chooser-where"
+              >
+                {where.map((c, i) => (
+                  <span key={i} className="whitespace-nowrap">
+                    {i > 0 && (
+                      <span aria-hidden="true" className="px-s1 text-faint">
+                        ›
+                      </span>
+                    )}
+                    {crumbs[i] === "" ? <Say>{c}</Say> : <span lang="en">{c}</span>}
+                  </span>
+                ))}
               </p>
-            )}
-            {stateLine !== null && (
-              <div className="grid justify-items-start gap-s2 px-s3 py-s2">
-                <p id={lineId} className="text-small text-primary" data-testid="chooser-state">
-                  <Say>{stateLine}</Say>
-                </p>
-                {listing?.state.kind === "no_answer" && (
-                  <Button
-                    kind="tone"
-                    size="small"
-                    disabled={still}
-                    data-testid="chooser-again"
-                    onClick={() => go({ kind: "again" })}
+            </div>
+
+            <div className="folder-chooser-list mt-s2" aria-busy={still || undefined}>
+              <div
+                ref={list}
+                id={listId}
+                role="listbox"
+                tabIndex={0}
+                aria-label={where.join(", ")}
+                aria-activedescendant={items.length > 0 ? `${listId}-${at}` : undefined}
+                aria-describedby={stateLine === null ? undefined : lineId}
+                className={cn("outline-none", busy && "opacity-60")}
+                data-testid="chooser-list"
+                onKeyDown={onListKey}
+              >
+                {items.map((item, i) => (
+                  <div
+                    key={`${i}-${item.name}`}
+                    id={`${listId}-${i}`}
+                    role="option"
+                    aria-selected={i === at}
+                    aria-disabled={item.refused || undefined}
+                    data-highlighted={i === at ? "" : undefined}
+                    data-disabled={item.refused ? "" : undefined}
+                    data-testid="chooser-item"
+                    className={cn(row, "folder-chooser-row")}
+                    onPointerDown={(e) => {
+                      // the list keeps the focus: a press opens, as Enter does
+                      e.preventDefault();
+                      list.current?.focus();
+                      setHi({ of: listing, at: i });
+                    }}
+                    onClick={() => openRow(i)}
                   >
-                    {w.m("Try again")}
-                  </Button>
-                )}
+                    <IconFolder size={16} className="shrink-0 text-muted" />
+                    <span lang="en" className="min-w-0 flex-1 truncate">
+                      {item.name}
+                    </span>
+                    {item.refused && (
+                      <span className={cn(rowNote, "shrink-0")}>
+                        <Say>{w.m("Can't be a matter")}</Say>
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
-            )}
+              {listing === null && (
+                <p className="px-s3 py-s1-5 text-small text-muted" data-testid="chooser-looking">
+                  <Say>{looking}</Say>
+                </p>
+              )}
+              {listing?.state.kind === "folders" && listing.state.more && (
+                <p className={cn(rowNote, "px-s3 py-s1-5")} data-testid="chooser-more">
+                  <Say>{w.m("Some folders aren't shown.")}</Say>
+                </p>
+              )}
+              {stateLine !== null && (
+                <div className="grid justify-items-start gap-s2 px-s3 py-s2">
+                  <p id={lineId} className="text-small text-primary" data-testid="chooser-state">
+                    <Say>{stateLine}</Say>
+                  </p>
+                  {listing?.state.kind === "no_answer" && (
+                    <Button
+                      kind="tone"
+                      size="small"
+                      disabled={still}
+                      data-testid="chooser-again"
+                      onClick={() => go({ kind: "again" })}
+                    >
+                      {w.m("Try again")}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           <form
-            className="mt-s3 grid gap-s1-5"
+            className="folder-chooser-typed mt-s3 grid gap-s1-5"
             onSubmit={(e) => {
               e.preventDefault();
               const path = typed.trim();
@@ -353,7 +381,10 @@ export function FolderChooser({
             </div>
           </form>
 
-          <div className="mt-s4 flex flex-wrap items-center justify-end gap-s2" data-dialog-acts="">
+          <div
+            className="folder-chooser-acts mt-s4 flex flex-wrap items-center justify-end gap-s2"
+            data-dialog-acts=""
+          >
             {waiting && (
               <p className="mr-auto text-small text-muted" data-testid="chooser-waiting">
                 <Say>{w.m("Waiting for you to confirm…")}</Say>

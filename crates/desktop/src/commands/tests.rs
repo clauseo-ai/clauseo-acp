@@ -31,6 +31,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             answer_permission,
             pick_folder,
             pick_folder_or_choose,
+            chooser_starts,
             chooser_list,
             chooser_choose,
             chooser_cancel,

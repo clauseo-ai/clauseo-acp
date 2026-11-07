@@ -1,5 +1,6 @@
 // One session of Clauseo's own folder chooser (transport/chooser.ts), loaded the first time the desktop asks for it:
-// it lists the first place to start, then each place the lawyer goes, through the session's calls, and ends the
+// it shows at once, saying it's looking while the desktop reads the drives (the places to start) and then the first
+// place, each filling in as it lands; then it lists each place the lawyer goes, through the session's calls, and ends the
 // request with the folder the desktop registered after its native confirm, or with Cancel. A confirm the lawyer
 // declines leaves the chooser open where it was. A call the desktop refuses (a typed location it doesn't take, a
 // session it closed) says Clauseo can't use the folder, and the chooser stays.
@@ -26,6 +27,8 @@ const refused = (shown: Listing | null): Listing => ({
 });
 
 export function FolderChooserSession({ request }: { request: ChooserRequest }) {
+  // null while the desktop reads the drives
+  const [starts, setStarts] = useState<readonly StartPoint[] | null>(null);
   const [listing, setListing] = useState<Listing | null>(null);
   // busy from the start: the first listing is on its way
   const [busy, setBusy] = useState(true);
@@ -60,8 +63,23 @@ export function FolderChooserSession({ request }: { request: ChooserRequest }) {
     // once, though Strict Mode runs the effect twice
     if (started.current) return;
     started.current = true;
-    const first = firstOf(request.start.starts);
-    void load(first === undefined ? { kind: "again" } : { kind: "start", key: first.key });
+    void (async () => {
+      let points: StartPoint[];
+      try {
+        points = await request.wire.starts();
+      } catch {
+        if (live.current) {
+          setStarts([]);
+          setListing(refused);
+          setBusy(false);
+        }
+        return;
+      }
+      if (!live.current) return;
+      setStarts(points);
+      const first = firstOf(points);
+      await load(first === undefined ? { kind: "again" } : { kind: "start", key: first.key });
+    })();
   });
 
   const choose = async () => {
@@ -79,7 +97,7 @@ export function FolderChooserSession({ request }: { request: ChooserRequest }) {
   return (
     <FolderChooser
       open
-      starts={request.start.starts}
+      starts={starts}
       listing={listing}
       busy={busy}
       waiting={waiting}

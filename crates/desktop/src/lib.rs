@@ -252,6 +252,7 @@ pub fn run() -> tauri::Result<()> {
             commands::answer_permission,
             commands::pick_folder,
             commands::pick_folder_or_choose,
+            commands::chooser_starts,
             commands::chooser_list,
             commands::chooser_choose,
             commands::chooser_cancel,
@@ -306,7 +307,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(Bridge::with_setup(cell, setup));
             app.manage(counts::CountsState::default());
             app.manage(dialogs::LastPick::default());
-            app.manage(chooser::Chooser::system());
+            app.manage(chooser::Chooser::started());
             open_main_window(app)?;
             start_host(app.handle().clone(), start, locations, parts)?;
             Ok(())

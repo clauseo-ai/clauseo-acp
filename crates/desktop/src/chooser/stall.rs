@@ -64,6 +64,17 @@ pub(crate) fn route(
     }
 }
 
+/// Whether a pick with these would ask the pre-check, which [`route`] asks only when nothing
+/// else decides: so the app starts it early only then (`Chooser::warm`).
+pub(crate) fn asks_precheck(fixed: bool, on_windows: bool, setting: Option<&str>) -> bool {
+    let asked = std::cell::Cell::new(false);
+    route(fixed, on_windows, setting, || {
+        asked.set(true);
+        false
+    });
+    asked.get()
+}
+
 /// The servers whose probe is still running, from this pick or an earlier one.
 #[derive(Default)]
 pub(crate) struct Probes {

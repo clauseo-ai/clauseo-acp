@@ -141,6 +141,45 @@ test("Change opens the chooser over New matter at the last place; choosing resol
   expect(transport.only("pick_folder")).toHaveLength(1);
 });
 
+test("the chooser shows at once, Looking… where the places and the folders are on their way, each filling in as it lands", async () => {
+  const held: Record<"starts" | "list", (() => void)[]> = { starts: [], list: [] };
+  const tree: FakeChooser = {
+    ...FAKE_CHOOSER,
+    hold: (call) => new Promise((go) => held[call].push(go)),
+  };
+  const transport = await mount(today(tree));
+  await openForm();
+  await press(byId("matter-existing"));
+  // open before the desktop has read anything: both say Looking…, and nothing can be chosen yet
+  expect(chooser()).not.toBeNull();
+  expect(byId("chooser-starts-looking")?.textContent).toBe("Looking…");
+  expect(byId("chooser-looking")?.textContent).toBe("Looking…");
+  expect(allById("chooser-start")).toHaveLength(0);
+  expect(byId<HTMLButtonElement>("chooser-choose")?.disabled).toBe(true);
+  expect(byId("chooser-heard")?.textContent).toBe("Looking…");
+  expect(lists(transport)).toEqual([]);
+  // the drives land: the places to start fill in, and the folders are still on their way
+  await act(async () => held.starts.shift()?.());
+  await flush();
+  expect(byId("chooser-starts-looking")).toBeNull();
+  expect(allById("chooser-start").map((b) => b.textContent)).toEqual([
+    "C:",
+    "D:",
+    "Home",
+    "Desktop",
+    "Last place",
+  ]);
+  expect(lists(transport)).toEqual([{ kind: "start", key: 4 }]);
+  expect(byId("chooser-looking")?.textContent).toBe("Looking…");
+  expect(names()).toEqual([]);
+  // the first listing lands: the folders fill in
+  await act(async () => held.list.shift()?.());
+  await flush();
+  expect(byId("chooser-looking")).toBeNull();
+  expect(names()).toEqual(["Iyer v. Iyer", "Mehta v. Mehta", "Rathi Steels", "Zaveri Exports"]);
+  expect(byId<HTMLButtonElement>("chooser-choose")?.disabled).toBe(false);
+});
+
 test("Up, a start point and a typed location each list where they say", async () => {
   const transport = await mount(today());
   await openForm();
