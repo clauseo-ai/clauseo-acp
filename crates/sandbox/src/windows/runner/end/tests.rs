@@ -494,20 +494,10 @@ fn an_escapee_makes_the_run_exit_escapee_whatever_the_agents_code() {
 }
 
 #[test]
-fn the_end_sweepers_pool_stop_exit_asks_for_the_system_stop_alone() {
+fn the_reserved_pool_stop_exit_is_no_clean_end() {
+    // No sweeper exits `PoolStop` any more; one that did would be a failure like any other.
     let pool_stop = crate::windows::runner::RunExit::PoolStop.code();
-    assert_eq!(Swept::from_exit(Some(pool_stop)), Swept::PoolStop);
-    assert!(needs_pool_stop(Swept::PoolStop));
-    for swept in [Swept::Clean, Swept::Escapee, Swept::Unclean] {
-        assert!(!needs_pool_stop(swept), "{swept:?}");
-    }
-    let end = EndSweep::new(Record {
-        swept: Some(Swept::PoolStop),
-        ..Record::default()
-    });
-    assert!(end.trigger(EndSignal::InnerExited));
-    assert_eq!(end.wait(), Swept::PoolStop);
-    assert!(!end.escaped());
+    assert_eq!(Swept::from_exit(Some(pool_stop)), Swept::Unclean);
 }
 
 #[test]
@@ -526,7 +516,7 @@ fn the_end_sweepers_escapee_exit_is_the_runs_outcome() {
     assert_eq!(end.wait(), Swept::Escapee);
     assert!(end.escaped());
     assert_eq!(end.outcome(0), escapee);
-    for swept in [Swept::Clean, Swept::Unclean, Swept::PoolStop] {
+    for swept in [Swept::Clean, Swept::Unclean] {
         let end = EndSweep::new(Record {
             swept: Some(swept),
             ..Record::default()
@@ -563,7 +553,7 @@ fn only_a_clean_end_removes_the_unclean_session_marker() {
     }
     // A sweeper that failed, ran past the wait or never started (the job didn't empty), or
     // found an escapee: left.
-    for swept in [Swept::Unclean, Swept::Escapee, Swept::PoolStop] {
+    for swept in [Swept::Unclean, Swept::Escapee] {
         let (end, swept) = ended(Some(EndSignal::InnerExited), swept);
         assert!(!end.clean(swept, true), "{swept:?}");
     }

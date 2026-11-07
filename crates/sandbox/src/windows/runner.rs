@@ -33,8 +33,9 @@
 //!   (`inner_flow.rs`); the inner reads its own job's pid list for that, with no handle. The
 //!   first act also removes the pool user's per-user COM classes, `Run`/`RunOnce` values and
 //!   Startup entries, with no COM; the end sweeper removes those and then, over COM, its scheduled
-//!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
-//!   (`pool::assign::busy`), so none of those processes is another session's.
+//!   tasks (`leftovers.rs`; no BITS call: the `SYSTEM` stop task cancels a pool user's jobs).
+//!   A pool user serves one live session at a time (`pool::assign::busy`), so none of those
+//!   processes is another session's.
 //! - At any end (the inner exiting, once the output drained; the host's stdin ending, once the
 //!   agent, its stdin closed, had 1 s to finish; a failure, at once) the outer ends the job,
 //!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`,
@@ -430,10 +431,10 @@ pub enum RunExit {
     /// says on stderr: the run's output came through, but the pool user has a process no sweep of
     /// its own can end, and only the host can act on that (0049).
     Escapee,
-    /// The end sweeper's alone: everything went, but BITS jobs of the pool user's whose `Cancel`
-    /// failed with `ERROR_NOT_LOGGED_ON` (1245) are left (`leftovers.rs`). BITS holds no logon
-    /// token for a pool user, so they can't run; the `SYSTEM` stop task removes them (0049).
-    /// The outer logs it (`end::Swept::PoolStop`, `end::needs_pool_stop`).
+    /// Reserved, no longer produced. The end sweeper once exited with it when everything went
+    /// but BITS jobs of the pool user's it couldn't cancel (1245). It makes no BITS call now
+    /// (`leftovers.rs`), and the outer takes this code as any failed sweeper's. Kept, with its
+    /// number, since the codes are explicit and may be read downstream.
     PoolStop,
 }
 

@@ -15,11 +15,7 @@ struct Fake {
     deny_list: BTreeSet<&'static str>,
     /// Items whose delete fails.
     deny_delete: BTreeSet<&'static str>,
-    /// Items whose delete fails with `NOT_LOGGED_ON`, as a pool user's BITS job's `Cancel`.
-    not_logged_on: BTreeSet<&'static str>,
     deleted: Vec<&'static str>,
-    /// Class keys that are back by the second class list: one registered again meanwhile.
-    back: Vec<&'static str>,
     /// How many times the classes were listed.
     class_lists: usize,
 }
@@ -28,7 +24,6 @@ fn key(kind: Kind) -> &'static str {
     match kind {
         Kind::Classes => "classes",
         Kind::Tasks => "tasks",
-        Kind::Bits => "bits",
         Kind::RunKeys => "run",
         Kind::Startup => "startup",
     }
@@ -42,9 +37,6 @@ impl Leftovers for Fake {
         }
         if kind == Kind::Classes {
             self.class_lists += 1;
-            if self.class_lists > 1 && !self.back.is_empty() {
-                return Ok(self.back.clone());
-            }
         }
         // What was deleted is gone.
         let items = self.items.get(key(kind)).cloned().unwrap_or_default();
@@ -57,9 +49,6 @@ impl Leftovers for Fake {
         if self.deny_delete.contains(item) {
             return Err(io::Error::from_raw_os_error(5));
         }
-        if self.not_logged_on.contains(item) {
-            return Err(io::Error::from_raw_os_error(NOT_LOGGED_ON));
-        }
         self.deleted.push(item);
         Ok(())
     }
@@ -71,7 +60,6 @@ fn full() -> Fake {
         .insert("classes", vec!["CLSID", "Wow6432Node\\CLSID"]);
     fake.items
         .insert("tasks", vec!["\\Evil\\AtLogon", "\\Updater"]);
-    fake.items.insert("bits", vec!["{job-1}"]);
     fake.items
         .insert("run", vec!["Run\\backdoor", "RunOnce\\once"]);
     fake.items
@@ -84,17 +72,11 @@ fn run(fake: &mut Fake) -> (bool, Vec<String>) {
 }
 
 fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
-    let (removal, lines) = removal(fake, kinds);
-    assert_eq!(removal.bits_for_stop, 0, "{lines:?}");
-    (removal.clean, lines)
-}
-
-fn removal(fake: &mut Fake, kinds: &[Kind]) -> (Removal, Vec<String>) {
     let mut lines = Vec::new();
-    let removal = remove_all(fake, kinds, "before launch", &mut |l| {
+    let clean = remove_all(fake, kinds, "before launch", &mut |l| {
         lines.push(l.to_owned());
     });
-    (removal, lines)
+    (clean, lines)
 }
 
 #[test]
@@ -114,7 +96,6 @@ fn each_kind_is_listed_and_every_item_deleted() {
             "x.bat",
             "\\Evil\\AtLogon",
             "\\Updater",
-            "{job-1}",
         ]
     );
     assert_eq!(
@@ -124,7 +105,6 @@ fn each_kind_is_listed_and_every_item_deleted() {
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
             "clauseo-sandbox-run: cleanup (before launch): removed 3 Startup folder entries",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
-            "clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs",
         ]
     );
 }
@@ -138,11 +118,11 @@ fn nothing_left_is_clean_and_silent() {
 #[test]
 fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
     let mut fake = full();
-    fake.deny_list.insert("bits");
+    fake.deny_list.insert("tasks");
     fake.deny_delete.insert("evil.lnk");
     let (clean, lines) = run(&mut fake);
     assert!(!clean);
-    // The tasks before and the Run values and other Startup entries after are still deleted.
+    // The classes, the Run values and the other Startup entries are still deleted.
     assert_eq!(
         fake.deleted,
         [
@@ -152,8 +132,6 @@ fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
             "RunOnce\\once",
             "subdir",
             "x.bat",
-            "\\Evil\\AtLogon",
-            "\\Updater",
         ]
     );
     assert_eq!(
@@ -163,86 +141,17 @@ fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Startup folder entries, 1 \
              couldn't be (5)",
-            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
-            "clauseo-sandbox-run: cleanup (before launch): the BITS jobs can't be listed (1058)",
+            "clauseo-sandbox-run: cleanup (before launch): the scheduled tasks can't be listed \
+             (1058)",
         ]
     );
     for line in &lines {
         for name in [
-            "Evil", "Updater", "job-1", "backdoor", "once", "evil", "subdir", "x.bat",
+            "Evil", "Updater", "backdoor", "once", "evil", "subdir", "x.bat",
         ] {
             assert!(!line.contains(name), "{line} names {name}");
         }
     }
-}
-
-#[test]
-fn a_bits_job_bits_cant_cancel_for_want_of_a_logon_is_counted_apart_and_no_failure() {
-    let mut fake = full();
-    fake.items
-        .insert("bits", vec!["{job-1}", "{job-2}", "{job-3}"]);
-    fake.not_logged_on.extend(["{job-1}", "{job-3}"]);
-    let (removal, lines) = removal(&mut fake, &Kind::ALL);
-    assert_eq!(
-        removal,
-        Removal {
-            clean: true,
-            bits_for_stop: 2
-        }
-    );
-    assert!(fake.deleted.contains(&"{job-2}"));
-    assert_eq!(
-        lines.get(4..),
-        Some(
-            [
-                "clauseo-sandbox-run: cleanup (before launch): 2 BITS jobs left for the system \
-                 stop (1245): no logon token for them"
-                    .to_owned(),
-                "clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs".to_owned(),
-            ]
-            .as_slice()
-        )
-    );
-}
-
-#[test]
-fn any_other_bits_error_and_1245_elsewhere_stay_failures() {
-    // Another error from a BITS job's `Cancel` fails the removal, the 1245 beside it counted.
-    let mut fake = full();
-    fake.items.insert("bits", vec!["{job-1}", "{job-2}"]);
-    fake.not_logged_on.insert("{job-1}");
-    fake.deny_delete.insert("{job-2}");
-    let (left, lines) = removal(&mut fake, &Kind::ALL);
-    assert_eq!(
-        left,
-        Removal {
-            clean: false,
-            bits_for_stop: 1
-        }
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.ends_with("removed 0 BITS jobs, 1 couldn't be (5)")),
-        "{lines:?}"
-    );
-    // 1245 from any other kind is a plain failure.
-    let mut fake = full();
-    fake.not_logged_on.insert("\\Updater");
-    let (left, lines) = removal(&mut fake, &Kind::ALL);
-    assert_eq!(
-        left,
-        Removal {
-            clean: false,
-            bits_for_stop: 0
-        }
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.ends_with("removed 1 scheduled tasks, 1 couldn't be (1245)")),
-        "{lines:?}"
-    );
 }
 
 #[test]
@@ -252,11 +161,7 @@ fn the_inner_lists_nothing_over_com() {
     assert!(clean);
     assert!(Kind::LOCAL.iter().all(|kind| !kind.over_com()));
     assert_eq!(lines.len(), 3, "{lines:?}");
-    assert!(
-        !fake.deleted.contains(&"{job-1}") && !fake.deleted.contains(&"\\Updater"),
-        "{:?}",
-        fake.deleted
-    );
+    assert!(!fake.deleted.contains(&"\\Updater"), "{:?}", fake.deleted);
 }
 
 #[test]
@@ -268,53 +173,39 @@ fn the_classes_go_first_and_com_waits_for_them() {
     fake.deny_delete.insert("CLSID");
     let (clean, lines) = run(&mut fake);
     assert!(!clean);
-    assert!(!fake.deleted.contains(&"\\Updater") && !fake.deleted.contains(&"{job-1}"));
+    assert!(!fake.deleted.contains(&"\\Updater"));
     assert!(fake.deleted.contains(&"x.bat"), "the rest still run");
     let skipped = lines
         .iter()
         .filter(|l| l.contains("weren't listed"))
         .count();
-    assert_eq!(skipped, 2, "{lines:?}");
+    assert_eq!(skipped, 1, "{lines:?}");
     // So does a class list that fails.
     let mut fake = full();
     fake.deny_list.insert("classes");
     let (clean, _) = run(&mut fake);
     assert!(!clean);
-    assert!(!fake.deleted.contains(&"{job-1}"));
+    assert!(!fake.deleted.contains(&"\\Updater"));
 }
 
 #[test]
-fn the_classes_are_looked_at_again_right_before_bits() {
-    // All gone: listed once more right before BITS, which then runs.
+fn the_classes_are_listed_once_and_no_bits_job_is_a_kind() {
+    // No BITS step: no second class list right before it, and no kind reached over COM but the
+    // tasks, whose class object comes from System32's module with no lookup.
     let mut fake = full();
     assert!(run(&mut fake).0);
-    assert_eq!(fake.class_lists, 2);
-    assert!(fake.deleted.contains(&"{job-1}"));
-    // A class key registered again after the classes' removal: the tasks still go (their class
-    // object comes from System32's module, with no lookup), BITS doesn't.
-    let mut fake = full();
-    fake.back = vec!["CLSID"];
-    let (clean, lines) = run(&mut fake);
-    assert!(!clean);
-    assert!(fake.deleted.contains(&"\\Updater"));
-    assert!(!fake.deleted.contains(&"{job-1}"));
-    assert_eq!(
-        lines.last().map(String::as_str),
-        Some(
-            "clauseo-sandbox-run: cleanup (before launch): the BITS jobs weren't listed: \
-             per-user COM class keys are left"
-        )
-    );
-    // A second class list that fails counts as a key left.
-    let mut fake = full();
-    fake.back = vec!["CLSID"];
-    fake.deny_list.insert("classes");
-    assert!(!run(&mut fake).0);
-    assert!(!fake.deleted.contains(&"{job-1}"));
-    // The inner, with no BITS, lists the classes once.
-    let mut fake = full();
-    assert!(run_kinds(&mut fake, &Kind::LOCAL).0);
     assert_eq!(fake.class_lists, 1);
+    assert_eq!(Kind::ALL.last(), Some(&Kind::Tasks));
+    let over_com: Vec<Kind> = Kind::ALL
+        .into_iter()
+        .filter(|kind| kind.over_com())
+        .collect();
+    assert_eq!(over_com, [Kind::Tasks]);
+    assert!(
+        Kind::ALL
+            .iter()
+            .all(|kind| !kind.to_string().contains("BITS"))
+    );
 }
 
 #[test]

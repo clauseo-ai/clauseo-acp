@@ -5,24 +5,21 @@
 //!    since a process of the pool user could still be alive to open it.
 //! 3. **Widen**: only once the sweep left no process of its user (it went without a failure),
 //!    the token gives its user `TOKEN_QUERY`, `TOKEN_DUPLICATE` and `TOKEN_IMPERSONATE`
-//!    (`token::SWEEPER_COM_TOKEN_RIGHTS`), what COM needs: with the token shut, Task Scheduler and
-//!    BITS fail with `E_OUTOFMEMORY` (14).
+//!    (`token::SWEEPER_COM_TOKEN_RIGHTS`), what COM needs: with the token shut, Task Scheduler
+//!    fails with `E_OUTOFMEMORY` (14).
 //! 4. **Remove** (`leftovers::remove_all`): the per-user COM classes first, the `Run` and
-//!    `RunOnce` values and the Startup folder, then the scheduled tasks and BITS jobs over COM.
+//!    `RunOnce` values and the Startup folder, then the scheduled tasks over COM. No BITS job is
+//!    touched (`leftovers.rs` says why).
 //!
 //! A sweep that failed, or a widening that did, leaves the token shut: the classes, values and
-//! Startup entries are removed without COM, and the tasks and BITS jobs wait for the next
-//! session's end sweeper.
-//!
-//! A BITS job whose `Cancel` failed with `ERROR_NOT_LOGGED_ON` is left for the `SYSTEM` stop
-//! task (`leftovers.rs` says why it is inert): when that is all that is left, the sweeper exits
-//! [`RunExit::PoolStop`] instead of 0, and the outer logs it (`end::needs_pool_stop`).
+//! Startup entries are removed without COM, and the tasks wait for the next session's end
+//! sweeper.
 
 use std::io;
 
 use super::RunExit;
 use super::inner_flow::at;
-use super::leftovers::{Kind, Removal};
+use super::leftovers::Kind;
 use super::sweep::{Point, SweepError, end_sweeper_exit};
 
 /// The end sweeper's acts.
@@ -33,9 +30,8 @@ pub(crate) trait SweeperActs {
     fn sweep(&mut self, log: &mut dyn FnMut(&str)) -> Result<(), SweepError>;
     /// Gives its user the token rights COM needs.
     fn widen_for_com(&mut self) -> io::Result<()>;
-    /// Removes `kinds` (`leftovers::remove_all`); whether everything went, and the BITS jobs
-    /// left for the system stop.
-    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> Removal;
+    /// Removes `kinds` (`leftovers::remove_all`); whether everything went.
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool;
 }
 
 /// The end sweeper's run after its start, in order; its exit code.
@@ -55,9 +51,8 @@ pub(crate) fn run<S: SweeperActs>(steps: &mut S, log: &mut dyn FnMut(&str)) -> u
                 at(Point::Sweeper, error)
             ));
             log(
-                "clauseo-sandbox-run: cleanup (end sweeper): the scheduled tasks and BITS jobs \
-                 weren't listed: the sweep may have left a process of the sandbox user, so its \
-                 token stays shut",
+                "clauseo-sandbox-run: cleanup (end sweeper): the scheduled tasks weren't listed: \
+                 the sweep may have left a process of the sandbox user, so its token stays shut",
             );
             &Kind::LOCAL
         }
@@ -65,20 +60,16 @@ pub(crate) fn run<S: SweeperActs>(steps: &mut S, log: &mut dyn FnMut(&str)) -> u
             Ok(()) => &Kind::ALL,
             Err(error) => {
                 log(&format!(
-                    "clauseo-sandbox-run: cleanup (end sweeper): the scheduled tasks and BITS \
-                     jobs weren't listed: its token can't be opened to COM ({})",
+                    "clauseo-sandbox-run: cleanup (end sweeper): the scheduled tasks weren't \
+                     listed: its token can't be opened to COM ({})",
                     code(&error)
                 ));
                 &Kind::LOCAL
             }
         },
     };
-    let removal = steps.remove(kinds, log);
-    let removed = removal.clean && kinds == Kind::ALL.as_slice();
-    match end_sweeper_exit(&kills, removed) {
-        0 if removal.bits_for_stop > 0 => RunExit::PoolStop.code(),
-        exit => exit,
-    }
+    let removed = steps.remove(kinds, log) && kinds == Kind::ALL.as_slice();
+    end_sweeper_exit(&kills, removed)
 }
 
 /// An error's OS code, or its kind.
