@@ -66,25 +66,51 @@ fn base64_decodes_as_rfc_4648_says() {
 }
 
 #[test]
-fn the_release_guard_refuses_only_a_release_with_a_key_that_signs_no_release() {
+fn a_release_build_needs_the_pinned_production_key() {
     let real = 0x0123_4567_89AB_CDEF;
-    for (mode, profile, id, refused) in [
-        (Some("release"), "release", PLACEHOLDER_KEY_ID, true),
-        (Some("release"), "release", TEST_KEY_ID, true),
-        (Some("release"), "release", real, false),
-        // A dry or test run, or no mode: any key.
-        (None, "release", PLACEHOLDER_KEY_ID, false),
-        (Some("dry"), "release", PLACEHOLDER_KEY_ID, false),
-        (Some("test"), "release", TEST_KEY_ID, false),
-        (Some(""), "release", TEST_KEY_ID, false),
-        // A debug build in release mode (a local check): any key.
-        (Some("release"), "debug", PLACEHOLDER_KEY_ID, false),
-        (Some("release"), "debug", TEST_KEY_ID, false),
+    let pinned = Some("0123456789ABCDEF");
+    for (mode, id, pin, refused) in [
+        // A release: only the pinned key, in either case; never with no pin.
+        (Some("release"), real, pinned, false),
+        (Some("release"), real, Some("0123456789abcdef"), false),
+        (Some("release"), PLACEHOLDER_KEY_ID, pinned, true),
+        (Some("release"), TEST_KEY_ID, pinned, true),
+        (Some("release"), 0x0123_4567_89AB_CDEE, pinned, true),
+        (Some("release"), real, None, true),
+        (Some("release"), TEST_KEY_ID, None, true),
+        // A dry or test run, a local build, or no mode: any key.
+        (None, PLACEHOLDER_KEY_ID, None, false),
+        (Some("dry"), PLACEHOLDER_KEY_ID, pinned, false),
+        (Some("test"), TEST_KEY_ID, pinned, false),
+        (Some(""), TEST_KEY_ID, None, false),
     ] {
-        let verdict = release_guard(mode, profile, id);
-        assert_eq!(verdict.is_err(), refused, "{mode:?} {profile} {id:016X}");
+        let verdict = release_guard_with(mode, id, pin);
+        assert_eq!(verdict.is_err(), refused, "{mode:?} {id:016X} {pin:?}");
         if let Err(why) = verdict {
             assert!(why.contains(&format!("{id:016X}")), "{why}");
         }
     }
 }
+
+#[test]
+fn the_pinned_key_is_never_one_that_signs_no_release() {
+    match PRODUCTION_KEY_ID {
+        // Until #527 pins it, a release build fails whatever its key.
+        None => assert!(release_guard(Some("release"), PRODUCTION_KEY_SAMPLE).is_err()),
+        Some(pinned) => {
+            assert_eq!(pinned.len(), 16, "{pinned}");
+            for never in [PLACEHOLDER_KEY_ID, TEST_KEY_ID] {
+                assert!(
+                    !pinned.eq_ignore_ascii_case(&format!("{never:016X}")),
+                    "{pinned}"
+                );
+            }
+        }
+    }
+    assert!(release_guard(Some("release"), TEST_KEY_ID).is_err());
+    assert!(release_guard(Some("dry"), PLACEHOLDER_KEY_ID).is_ok());
+    assert_eq!(KEY_ID_VERSION_STRING, "UpdaterKeyId");
+}
+
+/// Any key id that isn't the placeholder's or the test key's.
+const PRODUCTION_KEY_SAMPLE: u64 = 0x0123_4567_89AB_CDEF;

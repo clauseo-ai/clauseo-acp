@@ -137,6 +137,9 @@ sha2 = { version = "0.10.9", default-features = false }
 # tests sign with a key they make with ring (0.17, in the lock through rustls).
 minisign-verify = "0.3.0"
 ring = "0.17.14"
+# clauseo-sandbox: the refresh orders signed versions by semver precedence, so a prerelease sorts
+# below its release (1.0.28 is already in the lock through tauri).
+semver = "1.0.28"
 # clauseo-host: the pre-write guard compares a held file's name with a shell command's words in one
 # Unicode form on macOS, as APFS does (gix already builds it for clauseo-matters).
 unicode-normalization = "0.1.26"

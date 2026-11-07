@@ -1,7 +1,7 @@
 //! The file version a PE image's `VERSIONINFO` carries: the numeric `FILEVERSION` of its
 //! `VS_FIXEDFILEINFO`, read from the bytes alone, with no Windows call (and so no new DLL in
-//! the setup exe). The refresh reads it from the staged copy once its signature has verified, and
-//! compares it with the record's `AdminCopyVersion` ([`version_not_older`]).
+//! the setup exe), and the image's `Machine` (its CPU type). The refresh reads both from the
+//! staged copy once its signature has verified (`version.rs` compares the version).
 //!
 //! The walk: the DOS header's `e_lfanew`, the PE signature, the optional header (PE32 or PE32+),
 //! data directory 2 (resources), the section that maps it, the resource tree's `RT_VERSION` (16)
@@ -16,6 +16,18 @@ const FIXED_SIGNATURE: u32 = 0xFEEF_04BD;
 /// The deepest the resource tree is walked (type, name, language).
 const LEVELS: usize = 3;
 
+/// `IMAGE_FILE_MACHINE_AMD64`.
+pub const MACHINE_X64: u16 = 0x8664;
+/// `IMAGE_FILE_MACHINE_ARM64`.
+pub const MACHINE_ARM64: u16 = 0xAA64;
+/// `IMAGE_FILE_MACHINE_I386`.
+pub const MACHINE_X86: u16 = 0x014C;
+
+/// The image's COFF `Machine`, or `None` when it isn't a PE image.
+pub fn machine(image: &[u8]) -> Option<u16> {
+    Pe::parse(image).map(|pe| pe.machine)
+}
+
 /// The image's `FILEVERSION` as its four parts, or `None` when it has no readable one.
 pub fn file_version(image: &[u8]) -> Option<[u16; 4]> {
     let pe = Pe::parse(image)?;
@@ -27,32 +39,6 @@ pub fn file_version(image: &[u8]) -> Option<[u16; 4]> {
 pub fn dotted(version: [u16; 4]) -> String {
     let [a, b, c, d] = version;
     format!("{a}.{b}.{c}.{d}")
-}
-
-/// Whether `candidate` is not older than `recorded`, both versions as text: up to four dotted
-/// decimal parts, a leading `v` and anything from a `-` or `+` on ignored, missing parts 0, so
-/// `1.4.0`, `v1.4.0-beta` and `1.4.0.0` are the same version. `false` when either can't be read:
-/// the refresh then keeps the old copy.
-pub fn version_not_older(recorded: &str, candidate: &str) -> bool {
-    match (parts(recorded), parts(candidate)) {
-        (Some(recorded), Some(candidate)) => candidate >= recorded,
-        _ => false,
-    }
-}
-
-/// A version's four parts, as [`version_not_older`] reads them.
-fn parts(version: &str) -> Option<[u64; 4]> {
-    let version = version.trim();
-    let version = version.strip_prefix('v').unwrap_or(version);
-    let core = version.split(['-', '+']).next()?;
-    let mut out = [0u64; 4];
-    for (index, part) in core.split('.').enumerate() {
-        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        *out.get_mut(index)? = part.parse().ok()?;
-    }
-    Some(out)
 }
 
 /// `N` little-endian bytes of `bytes` at `at`.
@@ -78,6 +64,8 @@ fn usize_at(bytes: &[u8], at: usize) -> Option<usize> {
 /// The parts of the image the walk needs.
 struct Pe<'a> {
     bytes: &'a [u8],
+    /// The COFF header's `Machine`.
+    machine: u16,
     /// The resource directory's RVA (0 when absent).
     resources: usize,
     /// The section table's offset, and its number of sections.
@@ -95,6 +83,7 @@ impl<'a> Pe<'a> {
         if le::<4>(bytes, header)? != *b"PE\0\0" {
             return None;
         }
+        let machine = u16_at(bytes, header.checked_add(4)?)?;
         let sections = usize::from(u16_at(bytes, header.checked_add(6)?)?);
         let optional = header.checked_add(24)?;
         let optional_size = usize::from(u16_at(bytes, header.checked_add(20)?)?);
@@ -113,6 +102,7 @@ impl<'a> Pe<'a> {
         };
         Some(Pe {
             bytes,
+            machine,
             resources,
             table: optional.checked_add(optional_size)?,
             sections,

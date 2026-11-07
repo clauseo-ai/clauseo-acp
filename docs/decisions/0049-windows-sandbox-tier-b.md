@@ -804,55 +804,84 @@ The elevated exe runs only from its admin copy,
 elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and
 only from an exe the updater key signed.
 
-**The task.** `\Clauseo\SandboxRefresh` is registered through `ITaskService` by `--adopt`
+**The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService`
 (`register_refresh_task`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path,
 resolved from `FOLDERID_ProgramFiles`, with `--refresh` and no other argument. It starts at the
 record owner's logon and on demand, needs no network, stops after 5 minutes, and never runs twice
-at once. The task and its folder carry `D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so the
-owner can read and run the task but can't change or delete it. The app asks for a run after an
-update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). `--remove` deletes the task
-and the staging folder.
+at once. The task and its folder carry `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so
+the owner can read and run the task but can't change or delete it. The folder gets that owner and
+DACL when it is made, and again on each registration if it was already there. The app asks for a
+run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). `--remove`
+deletes the task and the staging folder.
 
 **The run.** `--refresh` takes nothing from the user except the files in the recorded folder:
 no path argument and no environment. `UserInstallDir` is untrusted: the lawyer can re-point any
-folder of it through a junction at any time, or re-run `--adopt` with another folder. It:
+folder of it through a junction at any time, or re-run `--adopt` with another folder. The run:
 
 1. refuses unless it runs as LOCAL SYSTEM from the admin copy's path;
 2. refuses a build whose key is the placeholder, before reading anything;
 3. refuses an install folder that isn't inside the record owner's profile (`ProfileList`'s
-   `ProfileImagePath` for `OwnerSid`);
+   `ProfileImagePath` for `OwnerSid`; a temporary profile counts as none);
 4. opens the drive's root, then each folder of the path relative to its parent's handle
    (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and `FILE_OPEN_REPARSE_POINT`),
-   refusing a reparse point at every level; then opens `clauseo-sandbox-setup.exe` and its
+   refusing a reparse point at every level. It then opens `clauseo-sandbox-setup.exe` and its
    `.sig` relative to the last folder, and refuses a reparse point, anything but a regular file, a
    second hard link, or more than 16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
    SYSTEM never writes or deletes anything in the folder;
 5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
-6. reads the staged exe's `FILEVERSION` from its `VERSIONINFO` and refuses one older than
-   `AdminCopyVersion` (`version_not_older`), so an older signed exe can't roll the copy back;
-7. stops when the staged SHA-256 is already recorded;
-8. otherwise sets the running copy aside by renaming it into staging, which Windows allows for a
-   running exe, moves the staged file into place with the admin copy's DACL, and only then writes
-   the new `AdminCopyVersion`, then the new hash. The old copy is deleted at the next reboot or
-   the next run.
+6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
+   exe for another CPU never replaces it;
+7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
+8. stops when the staged SHA-256 is already recorded;
+9. otherwise renames the running copy into staging, which Windows allows for a running exe, and
+   moves the staged file into place with the admin copy's DACL. Only then does it write the new
+   `AdminCopyVersion` (the signed version, as signed), then the new hash. The set-aside copy
+   stays in staging until the next run deletes it. That run starts from the new copy, which shows
+   the new copy runs.
 
-**Crash safety.** The record never names a file that isn't at the admin path. Until the last
-step the record holds the old hash. A crash between the two renames leaves no file at the path,
-which the launcher treats as a missing copy, so it asks for a re-adopt. A crash after the move
-leaves the new file under the old hash, which the launcher refuses. The next run then finds the
-admin path already holding the staged exe and writes its version and hash without another swap.
-The version goes first, so a recorded new hash always has its version. A failed move puts the old
-copy back.
+**Crash safety.** The record never names a hash the admin path doesn't hold: until the last step
+it holds the old hash. A crash after both renames leaves the new file under the old hash, which
+the launcher refuses. The next run then finds the admin path already holding the staged exe and
+writes its version and hash without another swap. The version goes first, so a recorded new hash
+always has its version. A failed move puts the old copy back.
+
+**Accepted: the gap between the two renames.** A crash, or the task's 5-minute kill, between the
+two renames leaves no exe at the task's path. No run can heal that, because the task can't start.
+The launcher then finds the copy missing (`AdminCopyMissing`), and the app's words lead the
+lawyer to the installer's repair, which places a copy again. The old copy is still in staging
+under its set-aside name, so repair can restore it. The gap is as narrow as it can be: two
+write-through renames back to back, with nothing between them.
 
 **The signature.** The `.sig` is Tauri's: base64 of a minisign signature file, prehashed (`ED`),
-checked with `minisign-verify`. The key is built in by `crates/sandbox/build.rs`:
-`CLAUSEO_UPDATER_PUBKEY`, else `plugins.updater.pubkey` from `tauri.conf.json`, else the
-placeholder `AC986E7C6BA67AB9`. The placeholder has an all-zero key and is refused by its id.
-A release build (`CLAUSEO_RELEASE_MODE=release`, release profile) with the placeholder or the test
-key `B142942ACEC5F521` fails to build. The trusted comment is the signer's once the global
-signature verifies. It must name `clauseo-sandbox-setup.exe`, so a signed installer can't stand in
-for the exe.
+checked with `minisign-verify`. The trusted comment is the signer's once the global signature
+verifies. tauri-cli 2.12 writes it as `timestamp:<seconds>\tfile:<basename>\tversion:<semver>`.
+It is read as tab-separated `key:value` fields, matched by key in any order. A field without
+`:` or a key given twice is refused. `file` must be exactly `clauseo-sandbox-setup.exe`, so a
+signed installer can't stand in for the exe. `version` must be present. `timestamp` is not
+checked.
+
+**Versions.** The signed `version` is the release's semver (release.yml's `$VERSION`, such as
+`1.4.0` or `1.4.0-beta.1`), and `build.rs` writes its core into `FILEVERSION` as `X.Y.Z.0`.
+- The staged exe's `FILEVERSION` must be the signed version's core with a fourth part of 0. So a
+  signed `0.1.0` matches `0.1.0.0`, but not `0.1.0.1` or `0.1.1.0`. The signature thus binds
+  the exe's own version.
+- The signed version is then ordered against `AdminCopyVersion` by semver precedence
+  (`version_not_older`). A prerelease is older than its release, so `1.4.0-beta.1` can't replace
+  `1.4.0`, but `1.4.0` replaces its beta. Build metadata doesn't count.
+- An older version is refused. So is an equal version whose bytes differ from the copy in place.
+- A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
+  unreadable, a non-zero fourth part included, refuses the run.
+
+**The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
+`plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The
+placeholder has an all-zero key and is refused by its id. A release build
+(`CLAUSEO_RELEASE_MODE=release`, any profile) fails unless the key is the pinned production key,
+`PRODUCTION_KEY_ID` in `refresh/key.rs`. That id is unset until #527 adds the production key, so
+until then every release build fails. The guard alone would depend on the variable being set. So
+on msvc the exe's `VERSIONINFO` also carries the key's id, as the string `UpdaterKeyId` (16 hex
+digits). A release's assembly can read it from the file, without running the exe (which would
+prompt), and refuse a release whose key isn't the production one.
 
 Each refusal keeps the old copy, writes one Event Log line (source `Clauseo Sandbox`, naming no
 user path beyond the install folder), and exits with its own code. The codes start at 32, clear
