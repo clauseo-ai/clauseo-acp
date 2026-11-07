@@ -2,10 +2,12 @@
 //! draws it, so a webview cannot point an agent at another server without the lawyer's say.
 //! `InstallAgent` asks nothing: it is the lawyer choosing the agent's card, which shows the
 //! download's size first. A decline runs nothing and answers
-//! `transport.unauthorized`, as `answer_permission`'s does. The words are fixed text and the
-//! values the backend fills in (the agent's name and the endpoint's address,
-//! checked before the confirm as the settings crate checks it, `backend.rs`'s
-//! `checked_endpoint`); Cancel is the default button.
+//! `transport.unauthorized`, as `answer_permission`'s does. One more stands in front of a Codex
+//! sign-in while Codex is signed in with Clauseo's own login (`Ask::SwitchAccount`, since
+//! `codex login` signs that account out first); its decline runs nothing and answers `Done`.
+//! The words are fixed text and the values the backend fills in (the agent's name and the
+//! endpoint's address, checked before the confirm as the settings crate checks it,
+//! `backend.rs`'s `checked_endpoint`); Cancel is the default button.
 //!
 //! A confirm has no timeout: it waits until the lawyer answers. Cancel, Escape, closing the
 //! dialog, a stopped sheet when the main window closes, or a dialog that never shows (the app
@@ -27,6 +29,11 @@ pub(crate) enum Ask {
         name: String,
         /// The endpoint, or `None` to clear it.
         url: Option<String>,
+    },
+    /// Sign the agent named `name` (Codex) out of its account so another can sign in.
+    SwitchAccount {
+        /// The agent's name.
+        name: String,
     },
 }
 
@@ -51,6 +58,14 @@ pub(crate) fn words(ask: &Ask) -> (String, String, String) {
             format!("Stop using your firm's endpoint for {name}?"),
             format!("{name} will go back to its usual service."),
             "Stop using it".to_owned(),
+        ),
+        // Provisional words, for the copy review.
+        Ask::SwitchAccount { name } => (
+            "Sign in with a different account?".to_owned(),
+            format!(
+                "This signs you out of {name} first, in every matter. Then you can sign in again."
+            ),
+            "Sign out and continue".to_owned(),
         ),
     }
 }
