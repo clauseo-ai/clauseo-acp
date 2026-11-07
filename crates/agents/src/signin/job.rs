@@ -181,14 +181,18 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             &self.home,
         ));
         let Some(script) = self.script() else {
-            // Codex's CLI is not in the install: nothing runs, so the adapter is never asked. A
-            // sign-in the lawyer started fails; any other task reads as not signed in.
+            // Codex's CLI is not in the install: no CLI command runs, so the adapter is never
+            // asked. The tasks that need no run still do their file work: "Stop using it" its
+            // unlink and `no-reuse`, a sign-out its removal of the home's login file. A sign-in
+            // the lawyer started fails; any other task reads as not signed in.
             self.note(SigninNote::CliMissing);
-            return Some(if self.task.signs_in() {
-                self.failed(SigninCode::Failed)
-            } else {
-                SigninState::SignedOut { found: None }
-            });
+            return match (self.vendor, self.task) {
+                (_, Task::StopUsing(why)) => found::stop_using(self, why).await,
+                (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
+                (Vendor::Claude, Task::SignOut) => Some(self.failed(SigninCode::Failed)),
+                (_, task) if task.signs_in() => Some(self.failed(SigninCode::Failed)),
+                _ => Some(SigninState::SignedOut { found: None }),
+            };
         };
         self.note(SigninNote::CliResolved {
             file: cli_file_name(&script),

@@ -46,6 +46,12 @@ pub(crate) const POLL: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_LIMIT: Duration = Duration::from_secs(5);
 pub(crate) const NUDGE: Duration = Duration::from_secs(30);
 pub(crate) const LOGIN_LIMIT: Duration = Duration::from_secs(600);
+/// Codex's own limits: one `login status`, and the app-server's `account/read`. Only the
+/// Unix-only stalled runs wait them out.
+#[cfg(unix)]
+pub(crate) const CODEX_STATUS_LIMIT: Duration = Duration::from_secs(15);
+#[cfg(unix)]
+pub(crate) const APP_SERVER_LIMIT: Duration = Duration::from_secs(20);
 
 /// The remote hints the test's own environment sets, which no child may see.
 pub(crate) const REMOTE_HINTS: [&str; 4] = [

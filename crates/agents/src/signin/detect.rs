@@ -21,7 +21,7 @@ use clauseo_process::Timer;
 
 use crate::cancel::Cancel;
 use crate::signin::SigninState;
-use crate::signin::codex::identity;
+use crate::signin::codex::identity::{self, AccountRead};
 use crate::signin::env::RunKind;
 use crate::signin::job::SigninJob;
 use crate::signin::{claude, codex, reuse};
@@ -70,7 +70,9 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
 /// Codex's detection; `None` when it could not tell: a status run that could not, or, for a
 /// reusable login, an `account/read` that named no account (cut short by Cancel or its limit, a
 /// JSON-RPC error, or `account: null`). Such a read is never "no email": `LoginFound { email:
-/// None }` comes only from an answer that names an account other than a `ChatGPT` one.
+/// None }` comes only from a `ChatGPT` account whose email Codex does not know. A login whose
+/// account is not a `ChatGPT` one (an API key, say) is not offered: `SignedOut { found: None }`,
+/// the plain sign-in card.
 pub(crate) async fn codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
@@ -87,7 +89,16 @@ pub(crate) async fn codex<T: Timer + Send + Sync>(
         .is_some_and(|lawyer| reuse::lawyer_login_present(&lawyer));
     let verdict = CodexDetect::classify(said == codex::StatusSaid::LoggedIn, present);
     let identity = if verdict == CodexDetect::Reusable {
-        identity::read_as(job, cancel, RunKind::Detect, &folder).await?
+        match identity::read_as(job, cancel, RunKind::Detect, &folder).await {
+            AccountRead::Chatgpt(identity) => identity,
+            AccountRead::NotChatgpt => {
+                return Some(Detected {
+                    state: SigninState::SignedOut { found: None },
+                    identity: Identity::default(),
+                });
+            }
+            AccountRead::NoAccount => return None,
+        }
     } else {
         Identity::default()
     };
