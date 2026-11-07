@@ -4,7 +4,8 @@
 //! here", on the firm's network keeps the proxy. The probe ends within the lookup budget, and
 //! none runs while the OS answers with proxies.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -12,25 +13,31 @@ use clauseo_agents::{Clock as _, SystemClock};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use url::Url;
 
-use super::super::super::ask::PROBE_CAP;
-use super::super::super::{NetworkSlot, OsAnswer, ProxyEnv};
+use super::super::super::ask::{Event, PROBE_CAP};
+use super::super::super::{LookupTime, NetworkSlot, OsAnswer, ProxyEnv};
 use super::super::{Follower, NetworkFollow};
 use super::{OS_PROXY, claude, facts, hook_env, since};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
 use crate::test_support::block_on;
 
-/// An OS whose answer, and how long it takes, the test sets.
+/// An OS whose answer, and how long it takes, the test sets; it counts the lookups it ended.
 #[derive(Clone)]
 struct Os {
     answer: Arc<Mutex<(OsAnswer, Duration)>>,
+    ended: Arc<AtomicUsize>,
 }
 
 impl Os {
     fn new(answer: OsAnswer) -> Self {
         Self {
             answer: Arc::new(Mutex::new((answer, Duration::ZERO))),
+            ended: Arc::default(),
         }
+    }
+
+    fn ended(&self) -> usize {
+        self.ended.load(Ordering::SeqCst)
     }
 
     fn set(&self, answer: OsAnswer, delay: Duration) {
@@ -44,17 +51,58 @@ impl Os {
             if !delay.is_zero() {
                 futures::executor::block_on(AsyncIoTimer.after(delay));
             }
+            os.ended.fetch_add(1, Ordering::SeqCst);
             answer
         }
     }
 }
 
-/// A proxy probe the test sets: whether the proxy answers, how long the probe takes, and the
-/// proxies it was asked about.
+/// The longest a test waits in real time: a guard against a hang, never a budget check.
+const HANG_GUARD: Duration = Duration::from_secs(10);
+
+/// Virtual time for the lookups' budget and the probes: it moves only when a probe takes its
+/// time, or when every lookup left hangs (`hang`) and no probe is running, to the end of the
+/// wait. Else the lookups answer at once and are waited for.
+#[derive(Default)]
+struct Virtual {
+    now: Mutex<Duration>,
+    hang: AtomicBool,
+}
+
+impl Virtual {
+    fn advance(&self, by: Duration) {
+        *lock(&self.now) += by;
+    }
+}
+
+impl LookupTime for Virtual {
+    fn now(&self) -> Duration {
+        *lock(&self.now)
+    }
+
+    fn next(
+        &self,
+        events: &mpsc::Receiver<Event>,
+        until: Duration,
+        probing: usize,
+    ) -> Option<Event> {
+        if let Ok(event) = events.try_recv() {
+            return Some(event);
+        }
+        if probing > 0 || !self.hang.load(Ordering::SeqCst) {
+            let event = events.recv_timeout(HANG_GUARD);
+            return Some(event.expect("an answer or a probe result within the hang guard"));
+        }
+        let mut now = lock(&self.now);
+        *now = (*now).max(until);
+        None
+    }
+}
+
+/// A proxy probe the test sets: whether the proxy answers, and the proxies it was asked about.
 #[derive(Clone, Default)]
 struct Probe {
     reachable: Arc<AtomicBool>,
-    takes: Arc<Mutex<Duration>>,
     asked: Arc<Mutex<Vec<String>>>,
 }
 
@@ -69,10 +117,6 @@ impl Probe {
         let probe = self.clone();
         move |proxy: &str| {
             lock(&probe.asked).push(proxy.to_owned());
-            let takes = *lock(&probe.takes);
-            if !takes.is_zero() {
-                futures::executor::block_on(AsyncIoTimer.after(takes));
-            }
             probe.reachable.load(Ordering::SeqCst)
         }
     }
@@ -139,24 +183,46 @@ fn a_failed_lookup_with_the_proxy_reachable_keeps_it() {
 }
 
 /// A lookup that hangs past the budget (a PAC host that drops packets): the proxy is probed
-/// while it runs, and the route made within the budget goes direct when it does not answer, even
-/// when its probe takes the whole cap (a proxy that drops packets too).
+/// while it runs, and the route made at the budget's end goes direct when it does not answer,
+/// even when its probe takes the whole cap (a proxy that drops packets too). In virtual time, so
+/// a loaded machine cannot move the probe past the deadline.
 #[test]
 fn a_hanging_lookup_with_the_proxy_unreachable_goes_direct_within_the_budget() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
-    let probe = Probe::reachable(false);
-    let budget = BUDGET;
-    let (network, hook) = inline(&os, &probe, budget);
-    *lock(&probe.takes) = PROBE_CAP;
-    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::from_secs(3));
-    let started = SystemClock.monotonic();
-    assert_eq!(network.refresher()().and_then(|n| n.proxy), None);
-    assert!(
-        since(started) < budget + Duration::from_millis(300),
-        "the probe ended within the budget"
+    let time = Arc::new(Virtual::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let (clock, seen) = (Arc::clone(&time), Arc::clone(&asked));
+    let reach = move |proxy: &str| {
+        lock(&seen).push(proxy.to_owned());
+        clock.advance(PROBE_CAP);
+        false
+    };
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .reach(reach)
+        .lookup_time(Arc::clone(&time) as Arc<dyn LookupTime>)
+        .fresh_for(Duration::ZERO)
+        .lookup_budget(BUDGET);
+    let network = NetworkFollow::inline(follower);
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    network.update(facts());
+    assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), HANG_GUARD * 3);
+    time.hang.store(true, Ordering::SeqCst);
+    let (started, wall) = (time.now(), SystemClock.monotonic());
+    assert_eq!(
+        network.refresher()().and_then(|n| n.proxy),
+        None,
+        "the dead proxy is not kept"
+    );
+    assert_eq!(
+        time.now().saturating_sub(started),
+        BUDGET,
+        "decided at the budget's end"
     );
     assert_eq!(proxy_of(&hook), None);
-    assert_eq!(probe.asked(), [OS_PROXY]);
+    assert_eq!(*lock(&asked), [OS_PROXY], "one probe, of the whole cap");
+    assert!(since(wall) < HANG_GUARD, "a hang guard only");
 }
 
 /// One `DIRECT` (a WPAD 12167 once on the firm's network) with the proxy still answering keeps
@@ -215,11 +281,17 @@ fn a_late_direct_over_a_reachable_proxy_is_kept_once() {
     network.update(facts());
     block_on(network.ready());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
+    let lookups = os.ended();
     os.set(OsAnswer::Direct, BUDGET + Duration::from_millis(300));
     // The same read again: a resolve of the same hosts, whose lookups land late.
     network.update(facts());
-    // Past the late answers and their hand-over.
-    block_on(AsyncIoTimer.after(BUDGET + Duration::from_millis(900)));
+    let started = SystemClock.monotonic();
+    while os.ended() < 2 * lookups {
+        assert!(since(started) < HANG_GUARD, "the late lookups never ended");
+        block_on(AsyncIoTimer.after(Duration::from_millis(20)));
+    }
+    // Their hand-over to the network thread: a channel send each.
+    block_on(AsyncIoTimer.after(Duration::from_millis(500)));
     assert_eq!(
         proxy_of(&hook).as_deref(),
         Some(OS_PROXY),
@@ -229,7 +301,7 @@ fn a_late_direct_over_a_reachable_proxy_is_kept_once() {
     let started = SystemClock.monotonic();
     while proxy_of(&hook).is_some() {
         assert!(
-            since(started) < Duration::from_secs(5),
+            since(started) < HANG_GUARD,
             "the second late DIRECT never landed"
         );
         block_on(AsyncIoTimer.after(Duration::from_millis(20)));

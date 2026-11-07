@@ -47,8 +47,8 @@ use futures::future::{Either, Shared, select};
 use url::Url;
 
 use super::{
-    Answered, KEEP_FOR, Known, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, Probe,
-    Probed, ProxyEnv, Reach, ask_all, os_targets, reach, resolve,
+    Answered, KEEP_FOR, Known, LookupTime, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer,
+    OsLookup, Probe, Probed, ProxyEnv, Reach, RealTime, ask_all, os_targets, reach, resolve,
 };
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
@@ -247,6 +247,8 @@ struct Resolver {
     budget: Duration,
     /// Whether a proxy that may be kept still takes a connection ([`reach`], faked in tests).
     reach: Arc<Reach>,
+    /// The lookups' budget and the probes' time ([`RealTime`], virtual in tests).
+    time: Arc<dyn LookupTime>,
 }
 
 impl Resolver {
@@ -271,7 +273,7 @@ impl Resolver {
             keepable: fresh.answers.keepable(&targets),
             reach: Arc::clone(&self.reach),
         };
-        let answers = ask_all(targets, &self.os, self.budget, probe);
+        let answers = ask_all(targets, &self.os, self.budget, probe, &self.time);
         let known = fresh.merge(answers.got, &answers.probed);
         let route = route_from(facts, &env, self.os_fallback, &known.answers);
         if let Some(running) = answers.late {
@@ -349,6 +351,7 @@ impl Follower {
                 os_fallback,
                 budget: OS_LOOKUP_BUDGET,
                 reach: Arc::new(reach),
+                time: RealTime::shared(),
             },
             slot,
             agents: None,
@@ -358,34 +361,6 @@ impl Follower {
             landed: None,
             fresh: Freshness::new(Arc::new(SystemClock), ROUTE_FRESH_FOR),
         }
-    }
-
-    /// With `budget` instead of [`OS_LOOKUP_BUDGET`] (tests).
-    #[cfg(test)]
-    pub(crate) fn lookup_budget(mut self, budget: Duration) -> Self {
-        self.resolver.budget = budget;
-        self
-    }
-
-    /// With `reach` instead of a real probe of a proxy (tests).
-    #[cfg(test)]
-    pub(crate) fn reach(mut self, reach: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
-        self.resolver.reach = Arc::new(reach);
-        self
-    }
-
-    /// With `clock` instead of the system's (tests).
-    #[cfg(test)]
-    pub(crate) fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
-        self.fresh.clock = clock;
-        self
-    }
-
-    /// With `fresh_for` instead of [`ROUTE_FRESH_FOR`] (tests).
-    #[cfg(test)]
-    pub(crate) fn fresh_for(mut self, fresh_for: Duration) -> Self {
-        self.fresh.fresh_for = fresh_for;
-        self
     }
 
     /// What ends once the first route has been handed on.
@@ -591,5 +566,7 @@ fn serve(
     }
 }
 
+#[cfg(test)]
+mod seams;
 #[cfg(test)]
 mod tests;

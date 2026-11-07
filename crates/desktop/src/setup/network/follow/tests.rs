@@ -12,7 +12,7 @@ use clauseo_protocol::AgentId;
 use url::Url;
 
 use super::super::{
-    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, Probe, ProxyEnv, ask_all,
+    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, Probe, ProxyEnv, RealTime, ask_all,
 };
 use super::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, OS_LOOKUP_BUDGET, follow};
 use crate::bridge::lock;
@@ -281,7 +281,14 @@ fn five_slow_lookups_take_about_one_lookups_time() {
         "d.example",
         "e.example",
     ];
-    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5), Probe::none()).got;
+    let answers = ask_all(
+        targets(&hosts),
+        &os,
+        Duration::from_secs(5),
+        Probe::none(),
+        &RealTime::shared(),
+    )
+    .got;
     let took = since(asked);
     assert_eq!(answers.len(), 5);
     assert!(
@@ -307,6 +314,7 @@ fn a_lookup_past_the_budget_has_no_answer_and_the_rest_are_kept() {
         &os,
         budget,
         Probe::none(),
+        &RealTime::shared(),
     )
     .got;
     let took = since(asked);
