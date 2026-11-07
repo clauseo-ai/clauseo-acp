@@ -14,11 +14,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::SessionKey;
+use clauseo_protocol::{StopReason, StreamId, ThreadId};
 use serde_json::{Value, json};
 
 use crate::egress::{Recording, calls, claude_then, wired};
 use crate::profile_rig::{CLAUDE, Wired, turn};
-use crate::support::Dir;
+use crate::support::{Dir, Running, wait};
 
 /// The agent's last line: it exits once its turn has ended.
 fn exit() -> Value {
@@ -371,6 +372,69 @@ fn a_removal_thread_that_does_not_start_holds_the_proxy() {
     assert_eq!(calls(&log), ["open 1", "close 1"]);
 }
 
+/// How long a launch waits for a slot a running removal may free (`launch_checks::browser`).
+const SLOT_WAIT: Duration = Duration::from_secs(3);
+
+/// Runs a turn on `thread` whose launch waits for a browser slot: once the launch has armed
+/// its wait on the host clock, `then` (which ends the wait), and the turn's end.
+fn turn_after_slot_wait(host: &Running, thread: ThreadId, then: impl FnOnce()) {
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Go.");
+    let armed = (0..256).any(|_| wait("a timer armed", host.clock.next_armed()) == SLOT_WAIT);
+    assert!(armed, "the launch did not wait for a slot");
+    then();
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+}
+
+/// A session started while every slot is taken and an ended session's removal still runs
+/// waits for that removal and gets the slot it frees, rather than `TooManyBrowsers`. The
+/// removal is held at its start until the next launch waits (on Windows the removal's look at
+/// Chrome's port alone takes longer than a launch).
+#[test]
+fn a_launch_gets_the_slot_an_ending_session_frees() {
+    use clauseo_protocol::{ClauseoTool, ToolAvailability};
+
+    let dir = Dir::new("egress_slot_freed", &[]);
+    claude_then(&dir, &json!("{{any}}"), &[exit()]);
+    let (proxy, log, closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let (go, gate) = channel::<()>();
+    let (began, removing) = channel::<()>();
+    let gate = Mutex::new(Some((began, gate)));
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        wired(config, proxy, removals).with_tree_wait_hook(Arc::new(move |_cdp| {
+            // Only the first removal is held.
+            if let Some((began, gate)) = gate.lock().unwrap().take() {
+                began.send(()).unwrap();
+                gate.recv_timeout(Duration::from_secs(30)).unwrap();
+            }
+        }))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let ending = host.create_thread(matter, CLAUDE);
+    turn(&host, ending);
+    claude_then(&dir, &json!("{{any}}"), &[]);
+    let running = host.create_thread(matter, CLAUDE);
+    turn(&host, running);
+    removing
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the ended session's removal began");
+    let next = host.create_thread(matter, CLAUDE);
+    turn_after_slot_wait(&host, next, || go.send(()).unwrap());
+    let tools = crate::profile_rig::first_frame_tools(&host, next);
+    let browser = tools
+        .iter()
+        .find(|state| state.tool == ClauseoTool::Browser);
+    assert_eq!(
+        browser.map(|state| &state.availability),
+        Some(&ToolAvailability::Available)
+    );
+    closes
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the ended session was freed");
+    host.shutdown();
+}
+
 /// A session's browser slot stays taken while its removal waits for Chrome: with the machine's
 /// two slots, one waiting and one running, a third session gets `TooManyBrowsers`; once the
 /// waiting one is freed, a fourth gets the browser.
@@ -411,7 +475,9 @@ fn the_browser_slot_stays_taken_during_the_wait() {
     turn(&host, running);
     assert_eq!(browser(&host, running), ToolAvailability::Available);
     let third = host.create_thread(matter, CLAUDE);
-    turn(&host, third);
+    // Its launch waits for the waiting session's removal, which runs on, until the slot wait
+    // runs out.
+    turn_after_slot_wait(&host, third, || host.clock.advance(SLOT_WAIT));
     assert_eq!(
         browser(&host, third),
         ToolAvailability::Unavailable {

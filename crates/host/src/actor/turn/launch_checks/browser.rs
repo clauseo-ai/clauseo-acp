@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::super::super::Actor;
 use crate::browser::chrome::ChromeRoots;
@@ -116,9 +117,35 @@ impl BrowserPrep {
     }
 }
 
+/// How long a launch prep waits for a browser slot that a running removal may free
+/// ([`slot_wait`]). A removal whose processes are gone ends within a few looks; one that waits
+/// for a straggler can run to its cap (20 s), and the launch goes on without it.
+pub(super) const SLOT_WAIT: Duration = Duration::from_secs(3);
+
+/// The wait of a launch prep that wants the browser (`prep`) for `key` while every slot is
+/// taken and a holder's removal runs: until a holder's removal ends or [`SLOT_WAIT`] has
+/// passed on the host clock. The session then looks at the slots again
+/// (`profile_loads.rs`), so it gets the slot that removal freed.
+pub(super) fn slot_wait(
+    actor: &mut Actor,
+    key: SessionKey,
+    prep: &BrowserPrep,
+) -> Option<impl std::future::Future<Output = ()> + Send + use<>> {
+    if matches!(prep.chrome, ChromeSearch::Skip) || !actor.wiring.browser_slots.releasing(key) {
+        return None;
+    }
+    let (wake, woken) = futures::channel::oneshot::channel();
+    actor.turn_path.slot_waits.push(wake);
+    let timer = actor.clock.after(SLOT_WAIT);
+    tracing::debug!("a launch waits for a browser slot that a session's end frees");
+    Some(async move {
+        futures::future::select(woken, timer).await;
+    })
+}
+
 /// What the launch prep does for `agent`'s session `key`, from the actor's state: nothing when
-/// no browser can go to it (`tools.browser` off, no proxy, no slot, or no `browser` entry from
-/// the profile hook).
+/// no browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
+/// hook, or no slot and none coming free).
 pub(super) fn browser_prep(
     actor: &Actor,
     agent: &clauseo_protocol::AgentId,
@@ -132,7 +159,7 @@ pub(super) fn browser_prep(
     };
     if !actor.effective.settings().tools.browser
         || actor.wiring.proxy.is_none()
-        || !actor.wiring.browser_slots.free_for(key)
+        || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
     {
         return skip;
     }

@@ -266,6 +266,7 @@ pub(super) fn prepare(
         }
     };
     let job = codex::prepare::Job::launch(run.key.matter);
+    let slot_wait = browser::slot_wait(actor, run.key, &claims.browser);
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -280,6 +281,9 @@ pub(super) fn prepare(
     actor.spawn_post(async move {
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
+        }
+        if let Some(slot_wait) = slot_wait {
+            slot_wait.await;
         }
         let result = codex::prepare::off_actor_or_undo(
             clock,

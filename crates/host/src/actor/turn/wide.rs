@@ -13,6 +13,8 @@ pub(crate) struct TurnPath {
     pub(super) stops: StopWaits,
     /// The idle stop's settings, live agents and its one deadline (`idle.rs`).
     pub(super) idle: IdleClock,
+    /// The launch preps waiting for a browser slot to come free (`launch_checks::browser`).
+    pub(super) slot_waits: Vec<futures::channel::oneshot::Sender<()>>,
 }
 
 impl TurnPath {
