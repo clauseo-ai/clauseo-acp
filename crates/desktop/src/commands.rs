@@ -33,7 +33,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 22] = [
+pub(crate) const COMMANDS: [&str; 23] = [
     "dispatch",
     "query",
     "open_stream",
