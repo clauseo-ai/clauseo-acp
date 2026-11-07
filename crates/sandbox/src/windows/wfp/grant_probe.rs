@@ -1,9 +1,9 @@
 //! What the owner may do to set-up's WFP objects (S15 PR7, for the VM harness, run unelevated
 //! as the owner): read them, and nothing else. Set-up grants read only (orchestrator ruling,
 //! 2026-11-07), so adding a filter in our sublayer, deleting one of ours, linking a filter to
-//! our sublayer at another layer, or changing one's permissions must each be refused. The adds run in a dynamic session, so
-//! one that wrongly succeeds goes when the probe ends; a delete that wrongly succeeds is real,
-//! and the row says to run set-up again.
+//! our sublayer at another layer, or changing one's permissions must each be refused. The adds
+//! run in a dynamic session, so one that wrongly succeeds goes when the probe ends; a delete or
+//! permission change that wrongly succeeds is real, and the row says to run set-up again.
 
 use std::net::Ipv4Addr;
 
