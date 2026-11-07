@@ -16,6 +16,7 @@ import { mt } from "../lib/words-matters.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { nextDateError, parseNextDate } from "./matter-form-check.ts";
 import { Heading } from "./heading.tsx";
+import { PickerLine } from "./picker-line.tsx";
 import { Say } from "./say.tsx";
 
 export type NewMatterFormProps = {
@@ -42,6 +43,9 @@ export type NewMatterFormProps = {
    * line shows it, or null if none was, which keeps what was there. It may answer later: Change waits for it. Without
    * it, Change stands for the picker and keeps the folder Clauseo would make. */
   pickFolder?: ((current: string) => Promise<string | null> | string | null) | undefined;
+  /** Optional: the folder picker is on its way (its pick has run 300 ms, the caller's wait): a muted line under the
+   * folder line says so, and goes when the pick resolves. */
+  opening?: boolean | undefined;
   /** Optional: a line under the fields, from the caller, in the language: a folder refused, a matter not made. */
   error?: string | null | undefined;
   /** Optional: the next date's line, from the caller. Left out, the form reads the date itself and, where it doesn't
@@ -153,6 +157,7 @@ export function NewMatterForm({
   blocked = false,
   scan,
   unpick = 0,
+  opening = false,
   testIds,
   titled = true,
   inDialog = false,
@@ -309,6 +314,7 @@ export function NewMatterForm({
           <span className="deva-nudge">{w("Change")}</span>
         </Button>
       </div>
+      {opening && <PickerLine />}
       {scan}
       {warning?.note}
       {error !== undefined && error !== null && (

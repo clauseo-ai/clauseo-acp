@@ -319,9 +319,13 @@ export class Matters {
     await this.#command({ forget_matter: { matter } }, "forget_matter");
   }
 
-  /** H3: asks for the folder of a matter that moved, and tells the host where it is now. */
-  async locate(matter: MatterId): Promise<void> {
-    const picked = await this.#transport.pickFolder();
+  /** H3: asks for the folder of a matter that moved, and tells the host where it is now. `around` runs the picker, so a
+   * caller can show its wait; left out, the pick runs as it is. */
+  async locate(
+    matter: MatterId,
+    around: <T>(pick: () => Promise<T>) => Promise<T> = (pick) => pick(),
+  ): Promise<void> {
+    const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
     await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
   }

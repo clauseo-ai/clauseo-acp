@@ -104,7 +104,8 @@ export type FakeNextHost = {
 export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
-  pickFolder?: () => PickedFolder | null;
+  /** Answers the folder picker; a promise holds it open (the picker's line shows while it waits). */
+  pickFolder?: () => PickedFolder | null | Promise<PickedFolder | null>;
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
    * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
    * Protected View. */
@@ -502,7 +503,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   async pickFolder(): Promise<PickedFolder | null> {
     this.calls.push({ call: "pick_folder" });
-    return this.host.pickFolder?.() ?? null;
+    return (await this.host.pickFolder?.()) ?? null;
   }
 
   async openExternal(url: string): Promise<void> {
