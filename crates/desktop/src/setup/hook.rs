@@ -34,7 +34,7 @@ use serde_json::{Map, Value};
 use zeroize::Zeroizing;
 
 use super::keys::KeySlot;
-use super::network::NetworkSlot;
+use super::network::{NetworkSlot, with_loopback};
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
@@ -135,7 +135,16 @@ fn setup_parts(
             .any(|set: &String| set.eq_ignore_ascii_case(name))
     };
     let routed = route.launch_vars(agent, &planned);
+    let proxied = route.proxied(agent);
     drop(route);
+    if proxied {
+        // A plan's own `NO_PROXY` stays, with the loopback names it lacks added.
+        for (name, value) in &mut vars {
+            if name.eq_ignore_ascii_case("NO_PROXY") {
+                *value = Zeroizing::new(with_loopback(value));
+            }
+        }
+    }
     let key = keys.get().and_then(|keys| keys.get(agent));
     if let Some(key) = key.filter(|key| !key.is_empty()) {
         vars.insert(key_var(kind).to_owned(), key);
