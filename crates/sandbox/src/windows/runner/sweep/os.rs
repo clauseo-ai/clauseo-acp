@@ -1,6 +1,6 @@
 //! The sweep's calls on Windows. The list is `WTSEnumerateProcessesW`'s: each process with its
 //! token's user, read by the service, so the outer need open no process to learn whose it is; a
-//! process it gives no user for is read here, through `OpenProcessToken`, or left unknown. A
+//! process it gives no user for is [`Owner::None`], passed over. A
 //! process is opened with `PROCESS_TERMINATE`, `PROCESS_QUERY_LIMITED_INFORMATION` and
 //! `SYNCHRONIZE`, the rights the agent's default DACL gives the desktop user, then checked with
 //! `IsProcessInJob` and ended with `TerminateProcess`.
@@ -10,20 +10,19 @@ use std::io;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
-use windows::Win32::Security::TOKEN_QUERY;
 use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
 use windows::Win32::System::Threading::{
-    OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    TerminateProcess, WaitForSingleObject,
 };
 use windows::core::BOOL;
 
 use super::{Owner, Processes, Seen};
 use crate::windows::acl::object::{Handle, os_error};
-use crate::windows::token::os::{sid_text, user};
+use crate::windows::token::os::sid_text;
 
 /// How long an ended process has to be gone.
 const KILL_WAIT: Duration = Duration::from_secs(5);
@@ -73,7 +72,7 @@ impl Processes for OsProcesses<'_> {
         let len = usize::try_from(count).map_err(io::Error::other)?;
         // SAFETY: the call wrote `count` entries at `info`, live until `list` drops.
         let entries = unsafe { std::slice::from_raw_parts(list.0, len) };
-        Ok(entries.iter().map(seen).collect())
+        entries.iter().map(seen).collect()
     }
 
     fn open(&mut self, pid: u32) -> io::Result<Option<Handle>> {
@@ -113,37 +112,25 @@ impl Processes for OsProcesses<'_> {
     }
 }
 
-/// One entry of the list: its user as the service read it, or as read here when it gave none.
-fn seen(entry: &WTS_PROCESS_INFOW) -> Seen {
-    let pid = entry.ProcessId;
+/// One entry of the list; a SID the service gave that isn't one fails the list.
+fn seen(entry: &WTS_PROCESS_INFOW) -> io::Result<Seen> {
     let image = if entry.pProcessName.is_null() {
         String::from("?")
     } else {
         // SAFETY: the service wrote a NUL-terminated name, live while the list is.
         unsafe { entry.pProcessName.to_string() }.unwrap_or_else(|_| String::from("?"))
     };
+    // No SID: one of the kernel's or a protected process, never a pool user's (`Owner::None`).
     let owner = if entry.pUserSid.is_invalid() {
-        read_user(pid)
+        Owner::None
     } else {
-        sid_text(entry.pUserSid).ok()
+        Owner::User(sid_text(entry.pUserSid)?)
     };
-    Seen {
-        pid,
+    Ok(Seen {
+        pid: entry.ProcessId,
         image,
-        owner: owner.map_or(Owner::Unknown, Owner::User),
-    }
-}
-
-/// `pid`'s token user, read through its token, if this process may.
-fn read_user(pid: u32) -> Option<crate::windows::sids::Sid> {
-    // SAFETY: a plain open by pid; the handle is owned by `Handle`.
-    let process =
-        Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?);
-    let mut token = HANDLE::default();
-    // SAFETY: the process handle is live; `token` is a live out-pointer owned by `Handle` once
-    // written.
-    unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &raw mut token) }.ok()?;
-    user(&Handle(token)).ok()
+        owner,
+    })
 }
 
 /// Whether `process` has ended within `wait`.

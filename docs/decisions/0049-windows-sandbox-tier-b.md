@@ -1011,11 +1011,16 @@ leaves that profile, both naming the part.
     the gap, a process the logon itself set off included, before the inner runs any code. The
     list comes from `WTSEnumerateProcessesW`, which gives each process's user without opening
     it. Each process found is opened, which pins its pid, and checked against a second list, so
-    a pid reused meanwhile is left alone. At (a) and (b), a process whose user can't be read, or
-    one of the pool user's that can't be opened, checked or ended, fails the launch
-    (`RunExit::Sweep`). Mid-session and at the end a failure is logged, and the next tick tries
-    a mid-session one again. Each kill is logged with its pid, image name and sweep point. An
-    outer that is killed runs no (c); the next launch's (a) sweeps what it left.
+    a pid reused meanwhile is left alone. An entry with no user SID is passed over: the service
+    reads each token as SYSTEM, so only the kernel's own, pseudo and protected processes come
+    back without one, and a pool user can start none of them. At (a) and (b), a list that can't
+    be read, or a process of the pool user's that can't be opened, checked or ended, fails the
+    launch (`RunExit::Sweep`). Microsoft documents that only a member of Administrators may list
+    other users' processes this way; whether an unelevated standard user sees the pool user's
+    processes is unmeasured, and CI's desktop user is an admin (open, a VM row). Mid-session and
+    at the end a failure is logged, and the next tick tries a mid-session one again. Each kill is
+    logged with its pid, image name and sweep point. An outer that is killed runs no (c); the
+    next launch's (a) sweeps what it left.
 
   The experiment that would lower a duplicated token to Low and impersonate it from the agent
   was dropped. With one live session per pool user and sweep (b), no other process of the pool

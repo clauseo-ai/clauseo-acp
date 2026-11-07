@@ -97,7 +97,7 @@ fn machine() -> Fake {
     fake.procs.insert(
         0,
         Proc {
-            owner: Owner::Unknown,
+            owner: Owner::None,
             image: "[System Process]",
             in_job: false,
         },
@@ -167,23 +167,33 @@ fn nothing_of_the_pool_user_is_nothing_to_do() {
 }
 
 #[test]
-fn a_process_whose_user_cant_be_read_fails_closed() {
+fn entries_without_a_user_are_passed_over_and_the_pool_users_still_fail_closed() {
     let mut fake = machine();
-    fake.procs.insert(
-        77,
-        Proc {
-            owner: Owner::Unknown,
-            image: "hidden.exe",
+    for (pid, image) in [
+        (88, "Registry"),
+        (160, "Secure System"),
+        (2100, "MemCompression"),
+    ] {
+        let kernel = Proc {
+            owner: Owner::None,
+            image,
             in_job: false,
-        },
-    );
+        };
+        fake.procs.insert(pid, kernel);
+    }
     fake.procs.insert(12, pool_proc("stray.exe"));
-    let want = SweepError::Unknown {
-        pid: 77,
-        image: "hidden.exe".to_owned(),
-    };
-    assert_eq!(run(&mut fake, &[], Point::BeforeLogon).0, Err(want));
-    assert_eq!(fake.killed, Vec::<u32>::new());
+    assert_eq!(run(&mut fake, &[], Point::BeforeLogon).0, Ok(vec![12]));
+    for pid in [0, 88, 160, 2100] {
+        assert!(fake.procs.contains_key(&pid), "{pid} passed over");
+    }
+    // Beside them, a pool user's process that can't be opened still fails the launch.
+    fake.procs.insert(13, pool_proc("hidden.exe"));
+    fake.deny_open.insert(13);
+    let got = run(&mut fake, &[], Point::BeforeResume).0;
+    assert!(
+        matches!(&got, Err(SweepError::Open { pid: 13, code, .. }) if code == "5"),
+        "{got:?}"
+    );
 }
 
 #[test]

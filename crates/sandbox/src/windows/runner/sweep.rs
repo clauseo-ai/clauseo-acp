@@ -13,10 +13,11 @@
 //!   service started outside the job lives at most that long;
 //! - (c) at session end ([`Point::End`]).
 //!
-//! At (a) and (b) a failure fails the launch closed: a process whose user can't be read (the
-//! System Idle process, pid 0, aside), or one of the pool user's that can't be opened, checked
-//! against the job or ended. At a tick and at (c) a failure is logged and the session goes on;
-//! a tick's failure is tried again at the next tick.
+//! At (a) and (b) a failure fails the launch closed: a list that can't be read, or a process of
+//! the pool user's that can't be opened, checked against the job or ended. A process the list
+//! gives no user for ([`Owner::None`]) is not the pool user's and is passed over. At a tick and
+//! at (c) a failure is logged and the session goes on; a tick's failure is tried again at the
+//! next tick.
 //!
 //! Each process found is opened first, which pins its pid, and then the list is read again: only
 //! a pid that list still gives the pool user is killed, so a pid reused meanwhile is left alone.
@@ -66,8 +67,11 @@ impl fmt::Display for Point {
 pub(crate) enum Owner {
     /// Its token's user.
     User(Sid),
-    /// A user that couldn't be read.
-    Unknown,
+    /// No user: `WTSEnumerateProcessesW` reads each token in the service, as SYSTEM, and gives
+    /// none only for the kernel's own and pseudo processes (System Idle, System, Registry, Memory
+    /// Compression, Secure System) and protected ones, none of which a pool user can start. Not
+    /// the pool user's, so passed over.
+    None,
 }
 
 /// One process in the list.
@@ -99,9 +103,6 @@ pub(crate) enum SweepError {
     /// The process list couldn't be read.
     #[error("the process list failed ({0})")]
     List(String),
-    /// A process's user couldn't be read.
-    #[error("the user of process {pid} ({image}) can't be read")]
-    Unknown { pid: u32, image: String },
     /// One of the pool user's processes couldn't be opened.
     #[error("the sandbox user's process {pid} ({image}) can't be opened ({code})")]
     Open {
@@ -207,20 +208,9 @@ pub(crate) fn watch<P: Processes, T>(
     }
 }
 
-/// The list, refused when a process's user can't be read.
+/// The list; one that can't be read fails the sweep.
 fn list<P: Processes>(calls: &mut P) -> Result<Vec<Seen>, SweepError> {
-    let seen = calls.list().map_err(|e| SweepError::List(code(&e)))?;
-    // The System Idle process has no token.
-    if let Some(unknown) = seen
-        .iter()
-        .find(|s| s.owner == Owner::Unknown && s.pid != 0)
-    {
-        return Err(SweepError::Unknown {
-            pid: unknown.pid,
-            image: unknown.image.clone(),
-        });
-    }
-    Ok(seen)
+    calls.list().map_err(|e| SweepError::List(code(&e)))
 }
 
 fn is(seen: &Seen, user: &Sid) -> bool {
