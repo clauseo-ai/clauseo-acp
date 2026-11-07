@@ -1,6 +1,7 @@
 // The desktop's folder chooser, scripted for tests, the review page and screenshots: a Windows tree of drives and
-// folders, and one session over it that answers `chooser_list`, `chooser_choose` and `chooser_cancel` as the desktop
-// does (crates/desktop/src/chooser.rs): moving by start key, by an index into the last listing, up to a drive's root,
+// folders, and one session over it that answers `chooser_starts`, `chooser_list`, `chooser_choose` and
+// `chooser_cancel` as the desktop does (crates/desktop/src/chooser.rs), each held as long as the script says: moving by
+// start key, by an index into the last listing, up to a drive's root,
 // or to a typed path; refused folders listed but not opened; a folder that doesn't answer; one that isn't there.
 import type { ChooserWire } from "./chooser.ts";
 import type {
@@ -39,10 +40,14 @@ export type FakeChooser = {
   /** The native confirm for the folder shown, its full path given: the folder registered, or null when the lawyer
    * declines. Left out, every folder is confirmed and registered as `chosen:<path>`. */
   choose?: (path: string) => PickedFolder | null | Promise<PickedFolder | null>;
+  /** Held before `chooser_starts` or `chooser_list` answers, as the desktop's reads of the drives and of a folder
+   * take their time; left out, both answer at once. */
+  hold?: (call: "starts" | "list") => Promise<void>;
 };
 
 /** What a session saw, in order, for a test to read. */
 export type FakeChooserCall =
+  | { call: "chooser_starts"; chooser: number }
   | { call: "chooser_list"; chooser: number; go: Go }
   | { call: "chooser_choose"; chooser: number }
   | { call: "chooser_cancel"; chooser: number };
@@ -157,9 +162,16 @@ export function fakeChooserSession(
   };
 
   const wire: ChooserWire = {
+    async starts() {
+      seen({ call: "chooser_starts", chooser });
+      live();
+      await tree.hold?.("starts");
+      return points;
+    },
     async list(go) {
       seen({ call: "chooser_list", chooser, go });
       live();
+      await tree.hold?.("list");
       switch (go.kind) {
         case "start": {
           const start = starts[go.key];
@@ -203,7 +215,7 @@ export function fakeChooserSession(
       open = false;
     },
   };
-  return { start: { chooser, starts: points }, wire };
+  return { start: { chooser }, wire };
 }
 
 /** A lawyer's Windows machine, for tests and the review page: C: with Program Files and Windows (refused), home at

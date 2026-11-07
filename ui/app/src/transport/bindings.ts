@@ -69,12 +69,19 @@ export const commands = {
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
 	/**
 	 *  [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
-	 *  (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
-	 *  instead): then it opens an in-app chooser session (closing any other) and answers `choose`
-	 *  with its start points. At most 20 sessions a run and 3 a minute; past that the native dialog
-	 *  opens. Never `choose` off Windows.
+	 *  (`chooser/stall.rs`, found out as the app starts, so at once by now, at most 1.5 s after the
+	 *  start; `CLAUSEO_FOLDER_PICKER=app|native` decides instead): then it opens an in-app chooser
+	 *  session (closing any other) and answers `choose` at once, without waiting on any read. At
+	 *  most 20 sessions a run and 3 a minute; past that the native dialog opens. Never `choose` off
+	 *  Windows.
 	 */
 	pickFolderOrChoose: () => typedError<PickAnswer, HostError>(__TAURI_INVOKE("pick_folder_or_choose")),
+	/**
+	 *  Where the chooser session `chooser` may start: its drives, home, Desktop and last place,
+	 *  once its one read of the drives landed (at most 1.5 s after it opened). `command.invalid`
+	 *  for an unknown or closed session.
+	 */
+	chooserStarts: (chooser: number) => typedError<StartPoint[], HostError>(__TAURI_INVOKE("chooser_starts", { chooser })),
 	/**
 	 *  Goes where `go` says in the chooser session `chooser` and lists the folder there: by a
 	 *  start point's key, an index into the last listing, up (to a drive or typed share root), a
@@ -598,12 +605,13 @@ export type CheckpointRecorded = {
 	turn?: TurnId,
 };
 
-/**  A chooser session and where it may start. */
+/**  A chooser session, open at once; where it may start comes from `chooser_starts`. */
 export type ChooserStart = {
-	/**  The session, for `chooser_list`, `chooser_choose` and `chooser_cancel`. */
+	/**
+	 *  The session, for `chooser_starts`, `chooser_list`, `chooser_choose` and
+	 *  `chooser_cancel`.
+	 */
 	chooser: number,
-	/**  The places to start from. */
-	starts: StartPoint[],
 };
 
 /**  One of Clauseo's own tools. */
@@ -3853,7 +3861,7 @@ export type PickAnswer =
 { kind: "picked"; folder: PickedFolder } | 
 /**  The native dialog was cancelled. */
 { kind: "cancelled" } | 
-/**  The native dialog would stall: choose in the page, starting from these. */
+/**  The native dialog would stall: choose in the page, in this session. */
 { kind: "choose"; start: ChooserStart };
 
 /**  A folder the lawyer picked: the ref `CreateMatter` takes, and the path to show. */

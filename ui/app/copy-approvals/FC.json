@@ -185,5 +185,16 @@
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)",
     "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-18": {
+    "en": "Looking…",
+    "hi": "देखा जा रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows, just opened: where the places to start and the folders stand while the desktop still reads the drives and the first folder"
   }
 }

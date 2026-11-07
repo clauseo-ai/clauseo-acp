@@ -306,6 +306,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     if (answer.kind === "cancelled") return null;
     const session = answer.start.chooser;
     return chooserOf(this).run(answer.start, {
+      starts: () => call(commands.chooserStarts(session)),
       list: (go) => call(commands.chooserList(session, go)),
       choose: () => call(commands.chooserChoose(session)),
       cancel: async () => {

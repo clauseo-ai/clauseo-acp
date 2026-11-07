@@ -143,12 +143,21 @@ fn sessions_are_capped_per_minute_and_per_run() {
 }
 
 /// A read of the drives that hangs leaves the session without drives after about 1.5 s: no
-/// drive start points, and no network drive.
+/// drive start points, and no network drive. The session itself opens at once.
 #[test]
 fn a_hanging_drive_read_leaves_no_drives_after_one_and_a_half_seconds() {
     let (chooser, release) = fake_with(r"C:\Users\rmehra\Desktop", &["SRV"], true);
     let started = crate::open::now();
-    let start = open(&chooser, started);
+    let id = chooser
+        .open(Some(Path::new(HOME)), None, &[], started)
+        .unwrap()
+        .chooser;
+    let opened = crate::open::now().saturating_duration_since(started);
+    assert!(opened < Duration::from_millis(300), "{opened:?}");
+    let start = Opened {
+        chooser: id,
+        starts: chooser.starts(id, started).unwrap(),
+    };
     let waited = crate::open::now().saturating_duration_since(started);
     assert!(
         waited >= Duration::from_millis(1400) && waited < Duration::from_secs(4),

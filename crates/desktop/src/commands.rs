@@ -23,7 +23,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
-use crate::chooser::{Chooser, Go, Listing, PickAnswer, Route};
+use crate::chooser::{Chooser, Go, Listing, PickAnswer, Route, StartPoint};
 use crate::counts::{CountsState, UiCount};
 use crate::dialogs::LastPick;
 use crate::frame::Frame;
@@ -33,7 +33,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 20] = [
+pub(crate) const COMMANDS: [&str; 21] = [
     "dispatch",
     "query",
     "open_stream",
@@ -44,6 +44,7 @@ pub(crate) const COMMANDS: [&str; 20] = [
     "answer_permission",
     "pick_folder",
     "pick_folder_or_choose",
+    "chooser_starts",
     "chooser_list",
     "chooser_choose",
     "chooser_cancel",
@@ -282,10 +283,11 @@ async fn native_pick<R: Runtime>(
 }
 
 /// [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
-/// (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
-/// instead): then it opens an in-app chooser session (closing any other) and answers `choose`
-/// with its start points. At most 20 sessions a run and 3 a minute; past that the native dialog
-/// opens. Never `choose` off Windows.
+/// (`chooser/stall.rs`, found out as the app starts, so at once by now, at most 1.5 s after the
+/// start; `CLAUSEO_FOLDER_PICKER=app|native` decides instead): then it opens an in-app chooser
+/// session (closing any other) and answers `choose` at once, without waiting on any read. At
+/// most 20 sessions a run and 3 a minute; past that the native dialog opens. Never `choose` off
+/// Windows.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_folder_or_choose<R: Runtime>(
@@ -335,6 +337,21 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
         Some(folder) => PickAnswer::Picked { folder },
         None => PickAnswer::Cancelled,
     })
+}
+
+/// Where the chooser session `chooser` may start: its drives, home, Desktop and last place,
+/// once its one read of the drives landed (at most 1.5 s after it opened). `command.invalid`
+/// for an unknown or closed session.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn chooser_starts(
+    state: State<'_, Chooser>,
+    chooser: u32,
+) -> Result<Vec<StartPoint>, HostError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.starts(chooser, crate::open::now()))
+        .await
+        .map_err(|error| HostError::new(ErrorCode::Internal, format!("no starts: {error}")))?
 }
 
 /// Goes where `go` says in the chooser session `chooser` and lists the folder there: by a

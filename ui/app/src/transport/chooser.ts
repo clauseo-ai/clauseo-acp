@@ -1,19 +1,21 @@
 // Clauseo's own folder chooser, between a transport and the page. When Windows' folder window would stall on a share
-// that is down, the desktop answers `pick_folder_or_choose` with a chooser session (`choose`), and the transport hands
-// it here: `run` resolves once the lawyer has chosen (the folder `chooser_choose` registered) or cancelled (null), so
-// every caller of `pickFolder` still awaits a `PickedFolder | null`. One store per transport; the room's
+// that is down, the desktop answers `pick_folder_or_choose` with a chooser session (`choose`) at once, before it knows
+// where the session may start, and the transport hands it here: `run` resolves once the lawyer has chosen (the folder
+// `chooser_choose` registered) or cancelled (null), so every caller of `pickFolder` still awaits a `PickedFolder | null`. One store per transport; the room's
 // FolderChooserHost (room/folder-chooser-host.tsx) shows the request it holds. Kept small: it ships in the first load.
-import type { ChooserStart, Go, Listing, PickedFolder } from "./protocol.ts";
+import type { ChooserStart, Go, Listing, PickedFolder, StartPoint } from "./protocol.ts";
 
-/** One chooser session's calls: the desktop's `chooser_list`, `chooser_choose` and `chooser_cancel`, the session
- * bound. `choose` gives null when the lawyer declines the native confirm; the session stays open then. */
+/** One chooser session's calls: the desktop's `chooser_starts`, `chooser_list`, `chooser_choose` and
+ * `chooser_cancel`, the session bound. `starts` lands once the desktop has read the drives (at most 1.5 s);
+ * `choose` gives null when the lawyer declines the native confirm; the session stays open then. */
 export type ChooserWire = {
+  starts(): Promise<StartPoint[]>;
   list(go: Go): Promise<Listing>;
   choose(): Promise<PickedFolder | null>;
   cancel(): Promise<void>;
 };
 
-/** A session the page shows: where it may start, its calls, and how it ends. */
+/** A session the page shows: the session, its calls, and how it ends. */
 export type ChooserRequest = {
   start: ChooserStart;
   wire: ChooserWire;

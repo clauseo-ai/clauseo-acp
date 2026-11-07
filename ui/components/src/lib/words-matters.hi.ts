@@ -73,6 +73,8 @@ export const HI = {
   // beside a folder Clauseo refuses (a system folder, the home folder's own): listed, but it doesn't open
   "Can't be a matter": "मामला नहीं बन सकता",
   "Some folders aren't shown.": "कुछ फ़ोल्डर नहीं दिखाए गए हैं।",
+  // where the places to start or the folders stand while the desktop still reads them (provisional Hindi)
+  "Looking…": "देखा जा रहा है…",
   // while the desktop's own window asks to use the folder chosen
   "Waiting for you to confirm…": "आपकी पुष्टि की प्रतीक्षा है…",
   /* ---------- a matter whose folder has moved ---------- */

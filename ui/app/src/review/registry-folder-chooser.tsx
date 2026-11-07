@@ -1,4 +1,4 @@
-// Clauseo's own folder chooser's copy review entries (FC-01 to FC-17): the chooser Windows gets when its folder window
+// Clauseo's own folder chooser's copy review entries (FC-01 to FC-18): the chooser Windows gets when its folder window
 // would stall, in the real room over FakeTransport, opened by New matter's Change over the scripted machine
 // (transport/fake-chooser.ts), at the last place or where each state shows; in a 640 by 480 window, the smallest the
 // chooser must fit. Apart from registry.tsx to keep that file under the size limit.
@@ -19,6 +19,12 @@ const opened = (last: FakePath, choose?: FakeChooser["choose"]) => () =>
   });
 
 const MATTERS: FakePath = ["C:", "Users", "rmehra", "Documents", "Matters"];
+/** Just opened: the desktop still reads the drives, so the places to start and the folders are on their way. */
+const looking = () =>
+  new FakeTransport({
+    query: () => ({ matters: [MATTER] }),
+    chooser: { ...FAKE_CHOOSER, last: MATTERS, hold: () => new Promise(() => {}) },
+  });
 const atMatters = () => <Chooser host={opened(MATTERS)} />;
 /** The typed location filled in, as the lawyer types it. */
 const typed = () => (
@@ -82,4 +88,5 @@ export const FOLDER_CHOOSER: Entry[] = [
   entry("FC-15", "Can't be a matter", () => <Chooser host={opened(["C:"])} />),
   entry("FC-16", "Some folders aren't shown.", () => <Chooser host={opened(["D:", "Archive"])} />),
   entry("FC-17", "Waiting for you to confirm…", waiting),
+  entry("FC-18", "Looking…", () => <Chooser host={looking} />),
 ];
