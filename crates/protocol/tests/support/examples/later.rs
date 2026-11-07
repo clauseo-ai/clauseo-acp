@@ -89,6 +89,14 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistNoticeExpired,
             "the blocked-site notice is no longer kept",
         ),
+        failed(
+            ErrorCode::BlocklistAllowNotSaved,
+            "the allow is kept until Clauseo closes",
+        ),
+        failed(
+            ErrorCode::BlocklistRevokeNotSaved,
+            "the data folder is read-only",
+        ),
     ]
 }
 

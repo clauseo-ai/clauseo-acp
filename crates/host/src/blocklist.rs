@@ -27,7 +27,8 @@
 //! - Redirects (`fetch.rs`): followed by hand, at most five hops, each resolved against the URL
 //!   before it, `https` only (when asked) and to an allowed host only.
 //! - The lawyer's allowed sites (PR 2, `allowed.rs`): the per-matter views the proxies read,
-//!   which the seams carry ([`BlockListSeams::with_allowed`]) and the actor publishes.
+//!   which the seams carry ([`BlockListSeams::with_allowed`]) and the actor publishes; and the
+//!   OS secret store holding `allowed.json`'s hash ([`BlockListSeams::with_secrets`]).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,6 +37,7 @@ use std::thread;
 use std::time::Duration;
 
 use clauseo_blocklist::{Current, MAX_SIGNATURE, PUBLIC_KEYS};
+use clauseo_connectors::SecretStore;
 use clauseo_protocol::Timestamp;
 use clauseo_sandbox::Upstream;
 
@@ -80,6 +82,7 @@ pub struct BlockListSeams {
     pub(crate) bundled: Option<PathBuf>,
     pub(crate) update: BlockListUpdate,
     pub(crate) allowed: Arc<AllowedSites>,
+    pub(crate) secrets: Option<Arc<dyn SecretStore>>,
 }
 
 impl BlockListSeams {
@@ -91,6 +94,7 @@ impl BlockListSeams {
             bundled,
             update,
             allowed: Arc::default(),
+            secrets: None,
         }
     }
 
@@ -99,6 +103,15 @@ impl BlockListSeams {
     #[must_use]
     pub fn with_allowed(mut self, allowed: Arc<AllowedSites>) -> Self {
         self.allowed = allowed;
+        self
+    }
+
+    /// These seams with `secrets`, the OS secret store that keeps `allowed.json`'s hash
+    /// (`blocklist/allowed/integrity.rs`). Without one (the default), no stored allow is
+    /// trusted and allows made in a run apply until it ends.
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: Arc<dyn SecretStore>) -> Self {
+        self.secrets = Some(secrets);
         self
     }
 
@@ -116,7 +129,7 @@ impl BlockListSeams {
     /// `clauseo-blocklist` thread and fetches nothing. Kept here, not as a `HostConfig`
     /// builder, so `config.rs` stays within 600 lines.
     pub fn apply(self, mut config: crate::HostConfig) -> crate::HostConfig {
-        config.wiring.blocklist = Some(self);
+        config.wiring.blocklist = Some(Box::new(self));
         config
     }
 
@@ -193,19 +206,20 @@ pub(crate) struct Start {
     pub(crate) clock: Arc<dyn Clock>,
 }
 
-/// The allowed sites' views `config`'s seams carry, or a fresh one without seams.
-pub(crate) fn allowed_sites(config: &crate::HostConfig) -> Arc<AllowedSites> {
-    config
-        .wiring
-        .blocklist
-        .as_ref()
-        .map(|seams| Arc::clone(&seams.allowed))
-        .unwrap_or_default()
+/// The allowed sites' views `config`'s seams carry (a fresh one without seams), and their
+/// secret store, if any.
+pub(crate) fn allowed_sites(
+    config: &crate::HostConfig,
+) -> (Arc<AllowedSites>, Option<Arc<dyn SecretStore>>) {
+    match &config.wiring.blocklist {
+        Some(seams) => (Arc::clone(&seams.allowed), seams.secrets.clone()),
+        None => (Arc::default(), None),
+    }
 }
 
 /// Takes the block list's seams out of `config`, with what the thread needs beside them.
 pub(crate) fn take(config: &mut crate::HostConfig) -> Option<Start> {
-    let seams = config.wiring.blocklist.take()?;
+    let seams = *config.wiring.blocklist.take()?;
     Some(Start {
         seams,
         data_dir: config.effective.data_dir().to_path_buf(),

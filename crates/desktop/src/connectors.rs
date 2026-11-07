@@ -95,15 +95,28 @@ const UA_MARK: &str = if cfg!(feature = "local-connector") {
     ""
 };
 
+/// The OS keychain, opened once per app, for the connectors and (under its own service) the
+/// block list's allowed sites; `None` (logged) when it cannot be opened, as on Linux.
+pub(crate) fn secret_store() -> Option<KeyringStore> {
+    match KeyringStore::new() {
+        Ok(store) => Some(store),
+        Err(error) => {
+            tracing::warn!(%error, "the keychain could not be opened");
+            None
+        }
+    }
+}
+
 /// `config` with the connectors and the case-law relays, or unchanged (logged) when they cannot
-/// be built.
+/// be built; `store` is [`secret_store`]'s.
 pub(crate) fn with_connectors<R: Runtime>(
     config: HostConfig,
     app: AppHandle<R>,
     data_dir: &Path,
+    store: Option<KeyringStore>,
 ) -> HostConfig {
     let opener = Arc::new(LinkOpener(app));
-    let Ok(store) = KeyringStore::new() else {
+    let Some(store) = store else {
         tracing::warn!("no data connectors: the keychain could not be opened");
         return config;
     };

@@ -106,10 +106,16 @@ const room = (id: string, ref: WordsRef, scene: keyof typeof SCENES): Entry => (
 
 const AT = Date.UTC(2026, 10, 5, 6);
 const SITES: AllowedSite[] = [
-  { host: "update-cdn.example", scope: "always", allowed_at: AT },
-  { host: "invoice-paypa1.example", scope: "matter", matter: MATTER.matter, allowed_at: AT },
+  { host: "update-cdn.example", scope: "always", allowed_at: AT, saved: true },
+  {
+    host: "invoice-paypa1.example",
+    scope: "matter",
+    matter: MATTER.matter,
+    allowed_at: AT,
+    saved: true,
+  },
   // a forgotten matter's allow, kept
-  { host: "old-portal.example", scope: "matter", matter: uuid(5, 2), allowed_at: AT },
+  { host: "old-portal.example", scope: "matter", matter: uuid(5, 2), allowed_at: AT, saved: true },
 ];
 const NAMED = [{ ...MATTER } as MatterInfo];
 

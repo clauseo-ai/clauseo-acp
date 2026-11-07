@@ -25,6 +25,7 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
     super::browser_install::shutdown(actor);
     super::connectors::shutdown(actor);
     super::protection::work::shutdown(actor);
+    super::allowed::shutdown(actor);
     turn::shutdown(actor);
 }
 

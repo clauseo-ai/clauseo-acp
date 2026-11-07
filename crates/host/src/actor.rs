@@ -506,6 +506,7 @@ impl Actor {
             Input::Update(input) => update::on_input(self, input),
             Input::Connector(input) => connectors::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
+            Input::Allowed(input) => allowed::on_input(self, *input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -519,6 +520,7 @@ impl Actor {
         if !self.work.idle()
             || turn::busy(self)
             || browser_install::busy(self)
+            || allowed::busy(self)
             || update::busy(self)
             || scratch::holds(self)
             || matters::probe::stop_held(self)

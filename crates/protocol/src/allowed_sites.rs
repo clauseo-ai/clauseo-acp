@@ -37,4 +37,7 @@ pub struct AllowedSite {
     pub matter: Option<MatterId>,
     /// When the lawyer allowed it.
     pub allowed_at: Timestamp,
+    /// Whether the next start honours it: false when Clauseo couldn't save it, so it lasts
+    /// until Clauseo closes.
+    pub saved: bool,
 }

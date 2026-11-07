@@ -18,19 +18,21 @@
 //!   on every `SettingsChanged` the actor publishes, so a settings change applies at the
 //!   proxies' next request. The policy file is read only at start, so a policy change takes
 //!   effect at the next start; a future runtime reload would publish `SettingsChanged`.
-//! - Storage (`blocklist/allowed/file.rs`): an allow is written before it takes effect (a
-//!   failed write is `store.io` and allows nothing); a revoke takes effect first and is then
-//!   written (a failed write is `store.io`, and the site stays blocked until Clauseo restarts).
-//!   A revoke always writes, so retrying one whose write failed saves it even though memory no
-//!   longer holds the allow. Both writes run on the actor thread, as `hints.json`'s does.
+//! - Limit: a new allow past `file::MAX_HOSTS` (10,000) is `command.invalid` (a count past its
+//!   most, as 0003 words that code) and changes nothing; allowing a host already there is fine.
+//! - Storage (`allowed/saving.rs`): an allow or revoke takes effect in memory at once, then its
+//!   save runs on the allowed sites' own thread, in order, and the command is answered once the
+//!   save is: `Done` when saved, else `blocklist.allow_not_saved` or
+//!   `blocklist.revoke_not_saved` (the change lasts until Clauseo closes).
 //! - Log: one info line per command, naming the host, the scope and the matter.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, mpsc};
 
 use clauseo_protocol::{
-    AllowScope, BlockedSiteId, CommandOutcome, ErrorCode, MatterId, QueryResult, ThreadId,
+    AllowScope, BlockedSiteId, CommandId, ErrorCode, MatterId, QueryResult, ThreadId,
 };
 
 use super::Actor;
@@ -38,11 +40,14 @@ use super::commands::CommandCtx;
 use super::input::Reply;
 use crate::blocklist::AllowedSites;
 use crate::blocklist::allowed::file::{self, Stored};
+use crate::blocklist::allowed::integrity::Job;
 use crate::error::Error;
-use crate::log_file::Cause;
 
+mod saving;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use saving::{AllowedInput, busy, on_input, shutdown, start};
 
 /// How many of each thread's latest notices an allow can name.
 pub(crate) const MAX_NOTICES_PER_THREAD: usize = 64;
@@ -55,12 +60,9 @@ pub(crate) const OVERRIDE_OFF: &str =
 /// `AllowBlockedSite`'s refusal for a notice the host no longer keeps.
 pub(crate) const UNKNOWN_NOTICE: &str =
     "This notice has expired. Open the site again, then allow it from the new notice.";
-/// An allow whose write failed.
-pub(crate) const ALLOW_NOT_SAVED: &str =
-    "Clauseo couldn't save the allowed site, so it stays blocked. Try again.";
-/// A revoke whose write failed.
-pub(crate) const REVOKE_NOT_SAVED: &str = "The site is blocked again, but Clauseo couldn't save that, so it may be allowed again \
-     after a restart. Try again.";
+/// An allow past the most allows kept.
+pub(crate) const TOO_MANY: &str = "Clauseo already keeps the most allowed sites it can, so this site stays blocked. Remove some in \
+     Settings, then try again.";
 
 /// One notice an allow can name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +78,51 @@ pub(crate) struct AllowState {
     stored: Stored,
     path: PathBuf,
     sites: Arc<AllowedSites>,
+    /// What the next start would honour, when known (`saving.rs`).
+    persisted: Option<Stored>,
+    /// The thread's job queue; `None` without a thread, or after giving up on its read.
+    writer: Option<mpsc::Sender<Job>>,
+    /// The commands whose saves are out, in the order they were sent.
+    waiting: VecDeque<(CommandId, Change, Stored)>,
+    /// While the start-up read is out: the commands sent meanwhile, in order.
+    opening: Option<Vec<Held>>,
+    /// Dropped to end the read's deadline early (`saving.rs`).
+    read_deadline: Option<futures::channel::oneshot::Sender<()>>,
+    /// The secret store, for the stop's last delete (`saving.rs`).
+    store: Option<saving::Secrets>,
+    /// Set when the stop gives up on the queue: the thread writes nothing more.
+    abandoned: Arc<AtomicBool>,
+    /// Where the host's stop is with the queue.
+    stop: saving::Stop,
+    /// Dropped to end the stop's wait early.
+    stop_deadline: Option<futures::channel::oneshot::Sender<()>>,
+}
+
+/// What a command changed, to answer it once its save is known.
+#[derive(Debug)]
+enum Change {
+    Allow,
+    Revoke {
+        host: String,
+        scope: AllowScope,
+        matter: Option<MatterId>,
+    },
+}
+
+/// An allow or revoke sent before the start-up read was back.
+#[derive(Debug)]
+enum Held {
+    Allow {
+        id: CommandId,
+        block_id: BlockedSiteId,
+        scope: AllowScope,
+    },
+    Revoke {
+        id: CommandId,
+        host: String,
+        scope: AllowScope,
+        matter: Option<MatterId>,
+    },
 }
 
 impl AllowState {
@@ -86,6 +133,15 @@ impl AllowState {
             stored: Stored::default(),
             path: file::path(data_dir),
             sites: Arc::default(),
+            persisted: None,
+            writer: None,
+            waiting: VecDeque::new(),
+            opening: None,
+            read_deadline: None,
+            store: None,
+            abandoned: Arc::default(),
+            stop: saving::Stop::Running,
+            stop_deadline: None,
         }
     }
 
@@ -125,13 +181,6 @@ impl AllowState {
     }
 }
 
-/// At the start: `sites` (the seams' views, or a fresh one) and the stored allows, published.
-pub(super) fn start(actor: &mut Actor, sites: Arc<AllowedSites>) {
-    actor.allowed.sites = sites;
-    actor.allowed.stored = file::read(&actor.allowed.path);
-    refresh(actor);
-}
-
 /// Publishes what is in force now to every launch's view: the stored allows, or none while
 /// overrides are off.
 pub(crate) fn refresh(actor: &Actor) {
@@ -155,17 +204,33 @@ fn scope_word(scope: AllowScope) -> &'static str {
     }
 }
 
-/// `AllowBlockedSite`: answers `Done`, with no receipt, or a refusal.
+/// `AllowBlockedSite`: answers once its save is known (`Done`, or not saved), or a refusal;
+/// held while the start-up read is out.
 pub(super) fn allow(
     actor: &mut Actor,
     ctx: &CommandCtx,
     block_id: BlockedSiteId,
     scope: AllowScope,
 ) {
-    let result = try_allow(actor, block_id, scope).map(|()| CommandOutcome::Done);
-    actor.finish_command(ctx.id, result);
+    if let Some(held) = &mut actor.allowed.opening {
+        held.push(Held::Allow {
+            id: ctx.id,
+            block_id,
+            scope,
+        });
+        return;
+    }
+    run_allow(actor, ctx.id, block_id, scope);
 }
 
+fn run_allow(actor: &mut Actor, id: CommandId, block_id: BlockedSiteId, scope: AllowScope) {
+    match try_allow(actor, block_id, scope) {
+        Ok(()) => saving::save(actor, id, Change::Allow),
+        Err(error) => actor.finish_command(id, Err(error)),
+    }
+}
+
+/// Puts the allow in memory and in force; the save follows.
 fn try_allow(actor: &mut Actor, block_id: BlockedSiteId, scope: AllowScope) -> Result<(), Error> {
     if !honoured(actor) {
         return Err(Error::refused(
@@ -181,10 +246,8 @@ fn try_allow(actor: &mut Actor, block_id: BlockedSiteId, scope: AllowScope) -> R
     };
     let mut stored = actor.allowed.stored.clone();
     if stored.allow(&notice.host, scope, notice.matter, actor.now().wall) {
-        // On the actor thread, fsync and all, as `connectors/hints.json`'s save is.
-        if let Err(error) = file::write(&actor.allowed.path, &stored) {
-            tracing::warn!(error = %Cause(&error), "blocklist: allowed.json not written");
-            return Err(Error::refused(ErrorCode::StoreIo, ALLOW_NOT_SAVED));
+        if stored.count() > file::MAX_HOSTS {
+            return Err(Error::refused(ErrorCode::CommandInvalid, TOO_MANY));
         }
         actor.allowed.stored = stored;
         refresh(actor);
@@ -198,10 +261,30 @@ fn try_allow(actor: &mut Actor, block_id: BlockedSiteId, scope: AllowScope) -> R
     Ok(())
 }
 
-/// `RevokeAllowedSite`: answers `Done`, with no receipt, or `store.io` when the write failed.
+/// `RevokeAllowedSite`: takes effect at once and answers once its save is known; held while
+/// the start-up read is out.
 pub(super) fn revoke(
     actor: &mut Actor,
     ctx: &CommandCtx,
+    host: &str,
+    scope: AllowScope,
+    matter: Option<MatterId>,
+) {
+    if let Some(held) = &mut actor.allowed.opening {
+        held.push(Held::Revoke {
+            id: ctx.id,
+            host: host.to_owned(),
+            scope,
+            matter,
+        });
+        return;
+    }
+    run_revoke(actor, ctx.id, host, scope, matter);
+}
+
+fn run_revoke(
+    actor: &mut Actor,
+    id: CommandId,
     host: &str,
     scope: AllowScope,
     matter: Option<MatterId>,
@@ -210,26 +293,28 @@ pub(super) fn revoke(
     if removed {
         refresh(actor);
     }
-    // Written even when nothing was removed: an earlier revoke whose write failed left the file
-    // holding the allow, and "Try again" must put it right. On the actor thread, fsync and all,
-    // as `connectors/hints.json`'s save is: a small file, written only on the lawyer's act.
-    let mut result = Ok(CommandOutcome::Done);
-    if let Err(error) = file::write(&actor.allowed.path, &actor.allowed.stored) {
-        tracing::warn!(error = %Cause(&error), "blocklist: allowed.json not written");
-        result = Err(Error::refused(ErrorCode::StoreIo, REVOKE_NOT_SAVED));
-    }
-    let matter = matter.map(|matter| matter.to_string());
+    let shown = matter.map(|matter| matter.to_string());
     tracing::info!(
         host,
         scope = scope_word(scope),
-        matter = matter.as_deref().unwrap_or("none"),
+        matter = shown.as_deref().unwrap_or("none"),
         removed,
         "blocklist: the lawyer took back an allowed site"
     );
-    actor.finish_command(ctx.id, result);
+    // Saved even when nothing was removed: the save is the whole state, and a retry after one
+    // that failed must put it right.
+    let change = Change::Revoke {
+        host: host.to_owned(),
+        scope,
+        matter,
+    };
+    saving::save(actor, id, change);
 }
 
-/// `HostQuery::AllowedSites`: every stored allow, honoured or not.
+/// `HostQuery::AllowedSites`: every stored allow, honoured or not, each saying whether it is
+/// saved; none while the start-up read is out.
 pub(super) fn list(actor: &Actor, reply: Reply<QueryResult>) {
-    let _gone = reply.send(Ok(QueryResult::AllowedSites(actor.allowed.stored.list())));
+    let allowed = &actor.allowed;
+    let sites = allowed.stored.list(allowed.persisted.as_ref());
+    let _gone = reply.send(Ok(QueryResult::AllowedSites(sites)));
 }

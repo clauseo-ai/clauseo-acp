@@ -25,12 +25,13 @@ pub trait SecretStore: Send + Sync + 'static {
     fn delete(&self, account: &str) -> Result<(), StoreError>;
 }
 
-/// The OS keychain under [`KEYCHAIN_SERVICE`](crate::KEYCHAIN_SERVICE): Keychain Services on
-/// macOS, Credential Manager on Windows, raw bytes (`set_secret`, `get_secret`,
-/// `delete_credential` of keyring 4). Elsewhere every call answers [`StoreError::Unsupported`].
+/// The OS keychain under [`KEYCHAIN_SERVICE`](crate::KEYCHAIN_SERVICE) (another service with
+/// [`KeyringStore::with_service`]): Keychain Services on macOS, Credential Manager on Windows,
+/// raw bytes (`set_secret`, `get_secret`, `delete_credential` of keyring 4). Elsewhere every
+/// call answers [`StoreError::Unsupported`].
 #[derive(Debug, Clone, Copy)]
 pub struct KeyringStore {
-    _private: (),
+    service: &'static str,
 }
 
 impl KeyringStore {
@@ -40,28 +41,42 @@ impl KeyringStore {
         #[cfg(any(target_os = "macos", windows))]
         {
             keyring::init()?;
-            Ok(KeyringStore { _private: () })
+            Ok(KeyringStore {
+                service: crate::KEYCHAIN_SERVICE,
+            })
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
             Err(StoreError::Unsupported)
         }
     }
+
+    /// The same keychain, its items under `service` instead (the block list's own, say).
+    #[must_use]
+    pub fn with_service(mut self, service: &'static str) -> KeyringStore {
+        self.service = service;
+        self
+    }
+
+    /// The service its items are filed under.
+    pub fn service(&self) -> &'static str {
+        self.service
+    }
 }
 
 #[cfg(any(target_os = "macos", windows))]
 impl SecretStore for KeyringStore {
     fn get(&self, account: &str) -> Result<Option<Vec<u8>>, StoreError> {
-        keyring::get(account)
+        keyring::get(self.service, account)
     }
 
     fn set(&self, account: &str, secret: &[u8]) -> Result<(), StoreError> {
         check_size(secret)?;
-        keyring::set(account, secret)
+        keyring::set(self.service, account, secret)
     }
 
     fn delete(&self, account: &str) -> Result<(), StoreError> {
-        keyring::delete(account)
+        keyring::delete(self.service, account)
     }
 }
 

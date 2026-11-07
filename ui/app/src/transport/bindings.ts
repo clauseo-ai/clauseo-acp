@@ -371,6 +371,11 @@ export type AllowedSite = {
 	matter?: MatterId,
 	/**  When the lawyer allowed it. */
 	allowed_at: Timestamp,
+	/**
+	 *  Whether the next start honours it: false when Clauseo couldn't save it, so it lasts
+	 *  until Clauseo closes.
+	 */
+	saved: boolean,
 };
 
 /**  The text an `AppendText` extends. JSON: `"agent_text"` or `{"user_block": 1}`. */
@@ -1689,6 +1694,10 @@ export type ErrorCode =
 "blocklist.override_off" | 
 /** The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. */
 "blocklist.notice_expired" | 
+/** The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. */
+"blocklist.allow_not_saved" | 
+/** The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. */
+"blocklist.revoke_not_saved" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

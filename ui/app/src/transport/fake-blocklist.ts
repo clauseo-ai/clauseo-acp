@@ -57,6 +57,7 @@ export function fakeBlocklist({
       scope,
       ...(scope === "matter" ? { matter: site.matter } : {}),
       allowed_at: now(),
+      saved: true,
     };
     // always ones first, as the host lists them
     list = scope === "always" ? [row, ...list] : [...list, row];

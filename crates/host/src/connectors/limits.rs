@@ -409,7 +409,7 @@ pub(crate) fn local_date(unix_millis: i64, zone: &dyn LocalDay) -> String {
 }
 
 /// The proleptic Gregorian date of `days` since 1970-01-01 (Howard Hinnant's algorithm).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days.saturating_add(719_468);
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

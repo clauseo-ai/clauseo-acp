@@ -122,8 +122,17 @@ mod connectors;
 mod counts;
 // Its one test makes symlinks, so the module is Unix-only.
 #[cfg(test)]
+#[path = "host/allowed_integrity.rs"]
+mod allowed_integrity;
+#[cfg(test)]
+#[path = "host/allowed_saving.rs"]
+mod allowed_saving;
+#[cfg(test)]
 #[path = "host/allowed_sites.rs"]
 mod allowed_sites;
+#[cfg(test)]
+#[path = "host/allowed_stores.rs"]
+mod allowed_stores;
 #[cfg(all(test, unix))]
 #[path = "host/data_fence.rs"]
 mod data_fence;

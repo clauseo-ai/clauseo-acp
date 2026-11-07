@@ -426,8 +426,9 @@ fn start_host<R: Runtime>(
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
             config.with_launch_refused(agent, code)
         });
-        let config = connectors::with_connectors(config, app.clone(), &data_dir);
-        let config = blocklist::with_blocklist(&app, config);
+        let secrets = connectors::secret_store();
+        let config = connectors::with_connectors(config, app.clone(), &data_dir, secrets);
+        let config = blocklist::with_blocklist(&app, config, secrets);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());
