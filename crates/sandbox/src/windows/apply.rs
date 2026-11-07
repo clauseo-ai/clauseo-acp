@@ -364,9 +364,11 @@ fn write_all(
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
                 _ => acl.add(grant),
             };
-            // A link at a protected name is named, for `protected_link`.
+            // A link at a protected name is named, for `protected_link`; so is an item the
+            // lawyer can't label, for the running page.
             let refusal = |failure| Refused {
-                at: (failure == ApplyFailure::Link).then(|| grant.path().to_owned()),
+                at: matches!(failure, ApplyFailure::Link | ApplyFailure::CantLabel)
+                    .then(|| grant.path().to_owned()),
                 ..Refused::new(grant.kind(), failure)
             };
             match added.map_err(refusal)? {

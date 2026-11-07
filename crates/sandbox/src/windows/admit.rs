@@ -132,6 +132,9 @@ impl fmt::Display for FolderRefusal {
             FolderRefusal::Support(FolderSupport::NoPermissions) => {
                 f.write_str("its drive keeps no permissions")
             }
+            FolderRefusal::Support(FolderSupport::CantLabel) => {
+                f.write_str("its integrity label can't be set (no right to change its owner)")
+            }
             FolderRefusal::CheckFailed(kind) => write!(f, "the folder check failed ({kind})"),
             FolderRefusal::OverlapsDataFolder => {
                 f.write_str("it is, holds or is inside Clauseo's data folder")
@@ -240,8 +243,9 @@ pub fn grant_folders(policy: &Policy) -> Vec<(PathKind, &Path)> {
     folders
 }
 
-/// The gate on Windows, with [`folder_support`](super::folder_support): see [`gate`] for its
-/// steps. The only way, outside tests, to an [`Admitted`], so to a plan and a ledger entry.
+/// The gate on Windows, with [`label_support`](super::label_support) for the folders it grants
+/// on and [`folder_support`](super::folder_support) for the rest: see [`gate`] for its steps.
+/// The only way, outside tests, to an [`Admitted`], so to a plan and a ledger entry.
 #[cfg(windows)]
 pub fn admit<'a>(
     policy: &'a Policy,
@@ -249,11 +253,15 @@ pub fn admit<'a>(
     neighbours: &Neighbours,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, neighbours, super::folder_support, folders)
+    let checks = Checks {
+        entries: super::folder_support,
+        label: super::label_support,
+    };
+    gate(policy, data_dir, neighbours, checks, folders)
 }
 
 /// The gate with a fake folder check, for this crate's tests and, through `test-support`,
-/// others'.
+/// others': `check` answers for every folder, the labelled ones too.
 #[cfg(any(test, feature = "test-support"))]
 pub fn admit_with<'a>(
     policy: &'a Policy,
@@ -262,7 +270,38 @@ pub fn admit_with<'a>(
     check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, neighbours, check, folders)
+    let check = std::cell::RefCell::new(check);
+    let checks = Checks {
+        entries: |path: &Path| (check.borrow_mut())(path),
+        label: |path: &Path| (check.borrow_mut())(path),
+    };
+    gate(policy, data_dir, neighbours, checks, folders)
+}
+
+/// [`admit_with`] with a fake check of its own for the folders the plan labels (`label`, as
+/// [`label_support`](super::label_support) is) and `check` for the rest.
+#[cfg(any(test, feature = "test-support"))]
+pub fn admit_labelling_with<'a>(
+    policy: &'a Policy,
+    data_dir: &Path,
+    neighbours: &Neighbours,
+    check: impl FnMut(&Path) -> io::Result<FolderSupport>,
+    label: impl FnMut(&Path) -> io::Result<FolderSupport>,
+    folders: &dyn FolderList,
+) -> Result<Admitted<'a>, Error> {
+    let checks = Checks {
+        entries: check,
+        label,
+    };
+    gate(policy, data_dir, neighbours, checks, folders)
+}
+
+/// The gate's two folder checks: `label` for the folders it grants on, which the plan gives
+/// the Low label (so they need `WRITE_OWNER` too), `entries` for the folders it only denies.
+#[cfg(any(windows, test, feature = "test-support"))]
+struct Checks<E, L> {
+    entries: E,
+    label: L,
 }
 
 /// The gate, with the folder check `check` and the folder lister `folders` as parameters.
@@ -272,8 +311,9 @@ pub fn admit_with<'a>(
 ///    then compared part by part by the policy's comparison and also without ASCII case, as
 ///    NTFS compares names. A `data_dir` that doesn't resolve refuses, failing closed. Either
 ///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
-/// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`]; any other answer, or an
-///    error, refuses with [`Error::FolderUnsupported`] naming the folder's kind.
+/// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`] to the label check (each gets
+///    the Low label, so a folder the lawyer can't label is [`FolderSupport::CantLabel`]); any
+///    other answer, or an error, refuses with [`Error::FolderUnsupported`] naming its kind.
 /// 2. `neighbours.registered` are the other registered matters. One whose folders are inside
 ///    this matter, or hold it, refuses with [`FolderRefusal::NestedMatter`] before any folder
 ///    check. Isolation from them is their fences, which the plan carries.
@@ -294,9 +334,16 @@ fn gate<'a>(
     policy: &'a Policy,
     data_dir: &Path,
     neighbours: &Neighbours,
-    mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
+    checks: Checks<
+        impl FnMut(&Path) -> io::Result<FolderSupport>,
+        impl FnMut(&Path) -> io::Result<FolderSupport>,
+    >,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
+    let Checks {
+        entries: mut check,
+        mut label,
+    } = checks;
     let data = match dunce::canonicalize(data_dir) {
         Ok(data) => data,
         Err(error) => {
@@ -326,7 +373,7 @@ fn gate<'a>(
         return Err(refused(PathKind::OtherMatter, FolderRefusal::NestedMatter));
     }
     for (kind, folder) in grant_folders(policy) {
-        if let Some(refusal) = refusal(check(folder)) {
+        if let Some(refusal) = refusal(label(folder)) {
             return Err(refused(kind, refusal));
         }
     }

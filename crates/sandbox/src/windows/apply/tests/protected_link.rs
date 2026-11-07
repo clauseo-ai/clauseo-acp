@@ -54,3 +54,27 @@ fn a_protected_name_changed_since_the_check_stays_changed() {
     );
     assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
 }
+
+#[test]
+fn a_folder_that_cant_be_labelled_when_written_is_named() {
+    // The gate's `CantLabel` raced: the write refuses the same way, naming the folder for the
+    // running page, and rolls back.
+    let w = world("apply-cant-label", &[]);
+    let matter = w.canonical("matter");
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    acl.fail_add_with = Some((matter.clone(), ApplyFailure::CantLabel));
+    let mut plan = launch_plan(&w, &[]);
+    let error = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap_err();
+    let Error::AclApply {
+        path_kind: PathKind::Matter,
+        failure: ApplyFailure::CantLabel,
+        at: Some(at),
+    } = &error
+    else {
+        panic!("{error:?}");
+    };
+    assert_eq!(at, &matter);
+    assert!(!error.to_string().contains(&*matter.to_string_lossy()));
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert_eq!(ledger.entries().count(), 0);
+}

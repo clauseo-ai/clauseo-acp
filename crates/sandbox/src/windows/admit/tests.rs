@@ -355,6 +355,9 @@ mod fences;
 /// Claude store's files.
 mod links;
 
+/// The labelled folders' `WRITE_OWNER`: `CantLabel`.
+mod label;
+
 /// The gate with the real folder check, on CI's Windows job.
 #[cfg(windows)]
 mod on_windows;

@@ -355,14 +355,22 @@ fn write(grant: &Grant, expected: Option<&Path>) -> Result<Added, ApplyFailure> 
         if sacl.has(&spec) {
             return Ok(Added::AlreadyThere);
         }
+        // No WRITE_OWNER, or a denial now: the gate's `CantLabel`, should the folder have
+        // changed since it asked.
         if !target.write_owner {
-            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+            return Err(ApplyFailure::CantLabel);
         }
         let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
         let written = build_descriptor(bits, None, Some(&sacl.with(&spec)));
         target
             .set(LABEL_SECURITY_INFORMATION, &written)
-            .map_err(io)?;
+            .map_err(|e| {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    ApplyFailure::CantLabel
+                } else {
+                    io(e)
+                }
+            })?;
     } else {
         let dacl = Acl::parse(now.dacl.ok_or(ApplyFailure::NoDacl)?).map_err(io)?;
         if dacl.has(&spec) {

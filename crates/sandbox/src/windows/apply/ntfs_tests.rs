@@ -88,6 +88,32 @@ fn a_protected_subfolder_fails_the_launch_and_leaves_no_entry() {
 }
 
 #[test]
+fn a_folder_the_lawyer_cant_label_refuses_the_label_and_is_left_as_it_was() {
+    // Past the gate (it raced): the write refuses as `CantLabel`, naming the folder.
+    let place = Place::new("apply-ntfs-cant-label");
+    place.dir.dir("matter");
+    let matter = place.at("matter");
+    protect_with(&matter, "D:P(A;OICI;0x1701bf;;;OW)").unwrap();
+    drop_privileges();
+    let before = crate::windows::acl::descriptor(&matter).unwrap();
+    let label = grant(&matter, LOW_LABEL_SID, Rights::LowLabel, Inherit::Tree);
+    let mut plan = AdmittedPlan::from_grants(matter_one(), vec![label]);
+    let mut acl = NtfsAcl::new().unwrap();
+    let error = apply(&mut ledger(&place), &mut plan, &mut acl, &mut Around).unwrap_err();
+    let Error::AclApply {
+        path_kind: PathKind::Matter,
+        failure: ApplyFailure::CantLabel,
+        at: Some(at),
+    } = &error
+    else {
+        panic!("{error:?}");
+    };
+    assert!(at.ends_with("matter"), "{at:?}");
+    assert_eq!(crate::windows::acl::descriptor(&matter).unwrap(), before);
+    assert_eq!(ledger(&place).entries().count(), 0);
+}
+
+#[test]
 fn a_launch_then_forget_leaves_nothing() {
     let place = Place::new("apply-ntfs-forget");
     let doc = place.dir.file("matter/sub/doc.txt", "x");

@@ -26,7 +26,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_NAME_OPENED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     GETFINALPATHNAMEBYHANDLE_FLAGS, GetDriveTypeW, GetFileInformationByHandle,
     GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, OPEN_EXISTING, VOLUME_NAME_DOS,
-    WRITE_DAC,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -56,6 +56,20 @@ use super::FolderSupport;
 /// `SetNamedSecurityInfoW` will meet them. Backup and restore privileges don't affect it, so a
 /// token that holds them gets the same answer as one that doesn't.
 pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
+    support(path, false)
+}
+
+/// [`folder_support`] for a folder tier B also gives the Low label (the matter, state, notes
+/// and Claude store folders): after step 5, `CantLabel` when `AccessCheck` doesn't grant
+/// `WRITE_DAC | WRITE_OWNER`. Setting a label needs `WRITE_OWNER`, which an owner doesn't get
+/// implicitly (only `READ_CONTROL | WRITE_DAC`). A folder that already has the label is still
+/// asked: the gate refuses rather than read the label it would leave alone.
+pub fn label_support(path: &Path) -> io::Result<FolderSupport> {
+    support(path, true)
+}
+
+/// [`folder_support`]'s steps, with [`label_support`]'s last one when `label`.
+fn support(path: &Path, label: bool) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
     if is_share_path(&wide) || on_remote_drive(&wide) {
         return Ok(FolderSupport::Network);
@@ -83,11 +97,13 @@ pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
         return Ok(FolderSupport::CantChangePermissions);
     };
     let token = impersonation_token()?;
-    if grants_write_dac(&mut descriptor, token.0)? {
-        Ok(FolderSupport::Ok)
-    } else {
-        Ok(FolderSupport::CantChangePermissions)
+    if !grants(&mut descriptor, token.0, WRITE_DAC.0)? {
+        return Ok(FolderSupport::CantChangePermissions);
     }
+    if label && !grants(&mut descriptor, token.0, WRITE_DAC.0 | WRITE_OWNER.0)? {
+        return Ok(FolderSupport::CantLabel);
+    }
+    Ok(FolderSupport::Ok)
 }
 
 /// A file or folder handle, closed on drop.
@@ -283,10 +299,10 @@ fn impersonation_token() -> io::Result<Handle> {
     Ok(Handle(duplicate))
 }
 
-/// Whether `token` is granted `WRITE_DAC` by the security descriptor `descriptor`, from
+/// Whether `token` is granted all of `access` by the security descriptor `descriptor`, from
 /// `AccessCheck`. The privilege-set buffer starts at 256 bytes; if `AccessCheck` reports it too
 /// small, it is sized to the length it reports and the check runs once more.
-fn grants_write_dac(descriptor: &mut [u64], token: HANDLE) -> io::Result<bool> {
+fn grants(descriptor: &mut [u64], token: HANDLE, access: u32) -> io::Result<bool> {
     let mapping = GENERIC_MAPPING {
         GenericRead: FILE_GENERIC_READ.0,
         GenericWrite: FILE_GENERIC_WRITE.0,
@@ -305,7 +321,7 @@ fn grants_write_dac(descriptor: &mut [u64], token: HANDLE) -> io::Result<bool> {
             AccessCheck(
                 PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast()),
                 token,
-                WRITE_DAC.0,
+                access,
                 &raw const mapping,
                 Some(privileges.as_mut_ptr().cast::<PRIVILEGE_SET>()),
                 &raw mut length,
