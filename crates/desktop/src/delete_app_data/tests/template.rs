@@ -5,7 +5,9 @@
 //! elevated branch of `admin_elevated.nsh` and the per-machine installer's start
 //! (`safe_temp.nsh`, tested in `safe_temp.rs`); that branch loads no plug-in, calls no function
 //! and reads nothing the lawyer can write before it extracts. Clauseo's main window class is the
-//! one the branch looks for.
+//! one the branch looks for. The per-machine uninstaller's blocks (`uninstall-string`,
+//! `un-admin-section`, `uninstall-self-delete` and `un-gui-end`) are tested in
+//! `uninstall_in_place.rs`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -33,7 +35,7 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 4] = [
+const BLOCKS: [Block; 8] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
@@ -52,6 +54,28 @@ const BLOCKS: [Block; 4] = [
     Block {
         name: "admin-section",
         after: "Function .onInit",
+        replaces: None,
+    },
+    Block {
+        name: "uninstall-string",
+        after: "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"InstallLocation\" \"$\\\"$INSTDIR$\\\"\"",
+        replaces: Some(
+            "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"UninstallString\" \"$\\\"$INSTDIR\\uninstall.exe$\\\"\"",
+        ),
+    },
+    Block {
+        name: "un-admin-section",
+        after: "Function un.onInit",
+        replaces: None,
+    },
+    Block {
+        name: "uninstall-self-delete",
+        after: "  !endif",
+        replaces: None,
+    },
+    Block {
+        name: "un-gui-end",
+        after: "SectionEnd",
         replaces: None,
     },
 ];

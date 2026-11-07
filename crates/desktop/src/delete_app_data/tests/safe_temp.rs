@@ -12,7 +12,7 @@ use super::template::{TEMPLATE, reached, split_blocks};
 /// `${RunningX64}` (System), the template's `SetContext` (which tests it), the language picker
 /// (`MUI_LANGDLL_DISPLAY`), `MULTIUSER_INIT`, Tauri's `SemverCompare`, and any `Call` (whose
 /// function might).
-fn loads_a_plug_in(line: &str) -> bool {
+pub(super) fn loads_a_plug_in(line: &str) -> bool {
     line.contains("::")
         || line.contains("${RunningX64}")
         || line.contains("SemverCompare")
@@ -160,7 +160,14 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
             "RMDir \"$0\"",
             "${EndIf}",
             "!if \"${INSTALLMODE}\" == \"perMachine\"",
+            "!insertmacro CLAUSEO_PASSIVE_OR_UPDATE $1",
+            "${If} $1 = 0",
+            "!ifdef __UNINSTALL__",
+            "MessageBox MB_OK|MB_ICONSTOP \"$(uninstallTempFailed)\" /SD IDOK",
+            "!else",
             "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "!endif",
+            "${EndIf}",
             "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",
             "!else",
             "SetErrorLevel ${CLAUSEO_ADMIN_NOT_RUN}",
@@ -174,6 +181,7 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
     // The words the per-machine installer shows, and the include, before the branch's.
     let english = read("windows/nsis/English.nsh");
     assert!(english.contains("LangString installTempFailed ${LANG_ENGLISH} \""));
+    assert!(english.contains("LangString uninstallTempFailed ${LANG_ENGLISH} \""));
     let copy = read("windows/admin_copy.nsh");
     let temp = copy
         .find("!include \"${__FILEDIR__}\\safe_temp.nsh\"")
@@ -182,4 +190,56 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
         .find("!include \"${__FILEDIR__}\\admin_elevated.nsh\"")
         .unwrap();
     assert!(temp < branch);
+}
+
+#[test]
+fn the_box_is_skipped_under_passive_and_update_by_a_native_scan_of_the_command_line() {
+    let code = admin_code();
+    // /P and /UPDATE as whole words, any case (StrCmp), each followed by a space or the end; no
+    // Call (GetOptions is one), so the per-user elevated branch can reach it.
+    assert_eq!(
+        macro_body(&code, "CLAUSEO_PASSIVE_OR_UPDATE")[1..],
+        [
+            "Push $2",
+            "Push $3",
+            "StrCpy ${OUT} 0",
+            "StrCpy $2 0",
+            "${Do}",
+            "StrCpy $3 $CMDLINE 1 $2",
+            "${If} $3 == \"\"",
+            "${ExitDo}",
+            "${EndIf}",
+            "StrCpy $3 $CMDLINE 3 $2",
+            "${If} $3 == \" /P\"",
+            "IntOp $3 $2 + 3",
+            "StrCpy $3 $CMDLINE 1 $3",
+            "${If} $3 == \"\"",
+            "${OrIf} $3 == \" \"",
+            "StrCpy ${OUT} 1",
+            "${EndIf}",
+            "${EndIf}",
+            "StrCpy $3 $CMDLINE 8 $2",
+            "${If} $3 == \" /UPDATE\"",
+            "IntOp $3 $2 + 8",
+            "StrCpy $3 $CMDLINE 1 $3",
+            "${If} $3 == \"\"",
+            "${OrIf} $3 == \" \"",
+            "StrCpy ${OUT} 1",
+            "${EndIf}",
+            "${EndIf}",
+            "${If} ${OUT} = 1",
+            "${ExitDo}",
+            "${EndIf}",
+            "IntOp $2 $2 + 1",
+            "${Loop}",
+            "Pop $3",
+            "Pop $2",
+        ]
+    );
+    // The box only when neither is there; 25 either way, set after the box's test.
+    let temp = macro_body(&code, "CLAUSEO_SAFE_PLUGINSDIR");
+    let scan = line_with(temp, &["!insertmacro CLAUSEO_PASSIVE_OR_UPDATE $1"]);
+    assert_eq!(temp[scan + 1], "${If} $1 = 0");
+    assert!(scan < line_with(temp, &["MessageBox "]));
+    assert!(line_with(temp, &["MessageBox "]) < line_with(temp, &["SetErrorLevel ${CLAUSEO_EXIT"]));
 }

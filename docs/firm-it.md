@@ -31,7 +31,9 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   `C:\Program Files\Clauseo` and writes
   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo` (64-bit view) with `DisplayName` and
   `Publisher` `Clauseo`, `DisplayVersion` `<v>`, `InstallLocation` `"C:\Program Files\Clauseo"` and
-  `UninstallString` `"C:\Program Files\Clauseo\uninstall.exe"` (both in quotes), `DisplayIcon`,
+  `UninstallString` `"C:\Program Files\Clauseo\uninstall.exe" _?=C:\Program Files\Clauseo` (both
+  paths in quotes but the one after `_?=`, which takes the rest of the line), `QuietUninstallString`
+  `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo`, `DisplayIcon`,
   `MainBinaryName`, `NoModify` and `NoRepair` 1, and `EstimatedSize`. It also writes
   `HKLM\SOFTWARE\Clauseo\Clauseo`, whose default value is the install folder; uninstalling leaves
   that key. It makes two shortcuts for all users,
@@ -58,7 +60,7 @@ What a silent (`/S`) install can return:
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but Safe workspace's set-up failed, or hadn't finished after 10 minutes |
 | 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
-| 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
+| 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp`. Per-machine uninstall: nothing uninstalled, for the same reason |
 
 A 23 after a 10-minute wait means the set-up may still be running; the Safe workspace section of
 Clauseo's Settings shows whether it finished. A `/S` run as SYSTEM (Intune) runs in session 0,
@@ -71,12 +73,20 @@ What an interactive install can also return:
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
 An interactive per-machine install never sets 23: it shows a box when setting up failed, and a
-line in its details list when it was still running. It shows a box with 24 and 25 too.
+line in its details list when it was still running. It shows a box with 24 and 25 too, but not
+with 25 under `/P` or `/UPDATE`.
 
 The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
 plug-ins included, in a new folder under `C:\Program Files\Clauseo\installer-temp`, which only
 Administrators and SYSTEM can open, and delete it when they finish. The empty `installer-temp`
-folder stays.
+folder stays until a per-machine uninstall removes it, with the install folder, when both are
+empty. The per-machine uninstaller keeps its own plug-ins there too.
+
+A per-machine uninstall runs `uninstall.exe` where it is installed (the `_?=` in its registry
+commands), not from a copy in `%TEMP%`. It may leave a renamed `uninstall.<id>.old` in the install
+folder for a few seconds, until a hidden `cmd` it starts deletes it; if the install folder's path
+holds one of `% ^ & | < > " !`, the file stays until someone deletes it. It's harmless either way.
+Installs registered by an earlier version keep their old `UninstallString` until reinstalled.
 
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.
@@ -120,6 +130,9 @@ Write the uninstall path out in full rather than `%ProgramFiles%`: Intune's mana
 is a 32-bit process, where `%ProgramFiles%` means `C:\Program Files (x86)`. `/S` is NSIS's silent
 switch. `uninstall.exe /S` hands over to a copy of itself in `%TEMP%` and returns before the files
 are gone. On our test machine the stub returned after 0.46 s and the folder was gone 0.26 s later.
+The registry's `QuietUninstallString`, `"C:\Program Files\Clauseo\uninstall.exe" /S
+_?=C:\Program Files\Clauseo`, runs it in place instead and returns once it has finished, the
+renamed `uninstall.<id>.old` aside (not yet measured on Windows).
 Windows PowerShell's `Start-Process -Wait` waits for that copy too. Either way it leaves each
 user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place. As SYSTEM it removes the protection's
 sandbox users, group and key as well (above), allowing up to 2 minutes more, and the access rules

@@ -13,6 +13,7 @@ mod sandbox_link;
 mod set_aside;
 mod sources;
 mod template;
+mod uninstall_in_place;
 #[cfg(windows)]
 mod windows;
 

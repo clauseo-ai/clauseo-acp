@@ -105,6 +105,7 @@ Var ClauseoAdminTimedOut
 ; The elevated installers' protected temporary folder, made first in each elevated path, and the
 ; elevated instance's branch, which the template inserts first in .onInit.
 !include "${__FILEDIR__}\safe_temp.nsh"
+!include "${__FILEDIR__}\uninstall_in_place.nsh"
 !include "${__FILEDIR__}\admin_elevated.nsh"
 
 ; Writes the set-up program from this installer's payload into CLAUSEO_ADMIN_DIR; the error flag

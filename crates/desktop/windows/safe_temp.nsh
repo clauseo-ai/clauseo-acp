@@ -43,8 +43,9 @@
 ; so it can't tell SYSTEM from a lawyer. For SYSTEM the folder is harmless.
 ;
 ; It fails closed: nothing is extracted or loaded. The per-machine installer says installTempFailed
-; (a box, none under /S) and quits with 25; the per-user elevated instance quits with 99 (not run),
-; which its outer instance reports as a failed set-up.
+; (a box, none under /S, /P or /UPDATE) and quits with 25, and its uninstaller says
+; uninstallTempFailed the same way, with 25 too (nothing uninstalled); the per-user elevated
+; instance quits with 99 (not run), which its outer instance reports as a failed set-up.
 
 !define CLAUSEO_INSTALLER_TEMP "$PROGRAMFILES64\Clauseo\installer-temp"
 ; BUILTIN\Administrators and LocalSystem, as icacls takes a SID.
@@ -88,7 +89,16 @@
       RMDir "$0"
     ${EndIf}
     !if "${INSTALLMODE}" == "perMachine"
-      MessageBox MB_OK|MB_ICONSTOP "$(installTempFailed)" /SD IDOK
+      ; No box under /S (/SD), /P or /UPDATE, which the template hasn't parsed yet here. The
+      ; uninstaller (un.onInit's block, __UNINSTALL__) says it in its own words.
+      !insertmacro CLAUSEO_PASSIVE_OR_UPDATE $1
+      ${If} $1 = 0
+        !ifdef __UNINSTALL__
+          MessageBox MB_OK|MB_ICONSTOP "$(uninstallTempFailed)" /SD IDOK
+        !else
+          MessageBox MB_OK|MB_ICONSTOP "$(installTempFailed)" /SD IDOK
+        !endif
+      ${EndIf}
       SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}
     !else
       SetErrorLevel ${CLAUSEO_ADMIN_NOT_RUN}
@@ -99,11 +109,55 @@
   Pop $0
 !macroend
 
+; Sets OUT to 1 when $CMDLINE holds /P or /UPDATE as a whole word (any case, as GetOptions reads
+; them), else 0. Plain NSIS and LogicLib (GetOptions is a Call). OUT must not be $2 or $3. A path
+; in quotes holding " /P " counts too; that only skips a box.
+!macro CLAUSEO_PASSIVE_OR_UPDATE OUT
+  Push $2
+  Push $3
+  StrCpy ${OUT} 0
+  StrCpy $2 0
+  ${Do}
+    StrCpy $3 $CMDLINE 1 $2
+    ${If} $3 == ""
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $3 $CMDLINE 3 $2
+    ${If} $3 == " /P"
+      IntOp $3 $2 + 3
+      StrCpy $3 $CMDLINE 1 $3
+      ${If} $3 == ""
+      ${OrIf} $3 == " "
+        StrCpy ${OUT} 1
+      ${EndIf}
+    ${EndIf}
+    StrCpy $3 $CMDLINE 8 $2
+    ${If} $3 == " /UPDATE"
+      IntOp $3 $2 + 8
+      StrCpy $3 $CMDLINE 1 $3
+      ${If} $3 == ""
+      ${OrIf} $3 == " "
+        StrCpy ${OUT} 1
+      ${EndIf}
+    ${EndIf}
+    ${If} ${OUT} = 1
+      ${ExitDo}
+    ${EndIf}
+    IntOp $2 $2 + 1
+  ${Loop}
+  Pop $3
+  Pop $2
+!macroend
+
 ; The per-machine installer's start, first in .onInit (template block "admin-section"): the
 ; folder, then the environment's TEMP and TMP set to it (GetTempPath reads TMP first), so the
 ; programs it starts elevated use it too: the WebView2 bootstrapper, --adopt, and the uninstaller
 ; of the copy already installed, which the template's reinstall page runs in place (_?=). The
-; System calls are this run's first plug-in, loaded from the folder just made.
+; System calls are this run's first plug-in, loaded from the folder just made. The per-machine
+; uninstaller runs the same start first in un.onInit (template block "un-admin-section"): it runs
+; elevated in place (_?=, uninstall_in_place.nsh), and SetContext (${RunningX64}, System) and
+; CheckIfAppIsRunning (nsis_tauri_utils) would otherwise load from the user's %TEMP%; its children
+; (--remove, --delete-app-data) get the folder as TEMP too.
 !macro CLAUSEO_MACHINE_START
   !if "${INSTALLMODE}" == "perMachine"
     !insertmacro CLAUSEO_SAFE_PLUGINSDIR

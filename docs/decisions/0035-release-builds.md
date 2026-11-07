@@ -122,7 +122,7 @@ Developer ID.
 - **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
   installer is built from `crates/desktop/windows/nsis/installer.nsi`
   (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus
-  four marked blocks (S15 tier B, 2026-11-07). `admin-section`, at the top of `.onInit`, runs the
+  eight marked blocks (S15 tier B, 2026-11-07). `admin-section`, at the top of `.onInit`, runs the
   per-user installer's elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in,
   page or section; in the per-machine installer it first makes the run's own temporary folder
   under `%ProgramFiles%\Clauseo\installer-temp`, locked to Administrators and SYSTEM, and points
@@ -133,7 +133,10 @@ Developer ID.
   `no-solid` drops `/SOLID`, so the stub reads each file straight from the installer instead of
   unpacking all its data into a file in `%TEMP%` first, which the elevated instance would read
   the sandbox's set-up program from. `finish-show` and `finish-show-function` hide "Run Clauseo"
-  after a set-up wait that timed out. A test holds the copy to upstream plus a known list of
+  after a set-up wait that timed out. The per-machine uninstaller's four (`uninstall-string`,
+  `un-admin-section`, `uninstall-self-delete`, `un-gui-end`) register it with `_?=` so it runs in
+  place, give it the same temporary folder, and delete it once it has exited (decision 0049,
+  `uninstall_in_place.nsh`). A test holds the copy to upstream plus a known list of
   named blocks (by SHA-256 of upstream's text, rebuilt with the blocks taken out and the lines
   they stand in for put back) and to the CLI version in
   `ui/package.json`, so CI fails when either moves. Every Tauri upgrade copies the new template
