@@ -55,6 +55,21 @@ LangString removeExeMissing ${LANG_HINDI} "Clauseo सुरक्षित क�
 ; Provisional (app thread, 2026-11-07): stage C's admin-copy lines.
 LangString removeAdminCopyRefused ${LANG_HINDI} "Clauseo सुरक्षित कार्यक्षेत्र नहीं हटा सका, क्योंकि वह यह पुष्टि नहीं कर सका कि Program Files में रखा, इसे तैयार करने वाला प्रोग्राम वही है जो Clauseo ने इंस्टॉल किया था, और उसे केवल व्यवस्थापक बदल सकते हैं। सुरक्षित कार्यक्षेत्र के छिपे हुए Windows खाते अभी भी इस कंप्यूटर पर हैं। इस कंप्यूटर की देखरेख करने वाले व्यक्ति उन्हें हटा सकते हैं। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
 LangString setupExeRemoved ${LANG_HINDI} "इंस्टॉल होते समय Windows सुरक्षा ने Clauseo का एक हिस्सा हटा दिया: वह प्रोग्राम जो सुरक्षित कार्यक्षेत्र सेट अप करता है। जब तक इसे वापस नहीं लाया जाता, Clauseo सुरक्षित कार्यक्षेत्र में Claude या ChatGPT शुरू नहीं करेगा। इस कंप्यूटर की देखरेख करने वाला व्यक्ति इसे वापस ला सकता है। IT के लिए Clauseo के नोट्स में इसका तरीका बताया गया है।"
+; Provisional (app thread, 2026-11-07): stage C's admin-copy lines.
+LangString adminCopyAsk ${LANG_HINDI} "अब Windows, सुरक्षित कार्यक्षेत्र तैयार करने के लिए अनुमति माँगेगा। वह प्रकाशक को अज्ञात बताएगा। यह सामान्य है: अनुमति यही इंस्टॉलर माँग रहा है। Yes चुनें।"
+LangString adminCopyWorking ${LANG_HINDI} "सुरक्षित कार्यक्षेत्र तैयार हो रहा है। इसमें कुछ मिनट लग सकते हैं।"
+LangString adminCopyDone ${LANG_HINDI} "सुरक्षित कार्यक्षेत्र तैयार है।"
+LangString adminCopyDeclined ${LANG_HINDI} "Clauseo इंस्टॉल हो गया है, पर सुरक्षित कार्यक्षेत्र तैयार नहीं है, क्योंकि Windows के पूछने पर अनुमति नहीं दी गई। Clauseo इसके बिना भी काम करता है। इसे तैयार करने के लिए यह इंस्टॉलर फिर से चलाएँ और Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से उसे दर्ज करने को कहें।"
+LangString adminCopyFailed ${LANG_HINDI} "Clauseo इंस्टॉल हो गया है, पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। Clauseo इसके बिना भी काम करता है। फिर से प्रयास करने के लिए यह इंस्टॉलर दोबारा चलाएँ। अगर फिर भी यह तैयार न हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
+LangString adminCopyOtherAccount ${LANG_HINDI} "Clauseo इंस्टॉल हो गया है, पर सुरक्षित कार्यक्षेत्र तैयार नहीं है, क्योंकि इस कंप्यूटर पर किसी दूसरे Windows खाते के पास यह पहले से है। Clauseo इसके बिना भी काम करता है।"
+LangString adminCopyMachineFailed ${LANG_HINDI} "Clauseo इंस्टॉल हो गया है, पर इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। Clauseo इसके बिना भी काम करता है। इस कंप्यूटर की देखरेख करने वाले व्यक्ति इसे तैयार करने के लिए यह इंस्टॉलर फिर से चला सकते हैं।"
+LangString adminCopyNewerKept ${LANG_HINDI} "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम का जो नया संस्करण पहले से है, Clauseo ने उसे ही रहने दिया।"
+LangString adminCopyAppRunning ${LANG_HINDI} "Clauseo इंस्टॉल हो गया है, पर सुरक्षित कार्यक्षेत्र तैयार नहीं है, क्योंकि Clauseo चल रहा है। Clauseo बंद करें, फिर यह इंस्टॉलर दोबारा चलाएँ।"
+LangString adminCopyStillRunning ${LANG_HINDI} "हो सकता है Clauseo अभी भी सुरक्षित कार्यक्षेत्र तैयार कर रहा हो। यह तैयार हुआ या नहीं, यह देखने के लिए Clauseo की सेटिंग्स खोलें और सुरक्षित कार्यक्षेत्र देखें।"
+LangString adminCopySkippedSilent ${LANG_HINDI} "सुरक्षित कार्यक्षेत्र तैयार नहीं है, क्योंकि यह इंस्टॉल साइलेंट है। इसे तैयार करने के लिए यह इंस्टॉलर /S के बिना फिर से चलाएँ।"
+LangString installTempFailed ${LANG_HINDI} "Clauseo इंस्टॉल नहीं हुआ, क्योंकि इंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। इंस्टॉलर फिर से चलाएँ। अगर यह फिर विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
+LangString uninstallTempFailed ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। कुछ भी नहीं हटाया गया। अनइंस्टॉलर फिर से चलाएँ। अगर यह फिर विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
+LangString uninstallNotInPlace ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Clauseo के अपने फ़ोल्डर से शुरू नहीं किया गया। कुछ भी नहीं हटाया गया। सेटिंग्स > ऐप्स से Clauseo अनइंस्टॉल करें, या इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

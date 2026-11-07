@@ -64,8 +64,8 @@ LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe wo
 LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
 LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 ; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
-; these lines), needs one UAC prompt at install. The installer is English only (0035), so these
-; have no Hindi. Provisional (app thread and stage F, 2026-11-07).
+; these lines), needs one UAC prompt at install. Their Hindi is in Hindi.nsh. Provisional (app
+; thread and stage F, 2026-11-07).
 ; adminCopyAsk: a box just before the prompt, saying it is coming and why; the prompt may name the
 ; publisher "Unknown Publisher" while the installer is unsigned.
 ; adminCopyWorking and adminCopyDone: details-list lines while the set-up runs (it can take a few
