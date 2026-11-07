@@ -141,8 +141,7 @@ Developer ID.
 
 - One commit gives every asset, and `sha256sum -c SHA256SUMS.txt` checks a download. Every asset has
   a build provenance attestation.
-- S15's sandbox tool (release.yml's `SANDBOX_EXE`, today `clauseo-sandbox-setup.exe`, later
-  `clauseo-sandbox-admin.exe`) is signed in `sign-windows` with the mode's updater key, after
+- S15's sandbox tool (release.yml's `SANDBOX_EXE`, `clauseo-sandbox-setup.exe`) is signed in `sign-windows` with the mode's updater key, after
   SignPath and before NSIS, the same key and per-mode handling as the currentUser installer. A
   generated `bundle.resources` overlay puts its `.sig` beside it in the install folder of both
   installers (NSIS installs resources and `externalBin` alike under `$INSTDIR`), and both go on the

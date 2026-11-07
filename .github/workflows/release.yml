@@ -67,7 +67,7 @@ env:
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
   # S15's sandbox tool as the Windows installers place it beside Clauseo.exe (sidecars.mjs builds
   # it as crates/desktop/binaries/<name>-<target>.exe). The one place its name is written here and
-  # in latest-json.test.mjs: it becomes clauseo-sandbox-admin.exe when stage C's rename lands.
+  # in latest-json.test.mjs.
   SANDBOX_EXE: clauseo-sandbox-setup.exe
 
 jobs:
