@@ -440,7 +440,9 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     // Appended last: every code before it keeps its number.
     assert_eq!(RunExit::Escapee.code(), 0xE0C1_500F);
     assert_eq!(RunExit::Escapee.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 16), None);
+    assert_eq!(RunExit::PoolStop.code(), 0xE0C1_5010);
+    assert_eq!(RunExit::PoolStop.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 17), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);

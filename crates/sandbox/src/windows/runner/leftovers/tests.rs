@@ -15,6 +15,8 @@ struct Fake {
     deny_list: BTreeSet<&'static str>,
     /// Items whose delete fails.
     deny_delete: BTreeSet<&'static str>,
+    /// Items whose delete fails with `NOT_LOGGED_ON`, as a pool user's BITS job's `Cancel`.
+    not_logged_on: BTreeSet<&'static str>,
     deleted: Vec<&'static str>,
 }
 
@@ -40,6 +42,9 @@ impl Leftovers for Fake {
         if self.deny_delete.contains(item) {
             return Err(io::Error::from_raw_os_error(5));
         }
+        if self.not_logged_on.contains(item) {
+            return Err(io::Error::from_raw_os_error(NOT_LOGGED_ON));
+        }
         self.deleted.push(item);
         Ok(())
     }
@@ -64,11 +69,17 @@ fn run(fake: &mut Fake) -> (bool, Vec<String>) {
 }
 
 fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
+    let (removal, lines) = removal(fake, kinds);
+    assert_eq!(removal.bits_for_stop, 0, "{lines:?}");
+    (removal.clean, lines)
+}
+
+fn removal(fake: &mut Fake, kinds: &[Kind]) -> (Removal, Vec<String>) {
     let mut lines = Vec::new();
-    let clean = remove_all(fake, kinds, "before launch", &mut |l| {
+    let removal = remove_all(fake, kinds, "before launch", &mut |l| {
         lines.push(l.to_owned());
     });
-    (clean, lines)
+    (removal, lines)
 }
 
 #[test]
@@ -148,6 +159,75 @@ fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
             assert!(!line.contains(name), "{line} names {name}");
         }
     }
+}
+
+#[test]
+fn a_bits_job_bits_cant_cancel_for_want_of_a_logon_is_counted_apart_and_no_failure() {
+    let mut fake = full();
+    fake.items
+        .insert("bits", vec!["{job-1}", "{job-2}", "{job-3}"]);
+    fake.not_logged_on.extend(["{job-1}", "{job-3}"]);
+    let (removal, lines) = removal(&mut fake, &Kind::ALL);
+    assert_eq!(
+        removal,
+        Removal {
+            clean: true,
+            bits_for_stop: 2
+        }
+    );
+    assert!(fake.deleted.contains(&"{job-2}"));
+    assert_eq!(
+        lines.get(4..),
+        Some(
+            [
+                "clauseo-sandbox-run: cleanup (before launch): 2 BITS jobs left for the system \
+                 stop (1245): no logon token for them"
+                    .to_owned(),
+                "clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs".to_owned(),
+            ]
+            .as_slice()
+        )
+    );
+}
+
+#[test]
+fn any_other_bits_error_and_1245_elsewhere_stay_failures() {
+    // Another error from a BITS job's `Cancel` fails the removal, the 1245 beside it counted.
+    let mut fake = full();
+    fake.items.insert("bits", vec!["{job-1}", "{job-2}"]);
+    fake.not_logged_on.insert("{job-1}");
+    fake.deny_delete.insert("{job-2}");
+    let (left, lines) = removal(&mut fake, &Kind::ALL);
+    assert_eq!(
+        left,
+        Removal {
+            clean: false,
+            bits_for_stop: 1
+        }
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("removed 0 BITS jobs, 1 couldn't be (5)")),
+        "{lines:?}"
+    );
+    // 1245 from any other kind is a plain failure.
+    let mut fake = full();
+    fake.not_logged_on.insert("\\Updater");
+    let (left, lines) = removal(&mut fake, &Kind::ALL);
+    assert_eq!(
+        left,
+        Removal {
+            clean: false,
+            bits_for_stop: 0
+        }
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("removed 1 scheduled tasks, 1 couldn't be (1245)")),
+        "{lines:?}"
+    );
 }
 
 #[test]

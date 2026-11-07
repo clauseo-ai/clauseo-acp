@@ -1,17 +1,28 @@
 //! `probe items <plant|check|remove> <tag>`: the `end-cleanup` row's benign items, run by the
 //! harness as the session's pool user (`win_logon.rs`), so each is that user's own: its HKCU
 //! `Run` and `RunOnce` values, a `.cmd` in its Startup folder, a scheduled task registered as it
-//! (a time trigger in 2099, never run) and a suspended BITS job with no files. Each is named
-//! `ClauseoS15-<tag>` and runs (or would run) `"<this exe>" probe wait`.
+//! (a time trigger in 2099, never run), each running `"<this exe>" probe wait`, and a BITS job
+//! that could complete. Each is named `ClauseoS15-<tag>`.
+//!
+//! The BITS job copies a local file to another (`file://` source), both in the folder
+//! `%TEMP%\ClauseoS15-<tag>`, is resumed, and has a notify command line,
+//! `"<this exe>" probe items mark <tag> <marker>`, which BITS runs once the job is transferred and
+//! which writes the marker file `fired` in that folder. The marker proves the job ran: BITS holds
+//! no logon token for a pool user, so it shouldn't (`cleanup_verdict.rs`).
 //!
 //! Prints one `item <kind> <word>` per kind, `kind` one of [`KINDS`]: `planted`, `present`,
-//! `absent`, `removed`, or `error <why>`.
+//! `absent`, `removed`, or `error <why>`; the BITS job's `present` is followed by its state
+//! (`bitsadmin /getstate`). A check also prints `marker bits <present|absent>`; a removal
+//! removes the folder too.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use super::cleanup_verdict::KINDS;
-use super::sys::{make_dir, output, remove_file, say, write_file};
+use super::sys::{make_dir, output, remove_file, remove_tree, say, write_file};
+
+/// The marker file's name, in the BITS job's folder.
+const MARKER: &str = "fired";
 
 /// The HKCU key of the `Run` and `RunOnce` values.
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion";
@@ -23,6 +34,9 @@ pub(crate) fn run(rest: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
     let name = format!("ClauseoS15-{tag}");
+    if what == "mark" {
+        return mark(&name, rest.get(2));
+    }
     let exe = match std::env::current_exe() {
         Ok(exe) => exe.display().to_string(),
         Err(e) => {
@@ -33,9 +47,11 @@ pub(crate) fn run(rest: &[String]) -> ExitCode {
     for kind in KINDS {
         let word = match what.as_str() {
             "plant" => plant(kind, &name, &exe).map(|()| "planted".to_owned()),
-            "check" => {
-                present(kind, &name).map(|here| if here { "present" } else { "absent" }.to_owned())
-            }
+            "check" => present(kind, &name).map(|here| match here {
+                false => "absent".to_owned(),
+                true if kind == "bits" => format!("present {}", bits_state(&name)),
+                true => "present".to_owned(),
+            }),
             "remove" => remove(kind, &name),
             _ => Err(format!("no such step {what:?}")),
         };
@@ -44,7 +60,92 @@ pub(crate) fn run(rest: &[String]) -> ExitCode {
             word.unwrap_or_else(|why| format!("error {why}"))
         ));
     }
+    match (what.as_str(), bits_dir(&name)) {
+        ("check", Ok(dir)) => say(&format!(
+            "marker bits {}",
+            if dir.join(MARKER).exists() {
+                "present"
+            } else {
+                "absent"
+            }
+        )),
+        ("remove", Ok(dir)) if dir.exists() => {
+            if let Err(e) = remove_tree(&dir) {
+                say(&format!("folder bits error {}: {e}", dir.display()));
+            }
+        }
+        (_, Err(why)) => say(&format!("marker bits error {why}")),
+        _ => {}
+    }
     ExitCode::SUCCESS
+}
+
+/// `probe items mark <tag> <marker>`, the BITS job's notify command: writes `marker`, which
+/// must be the marker file of the job's folder.
+fn mark(name: &str, marker: Option<&String>) -> ExitCode {
+    let ours = bits_dir(name).map(|dir| dir.join(MARKER));
+    match (marker, ours) {
+        (Some(marker), Ok(ours)) if Path::new(marker) == ours => {
+            match write_file(&ours, b"fired\r\n") {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(_) => ExitCode::from(1),
+            }
+        }
+        _ => ExitCode::from(2),
+    }
+}
+
+/// `%TEMP%\<name>`: the BITS job's source, destination and marker.
+fn bits_dir(name: &str) -> Result<PathBuf, String> {
+    let temp = std::env::var("TEMP").map_err(|e| format!("TEMP: {e}"))?;
+    Ok(PathBuf::from(temp).join(name))
+}
+
+/// `path` as a `file:///` URL.
+fn file_url(path: &Path) -> String {
+    format!("file:///{}", path.display().to_string().replace('\\', "/"))
+}
+
+/// The job's state as `bitsadmin /getstate` gives it, or `unread`.
+fn bits_state(name: &str) -> String {
+    match exec("bitsadmin.exe", &["/rawreturn", "/getstate", name]) {
+        Ok((0, text)) if !text.trim().is_empty() => text.trim().to_owned(),
+        _ => "unread".to_owned(),
+    }
+}
+
+/// Plants the BITS job: made, a local file to copy, the notify command, resumed.
+fn plant_bits(name: &str, exe: &str) -> Result<(), String> {
+    let dir = bits_dir(name)?;
+    make_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let source = dir.join("source.txt");
+    write_file(&source, b"ClauseoS15\r\n").map_err(|e| format!("{}: {e}", source.display()))?;
+    let destination = dir.join("copy.txt").display().to_string();
+    let marker = dir.join(MARKER).display().to_string();
+    let notify = format!("\"{exe}\" probe items mark {} \"{marker}\"", tag_of(name));
+    exec_ok(
+        "bitsadmin.exe",
+        &["/rawreturn", "/create", "/download", name],
+    )?;
+    let url = file_url(&source);
+    exec_ok(
+        "bitsadmin.exe",
+        &["/rawreturn", "/addfile", name, &url, &destination],
+    )?;
+    exec_ok(
+        "bitsadmin.exe",
+        &["/rawreturn", "/setnotifyflags", name, "3"],
+    )?;
+    exec_ok(
+        "bitsadmin.exe",
+        &["/rawreturn", "/setnotifycmdline", name, exe, &notify],
+    )?;
+    exec_ok("bitsadmin.exe", &["/rawreturn", "/resume", name])
+}
+
+/// The tag in `ClauseoS15-<tag>`.
+fn tag_of(name: &str) -> &str {
+    name.strip_prefix("ClauseoS15-").unwrap_or(name)
 }
 
 /// Runs `program args` to its end; its exit code and its stdout, or why it couldn't start.
@@ -132,10 +233,7 @@ fn plant(kind: &str, name: &str, exe: &str) -> Result<(), String> {
             drop(remove_file(&temp));
             made
         }
-        "bits" => exec_ok(
-            "bitsadmin.exe",
-            &["/rawreturn", "/create", "/download", name],
-        ),
+        "bits" => plant_bits(name, exe),
         _ => Err(format!("no kind {kind}")),
     }
 }

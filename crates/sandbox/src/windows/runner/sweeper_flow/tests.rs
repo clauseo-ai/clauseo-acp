@@ -1,10 +1,11 @@
 //! The end sweeper's order through fakes: shut, sweep, widen, the classes, then COM; no widening
-//! and no COM after a sweep that failed or a widening that did.
+//! and no COM after a sweep that failed or a widening that did; a BITS job left for the system
+//! stop.
 
 use std::io;
 
 use super::*;
-use crate::windows::runner::leftovers::{Leftovers, remove_all};
+use crate::windows::runner::leftovers::{Leftovers, NOT_LOGGED_ON, Removal, remove_all};
 
 /// Each step and each removal call, in order.
 #[derive(Default)]
@@ -13,10 +14,12 @@ struct Fake {
     shut_fails: bool,
     sweep: Option<SweepError>,
     widen_fails: bool,
+    /// The OS error the BITS job's delete fails with.
+    bits_error: Option<i32>,
 }
 
 /// The removal's calls, recorded in the same list: one item of each kind.
-struct Calls<'a>(&'a mut Vec<String>);
+struct Calls<'a>(&'a mut Vec<String>, Option<i32>);
 
 fn key(kind: Kind) -> &'static str {
     match kind {
@@ -36,7 +39,10 @@ impl Leftovers for Calls<'_> {
     }
     fn delete(&mut self, kind: Kind, _: &Kind) -> io::Result<()> {
         self.0.push(format!("delete {}", key(kind)));
-        Ok(())
+        match self.1 {
+            Some(code) if kind == Kind::Bits => Err(io::Error::from_raw_os_error(code)),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -59,8 +65,9 @@ impl SweeperActs for Fake {
         }
         Ok(())
     }
-    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool {
-        remove_all(&mut Calls(&mut self.events), kinds, "end sweeper", log)
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> Removal {
+        let mut calls = Calls(&mut self.events, self.bits_error);
+        remove_all(&mut calls, kinds, "end sweeper", log)
     }
 }
 
@@ -160,4 +167,35 @@ fn a_shut_that_failed_stops_the_sweeper_first() {
         lines,
         ["clauseo-sandbox-run: the end sweeper can't shut its token (5)"]
     );
+}
+
+#[test]
+fn a_bits_job_left_for_want_of_a_logon_exits_pool_stop_and_other_errors_fail() {
+    let mut fake = Fake {
+        bits_error: Some(NOT_LOGGED_ON),
+        ..Fake::default()
+    };
+    let (code, lines) = go(&mut fake);
+    assert_eq!(code, RunExit::PoolStop.code());
+    assert_eq!(code, 0xE0C1_5010);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("1 BITS jobs left for the system stop (1245)")),
+        "{lines:?}"
+    );
+    for other in [5, 1058] {
+        let mut fake = Fake {
+            bits_error: Some(other),
+            ..Fake::default()
+        };
+        assert_eq!(go(&mut fake).0, RunExit::Sweep.code(), "{other}");
+    }
+    // A widening that failed lists no BITS job: its code is `Sweep`, never `PoolStop`.
+    let mut fake = Fake {
+        bits_error: Some(NOT_LOGGED_ON),
+        widen_fails: true,
+        ..Fake::default()
+    };
+    assert_eq!(go(&mut fake).0, RunExit::Sweep.code());
 }

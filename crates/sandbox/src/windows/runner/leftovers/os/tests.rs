@@ -81,7 +81,8 @@ fn a_planted_task_scheduler_server_is_removed_before_com() {
     let mut lines = Vec::new();
     let clean = remove_all(&mut calls, &[Kind::Classes], "test", &mut |line| {
         lines.push(line.to_owned());
-    });
+    })
+    .clean;
     let left: Vec<&String> = planted.iter().filter(|path| exists(path)).collect();
     let com_started = calls.com.is_some();
     drop(calls);
