@@ -356,3 +356,30 @@ fn sign_in_runs_through_the_sign_in_launcher_and_never_the_install_one() {
         "no sign-in run on the install launcher"
     );
 }
+
+/// The status check that runs detection (a CLI run in the lawyer's home) holds no caller: with
+/// every `auth status` run hung, `check_status` returns at once, and the state and a second
+/// command answer while the run goes on. Desktop's `setup` and the windows' calls never wait on it.
+#[cfg(unix)]
+#[test]
+fn a_status_run_that_never_answers_holds_no_caller() {
+    let fx = Fixture::new("signin-status-hangs", "never");
+    let (agents, _events) = fx.start();
+    fx.stall(Some("status"));
+    let began = clauseo_agents::testing::instant();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(agents.signin_state(&claude()), None);
+    drop(agents.cancel_sign_in(&claude()));
+    agents.check_status(&claude()).unwrap();
+    let took = clauseo_agents::testing::millis_since(began);
+    assert!(took < 100, "the calls took {took} ms");
+    let mut runs = 0;
+    for _ in 0..3000 {
+        runs = fx.runs_of("status").len();
+        if runs > 0 {
+            break;
+        }
+        crate::support::pause();
+    }
+    assert_eq!(runs, 1, "one status run, still going");
+}

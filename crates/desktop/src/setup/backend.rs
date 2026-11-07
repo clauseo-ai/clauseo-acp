@@ -542,11 +542,11 @@ impl AgentsBackend {
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
             let started = pending::run_press(self, agent);
-            if checked.insert(agent.clone())
-                && !started
-                && let Err(error) = self.agents.check_status(agent)
-            {
-                tracing::warn!(%agent, %error, "no status check");
+            if checked.insert(agent.clone()) && !started {
+                super::status_timing::asked(agent, "installed");
+                if let Err(error) = self.agents.check_status(agent) {
+                    tracing::warn!(%agent, %error, "no status check");
+                }
             }
         } else if self.compose.s18(agent).is_none() && self.agents.signin_state(agent).is_none() {
             self.compose
@@ -567,6 +567,7 @@ impl AgentsBackend {
             tracing::info!(%agent, "auth required: a status check is already on its way");
             return;
         }
+        super::status_timing::asked(agent, "auth_required");
         match self.agents.check_status(agent) {
             Ok(()) => tracing::info!(%agent, "auth required: sign-in status checked again"),
             Err(error) => {
