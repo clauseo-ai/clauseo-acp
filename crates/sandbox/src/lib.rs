@@ -186,7 +186,7 @@ pub use policy::{
 };
 pub use proxy::{
     Allowlist, Exchange, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route, Upstream,
-    Verdict, builtin_allowlist, start_proxy, upstream_for,
+    UpstreamAnswer, Verdict, builtin_allowlist, start_proxy, upstream_answer, upstream_for,
 };
 pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]

@@ -9,52 +9,60 @@
 
 use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows::Win32::Networking::WinHttp::{
-    ERROR_WINHTTP_AUTODETECTION_FAILED, WINHTTP_ACCESS_TYPE_NAMED_PROXY,
-    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP, WINHTTP_AUTO_DETECT_TYPE_DNS_A,
-    WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL, WINHTTP_AUTOPROXY_OPTIONS,
-    WINHTTP_AUTOPROXY_RUN_INPROCESS, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO,
-    WinHttpCloseHandle, WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen,
-    WinHttpSetTimeouts,
+    WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP,
+    WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL,
+    WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_AUTOPROXY_RUN_INPROCESS,
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO, WinHttpCloseHandle,
+    WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen, WinHttpSetTimeouts,
 };
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
 use super::Route;
-use super::parse::{self, Bypass};
+use super::parse::{
+    self, AUTOPROXY_SERVICE_ERROR, Bypass, PacAnswer, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT,
+};
 
 /// `WinHTTP`'s resolve, connect, send and receive timeouts for a PAC download, in milliseconds.
 const PAC_TIMEOUT_MS: i32 = 5_000;
 
-/// `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`.
-const UNABLE_TO_DOWNLOAD_SCRIPT: u32 = 12_167;
-
-/// `ERROR_WINHTTP_AUTOPROXY_SERVICE_ERROR`.
-const AUTOPROXY_SERVICE_ERROR: u32 = 12_178;
-
 /// The system's route for `target` (`https://host:port/`). `Err` holds a reason with no URL.
+/// The PAC settings answer first ([`parse::pac_answer`]): a PAC URL before auto-detect, so a
+/// slow WPAD cannot use up the 10 s bound before it. A WPAD lookup that failed, with nothing else
+/// set, is `Err` unless its error means no proxy here (12180, 12167, 12178:
+/// [`parse::pac_error`]); a PAC URL that fails, with no WPAD route either, is `Err`. `WinHTTP`
+/// reports "no WPAD on this network" and a transient discovery failure with the same code
+/// (12180), so a transient one still reads as direct on a refresh.
 pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String> {
     let config = IeConfig::current()?;
     let auto_config_url = config.auto_config_url.take_string();
+    let mut wpad = None;
     if config.auto_detect || auto_config_url.is_some() {
         let session = Session::open()?;
-        if config.auto_detect {
-            match session.proxy_for_url(target, &Pac::AutoDetect) {
-                Ok(route) => return Ok(route),
-                Err(error) if error == ERROR_WINHTTP_AUTODETECTION_FAILED => {
-                    tracing::debug!(host, port, "no WPAD file found");
+        let url = auto_config_url.as_deref().unwrap_or_default();
+        let answer =
+            parse::pac_answer(
+                config.auto_detect,
+                auto_config_url.is_some(),
+                |from| match from {
+                    PacFrom::Url => session.proxy_for_url(target, &Pac::Url(url)),
+                    PacFrom::AutoDetect => session.proxy_for_url(target, &Pac::AutoDetect),
+                },
+            );
+        match answer {
+            PacAnswer::Final(answer) => return answer,
+            PacAnswer::Fallback(answer) => {
+                match &answer {
+                    Ok(_) => tracing::debug!(host, port, "no WPAD file here"),
+                    Err(why) => tracing::warn!(port, %why, "WPAD failed; trying the next setting"),
                 }
-                Err(error) => {
-                    tracing::warn!(port, error, "WPAD failed; trying the next setting");
-                }
+                wpad = Some(answer);
             }
-        }
-        if let Some(url) = auto_config_url {
-            return session
-                .proxy_for_url(target, &Pac::Url(&url))
-                .map_err(|error| format!("the PAC file failed (WinHTTP error {error})"));
+            PacAnswer::Unset => {}
         }
     }
     let Some(proxy) = config.proxy.take_string() else {
-        return Ok(Route::Direct);
+        // Nothing else set: WPAD's answer, a failure included; none at all is direct.
+        return wpad.unwrap_or(Ok(Route::Direct));
     };
     let bypass = Bypass::parse(&config.bypass.take_string().unwrap_or_default());
     if bypass.matches(&parse::normal_host(host), port) {
@@ -174,13 +182,13 @@ impl Session {
         Ok(session)
     }
 
-    /// The route the PAC file gives `target`. `Err` holds the Win32 error code. A PAC URL the
-    /// `WinHTTP` service cannot fetch is tried once more in this process.
+    /// The route the PAC file gives `target`. `Err` holds the Win32 error code. A PAC file (a
+    /// URL's or WPAD's) the `WinHTTP` service cannot fetch, or with the service off, is tried
+    /// once more in this process.
     pub(super) fn proxy_for_url(&self, target: &str, pac: &Pac<'_>) -> Result<Route, u32> {
         match self.run(target, pac, 0) {
             Err(error)
-                if matches!(pac, Pac::Url(_))
-                    && (error == UNABLE_TO_DOWNLOAD_SCRIPT || error == AUTOPROXY_SERVICE_ERROR) =>
+                if error == UNABLE_TO_DOWNLOAD_SCRIPT || error == AUTOPROXY_SERVICE_ERROR =>
             {
                 self.run(target, pac, WINHTTP_AUTOPROXY_RUN_INPROCESS)
             }

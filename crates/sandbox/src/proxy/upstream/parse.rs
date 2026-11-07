@@ -178,6 +178,94 @@ fn is_within(host: &str, domain: &str) -> bool {
         .is_some_and(|head| head.is_empty() || head.ends_with('.'))
 }
 
+/// `ERROR_WINHTTP_AUTODETECTION_FAILED`: WPAD found no PAC file URL.
+#[cfg(any(windows, test))]
+const AUTODETECTION_FAILED: u32 = 12_180;
+
+/// `ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`.
+#[cfg(any(windows, test))]
+pub(super) const UNABLE_TO_DOWNLOAD_SCRIPT: u32 = 12_167;
+
+/// `ERROR_WINHTTP_AUTOPROXY_SERVICE_ERROR`.
+#[cfg(any(windows, test))]
+pub(super) const AUTOPROXY_SERVICE_ERROR: u32 = 12_178;
+
+/// Where a PAC file came from, for [`pac_error`].
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum PacFrom {
+    /// WPAD (auto-detect), by DHCP and DNS.
+    AutoDetect,
+    /// The PAC URL the settings name.
+    Url,
+}
+
+/// What a failed PAC lookup (`WinHttpGetProxyForUrl`, its Win32 error, after the in-process
+/// retry) means when nothing after it is set. From a PAC URL the firm named, any error is a
+/// failed lookup, so the caller keeps an earlier answer. From auto-detect, "no proxy here" reads
+/// as `DIRECT`: no WPAD file found (12180), a `wpad` name that answers but serves no script
+/// (12167, a home or ISP name answering 404), and the auto-proxy service off (12178), each of
+/// which would otherwise fail every lookup on that network; any other error (a bad script,
+/// 12166; a timeout, 12002; and the rest) is a failed lookup. `WinHTTP` reports "no WPAD on this
+/// network" and a transient discovery failure with the same code (12180), so a transient one
+/// still reads as direct on a refresh.
+#[cfg(any(windows, test))]
+pub(super) fn pac_error(from: PacFrom, error: u32) -> Result<Route, String> {
+    let none_here = [
+        AUTODETECTION_FAILED,
+        UNABLE_TO_DOWNLOAD_SCRIPT,
+        AUTOPROXY_SERVICE_ERROR,
+    ];
+    match from {
+        PacFrom::AutoDetect if none_here.contains(&error) => Ok(Route::Direct),
+        PacFrom::AutoDetect => Err(format!("WPAD failed (WinHTTP error {error})")),
+        PacFrom::Url => Err(format!("the PAC file failed (WinHTTP error {error})")),
+    }
+}
+
+/// What the PAC settings answer ([`pac_answer`]).
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PacAnswer {
+    /// The answer, whatever else is set.
+    Final(Result<Route, String>),
+    /// WPAD's, when auto-detect is the only PAC setting and it found no route: a static proxy
+    /// set beside it answers instead.
+    Fallback(Result<Route, String>),
+    /// Neither auto-detect nor a PAC URL is set.
+    Unset,
+}
+
+/// The PAC settings' answer, `ask` running one lookup (its Win32 error on failure). A PAC URL
+/// the settings name is asked first, so a slow WPAD (with its in-process retry) cannot use up
+/// the lookup's 10 s bound before it: a firm's GPO often sets both. Its route is the answer;
+/// when it fails, auto-detect's route, if it finds one, else the PAC URL's failure. With
+/// auto-detect alone, its route, or its error read by [`pac_error`] as a fallback.
+#[cfg(any(windows, test))]
+pub(super) fn pac_answer(
+    auto_detect: bool,
+    url_set: bool,
+    mut ask: impl FnMut(PacFrom) -> Result<Route, u32>,
+) -> PacAnswer {
+    if url_set {
+        let failed = match ask(PacFrom::Url) {
+            Ok(route) => return PacAnswer::Final(Ok(route)),
+            Err(error) => pac_error(PacFrom::Url, error),
+        };
+        if auto_detect && let Ok(route) = ask(PacFrom::AutoDetect) {
+            return PacAnswer::Final(Ok(route));
+        }
+        return PacAnswer::Final(failed);
+    }
+    if !auto_detect {
+        return PacAnswer::Unset;
+    }
+    match ask(PacFrom::AutoDetect) {
+        Ok(route) => PacAnswer::Final(Ok(route)),
+        Err(error) => PacAnswer::Fallback(pac_error(PacFrom::AutoDetect, error)),
+    }
+}
+
 /// A `WinHTTP` proxy string, as `WinHttpGetIEProxyConfigForCurrentUser` and
 /// `WinHttpGetProxyForUrl` give it: entries split by `;` or white space, each `host[:port]` or
 /// `scheme=host[:port]`, a host perhaps written `http://host`. For a CONNECT the first `https=`

@@ -360,6 +360,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     config.install.proxy = at_start.proxy;
     config.install.signin_proxy = at_start.signin_proxy;
     config.install.ca_certs = at_start.ca_certs;
+    // Each install try asks for a fresh route first (one past 60 s is resolved again).
+    config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {

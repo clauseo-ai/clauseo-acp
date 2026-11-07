@@ -11,7 +11,9 @@ use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::AgentId;
 use url::Url;
 
-use super::super::{NetworkFacts, NetworkRoute, NetworkSlot, OsLookup, ProxyEnv, ask_all};
+use super::super::{
+    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, ProxyEnv, ask_all,
+};
 use super::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, OS_LOOKUP_BUDGET, follow};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
@@ -256,7 +258,7 @@ fn slow_os(each: Duration, slow: Duration) -> Arc<OsLookup> {
             .host_str()
             .is_some_and(|host| host.starts_with("slow"));
         futures::executor::block_on(AsyncIoTimer.after(if slow_host { slow } else { each }));
-        Some(OS_PROXY.to_owned())
+        OsAnswer::Proxy(OS_PROXY.to_owned())
     })
 }
 
@@ -279,13 +281,13 @@ fn five_slow_lookups_take_about_one_lookups_time() {
         "d.example",
         "e.example",
     ];
-    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5));
+    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5)).got;
     let took = since(asked);
     assert_eq!(answers.len(), 5);
     assert!(
         answers
             .values()
-            .all(|answer| answer.as_deref() == Some(OS_PROXY))
+            .all(|answer| answer.proxy().as_deref() == Some(OS_PROXY))
     );
     assert!(
         took < Duration::from_millis(1_200),
@@ -293,22 +295,23 @@ fn five_slow_lookups_take_about_one_lookups_time() {
     );
 }
 
-/// A lookup past the budget counts as direct in the route; the answers in time are kept, and
-/// the route is made by the budget, not by the slow lookup.
+/// A lookup past the budget has no answer in the route; the answers in time are kept, and the
+/// route is made by the budget, not by the slow lookup.
 #[test]
-fn a_lookup_past_the_budget_counts_as_direct_and_the_rest_are_kept() {
+fn a_lookup_past_the_budget_has_no_answer_and_the_rest_are_kept() {
     let os = slow_os(Duration::ZERO, Duration::from_secs(3));
     let asked = SystemClock.monotonic();
     let budget = Duration::from_millis(300);
-    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget);
+    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget).got;
     let took = since(asked);
     assert!(took >= budget && took < Duration::from_secs(2), "{took:?}");
     let fast = Url::parse("https://fast.example/").unwrap();
     assert_eq!(
-        answers.get(&fast).cloned().flatten().as_deref(),
+        answers.get(&fast).and_then(OsAnswer::proxy).as_deref(),
         Some(OS_PROXY)
     );
-    assert!(!answers.contains_key(&Url::parse("https://slow.example/").unwrap()));
+    let slow = Url::parse("https://slow.example/").unwrap();
+    assert_eq!(answers.get(&slow), Some(&OsAnswer::Unknown));
     // The whole resolution fits the 5 s budget, a margin left to hand the route on.
     assert!(OS_LOOKUP_BUDGET < FIRST_ROUTE_WAIT);
     assert_eq!(FIRST_ROUTE_WAIT, Duration::from_secs(5));
@@ -345,3 +348,138 @@ fn the_start_never_waits_on_the_lookups_and_agents_bound_later_get_the_route() {
     assert_eq!(pushed.len(), 1, "the route resolved before the bind");
     assert_eq!(pushed[0].proxy.as_deref(), Some(OS_PROXY));
 }
+
+/// An OS whose answer the test switches, counting its lookups.
+struct Switchable {
+    answer: Arc<Mutex<String>>,
+    lookups: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Switchable {
+    fn new(answer: &str) -> Self {
+        Self {
+            answer: Arc::new(Mutex::new(answer.to_owned())),
+            lookups: Arc::default(),
+        }
+    }
+
+    fn lookup(&self) -> impl Fn(&Url) -> Option<String> + Send + Sync + 'static {
+        let (answer, lookups) = (Arc::clone(&self.answer), Arc::clone(&self.lookups));
+        move |_target: &Url| {
+            lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(lock(&answer).clone())
+        }
+    }
+
+    fn switch(&self, answer: &str) {
+        answer.clone_into(&mut lock(&self.answer));
+    }
+
+    fn lookups(&self) -> usize {
+        self.lookups.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+const NEW_PROXY: &str = "http://vpn-proxy.firm.example:3128";
+
+/// A route followed on its own thread, fresh for `fresh_for`, from `os`; its slot and the
+/// launch hook over it, once the first route has landed.
+fn followed(os: &Switchable, fresh_for: Duration) -> (NetworkFollow, SetupHook) {
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .fresh_for(fresh_for);
+    let network = follow(follower, SystemClock.monotonic());
+    network.update(facts());
+    crate::test_support::block_on(network.ready());
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    (network, hook)
+}
+
+/// The network changes: within the freshness an install try's refresh and a launch take the
+/// route as it is, with no OS lookup; past it the try's refresh resolves again and gets the new
+/// proxy, and the next launch takes it too.
+#[test]
+fn past_the_freshness_an_install_try_and_the_next_launch_get_the_new_proxy() {
+    let os = Switchable::new(OS_PROXY);
+    let fresh_for = Duration::from_secs(1);
+    let (network, hook) = followed(&os, fresh_for);
+    let refresh = network.refresher();
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], OS_PROXY);
+    let asked = os.lookups();
+    os.switch(NEW_PROXY);
+    assert_eq!(refresh().and_then(|n| n.proxy).as_deref(), Some(OS_PROXY));
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], OS_PROXY);
+    assert_eq!(os.lookups(), asked, "within the freshness: no lookup");
+    crate::test_support::block_on(AsyncIoTimer.after(fresh_for));
+    assert_eq!(refresh().and_then(|n| n.proxy).as_deref(), Some(NEW_PROXY));
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], NEW_PROXY);
+    assert!(os.lookups() > asked);
+}
+
+/// With nothing asking, a stale route is resolved again by the network thread itself, so a
+/// launch, which never waits, finds the new proxy.
+#[test]
+fn a_stale_route_is_resolved_again_by_itself_for_the_next_launch() {
+    let os = Switchable::new(OS_PROXY);
+    let fresh_for = Duration::from_millis(300);
+    let (_network, hook) = followed(&os, fresh_for);
+    os.switch(NEW_PROXY);
+    let switched = SystemClock.monotonic();
+    while hook_env(&hook, &claude())["HTTPS_PROXY"] != NEW_PROXY {
+        assert!(
+            since(switched) < Duration::from_secs(10),
+            "never resolved again"
+        );
+        crate::test_support::block_on(AsyncIoTimer.after(Duration::from_millis(50)));
+    }
+}
+
+/// An OS answer past the budget is not lost: the route is made again once it lands, with the
+/// answers already got and no new lookup, so the launch takes the slow host's proxy.
+#[test]
+fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
+    const LATE_PROXY: &str = "http://wpad-proxy.firm.example:8080";
+    let lookups = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&lookups);
+    let os = move |target: &Url| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if target.host_str() == Some("api.anthropic.com") {
+            futures::executor::block_on(AsyncIoTimer.after(Duration::from_millis(700)));
+            Some(LATE_PROXY.to_owned())
+        } else {
+            Some(OS_PROXY.to_owned())
+        }
+    };
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true)
+        .lookup_budget(Duration::from_millis(200));
+    let network = follow(follower, SystemClock.monotonic());
+    network.update(facts());
+    crate::test_support::block_on(network.ready());
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    assert!(
+        !hook_env(&hook, &claude()).contains_key("HTTPS_PROXY"),
+        "a first route: a lookup with no answer yet goes direct"
+    );
+    let asked = lookups.load(std::sync::atomic::Ordering::SeqCst);
+    let started = SystemClock.monotonic();
+    while hook_env(&hook, &claude())
+        .get("HTTPS_PROXY")
+        .map(String::as_str)
+        != Some(LATE_PROXY)
+    {
+        assert!(
+            since(started) < Duration::from_secs(10),
+            "the late answer never landed"
+        );
+        crate::test_support::block_on(AsyncIoTimer.after(Duration::from_millis(50)));
+    }
+    assert_eq!(
+        lookups.load(std::sync::atomic::Ordering::SeqCst),
+        asked,
+        "made again with no new lookup"
+    );
+    assert_eq!(hook_env(&hook, &codex())["HTTPS_PROXY"], OS_PROXY);
+}
+
+mod keep;
