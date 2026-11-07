@@ -201,31 +201,76 @@ fn a_read_that_cannot_start_is_failed() {
 }
 
 /// R17: a forced read the identity check gives up at its bound (a stalled network hangs Codex's
-/// app-server past 150 s) is cancelled when its future is dropped: the hung app-server is killed
-/// then, not at its own 20 s limit, and the next read finds none left behind.
+/// app-server past 150 s) has its app-server's stdin closed when its future is dropped, and is
+/// not killed (Codex may have rotated the refresh token and not yet saved it): it drains, exits
+/// on its own and is reaped.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_forced_read_given_up_kills_its_hung_app_server() {
-    let fx = Fixture::new("account-forced-hang", "ok-after:0");
+fn a_forced_read_let_go_closes_its_stdin_and_is_not_killed() {
+    let fx = Fixture::new("account-forced-let-go", "ok-after:0");
     let agents = signed_in(&fx, &codex(), Method::Browser);
+    swap_to(&fx, &codex(), "refresh-hang", "test@example.com");
+    let before = account_read_params(&fx, &codex()).len();
+    let read = agents.read_account_refreshed(&codex());
+    crate::support::eventually("the forced request reached the app-server", || {
+        account_read_params(&fx, &codex()).len() > before
+    });
+    let hung = fx.codex_runs(&["app-server"]).last().unwrap().pid;
+    // The check's bound passes: it drops the read.
+    drop(read);
+    let drained = fx.config.signin.homes[&codex()].join("fake-app-server-drained");
+    crate::support::eventually("the app-server read its stdin's end and exited", || {
+        drained.exists()
+    });
+    assert!(crate::support::gone(hung), "pid {hung} still runs");
+    assert_eq!(
+        block_on(agents.read_account(&codex())),
+        account("test@example.com"),
+        "the plain read is untouched"
+    );
+}
+
+/// Whether `pid` runs now (not a zombie), at once.
+#[cfg(target_os = "linux")]
+fn alive(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        let state = stat.rsplit(')').next().unwrap_or_default().trim_start();
+        !state.starts_with(['Z', 'X'])
+    })
+}
+
+/// R17: while a given-up forced read's app-server still drains, another forced read of that
+/// home starts none (no answer, which the check backs off on): two quick retries never leave two
+/// app-servers alive. A quit kills the one draining.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_forced_read_while_one_drains_starts_no_second_app_server_and_quit_kills_it() {
+    let fx = Fixture::new("account-forced-one-drains", "ok-after:0");
+    let agents = signed_in(&fx, &codex(), Method::Browser);
+    // The app-server is a sleep that never answers and ignores its stdin's end.
     fx.stall(Some("app-server"));
     let before = fx.codex_runs(&["app-server"]).len();
     let read = agents.read_account_refreshed(&codex());
     crate::support::eventually("the forced read's app-server runs", || {
         fx.codex_runs(&["app-server"]).len() > before
     });
-    let hung = fx.codex_runs(&["app-server"])[before].pid;
-    // The check's bound passes: it drops the read.
+    let draining = fx.codex_runs(&["app-server"])[before].pid;
     drop(read);
-    assert!(crate::support::gone(hung), "pid {hung} still runs");
-    fx.stall(None);
-    assert_eq!(
-        block_on(agents.read_account(&codex())),
-        account("test@example.com")
-    );
-    for run in fx.codex_runs(&["app-server"]) {
-        assert!(crate::support::gone(run.pid), "pid {} left behind", run.pid);
+    for _ in 0..2 {
+        assert_eq!(
+            block_on(agents.read_account_refreshed(&codex())),
+            AccountRead::Failed,
+            "no answer while one drains"
+        );
     }
+    assert_eq!(
+        fx.codex_runs(&["app-server"]).len(),
+        before + 1,
+        "no second app-server started"
+    );
+    assert!(alive(draining), "the drained one is not killed");
+    drop(agents);
+    assert!(crate::support::gone(draining), "a quit kills it");
 }
 
 #[cfg(unix)]

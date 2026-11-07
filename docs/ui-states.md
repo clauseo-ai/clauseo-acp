@@ -340,6 +340,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
 | Launch while the login's account is checked (0048 R17) | `ErrorCode::AgentIdentityChecking`, `ErrorCode::AgentIdentityUnknown` | yes |
 | The login's account changed (0048 R17) | `ErrorCode::SigninAccountChanged` | no |
+| The login could not be confirmed by a token refresh (0048 R17) | `ErrorCode::SigninUnconfirmed` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

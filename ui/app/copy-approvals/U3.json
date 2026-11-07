@@ -818,5 +818,15 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.unconfirmed": {
+    "en": "Clauseo couldn't confirm your Codex sign-in. Sign in again to carry on.",
+    "hi": "Clauseo आपके Codex साइन इन की पुष्टि नहीं कर सका। जारी रखने के लिए फिर से साइन इन करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-07",
+    "by": "app track copy review (scratch-S18/words-signin.md)"
   }
 }

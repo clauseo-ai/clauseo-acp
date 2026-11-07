@@ -37,8 +37,17 @@ pub(super) fn adapter() -> io::Result<i32> {
     Ok(EXIT_OK)
 }
 
+/// The marker `authMethod` for which a forced refresh never gets its answer while stdin stays
+/// open (a stalled network); once stdin ends, the app-server writes [`DRAINED_LOG`] and exits
+/// 0, as Codex drains a started request and exits.
+const REFRESH_HANG_METHOD: &str = "refresh-hang";
+/// The file in Codex's home [`REFRESH_HANG_METHOD`]'s app-server writes as it exits on stdin's
+/// end, so a test can tell it ended on its own from a kill.
+const DRAINED_LOG: &str = "fake-app-server-drained";
+
 /// `app-server`: answers each JSON-RPC line on stdin with one line on stdout, until stdin closes.
 pub(super) fn app_server(folder: &Path) -> io::Result<i32> {
+    let mut hung = false;
     for line in io::stdin().lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -47,9 +56,13 @@ pub(super) fn app_server(folder: &Path) -> io::Result<i32> {
         match reply(&line, folder) {
             Reply::Line(reply) => say(&reply)?,
             Reply::Nothing => {}
+            Reply::Hang => hung = true,
             // Closes before answering: the client reads no answer.
             Reply::Close => return Ok(EXIT_OK),
         }
+    }
+    if hung {
+        drop(write::write(folder.join(DRAINED_LOG), b"stdin ended\n"));
     }
     Ok(EXIT_OK)
 }
@@ -62,6 +75,8 @@ enum Reply {
     Nothing,
     /// Closes without answering ([`REFRESH_SILENT_METHOD`]'s forced refresh).
     Close,
+    /// Answers nothing and waits for stdin's end ([`REFRESH_HANG_METHOD`]'s forced refresh).
+    Hang,
 }
 
 /// `account/read` with `params`: they are appended to [`ACCOUNT_READ_LOG`]; with
@@ -77,6 +92,9 @@ fn account_read_reply(id: &Value, params: &Value, folder: &Path) -> Reply {
         let method = marker(folder).map(|marker| marker.method);
         if method.as_deref() == Some(REFRESH_SILENT_METHOD) {
             return Reply::Close;
+        }
+        if method.as_deref() == Some(REFRESH_HANG_METHOD) {
+            return Reply::Hang;
         }
         if method.as_deref() == Some(REFRESH_REFUSED_METHOD) {
             return Reply::Line(

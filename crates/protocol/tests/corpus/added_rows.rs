@@ -464,4 +464,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (371, 0xb6fe_c2b5_ff6d_2d0f),
         (273, 0x9101_b25f_5473_6148),
     ),
+    (
+        "added/turn_failed-SigninUnconfirmed",
+        include_bytes!("added/turn_failed-SigninUnconfirmed.jsonl"),
+        include_bytes!("added/turn_failed-SigninUnconfirmed.msgpack"),
+        (365, 0x34db_4e5a_4c69_0992),
+        (267, 0xfae5_f333_f9c9_09ed),
+    ),
 ];

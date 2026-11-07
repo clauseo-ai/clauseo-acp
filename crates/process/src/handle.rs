@@ -88,6 +88,13 @@ impl Handle {
         self.finish(&status)
     }
 
+    /// Closes the agent's stdin (the shutdown ladder's first step) and waits for nothing: an
+    /// agent that ends with its stdin can finish what it started and exit on its own, and
+    /// [`Handle::exited`] then reaps it. Dropping the handle still kills the tree.
+    pub fn close_stdin(&mut self) {
+        self.stdin.close();
+    }
+
     /// Stops the agent by the ladder: close its stdin and wait 2 s, then (Unix) SIGTERM to its
     /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job, and wait 2 s
     /// more for the exit. Whichever way it exits, what is left of its tree is killed: on Unix the

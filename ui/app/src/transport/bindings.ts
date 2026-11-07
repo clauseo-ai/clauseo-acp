@@ -1621,6 +1621,8 @@ export type ErrorCode =
 "agent.identity_unknown" | 
 /** The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. */
 "signin.account_changed" | 
+/** Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Its launches are refused until it is confirmed or signed in again. */
+"signin.unconfirmed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

@@ -1,8 +1,9 @@
 //! R17's refresh-on-check for Codex through the backend (`setup/identity/refresh.rs`): the first
 //! check since start forces a refresh, which confirms only when Codex rewrote the login file and
 //! a plain read of it names the recorded account, and an unchanged stamp then forces nothing; a
-//! rewrite naming another account is a change; a forced read that rewrites nothing, has no
-//! answer or times out confirms nothing, lets the launch go on its plain answer, and is tried
+//! rewrite naming another account is a change; an answer with no rewrite is retried once at
+//! 30 s and the same again is unknown with the sign-in-again card; a forced read with no
+//! answer or a timeout confirms nothing, lets the launch go on its plain answer, and is tried
 //! again with the backoff; Codex's refused login refuses; forcing again waits for 60 s after the
 //! last force, however the file was written.
 
@@ -12,11 +13,12 @@ use std::time::Duration;
 
 use clauseo_agents::{AccountHash, AccountRead};
 use clauseo_process::{AsyncIoTimer, Timer as _};
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, SignIn};
 use futures::future::{Either, select};
 
 use super::codex;
 use super::identity::{IdRig, refused};
+use super::switching::shown;
 use super::timing::{Stepping, start};
 use crate::setup::identity::{Identities, Verdict, check, poll_once};
 use crate::test_support::block_on;
@@ -130,8 +132,19 @@ fn a_rewrite_whose_plain_read_names_another_account_is_a_change() {
     assert_eq!(verdict(&id), Verdict::Changed);
 }
 
+/// Whether the card says sign in again for refresh-on-check (`signin.unconfirmed`).
+fn sign_in_again(id: &IdRig) -> bool {
+    matches!(
+        shown(&id.rig, &codex()),
+        Some(SignIn::Failed {
+            code: ErrorCode::SigninUnconfirmed,
+            ..
+        })
+    )
+}
+
 #[test]
-fn a_forced_read_that_rewrites_nothing_confirms_nothing_lets_the_launch_go_and_backs_off() {
+fn an_answer_with_no_rewrite_is_retried_once_at_thirty_seconds_and_the_same_again_is_unknown() {
     let id = changed_login("refresh-no-rewrite");
     id.look(2);
     assert_eq!(forced_and_plain(&id), (1, 0), "its own answer decides");
@@ -139,16 +152,68 @@ fn a_forced_read_that_rewrites_nothing_confirms_nothing_lets_the_launch_go_and_b
     assert_eq!(
         id.rig.host.calls().last(),
         Some(&refused(&codex(), None)),
-        "the same account: the launch goes"
+        "the same account: the launch goes, once"
     );
-    id.look(61);
-    assert_eq!(forced_and_plain(&id), (1, 0), "60 s after the last force");
-    id.look(62);
-    assert_eq!(forced_and_plain(&id), (2, 0), "still pending: forced again");
-    // Another account in a forced answer with no rewrite is still a change.
+    id.look(31);
+    assert_eq!(forced_and_plain(&id), (1, 0));
+    id.look(32);
+    assert_eq!(forced_and_plain(&id), (2, 0), "one retry 30 s later");
+    assert_eq!(
+        verdict(&id),
+        Verdict::Unknown,
+        "a refresh that fails online"
+    );
+    assert_eq!(
+        id.rig.host.calls().last(),
+        Some(&refused(&codex(), Some(ErrorCode::AgentIdentityUnknown)))
+    );
+    assert!(sign_in_again(&id), "the card says sign in again");
+    // Forcing goes on with the backoff.
+    id.look(91);
+    assert_eq!(forced_and_plain(&id).0, 2);
+    id.look(92);
+    assert_eq!(forced_and_plain(&id).0, 3);
+}
+
+#[test]
+fn an_answer_with_no_rewrite_then_a_rewrite_with_the_same_account_confirms() {
+    let id = changed_login("refresh-no-rewrite-then-rewrite");
+    id.look(2);
+    assert_eq!(forced_and_plain(&id), (1, 0));
+    refresh_rewrites(&id);
+    id.look(32);
+    assert_eq!(
+        forced_and_plain(&id),
+        (2, 1),
+        "the retry rewrote: its file read"
+    );
+    assert_eq!(verdict(&id), Verdict::Same);
+    assert!(!sign_in_again(&id));
+    id.look(40);
+    id.look(600);
+    assert_eq!(forced_and_plain(&id).0, 2, "confirmed: nothing more forced");
+}
+
+#[test]
+fn an_answer_with_no_rewrite_then_no_answer_keeps_the_allowance() {
+    let id = changed_login("refresh-no-rewrite-then-none");
+    id.look(2);
+    id.rig
+        .agents
+        .accounts
+        .forced_answers(&codex(), AccountRead::Failed);
+    id.look(32);
+    assert_eq!(forced_and_plain(&id), (2, 1), "the plain fallback decides");
+    assert_eq!(verdict(&id), Verdict::Same);
+    assert_eq!(
+        id.rig.host.calls().last(),
+        Some(&refused(&codex(), None)),
+        "no answer is not a refusal"
+    );
+    // Another account in an answer with no rewrite is still a change.
     let other = AccountRead::Account(AccountHash::of(OTHER).unwrap());
     id.rig.agents.accounts.forced_answers(&codex(), other);
-    id.look(500);
+    id.look(600);
     assert_eq!(verdict(&id), Verdict::Changed);
 }
 
@@ -214,7 +279,7 @@ fn a_hung_forced_read_is_dropped_at_its_share_and_the_fallback_ends_within_the_b
     assert_eq!(
         id.rig.agents.accounts.dropped.load(Ordering::SeqCst),
         1,
-        "the hung read was dropped, which kills its app-server"
+        "the hung read was let go: S18 closes its app-server's stdin, never kills it"
     );
     assert_eq!(verdict(&id), Verdict::Same, "the launch goes");
     id.look(62);
@@ -239,6 +304,7 @@ fn codexs_refused_login_is_unknown_and_tried_again_with_the_backoff() {
         id.rig.host.calls().last(),
         Some(&refused(&codex(), Some(ErrorCode::AgentIdentityUnknown)))
     );
+    assert!(sign_in_again(&id), "the card says sign in again");
     id.look(62);
     assert_eq!(forced_and_plain(&id), (2, 0));
 }
@@ -259,10 +325,10 @@ fn a_write_after_the_reply_is_not_taken_for_the_rewrite_and_is_forced_again() {
     );
     assert_eq!(verdict(&id), Verdict::Same, "the launch goes on its answer");
     id.look(4);
-    id.look(61);
+    id.look(31);
     assert_eq!(forced_and_plain(&id).0, 1);
-    id.look(62);
-    assert_eq!(forced_and_plain(&id).0, 2, "still pending: forced again");
+    id.look(32);
+    assert_eq!(forced_and_plain(&id).0, 2, "no rewrite of its own: retried");
 }
 
 #[test]

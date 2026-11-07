@@ -18,12 +18,16 @@
 //! own limits (Claude's status 5 s; Codex's `login status` 15 s and its app-server 20 s); the
 //! caller bounds the whole.
 
+use std::collections::BTreeSet;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::Timer;
 use sha2::{Digest as _, Sha256};
 
+use crate::cancel::Cancel;
 use crate::integrity::to_hex;
 use crate::signin::codex::identity::Checked;
 use crate::signin::codex::{StatusSaid, identity};
@@ -90,10 +94,57 @@ pub enum AccountRead {
 /// A read's answer, on its way from the job's thread.
 pub type AccountFuture = Pin<Box<dyn Future<Output = AccountRead> + Send>>;
 
-/// The read: see the module docs. With `refresh` (Codex only; Claude ignores it), Codex's
+/// How one read was asked for, and what its caller shares with its job.
+#[derive(Debug, Clone)]
+pub(crate) struct ReadOrder {
+    /// Codex's `account/read` asks for a token refresh first.
+    pub(crate) refresh: bool,
+    /// Set once the caller gives the read up (drops its future): a forced read's app-server
+    /// then gets its stdin closed and ends on its own (`codex::identity`).
+    pub(crate) let_go: Arc<Cancel>,
+    /// The Codex homes with a forced read's app-server alive, one each at most.
+    pub(crate) forced: Arc<ForcedRuns>,
+}
+
+/// The Codex homes with a forced read's app-server alive: running, or draining after its read
+/// was given up. Codex may have rotated the refresh token and not yet saved it, so a given-up
+/// app-server is never killed (but at quit), and no second one starts beside it.
+#[derive(Debug, Default)]
+pub(crate) struct ForcedRuns(Mutex<BTreeSet<PathBuf>>);
+
+impl ForcedRuns {
+    /// `home` claimed for one forced run until the claim drops; `None` while another's
+    /// app-server is alive there.
+    pub(crate) fn claim(self: &Arc<Self>, home: &Path) -> Option<ForcedRun> {
+        let mut homes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        homes.insert(home.to_path_buf()).then(|| ForcedRun {
+            runs: Arc::clone(self),
+            home: home.to_path_buf(),
+        })
+    }
+}
+
+/// A claim on a Codex home for one forced run ([`ForcedRuns::claim`]).
+#[derive(Debug)]
+pub(crate) struct ForcedRun {
+    runs: Arc<ForcedRuns>,
+    home: PathBuf,
+}
+
+impl Drop for ForcedRun {
+    fn drop(&mut self) {
+        let mut homes = self.runs.0.lock().unwrap_or_else(PoisonError::into_inner);
+        homes.remove(&self.home);
+    }
+}
+
+/// The read: see the module docs. With `order.refresh` (Codex only; Claude ignores it), Codex's
 /// `account/read` asks for a token refresh first ([`codex::identity::read_checked`]); a forced
 /// read maps its answers as a plain one does.
-pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, refresh: bool) -> AccountRead {
+pub(crate) async fn read<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    order: &ReadOrder,
+) -> AccountRead {
     let cancel = &job.ticket.cancel;
     let kind = if found::is_reused(job) {
         RunKind::Reused { home: &job.home }
@@ -114,7 +165,7 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, refresh: bo
             // the account is not known either way.
             StatusSaid::NoMarker | StatusSaid::NoAnswer => AccountRead::Failed,
             StatusSaid::LoggedIn => {
-                let read = codex::identity::read_checked(job, cancel, kind, &job.home, refresh);
+                let read = codex::identity::read_checked(job, cancel, kind, &job.home, order);
                 match read.await {
                     Checked::Read(identity::AccountRead::Chatgpt(identity)) => named(&identity),
                     // An API-key, Bedrock or unknown kind of account names no email.

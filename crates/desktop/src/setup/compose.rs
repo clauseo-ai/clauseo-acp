@@ -20,7 +20,9 @@
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored);
 //! 6. else, once the plan login's account changed (R17, `setup/identity.rs`), `Failed { code:
-//!    signin.account_changed }`, until a sign-in records an account again;
+//!    signin.account_changed }`, until a sign-in records an account again; else, while Codex's
+//!    refresh-on-check left the login unconfirmed (a refused login, or two refreshes that wrote
+//!    nothing), `Failed { code: signin.unconfirmed }`, which says sign in again;
 //! 7. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
@@ -66,6 +68,8 @@ pub(crate) struct Facts {
     pub(crate) stuck: bool,
     /// Since when the plan login's account is not the recorded one, if it is not (R17).
     pub(crate) account_changed: Option<SystemTime>,
+    /// Since when refresh-on-check could not confirm the plan login (R17), if it cannot.
+    pub(crate) unconfirmed: Option<SystemTime>,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
@@ -108,6 +112,12 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     if let Some(since) = facts.account_changed {
         return Some(SignIn::Failed {
             code: ErrorCode::SigninAccountChanged,
+            at: timestamp(since),
+        });
+    }
+    if let Some(since) = facts.unconfirmed {
+        return Some(SignIn::Failed {
+            code: ErrorCode::SigninUnconfirmed,
             at: timestamp(since),
         });
     }
@@ -480,6 +490,14 @@ impl Compose {
         self.change(agent, |known, now| {
             known.facts.account_changed =
                 changed.then(|| known.facts.account_changed.unwrap_or(now));
+        });
+    }
+
+    /// Whether refresh-on-check could not confirm `agent`'s plan login (R17): the card says sign
+    /// in again (`signin.unconfirmed`).
+    pub(crate) fn set_unconfirmed(&self, agent: &AgentId, unconfirmed: bool) {
+        self.change(agent, |known, now| {
+            known.facts.unconfirmed = unconfirmed.then(|| known.facts.unconfirmed.unwrap_or(now));
         });
     }
 

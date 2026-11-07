@@ -1513,7 +1513,8 @@ expression: counts_schema()
         "sandbox.required",
         "agent.identity_checking",
         "agent.identity_unknown",
-        "signin.account_changed"
+        "signin.account_changed",
+        "signin.unconfirmed"
       ],
       "type": "string"
     },

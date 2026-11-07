@@ -115,6 +115,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `agent.identity_checking` | Clauseo is confirming which account this agent's login belongs to; no agent was started. | yes | host (a launch while desktop confirms the login's account, decision record 0048 R17) |
 | `agent.identity_unknown` | Clauseo could not confirm which account this agent's login belongs to (its status check failed or gave no account); no agent was started. Trying again can succeed. | yes | host (a launch after desktop could not confirm the login's account, decision record 0048 R17) |
 | `signin.account_changed` | The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. | no | desktop (the login's account changed from the one signed in, decision record 0048 R17) |
+| `signin.unconfirmed` | Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Its launches are refused until it is confirmed or signed in again. | no | desktop (Codex's refresh-on-check could not confirm the login, decision record 0048 R17) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
