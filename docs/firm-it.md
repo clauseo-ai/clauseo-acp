@@ -460,6 +460,11 @@ Coming:
     than that counts as direct until then;
   - after changing networks (office, home, VPN), restart Clauseo.
 
+  Known issue: on Windows, a machine-wide `SSL_CERT_FILE` (set by Anaconda, for example) can
+  still break Codex even with `CODEX_CA_CERTIFICATE` set
+  ([openai/codex#55668](https://github.com/openai/codex/issues/55668)); remove it, or point it
+  at a full root bundle.
+
 ## 8. Claude's personal skills
 
 A lawyer's personal claude.ai skills don't appear in Clauseo sessions. Clauseo runs Claude Code

@@ -54,15 +54,6 @@ use url::Url;
 /// (decided for launch); off is this one line.
 pub(crate) const OS_FALLBACK: bool = true;
 
-/// What `NO_PROXY` always holds in a launch with a proxy: this computer, which the host's own
-/// listeners are on and no firm proxy can reach.
-const LOOPBACK: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
-
-/// The proxy variables a launch with a proxy gets, each unless a firm plan's `env` or the
-/// agent's own entry sets it (in any case). An `ALL_PROXY` set there keeps the first two out
-/// too: they would win over it.
-const PROXY_VARS: [&str; 2] = ["HTTPS_PROXY", "HTTP_PROXY"];
-
 /// Claude's primary API host: the first host of the sandbox's built-in allowlists for both of
 /// Claude's logins (`clauseo_sandbox::builtin_allowlist`, `ClaudePlan` and `ClaudeApiKey`).
 const CLAUDE_API: &str = "https://api.anthropic.com/";
@@ -117,6 +108,9 @@ pub(crate) struct NetworkFacts {
     /// The variable names each agent's own entry (`agents.<id>.env`) sets, which the launch
     /// hook leaves alone.
     pub(crate) own_vars: BTreeMap<AgentId, BTreeSet<String>>,
+    /// The `NO_PROXY` each agent's own entry sets (in any case): its name and value, which a
+    /// launch with a proxy takes with the loopback names added.
+    pub(crate) own_no_proxy: BTreeMap<AgentId, (String, String)>,
 }
 
 impl std::fmt::Debug for NetworkFacts {
@@ -132,6 +126,7 @@ impl std::fmt::Debug for NetworkFacts {
                 &self.api.values().map(|api| shown(api)).collect::<Vec<_>>(),
             )
             .field("own_vars", &self.own_vars)
+            .field("own_no_proxy", &self.own_no_proxy)
             .finish()
     }
 }
@@ -180,6 +175,15 @@ impl NetworkFacts {
                 facts
                     .own_vars
                     .insert(agent.clone(), entry.env.keys().cloned().collect());
+                let no_proxy = entry
+                    .env
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("NO_PROXY"));
+                if let Some((name, value)) = no_proxy {
+                    facts
+                        .own_no_proxy
+                        .insert(agent.clone(), (name.clone(), value.clone()));
+                }
             }
         }
         facts
@@ -195,6 +199,8 @@ pub(crate) struct ProxyEnv {
     /// `NO_PROXY`, else `no_proxy`: kept in a launch's `NO_PROXY` beside the loopback names,
     /// since the launch's replaces the inherited one.
     pub(crate) no_proxy: Option<String>,
+    /// Whether `NODE_USE_SYSTEM_CA` is set (not empty): then a launch inherits it as it is.
+    pub(crate) system_ca: bool,
 }
 
 impl ProxyEnv {
@@ -214,6 +220,7 @@ impl ProxyEnv {
         Self {
             https: read(&["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]),
             no_proxy: read(&["NO_PROXY", "no_proxy"]),
+            system_ca: var(clauseo_agents::SYSTEM_CA_VAR).is_some_and(|value| !value.is_empty()),
         }
     }
 }
@@ -260,6 +267,10 @@ pub(crate) struct NetworkRoute {
     no_proxy: String,
     /// The names each agent's own entry sets.
     own_vars: BTreeMap<AgentId, BTreeSet<String>>,
+    /// The `NO_PROXY` each agent's own entry sets: name and value.
+    own_no_proxy: BTreeMap<AgentId, (String, String)>,
+    /// Whether this process's environment sets `NODE_USE_SYSTEM_CA`, which a launch inherits.
+    system_ca_inherited: bool,
 }
 
 impl std::fmt::Debug for NetworkRoute {
@@ -366,6 +377,8 @@ pub(crate) fn resolve(
     let mut route = NetworkRoute {
         ca_certs: facts.ca_certs.clone(),
         own_vars: facts.own_vars.clone(),
+        own_no_proxy: facts.own_no_proxy.clone(),
+        system_ca_inherited: env.system_ca,
         no_proxy: no_proxy(env.no_proxy.as_deref()),
         ..NetworkRoute::default()
     };
@@ -426,7 +439,7 @@ pub(crate) fn resolve(
 
 /// The loopback names, then `inherited`'s entries not already there.
 fn no_proxy(inherited: Option<&str>) -> String {
-    let mut names: Vec<&str> = LOOPBACK.to_vec();
+    let mut names: Vec<&str> = launch::LOOPBACK.to_vec();
     for name in inherited.unwrap_or_default().split(',').map(str::trim) {
         if !name.is_empty() && !names.contains(&name) {
             names.push(name);
@@ -475,14 +488,16 @@ impl NetworkRoute {
     /// - with a proxy, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (the loopback names and the
     ///   inherited ones), lower case too off Windows (Node's proxy agent reads `https_proxy`
     ///   first, and an inherited one would win); each one on its own, unless `taken` or the entry
-    ///   sets it in either case (so an entry's own `NO_PROXY` stays as it is and the proxy still
-    ///   comes), and neither proxy beside an `ALL_PROXY` there;
+    ///   sets it in either case (so the proxy still comes beside an entry's own `NO_PROXY`, which
+    ///   gets the loopback names it lacks, [`with_loopback`]), and neither proxy beside an
+    ///   `ALL_PROXY` there;
     /// - its CA file under its CLI's variable (`clauseo_agents::ca_cert_var`, sign-in's mapping:
     ///   `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`), unless that variable is taken; the path
     ///   as it is, never through UTF-8. Never `SSL_CERT_FILE`, so one the launcher sets (the
     ///   sandbox's whole root set) or the agent inherits stays as it is;
     /// - `NODE_USE_SYSTEM_CA=1` (`clauseo_agents::SYSTEM_CA_VAR`), so Node trusts the OS's store
-    ///   too, where a firm's TLS-inspecting proxy puts its root, unless taken.
+    ///   too, where a firm's TLS-inspecting proxy puts its root, unless taken or this process's
+    ///   environment sets it (the launch inherits that one).
     ///
     /// The host's forced variables come after the hook's, so a proxy the launcher sets (the
     /// sandbox's egress proxy, tiers A and B) stays.
@@ -491,39 +506,14 @@ impl NetworkRoute {
         agent: &AgentId,
         taken: &dyn Fn(&str) -> bool,
     ) -> Vec<(String, OsString)> {
-        let own = self.own_vars.get(agent);
-        let held = |name: &str| {
-            taken(name)
-                || own.is_some_and(|own| own.iter().any(|set| set.eq_ignore_ascii_case(name)))
-        };
-        let mut vars = Vec::new();
-        let proxy = self
-            .agents
+        launch::launch_vars(self, agent, taken)
+    }
+
+    /// Whether `agent`'s launches go through a proxy.
+    pub(crate) fn proxied(&self, agent: &AgentId) -> bool {
+        self.agents
             .get(agent)
-            .and_then(|route| route.launch.as_ref());
-        if let Some(proxy) = proxy {
-            let all = held("ALL_PROXY");
-            let free = PROXY_VARS.iter().filter(|name| !all && !held(name));
-            let mut wanted: Vec<(&str, &str)> = free.map(|name| (*name, proxy.as_str())).collect();
-            if !held("NO_PROXY") {
-                wanted.push(("NO_PROXY", self.no_proxy.as_str()));
-            }
-            for (name, value) in wanted {
-                vars.push((name.to_owned(), value.into()));
-                if cfg!(not(windows)) {
-                    vars.push((name.to_ascii_lowercase(), value.into()));
-                }
-            }
-        }
-        if let (Some(name), Some(ca)) = (clauseo_agents::ca_cert_var(agent), self.ca_cert(agent))
-            && !held(name)
-        {
-            vars.push((name.to_owned(), ca.as_os_str().to_owned()));
-        }
-        if !held(clauseo_agents::SYSTEM_CA_VAR) {
-            vars.push((clauseo_agents::SYSTEM_CA_VAR.to_owned(), "1".into()));
-        }
-        vars
+            .is_some_and(|route| route.launch.is_some())
     }
 
     /// The log's view: the source and each distinct proxy's scheme, host and port.
@@ -573,6 +563,9 @@ pub(crate) fn shown(proxy: &str) -> String {
 }
 
 mod follow;
+mod launch;
+
+pub(crate) use launch::with_loopback;
 
 pub(crate) use follow::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, follow};
 

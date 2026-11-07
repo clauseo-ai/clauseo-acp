@@ -281,24 +281,27 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (loopback) and the CA file under sign-in's variable
    (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, the path as it is; never `SSL_CERT_FILE`, which
    the tools in an agent's shell take to replace the system roots, so a launcher's or an inherited
-   one stays) and `NODE_USE_SYSTEM_CA=1`, so Node trusts the OS's store too, each on its own and
-   never over a variable the firm plan's `env` or the agent's own entry sets (an entry's own
-   `NO_PROXY` stays and the proxy still comes; an `ALL_PROXY` there keeps both proxies out). An
-   agent's stderr tail shows any URL's user name and password as `***`, since a proxy URL may carry
-   them. The log names the source (`policy`, `setting`, `env`, `os` or `none`) with each proxy's
-   scheme, host and port only. An install, retry or sign-in pressed before the OS's first answer
-   lands, and first run's install, waits for it (at most until 5 s after the setup's start), so its
-   first try never goes direct, and the start's `agent.keys_loading` launch refusal stays until
-   then too, so no agent launched at start goes direct. Known limits, until the sandbox's local
-   forwarder (S16) carries the agents' own traffic: one fixed proxy serves a launch's every host,
-   the OS's answer for the agent's primary API host, so a PAC script's fallbacks and other per-host
-   answers, and the OS's bypass list, are not applied to it; the sandbox's lookup does not tell a
-   static OS proxy from a PAC one, so the log says `os` for both; the route is not resolved again
-   when the computer changes networks, so after changing networks (office, home, VPN), restart
-   Clauseo. Chaining the sandbox's egress proxy (tiers A and B, S16) to this upstream is stage C's:
-   the route gives it `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and
-   `ca_cert`, and an `https://` setting, which that proxy cannot chain to, is logged once per
-   change.
+   one stays) and `NODE_USE_SYSTEM_CA=1`, so Node trusts the OS's store too (unless this process's
+   environment sets it, which the launch inherits), each on its own and never over a variable the
+   firm plan's `env` or the agent's own entry sets (the proxy still comes beside an entry's or a
+   plan's own `NO_PROXY`, which keeps its entries and gets the loopback names it lacks, so the
+   agent's calls to Clauseo's MCP relay on 127.0.0.1 stay off the proxy; an `ALL_PROXY` there keeps
+   both proxies out). An agent's stderr tail shows any URL's user name and password as `***`, and
+   the password of every proxy variable in a run's environment, as written and percent-decoded, a
+   URL with no scheme included, as `[redacted]`. The log names the source (`policy`, `setting`,
+   `env`, `os` or `none`) with each proxy's scheme, host and port only. An install, retry or
+   sign-in pressed before the OS's first answer lands, and first run's install, waits for it (at
+   most until 5 s after the setup's start), so its first try never goes direct, and the start's
+   `agent.keys_loading` launch refusal stays until then too, so no agent launched at start goes
+   direct. Known limits, until the sandbox's local forwarder (S16) carries the agents' own traffic:
+   one fixed proxy serves a launch's every host, the OS's answer for the agent's primary API host,
+   so a PAC script's fallbacks and other per-host answers, and the OS's bypass list, are not
+   applied to it; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log
+   says `os` for both; the route is not resolved again when the computer changes networks, so after
+   changing networks (office, home, VPN), restart Clauseo. Chaining the sandbox's egress proxy
+   (tiers A and B, S16) to this upstream is stage C's: the route gives it `NetworkRoute::upstream`
+   (`Fixed` for a setting, else `System`) and `ca_cert`, and an `https://` setting, which that
+   proxy cannot chain to, is logged once per change.
 
 ## Consequences
 
