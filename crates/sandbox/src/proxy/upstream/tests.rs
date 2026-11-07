@@ -351,9 +351,10 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
     assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
 }
 
-/// A Windows WPAD lookup with nothing else set: "no WPAD file found" (12180) is `DIRECT`; a PAC
-/// file found but not downloaded (12167), a timeout (12002) or a service failure (12178) is a
-/// failed lookup, never `DIRECT` (delta review Medium).
+/// A Windows WPAD lookup with nothing else set: "no WPAD file found" (12180) is `DIRECT`; a bad
+/// PAC script (12166), a PAC file found but not downloaded (12167), a timeout (12002), a service
+/// failure (12178), and any code not expected, is a failed lookup, never `DIRECT` (delta review
+/// Medium).
 #[test]
 fn a_wpad_error_other_than_no_wpad_file_is_failed_not_direct() {
     use super::settle;
@@ -361,7 +362,17 @@ fn a_wpad_error_other_than_no_wpad_file_is_failed_not_direct() {
         settle(443, parse::wpad_only(12_180)),
         UpstreamAnswer::Route(Route::Direct)
     );
-    for error in [12_167, 12_002, 12_178] {
+    for error in [
+        12_166,
+        12_167,
+        12_002,
+        12_178,
+        0,
+        1,
+        12_179,
+        12_181,
+        u32::MAX,
+    ] {
         assert_eq!(
             settle(443, parse::wpad_only(error)),
             UpstreamAnswer::Failed,
