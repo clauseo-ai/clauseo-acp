@@ -174,15 +174,11 @@ pub mod quit_signals_for_tests {
     pub use crate::quit_signals::{QuitSignals, exit_code};
 }
 
-/// The label of the main window. `capabilities/main.json` grants by this label
-/// (`"windows": ["main"]`), so rename both together: a window whose label no capability names
-/// gets no IPC at all.
+/// The main window's label. `capabilities/main.json` grants by it (`"windows": ["main"]`), so
+/// rename both together: a window whose label no capability names gets no IPC at all.
 pub(crate) const MAIN_WINDOW: &str = "main";
 
-/// The main window's Windows class (tao's default is `Tauri Window`, shared by every Tauri app):
-/// the installer's admin section refuses while a window of this class is on the desktop
-/// (`windows/admin_copy.nsh`'s `CLAUSEO_MAIN_WINDOW_CLASS`, held equal by a test), and the e2e
-/// close finds the window by it (`ui/e2e/app-windows/close.ts`). Ignored off Windows.
+/// The main window's class, not tao's shared one: `admin_copy.nsh` and the e2e close find it.
 pub(crate) const MAIN_WINDOW_CLASS: &str = "ClauseoMainWindow";
 
 /// The app's context, from the checked `tauri.conf.json` and capabilities. Generic, so the
