@@ -1,7 +1,9 @@
-//! The tasks' descriptor on a real machine: the owner, holding only `FR` on a task
-//! ([`task_sddl`]), may start it with `schtasks /run` but not end a running one with
-//! `schtasks /end`. MS-TSCH's `SchRpcRun` refuses only a caller with neither read nor execute
-//! access, while `SchRpcStop` needs execute; this test is the evidence for both.
+//! The tasks' descriptor on a real machine: the owner, holding `FRFX` on a task
+//! ([`task_sddl`]), may start it with `schtasks /run` and end a running one with
+//! `schtasks /end`. Run needs execute access: with `FR` alone, `/run` was refused ("Access is
+//! denied", CI run 42416074600), so the owner holds execute, which also ends a task. That is
+//! accepted: an ended stop never writes `StopCompleted` (`setup::stop`), and an ended refresh
+//! keeps the old copy.
 //!
 //! Elevated, from CI's elevated step only (`CLAUSEO_ELEVATED_TESTS=1`): it makes a standard
 //! account (`ClauseoSbTT` and six hex digits), a test folder `\ClauseoTest<pid>` with the
@@ -249,8 +251,8 @@ impl Drop for Scheduled {
 
 #[test]
 #[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
-fn elevated_the_owner_can_start_a_task_it_can_only_read_but_not_end_one() {
-    if !gate("elevated_the_owner_can_start_a_task_it_can_only_read_but_not_end_one") {
+fn elevated_the_owner_can_start_and_end_a_task_it_can_read_and_execute() {
+    if !gate("elevated_the_owner_can_start_and_end_a_task_it_can_read_and_execute") {
         return;
     }
     clear_leftovers(TASK_TEST_PREFIX);
@@ -279,7 +281,7 @@ fn elevated_the_owner_can_start_a_task_it_can_only_read_but_not_end_one() {
     eprintln!("task A's descriptor as registered: {read_back}");
     let schtasks = format!(r"{}\schtasks.exe", system32());
 
-    // 3. The owner starts A: its read entry is all it holds.
+    // 3. The owner starts A through its read and execute entry.
     let run = format!(r#""{schtasks}" /run /tn \{name}\A"#);
     let (code, printed) = try_in_cmd(&user, dir.path(), &run);
     eprintln!("as the owner: {run}\nexit {code:?}\n{printed}");
@@ -294,7 +296,7 @@ fn elevated_the_owner_can_start_a_task_it_can_only_read_but_not_end_one() {
     }
     assert!(ran, "task A didn't write {} within 15 s", marker.display());
 
-    // 4. This elevated process starts B; the owner may not end it.
+    // 4. This elevated process starts B; the owner ends it, as its execute access allows.
     // SAFETY: a live task and an empty VARIANT: no parameters.
     unsafe { scheduled.task("B").Run(&VARIANT::default()) }.unwrap();
     let mut running = scheduled.running("B");
@@ -310,15 +312,15 @@ fn elevated_the_owner_can_start_a_task_it_can_only_read_but_not_end_one() {
     let end = format!(r#""{schtasks}" /end /tn \{name}\B"#);
     let (code, printed) = try_in_cmd(&user, dir.path(), &end);
     eprintln!("as the owner: {end}\nexit {code:?}\n{printed}");
-    assert!(
-        code.is_some_and(|code| code != 0),
-        "schtasks /end as the owner exited {code:?}:\n{printed}"
-    );
-    assert!(
-        printed.to_lowercase().contains("access is denied"),
-        "schtasks /end as the owner:\n{printed}"
-    );
-    let after = scheduled.running("B");
+    assert_eq!(code, Some(0), "schtasks /end as the owner:\n{printed}");
+    let mut after = scheduled.running("B");
+    for _ in 0..WAIT_STEPS {
+        if !after.0 && after.1 == 0 {
+            break;
+        }
+        pause();
+        after = scheduled.running("B");
+    }
     eprintln!("task B after the owner's /end: (running, instances) = {after:?}");
-    assert!(after.0 && after.1 > 0, "task B was ended: {after:?}");
+    assert!(!after.0 && after.1 == 0, "task B still runs: {after:?}");
 }

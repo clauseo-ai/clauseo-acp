@@ -9,10 +9,10 @@
 //!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
 //!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice
 //!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
-//!   SYSTEM and Administrators do anything and the owner read it, which is enough to start it but
-//!   not to end a running one, nothing more; the folder `\Clauseo` gets the same owner and DACL,
-//!   made with them, or set again when an administrator made it; one anyone else made is deleted
-//!   with what is in it and made again (`task_folder.rs`).
+//!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
+//!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
+//!   and DACL, made with them, or set again when an administrator made it; one anyone else made
+//!   is deleted with what is in it and made again (`task_folder.rs`).
 //! - [`unregister_task`] and [`remove_staging`], which `--remove --uninstall` calls.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
