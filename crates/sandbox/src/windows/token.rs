@@ -185,7 +185,8 @@ pub const AGENT_TOKEN_POOL_RIGHTS: u32 = 0x0002_0009;
 /// session and doesn't hold it. Other matters' runners started from the same logon do, and can
 /// open this one, but their sweeps only end their own pool user's processes. A sweeper from
 /// before the desktop user signed out and in again holds the old logon SID, so a launch during
-/// its 60 s fails `RunExit::Sweep` and a retry works (accepted).
+/// its 60 s can't open it and fails `RunExit::Escapee`, and a retry once it exited works
+/// (accepted).
 pub fn runner_process_sddl(desktop_user: &Sid, logon: &Sid) -> String {
     format!(
         "D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})\

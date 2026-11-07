@@ -1,5 +1,6 @@
 //! The inner runner's order through a recording fake: the first-act sweep and cleanup before the
-//! launch, the fail-closed sweep, the job kept by the later sweeps, and the tick.
+//! launch, the fail-closed sweep, the job kept by the later sweeps, the tick, and the escapee
+//! reports at each point.
 
 use super::*;
 
@@ -9,6 +10,10 @@ struct Record {
     done: Vec<String>,
     /// Sweeps at these points fail.
     fail_sweep: Vec<Point>,
+    /// Sweeps at these points find a process they can't end.
+    escape_sweep: Vec<Point>,
+    /// Reports told, and whether `ctl` was open when they were.
+    told: Vec<(InnerReport, bool)>,
     /// This step fails: "connect", "read", "start", "started".
     fail: Option<&'static str>,
     /// How many waits pass before the agent exits.
@@ -20,6 +25,31 @@ struct Record {
 
 const ERROR: SweepError = SweepError::StillRunning;
 
+/// A sweep's failure naming a process it couldn't end: the first act's first failure, or a later
+/// sweep's left processes, one of them unkillable.
+fn escapee(point: Point) -> SweepError {
+    if point == Point::Start {
+        return SweepError::Open {
+            pid: 12,
+            image: "hidden.exe".to_owned(),
+            code: "5".to_owned(),
+        };
+    }
+    SweepError::Left {
+        count: 2,
+        unkillable: 1,
+        images: vec!["hidden.exe".to_owned()],
+    }
+}
+
+fn escapee_report(point: &str) -> InnerReport {
+    InnerReport::Escapee {
+        point: point.to_owned(),
+        count: 1,
+        images: vec!["hidden.exe".to_owned()],
+    }
+}
+
 impl Inner for Record {
     type Job = u64;
     type Agent = u32;
@@ -28,7 +58,13 @@ impl Inner for Record {
         if self.fail_sweep.contains(&point) {
             return Err(ERROR);
         }
+        if self.escape_sweep.contains(&point) {
+            return Err(escapee(point));
+        }
         Ok(())
+    }
+    fn tell(&mut self, report: InnerReport) {
+        self.told.push((report, self.open));
     }
     fn clean(&mut self) {
         self.done.push("clean".to_owned());
@@ -195,4 +231,72 @@ fn a_failure_after_the_first_act_is_reported_and_starts_no_agent() {
     assert_eq!(run(&mut record), 3);
     let kill = format!("kill 77 {:#x}", RunExit::Pipe.code());
     assert!(record.done.contains(&kill), "{:?}", record.done);
+}
+
+#[test]
+fn an_escapee_at_the_first_act_is_reported_before_ctl_opens_and_exits_escapee() {
+    let mut record = Record {
+        escape_sweep: vec![Point::Start],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Escapee.code());
+    // Told before ctl opened: the real calls hold it and send it first once `connect` opens it.
+    assert_eq!(record.told, [(escapee_report("before launch"), false)]);
+    let what = "sweep (before launch): the sandbox user's process 12 (hidden.exe) can't be \
+                opened (5)";
+    assert_eq!(
+        record.done,
+        [
+            "sweep before launch job None".to_owned(),
+            "connect".to_owned(),
+            format!(
+                "report Failed {{ exit: {}, what: {what:?} }}",
+                RunExit::Escapee.code()
+            ),
+        ]
+    );
+    // With ctl failing too, the exit code still says it.
+    let mut record = Record {
+        escape_sweep: vec![Point::Start],
+        fail: Some("connect"),
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Escapee.code());
+    // Any other first-act failure stays Sweep, and tells nothing.
+    let mut record = Record {
+        fail_sweep: vec![Point::Start],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Sweep.code());
+    assert_eq!(record.told, Vec::new());
+}
+
+#[test]
+fn an_escapee_at_a_tick_or_the_end_is_reported_on_ctl_and_the_run_goes_on() {
+    let mut record = Record {
+        waits_left: 1,
+        escape_sweep: vec![Point::Tick, Point::End],
+        ..Record::default()
+    };
+    // The agent's own code: the outer makes the run's outcome Escapee.
+    assert_eq!(run(&mut record), 3);
+    assert_eq!(
+        record.told,
+        [
+            (escapee_report("mid-session"), true),
+            (escapee_report("session end"), true),
+        ]
+    );
+    // Each told after its sweep's log line and before the exit report.
+    let logged: Vec<&str> = record.lines.iter().map(|(line, _)| line.as_str()).collect();
+    assert!(logged[1].starts_with("clauseo-sandbox-run: sweep (mid-session): 2 of"));
+    assert_eq!(record.done.last().unwrap(), "report Exited { code: 3 }");
+    // A tick's plain failure tells nothing.
+    let mut record = Record {
+        waits_left: 1,
+        fail_sweep: vec![Point::Tick],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), 3);
+    assert_eq!(record.told, Vec::new());
 }

@@ -405,15 +405,25 @@ pub enum RunExit {
     /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
     AgentReserved,
     /// The inner runner's first-act sweep of the pool user's processes failed (`sweep.rs`): the
-    /// process list couldn't be read, or a process of the pool user's couldn't be opened, checked
-    /// or ended. Also the end sweeper's exit code when anything it did failed.
+    /// process list couldn't be read, or a process of the pool user's couldn't be checked, or it
+    /// kept starting processes. Also the end sweeper's exit code when anything it did failed but
+    /// for an escapee. A process that couldn't be opened or ended is [`RunExit::Escapee`].
     Sweep,
     /// The runner's DLL search couldn't be kept to System32.
     DllSearch,
+    /// A sweep found a process of the pool user's it couldn't end, even after the owner's
+    /// `WRITE_DAC` reopen: one that shut its DACL to its own user, alive outside every job (M2).
+    /// The inner's first act exits with it and starts no agent; the end sweeper exits with it.
+    /// The outer exits with it whenever any sweep of its session found one: the first act's, the
+    /// inner's ticks and end (reported on `ctl`), or the end sweeper's (its exit code, when the
+    /// outer still waits for it). It wins over the agent's own code, even 0, which the outer then
+    /// says on stderr: the run's output came through, but the pool user has a process no sweep of
+    /// its own can end, and only the host can act on that (0049).
+    Escapee,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 15] = [
+    const ALL: [RunExit; 16] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -429,6 +439,7 @@ impl RunExit {
         RunExit::AgentReserved,
         RunExit::Sweep,
         RunExit::DllSearch,
+        RunExit::Escapee,
     ];
 
     /// The exit code.
@@ -467,7 +478,8 @@ impl RunExit {
             | RunExit::Spawn
             | RunExit::AgentReserved
             | RunExit::Sweep
-            | RunExit::DllSearch => None,
+            | RunExit::DllSearch
+            | RunExit::Escapee => None,
         }
     }
 }
