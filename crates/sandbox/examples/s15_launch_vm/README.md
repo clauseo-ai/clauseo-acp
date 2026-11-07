@@ -64,6 +64,12 @@ Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-c
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
 process it started.
 
+A row's agent keeps its stdin open until it has ended by itself (`Running::finish`): the host
+closes stdin only to end a session, and the runner ends the job 1.5 s after that. Only the agents
+that end at their stdin's end have it closed (`Running::end`: `probe hold`, and `stdio`'s `probe
+echo`). `codex` runs under `probe stdin-null`, since `codex exec` reads its stdin to the end before
+it starts.
+
 Prepare picks three pool users: matter A's, matter B's and matter A's second (`A2`), which is
 granted matter A's folder too and has a state folder of its own (`matters\A2\state`). The runner
 serves one live session per pool user: its first act ends every process of its user outside its

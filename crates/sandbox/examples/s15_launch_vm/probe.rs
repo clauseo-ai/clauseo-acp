@@ -10,6 +10,7 @@
 //! - `open-pipes <name>...`: `pipe <name> read <code> write <code>` per name.
 //! - `spawn-child`: starts `probe wait`, prints `pid <self>` and `child <pid>`, then waits.
 //! - `echo`: `echo <line>` for each stdin line; exits 0 at end of input.
+//! - `stdin-null <program> <args>...`: runs the program with its stdin on `NUL`; its exit code.
 //! - `exit <n>`: exits `n` (decimal, or hex with `0x`; any 32-bit code).
 //! - `job-ui [atom]`: `ui-limits <hex>`, the UI limits of the innermost job it runs in, and
 //!   `ui-effect station <name>`, its own window station; then the limits' effects:
@@ -106,6 +107,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         "echo" => echo(),
+        "stdin-null" => stdin_null(rest),
         "exit" => match rest.first().and_then(|n| exit_code(n)) {
             Some(n) => match u8::try_from(n) {
                 Ok(small) => ExitCode::from(small),
@@ -362,6 +364,26 @@ fn spawn_child() -> ExitCode {
         }
         Err(error) => {
             say(&format!("spawn error {}", code(&error)));
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `stdin-null <program> <args>...`: runs the program with its stdin on `NUL` and this probe's
+/// stdout and stderr, and exits with its code. For the `codex` row: `codex exec` reads its stdin
+/// to the end before it starts, while the runner's stdin stays open until the agent is done.
+fn stdin_null(rest: &[String]) -> ExitCode {
+    let Some((program, args)) = rest.split_first() else {
+        return usage("stdin-null <program> <args>...");
+    };
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null());
+    match start(&mut command).and_then(|mut child| child.wait()) {
+        Ok(status) => exit_with(u32::from_ne_bytes(
+            status.code().unwrap_or(-1).to_ne_bytes(),
+        )),
+        Err(error) => {
+            say(&format!("stdin-null error {}", code(&error)));
             ExitCode::from(1)
         }
     }

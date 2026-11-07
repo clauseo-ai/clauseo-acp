@@ -3,11 +3,13 @@
 //!
 //! The mock (`mock-responses.mjs`, copied from the MXC spike) runs as the harness user on a
 //! loopback port; `<state A>\codex-home\config.toml` points codex at it; `codex exec` runs
-//! through the runner as A with full access (tier B's choice, D3 (c)). The mock asks for one
-//! shell call that writes `s15-codex.txt` in A's matter and runs `probe job-ui <atom>` (the
-//! harness's global atom's name, in the command the mock asks for). Passes when the file holds
-//! `s15-codex-ok`, its owner is A's pool SID, the mock's log shows the call's output came back,
-//! and the job-ui lines pass `checks_ui::ui_limits` (the atom lookup is information).
+//! through the runner as A with full access (tier B's choice, D3 (c)), under `probe stdin-null`
+//! (its stdin on `NUL`: it reads stdin to the end before it starts, while the runner's stdin
+//! stays open until the agent has exited, as a host's does until it ends the session). The mock
+//! asks for one shell call that writes `s15-codex.txt` in A's matter and runs `probe job-ui
+//! <atom>` (the harness's global atom's name, in the command the mock asks for). Passes when the
+//! file holds `s15-codex-ok`, its owner is A's pool SID, the mock's log shows the call's output
+//! came back, and the job-ui lines pass `checks_ui::ui_limits` (the atom lookup is information).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -134,9 +136,15 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, S
 
     let mut path = vec![codex.parent().map(Path::to_path_buf).unwrap_or_default()];
     path.extend(m.codex_path.clone());
+    // `codex exec` reads its stdin to the end before it starts, and the runner ends the job
+    // 1.5 s after its own stdin's end. So codex runs under `probe stdin-null`, its stdin on
+    // `NUL`, while the runner's stays open until the agent is done (`Running::finish`).
     let spec = Spec {
-        program: text(codex),
+        program: text(&m.harness_exe()),
         args: [
+            "probe",
+            "stdin-null",
+            &text(codex),
             "exec",
             "--skip-git-repo-check",
             "--dangerously-bypass-approvals-and-sandbox",

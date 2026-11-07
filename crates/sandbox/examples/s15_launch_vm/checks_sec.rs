@@ -87,6 +87,7 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     }
     lines.push("end\n".to_owned());
     a.send(&lines.join("\n"))?;
+    // The probe reads up to `end`, then checks and exits; its stdin stays open until then.
     let done = a.finish(until)?;
     for line in done.stdout.iter().chain(&done.stderr) {
         ctx.note(&format!("A: {line}"));
@@ -296,12 +297,17 @@ pub(crate) fn breakaway(ctx: &Ctx<'_>) -> Result<String, String> {
             inside.map_or_else(|why| format!("error {why}"), |inside| inside.to_string())
         ));
     }
-    if let Err(why) = a.send("go\n") {
-        ctx.note(&format!(
-            "the line that ends the probe's wait wasn't sent: {why}"
-        ));
-    }
-    let done = a.finish(until)?;
+    // The probe exits after the line, its stdin held open until then; without it, its stdin's
+    // end.
+    let done = match a.send("go\n") {
+        Ok(()) => a.finish(until)?,
+        Err(why) => {
+            ctx.note(&format!(
+                "the line that ends the probe's wait wasn't sent: {why}"
+            ));
+            a.end(until)?
+        }
+    };
     ctx.note(&format!("A: probe breakaway: {}", summary(&done)));
     let mut lines = done.stdout;
     lines.extend(ours);
