@@ -189,8 +189,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
             os(&format!("the agent's window station: {call}"), &e),
         )
     })?;
-    // The logon, the user's check, the job, the job handle given, the shut, then the resume
-    // (`start.rs`); the inner's first act is the sweep of every other process of the pool user's.
+    // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
+    // first act is the sweep of every other process of the pool user's. The job's one handle stays
+    // this process's, so the job's processes end with it.
     let mut steps = Start {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
@@ -201,12 +202,8 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         base: set.base(),
         cwd: &sweeper.cwd,
         job,
-        given: None,
     };
     let inner = start(&mut steps)?;
-    let given = steps
-        .given
-        .ok_or_else(|| Failure::new(RunExit::Job, "the job handle wasn't given"))?;
     let launch = InnerLaunch {
         pool_user: message.pool_user.clone(),
         desktop_user: desktop,
@@ -220,7 +217,6 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
-        job: given,
     };
     let result = serve(&inner, pipes, &launch, end);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,

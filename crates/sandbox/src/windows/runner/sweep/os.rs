@@ -16,10 +16,13 @@
 //! A process is opened with `PROCESS_TERMINATE`, `PROCESS_QUERY_LIMITED_INFORMATION` and
 //! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
 //! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
-//! this user those rights, and opened again; when that fails too, the first error stands. It is
-//! checked with `IsProcessInJob` against the job handle the outer gave the inner
-//! (`JOB_OBJECT_QUERY`), its creation time read with `GetProcessTimes`, and it is ended with
-//! `TerminateProcess`.
+//! this user those rights, and opened again; when that fails too, the first error stands. Its
+//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`.
+//!
+//! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
+//! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
+//! for `JobObjectBasicProcessIdList`, the buffer grown until the list fits. The inner holds no
+//! handle to its job, so the outer's is the job's last and kill-on-close fires with the outer.
 #![expect(
     unsafe_code,
     reason = "FFI to the process lists, process, token and job calls"
@@ -34,7 +37,9 @@ use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::JobObjects::IsProcessInJob;
+use windows::Win32::System::JobObjects::{
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList, QueryInformationJobObject,
+};
 use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
@@ -43,7 +48,6 @@ use windows::Win32::System::Threading::{
     PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
-use windows::core::BOOL;
 
 use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, end_sweep, sweep};
 use crate::windows::acl::object::{Handle, os_error};
@@ -58,12 +62,13 @@ const NO_SUCH_PID: i32 = 87;
 const NO_MORE: i32 = 18;
 /// `ERROR_ACCESS_DENIED`.
 const DENIED: i32 = 5;
+/// `ERROR_MORE_DATA`: the job's pid list doesn't fit the buffer.
+const MORE_DATA: i32 = 234;
+/// The most pids the job's list is read for: past it, the read fails.
+const JOB_PIDS_CAP: usize = 1 << 16;
 
-/// The calls, against this launch's kill-on-close job when there is one.
+/// The calls.
 pub(in crate::windows::runner) struct OsProcesses<'a> {
-    /// The job handle the outer duplicated into the inner (`JOB_OBJECT_QUERY`), or `None` for
-    /// a sweep that keeps no job's processes.
-    pub(in crate::windows::runner) job: Option<HANDLE>,
     /// This process's user, whom a DACL it rewrites grants.
     pub(in crate::windows::runner) me: &'a Sid,
 }
@@ -81,16 +86,15 @@ impl Drop for WtsList {
 }
 
 /// Sweeps the processes of `me` (this process's own user) at `point`, keeping this process and,
-/// with `job`, the job's processes. Each kill is a line given to `log`.
+/// past the first act, its job's processes. Each kill is a line given to `log`.
 pub(in crate::windows::runner) fn sweep_own(
     me: &Sid,
-    job: Option<HANDLE>,
     point: Point,
     log: &mut dyn FnMut(&str),
 ) -> Result<(), SweepError> {
     // SAFETY: no arguments.
     let own = unsafe { GetCurrentProcessId() };
-    let mut calls = OsProcesses { job, me };
+    let mut calls = OsProcesses { me };
     sweep(&mut calls, me, &[own], point, log).map(drop)
 }
 
@@ -102,7 +106,7 @@ pub(in crate::windows::runner) fn end_sweep_own(
 ) -> Result<(), SweepError> {
     // SAFETY: no arguments.
     let own = unsafe { GetCurrentProcessId() };
-    let mut calls = OsProcesses { job: None, me };
+    let mut calls = OsProcesses { me };
     end_sweep(&mut calls, me, &[own], log).map(drop)
 }
 
@@ -179,16 +183,8 @@ impl Processes for OsProcesses<'_> {
         open(access, pid)
     }
 
-    fn in_job(&mut self, process: &Handle) -> io::Result<bool> {
-        let Some(job) = self.job else {
-            return Ok(false);
-        };
-        let mut inside = BOOL(0);
-        // SAFETY: both handles are live; `inside` is a live out-pointer. The job handle is never
-        // null here: a null one would ask about any job.
-        unsafe { IsProcessInJob(process.0, Some(job), &raw mut inside) }
-            .map_err(|e| os_error(&e))?;
-        Ok(inside.as_bool())
+    fn job_pids(&mut self) -> io::Result<Vec<u32>> {
+        own_job_pids()
     }
 
     fn started(&mut self, process: &Handle) -> io::Result<u64> {
@@ -216,6 +212,58 @@ impl Processes for OsProcesses<'_> {
         } else {
             Err(io::Error::from(io::ErrorKind::TimedOut))
         }
+    }
+}
+
+/// The pids of this process's own job (`JobObjectBasicProcessIdList`, no job handle), the
+/// buffer grown fourfold while the list doesn't fit (`ERROR_MORE_DATA`, or fewer pids than
+/// processes), up to [`JOB_PIDS_CAP`] pids; past that, an error.
+pub(in crate::windows::runner) fn own_job_pids() -> io::Result<Vec<u32>> {
+    let head = size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>().div_ceil(size_of::<usize>());
+    let mut room = 64usize;
+    loop {
+        // usize-aligned, as the list's pid array is.
+        let mut buffer = vec![0usize; head + room];
+        let len = u32::try_from(size_of_val(buffer.as_slice())).map_err(io::Error::other)?;
+        // SAFETY: no job handle: the caller's own job. `buffer` is live, writable for `len`
+        // bytes and aligned for the list.
+        let asked = unsafe {
+            QueryInformationJobObject(
+                None,
+                JobObjectBasicProcessIdList,
+                buffer.as_mut_ptr().cast(),
+                len,
+                None,
+            )
+        }
+        .map_err(|e| os_error(&e));
+        match asked {
+            Ok(()) => {}
+            Err(error) if error.raw_os_error() == Some(MORE_DATA) && room < JOB_PIDS_CAP => {
+                room *= 4;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        // SAFETY: the call wrote the list at the start of the aligned buffer.
+        let list = unsafe { &*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+        let count = usize::try_from(list.NumberOfProcessIdsInList).map_err(io::Error::other)?;
+        let assigned = usize::try_from(list.NumberOfAssignedProcesses).map_err(io::Error::other)?;
+        if assigned > count && room < JOB_PIDS_CAP {
+            room *= 4;
+            continue;
+        }
+        if count > room || assigned > count {
+            return Err(io::Error::other(
+                "the job's pid list doesn't fit its buffer",
+            ));
+        }
+        // SAFETY: `count` pids follow in `ProcessIdList`, inside `buffer` (`count <= room`).
+        let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+        return pids
+            .iter()
+            .map(|pid| u32::try_from(*pid).map_err(io::Error::other))
+            .collect();
     }
 }
 

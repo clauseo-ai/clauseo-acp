@@ -832,11 +832,14 @@ for `--reclaim`.
     again. Each kill is logged with its pid, image name and sweep point, through `ctl` to the
     outer's stderr.
   - **First act.** The inner's first act once resumed, before it reads the launch or makes
-    anything, is that sweep. It keeps only itself: the job is unnamed and its only full handle is
-    the outer's, and the inner has started nothing yet, so nothing else can be in it. A process of
+    anything, is that sweep. It keeps only itself, never another process of the job: the job is
+    unnamed and its only handle is the outer's, and the inner has started nothing yet, so nothing
+    else should be in it, and one there would have been started from the inner's process by a
+    process that opened it before the outer's shut. It still reads the job's pid list (below), so
+    a query that doesn't work stops the launch before any agent runs. A process of
     the pool user's that can't be opened or ended makes the inner exit with `RunExit::Escapee`
-    (below); a list that can't be read, or a process that can't be checked, with
-    `RunExit::Sweep`. Either way it starts no agent, so the launch fails closed. The
+    (below); a list that can't be read (the job's pid list included), or a process that can't be
+    checked, with `RunExit::Sweep`. Either way it starts no agent, so the launch fails closed. The
     timing holds because no code of the launch's runs before this sweep. The inner first limits
     its DLL search, sets its error mode and shuts its own token, and the only token anyone could
     have opened in the gap is the inner's own, as the pool user it already is. A process that
@@ -854,10 +857,21 @@ for `--reclaim`.
     to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
     so a link is deleted and never what it names. Each kind is logged by count alone, with no
     names or contents. A kind that fails is logged and the rest still run; the launch goes on.
-  - **Mid-session and end.** The outer duplicates a handle to the job into the suspended inner,
-    with `JOB_OBJECT_QUERY` alone, and names its value in the launch. While the agent runs, the
-    inner sweeps every 30 s and keeps the job's processes (`IsProcessInJob` against that
-    handle). When the agent exits, the inner sweeps once more before it exits. At both, and in
+  - **Mid-session and end.** While the agent runs, the inner sweeps every 30 s and keeps the
+    job's processes; when the agent exits, it sweeps once more before it exits. The inner holds no
+    handle to its job. A kill-on-close job ends its processes only when its last handle closes,
+    so a handle in the inner (the first version duplicated one in, `JOB_OBJECT_QUERY` alone)
+    kept the job, the inner and the agent alive once the outer ended: the harness found a
+    session's inner runner, agent and `conhost.exe` still running 75 s after it. The inner asks
+    instead for its own job's pid list: `QueryInformationJobObject` with no job handle, which
+    names the caller's job (the immediate one, the launch's, as jobs nest), for
+    `JobObjectBasicProcessIdList`, the buffer grown until the list fits. It reads the list once a
+    round, after the round's processes are opened (each pid pinned), so a pid in it is the
+    process opened, and a process the agent started since the last round is in it. A process is
+    the job's when its pid is in the list and it was created (`GetProcessTimes`) no earlier than
+    the inner: nothing created before the inner can be in its job, so such a process holds a
+    reused pid and is killed. A list that can't be read fails the sweep: the tick logs it and
+    tries again at the next. At both, and in
     the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
     goes on with the rest; the sweep's next round and the next tick try it again. One that can't
     be opened or ended is also an escapee (below).
@@ -928,10 +942,13 @@ for `--reclaim`.
     would have without the job's end: with the agent's own code when the inner reported the
     agent's exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in
     the process crate). An agent that finished within its 1.5 s exits with its own code, as on
-    any inner exit. The host's shutdown outcome is timed, not read from the code. The inner holds
-    a query-only handle to the job, which keeps the job open, and so its processes running, if
-    the outer dies without ending it; on a cancel the outer ends the job itself 1.5 s after the
-    stdin end, before the host's job end can kill it.
+    any inner exit. The host's shutdown outcome is timed, not read from the code. The job's one
+    handle is the outer's: no process of ours is given one (not the inner, not the end sweeper,
+    which `CreateProcessWithLogonW` starts with no inherited handles but its output pipe, and
+    not the agent, which inherits its three pipes alone), so an outer ended any way at all,
+    `TerminateProcess` or the host's job end, closes it, and the inner and the agent end with
+    it. On a cancel the outer ends the job itself 1.5 s after the stdin end, before the host's
+    job end can kill it.
   - **Escapees.** A process of the pool user's that a sweep can't open, even after the owner's
     `WRITE_DAC` reopen, or can't end is an escapee: it lives outside every job, and no sweep of
     the pool user's own can end it. The inner reports it on `ctl` (`InnerReport::Escapee`: the
