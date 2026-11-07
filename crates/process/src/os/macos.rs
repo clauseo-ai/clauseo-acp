@@ -107,11 +107,11 @@ pub(super) fn session_of(pid: u32) -> Option<u32> {
 
 /// The running members of process group `group`, each with its start and session: libproc's
 /// `proc_listpgrppids` (`proc_listpids(PROC_PGRP_ONLY, group)`), each pid read again by
-/// `PROC_PIDTBSDINFO` and kept only when it still runs in `group`, and its session by
-/// `getsid`. `None` when the listing fails, a member's session cannot be read, the group is
-/// out of range, or the group holds more than [`MAX_CHILDREN`] pids (a cut list would hide
-/// members, so the caller cannot tell). A count of 0 reads as no members: libproc answers a
-/// failed system call with 0, never -1 (see [`children`]).
+/// `PROC_PIDTBSDINFO` and kept only when it still runs in `group`, and its session by `getsid` (a
+/// member gone by then, `ESRCH`, is skipped). `None` when the listing fails, a member's session
+/// cannot be read otherwise, the group is out of range, or the group holds more than
+/// [`MAX_CHILDREN`] pids (a cut list would hide members, so the caller cannot tell). A count of 0
+/// reads as no members: libproc answers a failed system call with 0, never -1 (see [`children`]).
 pub(super) fn members(group: u32) -> Option<Vec<(u32, u64, u32)>> {
     let raw = c_int::try_from(group).ok()?;
     let mut room = FIRST_CHILDREN;
@@ -137,7 +137,12 @@ pub(super) fn members(group: u32) -> Option<Vec<(u32, u64, u32)>> {
                 else {
                     continue;
                 };
-                found.push((pid, info.start, session_of(pid)?));
+                // One that exits between the two reads is gone, not a failed listing.
+                match nix::unistd::getsid(Some(Pid::from_raw(c_int::try_from(pid).ok()?))) {
+                    Ok(session) => found.push((pid, info.start, session.as_raw().unsigned_abs())),
+                    Err(Errno::ESRCH) => {}
+                    Err(_) => return None,
+                }
             }
             return Some(found);
         }

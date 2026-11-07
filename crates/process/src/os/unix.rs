@@ -116,6 +116,11 @@ impl Root {
         }
     }
 
+    /// The agent's start as read at its spawn; `None` when that read failed.
+    pub(crate) fn start(&self) -> Option<u64> {
+        self.start
+    }
+
     /// Every running descendant of the agent, by parent pid; `None` when the agent is gone or
     /// the OS listing failed. Blocking: on Linux it reads `/proc/<pid>/stat` of every process.
     pub(crate) fn list(&self) -> Option<Vec<Proc>> {

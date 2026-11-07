@@ -23,6 +23,11 @@ use crate::os;
 pub struct StartStamp(u64);
 
 impl StartStamp {
+    /// A stamp from the OS's raw start (the unit of [`StartStamp`]'s own doc).
+    pub(crate) fn from_raw(start: u64) -> StartStamp {
+        StartStamp(start)
+    }
+
     /// The stamp as text, for a record; [`StartStamp::decode`] reads it back.
     pub fn encode(self) -> String {
         self.0.to_string()

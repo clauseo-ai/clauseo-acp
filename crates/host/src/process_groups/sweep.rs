@@ -96,7 +96,7 @@ impl Deadline<'_> {
     }
 }
 
-/// Sweeps/ the records in `folder`, and answers this boot's stamp (`None` when it cannot be
+/// Sweeps the records in `folder`, and answers this boot's stamp (`None` when it cannot be
 /// read: then no record is acted on, and all stay).
 pub(super) fn sweep(folder: &Path, clock: &dyn Clock) -> Option<String> {
     let boot = boot_stamp();
@@ -202,9 +202,11 @@ enum Leaderless {
 
 /// Reads `record`'s leader-less group. An id is not given again while a member of its group
 /// lives, but once the agent's group emptied a later process may take the id, `setsid` or
-/// `setpgid(0, 0)`, and exit, leaving a group of its own children: such a group is in another
-/// session (a `setsid` daemon's own, or a terminal's), since the agent never left the host's
-/// session (`process_group(0)`, not `setsid`), or its members started before the agent.
+/// `setpgid(0, 0)`, and exit, leaving a group of its own children. The agent never left the
+/// host's session (`process_group(0)`, not `setsid`); a `setsid` daemon's group is in a session
+/// of its own, and other groups often in another (a terminal's) or with members older than the
+/// agent. A later group in the host's own session with only newer members is not told apart: a
+/// residual (`process_groups.rs`).
 fn leaderless(record: &Checked) -> Leaderless {
     let Some(members) = group_members(record.pgid) else {
         return Leaderless::Unsure;

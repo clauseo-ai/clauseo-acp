@@ -242,7 +242,8 @@ and ends what a crashed run left at its next start.
   again at each boot). A process holds the group's id (`kill(pgid, 0)` is not `ESRCH`, so a
   zombie or another user's process counts): `SIGKILL` to the group only when its start (a
   zombie's too, on Linux) is the recorded leader's; another start means the id was given again,
-  and an unreadable start is unprovable; both are left alone. No process holds it but members
+  and an unreadable start (another user's process; on macOS a zombie leader, which
+  `PROC_PIDTBSDINFO` cannot read) is unprovable; both are left alone. No process holds it but members
   of the group run: a group id is not given again while a member lives, but once the agent's
   group emptied a later process may take the id, `setsid` or `setpgid(0, 0)`, and exit, leaving
   a leader-less group of its own children (every double-fork daemon does this). The agent is
@@ -262,8 +263,13 @@ and ends what a crashed run left at its next start.
   not depend on it.
 - **Windows** records nothing: the agent's Job Object has `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
   so the tree ends when the desktop's process dies, however it dies.
-- **Residuals.** A descendant that left the group (`setsid`, `setpgid`) is not in it: that is
-  the jail's to contain. A launch whose record write failed is not swept. Between the leader's
+- **Residuals.** A group that took the id later in the host's own session passes the session
+  test when all its members started after the recorded leader: a shell job when desktop was
+  started from that terminal, or on Linux another app of the same graphical session whose group
+  leader exited. A descendant that left the group (`setsid`, `setpgid`) is not in it: that is
+  the jail's to contain. A launch whose record write failed, or whose start was not read at the
+  spawn, is not swept (a failed launch is recorded with the start the spawn read, and the host's
+  own session). Between the leader's
   start check and `killpg`, the group could empty and its id be taken again: a pid wrap within
   microseconds, inherent to `killpg`. A restart in another pid namespace (Flatpak, a container)
   or with a `hidepid` `/proc` sees other or unreadable pids; its records end nothing, as their

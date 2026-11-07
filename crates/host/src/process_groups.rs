@@ -19,13 +19,15 @@
 //! - a process holds the group's id (`kill(pgid, 0)` is not `ESRCH`; a zombie or another
 //!   user's counts): the group is ended only when that process's start (a zombie's too, on
 //!   Linux) is the recorded leader's. Another start means the id was given again; an unreadable
-//!   one is unprovable. Both are left alone;
+//!   one is unprovable (another user's process, and on macOS a zombie leader, which
+//!   `PROC_PIDTBSDINFO` cannot read). Both are left alone;
 //! - no process holds it, but members of the group run: ended only when every member is in the
 //!   recorded session, that session is not the group's own id, and no member started before the
 //!   recorded leader. The agent is started with `process_group(0)`, never `setsid`, so its tree
 //!   stays in the host's session; a group that took the id later (a `setsid` or double-fork
-//!   daemon, a terminal's job, whose leader then exited) is in another session or has older
-//!   members. Otherwise, or when the listing fails or may be cut short, the whole group is left;
+//!   daemon whose leader then exited) is in another session or has older members. Otherwise, or
+//!   when the listing fails or may be cut short, the whole group is left. A later group in the
+//!   host's own session is not told apart (see the residuals);
 //! - neither: nothing to do.
 //!
 //! Each kill is SIGKILL, then up to 500 ms for the group to empty; the sweep takes at most 2 s on
@@ -34,12 +36,15 @@
 //! or does not parse is deleted unread and counted. The log holds counts only, never a pid, path
 //! or command line.
 //!
-//! Residuals: a descendant that left the group (`setsid`, `setpgid`) is the jail's to contain; a
-//! launch whose record write failed is not swept; between the leader's start check and `killpg`
-//! the group could empty and its id be taken again (a pid wrap within microseconds, inherent to
-//! `killpg`); and a restart in another pid namespace (Flatpak, a container) or with a
-//! `hidepid` `/proc` sees other pids or unreadable ones: those records end nothing, as their
-//! leaders and members read as gone, reused or unsure.
+//! Residuals: a group that took the id later in the host's own session passes the session test: a
+//! shell job when desktop was started from that terminal, or on Linux another app of the same
+//! graphical session that made a group and whose leader exited, with every member started after the
+//! recorded leader; a descendant that left the group (`setsid`, `setpgid`) is the jail's to
+//! contain; a launch whose record write failed, or whose spawn-time start was not read, is not
+//! swept; between the leader's start check and `killpg` the group could empty and its id be taken
+//! again (a pid wrap within microseconds, inherent to `killpg`); and a restart in another pid
+//! namespace (Flatpak, a container) or with a `hidepid` `/proc` sees other pids or unreadable ones:
+//! those records end nothing, as their leaders and members read as gone, reused or unsure.
 //!
 //! Windows records nothing: the agent's Job Object (`KILL_ON_JOB_CLOSE`) ends its tree when the
 //! desktop's process dies.
@@ -99,21 +104,26 @@ pub(crate) fn start(data: &Path, clock: &dyn crate::clock::Clock) -> Recorder {
 }
 
 impl Recorder {
-    /// Records agent `pid`'s group (it leads its own, `process_group(0)`) at `path`, the
-    /// launch's [`record_path`]. One small file, not synced (a reboot voids it anyway): cheap
-    /// enough for the host thread. A failure logs its kind and the launch goes on: the record is
-    /// a backstop, not a gate.
-    pub(crate) fn write(&self, path: &Path, pid: u32) {
+    /// Records the group of the agent `tree` watches (it leads its own, `process_group(0)`) at
+    /// `path`, the launch's [`record_path`]. One small file, not synced (a reboot voids it anyway):
+    /// cheap enough for the host thread. A failure logs its kind and the launch goes on: the record
+    /// is a backstop, not a gate.
+    pub(crate) fn write(&self, path: &Path, tree: &clauseo_process::TreeWatch) {
         #[cfg(unix)]
         {
             let Some(boot) = &self.boot else {
                 return;
             };
-            let (Ok(pgid), Some(start), Some(sid)) = (
-                i32::try_from(pid),
-                clauseo_process::start_stamp(pid),
-                clauseo_process::session_id(pid),
-            ) else {
+            let pid = tree.group();
+            // The start the spawn read, so a leader that has already exited (a failed launch)
+            // is recorded too. Its session is the host's own when it can no longer be read:
+            // `process_group(0)` keeps the agent in the session it was started from.
+            let start = tree
+                .leader_start()
+                .or_else(|| clauseo_process::start_stamp(pid));
+            let sid = clauseo_process::session_id(pid)
+                .or_else(|| clauseo_process::session_id(std::process::id()));
+            let (Ok(pgid), Some(start), Some(sid)) = (i32::try_from(pid), start, sid) else {
                 tracing::warn!(
                     "the agent's start or session was not read; its group is not recorded"
                 );
@@ -137,7 +147,7 @@ impl Recorder {
         }
         #[cfg(not(unix))]
         {
-            let _ = (self, path, pid);
+            let _ = (self, path, tree);
         }
     }
 }
