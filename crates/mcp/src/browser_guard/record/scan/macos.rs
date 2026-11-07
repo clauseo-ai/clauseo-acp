@@ -9,6 +9,8 @@ use std::ffi::{c_int, c_void};
 
 use nix::libc;
 
+use super::procargs;
+
 /// How many pids the first `proc_listallpids` call makes room for; a full buffer is retried with
 /// twice the room, up to [`MAX_PIDS`].
 const FIRST_PIDS: usize = 1_024;
@@ -39,31 +41,45 @@ pub(super) fn all_pids() -> Option<Vec<i32>> {
     }
 }
 
-/// `pid`'s argument area as `KERN_PROCARGS2` gives it: its argument count, its executable's
-/// path, then its arguments and environment, each ended by a NUL. `None` when the call fails
-/// (the process is gone, a zombie, or another user's).
-pub(super) fn args_of(pid: i32) -> Option<Vec<u8>> {
-    let mut buffer = vec![0_u8; arg_max()?];
-    let mut size = buffer.len();
-    let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    // SAFETY: `name` is a live array of the 3 integers passed as its length; `buffer` is a live
-    // buffer of `size` bytes, and `size` a live length the kernel lowers to what it wrote; no new
-    // value is set (null, 0).
-    let result = unsafe {
-        libc::sysctl(
-            name.as_mut_ptr(),
-            3,
-            buffer.as_mut_ptr().cast::<c_void>(),
-            &raw mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if result != 0 {
-        return None;
+/// The arguments of the processes of one listing, read into one buffer of `KERN_ARGMAX` bytes,
+/// asked for once and reused for every pid.
+pub(super) struct Reader {
+    buffer: Vec<u8>,
+}
+
+impl Reader {
+    /// `None` when `KERN_ARGMAX` cannot be read.
+    pub(super) fn new() -> Option<Reader> {
+        Some(Reader {
+            buffer: vec![0_u8; arg_max()?],
+        })
     }
-    buffer.truncate(size.min(buffer.len()));
-    Some(buffer)
+
+    /// `pid`'s arguments, each ended by a NUL ([`procargs::arguments`]: never its environment).
+    /// `None` when the call fails (the process is gone, a zombie, or another user's) or the
+    /// area does not parse.
+    pub(super) fn args_of(&mut self, pid: i32) -> Option<Vec<u8>> {
+        let mut size = self.buffer.len();
+        let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        // SAFETY: `name` is a live array of the 3 integers passed as its length; `buffer` is a
+        // live buffer of `size` bytes, and `size` a live length the kernel lowers to what it
+        // wrote; no new value is set (null, 0).
+        let result = unsafe {
+            libc::sysctl(
+                name.as_mut_ptr(),
+                3,
+                self.buffer.as_mut_ptr().cast::<c_void>(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if result != 0 {
+            return None;
+        }
+        let area = self.buffer.get(..size.min(self.buffer.len()))?;
+        procargs::arguments(area).map(<[u8]>::to_vec)
+    }
 }
 
 /// `KERN_ARGMAX`: the size of the largest argument area.

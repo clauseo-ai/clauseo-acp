@@ -1,6 +1,7 @@
 //! The download mover: names, the no-replace move, Chrome's in-progress names and the OS marks.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::{
     BLOCKED_NOTE, Mover, Sweeper, in_progress, is_protected, marks, place, safe_name, sweep,
@@ -365,14 +366,14 @@ fn a_moved_file_is_quarantined_with_or_without_a_mark_before() {
 #[test]
 fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     let (dir, staging, downloads) = scratch("idle-stop");
-    let mover = Mover::start(staging.clone(), downloads.clone());
+    let mover = Mover::start(staging.clone(), downloads.clone(), Arc::default());
     write::write(&staging.join("report.pdf"), "first").unwrap();
     write::write(&staging.join("big.zip.crdownload"), "half").unwrap();
     mover.finish();
     assert_eq!(names(&downloads), ["report.pdf"]);
     assert_eq!(names(&staging), ["big.zip.crdownload"]);
     assert!(marks::marked(&downloads.join("report.pdf")));
-    let mover = Mover::start(staging.clone(), downloads.clone());
+    let mover = Mover::start(staging.clone(), downloads.clone(), Arc::default());
     write::write(&staging.join("second.pdf"), "second").unwrap();
     mover.finish();
     assert_eq!(names(&downloads), ["report.pdf", "second.pdf"]);

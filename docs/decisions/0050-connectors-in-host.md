@@ -39,16 +39,30 @@ answer:
 
 - exactly these three keys, each once (`deny_unknown_fields` on borrowed strings, so a field
   with an escape does not parse);
-- version 1; another number gets `unsupported_version`;
+- a version that is a number;
 - a token of 64 lowercase hex characters;
-- a connector name of 1 to 32 lowercase letters, digits or hyphens, not starting with a hyphen,
-  which must be this relay's connector (`wrong_connector`);
+- a connector name of 1 to 32 lowercase letters, digits or hyphens, not starting with a hyphen;
 - the token compared in constant time against the SHA-256 the listener keeps
-  (`relay.rs`, `token_matches`), so another listener's token is `bad_token`, and a revoked one
-  is `closed`.
+  (`relay.rs`, `token_matches`), so another listener's token is `bad_token`; a revoked session
+  has forgotten its token and refuses every one the same way;
+- only past the token: version 1 (another number gets `unsupported_version`), then this relay's
+  connector (`wrong_connector`), then `busy` or `closed` (the session ended meanwhile) from
+  `promote`.
 
-A hello that fails the shape closes the connection unanswered. One that is well formed is
-answered `ok`, or refused with a code and closed. Limits (`connectors/limits.rs`): 1 KB per hello
+**One answer before the token passes** (stage C's audit of the loopback listeners): a hello of
+the wrong shape, another version, a wrong token and a revoked session's hello all get
+`bad_token` and the same close; the host's log alone tells them apart (`bad_hello`, `bad_token`,
+`closed`; the version is not looked at before the token). Under tier B sandboxed matters
+can reach each other's loopback ports, and the token is the boundary: a client from another
+matter must not learn whether this session is live or revoked. Before, a revoked session
+answered `closed` and a newer version `unsupported_version` to anyone. The timing barely
+differs: every well-formed hello's token is hashed, live or revoked, before any answer (a live
+session then compares 32 bytes in constant time), and only a hello's own shape decides whether it
+is hashed at all. `clauseo-mcp connector` treats every code alike (the "not reachable" error, with
+the code as `data.reason`), so nothing changes on the agent's side.
+
+A hello that is well formed and passes is answered `ok`; any other is refused with a code and
+closed. Limits (`connectors/limits.rs`): 1 KB per hello
 (`MAX_HELLO_BYTES`), 5 s from the accept to its newline on the host clock (`HANDSHAKE_TIMEOUT`),
 8 pending handshakes per listener (`MAX_PENDING_HANDSHAKES`), 4 connections past the hello per
 token (`MAX_CONNECTIONS_PER_TOKEN`), one hello per connection. The hello is never logged, echoed
@@ -70,7 +84,8 @@ or kept: it holds the token.
 - The agent's stderr redactor hides it (`LaunchSpec::with_redacted` in `process`, #496).
 - Claude's data-folder deny list holds `run/*/relay-token` (`agent/data_fence.rs`), so a token
   read through Claude's own tools never lands in a transcript.
-- When the session ends the token is revoked first (the relay answers `closed` from then on),
+- When the session ends the token is revoked first (the relay answers `bad_token` to every hello
+  from then on),
   then the run folder goes, and the relay stops when the last `RunFolders` clone drops in
   `discard`, after the agent's tree was killed. Nothing is accepted after that.
 

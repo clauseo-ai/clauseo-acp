@@ -24,27 +24,27 @@ fn a_hello_of_exactly_the_three_keys_parses() {
     assert!(parse(&line).is_ok());
 }
 
+/// Any number passes the shape as the version (`check` answers another one only past the
+/// token); anything else is a bad hello.
 #[test]
-fn only_a_numeric_other_version_is_unsupported() {
-    for version in ["2", "1.5", "0", "-1"] {
+fn any_numeric_version_parses_and_nothing_else_does() {
+    for (version, number) in [
+        ("1", Some(1)),
+        ("2", Some(2)),
+        ("0", Some(0)),
+        ("1.5", None),
+    ] {
         let line = hello(&format!(
             r#""clauseo_relay":{version},"token":"{TOKEN}","connector":"c""#
         ));
-        assert_eq!(
-            parse(&line).err(),
-            Some(Refusal::Answer(texts::UNSUPPORTED_VERSION)),
-            "{version}"
-        );
+        let parsed = parse(&line).ok().unwrap();
+        assert_eq!(parsed.version.as_u64(), number, "{version}");
     }
     for version in [r#""1""#, "true", "null", "[1]"] {
         let line = hello(&format!(
             r#""clauseo_relay":{version},"token":"{TOKEN}","connector":"c""#
         ));
-        assert_eq!(
-            parse(&line).err(),
-            Some(Refusal::Silent("bad_hello")),
-            "{version}"
-        );
+        assert_eq!(parse(&line).err(), Some("bad_hello"), "{version}");
     }
 }
 

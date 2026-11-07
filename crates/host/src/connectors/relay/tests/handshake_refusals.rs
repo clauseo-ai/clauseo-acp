@@ -1,5 +1,6 @@
 //! The handshake's refusals: each is answered with its code (or closed unanswered) and closed,
-//! and the log names the session and the reason, never the token or the hello.
+//! and the log names the session and the reason, never the token or the hello. Before the token
+//! passes, every refusal is `bad_token`, whatever the session's state.
 
 use futures::executor::block_on;
 use serde_json::json;
@@ -65,8 +66,63 @@ fn another_version_is_unsupported() {
     assert!(agent.closed());
 }
 
+/// Live, ended or asked in another version: a client without the token hears `bad_token` and
+/// the close every time, so it cannot tell a revoked session from a live one. With the token, the
+/// specific answers come back.
 #[test]
-fn a_hello_of_the_wrong_shape_closes_unanswered() {
+fn before_the_token_passes_every_refusal_is_the_same() {
+    let rig = rig();
+    let token = rig.token.expose().to_owned();
+    let wrong = "0".repeat(64);
+    let hellos = |token: &str| {
+        [
+            json!({"clauseo_relay": 1, "token": token, "connector": "case-law"}).to_string(),
+            json!({"clauseo_relay": 2, "token": token, "connector": "case-law"}).to_string(),
+            json!({"clauseo_relay": 1, "token": token, "connector": "other-law"}).to_string(),
+            format!(r#"{{"clauseo_relay":1,"token":"{token}"}}"#),
+        ]
+    };
+    let answers = |token: &str| -> Vec<Option<serde_json::Value>> {
+        hellos(token)
+            .iter()
+            .map(|hello| {
+                let mut agent = Agent::connect(&rig.session);
+                agent.send(hello);
+                let answer = agent
+                    .recv_line()
+                    .map(|line| serde_json::from_slice(&line).unwrap());
+                // A refusal closes; an `ok` leaves the connection open until it drops here.
+                if answer != Some(json!({"clauseo_relay": 1, "ok": true})) {
+                    assert!(agent.closed(), "{hello}");
+                }
+                answer
+            })
+            .collect()
+    };
+    let generic = Some(refused("bad_token"));
+    assert_eq!(
+        answers(&wrong),
+        vec![generic.clone(); 4],
+        "live, wrong token"
+    );
+    let own = answers(&token);
+    assert_eq!(own[0], Some(json!({"clauseo_relay": 1, "ok": true})));
+    assert_eq!(own[1], Some(refused("unsupported_version")));
+    assert_eq!(own[2], Some(refused("wrong_connector")));
+    assert_eq!(own[3], generic, "a bad hello, even with the token");
+    rig.session.end();
+    assert_eq!(
+        answers(&wrong),
+        vec![generic.clone(); 4],
+        "ended, wrong token"
+    );
+    assert_eq!(answers(&token), vec![generic; 4], "ended, its own token");
+}
+
+/// A hello of the wrong shape is answered as a wrong token is; only one over the cap closes
+/// unanswered, before its newline arrives.
+#[test]
+fn a_hello_of_the_wrong_shape_is_answered_as_a_wrong_token() {
     let rig = rig();
     let token = rig.token.expose();
     let bad = [
@@ -90,7 +146,11 @@ fn a_hello_of_the_wrong_shape_closes_unanswered() {
     for hello in &bad {
         let mut agent = Agent::connect(&rig.session);
         agent.send(hello);
-        assert_eq!(agent.recv_line(), None, "{hello}");
+        let answer = agent
+            .recv_line()
+            .map(|line| serde_json::from_slice(&line).unwrap());
+        assert_eq!(answer, Some(refused("bad_token")), "{hello}");
+        assert!(agent.closed(), "{hello}");
     }
     // A hello over the cap is closed before its newline arrives.
     let mut agent = Agent::connect(&rig.session);
@@ -179,7 +239,10 @@ fn the_log_names_the_session_and_reason_never_the_token_or_hello() {
     let hello =
         format!(r#"{{"clauseo_relay":1,"token":"{token}","connector":"case-law","x":"marker-7"}}"#);
     shape.send(&hello);
-    assert_eq!(shape.recv_line(), None);
+    let answer = shape
+        .recv_line()
+        .map(|line| serde_json::from_slice(&line).unwrap());
+    assert_eq!(answer, Some(refused("bad_token")));
     let mut good = rig.agent();
     good.send(&format!(
         r#"{{"clauseo_relay":1,"token":"{token}","connector":"case-law"}}"#

@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::chrome::{self, Chrome, Spec};
+use super::downloads::Held;
 use super::parent::{self, Parent};
 use super::port_file::Expected;
 use super::record::{self, ChromeState};
@@ -145,6 +146,9 @@ pub(crate) struct Shared {
     /// The one-shot agent-browser answering a request while the browser is stopped
     /// (`relay/oneshot.rs`), until it is reaped.
     pub(crate) oneshot: Mutex<Option<Child>>,
+    /// The downloads Chrome holds for confirmation, which the agent has not been told about yet
+    /// (`downloads/held.rs`); kept across starts.
+    pub(crate) held: Arc<Held>,
 }
 
 impl Shared {
@@ -163,6 +167,7 @@ impl Shared {
             out: Mutex::new(io::stdout()),
             closing: AtomicBool::new(false),
             oneshot: Mutex::new(None),
+            held: Arc::default(),
         }
     }
 }
@@ -208,14 +213,17 @@ impl State {
         self.in_flight.push((id, call));
     }
 
-    /// Takes the reply to `id` off the list. A tool call's reply restarts the idle time.
-    pub(crate) fn answered(&mut self, id: &Value) {
-        if let Some(at) = self.in_flight.iter().position(|(sent, _)| sent == id) {
-            let (_, call) = self.in_flight.remove(at);
-            if call {
-                self.idle_since = now();
-            }
+    /// Takes the reply to `id` off the list, and returns whether it answers a tool call. A tool
+    /// call's reply restarts the idle time.
+    pub(crate) fn answered(&mut self, id: &Value) -> bool {
+        let Some(at) = self.in_flight.iter().position(|(sent, _)| sent == id) else {
+            return false;
+        };
+        let (_, call) = self.in_flight.remove(at);
+        if call {
+            self.idle_since = now();
         }
+        call
     }
 
     /// The ids still unanswered, which the guard now answers itself.
@@ -284,7 +292,12 @@ fn start_both(
         "Chrome started; waiting for it to listen on the claimed debugging port {}",
         launcher.cdp_port
     ));
-    let endpoint = chrome.endpoint(launcher.cdp_port, start_wait(), parent)?;
+    let endpoint = chrome.endpoint(
+        launcher.cdp_port,
+        start_wait(),
+        parent,
+        Arc::clone(&shared.held),
+    )?;
     note(&format!(
         "Chrome is listening on the claimed debugging port {}",
         launcher.cdp_port

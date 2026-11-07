@@ -360,7 +360,8 @@ fn no_entry_and_no_relay_unless_every_condition_holds() {
 }
 
 const OK: &str = r#"{"clauseo_relay":1,"ok":true}"#;
-const CLOSED: &str = r#"{"clauseo_relay":1,"ok":false,"error":"closed"}"#;
+/// What a hello with a revoked token gets: the answer for any token the relay does not take.
+const REVOKED: &str = r#"{"clauseo_relay":1,"ok":false,"error":"bad_token"}"#;
 
 /// A connection to the relay at `addr` that sent the hello with `token`, and the answer line.
 fn hello(addr: SocketAddr, token: &str) -> (BufReader<TcpStream>, String) {
@@ -458,11 +459,14 @@ fn the_relay_refuses_once_the_agent_is_stopped_and_the_file_goes_after() {
         };
         (again, shut, probe_file.exists())
     });
-    assert_eq!(again, CLOSED, "a new hello once the agent is being stopped");
+    assert_eq!(
+        again, REVOKED,
+        "a new hello once the agent is being stopped"
+    );
     assert!(shut, "the open connection was not shut");
     assert!(kept, "the token file went before the agent ended");
     let removal = removals.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(removal, (true, CLOSED.to_owned()));
+    assert_eq!(removal, (true, REVOKED.to_owned()));
     // The shutdown can answer before the removal ends: the ladder's mover advances the manual
     // clock past the removal's wait too, and the removal's thread goes on on its own.
     crate::support::wait("the token file to go with the run folder", async {
@@ -482,7 +486,7 @@ fn an_agent_that_exits_has_its_token_revoked_before_its_file_goes() {
         format!("{lines}\n{}", json!({"exit": {"code": 0}}))
     });
     let removal = removals.recv_timeout(Duration::from_secs(30)).unwrap();
-    assert_eq!(removal, (true, CLOSED.to_owned()));
+    assert_eq!(removal, (true, REVOKED.to_owned()));
     host.shutdown();
     let file = launcher.seen()[0].run.clone().unwrap().join("relay-token");
     assert!(!file.exists());
@@ -537,7 +541,7 @@ fn managed_mcp_that_appears_during_the_launch_fails_closed() {
     let seen = wired.seen();
     let token = token_of(&seen[0]).expect("the prep opened the relay");
     let addr = connector.relays.opened_for_test()[0].1;
-    assert_eq!(hello(addr, &token).1, CLOSED, "the relay was not ended");
+    assert_eq!(hello(addr, &token).1, REVOKED, "the relay was not ended");
     let config = seen[0].codex_config().expect("a Codex launch");
     assert_eq!(config["developer_instructions"], json!(instructions(true)));
     host.shutdown();

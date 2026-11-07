@@ -54,21 +54,23 @@ fn run(session: &Arc<Session>, id: u64, stream: TcpStream, watchdog: Watchdog) {
     let flight = Arc::new(Flight::default());
     let verdict = verdict.and_then(|()| session.promote(id, &flight).map_err(Refusal::Answer));
     let writer = Writer(Mutex::new(stream));
-    match verdict {
-        Ok(()) => {}
-        Err(Refusal::Silent(reason)) => {
-            session.log_refusal(reason);
-            writer.hang_up();
-            return;
+    // Before the token passed, every refusal answers as a wrong token's does; the log keeps
+    // the reason.
+    let (reason, code) = match verdict {
+        Ok(()) => (None, None),
+        Err(Refusal::Silent(reason)) => (Some(reason), None),
+        Err(Refusal::Unauthenticated(reason)) => (Some(reason), Some(texts::BAD_TOKEN)),
+        Err(Refusal::Answer(code)) => (Some(code), Some(code)),
+    };
+    if let Some(reason) = reason {
+        session.log_refusal(reason);
+        if let Some(code) = code
+            && writer.line(&texts::hello_refused(code)).is_err()
+        {
+            // The peer is gone; it hears nothing either way.
         }
-        Err(Refusal::Answer(code)) => {
-            session.log_refusal(code);
-            if writer.line(&texts::hello_refused(code)).is_err() {
-                // The peer is gone; it hears nothing either way.
-            }
-            writer.hang_up();
-            return;
-        }
+        writer.hang_up();
+        return;
     }
     if writer.line(&texts::hello_ok()).is_err() {
         writer.hang_up();

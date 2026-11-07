@@ -271,7 +271,22 @@ connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-443
   names.
 - The profile is the run's own, made fresh at the run's first Chrome start, kept across the
   run's later starts ("Lazy start and the idle stop", below) and deleted on the guard's exit
-  ("Each run's own names", below). Its
+  ("Each run's own names", below). Before each start the guard reads and rewrites the kept
+  profile's `Default/Preferences` and `Local State` without following a link at either name
+  (`chrome/profile.rs`): each is read with `O_NOFOLLOW` on Unix and as the reparse point itself
+  on Windows (a link reads as missing), and written to a new `.<name>.clauseo-new-<pid>-<n>`
+  beside it (a name no earlier write had; the temporary files a write killed midway left are
+  removed first, so a leftover never fails a later start), then renamed over the name, which
+  replaces a link there instead of writing through it; a failed step says which file it was for
+  ("cannot make Chrome's profile: could not write Default/Preferences: ...");
+  `Default` and the staging folder must be real folders, and a link at either is replaced by
+  one. On Unix the folder is opened once with `O_DIRECTORY|O_NOFOLLOW` and the temporary file
+  (`O_CREAT|O_EXCL|O_NOFOLLOW`) and the rename are relative to it (`openat`, `renameat`,
+  `write/unix.rs`), so a link swapped in for `Default` after its check fails the open and is
+  never written through. On Windows both steps resolve the path again, so a junction swapped in
+  between the check and the write would redirect it; that is bounded by the jail, since the
+  guard runs in the agent's jail with the agent's rights (below), so such a write reaches nothing
+  the agent could not write itself. Its
   `Default/Preferences` sends downloads to a staging folder in it (below) and allows "insecure
   content" (`mixed_script`) for `http://` pages only (`http://*:*`): Chrome otherwise holds an
   `http://` download of a "high-risk" type (`.md`, `.pdf`) until someone clicks Keep, which
@@ -529,6 +544,29 @@ netlog's URLs; Playwright's `chromiumSwitches` and its issue #42910 name the sam
   download), `url_keyed_anonymized_data_collection` false, autofill profiles and cards off.
   Chrome kept every one of them across a run (read back from the profile on iris).
 
+**Closed by the deny list: `clients1.google.com` from branded Chrome on Windows and macOS
+(RLZ).** Installed
+Google Chrome 157 on Windows contacted `clients1.google.com:443` through the proxy about 90 s
+into an idle session; Chrome for Testing did not. From Chromium's source (tag 157.0.8103.38) it
+is RLZ's financial ping, `https://clients1.google.com/tools/pso/ping?as=chrome&brand=...`
+(traffic annotation `rlz_ping`, "cannot be disabled in settings"; `rlz/lib/lib_values.cc:45-47`,
+`rlz/lib/financial_ping.cc:301`), started from `chrome_browser_main.cc:1665-1682` after the
+profile preference `rlz_ping_delay`, 90 s by default (`chrome_rlz_tracker_delegate.cc:51`),
+clamped to 20-200 s (`components/rlz/rlz_tracker.cc:44-45,294`). RLZ is built only into branded
+Chrome for Windows, macOS and ChromeOS, and pings only for a brand code off Chrome's organic list
+(`google_brand.cc` `IsOrganic`); its state is per machine (`HKCU\Software\Google\Common\Rlz` on
+Windows), so the session's fresh profile does not stop it, and with the ping refused its pending
+events make it repeat at every Chrome start. No switch, feature or preference turns it off
+(`rlz_ping_delay` only moves it to at most 200 s; `--test-type` makes the delay zero), so
+`quiet.rs` has nothing for it. Linux Google Chrome 157 with the guard's switches, 180 s headless
+and 180 s headed, made no request at all (its binary has no `tools/pso/ping`), so it was not
+reproduced, and the Windows machine's brand code was not checked. The fix: `clients1.google.com`
+is in `DENY_HOSTS` (`host/src/browser/deny_hosts.rs`, `rlzs_ping_host_is_denied`), which stage
+C's egress proxy refuses silently for browser sessions, with no card. Chrome still asks the proxy
+for the host, but the request is refused there, so nothing leaves the machine; Chrome's ping
+just fails, and repeats at the next start. The denial applies to browser sessions only; a page
+in the session that loads something from `clients1.google.com` loses that request too.
+
 **Safe Browsing is off, deliberately.** What that costs depends on the Chrome:
 - With Chrome for Testing nothing is lost: it made no Safe Browsing traffic at all on iris, so
   it had no lists and no lookups to warn from.
@@ -674,7 +712,12 @@ Chrome that may run. Instead the window is closed where it opens:
   helpers carry it, and the profile's name is the run's own, so nothing else matches); each is
   killed with SIGKILL (its whole group when it leads one, as Chrome does), and the listing is
   read again every 100 ms, up to 5 s, until none is left. Then the record goes. Linux reads
-  `/proc/<pid>/cmdline`; macOS lists with `proc_listallpids` and reads `sysctl KERN_PROCARGS2`.
+  `/proc/<pid>/cmdline`; macOS lists with `proc_listallpids` and reads `sysctl KERN_PROCARGS2`
+  into one buffer of `KERN_ARGMAX` bytes per listing, matching only the area's `argc` arguments,
+  never its executable path or environment (`record/scan/procargs.rs`). Another user's process
+  is skipped on macOS (its arguments are refused); on Linux its `cmdline` is readable, so one
+  naming the run's profile would be found, its kill would fail with `EPERM` and the record would
+  stay.
   A listing that fails, or cannot read the scanning process's own arguments (a jail, `hidepid`),
   is not trusted: the record stays `Starting`, the one case left. A pid is signalled only while
   its fresh command line names the profile, so no pid read from a file is acted on. The
@@ -799,6 +842,46 @@ download in staging with one `DOWNLOADS-BLOCKED.txt`; the real probe passes on t
 drive and leaves nothing; the `ZoneId` parser and rules; on Windows, moved files keep zones 2 and
 3 (with `HostUrl`) and get `ZoneId=3` for zone 0, a garbled stream and none; on macOS, an
 existing quarantine value is kept and a missing one written.
+
+#### Executable downloads (`downloads/held.rs`)
+
+**Ruling** (orchestrator): the agent never delivers an executable. Chrome holds a download it
+rates dangerous (on Windows every `.exe`, with Safe Browsing off) under the name
+`<prefix> <n>.crdownload` until someone clicks Keep: `<prefix>` is
+`IDS_DOWNLOAD_UNCONFIRMED_PREFIX` in Chrome's language ("Unconfirmed" in English) and `<n>` a
+number from 0 to 1 000 000 (`download_target_determiner.cc`, `kUnconfirmedFormatSuffix`).
+Headless nobody can click, so the file never got its own name, the mover never delivered it,
+and the agent waited for it in vain.
+
+**What the guard does.**
+- The mover matches that name (a prefix without a dot, a space, 1 to 7 digits, `.crdownload`),
+  records each such file once and never moves it.
+- The next tool call's result the guard relays gets one more text block after agent-browser's
+  own content, which stays as it is: "Clauseo does not deliver executable downloads. The
+  browser held back 1 download as an executable or another file type it treats as dangerous,
+  so it was not saved to the downloads folder and will be deleted. Tell your user it was not
+  delivered." A result with no `content` gets it as its only block; an error reply carries
+  nothing and the note waits for the next result. The note cannot name the file: Chrome's held
+  name carries nothing of it.
+- When Chrome stops (the idle stop, a crash's stop, the guard's exit, and on Unix the reaper's
+  sweep after a killed guard) the held files are deleted from staging, tried for up to 1 s while
+  Windows still refuses; the profile's deletion at the guard's exit takes any left.
+
+**Why a block in the next result.** agent-browser 0.41.1's MCP tools have no download tool: a
+download starts from a click, an `open` or `eval`, and the click's result comes back before
+Chrome names the file (up to one 200 ms poll later). The guard already reads every reply line to
+take its id off the in-flight list; adding one block to a tool call's result changes none of
+agent-browser's content, and needs no new message type the agent's client would have to know.
+The reply is then re-serialized by serde_json (same values, key order and spacing may differ).
+
+**Accepted.** A download still in progress whose own name has no extension and ends in a space
+and a number (`Report 12`) looks the same while it is written: the agent is told it was held,
+and a stop in that window deletes it. It still lands if it finishes while Chrome runs.
+
+**Tests**: `downloads/held/tests.rs` (the names in English, German and Japanese and the near
+misses, the note's place and its once-only telling, the mover's record, the clearing at the
+mover's finish and the reaper's sweep); `tests/guard/held.rs` (a held file in staging; the next
+tool result through the built guard carries the note, the one after it does not).
 
 #### No failed logon at start (`logon.rs`)
 
@@ -1204,8 +1287,9 @@ flags (`--disable-background-networking`, `--disable-component-update`, `--disab
 `clients2.google.com`, `redirector.gvt1.com`, `edgedl.me.gvt1.com`), Safe Browsing
 (`safebrowsing.googleapis.com`, `sb-ssl.google.com`; no `--safebrowsing-disable-auto-update`),
 the optimization guide (`optimizationguide-pa.googleapis.com`), autofill predictions
-(`content-autofill.googleapis.com`), the variations seed (`clientservices.googleapis.com`) and
-sign-in checks (`accounts.google.com`). The denial applies to browser sessions only, never to
+(`content-autofill.googleapis.com`), the variations seed (`clientservices.googleapis.com`),
+RLZ's ping on branded Windows and macOS Chrome (`clients1.google.com`, which no switch stops:
+"No background hosts") and sign-in checks (`accounts.google.com`). The denial applies to browser sessions only, never to
 the agent's own traffic. `accounts.google.com` in particular is provisional for G17 item 5:
 denying it without a card breaks Google sign-in on every site. Stage C's proxy reads both
 lists; the `browser` module is public for it.
@@ -1538,6 +1622,14 @@ The download (part 3):
   scan (if before, a mark does not mean the scan is done), whether a scanner holds the file
   without delete sharing (then the move waits for the next poll), and what Gatekeeper makes of
   the flags `0081` with no event id.
+- Executable downloads (`downloads/held.rs`): unit tests and a stub test on Linux, with a held
+  name written by hand; a real Chrome holding a download was not tried. The Windows VM's item 7
+  with an `.exe` is the proof that the note arrives and the file goes at the idle stop.
+- The link-safe profile writes (`chrome/profile.rs`): the link tests run on Unix only; a Windows
+  junction at `Default` or the staging folder (removed with `remove_dir`) was never tried.
+- macOS: the `KERN_PROCARGS2` parser runs as unit tests on every OS, and `read_xattr`'s `ERANGE`
+  retry has a macOS unit test; both pass `cargo clippy --target aarch64-apple-darwin` and were
+  not run on a Mac (CI's macOS job runs the xattr test).
 
 ## Status
 
