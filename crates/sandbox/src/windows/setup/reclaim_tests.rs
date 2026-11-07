@@ -24,7 +24,7 @@ use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::{elevated_tests_enabled, has, protected};
 use crate::windows::test_dacl::{drop_privileges, give_owner, protect_with};
-use crate::windows::writer::AclWriter;
+use crate::windows::writer::{AclWriter, DenyStrip};
 
 /// This test's account prefix (`ClauseoRcl`, then six hex digits).
 const FAMILY: &str = "ClauseoRcl";
@@ -104,7 +104,7 @@ fn elevated_the_walk_takes_a_pool_users_shut_file_and_the_hand_back_cleans_it() 
     let others = [other.clone()];
     let handed = NtfsAcl::new()
         .unwrap()
-        .strip_taken(&matter, &others, &[], true)
+        .strip_taken(&matter, &others, &[], true, &DenyStrip::default())
         .unwrap();
 
     assert_eq!(handed.repaired, 2, "{handed:?}");

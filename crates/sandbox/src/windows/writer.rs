@@ -320,21 +320,39 @@ pub trait AclWriter {
     /// when `whole`, everything below it, through each folder's handle, never following a
     /// link) that the desktop user owns loses its explicit plain allows for `others` (the pool
     /// users but the matter's own), and nothing more: every other entry and the DACL's
-    /// protection stay, and so does an allow `keep` lists on that path (our own entries'). A
-    /// file with more than one link is left as it is. An item left with a protected DACL and no
-    /// explicit entry (only the agent's protection can have made it) is unprotected and takes
-    /// its folder's inherited entries, and so is one whose inherited entries still allow one of
-    /// `others`; in one write, worked out after the strip. Each item is opened with only the
-    /// owner's implied `READ_CONTROL | WRITE_DAC`, and a folder listed only after its write. A
-    /// child the lawyer can't open or list is refused as [`ApplyFailure::ChildShut`], naming it.
-    /// The default, for writers that don't need it, is `Unsupported`.
+    /// protection stay, and so does an allow `keep` lists on that path (our own entries'). An
+    /// item `denies` lists as taken (its final path and file ID both match) also loses its
+    /// explicit denies for the desktop user, a group of its token (enabled or deny-only),
+    /// `OWNER RIGHTS`, `CREATOR OWNER` or `CREATOR GROUP`, but never one naming a SID
+    /// `denies` keeps (the pool users and the pool group: our fence). A file with more than one
+    /// link is left as it is. An item left with a protected DACL and no explicit entry (only the
+    /// agent's protection can have made it) is unprotected and takes its folder's inherited
+    /// entries, and so is one whose inherited entries still allow one of `others` (or, when
+    /// taken, deny one of those SIDs); in one write, worked out after the strip. Each item is
+    /// opened with only the owner's implied `READ_CONTROL | WRITE_DAC`, and a folder listed only
+    /// after its write. A child the lawyer can't open or list is refused as
+    /// [`ApplyFailure::ChildShut`], naming it. The default, for writers that don't need it, is
+    /// `Unsupported`.
     fn strip_taken(
         &mut self,
         _root: &Path,
         _others: &[Sid],
         _keep: &[(PathBuf, Sid)],
         _whole: bool,
+        _denies: &DenyStrip<'_>,
     ) -> Result<Walked, ApplyFailure> {
         Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
     }
+}
+
+/// What the hand-back after `--reclaim` may take denies off ([`AclWriter::strip_taken`]): the
+/// items `--reclaim` took, each by its final path and file ID, as its result reported them and
+/// the ledger keeps them; and the SIDs whose denies stay whoever owns the item, the machine
+/// record's pool users and pool group.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DenyStrip<'a> {
+    /// The items taken.
+    pub taken: &'a [(PathBuf, FileId)],
+    /// The SIDs whose denies are kept.
+    pub kept: &'a [Sid],
 }

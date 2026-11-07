@@ -7,8 +7,9 @@
 use std::io;
 
 use super::{
-    ALLOWED, ALLOWED_CALLBACK, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, INHERITED,
-    broad_allow, build_descriptor, empty_acl, flags, kind, owner_bytes, rebuild, render, sid,
+    ALLOWED, ALLOWED_CALLBACK, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, DENIED, DENIED_CALLBACK,
+    Descriptor, INHERITED, broad_allow, build_descriptor, empty_acl, flags, kind, owner_bytes,
+    rebuild, render, sid,
 };
 
 /// One write on a child.
@@ -77,11 +78,15 @@ pub(crate) fn handed_back(
 
 /// What `--reclaim` took, cleaned (S15 `PR4i`): when `descriptor` is an item the desktop user
 /// (`me`) owns whose DACL holds an explicit plain allow for one of `others` (the pool users but
-/// the matter's own), the descriptor to write: its DACL without exactly those allows, every
-/// other entry kept (a broad group's, the matter's own pool user's, inherited ones, denies) and
-/// its control bits as they were, protection included. In a protected DACL an allow marked
-/// inherited counts as explicit: nothing can be inherited there. `None` when there is nothing
-/// to strip.
+/// the matter's own), or an explicit deny for one of `mine` that names none of `others` (`mine`
+/// is empty but on an item `--reclaim` took: there, the desktop user, its token's groups and the
+/// owner's stand-ins, less the pool and its group), the descriptor to write: its
+/// DACL without exactly those entries, every other entry kept (a broad group's allow, the
+/// matter's own pool user's, inherited ones, a deny naming a pool user or the pool group: our
+/// fence) and its control bits as they were, protection included. So an agent can't leave on
+/// what it made a deny that later refuses the lawyer a write, such as its label. In a protected
+/// DACL an entry marked inherited counts as explicit: nothing can be inherited there. `None`
+/// when there is nothing to strip.
 #[cfg_attr(
     not(any(windows, test)),
     expect(dead_code, reason = "the hand-back after --reclaim is Windows only")
@@ -90,6 +95,7 @@ pub(crate) fn stripped(
     descriptor: &[u8],
     others: &[Vec<u8>],
     me: &[u8],
+    mine: &[Vec<u8>],
 ) -> io::Result<Option<Vec<u8>>> {
     if me.is_empty() || owner_bytes(descriptor) != Some(me) {
         return Ok(None);
@@ -102,11 +108,8 @@ pub(crate) fn stripped(
     // Nothing is inherited through a protected DACL: an entry there marked inherited is one an
     // agent forged (`D:P(A;ID;FA;;;<pool user>)`), and goes like an explicit one.
     let protected = now.dacl_protected();
-    let offends = |ace: &&[u8]| {
-        (protected || flags(ace) & INHERITED == 0)
-            && matches!(kind(ace), ALLOWED | ALLOWED_CALLBACK)
-            && sid(ace).is_some_and(|s| others.iter().any(|o| o == s))
-    };
+    let offends =
+        |ace: &&[u8]| (protected || flags(ace) & INHERITED == 0) && offending(ace, others, mine);
     if !dacl.aces().iter().any(offends) {
         return Ok(None);
     }
@@ -119,6 +122,44 @@ pub(crate) fn stripped(
     let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
     let new = render(dacl.revision.max(2), &kept);
     Ok(Some(build_descriptor(now.control & bits, Some(&new), None)))
+}
+
+/// Whether `ace` is one the strip takes off when explicit ([`stripped`]): an allow for one of
+/// `others`, or a deny for one of `mine` that names none of `others`. A deny object entry
+/// counts as a plain deny: without an object type, an access check applies it as one, and with
+/// one it denies nothing a file's check asks; either way the lawyer loses nothing by its going.
+fn offending(ace: &[u8], others: &[Vec<u8>], mine: &[Vec<u8>]) -> bool {
+    let named = |found: Option<&[u8]>, set: &[Vec<u8>]| {
+        found.is_some_and(|s| set.iter().any(|o| o.as_slice() == s))
+    };
+    match kind(ace) {
+        ALLOWED | ALLOWED_CALLBACK => named(sid(ace), others),
+        DENIED | DENIED_CALLBACK => named(sid(ace), mine) && !named(sid(ace), others),
+        DENIED_OBJECT | DENIED_CALLBACK_OBJECT => {
+            named(object_sid(ace), mine) && !named(object_sid(ace), others)
+        }
+        _ => false,
+    }
+}
+
+/// `ACCESS_DENIED_OBJECT_ACE_TYPE`.
+const DENIED_OBJECT: u8 = 6;
+/// `ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE`.
+const DENIED_CALLBACK_OBJECT: u8 = 12;
+
+/// An object entry's SID: after its mask, its flags, and the object type and inherited object
+/// type GUIDs its flags say are present.
+fn object_sid(ace: &[u8]) -> Option<&[u8]> {
+    let flags = u32::from_le_bytes(ace.get(8..12)?.try_into().ok()?);
+    let mut at = 12;
+    for present in [0x1, 0x2] {
+        if flags & present != 0 {
+            at += 16;
+        }
+    }
+    let body = ace.get(at..)?;
+    let count = usize::from(*body.get(1)?);
+    body.get(..8 + 4 * count)
 }
 
 /// Whether `descriptor` (what [`stripped`] made of an item `--reclaim` took) is left with a
@@ -141,21 +182,22 @@ pub(crate) fn bare(descriptor: &[u8]) -> io::Result<bool> {
 /// The one write the hand-back after `--reclaim` makes on a taken item (S15 `PR4i`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TakenWrite {
-    /// Its DACL without the other pool users' allows, protection kept ([`stripped`]).
+    /// Its DACL without the other pool users' allows and the denies of the desktop user's
+    /// token, protection kept ([`stripped`]).
     Stripped(Vec<u8>),
-    /// Unprotected, its explicit entries (less those allows) and the inherited entries its
-    /// folder gives now, and nothing else: an item the strip left [`bare`], or one whose
-    /// inherited entries still let another pool user in (copies of the agent's protected DACL
-    /// on what was below it).
+    /// Unprotected, its explicit entries (less those) and the inherited entries its folder
+    /// gives now, and nothing else: an item the strip left [`bare`], or one whose inherited
+    /// entries still let another pool user in or deny the desktop user's token (copies of the
+    /// agent's entries on what was below it).
     Inheriting(Vec<u8>),
 }
 
-/// What to write on the taken item `current`, in one write. The other pool users' allows come
-/// off first ([`stripped`]); then, when that leaves it [`bare`], or unprotected with an
-/// inherited allow still naming one of them, the inherited entries are worked out by `inherit`
-/// from the stripped item's explicit entries alone. So the inherited grants are worked out only
-/// once the pool users' allows are gone, and the item never holds both. `None` when there is
-/// nothing to change.
+/// What to write on the taken item `current`, in one write. The other pool users' allows and the
+/// denies of `mine` come off first ([`stripped`]); then, when that leaves it [`bare`], or
+/// unprotected with an inherited entry still of those, the inherited entries are worked out by
+/// `inherit` from the stripped item's explicit entries alone. So the inherited grants are worked
+/// out only once the pool users' allows are gone, and the item never holds both. `None` when
+/// there is nothing to change.
 #[cfg_attr(
     not(any(windows, test)),
     expect(dead_code, reason = "the hand-back after --reclaim is Windows only")
@@ -164,12 +206,13 @@ pub(crate) fn taken_write(
     current: &[u8],
     others: &[Vec<u8>],
     me: &[u8],
+    mine: &[Vec<u8>],
     inherit: &mut dyn FnMut(&[u8]) -> io::Result<Vec<u8>>,
 ) -> io::Result<Option<TakenWrite>> {
     if me.is_empty() || owner_bytes(current) != Some(me) {
         return Ok(None);
     }
-    let stripped_now = stripped(current, others, me)?;
+    let stripped_now = stripped(current, others, me, mine)?;
     let after = stripped_now.as_deref().unwrap_or(current);
     let read = Descriptor::parse(after)?;
     let Some(dacl) = read.dacl else {
@@ -177,11 +220,10 @@ pub(crate) fn taken_write(
     };
     let dacl = Acl::parse(dacl)?;
     let stale = !read.dacl_protected()
-        && dacl.aces().iter().any(|ace| {
-            flags(ace) & INHERITED != 0
-                && matches!(kind(ace), ALLOWED | ALLOWED_CALLBACK)
-                && sid(ace).is_some_and(|s| others.iter().any(|o| o == s))
-        });
+        && dacl
+            .aces()
+            .iter()
+            .any(|ace| flags(ace) & INHERITED != 0 && offending(ace, others, mine));
     if !bare(after)? && !stale {
         return Ok(stripped_now.map(TakenWrite::Stripped));
     }

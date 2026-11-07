@@ -18,7 +18,7 @@ use crate::windows::write::write_atomic;
 use crate::windows::writer::{Added, FileId, Label, Reach, Strict, Walked};
 
 /// `name` as an absolute path on every OS.
-fn abs(name: &str) -> PathBuf {
+pub(super) fn abs(name: &str) -> PathBuf {
     std::env::temp_dir()
         .join("clauseo-reclaim-paths")
         .join(name)
@@ -41,7 +41,7 @@ fn link() -> PathBuf {
 
 /// Matter one's own folders (`m1`, its state and notes), a read-only item in it, a sibling deny,
 /// the credential link and the Claude store, recorded; then `extra` merged into the file.
-fn ledger_with(temp: &TempDir, extra: &Value) -> Ledger {
+pub(super) fn ledger_with(temp: &TempDir, extra: &Value) -> Ledger {
     let path = ledger_path(temp.path());
     let grants = vec![
         grant(&abs("m1"), PathKind::Matter, Rights::Modify, Inherit::Tree),
@@ -86,7 +86,7 @@ fn ledger_with(temp: &TempDir, extra: &Value) -> Ledger {
 }
 
 /// `matters.json`'s rows: matter one holds a pool user, matter two released its.
-fn rows() -> Rows {
+pub(super) fn rows() -> Rows {
     let held = MatterRow {
         pool_user: Some(Sid::parse(USER_SID).unwrap()),
         ..MatterRow::default()
@@ -323,18 +323,23 @@ fn admissible_compares_verbatim_and_case_variants_alike() {
 /// One strip: its root, the pool SIDs it strips, what it keeps, whether whole.
 type Strip = (PathBuf, Vec<Sid>, Vec<(PathBuf, Sid)>, bool);
 
+/// What one strip was given to take denies off: the items taken, and the SIDs kept.
+pub(super) type Denies = (Vec<(PathBuf, FileId)>, Vec<Sid>);
+
 /// Records the hand-backs; refuses at `shut`. Any other call is counted in `other`, and fails.
 #[derive(Default)]
-struct Hands {
-    roots: Vec<PathBuf>,
-    trees: Vec<PathBuf>,
+pub(super) struct Hands {
+    pub(super) roots: Vec<PathBuf>,
+    pub(super) trees: Vec<PathBuf>,
     /// Each strip: its root, the pool SIDs it strips, what it keeps, whether whole.
-    strips: Vec<Strip>,
+    pub(super) strips: Vec<Strip>,
+    /// What each strip was given to take denies off: the items taken, and the SIDs kept.
+    pub(super) denies: Vec<Denies>,
     /// The pool SIDs each root's hand-back was given.
-    handed: Vec<Vec<Sid>>,
-    shut: Option<PathBuf>,
-    refused: Option<PathBuf>,
-    other: usize,
+    pub(super) handed: Vec<Vec<Sid>>,
+    pub(super) shut: Option<PathBuf>,
+    pub(super) refused: Option<PathBuf>,
+    pub(super) other: usize,
 }
 
 impl Hands {
@@ -420,9 +425,12 @@ impl AclWriter for Hands {
         others: &[Sid],
         keep: &[(PathBuf, Sid)],
         whole: bool,
+        denies: &DenyStrip<'_>,
     ) -> Result<Walked, ApplyFailure> {
         let entry = (root.to_owned(), others.to_vec(), keep.to_vec(), whole);
         self.strips.push(entry);
+        self.denies
+            .push((denies.taken.to_vec(), denies.kept.to_vec()));
         Ok(Walked::default())
     }
 }
@@ -453,7 +461,7 @@ fn the_lawyers_hand_back_goes_over_each_target_and_lists_a_refusal() {
     };
     let pool = [Sid::parse(USER_SID).unwrap()];
 
-    let done = hand_back_targets(&mut acl, &targets, &pool);
+    let done = hand_back_targets(&mut acl, &targets, &pool, &DenyStrip::default());
 
     assert_eq!(acl.roots, [abs("a"), abs("b"), abs("c")]);
     assert_eq!(
@@ -486,7 +494,12 @@ fn the_matters_own_pool_user_and_our_own_allows_are_kept() {
     let targets = [target("n1", false, &[USER_SID], &keep)];
     let mut acl = Hands::default();
 
-    let done = hand_back_targets(&mut acl, &targets, &[own, other.clone()]);
+    let done = hand_back_targets(
+        &mut acl,
+        &targets,
+        &[own, other.clone()],
+        &DenyStrip::default(),
+    );
 
     assert_eq!(done.done, 1);
     assert_eq!(acl.handed, [vec![other.clone()]]);

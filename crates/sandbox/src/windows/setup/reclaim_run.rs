@@ -19,7 +19,9 @@
 //!    user owns or the owner can list: what a pool SID of the record owns and the owner can't
 //!    hand back (`Owner::granted`) gets the owner as its owner, and nothing else changes (K1).
 //! 7. `setup-result.json` is written as the owner: 0 when nothing failed; else the counts, of
-//!    what the walks reached only, with how many items were taken.
+//!    what the walks reached only, with how many items were taken. Before it, as the owner too,
+//!    `reclaim-taken.json` lists each item taken (`taken_file.rs`), so the app's hand-back strips
+//!    the agent's denies of the lawyer on those items alone.
 //!
 //! The app then hands back what was taken, as the lawyer (`UserSetup::reclaim`), and retries the
 //! forget or the launch.
@@ -32,12 +34,13 @@ use super::owner::Owner;
 use super::profile::profile_of;
 use super::record_write;
 use super::result_file::{self, SetupResult};
+use super::taken_file;
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
 use crate::windows::acl::take::NtfsOwners;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::MachineRecord;
-use crate::windows::reclaim::{Reclaimed, Scope, matter_roots, take_ownership, targets};
+use crate::windows::reclaim::{Reclaimed, Scope, TakenItem, matter_roots, take_ownership, targets};
 use crate::windows::sids::{Reserved, Sid};
 
 /// The result file's step for the clean-up.
@@ -79,7 +82,13 @@ pub(super) fn run_with(owner: &Owner, record: Result<Option<MachineRecord>, ()>)
         }
     };
     let result = match reclaim(owner, &record, &data_dir) {
-        Ok(done) => result_of(done),
+        Ok((done, taken)) => {
+            let written = owner.run_as(|| taken_file::write(&data_dir, &taken));
+            if !taken.is_empty() && !matches!(written, Ok(Ok(()))) {
+                tracing::error!("reclaim-taken.json couldn't be written");
+            }
+            result_of(done)
+        }
         Err(cause) => {
             // The cause goes to the result file, for the app; the log names nothing.
             tracing::error!("the clean-up failed");
@@ -134,8 +143,13 @@ pub(super) fn result_of(done: Reclaimed) -> SetupResult {
     result
 }
 
-/// Steps 3 to 6: the targets, read as the owner, walked with the privileges enabled.
-fn reclaim(owner: &Owner, record: &MachineRecord, data_dir: &Path) -> Result<Reclaimed, String> {
+/// Steps 3 to 6: the targets, read as the owner, walked with the privileges enabled; with each
+/// item taken, under the matter whose target found it.
+fn reclaim(
+    owner: &Owner,
+    record: &MachineRecord,
+    data_dir: &Path,
+) -> Result<(Reclaimed, Vec<TakenItem>), String> {
     let mut trusted: Vec<Sid> = record.pool.clone();
     trusted.push(record.group.clone());
     let (found, bounds) = owner
@@ -149,9 +163,10 @@ fn reclaim(owner: &Owner, record: &MachineRecord, data_dir: &Path) -> Result<Rec
         })
         .map_err(|e| e.to_string())??;
     let mut done = Reclaimed::default();
+    let mut taken = Vec::new();
     if found.is_empty() {
         tracing::info!("nothing is owed a clean-up");
-        return Ok(done);
+        return Ok((done, taken));
     }
     let profiles = profiles(&record.pool)?;
     let _privileges = Privileges::enable(&RECLAIM).map_err(|e| e.to_string())?;
@@ -174,8 +189,16 @@ fn reclaim(owner: &Owner, record: &MachineRecord, data_dir: &Path) -> Result<Rec
             target.whole,
             &scope,
         ));
+        let items = tree.drain_taken().into_iter();
+        taken.extend(items.map(|(path, file)| TakenItem {
+            matter: target.matter,
+            path,
+            file,
+        }));
     }
-    Ok(done)
+    // A path that isn't text can't be reported: its item keeps the strip of allows alone.
+    taken.retain(|item| item.path.to_str().is_some());
+    Ok((done, taken))
 }
 
 /// Each pool user's profile folder, from `ProfileList`; one that can't be read fails the

@@ -1,10 +1,14 @@
 //! S15 `PR4i` on a real NTFS volume: the hand-back after `--reclaim` (`strip_taken`) takes off a
-//! lawyer-owned item only the explicit allows of pool users other than the matter's own: a broad
-//! group's allow, the matter's own pool user's, the lawyer's and the DACL's protection stay, and
-//! so does an allow the ledger lists as ours (`keep`).
+//! lawyer-owned item only the explicit allows of pool users other than the matter's own, and, on
+//! an item `--reclaim` took, the denies of the lawyer, its token's groups and the owner's
+//! stand-ins: a broad group's allow, the matter's own pool user's, the lawyer's, a kept SID's
+//! deny and the DACL's protection stay, and so does an allow the ledger lists as ours (`keep`).
 
 use super::*;
+use crate::windows::acl::object::Object;
+use crate::windows::acl_bytes::DENIED;
 use crate::windows::test_acl::{entries, owner_view};
+use crate::windows::writer::FileId;
 
 const OTHER: &str = "S-1-5-21-1111111111-2222222222-3333333333-1002";
 
@@ -23,7 +27,13 @@ fn only_another_pool_users_allow_goes_and_everything_else_stays() {
 
     let mut acl = NtfsAcl::new().unwrap();
     let walked = acl
-        .strip_taken(&place.at("matter"), &[other()], &[], true)
+        .strip_taken(
+            &place.at("matter"),
+            &[other()],
+            &[],
+            true,
+            &DenyStrip::default(),
+        )
         .unwrap();
 
     assert_eq!(walked.repaired, 1);
@@ -32,6 +42,92 @@ fn only_another_pool_users_allow_goes_and_everything_else_stays() {
     assert!(!has(&item, OTHER, false), "another pool user's allow goes");
     for kept in [me.as_str(), "S-1-1-0", USER_SID] {
         assert!(has(&item, kept, false), "{kept} stays");
+    }
+}
+
+/// `path`'s final path and file ID, as `--reclaim` reports an item it took.
+fn taken(path: &Path) -> (PathBuf, FileId) {
+    let object = Object::open(path).unwrap();
+    let (volume, id) = object.file_id().unwrap();
+    let at = PathBuf::from(OsString::from_wide(&object.normalized().unwrap()));
+    (at, FileId { volume, id })
+}
+
+/// On the items `--reclaim` took, the agent's denies of the lawyer (`WRITE_OWNER`, which the
+/// label write needs), of `Everyone` and of `OWNER RIGHTS` go, read with the lawyer's real
+/// token; a pool user's deny stays, and so does a kept SID's (the pool group's place), even one
+/// in the lawyer's token (`Users`). The lawyer's own file beside them, and the matter root, keep
+/// their denies: they weren't taken.
+#[test]
+fn only_taken_items_lose_the_lawyers_denies_and_kept_ones_stay() {
+    drop_privileges();
+    let place = Place::new("acl-strip-deny");
+    let me = current_user_sid().unwrap();
+    let group = "S-1-5-21-9-9-9-1600";
+    let shut = dunce::canonicalize(place.dir.file("matter/denied.txt", "x")).unwrap();
+    let owner_rights = dunce::canonicalize(place.dir.file("matter/ow.txt", "x")).unwrap();
+    let mine = dunce::canonicalize(place.dir.file("matter/mine.txt", "x")).unwrap();
+    let root = dunce::canonicalize(place.at("matter")).unwrap();
+    let listed = [taken(&shut), taken(&owner_rights)];
+    let dacl = format!(
+        "D:P(D;;WO;;;{me})(D;;FA;;;WD)(D;;FA;;;{OTHER})(D;;DE;;;BU)(D;;DE;;;{group})\
+         (A;;FA;;;{me})(A;;FA;;;{OTHER})"
+    );
+    // The root first: setting its DACL by name carries its inherited entries down.
+    for left_alone in [&root, &mine] {
+        auto_inherit_with(left_alone, "D:(D;;DE;;;WD)").unwrap();
+    }
+    protect_with(&shut, &dacl).unwrap();
+    protect_with(&owner_rights, &format!("D:P(D;;WO;;;OW)(A;;FA;;;{me})")).unwrap();
+    let kept = [
+        other(),
+        Sid::parse("S-1-5-32-545").unwrap(),
+        Sid::parse(group).unwrap(),
+    ];
+    let denies = DenyStrip {
+        taken: &listed,
+        kept: &kept,
+    };
+
+    NtfsAcl::new()
+        .unwrap()
+        .strip_taken(&root, &[other()], &[], true, &denies)
+        .unwrap();
+
+    let named = |path: &Path, kind: u8, sid: &str| {
+        entries(path)
+            .iter()
+            .any(|e| e.0 == kind && e.3.as_str() == sid)
+    };
+    assert!(
+        !named(&shut, DENIED, me.as_str()),
+        "the deny of the lawyer goes"
+    );
+    assert!(
+        !named(&shut, DENIED, "S-1-1-0"),
+        "the deny of Everyone goes"
+    );
+    assert!(
+        !named(&owner_rights, DENIED, "S-1-3-4"),
+        "OWNER RIGHTS' goes"
+    );
+    for stays in [OTHER, "S-1-5-32-545", group] {
+        assert!(named(&shut, DENIED, stays), "{stays}'s deny stays");
+    }
+    assert!(
+        !named(&shut, ALLOWED, OTHER),
+        "another pool user's allow goes"
+    );
+    assert!(
+        named(&shut, ALLOWED, me.as_str()),
+        "the lawyer's allow stays"
+    );
+    for left_alone in [&mine, &root] {
+        assert!(
+            named(left_alone, DENIED, "S-1-1-0"),
+            "not taken: {} keeps its deny",
+            left_alone.display()
+        );
     }
 }
 
@@ -50,7 +146,8 @@ fn a_taken_root_keeps_the_matters_own_modify_and_loses_another_users_allow() {
         .unwrap();
     auto_inherit_with(&child, &format!("D:(A;;FA;;;{OTHER})")).unwrap();
 
-    acl.strip_taken(&root, &[other()], &[], false).unwrap();
+    acl.strip_taken(&root, &[other()], &[], false, &DenyStrip::default())
+        .unwrap();
 
     assert!(has(&root, USER_SID, false), "the matter's own Modify stays");
     assert!(!has(&root, OTHER, false));
@@ -74,8 +171,14 @@ fn an_allow_the_ledger_lists_as_ours_stays() {
     let keep = [(link.clone(), other())];
 
     let mut acl = NtfsAcl::new().unwrap();
-    acl.strip_taken(&place.at("state"), &[other()], &keep, true)
-        .unwrap();
+    acl.strip_taken(
+        &place.at("state"),
+        &[other()],
+        &keep,
+        true,
+        &DenyStrip::default(),
+    )
+    .unwrap();
 
     assert!(has(&link, OTHER, false), "ours stays");
     assert!(!has(&stray, OTHER, false));
@@ -97,6 +200,7 @@ fn an_item_the_lawyer_doesnt_own_is_left_alone() {
             &[Sid::parse(USER_SID).unwrap()],
             &[],
             true,
+            &DenyStrip::default(),
         )
         .unwrap();
 
@@ -128,9 +232,16 @@ fn a_shut_item_of_pool_entries_alone_inherits_and_a_colleagues_keeps_its_protect
     acl.add(&modify).unwrap();
     acl.add(&deny).unwrap();
 
-    acl.strip_taken(&place.at("matter"), &[other()], &[], true)
+    acl.strip_taken(
+        &place.at("matter"),
+        &[other()],
+        &[],
+        true,
+        &DenyStrip::default(),
+    )
+    .unwrap();
+    acl.strip_taken(&shared, &[other()], &[], false, &DenyStrip::default())
         .unwrap();
-    acl.strip_taken(&shared, &[other()], &[], false).unwrap();
 
     assert!(!protected(&shut), "it inherits again");
     assert!(!has(&shut, OTHER, false));
@@ -175,7 +286,9 @@ fn a_shut_folder_inherits_and_then_its_contents_are_handed_back() {
     acl.add(&modify).unwrap();
     acl.add(&deny).unwrap();
 
-    let walked = acl.strip_taken(&matter, &[other()], &[], true).unwrap();
+    let walked = acl
+        .strip_taken(&matter, &[other()], &[], true, &DenyStrip::default())
+        .unwrap();
 
     assert_eq!(walked.repaired, 2, "{walked:?}");
     for item in [&work, &inner] {
