@@ -61,6 +61,7 @@ pub mod acl_plan;
 pub mod admin_copy;
 pub mod admit;
 pub mod apply;
+pub mod ca_bundle;
 pub mod clean_close;
 #[cfg(windows)]
 mod detect;
@@ -93,6 +94,9 @@ pub mod sids;
 mod test_acl;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_dacl;
+#[cfg(test)]
+#[cfg(windows)]
+mod test_pool;
 pub mod token;
 // The host's data folder fence tests make junctions too (`test-support`).
 #[cfg(all(windows, any(test, feature = "test-support")))]
