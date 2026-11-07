@@ -78,8 +78,8 @@ mod walk;
 mod windows_refresher;
 
 pub use rules::{
-    ADMIN_COPY_SDDL, EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, hex, inside_profile, same_path,
-    sddl_matches, task_sddl,
+    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, hex, inside_profile, same_path, sddl_matches,
+    task_sddl,
 };
 #[cfg(windows)]
 pub use task::{

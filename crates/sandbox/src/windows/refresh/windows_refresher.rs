@@ -25,28 +25,21 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::read_capped;
 use super::{
-    ADMIN_COPY_SDDL, EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher,
-    STAGING_SDDL, SourceError, SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
+    EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
+    SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
 };
+use crate::windows::admin_copy::{self, LOCKED_FILE_SDDL};
+pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::record::read_string;
+use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::owner::this_process;
-use crate::windows::setup::profile::profile_of;
+use crate::windows::setup::record_values::{
+    ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, OWNER_SID, USER_INSTALL_DIR,
+};
 use crate::windows::sids::Sid;
 
 /// The record's key under `HKLM`.
 const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
-/// The record's owner (set-up writes it).
-const OWNER_SID: &str = "OwnerSid";
-/// The record's value naming the per-user install folder (PR 2's `--adopt` writes it).
-pub(crate) const USER_INSTALL_DIR: &str = "UserInstallDir";
-/// The record's value holding the admin copy's SHA-256 (PR 2's `--adopt` writes it first).
-pub(crate) const ADMIN_COPY_SHA256: &str = "AdminCopySha256";
-/// The record's value holding the admin copy's file version (PR 2's `--adopt` writes it first).
-pub(crate) const ADMIN_COPY_VERSION: &str = "AdminCopyVersion";
-/// The setup exe's file name, in the user folder and as the admin copy.
-pub(crate) const EXE_NAME: &str = "clauseo-sandbox-setup.exe";
-/// Its signature's file name.
-pub(crate) const SIG_NAME: &str = "clauseo-sandbox-setup.exe.sig";
 /// The staged copy's name in staging.
 pub(super) const STAGED_NAME: &str = "clauseo-sandbox-setup.exe.new";
 /// The set-aside copy's name in staging.
@@ -94,7 +87,7 @@ impl WindowsRefresher {
 
     /// `<sandbox>\staging`.
     fn staging(&self) -> Result<PathBuf, Failed> {
-        self.at("staging")
+        self.at(admin_copy::STAGING)
     }
 
     /// `<sandbox>\staging\<name>`.
@@ -105,7 +98,7 @@ impl WindowsRefresher {
 
 /// `<FOLDERID_ProgramFiles>\Clauseo\Sandbox`: where the admin copy and staging live.
 pub(crate) fn sandbox_dir() -> Result<PathBuf, Failed> {
-    Ok(program_files()?.join("Clauseo").join("Sandbox"))
+    Ok(admin_copy::admin_dir(&program_files()?))
 }
 
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment.
@@ -156,11 +149,8 @@ impl Refresher for WindowsRefresher {
     }
 
     fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed> {
-        let profile = profile_of(owner).map_err(|error| format!("the owner's profile: {error}"))?;
         // A temporary profile isn't the owner's own folder: none, so the refresh refuses.
-        Ok(profile
-            .filter(|profile| !profile.temporary)
-            .map(|profile| profile.path))
+        own_profile(owner).map_err(|error| format!("the owner's profile: {error}"))
     }
 
     fn clear_leftovers(&mut self) -> Result<(), Failed> {
@@ -187,8 +177,10 @@ impl Refresher for WindowsRefresher {
         }
     }
 
+    /// The descriptor `--adopt` gives the admin copy, so a refresh changes no access and the
+    /// launcher's exact check (`admin_copy::locked`) still passes.
     fn secure_staged(&mut self) -> Result<(), Failed> {
-        staging::secure_file(&self.staged(STAGED_NAME)?, ADMIN_COPY_SDDL)
+        staging::secure_file(&self.staged(STAGED_NAME)?, LOCKED_FILE_SDDL)
     }
 
     fn set_aside_admin_copy(&mut self) -> Result<(), Failed> {

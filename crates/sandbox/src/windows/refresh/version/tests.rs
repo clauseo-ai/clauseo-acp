@@ -1,6 +1,8 @@
 //! Version reading and ordering: semver precedence, the `X.Y.Z.0` form, and the signed
 //! version against the exe's `FILEVERSION`.
 
+use std::cmp::Ordering;
+
 use super::*;
 
 #[test]
