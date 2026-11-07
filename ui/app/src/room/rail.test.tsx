@@ -5,6 +5,7 @@
 // permission, and U12's paused rail.
 // @vitest-environment happy-dom
 import { act } from "react";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
@@ -351,7 +352,7 @@ test("without a NextHost a row's menu is Show in Finder alone, and it reveals th
   expect(transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: A.matter } }]);
 });
 
-test("a refused Show in Finder only goes to the console; the rail stays as it was", async () => {
+test("a refused Show in Finder says why on its row's note line and in the console; the list stays", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const transport = await mount({
     ...today([A, B]),
@@ -365,6 +366,9 @@ test("a refused Show in Finder only goes to the console; the rail stays as it wa
   expect(transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: A.matter } }]);
   expect(warn).toHaveBeenCalledWith(expect.stringContaining("reveal failed"));
   expect(names()).toEqual(before);
+  expect(rowOf(A.name)?.querySelector(".room-matter-note")?.textContent).toBe(
+    errorWords("en", "matter.folder_missing"),
+  );
   warn.mockRestore();
 });
 

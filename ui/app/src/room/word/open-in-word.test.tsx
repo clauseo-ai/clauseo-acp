@@ -1,11 +1,12 @@
-// @vitest-environment happy-dom
-// "Open in Word" over FakeTransport: a .doc or .docx the wall lists opens through open_file with its file ref, from its
-// tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
-// a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
-// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
-// only in the console for a tile, but for a path too long for Word, which says why under the tiles too, with Show in
-// folder beside it, revealing the matter's folder. An open Word started in Protected View says so in a quiet line
-// under the note, until the next open or Undo, and under the tiles, until the next press of a tile.
+// @vitest-environment happy-dom "Open in Word" over FakeTransport: a .doc or .docx the wall lists
+// opens through open_file with its file ref, from its tile (a press, Enter or Space, with the hint
+// on hover and keyboard focus and the label for screen readers) and from a change note naming it
+// while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
+// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why
+// under the note and under the tiles, by its code; a path too long for Word with Show in folder
+// beside it, revealing the matter's folder. An open Word started in Protected View says so in a
+// quiet line under the note, until the next open or Undo, and under the tiles, until the next press
+// of a tile.
 import { IconFileGeneric, IconFilePdf, IconFileWord } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
@@ -175,7 +176,7 @@ test("Enter and Space on a focused Word tile open it: the face is a native butto
   expect(opened()).toEqual([uuid(1, 8)]);
 });
 
-test("a declined open says nothing; a failed one goes only to the console", async () => {
+test("a declined open says nothing; a failed one says why under the tiles", async () => {
   h = await withPapers();
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   h.transport.host.openFile = () => {
@@ -190,7 +191,8 @@ test("a declined open says nothing; a failed one goes only to the console", asyn
   await h.click(faceOf("Reply.docx"));
   await h.settle();
   expect(warn).toHaveBeenCalledTimes(1);
-  expect(h.host.querySelector('[role="alert"]')).toBeNull();
+  expect(wallLine("wall-error")?.dataset["code"]).toBe("internal");
+  expect(wallLine("wall-error")?.getAttribute("role")).toBe("alert");
   expect(opened()).toHaveLength(2);
 });
 
@@ -392,16 +394,23 @@ test("a tile's open of a path too long for Word says why under the tiles, and Sh
   expect(wallLine("reveal")).toBeNull();
 });
 
-test("a tile's other failures say nothing under the tiles", async () => {
-  h = await withPapers();
-  vi.spyOn(console, "warn").mockImplementation(() => {});
-  h.transport.host.openFile = () => {
-    throw { code: "internal", message: "for logs", retryable: false };
-  };
-  await openFromTile();
-  expect(wallLine("wall-error")).toBeNull();
-  expect(wallLine("reveal")).toBeNull();
-});
+for (const code of ["internal", "command.conflict", "matter.folder_missing", "some.newer_code"])
+  test(`a tile's other failures say why under the tiles, by their code, without Show in folder: ${code}`, async () => {
+    h = await withPapers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.transport.host.openFile = () => {
+      throw { code, message: "for logs", retryable: false };
+    };
+    await openFromTile();
+    expect(wallLine("wall-error")?.dataset["code"]).toBe(code);
+    // an unknown code says the generic words
+    expect(wallLine("wall-error")?.textContent).toBe(errorWords("en", code));
+    expect(wallLine("reveal")).toBeNull();
+    // the next press that opens clears it
+    h.transport.host.openFile = () => {};
+    await openFromTile();
+    expect(wallLine("wall-error")).toBeNull();
+  });
 
 test("the note's error line for a path too long for Word has Show in folder, which reveals the matter's folder", async () => {
   h = await withPapers();

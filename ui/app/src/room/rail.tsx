@@ -20,6 +20,7 @@ import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conv
 import { RailSwitch } from "@clauseo/components/clauseo/rail-switch.tsx";
 import { RailRecent } from "@clauseo/components/clauseo/rail-recent.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -29,6 +30,7 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
+import { locatable } from "./act-refusals.ts";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
 import type { TriageStatus } from "./triage.ts";
@@ -157,6 +159,8 @@ export function RoomRail({
 }) {
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
+  const { refusals } = matters;
+  const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
   const zone = view.zone;
   // the last moment the pointer came or went, or the window came back
   const [stamp, setStamp] = useRailClock(transport, zone);
@@ -205,10 +209,15 @@ export function RoomRail({
             m.next_date,
           )
         : null;
+    // a refused Show in Finder says why on the row's note line until the next try (act-refusals.ts)
+    const said = refused.get(m.matter);
+    const revealed = said?.act === "reveal" ? said.code : null;
+    const findFolder = m.folder_state === "missing" || locatable(revealed);
     return {
       id: m.matter,
       name: m.name,
-      note: "",
+      note: revealed === null ? "" : errorWords(w.lang, revealed),
+      locateAsked: locatable(revealed),
       hint:
         m.folder_display === undefined || m.folder_display === "" ? "" : isolate(m.folder_display),
       current,
@@ -254,9 +263,7 @@ export function RoomRail({
             pinned: m.pinned,
             onPin: (pinned: boolean) => void matters.pin(m.matter, pinned),
             onRemove: () => void matters.forget(m.matter),
-            ...(m.folder_state === "missing"
-              ? { onLocate: () => void matters.locate(m.matter) }
-              : {}),
+            ...(findFolder ? { onLocate: () => void matters.locate(m.matter) } : {}),
           }
         : {}),
     };

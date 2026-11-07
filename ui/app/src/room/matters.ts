@@ -11,7 +11,7 @@ import { frameBatch, type Batch } from "../store/batch.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
-import { quietly } from "./open.ts";
+import { ActRefusals } from "./act-refusals.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
@@ -168,6 +168,8 @@ export class Matters {
   readonly #removedEarly = new Set<MatterId>();
   readonly #changedEarly = new Map<MatterId, MatterInfo>();
   readonly #listeners = new Set<() => void>();
+  /** What the lawyer's last open or show on each matter was refused with (act-refusals.ts). */
+  readonly refusals = new ActRefusals();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
    * matters still working. */
@@ -327,12 +329,14 @@ export class Matters {
   ): Promise<void> {
     const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
+    this.refusals.clear(matter);
     await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
   }
 
-  /** H11: shows the matter's folder in Finder or File Explorer; a refusal only goes to the console. */
+  /** H11: shows the matter's folder in Finder or File Explorer; a refusal stands in `refusals`
+   * until the next try. */
   reveal(matter: MatterId): Promise<void> {
-    return quietly("reveal", this.#transport.reveal({ matter }));
+    return this.refusals.track("reveal", matter, this.#transport.reveal({ matter }));
   }
 
   /** H20: where a new matter's folder goes, as the lawyer would write it; null without it, or when the read fails. */
