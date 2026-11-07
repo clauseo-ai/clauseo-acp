@@ -395,12 +395,13 @@ pub(crate) async fn open_file<R: Runtime>(
     gates: State<'_, OpenGates>,
     file: FileRefId,
 ) -> Result<OpenedFile, HostError> {
-    let opener = NativeOpener::new(app);
+    let opener = std::sync::Arc::new(NativeOpener::new(app));
     crate::open::open_file(
         bridge.host().await?,
         &opener,
         &gates.files,
         &crate::open::now,
+        crate::open::FOLDER_WAIT,
         file,
     )
     .await
@@ -417,8 +418,9 @@ pub(crate) async fn reveal<R: Runtime>(
 ) -> Result<(), HostError> {
     crate::open::reveal(
         bridge.host().await?,
-        &NativeOpener::new(app),
+        &std::sync::Arc::new(NativeOpener::new(app)),
         &app_data.0,
+        crate::open::FOLDER_WAIT,
         target,
     )
     .await

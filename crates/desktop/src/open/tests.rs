@@ -3,7 +3,7 @@
 //! the confirm's words are in `links.rs`; the files and folders here.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, Language, MatterId};
@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::*;
 use crate::test_support::Scratch;
 
+mod bounded;
 mod links;
 mod word;
 
@@ -84,12 +85,25 @@ impl LinkConfirm for FakeConfirm {
     }
 }
 
-/// A host that knows one file ref and one matter, and the code its marker check refuses that
-/// matter's folder with (`None`: it passes).
+/// A host that knows one file ref and one matter, and its marker check.
 struct FakeHost {
     file: FileRefId,
     located: LocatedFile,
-    marker: Option<ErrorCode>,
+    check: MarkerCheck,
+}
+
+impl FakeHost {
+    /// A marker check that asks only about this host's matter and folder, and answers `refused`
+    /// (`None`: it passes).
+    fn refusing(&mut self, refused: Option<ErrorCode>) {
+        let (folder, matter) = (self.located.folder.clone(), self.located.matter);
+        self.check = Arc::new(move |asked: &Path, asked_matter| {
+            assert_eq!((asked, asked_matter), (folder.as_path(), matter));
+            refused.map_or(Ok(()), |code| {
+                Err(HostError::new(code, "the marker check refused"))
+            })
+        });
+    }
 }
 
 impl Locate for FakeHost {
@@ -115,14 +129,8 @@ impl Locate for FakeHost {
         };
         Box::pin(async move { answer })
     }
-    fn check_marker(&self, folder: &Path, matter: MatterId) -> Result<(), HostError> {
-        assert_eq!(
-            (folder, matter),
-            (self.located.folder.as_path(), self.located.matter)
-        );
-        self.marker.map_or(Ok(()), |code| {
-            Err(HostError::new(code, "the marker check refused"))
-        })
+    fn marker_check(&self) -> MarkerCheck {
+        Arc::clone(&self.check)
     }
 }
 
@@ -137,15 +145,17 @@ fn matter_id() -> MatterId {
 /// A host whose one ref names `path` in the matter whose folder is `folder`, a folder whose
 /// marker check passes.
 fn host(folder: &Path, path: &Path) -> FakeHost {
-    FakeHost {
+    let mut host = FakeHost {
         file: file_ref(),
-        marker: None,
+        check: Arc::new(|_: &Path, _| Ok(())),
         located: LocatedFile {
             matter: matter_id(),
             folder: folder.to_path_buf(),
             path: path.to_path_buf(),
         },
-    }
+    };
+    host.refusing(None);
+    host
 }
 
 /// A clock the test moves by hand.
@@ -185,10 +195,15 @@ fn external(
 }
 
 /// `open_file` through a fresh gate.
-fn file(host: &FakeHost, opener: &dyn Opener, file: FileRefId) -> Result<OpenedFile, HostError> {
+fn file(
+    host: &FakeHost,
+    opener: &Arc<FakeOpener>,
+    file: FileRefId,
+) -> Result<OpenedFile, HostError> {
     let clock = Clock::new();
     let gate = gate::Gate::default();
-    block_on(open_file(host, opener, &gate, &|| clock.now(), file))
+    let now = || clock.now();
+    block_on(open_file(host, opener, &gate, &now, FOLDER_WAIT, file))
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -217,7 +232,7 @@ fn a_document_in_its_matter_opens_by_its_resolved_path() {
         &folder,
         &folder.join("Drafts").join("..").join("Drafts/Brief.docx"),
     );
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
@@ -233,7 +248,7 @@ fn an_unknown_ref_opens_nothing() {
     let scratch = Scratch::new("open-unknown", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let refused = file(&host, &opener, file_ref());
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(opener.opened(), []);
@@ -243,7 +258,7 @@ fn an_unknown_ref_opens_nothing() {
 fn a_file_outside_its_matter_is_refused() {
     let scratch = Scratch::new("open-outside", &[]);
     let (folder, _, outside) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     for path in [outside.as_path(), &folder.join("..").join("Outside.docx")] {
         let host = host(&folder, path);
         let refused = file(&host, &opener, host.file);
@@ -281,7 +296,7 @@ fn a_document_in_a_nested_folder_of_its_matter_opens_plain() {
     );
     assert_eq!(document.kind, "docx");
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
@@ -297,7 +312,7 @@ fn a_sibling_whose_name_starts_with_the_folders_is_refused() {
     let folder = scratch.dir("Acme");
     scratch.dir("Acme2");
     let sibling = scratch.file("Acme2/Brief.docx", b"PK");
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let host = host(&folder, &sibling);
     let refused = file(&host, &opener, host.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
@@ -342,7 +357,7 @@ fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
         document.path.display()
     );
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
@@ -365,7 +380,7 @@ fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
 fn only_document_files_open() {
     let scratch = Scratch::new("open-types", &[]);
     let (folder, _, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     // A folder, and a folder named like an app bundle.
     scratch.dir("Acme/Tool.app/Contents");
     let mut refused = vec![folder.join("Drafts"), folder.join("Tool.app")];
@@ -413,7 +428,7 @@ fn a_file_marked_as_a_program_is_refused() {
     let (folder, brief, _) = matter_folder(&scratch);
     scratch.executable("Acme/Drafts/Brief.docx");
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let refused = file(&host, &opener, host.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(opener.opened(), []);
@@ -425,10 +440,19 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
     let scratch = Scratch::new("open-gate", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let clock = Clock::new();
     let gate = gate::Gate::default();
-    let run = || block_on(open_file(&host, &opener, &gate, &|| clock.now(), host.file));
+    let run = || {
+        block_on(open_file(
+            &host,
+            &opener,
+            &gate,
+            &|| clock.now(),
+            FOLDER_WAIT,
+            host.file,
+        ))
+    };
     let pass = gate.enter(clock.now()).unwrap();
     assert_eq!(code(run()), ErrorCode::CommandConflict);
     drop(pass);
@@ -438,6 +462,7 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
         &opener,
         &gate,
         &|| clock.now(),
+        FOLDER_WAIT,
         file_ref(),
     ));
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
@@ -453,7 +478,7 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
 fn a_missing_file_or_folder_opens_nothing() {
     let scratch = Scratch::new("open-missing", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let gone = host(&folder, &folder.join("Gone.docx"));
     let refused = file(&gone, &opener, gone.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
@@ -470,15 +495,23 @@ fn reveal_shows_a_matters_folder_or_the_app_data_folder() {
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
     let app_data = scratch.path().join("data");
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     block_on(reveal(
         &host,
         &opener,
         &app_data,
+        FOLDER_WAIT,
         RevealTarget::Matter(host.located.matter),
     ))
     .unwrap();
-    block_on(reveal(&host, &opener, &app_data, RevealTarget::AppData)).unwrap();
+    block_on(reveal(
+        &host,
+        &opener,
+        &app_data,
+        FOLDER_WAIT,
+        RevealTarget::AppData,
+    ))
+    .unwrap();
     assert_eq!(
         opener.opened(),
         [Opened::Reveal(folder), Opened::Reveal(app_data)]
@@ -489,12 +522,13 @@ fn reveal_shows_a_matters_folder_or_the_app_data_folder() {
 fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
     let scratch = Scratch::new("reveal-refused", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let host_ = host(&folder, &brief);
     let unknown = block_on(reveal(
         &host_,
         &opener,
         scratch.path(),
+        FOLDER_WAIT,
         RevealTarget::Matter(matter_id()),
     ));
     assert_eq!(code(unknown), ErrorCode::CommandUnknownMatter);
@@ -504,6 +538,7 @@ fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
         &moved,
         &opener,
         scratch.path(),
+        FOLDER_WAIT,
         RevealTarget::Matter(moved.located.matter),
     ));
     assert_eq!(code(missing), ErrorCode::MatterFolderMissing);
@@ -519,20 +554,20 @@ fn the_marker_check_refuses_a_reveal_and_an_open() {
     let scratch = Scratch::new("reveal-not-a-matter", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let mut host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let matter = RevealTarget::Matter(host.located.matter);
     for refused_with in [
         ErrorCode::MatterFolderNotAMatter,
         ErrorCode::MatterFolderMissing,
     ] {
-        host.marker = Some(refused_with);
-        let refused = block_on(reveal(&host, &opener, scratch.path(), matter));
+        host.refusing(Some(refused_with));
+        let refused = block_on(reveal(&host, &opener, scratch.path(), FOLDER_WAIT, matter));
         assert_eq!(code(refused), refused_with);
         assert_eq!(code(file(&host, &opener, host.file)), refused_with);
     }
     assert_eq!(opener.opened(), []);
-    host.marker = None;
-    block_on(reveal(&host, &opener, scratch.path(), matter)).unwrap();
+    host.refusing(None);
+    block_on(reveal(&host, &opener, scratch.path(), FOLDER_WAIT, matter)).unwrap();
     file(&host, &opener, host.file).unwrap();
     assert_eq!(opener.opened().len(), 2);
 }

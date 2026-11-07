@@ -4,6 +4,7 @@
 //! has no permission for either plugin.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clauseo_host::HostHandle;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId, Principal};
@@ -131,7 +132,7 @@ impl Locate for HostHandle {
         ))
     }
 
-    fn check_marker(&self, folder: &Path, matter: MatterId) -> Result<(), HostError> {
-        clauseo_host::check_matter_folder(folder, matter)
+    fn marker_check(&self) -> super::MarkerCheck {
+        Arc::new(clauseo_host::check_matter_folder)
     }
 }
