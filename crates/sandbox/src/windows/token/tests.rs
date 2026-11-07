@@ -20,30 +20,26 @@ fn the_spec_is_design_b() {
     assert_eq!(spec.integrity.as_str(), "S-1-16-4096");
     assert_eq!(
         spec.default_dacl,
-        format!(
-            "D:(D;;0xc0000;;;{POOL})(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})\
-             (A;;RC;;;OW)"
-        )
+        format!("D:(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})")
     );
 }
 
 #[test]
-fn what_the_agent_makes_it_cant_rewrite_the_dacl_of() {
-    // Its processes, and its children's with no descriptor of their own, can't be shut to the
-    // sweep: WRITE_DAC and WRITE_OWNER are denied to the pool user before its GENERIC_ALL, and
-    // OWNER RIGHTS, held to READ_CONTROL, takes away the owner's implied WRITE_DAC (which passes
-    // by deny entries).
+fn the_default_dacl_denies_the_pool_user_nothing() {
+    // A console process with no console makes \Device\ConDrv\Server with GENERIC_ALL under this
+    // DACL: a deny entry, or an OWNER RIGHTS entry, ends every agent at start with
+    // STATUS_DLL_INIT_FAILED (0xC0000142).
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
-    assert_eq!(OWNER_WRITES, 0x0004_0000 | 0x0008_0000);
+    assert!(!spec.default_dacl.contains("(D;"), "{}", spec.default_dacl);
     assert!(
-        spec.default_dacl
-            .starts_with(&format!("D:(D;;0x{OWNER_WRITES:x};;;{POOL})")),
-        "the deny comes first: {}",
+        !spec.default_dacl.contains(";;;OW)"),
+        "{}",
         spec.default_dacl
     );
-    assert!(spec.default_dacl.ends_with("(A;;RC;;;OW)"));
-    assert_eq!(spec.default_dacl.matches(";;;OW)").count(), 1);
-    assert!(!spec.default_dacl.contains("WD;;;OW") && !spec.default_dacl.contains("GA;;;OW"));
+    assert!(
+        spec.default_dacl
+            .starts_with(&format!("D:(A;;GA;;;{POOL})"))
+    );
 }
 
 #[test]

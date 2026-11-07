@@ -44,11 +44,12 @@ build 26100):
     notes folders, the Claude store and the credential link, so the token writes nothing labelled
     higher;
   - a narrow default DACL: the pool user and `SYSTEM` with full access, and the desktop user with
-    `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE` only. The pool user is
-    denied `WRITE_DAC` and `WRITE_OWNER` ahead of its full access, and `OWNER RIGHTS` is held to
-    `READ_CONTROL` (an owner's implied `WRITE_DAC` passes by deny entries; an `OWNER RIGHTS`
-    entry takes it away), so the agent's processes, and those it starts with no descriptor of
-    their own, can't rewrite their DACL to shut the sweep out (M1, below);
+    `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE` only. Nothing is denied
+    to the pool user: the agent starts `CREATE_NO_WINDOW`, so `kernelbase` makes its console's
+    `\Device\ConDrv\Server` with `GENERIC_ALL` under this DACL, and a deny of `WRITE_DAC` and
+    `WRITE_OWNER` (tried in the S15 PR5 review round) ended every agent at start with
+    `STATUS_DLL_INIT_FAILED`. Such a deny held nothing back anyway: a process sets its own DACL
+    through its pseudo-handle, whose rights the kernel grants at creation whatever the DACL;
   - a private desktop per runner, labelled Low, and `SetErrorMode` in the runner.
 - **Grants** name the matter's pool user: `Modify` on the matter, state and notes folders and the
   credential link, `ReadAndExecute` on runtime and read paths, `CreateFiles` on the Claude store
@@ -1117,9 +1118,9 @@ leaves that profile, both naming the part.
   implied rights, can't be opened or ended by the pool user, but `WTSEnumerateProcessesW` still
   names it as the pool user's. At the first act it fails the launch closed (`RunExit::Sweep`, no
   agent); at the tick and the end it is logged and tried again. While it lives, every launch for
-  that pool user fails closed. The agent can't make one of its own processes so: its
-  default DACL denies it `WRITE_DAC`; but it can start a child with a descriptor of its own, or
-  a service can start one. The design that closes this is AppContainer, after launch (see
+  that pool user fails closed. The agent can make one of its own processes so (a process sets its
+  own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
+  or one a service starts; only one outside the job outlives the session. The design that closes this is AppContainer, after launch (see
   "Rejected: AppContainer (spike A)" for what blocks it today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
