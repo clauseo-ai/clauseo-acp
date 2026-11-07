@@ -80,6 +80,9 @@ mod win_desk;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_thread.rs"]
+mod win_thread;
 
 #[cfg(windows)]
 mod harness {

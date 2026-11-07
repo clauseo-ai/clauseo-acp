@@ -58,17 +58,33 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(once(0)).collect()
 }
 
-/// `call` failed: its name and the last error.
-fn failed(call: &str) -> String {
+/// A call that failed: its name and `GetLastError` right after it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Failed {
+    /// The call's name (`OpenClipboard`, `EmptyClipboard`, `SetClipboardData`, …).
+    pub(crate) call: &'static str,
+    /// `GetLastError` right after it.
+    pub(crate) code: u32,
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} failed ({})", self.call, self.code)
+    }
+}
+
+/// `call` just failed.
+fn failed(call: &'static str) -> Failed {
     // SAFETY: plain call.
-    format!("{call} failed ({})", unsafe { GetLastError() })
+    let code = unsafe { GetLastError() };
+    Failed { call, code }
 }
 
 /// A message-only window, the clipboard's owner while it is written; destroyed on drop.
 struct Window(*mut c_void);
 
 impl Window {
-    fn new() -> Result<Window, String> {
+    fn new() -> Result<Window, Failed> {
         let class = wide("STATIC");
         let name = wide("");
         // SAFETY: both strings are NUL-terminated and outlive the call; a message-only window
@@ -107,7 +123,7 @@ impl Drop for Window {
 struct Open;
 
 impl Open {
-    fn new(owner: *mut c_void) -> Result<Open, String> {
+    fn new(owner: *mut c_void) -> Result<Open, Failed> {
         // SAFETY: `owner` is null or this thread's live window.
         if unsafe { OpenClipboard(owner) } == 0 {
             return Err(failed("OpenClipboard"));
@@ -125,16 +141,16 @@ impl Drop for Open {
 
 /// The clipboard's text.
 pub(crate) fn read_text() -> Result<String, String> {
-    let _open = Open::new(null_mut())?;
+    let _open = Open::new(null_mut()).map_err(|f| f.to_string())?;
     // SAFETY: the clipboard is open.
     let memory = unsafe { GetClipboardData(CF_UNICODETEXT) };
     if memory.is_null() {
-        return Err(failed("GetClipboardData(CF_UNICODETEXT)"));
+        return Err(failed("GetClipboardData(CF_UNICODETEXT)").to_string());
     }
     // SAFETY: the clipboard's handle is a global memory block while the clipboard is open.
     let locked = unsafe { GlobalLock(memory) }.cast::<u16>();
     if locked.is_null() {
-        return Err(failed("GlobalLock"));
+        return Err(failed("GlobalLock").to_string());
     }
     let mut units = Vec::new();
     // SAFETY: CF_UNICODETEXT is NUL-terminated; read up to the NUL (capped at 1 MiB units).
@@ -153,6 +169,13 @@ pub(crate) fn read_text() -> Result<String, String> {
 
 /// Replaces the clipboard's contents with `text`.
 pub(crate) fn write_text(text: &str) -> Result<(), String> {
+    write_failed(text).map_err(|f| f.to_string())
+}
+
+/// [`write_text`], with the call that failed and its exact code: `CreateWindowExW` (the owner
+/// window), `OpenClipboard`, `EmptyClipboard`, `GlobalAlloc`, `GlobalLock` or
+/// `SetClipboardData`.
+pub(crate) fn write_failed(text: &str) -> Result<(), Failed> {
     let window = Window::new()?;
     let _open = Open::new(window.0)?;
     // SAFETY: the clipboard is open with an owner window.
@@ -178,7 +201,7 @@ pub(crate) fn write_text(text: &str) -> Result<(), String> {
     }
     // SAFETY: the clipboard is open and emptied by this owner; on success it owns `memory`.
     if unsafe { SetClipboardData(CF_UNICODETEXT, memory) }.is_null() {
-        let why = failed("SetClipboardData(CF_UNICODETEXT)");
+        let why = failed("SetClipboardData");
         // SAFETY: the clipboard didn't take the block; freed once.
         unsafe { GlobalFree(memory) };
         return Err(why);
@@ -191,7 +214,7 @@ pub(crate) fn add_atom(name: &str) -> Result<u16, String> {
     let name = wide(name);
     // SAFETY: the name is NUL-terminated and outlives the call.
     match unsafe { GlobalAddAtomW(name.as_ptr()) } {
-        0 => Err(failed("GlobalAddAtomW")),
+        0 => Err(failed("GlobalAddAtomW").to_string()),
         atom => Ok(atom),
     }
 }

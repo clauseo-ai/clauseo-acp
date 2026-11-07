@@ -4,9 +4,10 @@
 //! The mock (`mock-responses.mjs`, copied from the MXC spike) runs as the harness user on a
 //! loopback port; `<state A>\codex-home\config.toml` points codex at it; `codex exec` runs
 //! through the runner as A with full access (tier B's choice, D3 (c)). The mock asks for one
-//! shell call that writes `s15-codex.txt` in A's matter. Passes when the file holds
-//! `s15-codex-ok`, its owner is A's pool SID, and the mock's log shows the call's output came
-//! back.
+//! shell call that writes `s15-codex.txt` in A's matter and runs `probe job-ui <atom>` (the
+//! harness's global atom's name, in the command the mock asks for). Passes when the file holds
+//! `s15-codex-ok`, its owner is A's pool SID, the mock's log shows the call's output came back,
+//! and the job-ui lines pass `checks_ui::ui_limits` (the atom lookup is information).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -81,13 +82,13 @@ pub(crate) fn row(ctx: &Ctx<'_>) -> Outcome {
     let (Some(codex), Some(node)) = (&m.codex, &m.node) else {
         return Outcome::Skip("needs --codex and --node at prepare".to_owned());
     };
-    match run(ctx, codex, node) {
+    match super::checks_ui::with_atom(ctx, |atom| run(ctx, codex, node, atom)) {
         Ok(note) => Outcome::Pass(note),
         Err(why) => Outcome::Fail(why),
     }
 }
 
-fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path) -> Result<String, String> {
+fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, String> {
     let m = ctx.manifest;
     let until = deadline(ctx.limit);
     let matter = m.matter("A");
@@ -109,6 +110,7 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path) -> Result<String, String> {
         .arg(format!("matter={}", text(&matter)))
         .arg(format!("log={}", text(&log)))
         .arg(format!("probe={}", text(&m.harness_exe())))
+        .arg(format!("atom={atom}"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -193,12 +195,7 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path) -> Result<String, String> {
     if !came_back {
         return Err("the mock's log shows no request carrying the shell call's output".to_owned());
     }
-    let job_lines: Vec<String> = std::fs::read_to_string(&job_file)
-        .map_err(|e| format!("{} wasn't written ({e})", job_file.display()))?
-        .lines()
-        .map(|l| l.trim().to_owned())
-        .collect();
-    let limits = super::checks_ui::ui_limits(&job_lines)?;
+    let limits = job_ui(ctx, &job_file, atom)?;
     if done.code != 0 {
         return Err(format!(
             "the file is right but codex exited {}",
@@ -210,6 +207,22 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path) -> Result<String, String> {
          shell call: {limits}",
         pool.name
     ))
+}
+
+/// The `probe job-ui <atom>` lines codex's shell call wrote to `job_file`, checked by
+/// `checks_ui::ui_limits`, with the atom lookup noted as information.
+fn job_ui(ctx: &Ctx<'_>, job_file: &Path, atom: &str) -> Result<String, String> {
+    let lines: Vec<String> = std::fs::read_to_string(job_file)
+        .map_err(|e| format!("{} wasn't written ({e})", job_file.display()))?
+        .lines()
+        .map(|l| l.trim().to_owned())
+        .collect();
+    for line in &lines {
+        ctx.note(&format!("job-ui: {line}"));
+    }
+    let limits = super::checks_ui::ui_limits(ctx, &lines)?;
+    super::checks_ui::atom_info(ctx, &lines, atom);
+    Ok(limits)
 }
 
 /// The port in the mock's `listening` line.
