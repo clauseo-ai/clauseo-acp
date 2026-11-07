@@ -349,3 +349,32 @@ fn owner_rights_and_a_deny_object_entry_go_on_a_taken_item_and_nothing_listed_ke
         "not taken: its denies stay"
     );
 }
+
+/// What `--reclaim` writes before the owner: every `OWNER RIGHTS` entry goes (deny and allow,
+/// explicit and marked inherited, plain and object), and everything else stays byte for byte, in
+/// its order, with the DACL's revision and control bits. None when there is none.
+#[test]
+fn the_exe_takes_off_only_owner_rights_entries_and_leaves_every_other_byte() {
+    let everyone = ace(DENIED, 0, 0x001f_01ff, "S-1-1-0");
+    let ow_deny = ace(DENIED, 0, WO, "S-1-3-4");
+    let pool = spec(HB_OTHER, Rights::Modify).bytes();
+    let ow_allow = ace(ALLOWED, INHERITED, 0x0012_0089, "S-1-3-4");
+    let ow_object = denied_object(WO, "S-1-3-4");
+    let lawyer = inherited(HB_ME, Rights::Modify);
+    let all: [&[u8]; 6] = [&everyone, &ow_deny, &pool, &ow_allow, &ow_object, &lawyer];
+    for control in [DACL_PROTECTED, DACL_AUTO_INHERITED] {
+        let before = with_control(HB_OTHER, &all, control);
+
+        let after = without_owner_rights(&before).unwrap().unwrap();
+
+        let read = Descriptor::parse(&after).unwrap();
+        let want: [&[u8]; 3] = [&everyone, &pool, &lawyer];
+        assert_eq!(read.dacl, Some(render(2, &want).as_slice()));
+        let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
+        let was = Descriptor::parse(&before).unwrap().control & bits;
+        assert_eq!(read.control & bits, was);
+        assert_eq!(owner_bytes(&after), None, "the DACL alone is written");
+    }
+    let clean = with_control(HB_OTHER, &[&everyone, &pool], DACL_PROTECTED);
+    assert_eq!(without_owner_rights(&clean).unwrap(), None);
+}

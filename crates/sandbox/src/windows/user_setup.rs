@@ -78,7 +78,8 @@ impl UserSetup {
 
     /// The elevated clean-up (D-B10, S15 `PR4i`): one prompt. `--reclaim` makes this user the
     /// owner of what a sandbox user owns and this user can't hand back, in the trees the ledger
-    /// owes a clean-up (`reclaim::targets`), and changes nothing else; then, unelevated, the
+    /// owes a clean-up (`reclaim::targets`), taking their `OWNER RIGHTS` entries off first, and
+    /// changes nothing else; then, unelevated, the
     /// same trees are handed back (`reclaim::hand_back_after`), which cleans what was taken of
     /// its old owner's entries, and the items the exe reports taken of the denies an agent left
     /// of this user. The app then retries each owed `forget_matter` first, then

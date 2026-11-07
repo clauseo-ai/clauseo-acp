@@ -22,6 +22,8 @@ use super::writer::Label;
 pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
 #[cfg(test)]
 pub(crate) use steps::bare;
+#[cfg(any(windows, test))]
+pub(crate) use steps::without_owner_rights;
 pub(crate) use steps::{TakenWrite, Write, handed_back, lacking, stripped, taken_write, writes};
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.

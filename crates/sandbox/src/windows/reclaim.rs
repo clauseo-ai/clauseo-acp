@@ -8,7 +8,9 @@
 //! [`ApplyFailure::PoolOwned`](super::writer::ApplyFailure::PoolOwned) (the lawyer may not change
 //! its owner), or one refused as `ChildShut` that couldn't set the child aside. `--reclaim`
 //! (elevated, with the owner taken from its verified parent, D-B2) makes the owner the owner of
-//! those items and does nothing else; [`hand_back_targets`], run by the app as the lawyer just
+//! those items, first taking off their `OWNER RIGHTS` entries (which would leave the new owner
+//! without an owner's implied rights), and does nothing else; [`hand_back_targets`], run by the
+//! app as the lawyer just
 //! after, then cleans them as forget's hand-back does, and the app retries the forget or the
 //! launch.
 //!
