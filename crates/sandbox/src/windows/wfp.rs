@@ -57,7 +57,7 @@ pub use grant_probe::{GrantProbe, foreign_test_filter, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
-pub use os_ports::check_ports;
+pub use os_ports::{check_ports, dynamic_port_ranges};
 #[cfg(windows)]
 pub use permit::{check_launch, check_launch_in};
 pub use port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
