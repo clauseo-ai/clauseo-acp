@@ -926,6 +926,17 @@ for `--reclaim`.
     registered there runs in it), the `Run` and `RunOnce` values and the Startup entries, then
     the scheduled tasks and BITS jobs over COM. A sweep that failed, or a widening that did,
     leaves the token shut and skips COM: the tasks and BITS jobs wait for a later end sweeper.
+    A pool user's BITS job can't run: BITS runs a job with its owner's logon token and holds
+    none for a pool user, who logs on only through `CreateProcessWithLogonW` (the harness's
+    `end-cleanup` row checks this: a job that could complete, with a notify command that writes a
+    marker, stays untransferred and writes nothing through a second session). For the same
+    reason the sweeper can't cancel it: `Cancel` fails with `ERROR_NOT_LOGGED_ON` (1245), even
+    with the proxy set to impersonate. Such a job isn't a sweep failure; the sweeper counts it as
+    left for the system stop, logs the count, and exits `RunExit::PoolStop` (`0xE0C15010`) when
+    nothing else failed. The outer logs that exit (`end::needs_pool_stop`), and the session
+    isn't clean, so its marker stays. Any other BITS error is a failure. The `SYSTEM` stop task
+    (PR #668) removes the job; until then it is inert. Once both are merged, the outer asks for
+    that stop when `needs_pool_stop` holds.
     What the sweep spares, a next session's runners and agent started after the sweeper, may be
     alive while the token is widened. Its runners are trusted code of ours, and its agent is Low,
     so a Medium token it opens can't be impersonated past identification, and its token lacks
@@ -1008,7 +1019,9 @@ for `--reclaim`.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task or BITS job stays until
-    an end sweeper runs, and each process it starts lives only until a sweep. The residual cases are a cancel that kills the outer inside the 2 s before the
+    an end sweeper runs (a BITS job until the `SYSTEM` stop, above, and it starts nothing),
+    and each process it starts lives only until a sweep.
+    The residual cases are a cancel that kills the outer inside the 2 s before the
     sweeper's logon completes, and a job that doesn't empty within 400 ms. Then no end sweeper runs, and the cleanup waits for the next
     launch's first act. A task or BITS job that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's

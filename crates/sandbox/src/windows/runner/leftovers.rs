@@ -14,6 +14,12 @@
 //! Each kind is listed, then each item deleted; one kind failing (its list, or an item) is logged
 //! and the rest still run. The log carries counts and OS codes only, never a name or a content.
 //! The calls are behind [`Leftovers`]; Windows' are `os.rs`.
+//!
+//! A BITS job whose `Cancel` fails with [`NOT_LOGGED_ON`] is no failure: it is counted apart,
+//! as left for the system stop ([`Removal::bits_for_stop`]). BITS runs a job with its owner's
+//! logon token, and holds none for a pool user, who logs on only through
+//! `CreateProcessWithLogonW`; even impersonated, `Cancel` gives 1245. Such a job can't run, so
+//! it is inert; the `SYSTEM` stop task removes it (0049). Any other BITS error is a failure.
 
 use std::fmt;
 use std::io;
@@ -68,6 +74,20 @@ impl fmt::Display for Kind {
     }
 }
 
+/// `ERROR_NOT_LOGGED_ON`: what a BITS job's `Cancel` gives when BITS holds no logon token for
+/// its owner.
+pub(crate) const NOT_LOGGED_ON: i32 = 1245;
+
+/// What a removal did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Removal {
+    /// Every kind was listed and every item deleted, but for the BITS jobs left for the stop.
+    pub(crate) clean: bool,
+    /// The BITS jobs whose `Cancel` failed with [`NOT_LOGGED_ON`]: inert, left for the
+    /// `SYSTEM` stop task.
+    pub(crate) bits_for_stop: usize,
+}
+
 /// The calls a removal makes.
 pub(crate) trait Leftovers {
     /// One item found; what it holds is never logged.
@@ -80,14 +100,16 @@ pub(crate) trait Leftovers {
 
 /// Removes the items of each of `kinds`, in order, logging each kind's count, at `who` (the
 /// inner's first act, or the end sweeper). A kind reached over COM is skipped once the classes
-/// weren't all removed. Whether every kind was listed and every item deleted.
+/// weren't all removed. Whether every kind was listed and every item deleted, and the BITS jobs
+/// left for the system stop.
 pub(crate) fn remove_all<L: Leftovers>(
     calls: &mut L,
     kinds: &[Kind],
     who: &str,
     log: &mut dyn FnMut(&str),
-) -> bool {
+) -> Removal {
     let mut clean = true;
+    let mut bits_for_stop = 0;
     let mut classes_left = false;
     for &kind in kinds {
         if kind.over_com() && classes_left {
@@ -98,22 +120,27 @@ pub(crate) fn remove_all<L: Leftovers>(
             clean = false;
             continue;
         }
-        let removed = remove_kind(calls, kind, who, log);
+        let (removed, for_stop) = remove_kind(calls, kind, who, log);
         if kind == Kind::Classes && !removed {
             classes_left = true;
         }
         clean &= removed;
+        bits_for_stop += for_stop;
     }
-    clean
+    Removal {
+        clean,
+        bits_for_stop,
+    }
 }
 
-/// Removes one kind's items; whether it was listed and every item deleted.
+/// Removes one kind's items; whether it was listed and every item deleted but for the BITS jobs
+/// left for the system stop, and their count.
 fn remove_kind<L: Leftovers>(
     calls: &mut L,
     kind: Kind,
     who: &str,
     log: &mut dyn FnMut(&str),
-) -> bool {
+) -> (bool, usize) {
     let items = match calls.list(kind) {
         Ok(items) => items,
         Err(error) => {
@@ -121,21 +148,30 @@ fn remove_kind<L: Leftovers>(
                 "clauseo-sandbox-run: cleanup ({who}): the {kind} can't be listed ({})",
                 code(&error)
             ));
-            return false;
+            return (false, 0);
         }
     };
-    let mut removed = 0usize;
+    let (mut removed, mut for_stop) = (0usize, 0usize);
     let mut failed: Option<(usize, String)> = None;
     for item in &items {
         match calls.delete(kind, item) {
             Ok(()) => removed += 1,
+            Err(error) if kind == Kind::Bits && error.raw_os_error() == Some(NOT_LOGGED_ON) => {
+                for_stop += 1;
+            }
             Err(error) => {
                 let (count, _) = failed.get_or_insert((0, code(&error)));
                 *count += 1;
             }
         }
     }
-    match failed {
+    if for_stop > 0 {
+        log(&format!(
+            "clauseo-sandbox-run: cleanup ({who}): {for_stop} {kind} left for the system stop \
+             ({NOT_LOGGED_ON}): no logon token for them"
+        ));
+    }
+    let clean = match failed {
         None if removed == 0 => true,
         None => {
             log(&format!(
@@ -150,7 +186,8 @@ fn remove_kind<L: Leftovers>(
             ));
             false
         }
-    }
+    };
+    (clean, for_stop)
 }
 
 /// Whether `named`, a task's principal or author as Task Scheduler gives it, is the pool user:

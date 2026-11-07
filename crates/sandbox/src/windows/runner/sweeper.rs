@@ -16,7 +16,9 @@
 //! and BITS jobs (over COM) only when the token was widened, all on its own [`SWEEP_LIMIT`]. The
 //! order is `sweeper_flow.rs`'s. Its stderr gets each kill (pid, image name, sweep point) and each
 //! kind's count, which the outer relays while it lives. It exits 0 when
-//! everything went, [`RunExit::Escapee`] when a process of its user's couldn't be opened or
+//! everything went, [`RunExit::PoolStop`] when everything went but BITS jobs it can't cancel
+//! for want of their owner's logon (1245), left for the `SYSTEM` stop task (`leftovers.rs`),
+//! [`RunExit::Escapee`] when a process of its user's couldn't be opened or
 //! ended (`sweep::end_sweeper_exit`), [`RunExit::Sweep`] when anything else failed or the time
 //! ran out.
 //!
@@ -31,7 +33,7 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::leftovers::os::OsLeftovers;
-use super::leftovers::{Kind, remove_all};
+use super::leftovers::{Kind, Removal, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::SweepError;
 use super::sweep::os::end_sweep_own;
@@ -96,9 +98,12 @@ impl SweeperActs for OsActs {
         widen_sweeper_for_com(&self.token, self.me()?)
     }
 
-    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool {
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> Removal {
         let Ok(me) = self.me().cloned() else {
-            return false;
+            return Removal {
+                clean: false,
+                bits_for_stop: 0,
+            };
         };
         let mut calls = OsLeftovers::new(&self.token, me);
         remove_all(&mut calls, kinds, "end sweeper", log)

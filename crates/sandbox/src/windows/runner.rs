@@ -429,10 +429,15 @@ pub enum RunExit {
     /// says on stderr: the run's output came through, but the pool user has a process no sweep of
     /// its own can end, and only the host can act on that (0049).
     Escapee,
+    /// The end sweeper's alone: everything went, but BITS jobs of the pool user's whose `Cancel`
+    /// failed with `ERROR_NOT_LOGGED_ON` (1245) are left (`leftovers.rs`). BITS holds no logon
+    /// token for a pool user, so they can't run; the `SYSTEM` stop task removes them (0049).
+    /// The outer logs it (`end::Swept::PoolStop`, `end::needs_pool_stop`).
+    PoolStop,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 16] = [
+    const ALL: [RunExit; 17] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -449,6 +454,7 @@ impl RunExit {
         RunExit::Sweep,
         RunExit::DllSearch,
         RunExit::Escapee,
+        RunExit::PoolStop,
     ];
 
     /// The exit code.
@@ -488,7 +494,8 @@ impl RunExit {
             | RunExit::AgentReserved
             | RunExit::Sweep
             | RunExit::DllSearch
-            | RunExit::Escapee => None,
+            | RunExit::Escapee
+            | RunExit::PoolStop => None,
         }
     }
 }

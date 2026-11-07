@@ -13,7 +13,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::RunExit;
-use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, Swept, wait_empty};
+use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, Swept, needs_pool_stop, wait_empty};
 use super::super::spawn::{Job, Process, active_processes, end_job, log_on, output_pipe, resume};
 use super::super::sweep::SWEPT;
 use super::{os, say};
@@ -145,6 +145,10 @@ impl SweeperSteps for OsSweeper {
             Ok(code) => {
                 match code {
                     Some(0) => {}
+                    Some(code) if needs_pool_stop(Swept::from_exit(Some(code))) => say(&format!(
+                        "clauseo-sandbox-run: the end sweeper is done, but left BITS jobs of the \
+                         sandbox user for the system stop (0x{code:08X})"
+                    )),
                     Some(code) => say(&format!(
                         "clauseo-sandbox-run: the end sweeper failed (0x{code:08X})"
                     )),
