@@ -210,7 +210,10 @@ pool user's, so either listing with one is INFO, naming the count and the images
   resume left it behind. INFO when no look could read the threads' states (the `NTSTATUS` is
   named) or the session never started. PASS otherwise, naming the running runner processes of
   that user it saw (an end sweeper) or none. The outer's stderr is printed and the text says
-  whether it skipped the sweeper. A suspended runner found is ended at the row's end.
+  whether it skipped the sweeper, and, as information that decides nothing, the sweeper's own
+  logon time: the outer's `clauseo-sandbox-run: end sweeper: logon to resume <n> ms` line, from
+  the logon's start to the resume, or that the outer logged none. A suspended runner found is
+  ended at the row's end.
 
 The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
 harness ends its benign process if it still runs at the row's end, and notes it.
