@@ -150,6 +150,8 @@ pub(crate) struct RunFolders {
     /// clones: they are freed only after a completed wait, and held until the host stops on
     /// any other drop.
     pub(crate) lease: Arc<straggler::Lease>,
+    /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
+    pub(crate) slot_waited: bool,
 }
 
 impl RunFolders {
@@ -171,6 +173,7 @@ impl RunFolders {
             case_law: relay::CaseLaw::Absent,
             egress: None,
             lease: Arc::default(),
+            slot_waited: false,
         }
     }
 
@@ -267,6 +270,7 @@ pub(super) fn prepare(
     };
     let job = codex::prepare::Job::launch(run.key.matter);
     let slot_wait = browser::slot_wait(actor, run.key, &claims.browser);
+    run.slot_waited = slot_wait.is_some();
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -472,6 +476,7 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
+    browser::warn_if_still_full(actor, &prepared.run);
     // A refusal that came, or stayed, while the checks ran (a key refusal waited out
     // included): nothing launches.
     if let Some(error) = super::sign_in::launch_refusal(actor, thread) {
