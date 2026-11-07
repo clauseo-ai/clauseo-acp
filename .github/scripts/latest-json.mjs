@@ -548,7 +548,16 @@ function main(argv) {
 
 // Real paths on both sides: run through a symbolic link, the script still runs (a --verify that
 // silently did nothing would pass).
-const entry = process.argv[1] === undefined ? "" : pathToFileURL(realpathSync(process.argv[1])).href;
-if (pathToFileURL(realpathSync(fileURLToPath(import.meta.url))).href === entry) {
+// argv[1] is not a path when another script imports this module (`node -e` passes its own
+// arguments there), so a path that does not resolve means "not run as a script".
+function realHref(path) {
+  try {
+    return pathToFileURL(realpathSync(path)).href;
+  } catch {
+    return "";
+  }
+}
+const entry = process.argv[1] === undefined ? "" : realHref(process.argv[1]);
+if (entry !== "" && realHref(fileURLToPath(import.meta.url)) === entry) {
   process.exitCode = main(process.argv.slice(2));
 }

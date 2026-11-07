@@ -28,7 +28,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   PLACEHOLDER_KEY_ID,
   assets,
@@ -775,4 +775,22 @@ test("the release's latest.json is right and every platforms URL downloads", { s
     const sig = (await get(`${entry.url}.sig`)).toString("utf8").trim();
     assert.equal(sig, entry.signature, `${name}.sig against latest.json`);
   }
+});
+
+// release.yml's assemble imports this module from `node --input-type=module -e`, where argv[1] is
+// the version, not a path; the run-as-script guard must not throw on it (dry run 42371003314).
+test("importing latest-json.mjs with a non-path argv[1] runs nothing and does not throw", () => {
+  const run = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import { assets } from ${JSON.stringify(pathToFileURL(join(here, "latest-json.mjs")).href)}; console.log(assets(process.argv[1], process.argv[2]).length);`,
+      "0.0.0",
+      "clauseo-sandbox-setup.exe",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /^\d+\n$/);
 });
