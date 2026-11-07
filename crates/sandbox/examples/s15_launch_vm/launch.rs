@@ -331,9 +331,14 @@ impl Running {
         self.waited = true;
     }
 
+    /// Reads the runner's output until its pipes close or `until` (after [`Running::kill`]).
+    pub(crate) fn drain(&mut self, until: Instant) {
+        while self.pump(until) {}
+    }
+
     /// Waits for the agent to end by itself, until `until`: its stdin stays open until the
     /// runner exited. The host closes stdin only to end a session, and the runner ends the job
-    /// 1.5 s after that, so an agent still working would be cut short. Killed and `Err` when it
+    /// 1 s after that, so an agent still working would be cut short. Killed and `Err` when it
     /// is still running at `until`.
     pub(crate) fn finish(self, until: Instant) -> Result<Finished, String> {
         self.wait_exit(until)
