@@ -220,12 +220,22 @@ fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
         ui_limits(ctx, &running.stdout.clone(), Live::Yes, ctx.strict)
     });
     let noted = if paused { running.stdout.len() } else { 0 };
-    if paused && let Err(why) = running.send("go\n") {
-        ctx.note(&format!(
-            "the line that ends node's wait wasn't sent: {why}"
-        ));
-    }
-    let done = running.finish(until)?;
+    let sent = paused
+        && running.send("go\n").map_or_else(
+            |why| {
+                ctx.note(&format!(
+                    "the line that ends node's wait wasn't sent: {why}"
+                ));
+                false
+            },
+            |()| true,
+        );
+    // Node exits at the line, its stdin held open until then; without it, its stdin's end.
+    let done = if sent {
+        running.finish(until)?
+    } else {
+        running.end(until)?
+    };
     ctx.note(&format!("A: node: {}", summary(&done)));
     for line in done.stdout.iter().skip(noted) {
         ctx.note(&format!("node: {line}"));
@@ -360,7 +370,7 @@ pub(crate) fn stdio(ctx: &Ctx<'_>) -> Result<String, String> {
     }
     let first = a.first_line_ms.unwrap_or_default();
     let done = a
-        .finish(until)
+        .end(until)
         .map_err(|e| format!("after stdin closed: {e} (the EOF didn't reach the agent?)"))?;
     ctx.note(&format!("{}; first line after {first} ms", summary(&done)));
     ok_exit(&done)?;

@@ -331,10 +331,24 @@ impl Running {
         self.waited = true;
     }
 
-    /// Waits for the runner to exit until `until`, reading its output; killed and `Err` when it
-    /// is still running then.
-    pub(crate) fn finish(mut self, until: Instant) -> Result<Finished, String> {
+    /// Waits for the agent to end by itself, until `until`: its stdin stays open until the
+    /// runner exited. The host closes stdin only to end a session, and the runner ends the job
+    /// 1.5 s after that, so an agent still working would be cut short. Killed and `Err` when it
+    /// is still running at `until`.
+    pub(crate) fn finish(self, until: Instant) -> Result<Finished, String> {
+        self.wait_exit(until)
+    }
+
+    /// Ends the session as the host does: closes the agent's stdin, then waits as
+    /// [`Running::finish`] does. For the agents that end at their stdin's end (`hold`, `echo`).
+    pub(crate) fn end(mut self, until: Instant) -> Result<Finished, String> {
         self.close_stdin();
+        self.wait_exit(until)
+    }
+
+    /// Waits for the runner to exit until `until`, reading its output, then closes stdin;
+    /// killed and `Err` when it is still running then.
+    fn wait_exit(mut self, until: Instant) -> Result<Finished, String> {
         let code = loop {
             match self.child.try_wait() {
                 Ok(Some(status)) => {
@@ -357,6 +371,7 @@ impl Running {
         };
         note_ended(self.child.id());
         self.waited = true;
+        self.close_stdin();
         let wall_ms = self.started.elapsed().as_millis();
         // The output drains once the runner's pipes close; two seconds at most.
         let drain = now() + Duration::from_secs(2);

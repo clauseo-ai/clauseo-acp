@@ -192,7 +192,7 @@ fn listing_in_session(ctx: &Ctx<'_>, sid: &str, outer: u32) -> Vec<String> {
 
 /// Ends the session `a` (its stdin closed) and notes how it ended.
 pub(crate) fn end_session(ctx: &Ctx<'_>, a: Running, until: Instant) -> Result<(), String> {
-    let done = a.finish(until)?;
+    let done = a.end(until)?;
     ctx.note(&format!("A: probe hold: {}", summary(&done)));
     for line in &done.stderr {
         ctx.note(&format!("A stderr: {line}"));
