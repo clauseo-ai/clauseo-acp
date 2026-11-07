@@ -40,6 +40,7 @@ pub(super) fn discard(
         wait: cap.saturating_add(codex::prepare::PREPARE_WAIT),
     };
     actor.work.run_removals += 1;
+    actor.wiring.browser_slots.begin_release(key);
     let hook = actor.wiring.run_removal_hook.clone();
     let held = actor.wiring.held.clone();
     let wait_hook = actor.wiring.tree_wait_hook.clone();
@@ -108,8 +109,16 @@ pub(super) fn discard(
 
 /// A run folder's removal ended: shutdown no longer waits for it, and a session whose run was
 /// freed (`freed`) gives back its browser slot. A held run keeps its slot until the host stops.
+/// A removal of a slot's holder wakes the launch preps waiting for a slot
+/// (`browser::slot_wait`); each looks at the slots again.
 pub(in super::super) fn on_run_removed(actor: &mut Actor, key: SessionKey, freed: bool) {
     actor.work.run_removals = actor.work.run_removals.saturating_sub(1);
+    let slots = &mut actor.wiring.browser_slots;
+    if slots.end_release(key) {
+        for waiting in actor.turn_path.slot_waits.drain(..) {
+            let _gone = waiting.send(());
+        }
+    }
     if freed {
         actor.wiring.browser_slots.release(key);
     }
