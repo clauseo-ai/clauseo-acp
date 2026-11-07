@@ -9,6 +9,7 @@
 mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
@@ -60,16 +61,43 @@ pub(crate) fn route(
 #[derive(Default)]
 pub(crate) struct Probes {
     running: Arc<Mutex<HashSet<String>>>,
+    /// Whether a read of the known folders and drive types is still running.
+    reading: Arc<AtomicBool>,
 }
 
 impl Probes {
     /// Whether the native dialog would stall: a known folder on the network whose server does
     /// not answer within `wait`, answers with an error, or is still stuck on an earlier probe
-    /// (which gets no second thread). Reads no disk when no known folder is on the network.
+    /// (which gets no second thread), or when reading the known folders and drive types does
+    /// not end within `wait` (nor does an earlier read still running, which gets no second
+    /// thread). Reads no disk when no known folder is on the network.
     /// Logs the outcome only, never a path.
     pub(crate) fn would_stall(&self, known: &Arc<dyn KnownFolders>, wait: Duration) -> bool {
         let deadline = crate::open::now() + wait;
-        let servers = servers(known.as_ref());
+        // The drive types too may block (a disconnected mapped drive): read on a thread within
+        // the same deadline, one at a time; a read still stuck counts as no answer.
+        if self.reading.swap(true, Ordering::AcqRel) {
+            tracing::info!("folder picker: an earlier read of the known folders is still stuck");
+            return true;
+        }
+        let (send, read) = mpsc::sync_channel(1);
+        let (reading, reader) = (Arc::clone(&self.reading), Arc::clone(known));
+        let spawned = std::thread::Builder::new()
+            .name("clauseo-picker-folders".into())
+            .spawn(move || {
+                let found = servers(reader.as_ref());
+                reading.store(false, Ordering::Release);
+                // Gone once the deadline passed; the answer is then dropped.
+                let _gone = send.send(found);
+            });
+        if spawned.is_err() {
+            self.reading.store(false, Ordering::Release);
+            return true;
+        }
+        let Ok(servers) = read.recv_timeout(wait) else {
+            tracing::info!("folder picker: the known folders do not answer");
+            return true;
+        };
         if servers.is_empty() {
             return false;
         }

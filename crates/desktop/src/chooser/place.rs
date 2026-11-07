@@ -48,8 +48,8 @@ impl Place {
         let path = path.replace('/', "\\");
         let (root, rest) = if let Some(unc) = path.strip_prefix("\\\\") {
             let mut parts = unc.splitn(3, '\\');
-            let server = parts.next().filter(|s| name_ok(s))?;
-            let share = parts.next().filter(|s| name_ok(s))?;
+            let server = parts.next().filter(|s| typed_name_ok(s))?;
+            let share = parts.next().filter(|s| typed_name_ok(s))?;
             // `\\?\` and `\\.\`: the server would be `?` or `.`, which `name_ok` refuses.
             let root = Root::Share {
                 server: server.to_owned(),
@@ -64,7 +64,7 @@ impl Place {
         };
         let mut parts = Vec::new();
         for part in rest.split('\\').filter(|part| !part.is_empty()) {
-            if !name_ok(part) {
+            if !typed_name_ok(part) {
                 return None;
             }
             parts.push(part.to_owned());
@@ -199,21 +199,55 @@ impl Place {
     }
 }
 
-/// The names Windows keeps for devices, with or without an extension.
-const DEVICES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+/// The names Windows keeps for devices, with or without an extension (lower case).
+const DEVICES: [&str; 30] = [
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    "conin$",
+    "conout$",
+    "com1",
+    "com2",
+    "com3",
+    "com4",
+    "com5",
+    "com6",
+    "com7",
+    "com8",
+    "com9",
+    "com\u{b9}",
+    "com\u{b2}",
+    "com\u{b3}",
+    "lpt1",
+    "lpt2",
+    "lpt3",
+    "lpt4",
+    "lpt5",
+    "lpt6",
+    "lpt7",
+    "lpt8",
+    "lpt9",
+    "lpt\u{b9}",
+    "lpt\u{b2}",
+    "lpt\u{b3}",
 ];
 
 /// Whether `name` is one folder name the chooser takes: not empty, not `.` or `..`, no
-/// separator, no `:` and none of `*?"<>|` or a control character, not ending in a dot or a
-/// space, and no device name (`CON`, `nul.txt`, `COM1`, ...).
+/// separator, no `:` and none of `*?"<>|` or a control character, and not ending in a dot or a
+/// space. A listed folder only needs this, so `aux.d` still shows; a typed part needs
+/// [`typed_name_ok`].
 pub(crate) fn name_ok(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).to_lowercase();
     !name.is_empty()
         && !name.ends_with(['.', ' '])
-        && !DEVICES.contains(&stem.as_str())
         && !name.chars().any(|c| {
             c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })
+}
+
+/// [`name_ok`], and no device name before the first dot, trailing spaces trimmed (`CON`,
+/// `nul .txt`, `COM¹`, `CONIN$`, ...): Windows would open the device, not a folder.
+pub(crate) fn typed_name_ok(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+    name_ok(name) && !DEVICES.contains(&stem.to_lowercase().as_str())
 }

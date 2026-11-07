@@ -14,6 +14,7 @@ struct Fake {
     paths: Vec<String>,
     probes: AtomicUsize,
     downs: AtomicUsize,
+    drive_reads: AtomicUsize,
     gate: Mutex<mpsc::Receiver<()>>,
 }
 
@@ -22,6 +23,14 @@ impl KnownFolders for Fake {
         self.paths.clone()
     }
     fn remote_drive(&self, letter: char) -> bool {
+        if letter == 'Y' {
+            self.drive_reads.fetch_add(1, Ordering::SeqCst);
+            let _released = self
+                .gate
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(30));
+        }
         letter == 'Z'
     }
     fn answers(&self, path: &str) -> bool {
@@ -44,6 +53,7 @@ fn known(paths: &[&str]) -> (Arc<Fake>, Arc<dyn KnownFolders>, mpsc::Sender<()>)
         paths: paths.iter().map(|p| (*p).to_owned()).collect(),
         probes: AtomicUsize::new(0),
         downs: AtomicUsize::new(0),
+        drive_reads: AtomicUsize::new(0),
         gate: Mutex::new(gate),
     });
     let known: Arc<dyn KnownFolders> = Arc::clone(&fake) as Arc<dyn KnownFolders>;
@@ -95,6 +105,26 @@ fn a_hanging_server_opens_the_chooser_in_about_one_and_a_half_seconds() {
     assert!(probes.would_stall(&known, PROBE_WAIT));
     assert!(started.elapsed() < Duration::from_millis(500));
     assert_eq!(fake.downs.load(Ordering::SeqCst), 1);
+    drop(release);
+}
+
+/// A drive whose type does not answer (a disconnected mapped drive `Y:`) opens the chooser after
+/// about 1.5 s; a second check while that read is stuck answers at once, with no second read.
+#[test]
+fn a_hanging_drive_type_opens_the_chooser_in_about_one_and_a_half_seconds() {
+    let (fake, known, release) = known(&[r"Y:\Documents"]);
+    let probes = Probes::default();
+    let started = crate::open::now();
+    assert!(probes.would_stall(&known, PROBE_WAIT));
+    let waited = crate::open::now().saturating_duration_since(started);
+    assert!(
+        waited >= Duration::from_millis(1400) && waited < Duration::from_secs(4),
+        "{waited:?}"
+    );
+    let started = crate::open::now();
+    assert!(probes.would_stall(&known, PROBE_WAIT));
+    assert!(crate::open::now().saturating_duration_since(started) < Duration::from_millis(500));
+    assert_eq!(fake.drive_reads.load(Ordering::SeqCst), 1);
     drop(release);
 }
 

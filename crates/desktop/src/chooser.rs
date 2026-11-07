@@ -262,13 +262,16 @@ impl Chooser {
         let machine = Arc::clone(&self.machine);
         let path = target.clone();
         let read = bounded(&self.outstanding, LIST_WAIT, move || {
-            // A typed path goes through no link, hidden or system folder that exists.
+            // A typed path goes through no link, hidden or system folder, and through none whose
+            // attributes cannot be read; only its last folder may be missing (`not_found`).
+            let folders = path.below_root();
             let blocked = typed
-                && path
-                    .below_root()
-                    .iter()
-                    .map_while(|folder| machine.entry(&folder.text()))
-                    .any(|entry| entry.link || entry.hidden);
+                && folders.iter().enumerate().any(|(depth, folder)| {
+                    match machine.entry(&folder.text()) {
+                        Some(entry) => entry.link || entry.hidden,
+                        None => depth + 1 < folders.len(),
+                    }
+                });
             (!blocked).then(|| machine.read(&path.text()))
         });
         let state = match read {
