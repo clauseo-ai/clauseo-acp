@@ -161,6 +161,14 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
         format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)")
     );
     assert!(runner_token_sddl(&desktop).ends_with("(A;;RC;;;OW)"));
+    // Later threads get the threads' own entries: the owner held to READ_CONTROL, the desktop
+    // user SYNCHRONIZE only.
+    assert_eq!(
+        runner_default_dacl(&desktop),
+        runner_thread_sddl(&desktop).replacen("D:P", "D:", 1)
+    );
+    // Before the launch arrives the token names SYSTEM alone.
+    assert_eq!(RUNNER_TOKEN_FIRST_SDDL, "D:P(A;;GA;;;SY)(A;;RC;;;OW)");
 }
 
 #[test]

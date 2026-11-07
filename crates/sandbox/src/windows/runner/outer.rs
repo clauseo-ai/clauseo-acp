@@ -118,6 +118,25 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     // `log_on` takes the password and wipes it as it returns.
     let inner =
         log_on(&message.pool_name, password, exe_text, set.base(), &cwd).map_err(logon_failure)?;
+    // Its token's user, read now: from its first instruction the inner shuts its token to all but
+    // SYSTEM until the launch arrives over `ctl`.
+    let user = inner
+        .user()
+        .map_err(|e| Failure::new(RunExit::Logon, os("the inner runner's token", &e)));
+    match user {
+        Ok(user) if user == message.pool_user => {}
+        Ok(_) => {
+            inner.kill(RunExit::Logon.code());
+            return Err(Failure::new(
+                RunExit::Logon,
+                "the inner runner isn't the pool user",
+            ));
+        }
+        Err(failure) => {
+            inner.kill(RunExit::Logon.code());
+            return Err(failure);
+        }
+    }
     // Shut the inner runner's process and first thread to its agent (the same pool user) while
     // it is still suspended, so no agent of this pool user already running opens either in the
     // moment before the inner shuts itself (`token::os::shut_self`).
@@ -151,7 +170,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
             .map(|state| state.display())
             .unwrap_or_default(),
     };
-    let result = serve(&inner, &job, &message, pipes, &launch);
+    let result = serve(&inner, &job, pipes, &launch);
     // `job` drops when this returns: the inner runner and the agent's tree end with it.
     drop(job);
     result
@@ -162,24 +181,14 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
 fn serve(
     inner: &Process,
     job: &Handle,
-    message: &LaunchMessage,
     pipes: Vec<ServerPipe>,
     launch: &InnerLaunch,
 ) -> Result<u32, Failure> {
     let Ok([ctl, stdin, stdout, stderr]) = <[ServerPipe; 4]>::try_from(pipes) else {
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
+    // The client is the inner runner's process, whose token user was checked before it ran.
     accept(&ctl, inner, FIRST_CONNECT)?;
-    let user = inner
-        .user()
-        .map_err(|e| Failure::new(RunExit::Pipe, os("token", &e)))?;
-    if user != message.pool_user {
-        inner.kill(RunExit::Pipe.code());
-        return Err(Failure::new(
-            RunExit::Pipe,
-            "the inner runner isn't the pool user",
-        ));
-    }
     write_frame(&ctl, launch).map_err(|e| Failure::new(RunExit::Pipe, os("ctl write", &e)))?;
     for pipe in [&stdin, &stdout, &stderr] {
         if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
