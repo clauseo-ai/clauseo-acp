@@ -187,11 +187,13 @@ fn codex_kept_folders_lose_hard_and_symbolic_links() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// Round 5, low 2: a tree 300 folders deep is removed by handle with a bounded number of open
-/// handles; past the depth cap (lowered here) the clean refuses and the launch fails closed.
+/// Round 5's low 2 and round 6's D3: a tree 300 folders deep is removed by handle with a bounded
+/// number of open handles. Past the depth cap (lowered here), the tree is set aside into the
+/// data folder's parking folder (`<data>/set-aside`) and the launch goes on; with no parking
+/// folder the clean refuses and the launch fails closed.
 #[cfg(unix)]
 #[test]
-fn a_deep_tree_is_removed_and_past_the_cap_refused() {
+fn a_deep_tree_is_removed_and_past_the_cap_set_aside() {
     let (data, _home) = data("deep_tree");
     let state = state_dir(&data, matter(18), "codex-acp");
     prepare(&data, &state, AgentKind::Codex).unwrap();
@@ -204,19 +206,54 @@ fn a_deep_tree_is_removed_and_past_the_cap_refused() {
     prepare(&data, &state, AgentKind::Codex).unwrap();
     assert!(std::fs::symlink_metadata(state.join("planted")).is_err());
 
-    let mut deep = state.join("planted");
-    for _ in 0..20 {
-        deep.push("d");
-    }
-    write::create_dir_all(&deep).unwrap();
+    let plant_deep = || {
+        let mut deep = state.join("planted");
+        for _ in 0..20 {
+            deep.push("d");
+        }
+        write::create_dir_all(&deep).unwrap();
+    };
+    plant_deep();
     super::handle::hook::set_max_depth(Some(10));
+    // No parking folder: the clean refuses.
     let refused = prepare(&data, &state, AgentKind::Codex);
-    super::handle::hook::set_max_depth(None);
     assert_eq!(
         refused.unwrap_err().code(),
         clauseo_protocol::ErrorCode::AgentLaunchFailed
     );
-    prepare(&data, &state, AgentKind::Codex).unwrap();
+    // With it (the run sweep makes it before any launch): set aside, and the launch goes on.
+    let parking = super::set_aside_dir(&data);
+    write::create_dir_all(&parking).unwrap();
+    let parked = prepare(&data, &state, AgentKind::Codex);
+    super::handle::hook::set_max_depth(None);
+    parked.unwrap();
     assert!(std::fs::symlink_metadata(state.join("planted")).is_err());
+    let names: Vec<_> = std::fs::read_dir(&parking)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// Round 6's L1: a folder of a few thousand sibling folders is removed with each folder listed
+/// once (linear, not one listing of the parent per child removed).
+#[cfg(unix)]
+#[test]
+fn many_sibling_folders_are_removed_with_one_listing_each() {
+    let (data, _home) = data("siblings");
+    let state = state_dir(&data, matter(19), "codex-acp");
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    let wide = state.join("planted");
+    for n in 0..3_000 {
+        write::create_dir_all(&wide.join(format!("s{n}"))).unwrap();
+    }
+    super::handle::hook::take_listings();
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    let listings = super::handle::hook::take_listings();
+    assert!(std::fs::symlink_metadata(&wide).is_err());
+    // The state folder, `planted` once, each sibling once, and the kept folders' sweeps.
+    assert!(listings <= 3_000 + 20, "{listings} listings");
     write::remove_dir_all(&data).unwrap();
 }

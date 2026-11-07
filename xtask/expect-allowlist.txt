@@ -268,6 +268,9 @@ crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
 # R17 PR-C: a matter's Codex login link compared by Windows file id (CreateFileW with access 0,
 # then GetFileInformationByHandle), as agents' fileid; host may not depend on clauseo-agents.
 crates/host/src/agent/state_folder/file_id.rs file_id unsafe_code
+# R17 PR-C round 6: the Codex fence's deny globs run through the system's ripgrep as Codex's
+# sandbox runs it, and timed by hand.
+crates/host/src/agent/codex_fence/rg_tests.rs - clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
 crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
 crates/host/benches/common/dir.rs - clippy::disallowed_methods

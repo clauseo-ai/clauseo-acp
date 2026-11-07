@@ -97,10 +97,11 @@ fn state_denies_leave_out_tmp_and_notes_only() {
     }
 }
 
-/// Round 5: a matter made **after** the launch (not in the launch's `state_denies`) keeps its
-/// Codex login link, `.env`, `config.toml`, transcripts, history, log and databases and its whole
-/// Claude folder unreadable to the shell, by the profile's deny globs, in every turn. Its `notes`
-/// is the named residual; the own state folder's `tmp` stays readable and the own notes
+/// Rounds 5 and 6: a matter made **after** the launch (not in the launch's `state_denies`) keeps
+/// its Codex login link, `.env`, `config.toml`, history and live shell snapshots and Claude's
+/// login store and `.claude.json` unreadable to the shell, by the profile's deny globs, in every
+/// turn. Its transcripts, logs, databases and `notes` are the named residuals (narrow patterns,
+/// for Codex's 8192-match cap); the own state folder's `tmp` stays readable and the own notes
 /// writable.
 #[test]
 fn a_matter_made_after_the_launch_keeps_its_logins_and_transcripts_unreadable() {
@@ -110,28 +111,19 @@ fn a_matter_made_after_the_launch_keeps_its_logins_and_transcripts_unreadable() 
         later.join("codex-acp").join("auth.json"),
         later.join("codex-acp").join(".env"),
         later.join("codex-acp").join("config.toml"),
-        later
-            .join("codex-acp")
-            .join("sessions")
-            .join("2026")
-            .join("r.jsonl"),
-        later
-            .join("codex-acp")
-            .join("archived_sessions")
-            .join("a.jsonl"),
         later.join("codex-acp").join("history.jsonl"),
-        later.join("codex-acp").join("log").join("codex.log"),
-        later.join("codex-acp").join("state_5.sqlite-wal"),
-        later
-            .join("claude-acp")
-            .join("projects")
-            .join("p")
-            .join("s.jsonl"),
+        later.join("codex-acp").join("shell_snapshots").join("s.sh"),
+        later.join("claude-acp").join(".credentials.json"),
         later.join("claude-acp").join(".claude.json"),
     ] {
         assert_eq!(access(&keys, &path), "deny", "{}", path.display());
     }
-    assert_eq!(access(&keys, &later.join("notes").join("n.md")), "read");
+    for residual in [
+        later.join("notes").join("n.md"),
+        later.join("codex-acp").join("sessions").join("r.jsonl"),
+    ] {
+        assert_eq!(access(&keys, &residual), "read", "{}", residual.display());
+    }
     assert_eq!(
         access(&keys, &state().join("tmp").join("arg0").join("x")),
         "read"
@@ -163,4 +155,22 @@ fn the_own_kept_names_are_denied_even_when_absent() {
         assert!(denies.contains(&state.join(name)), "{name}");
     }
     assert!(!denies.contains(&state.join("tmp")));
+}
+
+/// Round 6: the parking folder `<data>/set-aside` is denied whole as one existing path, so a
+/// folder set aside there after the fence was built (a deep tree a later launch parks) is
+/// covered by that same fence: on bubblewrap the mask of the folder hides its later children.
+#[test]
+fn a_set_aside_made_after_the_fence_is_built_is_still_denied() {
+    let keys = fence();
+    let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
+        .as_object()
+        .unwrap();
+    assert_eq!(scoped.get("set-aside"), Some(&json!("deny")));
+    let later = data()
+        .join("set-aside")
+        .join("deep-77-0")
+        .join("codex-acp")
+        .join("auth.json");
+    assert_eq!(access(&keys, &later), "deny");
 }

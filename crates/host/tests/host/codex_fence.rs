@@ -33,7 +33,7 @@ pub(crate) fn checked_keys(
         "search.sqlite",
         "state.sqlite",
         "skill-packs",
-        "run.old-*",
+        "set-aside",
         "run",
         "agents/claude-acp",
         "agents/codex-acp/home",

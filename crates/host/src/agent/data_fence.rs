@@ -63,8 +63,9 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// the own one too, the case-law relay's token file
 /// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
 /// through them would land in the transcript.
-pub(crate) const DENIED: [&str; 41] = [
+pub(crate) const DENIED: [&str; 42] = [
     "run/*/relay-token",
+    "set-aside/**",
     "skill-packs/**",
     "matters/**",
     "logs/**",

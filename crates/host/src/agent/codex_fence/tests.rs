@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
 
-use super::{EXTENDS, PROFILE, SET_ASIDE_GLOB, Session, keys};
+use super::{EXTENDS, PROFILE, Session, keys};
 
 /// What of `<data>` is left readable to a Codex shell on purpose, with why. The guard test checks
 /// that each `Locations` path is denied or here.
@@ -119,7 +119,6 @@ fn compiled(keys: &Map<String, Value>) -> (Vec<(PathBuf, String)>, Vec<String>) 
 /// component or more.
 fn glob_matches(glob: &str, path: &Path) -> bool {
     let parts: Vec<&str> = glob.split('/').filter(|part| !part.is_empty()).collect();
-    let fits = |pattern: &str, name: &str| wildcard(pattern, name);
     path.ancestors().any(|ancestor| {
         let names: Vec<String> = ancestor
             .components()
@@ -131,23 +130,26 @@ fn glob_matches(glob: &str, path: &Path) -> bool {
                 | Component::ParentDir => None,
             })
             .collect();
-        match parts.split_last() {
-            Some((&"**", head)) => {
-                names.len() > head.len()
-                    && head
-                        .iter()
-                        .zip(&names)
-                        .all(|(pattern, name)| fits(pattern, name))
-            }
-            _ => {
-                names.len() == parts.len()
-                    && parts
-                        .iter()
-                        .zip(&names)
-                        .all(|(pattern, name)| fits(pattern, name))
-            }
-        }
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        components_match(&parts, &names)
     })
+}
+
+/// Whether `names` fit `parts`, a `**` part standing for any number of names, one or more at
+/// the end, zero or more elsewhere.
+fn components_match(parts: &[&str], names: &[&str]) -> bool {
+    match parts.split_first() {
+        None => names.is_empty(),
+        Some((&"**", [])) => !names.is_empty(),
+        Some((&"**", rest)) => (0..=names.len()).any(|skip| {
+            names
+                .get(skip..)
+                .is_some_and(|tail| components_match(rest, tail))
+        }),
+        Some((part, rest)) => names
+            .split_first()
+            .is_some_and(|(name, tail)| wildcard(part, name) && components_match(rest, tail)),
+    }
 }
 
 /// Whether `name` fits `pattern`, whose `*`s each stand for any run of characters.
@@ -256,7 +258,7 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "agent-state/m2",
         "agent-state/m1/claude-acp",
         "agent-state/m1/codex-acp/auth.json",
-        SET_ASIDE_GLOB,
+        "set-aside",
     ] {
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
@@ -343,7 +345,11 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
             .join("x")
             .join("SKILL.md"),
         data.join("run").join("s2").join("browser"),
-        data.join("run.old-0").join("s9").join("work").join("a.txt"),
+        data.join("set-aside")
+            .join("run-0")
+            .join("s9")
+            .join("work")
+            .join("a.txt"),
         data.join("skill-packs").join("pack").join("SKILL.md"),
         data.join("logs").join("host.log"),
         data.join("agents")
@@ -493,7 +499,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         .as_object()
         .expect("rules scoped under the literal data folder");
     assert_eq!(scoped.get("search.sqlite"), Some(&json!("deny")));
-    assert_eq!(scoped.get(SET_ASIDE_GLOB), None);
+    assert_eq!(scoped.get("agent-state/**/codex-acp/auth.json"), None);
 }
 
 #[test]
