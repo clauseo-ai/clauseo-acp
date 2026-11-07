@@ -89,7 +89,8 @@ still exists. To clear them, an administrator runs two commands on the matter fo
 2. `icacls "D:\Matters\Example" /setintegritylevel (OI)(CI)M` puts back the default (medium)
    integrity label, which everything below inherits. The first command leaves the low label.
 
-Measured on a Windows Server 2025 VM, 2026-11-07 (S15 PR4j, `235c39149`).
+These two commands were measured on a Windows Server 2025 VM, 2026-11-07 (S15 PR4j,
+`235c39149`).
 
 Measured on Windows Server 2025 (build 26100), 2026-11-03, with the 0.0.0 dry-run installer, from an
 elevated PowerShell: install exit 0 in about 2 s, with no window and no UAC prompt; uninstall exit
