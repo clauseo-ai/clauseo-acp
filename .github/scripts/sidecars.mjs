@@ -68,10 +68,13 @@ const cargoPackageBin = (pkg, bin) => async (triple, ctx) => {
 /**
  * The extra environment of a reproducible build: the job's rustflags (CARGO_ENCODED_RUSTFLAGS,
  * else RUSTFLAGS) and --remap-path-prefix for the repo root, cargo's home and the target dir, so
- * no absolute path from the runner (a dependency's panic location, an OUT_DIR file) reaches the
- * binary. rustc applies the last prefix that matches, so the target dir, inside the root, comes
- * after it. CARGO_ENCODED_RUSTFLAGS (0x1f between flags) keeps a path with spaces whole. Cargo
- * hashes rustflags into its artifacts' names, so this build sits beside the app's, not over it.
+ * the target's crates carry no absolute path from the runner (a dependency's panic location, an
+ * OUT_DIR file). Under --target, rustflags never reach the host's proc macros and build scripts,
+ * and lld's PDB holds absolute object paths, so the exe is reproducible at one build path only
+ * (crates/sandbox/build.rs). rustc applies the last prefix that matches, so the target dir,
+ * inside the root, comes after it. CARGO_ENCODED_RUSTFLAGS (0x1f between flags) keeps a path
+ * with spaces whole. Cargo hashes rustflags into its artifacts' names, so this build sits beside
+ * the app's, not over it.
  * SOURCE_DATE_EPOCH is the commit's time (the job's own, when it sets one), for any build
  * script or tool that would stamp a date. The linker's half (/Brepro, /PDBALTPATH) is in
  * crates/sandbox/build.rs; the toolchain is rust-toolchain.toml's, which rustup and cargo honour
@@ -238,8 +241,8 @@ export async function placeSidecars(triple, options = {}) {
 
 /**
  * Builds only the setup exe for a Windows `triple`, reproducibly, and returns its path; nothing
- * is placed and no overlay is written. setup-exe-repro.yml runs it twice, each with its own
- * CARGO_TARGET_DIR.
+ * is placed and no overlay is written. setup-exe-repro.yml runs it twice, in target/ wiped
+ * between the two.
  *
  * @param {string} triple a Windows target in RELEASE_TARGETS
  * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,

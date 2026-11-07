@@ -4,10 +4,15 @@
 //! Windows versions it supports, the app's list, `/MANIFESTINPUT`) into that one manifest; no
 //! `.rc` file holds it. Other targets get nothing.
 //!
-//! The build is reproducible: `/Brepro` puts a hash of the image where the link time would go,
-//! and `/PDBALTPATH:%_PDB%` keeps only the `.pdb`'s file name in the debug directory.
-//! `.github/scripts/sidecars.mjs` remaps the runner's paths (`--remap-path-prefix`), and
-//! `.github/workflows/setup-exe-repro.yml` builds the exe twice from clean and compares them.
+//! The build is reproducible at the release's build path (the repo's `target/`): rebuilding the
+//! release commit there gives the same exe, so a hash Microsoft has cleared stays cleared.
+//! `/Brepro` puts a hash of the image where the link time would go, and `/PDBALTPATH:%_PDB%`
+//! keeps only the `.pdb`'s file name in the debug directory. A different target dir still gives
+//! a different exe: lld's PDB GUID, which the debug directory holds, is a hash of the PDB, and the
+//! PDB holds the absolute paths of the objects and the link line; and RUSTFLAGS' remaps
+//! (`.github/scripts/sidecars.mjs`) miss the host's proc macros and build scripts under
+//! `--target`. `.github/workflows/setup-exe-repro.yml` builds the exe twice, from clean, in
+//! that one target dir, and compares them.
 //!
 //! The setup exe's version information, on `*-windows-msvc` and for that binary only: a
 //! `VERSIONINFO` resource written into `OUT_DIR` as `.rc` text and compiled by `embed-resource`
