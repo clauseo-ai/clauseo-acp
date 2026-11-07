@@ -765,7 +765,11 @@ for `--reclaim`.
 - **The token** is (B) as above, made by the inner runner from its own token with
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
-  only its three pipes. It makes the agent's profile folders part by part relative to each
+  only its three pipes. The agent runs as the inner runner's own user, so before it starts the
+  inner runner gives its own process, thread and primary token a protected DACL naming `SYSTEM`
+  and the lawyer alone, with `OWNER RIGHTS` held to `READ_CONTROL`: the agent can't open its
+  Medium, unrestricted token (the harness's `runners` row first found query and duplicate open).
+  It makes the agent's profile folders part by part relative to each
   parent's handle, never through a link.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
