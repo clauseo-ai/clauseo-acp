@@ -15,6 +15,7 @@ use super::rows::Ctx;
 use super::sys::say;
 use super::win;
 use super::win_desk::{self, UserObject};
+use super::win_thread;
 
 /// The start of the agent's own window station's name (the outer runner makes it).
 const STATION_PREFIX: &str = "ClauseoRun-";
@@ -23,8 +24,8 @@ const NO_SUCH_PROCESS: &str = "87";
 
 /// The `runners` row: A's agent is refused every right in [`REFUSED`] and [`TOKEN_RIGHTS`] on
 /// its inner runner (its parent) and on its outer runner (the process the harness started), every
-/// right in [`THREAD_RIGHTS`] on each of their threads, and the process and token rights on any
-/// `conhost.exe` either started.
+/// right in [`THREAD_RIGHTS`] on each of their threads (the ids from the harness's own snapshot),
+/// and the process and token rights on any `conhost.exe` either started.
 pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
     reach(ctx, &[])
 }
@@ -46,8 +47,15 @@ pub(crate) fn lawyer_processes(ctx: &Ctx<'_>) -> Result<String, String> {
     result
 }
 
-/// Starts A's `probe runners`, hands it the outer runner and `extra` targets, and checks every
-/// right in [`REFUSED`] and [`TOKEN_RIGHTS`] was refused on each.
+/// The thread ids the harness found for a runner: its role, its pid, and the ids or the
+/// snapshot's code.
+type Given = (&'static str, u32, Result<Vec<u32>, u32>);
+
+/// Starts A's `probe runners`; once it printed its parent (the inner runner), hands it the outer
+/// runner, `extra` targets, and from the harness's own Toolhelp snapshots (the lawyer's, outside
+/// the job) both runners' console hosts and thread ids, in one write; checks every right in
+/// [`REFUSED`] and [`TOKEN_RIGHTS`] was refused on each target (console hosts included) and
+/// every right in [`THREAD_RIGHTS`] on each thread.
 fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     let (mut a, agent) = started(ctx, "A", &["runners"])?;
     let outer = a.pid();
@@ -55,15 +63,28 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     let parent = a.line_after("parent ", until);
     let mut targets: Vec<(String, u32)> = vec![("outer".to_owned(), outer)];
     targets.extend(extra.iter().map(|(role, pid)| ((*role).to_owned(), *pid)));
-    let mut lines = String::new();
-    for (role, pid) in &targets {
-        lines.push_str(role);
-        lines.push(' ');
-        lines.push_str(&pid.to_string());
-        lines.push('\n');
+    let mut given: Vec<Given> = Vec::new();
+    if let Some(inner) = parent.as_deref().and_then(|p| p.trim().parse::<u32>().ok()) {
+        given.push(("inner", inner, win_thread::threads_of(inner)));
     }
-    lines.push_str("end\n");
-    a.send(&lines)?;
+    given.push(("outer", outer, win_thread::threads_of(outer)));
+    let runner_pids: Vec<u32> = given.iter().map(|(_, pid, _)| *pid).collect();
+    let consoles = win_thread::children_named(&runner_pids, "conhost.exe");
+    let mut lines: Vec<String> = targets
+        .iter()
+        .map(|(role, pid)| format!("{role} {pid}"))
+        .collect();
+    for (_, pid) in consoles.iter().flatten() {
+        lines.push(format!("conhost {pid}"));
+    }
+    for (role, _, tids) in &given {
+        if let Ok(tids) = tids {
+            let ids: Vec<String> = tids.iter().map(u32::to_string).collect();
+            lines.push(format!("threads {role} {}", ids.join(" ")));
+        }
+    }
+    lines.push("end\n".to_owned());
+    a.send(&lines.join("\n"))?;
     let done = a.finish(until)?;
     for line in done.stdout.iter().chain(&done.stderr) {
         ctx.note(&format!("A: {line}"));
@@ -83,13 +104,14 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
         targets.insert(0, ("inner".to_owned(), inner));
     }
     let mut bad = Vec::new();
-    let threads = threads(
-        ctx,
-        &done.stdout,
-        &[("inner", inner), ("outer", outer)],
-        &mut bad,
-    );
-    targets.extend(conhosts(ctx, &done.stdout, &mut bad));
+    if !given
+        .iter()
+        .any(|(role, pid, _)| *role == "inner" && *pid == inner)
+    {
+        bad.push(format!("inner ({inner}): the harness sent no thread ids"));
+    }
+    let threads = threads(ctx, &done.stdout, &given, &mut bad);
+    targets.extend(conhosts(ctx, &done.stdout, &given, &consoles, &mut bad));
     let mut seen = 0usize;
     for (role, pid) in &targets {
         for (right, _) in REFUSED.iter().chain(&TOKEN_RIGHTS) {
@@ -133,42 +155,49 @@ fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     ))
 }
 
-/// Checks the agent's `threads` and `thread` lines for each of `runners`: a live runner with
-/// no thread found proves nothing, and every right in [`THREAD_RIGHTS`] on every thread must be
-/// refused (87, a thread that ended meanwhile, is counted apart; at least one thread per runner
-/// must be refused with another code). Its summary.
-fn threads(
-    ctx: &Ctx<'_>,
-    lines: &[String],
-    runners: &[(&str, u32)],
-    bad: &mut Vec<String>,
-) -> String {
+/// Checks the agent's `thread` lines for each runner in `given` (the ids the harness's own
+/// snapshot found and sent): a failed snapshot, or a live runner with no thread id, proves
+/// nothing and fails; every right in [`THREAD_RIGHTS`] on every id must be refused (87, a thread
+/// that ended meanwhile, is counted apart; at least one open per runner must be refused with
+/// another code). The agent's own snapshot count is information. Its summary.
+fn threads(ctx: &Ctx<'_>, lines: &[String], given: &[Given], bad: &mut Vec<String>) -> String {
     let mut summary = Vec::new();
-    for (role, pid) in runners {
-        let count = values(lines, &format!("threads {role} {pid}"))
+    for (role, pid, tids) in given {
+        let own = values(lines, &format!("snapshot {role} {pid}"))
             .first()
-            .map(|v| (*v).to_owned());
-        let Some(count) = count else {
-            bad.push(format!("{role} ({pid}) threads: no line"));
-            continue;
+            .map_or_else(|| "no line".to_owned(), |v| (*v).to_owned());
+        ctx.note(&format!(
+            "information: the agent's own thread snapshot found {own} for the {role} runner"
+        ));
+        let tids = match tids {
+            Ok(tids) => tids,
+            Err(code) => {
+                bad.push(format!(
+                    "{role} ({pid}): the harness's thread snapshot failed ({code})"
+                ));
+                continue;
+            }
         };
-        let Ok(count) = count.parse::<usize>() else {
+        ctx.note(&format!(
+            "{role} runner ({pid}): {} threads in the harness's snapshot",
+            tids.len()
+        ));
+        if tids.is_empty() {
             bad.push(format!(
-                "{role} ({pid}): the thread snapshot failed: {count}"
-            ));
-            continue;
-        };
-        ctx.note(&format!("{role} runner ({pid}): {count} threads"));
-        if count == 0 {
-            bad.push(format!(
-                "{role} ({pid}): 0 threads found for a live pid (proves nothing)"
+                "{role} ({pid}): the harness found 0 threads for a live pid (proves nothing)"
             ));
             continue;
         }
         let (mut refused, mut ended) = (0usize, 0usize);
-        for line in values(lines, &format!("thread {role}")) {
+        for tid in tids {
+            let Some(line) = values(lines, &format!("thread {role} {tid}"))
+                .first()
+                .copied()
+            else {
+                bad.push(format!("{role} ({pid}) thread {tid}: no line"));
+                continue;
+            };
             let words: Vec<&str> = line.split_whitespace().collect();
-            let tid = words.first().copied().unwrap_or("?");
             for (right, _) in THREAD_RIGHTS {
                 let code = words
                     .iter()
@@ -189,39 +218,54 @@ fn threads(
             ));
         }
         summary.push(format!(
-            "{role} {count} threads ({refused} thread opens refused, {ended} on threads that \
-             ended)"
+            "{role} {} threads ({refused} thread opens refused, {ended} on threads that ended)",
+            tids.len()
         ));
     }
-    format!("threads: {}", summary.join(", "))
+    format!("threads (ids from the harness): {}", summary.join(", "))
 }
 
-/// The console hosts the agent found under the inner or the outer runner, as targets
-/// (`conhost-<pid>`); `conhost none` is noted (both runner exes are GUI-subsystem, so none is
-/// expected).
-fn conhosts(ctx: &Ctx<'_>, lines: &[String], bad: &mut Vec<String>) -> Vec<(String, u32)> {
-    let found = values(lines, "conhost");
-    if found == ["none"] {
-        ctx.note("conhost none (both runner exes are GUI-subsystem: none is expected)");
-        return Vec::new();
-    }
-    if found.is_empty() {
-        bad.push("no conhost line".to_owned());
-    }
-    let mut targets = Vec::new();
-    for value in found {
-        match value
-            .split_once(' ')
-            .map(|(parent, pid)| (parent, pid.trim().parse::<u32>()))
-        {
-            Some((parent, Ok(pid))) if parent != "error" => {
-                ctx.note(&format!("conhost {pid} under the {parent} runner: tested"));
-                targets.push((format!("conhost-{pid}"), pid));
-            }
-            _ => bad.push(format!("conhost: {value}")),
+/// The console hosts the harness's own snapshot found under the inner or the outer runner (and
+/// sent), as targets (`conhost-<pid>`); none is noted as information (both runner exes are
+/// GUI-subsystem, so none is expected), and so is what the agent's own snapshot found. A failed
+/// harness snapshot fails the row: nothing would be known.
+fn conhosts(
+    ctx: &Ctx<'_>,
+    lines: &[String],
+    given: &[Given],
+    consoles: &Result<Vec<(u32, u32)>, u32>,
+    bad: &mut Vec<String>,
+) -> Vec<(String, u32)> {
+    ctx.note(&format!(
+        "information: the agent's own process snapshot found conhost {:?}",
+        values(lines, "conhost-snapshot")
+    ));
+    let found = match consoles {
+        Ok(found) => found,
+        Err(code) => {
+            bad.push(format!("the harness's process snapshot failed ({code})"));
+            return Vec::new();
         }
+    };
+    if found.is_empty() {
+        ctx.note(
+            "conhost none (harness snapshot; both runner exes are GUI-subsystem: none is \
+             expected)",
+        );
     }
-    targets
+    found
+        .iter()
+        .map(|(parent, pid)| {
+            let role = given
+                .iter()
+                .find(|(_, p, _)| p == parent)
+                .map_or("?", |(role, _, _)| *role);
+            ctx.note(&format!(
+                "conhost {pid} under the {role} runner (harness snapshot): tested"
+            ));
+            (format!("conhost-{pid}"), *pid)
+        })
+        .collect()
 }
 
 /// The `breakaway` row: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or the child it made is still

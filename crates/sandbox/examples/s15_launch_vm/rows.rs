@@ -2,6 +2,7 @@
 //! thread of its own under a hard limit: a row past it is `FAIL <row>: timed out after N s`, and
 //! every process the harness started and hasn't waited for is ended (`launch::kill_started`).
 
+use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
@@ -44,6 +45,9 @@ pub(crate) enum Outcome {
     Fail(String),
     /// An input it needs is missing; which.
     Skip(String),
+    /// The agent's side held, but a positive control failed, so it proves nothing: why, and the
+    /// note. Neither a pass nor a fail.
+    Info(String),
 }
 
 /// What a row works with.
@@ -54,12 +58,34 @@ pub(crate) struct Ctx<'a> {
     pub(crate) limit: Duration,
     /// The row's name, for its notes.
     pub(crate) row: &'a str,
+    /// Why the row can be no more than INFO (a positive control failed); `None` while none has.
+    pub(crate) info: Mutex<Option<String>>,
 }
 
 impl Ctx<'_> {
     /// One note line under the row.
     pub(crate) fn note(&self, line: &str) {
         say(&format!("  {}: {line}", self.row));
+    }
+
+    /// Marks the row INFO at best: a positive control failed (`why` names the call and code).
+    /// A later failure still fails it.
+    pub(crate) fn info(&self, why: &str) {
+        self.note(&format!("INFO: {why}"));
+        if let Ok(mut held) = self.info.lock() {
+            held.get_or_insert_with(|| why.to_owned());
+        }
+    }
+
+    /// The outcome of the row's `result`: a fail stays a fail; a pass is INFO when [`Ctx::info`]
+    /// was called.
+    pub(crate) fn outcome(&self, result: Result<String, String>) -> Outcome {
+        let info = self.info.lock().ok().and_then(|held| held.clone());
+        match (result, info) {
+            (Err(why), _) => Outcome::Fail(why),
+            (Ok(note), Some(why)) => Outcome::Info(format!("{why}; the agent's side: {note}")),
+            (Ok(note), None) => Outcome::Pass(note),
+        }
     }
 }
 
@@ -75,6 +101,7 @@ pub(crate) fn run_row(name: &str, manifest: &Manifest, limit: Duration) -> Outco
             manifest: &owned,
             limit,
             row: &row,
+            info: Mutex::new(None),
         };
         drop(send.send(body(&ctx)));
     });
@@ -97,6 +124,7 @@ pub(crate) fn run_row(name: &str, manifest: &Manifest, limit: Duration) -> Outco
         }
         Outcome::Fail(why) => say(&format!("FAIL {name}: {why} ({seconds:.1} s)")),
         Outcome::Skip(why) => say(&format!("SKIP {name}: {why}")),
+        Outcome::Info(why) => say(&format!("INFO {name}: {why} ({seconds:.1} s)")),
     }
     outcome
 }
@@ -139,8 +167,5 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
         "m3-hardlink" => super::checks_m3::m3_hardlink(ctx),
         other => Err(format!("no row {other:?}; rows: {}", ROWS.join(", "))),
     };
-    match result {
-        Ok(note) => Outcome::Pass(note),
-        Err(why) => Outcome::Fail(why),
-    }
+    ctx.outcome(result)
 }

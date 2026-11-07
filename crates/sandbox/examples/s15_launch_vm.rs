@@ -8,8 +8,9 @@
 //! s15_launch_vm probe <what> ...                             (run inside the sandbox)
 //! ```
 //!
-//! Unattended prints one `PASS <row>`, `FAIL <row>: <why>` or `SKIP <row>: <why>` line per row,
-//! runs cleanup even when a row fails, and exits 1 when any row (or prepare) failed. Each row
+//! Unattended prints one `PASS <row>`, `FAIL <row>: <why>`, `SKIP <row>: <why>` or
+//! `INFO <row>: <why>` (a positive control failed, so the row proves nothing) line per row, runs
+//! cleanup even when a row fails, and exits 1 when any row (or prepare) failed. Each row
 //! has a hard limit (`--row-timeout`, 120 s by default). Windows only; elsewhere it exits 2.
 
 use std::process::ExitCode;
@@ -156,15 +157,17 @@ mod harness {
     fn rows(opts: &Opts, manifest: &Manifest, names: &[&str]) -> bool {
         let mut failed = Vec::new();
         let mut skipped = Vec::new();
+        let mut info = Vec::new();
         for name in names {
             match run_row(name, manifest, opts.row_timeout) {
                 Outcome::Pass(_) => {}
                 Outcome::Fail(_) => failed.push(*name),
                 Outcome::Skip(_) => skipped.push(*name),
+                Outcome::Info(_) => info.push(*name),
             }
         }
         say(&format!(
-            "rows: {} run, failed {failed:?}, skipped {skipped:?}",
+            "rows: {} run, failed {failed:?}, skipped {skipped:?}, info {info:?}",
             names.len()
         ));
         failed.is_empty()

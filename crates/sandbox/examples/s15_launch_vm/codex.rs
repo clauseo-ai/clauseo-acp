@@ -82,10 +82,9 @@ pub(crate) fn row(ctx: &Ctx<'_>) -> Outcome {
     let (Some(codex), Some(node)) = (&m.codex, &m.node) else {
         return Outcome::Skip("needs --codex and --node at prepare".to_owned());
     };
-    match super::checks_ui::with_atom(ctx, |atom| run(ctx, codex, node, atom)) {
-        Ok(note) => Outcome::Pass(note),
-        Err(why) => Outcome::Fail(why),
-    }
+    ctx.outcome(super::checks_ui::with_atom(ctx, |atom| {
+        run(ctx, codex, node, atom)
+    }))
 }
 
 fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, String> {
