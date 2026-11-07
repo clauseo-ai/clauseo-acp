@@ -8,7 +8,6 @@
 //! ([`user_with_profile`]).
 
 use std::fmt::Write as _;
-use std::io::ErrorKind;
 use std::os::windows::fs::MetadataExt as _;
 use std::path::{Component, Path};
 
@@ -24,7 +23,9 @@ use super::links::{ADMINISTRATORS, Canary, user_with_profile, wait_for_hive};
 use super::{gate, me};
 use crate::test_support::{TempDir, set_readonly, symlink_dir_at, symlink_file_at};
 use crate::windows::acl::object::Object;
-use crate::windows::test_dacl::sddl_bytes;
+use crate::windows::acl::privilege::{BACKUP_RESTORE, Privileges};
+use crate::windows::acl_bytes::{Acl, DENIED, Descriptor, kind, sid, sid_text};
+use crate::windows::test_dacl::{auto_inherit_with, sddl_bytes};
 
 /// The drive or share `path` starts with, without case: a hard link joins two names on one.
 fn volume(path: &Path) -> Option<String> {
@@ -43,14 +44,28 @@ fn is_reparse_point(path: &Path) -> bool {
 }
 
 /// Gives the folder `path` the protected DACL `sddl` describes, on it alone, through one handle
-/// opened without following a link (`SetKernelObjectSecurity`, which propagates nothing).
+/// opened without following a link (`SetKernelObjectSecurity`, which propagates nothing). The
+/// backup and restore privileges are enabled for the open, so a folder the user's own deny
+/// already shut is opened too; the token gets back their state after.
 fn shut_by_handle(path: &Path, sddl: &str) {
     let bytes = sddl_bytes(sddl).unwrap();
+    let privileges = Privileges::enable(&BACKUP_RESTORE).unwrap();
     let object = Object::open(path).unwrap();
+    drop(privileges);
     let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
     object
         .set(info, &bytes)
         .unwrap_or_else(|error| panic!("{} wasn't shut: {error}", path.display()));
+    // Read back through the same handle, whose access was granted before the deny: protected,
+    // and its first entry the deny for `Administrators`.
+    let written = object.security(DACL_SECURITY_INFORMATION.0).unwrap();
+    let read = Descriptor::parse(&written).unwrap();
+    assert!(read.dacl_protected(), "{}", path.display());
+    let dacl = Acl::parse(read.dacl.unwrap()).unwrap();
+    let first = dacl.aces().first().copied().unwrap();
+    assert_eq!(kind(first), DENIED, "{}", path.display());
+    let who = sid(first).and_then(sid_text).unwrap();
+    assert_eq!(who.as_str(), ADMINISTRATORS, "{}", path.display());
 }
 
 /// Whether `path`'s read-only attribute is set.
@@ -124,14 +139,18 @@ fn elevated_a_profile_shut_to_administrators_is_still_handed_off_and_deleted() {
     // what is below it, and a fresh profile may hold items the user can't re-permission, so
     // the outcome is only logged; the shut state is built below either way.
     let script = format!(
-        r#"icacls "{}" /deny *{ADMINISTRATORS}:(OI)(CI)F"#,
+        r#"icacls "{}" /deny "*{ADMINISTRATORS}:(OI)(CI)F""#,
         app_data.display()
     );
-    let (code, printed) = try_in_cmd(&user, &profile, &script);
+    // Its output goes to a folder made for it and granted to the user, outside the profile.
+    let output = TempDir::new("links-shut-output");
+    let grant = format!("D:(A;OICI;FA;;;{})", user.sid.as_str());
+    auto_inherit_with(output.path(), &grant).unwrap();
+    let (code, printed) = try_in_cmd(&user, output.path(), &script);
     eprintln!("as the test user, exit {code:?}: {script}\n{printed}");
     wait_for_hive(&user.sid, false, None);
     // Then this process shuts both to `Administrators` itself, by handle, so the state doesn't
-    // depend on `icacls`: `LocalLow` first, while `AppData` still lets it through.
+    // depend on `icacls`: `LocalLow` first, by its path through `AppData`.
     let shut_sddl = format!(
         "D:P(D;OICI;FA;;;{ADMINISTRATORS})(A;OICI;FA;;;SY)(A;OICI;FA;;;{})",
         user.sid.as_str()
@@ -139,9 +158,13 @@ fn elevated_a_profile_shut_to_administrators_is_still_handed_off_and_deleted() {
     for folder in [&local_low, &app_data] {
         shut_by_handle(folder, &shut_sddl);
     }
-    // This process holds the backup and restore privileges disabled: the deny shuts it out.
-    let shut = std::fs::read_dir(&app_data).unwrap_err();
-    assert_eq!(shut.kind(), ErrorKind::PermissionDenied, "{shut}");
+    // Only logged: `read_dir` opens with backup intent (`FindFirstFileExW`), so whether the
+    // deny stops it depends on this token's backup privilege being enabled; the DACL itself is
+    // checked by `shut_by_handle`.
+    match std::fs::read_dir(&app_data) {
+        Ok(_) => eprintln!("this process still lists {}", app_data.display()),
+        Err(error) => eprintln!("this process can't list {}: {error}", app_data.display()),
+    }
 
     let mut machine = machine_on(Names::production(), Path::new(r"C:\ClauseoNoSuchData"));
     let owner = machine.owner_in_profile(&profile, &local_low).unwrap();

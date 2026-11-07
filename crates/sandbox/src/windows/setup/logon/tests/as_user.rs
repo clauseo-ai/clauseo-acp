@@ -124,10 +124,12 @@ pub(super) fn run_in_cmd(user: &TestUser, profile: &Path, script: &str) {
     eprintln!("as the test user: {script}\n{printed}");
 }
 
-/// [`run_in_cmd`] without the check: its exit code (`None` if it didn't end in time) and what
-/// it printed, stdout and stderr together, read without failing on bytes that aren't UTF-8.
-pub(super) fn try_in_cmd(user: &TestUser, profile: &Path, script: &str) -> (Option<u32>, String) {
-    let output = profile.join(OUTPUT);
+/// [`run_in_cmd`] without the check, its output going to a file in `folder`, which `user` must
+/// be able to write: its exit code (`None` if it didn't end in time) and what it printed,
+/// stdout and stderr together, read without failing on bytes that aren't UTF-8. Parentheses in
+/// `script` must be quoted or escaped: it runs inside a `(...)` group.
+pub(super) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Option<u32>, String) {
+    let output = folder.join(OUTPUT);
     let cmd = format!(r"{}\cmd.exe", system32());
     // `/s`: cmd takes what is between the outer quotes as it is.
     let line = format!(
