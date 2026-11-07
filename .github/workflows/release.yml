@@ -908,6 +908,11 @@ jobs:
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
             echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            echo
+            echo "## Which Windows installer"
+            echo
+            echo "- **For your own Windows account** (most people): \`Clauseo_${VERSION}_x64-setup.exe\`, or \`Clauseo_${VERSION}_arm64-setup.exe\` on Windows on ARM."
+            echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
