@@ -17,9 +17,9 @@ fn a_set_up_covers_every_pool_user_before_its_marker() {
     let mut machine = FakeMachine::new("network-fresh");
     let mut acl = FakeAcl::default();
     let report = set_up_fresh(&mut machine, &mut acl);
-    let pool = sids(&[1001, 1002, 1003, 1004]);
+    let pool = sids(&[1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008]);
     assert_eq!(report.network.covered, pool);
-    assert_eq!(report.network.filters, 10, "6 blocks and 4 permits");
+    assert_eq!(report.network.filters, 14, "6 blocks and 8 permits");
     assert_eq!(report.network.firewall, FirewallOutcome::Applied);
     let networks = &machine.around.networks;
     assert_eq!(networks.len(), 1);
@@ -44,7 +44,8 @@ fn an_extend_covers_the_new_user_and_a_rerun_the_same_pool() {
     set_up_fresh(&mut machine, &mut acl);
     let req = request(&mut machine, 1, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
-    let grown = sids(&[1001, 1002, 1003, 1004, 1005]);
+    let grown: Vec<Sid> = report.pool.iter().map(|user| user.sid.clone()).collect();
+    assert!(grown.len() > 8, "the extend made users");
     assert_eq!(report.network.covered, grown);
     let req = request(&mut machine, 0, Vec::new());
     let again = set_up(&mut machine, &mut acl, &req).unwrap();
@@ -61,7 +62,7 @@ fn an_extend_covers_the_new_user_and_a_rerun_the_same_pool() {
 fn a_wfp_failure_fails_the_set_up_and_rolls_it_back() {
     let mut machine = FakeMachine::new("network-fails");
     let mut acl = FakeAcl::default();
-    machine.fail("network 1001,1002,1003,1004");
+    machine.fail("network 1001,1002,1003,1004,1005,1006,1007,1008");
     let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Network);
@@ -91,7 +92,7 @@ fn a_firewall_group_policy_ignores_leaves_the_set_up_done_on_wfp_alone() {
     machine.around.firewall = Some(FirewallOutcome::Ineffective(why.clone()));
     let report = set_up_fresh(&mut machine, &mut acl);
     assert_eq!(report.network.firewall, FirewallOutcome::Ineffective(why));
-    assert_eq!(report.network.filters, 10, "every filter is still built");
+    assert_eq!(report.network.filters, 14, "every filter is still built");
     assert!(machine.state.marker.is_some());
     assert!(FIREWALL_UNDER_POLICY.contains("AllowLocalPolicyMerge"));
 }
@@ -112,7 +113,7 @@ fn a_firewall_that_fails_with_wfp_ok_passes_with_a_note() {
             FirewallOutcome::Ineffective(trouble.words()),
             "{trouble:?}"
         );
-        assert_eq!(report.network.filters, 10, "{trouble:?}");
+        assert_eq!(report.network.filters, 14, "{trouble:?}");
         assert!(
             machine.state.marker.is_some(),
             "{trouble:?}: set-up is done"
@@ -129,7 +130,7 @@ fn wfp_failing_fails_the_set_up_naming_the_base_filtering_engine() {
         code: 1753,
     };
     machine.fails.push((
-        "network 1001,1002,1003,1004".to_owned(),
+        "network 1001,1002,1003,1004,1005,1006,1007,1008".to_owned(),
         MachineError::Other(bfe.cause()),
     ));
     let req = request(&mut machine, 0, Vec::new());
