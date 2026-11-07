@@ -10,7 +10,7 @@ use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
 use crate::windows::token::TokenSpec;
-use crate::windows::token::os::{logon_sid, make, own_token, user};
+use crate::windows::token::os::{logon_sid, make, own_token, shut_self, user};
 use crate::windows::write;
 
 /// A failure before the agent ran: its exit code and what failed (a call and its code).
@@ -92,6 +92,10 @@ fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<super::spawn::Process, F
     };
     let agent_token =
         make(&token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
+    // The agent runs as this runner's own user: shut this process, its thread and its token to
+    // it before it starts.
+    shut_self(&token, &launch.desktop_user)
+        .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e))?;
     let agent = start_agent(&Agent {
         token: &agent_token,
         desktop: &launch.desktop,

@@ -12,16 +12,17 @@ use std::ptr::null_mut;
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, SDDL_REVISION_1,
+    ConvertStringSidToSidW, SDDL_REVISION_1, SE_KERNEL_OBJECT, SetSecurityInfo,
 };
 use windows::Win32::Security::{
-    ACL, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetLengthSid, GetSecurityDescriptorDacl,
-    GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation,
-    TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
-    TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
+    ACL, CreateRestrictedToken, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, GetLengthSid,
+    GetSecurityDescriptorDacl, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS,
+    TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
+    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
 };
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken};
 use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -230,6 +231,55 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
     set_integrity(&token, &spec.integrity)?;
     set_default_dacl(&token, &spec.default_dacl)?;
     Ok(token)
+}
+
+/// Shuts the inner runner's own process, its thread and its primary token to the agent, which runs
+/// as the same pool user: each gets a protected DACL naming `SYSTEM` and the desktop user only,
+/// with `OWNER RIGHTS` held to `READ_CONTROL` so the pool user, their owner, keeps no implied
+/// `WRITE_DAC`. The desktop user may wait on, query and end the process (`0x101001`) and query the
+/// token. Called after the agent's token is made and before the agent starts; the handles this
+/// runner already holds keep their access. The harness's `runners` row found the agent opening
+/// this token for query and duplicate before.
+pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
+    let process = LocalDescriptor::new(&format!(
+        "D:P(A;;GA;;;SY)(A;;0x{:x};;;{desktop_user})(A;;RC;;;OW)",
+        super::DESKTOP_USER_RIGHTS
+    ))?;
+    let thread = LocalDescriptor::new(&format!(
+        "D:P(A;;GA;;;SY)(A;;0x100000;;;{desktop_user})(A;;RC;;;OW)"
+    ))?;
+    let primary = LocalDescriptor::new(&format!(
+        "D:P(A;;GA;;;SY)(A;;0x8;;;{desktop_user})(A;;RC;;;OW)"
+    ))?;
+    // SAFETY: the pseudo-handles of this process and thread need no close and carry every right.
+    let (own_process, own_thread) = unsafe { (GetCurrentProcess(), GetCurrentThread()) };
+    set_kernel_dacl(own_process, &process)?;
+    set_kernel_dacl(own_thread, &thread)?;
+    set_kernel_dacl(token.0, &primary)
+}
+
+/// Gives the kernel object `handle` the protected DACL of `descriptor`.
+fn set_kernel_dacl(handle: HANDLE, descriptor: &LocalDescriptor) -> io::Result<()> {
+    let dacl = descriptor.dacl()?;
+    // SAFETY: the handle is live with `WRITE_DAC`; the DACL lives in `descriptor`, which
+    // outlives the call.
+    let code = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl.cast_const()),
+            None,
+        )
+    };
+    if code.is_err() {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(code.0).unwrap_or(i32::MAX),
+        ));
+    }
+    Ok(())
 }
 
 /// Sets `token`'s integrity level to `level`.
