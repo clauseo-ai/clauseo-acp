@@ -37,6 +37,7 @@ fn full_removal() -> Vec<String> {
     .map(str::to_owned)
     .to_vec();
     lines.push(format!("stop_strays {}", strays.join(",")));
+    lines.push("remove_network".to_owned());
     for n in users {
         let local_low = format!("Users/ClauseoSb0{n}/AppData/LocalLow");
         lines.extend([
@@ -154,6 +155,7 @@ fn the_steps_are_named_by_what_failed() {
     let step_of = |line: &str| match line.split(' ').next().unwrap() {
         "write_record" => RemoveStep::Flag,
         "stop_strays" => RemoveStep::Strays,
+        "remove_network" => RemoveStep::Network,
         "account_name" | "delete_user" => RemoveStep::Account,
         "profile_of" | "delete_profile" => RemoveStep::Profile,
         "program_data" => RemoveStep::DeviceSync,
