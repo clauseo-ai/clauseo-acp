@@ -171,13 +171,21 @@ pool user's, so either listing with one is INFO, naming the count and the images
   harness, logged on as A's pool user as above, runs `probe items plant <tag>`
   (`probe_items.rs`), which plants that user's own HKCU `Run` and `RunOnce` values, a `.cmd` in
   its Startup folder, a scheduled task (`schtasks /create /xml`, its interactive token, a time
-  trigger in 2099, never run) and a suspended BITS job with no files (`bitsadmin /create`), each
-  named `ClauseoS15-<tag>` and running `probe wait`. After the session ends it waits until that
-  user has no process left (the end-of-session sweeper, `clauseo-sandbox-run --sweep`, has ended;
-  up to 75 s), then runs `probe items check` as that user until every item is gone or 30 s after
-  the session's end have passed. PASS when all are gone; FAIL names the
-  kinds left, or any not planted or not checked; INFO when only the BITS job couldn't be planted.
-  At the row's end `probe items remove` deletes whatever is left, and the row notes it.
+  trigger in 2099, never run), each running `probe wait`, and a BITS job that could complete:
+  a local `file://` source copied to a file beside it in `%TEMP%\ClauseoS15-<tag>`, a notify
+  command line (`probe items mark`) that writes the marker `fired` there, resumed. Each is named
+  `ClauseoS15-<tag>`. After the session ends it waits until that user has no process left (the
+  end-of-session sweeper, `clauseo-sandbox-run --sweep`, has ended; up to 75 s), then runs
+  `probe items check` as that user until the four other items are gone or 30 s after the
+  session's end have passed. The check records the BITS job's state (`bitsadmin /getstate`) and
+  whether the marker exists. BITS holds no logon token for a pool user, so the sweeper can't
+  cancel the job (1245) and leaves it for the `SYSTEM` stop task (PR #668); when it is still
+  there, the row runs a second short session of A and checks again. PASS when the four are gone
+  and the BITS job is gone or inert (no marker, never `TRANSFERRED` or `ACKNOWLEDGED`, through
+  both checks); FAIL names the kinds left, or any not planted or not checked, or says the BITS
+  job ran; INFO when only the BITS job couldn't be planted. At the row's end `probe items
+  remove` deletes whatever is left, and the row notes it. After #668 the row will also require
+  the job gone once the system stop has run.
 
 The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
 harness ends its benign process if it still runs at the row's end, and notes it.

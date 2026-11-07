@@ -75,6 +75,10 @@ pub(crate) enum Swept {
     Escapee,
     /// It failed otherwise, was still running when the outer's wait ran out, or never started.
     Unclean,
+    /// It exited [`RunExit::PoolStop`]: everything went but BITS jobs of the pool user's that
+    /// can't run, left for the `SYSTEM` stop task ([`needs_pool_stop`]). Not a clean end: the
+    /// unclean-session marker stays.
+    PoolStop,
 }
 
 impl Swept {
@@ -83,9 +87,20 @@ impl Swept {
         match code {
             Some(0) => Swept::Clean,
             Some(code) if code == RunExit::Escapee.code() => Swept::Escapee,
+            Some(code) if code == RunExit::PoolStop.code() => Swept::PoolStop,
             Some(_) | None => Swept::Unclean,
         }
     }
+}
+
+/// Whether the end sweeper left the pool user's BITS jobs for the `SYSTEM` stop task.
+///
+/// The outer's wait logs it (`outer/end.rs`); no stop is asked for yet. Once the stop task's
+/// `request_pool_stop()` lands (PR #668), the outer asks for the stop when this holds: in
+/// `outer.rs`'s `relay`, right after `let swept = end.wait();` (after `tell_status`), and in
+/// `outer`, where the failure path calls `end.wait()` after `end.trigger(EndSignal::Failed)`.
+pub(crate) fn needs_pool_stop(swept: Swept) -> bool {
+    swept == Swept::PoolStop
 }
 
 /// Starts the sweeper: the job emptied, then logon, shut, resume, and nothing else (no job). A

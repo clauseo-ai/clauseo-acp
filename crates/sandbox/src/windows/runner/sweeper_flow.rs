@@ -13,12 +13,16 @@
 //! A sweep that failed, or a widening that did, leaves the token shut: the classes, values and
 //! Startup entries are removed without COM, and the tasks and BITS jobs wait for the next
 //! session's end sweeper.
+//!
+//! A BITS job whose `Cancel` failed with `ERROR_NOT_LOGGED_ON` is left for the `SYSTEM` stop
+//! task (`leftovers.rs` says why it is inert): when that is all that is left, the sweeper exits
+//! [`RunExit::PoolStop`] instead of 0, and the outer logs it (`end::needs_pool_stop`).
 
 use std::io;
 
 use super::RunExit;
 use super::inner_flow::at;
-use super::leftovers::Kind;
+use super::leftovers::{Kind, Removal};
 use super::sweep::{Point, SweepError, end_sweeper_exit};
 
 /// The end sweeper's acts.
@@ -29,8 +33,9 @@ pub(crate) trait SweeperActs {
     fn sweep(&mut self, log: &mut dyn FnMut(&str)) -> Result<(), SweepError>;
     /// Gives its user the token rights COM needs.
     fn widen_for_com(&mut self) -> io::Result<()>;
-    /// Removes `kinds` (`leftovers::remove_all`); whether everything went.
-    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> bool;
+    /// Removes `kinds` (`leftovers::remove_all`); whether everything went, and the BITS jobs
+    /// left for the system stop.
+    fn remove(&mut self, kinds: &[Kind], log: &mut dyn FnMut(&str)) -> Removal;
 }
 
 /// The end sweeper's run after its start, in order; its exit code.
@@ -68,8 +73,12 @@ pub(crate) fn run<S: SweeperActs>(steps: &mut S, log: &mut dyn FnMut(&str)) -> u
             }
         },
     };
-    let removed = steps.remove(kinds, log) && kinds == Kind::ALL.as_slice();
-    end_sweeper_exit(&kills, removed)
+    let removal = steps.remove(kinds, log);
+    let removed = removal.clean && kinds == Kind::ALL.as_slice();
+    match end_sweeper_exit(&kills, removed) {
+        0 if removal.bits_for_stop > 0 => RunExit::PoolStop.code(),
+        exit => exit,
+    }
 }
 
 /// An error's OS code, or its kind.
