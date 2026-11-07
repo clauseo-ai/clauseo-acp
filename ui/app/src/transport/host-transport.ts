@@ -47,7 +47,8 @@ export interface HostTransport {
     request: PermissionRequestId,
     option: AgentChoiceId,
   ): Promise<void>;
-  /** The native folder dialog: the folder's ref and its home-relative display; `null` when the lawyer cancels it. */
+  /** The native folder dialog, or on Windows Clauseo's own chooser when that dialog would stall (chooser.ts): the
+   * folder's ref and its home-relative display; `null` when the lawyer cancels. */
   pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
   /** Opens a web or mail link (https, http, mailto) in the default browser or mail app, after the host's native

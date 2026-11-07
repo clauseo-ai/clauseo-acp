@@ -11,6 +11,7 @@
 import { Channel, isTauri } from "@tauri-apps/api/core";
 import { commands, type Ack, type StreamMessage } from "./bindings.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
+import { chooserOf } from "./chooser.ts";
 import {
   NullTransport,
   toHostError,
@@ -297,8 +298,20 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   ): Promise<void> {
     await call(commands.answerPermission(thread, request, option));
   }
-  pickFolder(): Promise<PickedFolder | null> {
-    return call(commands.pickFolder());
+  /** The native folder dialog, or Clauseo's own chooser where Windows' would stall (chooser.ts): either way the
+   * folder picked, or null. */
+  async pickFolder(): Promise<PickedFolder | null> {
+    const answer = await call(commands.pickFolderOrChoose());
+    if (answer.kind === "picked") return answer.folder;
+    if (answer.kind === "cancelled") return null;
+    const session = answer.start.chooser;
+    return chooserOf(this).run(answer.start, {
+      list: (go) => call(commands.chooserList(session, go)),
+      choose: () => call(commands.chooserChoose(session)),
+      cancel: async () => {
+        await call(commands.chooserCancel(session));
+      },
+    });
   }
   displayInfo(): Promise<DisplayInfo> {
     return call(commands.displayInfo());

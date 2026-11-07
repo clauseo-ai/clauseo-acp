@@ -16,6 +16,8 @@ import type {
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
+import { chooserOf } from "./chooser.ts";
+import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
 import {
   internalError,
   toHostError,
@@ -68,6 +70,7 @@ export type FakeCall =
       option: AgentChoiceId;
     }
   | { call: "pick_folder" }
+  | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
@@ -106,6 +109,10 @@ export type FakeHost = {
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   /** Answers the folder picker; a promise holds it open (the picker's line shows while it waits). */
   pickFolder?: () => PickedFolder | null | Promise<PickedFolder | null>;
+  /** With it, the picker answers `choose` as the desktop does where Windows' folder window would stall, and Clauseo's
+   * own chooser opens over this tree (fake-chooser.ts; FAKE_CHOOSER is a lawyer's machine). A promise holds the pick
+   * open first, as the desktop's pre-check does. Ahead of pickFolder. */
+  chooser?: FakeChooser | (() => Promise<FakeChooser>);
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
    * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
    * Protected View. */
@@ -168,6 +175,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
+  /** The chooser sessions opened, for each one's id. */
+  #sessions = 0;
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
@@ -503,6 +512,15 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   async pickFolder(): Promise<PickedFolder | null> {
     this.calls.push({ call: "pick_folder" });
+    const chooser = this.host.chooser;
+    if (chooser !== undefined) {
+      const tree = typeof chooser === "function" ? await chooser() : chooser;
+      this.#sessions += 1;
+      const { start, wire } = fakeChooserSession(tree, this.#sessions, (call) =>
+        this.calls.push(call),
+      );
+      return chooserOf(this).run(start, wire);
+    }
     return (await this.host.pickFolder?.()) ?? null;
   }
 

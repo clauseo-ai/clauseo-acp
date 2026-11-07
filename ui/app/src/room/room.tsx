@@ -59,6 +59,7 @@ import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
+import { FolderChooserHost } from "./folder-chooser-host.tsx";
 import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
@@ -169,6 +170,8 @@ export function Room({
         {/* the limits view (U12): the toolbar's plan and the composer's warning read it */}
         <LimitsContext value={limitsStoreOf(transport)}>
           <RoomFrame transport={transport} windowControls={windowControls} standIns={standIns} />
+          {/* Clauseo's own folder chooser, where Windows' folder window would stall: one for every pick */}
+          <FolderChooserHost transport={transport} />
         </LimitsContext>
       </PartsRoot>
     </RoomScopeProvider>
