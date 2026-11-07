@@ -193,8 +193,8 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
         "{body:?}"
     );
     let english = read("windows/nsis/English.nsh");
-    let still = "LangString removeStillRunning ${LANG_ENGLISH} \"Clauseo is still removing its \
-                 protection. It finishes on its own.\"";
+    let still = "LangString removeStillRunning ${LANG_ENGLISH} \"Clauseo is still removing the \
+                 Safe workspace. It finishes on its own.\"";
     assert!(english.lines().any(|line| line == still), "{still}");
     // The exit code, read only in the WAIT_OBJECT_0 branch, into a value seeded 1; a failed
     // GetExitCodeProcess (0 in $R2) puts the failure back. Nothing else writes $R8 to 0.
@@ -267,11 +267,33 @@ fn a_silent_per_user_uninstall_skips_the_elevated_removal_and_keeps_the_sandbox_
         "{body:?}"
     );
     let english = read("windows/nsis/English.nsh");
-    // Stage F's words (#619), provisional: they say how to remove the protection.
-    let skipped = "LangString removeSkippedSilent ${LANG_ENGLISH} \"Clauseo didn't remove its \
-                   protection, because this uninstall is silent. To remove it, reinstall Clauseo \
+    // Stage F's words (#619), provisional: they say how to remove the Safe workspace.
+    let skipped = "LangString removeSkippedSilent ${LANG_ENGLISH} \"Clauseo didn't remove the \
+                   Safe workspace, because this uninstall is silent. To remove it, reinstall Clauseo \
                    and uninstall it without /S.\"";
     assert!(english.lines().any(|line| line == skipped), "{skipped}");
+}
+
+#[test]
+fn the_apps_language_goes_with_the_data_and_stays_when_it_is_kept() {
+    let code = hook_code();
+    let body = preuninstall(&code);
+    // The app writes HKCU\Software\Clauseo\UiLanguage; ${MANUKEY} is "Software\${MANUFACTURER}"
+    // (installer.nsi:68), and MANUFACTURER is tauri.conf.json's publisher.
+    let conf: serde_json::Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
+    assert_eq!(conf["bundle"]["publisher"], "Clauseo");
+    let deleted = line_with(body, &[r#"DeleteRegValue HKCU "${MANUKEY}" "UiLanguage""#]);
+    let key = line_with(body, &[r#"DeleteRegKey /ifempty HKCU "${MANUKEY}""#]);
+    assert_eq!(deleted + 1, key, "the value goes right before its key");
+    // Only in the box's branch: after the box is cleared there, and nowhere else in the hooks.
+    let branch = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    let cleared = line_with(body, &["StrCpy $DeleteAppDataCheckboxState 0"]);
+    assert!(branch < cleared && cleared < deleted, "{body:?}");
+    let deletes = code.iter().filter(|line| line.starts_with("Delete"));
+    assert_eq!(
+        deletes.filter(|line| line.contains("UiLanguage")).count(),
+        1
+    );
 }
 
 #[test]

@@ -34,22 +34,22 @@ LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete a
 ; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
 LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $COMMONAPPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
 LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $COMMONAPPDATA\Clauseo for a firm policy. Your IT team can create it."
-; removeStillRunning: S15's removal of Clauseo's protection (clauseo-sandbox-setup.exe --remove)
+; removeStillRunning: S15's removal of the Safe workspace (clauseo-sandbox-setup.exe --remove)
 ; was still running when the uninstaller stopped waiting for it, after 2 minutes; it carries on
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
 ; Provisional (stage F, 2026-11-07).
-LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its protection. It finishes on its own."
+LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing the Safe workspace. It finishes on its own."
 ; removeSkippedSilent: a silent per-user uninstall (/S) can't ask for the UAC prompt that removing
-; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
+; the Safe workspace needs, so it skips the removal and keeps the sandbox folder. In the
 ; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
-LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
+LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe workspace, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
 ; removeExeMissing: the uninstaller found S15's set-up program (clauseo-sandbox-setup.exe) gone,
 ; most likely quarantined by Windows security, while the machine's record shows a set-up, so it
 ; couldn't run --remove. A box; under /S a details line and exit code 21. setupExeRemoved: an
 ; installer found that program gone right after writing it; the install stays. A box; under /S a
-; details line and exit code 20. Drafts, for the app thread and stage F (2026-11-07).
-LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove its sandbox because Windows security removed its set-up program. The sandbox's hidden user accounts are still on this computer. Whoever looks after this computer can remove them; the steps are in Clauseo's notes for IT."
-LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo (its sandbox set-up program) while installing. Clauseo won't start AI agents on this computer until it's restored. Whoever looks after this computer can restore it; the steps are in Clauseo's notes for IT."
+; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
+LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
+LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

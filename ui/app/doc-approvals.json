@@ -34,5 +34,12 @@
       "$R8": "the folder it kept",
       "$COMMONAPPDATA": "C:\\ProgramData"
     }
+  },
+  "crates/desktop/windows/nsis/Hindi.nsh": {
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app thread (provisional Hindi; Rohan batch review)",
+    "pr": 651,
+    "title": "Messages the Windows installer and uninstaller show, in Hindi"
   }
 }
