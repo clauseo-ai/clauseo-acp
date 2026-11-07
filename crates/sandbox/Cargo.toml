@@ -114,9 +114,11 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # The runner (S15 PR5, src/windows/{runner,token,pipe}): the named pipes (System_Pipes), its
 # private desktop (System_StationsAndDesktops, whose CreateDesktopW needs Graphics_Gdi), the
 # error mode (System_Diagnostics_Debug), the kill-on-close job (System_JobObjects), and the
-# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp), and the sweep
-# of the pool user's processes, listed with their users by WTSEnumerateProcessesW
-# (System_RemoteDesktop).
+# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp), the sweep of
+# the pool user's processes, listed by a Toolhelp snapshot too, and the removal of what the pool
+# user could leave to start at a logon: its scheduled tasks (System_TaskScheduler, whose
+# collections take a VARIANT index: System_Variant, System_Ole) and BITS jobs
+# (Networking_BackgroundIntelligentTransferService).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -124,6 +126,7 @@ windows = { workspace = true, features = [
   "Wdk_Storage_FileSystem",
   "Wdk_System_Threading",
   "Win32_Foundation",
+  "Win32_Networking_BackgroundIntelligentTransferService",
   "Win32_Globalization",
   "Win32_Graphics_Gdi",
   "Win32_NetworkManagement_IpHelper",
@@ -149,11 +152,11 @@ windows = { workspace = true, features = [
   "Win32_System_ProcessStatus",
   "Win32_System_Rpc",
   "Win32_System_Registry",
-  "Win32_System_RemoteDesktop",
   "Win32_System_Services",
   "Win32_System_StationsAndDesktops",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
+  "Win32_System_TaskScheduler",
   "Win32_System_Threading",
   "Win32_System_Variant",
   "Win32_System_WindowsProgramming",

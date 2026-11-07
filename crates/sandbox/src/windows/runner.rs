@@ -8,6 +8,10 @@
 //!   clauseo-sandbox-run --inner <pipe base>   (the inner runner: the pool user, Medium)
 //!     --CreateProcessAsUserW((B) token, private desktop, the in/out/err pipes)-->
 //!   the agent (the pool user, restricted, Low)
+//!
+//! at the session's end, from the outer, outside every job of the outer's:
+//!     --CreateProcessWithLogonW(LOGON_WITH_PROFILE, suspended, shut, resumed)-->
+//!   clauseo-sandbox-run --sweep   (the end sweeper: the pool user, Medium, detached)
 //! ```
 //!
 //! - The host writes a [`LaunchMessage`] ([`write_launch`]) into the protected run folder and
@@ -22,10 +26,18 @@
 //!   outer's, so when the host's job ends the outer, the inner runner and the agent's tree end
 //!   with it. A disabled Secondary Logon service (error 1058) is [`RunExit::SecondaryLogon`],
 //!   `SetUpFailed` with its named cause ([`RunExit::no_sandbox`]).
-//! - The outer kills every process of the pool user outside its job (`sweep.rs`): before the
-//!   logon, once the suspended inner runner is in the job and shut but before it resumes, every
-//!   [`TICK`](sweep::TICK) while the session runs, and at its end. A pool user serves one live
-//!   session at a time (`pool::assign::busy`), so none of those processes is another session's.
+//! - The pool user's processes outside the job are killed by the pool user itself (`sweep.rs`),
+//!   which alone can see them all (`WTSEnumerateProcessesW` lists another user's processes only
+//!   to Administrators): the inner runner's first act once resumed, before it reads the launch,
+//!   then every [`TICK`](sweep::TICK) while the agent runs and once more when it exited
+//!   (`inner_flow.rs`); the outer gives the inner a query-only handle to the job for that. The
+//!   first act also removes the pool user's scheduled tasks, BITS jobs, `Run`/`RunOnce` values and
+//!   Startup entries (`leftovers.rs`). A pool user serves one live session at a time
+//!   (`pool::assign::busy`), so none of those processes is another session's.
+//! - The outer's first reaction to any end (the host's stdin ending, the inner exiting, a
+//!   failure) is to start the end sweeper once (`end.rs`, `sweeper.rs`): `--sweep`, the same
+//!   kills with no job kept and the same removal, on its own timeout. It is never in the outer's
+//!   job, so the host ending the outer leaves it running.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
 //!   launch on `ctl` only after it checked the client is the inner runner's pid and that pid's
 //!   token user is the pool user; `CreateProcessWithLogonW` caps the command line at 1024
@@ -55,10 +67,16 @@ use super::sids::Sid;
 mod ca;
 #[cfg(windows)]
 mod desktop;
+#[cfg(any(windows, test))]
+mod end;
 pub mod env;
 pub mod frame;
 #[cfg(windows)]
 mod inner;
+#[cfg(any(windows, test))]
+mod inner_flow;
+#[cfg(any(windows, test))]
+mod leftovers;
 #[cfg(windows)]
 mod outer;
 pub mod paths;
@@ -69,6 +87,8 @@ mod spawn;
 mod start;
 #[cfg(any(windows, test))]
 mod sweep;
+#[cfg(windows)]
+mod sweeper;
 
 pub use env::agent_env;
 #[cfg(windows)]
@@ -79,6 +99,8 @@ pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+#[cfg(windows)]
+pub use sweeper::run_sweep;
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
 /// pool users (S15 `PR8`).
@@ -299,6 +321,27 @@ pub fn is_launch_name(name: &str) -> bool {
     })
 }
 
+/// What [`RUNNER_EXE`] was started to do, from its arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    /// `--launch <file>`: the outer runner.
+    Launch(PathBuf),
+    /// `--inner <pipe base>`: the inner runner.
+    Inner(String),
+    /// `--sweep`: the end sweeper, which takes nothing else.
+    Sweep,
+}
+
+/// The mode `args` (the arguments after the program) name; `None` for any other command line.
+pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
+    match args {
+        [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
+        [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
+        [flag] if flag == "--sweep" => Some(Mode::Sweep),
+        _ => None,
+    }
+}
+
 /// The arguments the host starts [`RUNNER_EXE`] with.
 pub fn runner_args(launch_file: &Path) -> Vec<std::ffi::OsString> {
     vec!["--launch".into(), launch_file.as_os_str().to_owned()]
@@ -332,7 +375,7 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
 /// renumbered: the host reads them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunExit {
-    /// The command line isn't `--launch <file>` or `--inner <base>`.
+    /// The command line isn't `--launch <file>`, `--inner <base>` or `--sweep`.
     Usage,
     /// The launch file is missing, isn't the desktop user's alone, or breaks a rule.
     BadLaunch,
@@ -359,9 +402,9 @@ pub enum RunExit {
     /// The agent exited with a code in the runner's own range, which the outer runner never
     /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
     AgentReserved,
-    /// The sweep of the pool user's processes before the inner runner ran failed (`sweep.rs`):
-    /// the process list couldn't be read, or a process of the pool user's couldn't be opened,
-    /// checked or ended.
+    /// The inner runner's first-act sweep of the pool user's processes failed (`sweep.rs`): the
+    /// process list couldn't be read, or a process of the pool user's couldn't be opened, checked
+    /// or ended. Also the end sweeper's exit code when anything it did failed.
     Sweep,
     /// The runner's DLL search couldn't be kept to System32.
     DllSearch,
