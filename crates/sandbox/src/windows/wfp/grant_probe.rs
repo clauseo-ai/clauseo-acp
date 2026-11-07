@@ -37,6 +37,19 @@ fn stray(ns: &Namespace, layer: Layer, n: u16) -> FilterSpec {
     }
 }
 
+/// Adds (elevated) a persistent permit in our sublayer that set-up didn't write, for the VM row
+/// that checks a launch refuses it (does the owner's enumeration see it?); with `remove`,
+/// deletes it. Running set-up again deletes it too.
+pub fn foreign_test_filter(ns: &Namespace, remove: bool) -> Result<(), WfpError> {
+    let engine = Engine::open(false, &ns.display)?;
+    let spec = stray(ns, Layer::ConnectV4, 2);
+    if remove {
+        engine.delete_filter(spec.key).map(drop)
+    } else {
+        engine.add_filter(ns, &spec).map(drop)
+    }
+}
+
 /// Runs the probes in `ns` as the calling user.
 pub fn probe_owner_grants(ns: &Namespace) -> Vec<GrantProbe> {
     let engine = match Engine::open(true, &ns.display) {
