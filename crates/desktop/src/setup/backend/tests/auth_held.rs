@@ -3,10 +3,10 @@
 //! once at a time, so a login that is gone shows signed out instead of "signed in" under the
 //! error.
 
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use clauseo_agents::{AgentsEvent, SigninState, Source};
-use clauseo_protocol::{AgentId, SetupEvent, SignIn};
+use clauseo_protocol::{AgentId, SetupEvent, SignIn, Timestamp};
 use futures::StreamExt as _;
 use serde_json::json;
 
@@ -150,6 +150,81 @@ fn a_status_check_that_ends_with_no_state_lets_a_later_hold_check_again() {
         2,
         "a new hold after a job with no state checks again"
     );
+}
+
+/// The `SignInChanged` states sent for Codex.
+fn codex_changes(events: Vec<SetupEvent>) -> Vec<SignIn> {
+    events
+        .into_iter()
+        .filter_map(|event| match event {
+            SetupEvent::SignInChanged { agent, state } if agent == codex() => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Codex signed in to `email` with Clauseo's own login, confirmed at `secs` after the epoch.
+fn signed_in_as(email: &str, secs: u64) -> SigninState {
+    SigninState::SignedIn {
+        email: Some(email.to_owned()),
+        plan: Some("plus".to_owned()),
+        source: Source::Own,
+        at: UNIX_EPOCH + Duration::from_secs(secs),
+    }
+}
+
+/// The `at` of a `SignedIn`.
+fn at(state: Option<&SignIn>) -> Timestamp {
+    match state {
+        Some(SignIn::SignedIn { at, .. }) => *at,
+        other => panic!("not signed in: {other:?}"),
+    }
+}
+
+/// The desktop review: a re-check after `auth_required` that re-confirms the same account (it
+/// reads the local login file, which an expired token still passes) keeps the first `at`, so
+/// the card never shows "Signed in again" with nothing done; nothing is sent.
+#[test]
+fn a_recheck_that_re_confirms_the_same_account_keeps_its_time() {
+    let rig = rig(true);
+    let mut feed = rig.events.follow();
+    rig.s18_was(&codex(), signed_in_as("a@example.com", 100));
+    assert!(
+        !codex_changes(setup_events(&mut feed)).is_empty(),
+        "shown first"
+    );
+    lock(&rig.agents.answers).insert("check_status", signed_in_as("a@example.com", 200));
+    feed_holds(&rig, vec![frame(&[(2, true)])]);
+    rig.pumped(follow_sign_in_holds(&rig.backend));
+    assert_eq!(status_checks(&rig), 1, "one status run");
+    assert_eq!(
+        codex_changes(setup_events(&mut feed)),
+        [],
+        "nothing is sent"
+    );
+    assert_eq!(
+        rig.backend.compose.s18(&codex()),
+        Some(signed_in_as("a@example.com", 100)),
+        "the first time is kept"
+    );
+}
+
+/// The same re-check answering another account is a real change: sent, with its new `at`.
+#[test]
+fn a_recheck_that_finds_another_account_is_sent_with_its_new_time() {
+    let rig = rig(true);
+    let mut feed = rig.events.follow();
+    rig.s18_was(&codex(), signed_in_as("a@example.com", 100));
+    let first = at(codex_changes(setup_events(&mut feed)).last());
+    lock(&rig.agents.answers).insert("check_status", signed_in_as("b@example.com", 200));
+    feed_holds(&rig, vec![frame(&[(2, true)])]);
+    rig.pumped(follow_sign_in_holds(&rig.backend));
+    let shown = codex_changes(setup_events(&mut feed));
+    assert!(
+        matches!(shown.last(), Some(SignIn::SignedIn { email: Some(email), .. }) if email == "b@example.com"),
+        "{shown:?}"
+    );
+    assert_ne!(at(shown.last()), first, "a new time");
 }
 
 #[test]
