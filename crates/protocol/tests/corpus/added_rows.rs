@@ -443,4 +443,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (372, 0x0628_bffb_8100_b51f),
         (274, 0x1ed4_7c46_29a5_cdfd),
     ),
+    (
+        "added/turn_failed-MatterFolderNotAMatter",
+        include_bytes!("added/turn_failed-MatterFolderNotAMatter.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderNotAMatter.msgpack"),
+        (370, 0x941c_ca6d_b49a_dcfc),
+        (272, 0xe7d0_ab7d_c51d_b6ec),
+    ),
 ];

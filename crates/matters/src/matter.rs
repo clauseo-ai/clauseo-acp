@@ -5,6 +5,7 @@
 mod discard;
 pub use discard::remove_marker_of;
 pub(crate) mod json;
+pub use json::check_marker;
 
 use discard::Fresh;
 
@@ -157,8 +158,9 @@ impl Matter {
         Ok(Made::Done(Box::new(matter), summary))
     }
 
-    /// Opens matter `id` in `folder`: `matter.folder_missing` if the folder is gone or its
-    /// `matter.json` is missing, does not read or names another matter. Points the history's
+    /// Opens matter `id` in `folder`: `matter.folder_missing` if the folder is gone, and
+    /// `matter.folder_not_a_matter` if its `matter.json` is missing, does not read or names another
+    /// matter. Points the history's
     /// work tree (`core.worktree`) at `folder` if it named another, rebuilds the timeline from
     /// the trailers, loads the stat cache (rebuilt if it does not match) and, on Windows, hides
     /// `.clauseo` again if it lost the attribute.
@@ -177,7 +179,7 @@ impl Matter {
     ///   it, and a refused tree (`Settings::refused_trees`) or a folder nested with it;
     ///   `matter.folder_missing` (`NoFolder`) for a folder that does not exist;
     /// - a folder whose `.clauseo/matter.json` is missing, does not read or names another
-    ///   matter: `matter.folder_missing` with that reason.
+    ///   matter: `matter.folder_not_a_matter` (`Error::FolderMissing` with that reason).
     ///
     /// Then it opens the matter as [`Matter::open`] does, which points the history's work tree at
     /// `folder`. The host stores `folder` as the matter's path only after `Ok`, and drops any
@@ -216,9 +218,9 @@ impl Matter {
     ///
     /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root, a
     ///   refused tree);
-    /// - a `matter.json` naming another matter: `matter.folder_missing` (`OtherMatter`), never
-    ///   overwritten;
-    /// - a folder the history does not record: `matter.folder_missing` with the reason
+    /// - a `matter.json` naming another matter: `matter.folder_not_a_matter` (`OtherMatter`),
+    ///   never overwritten;
+    /// - a folder the history does not record: `matter.folder_not_a_matter` with the reason
     ///   `open` gave (`NoMatterJson` or `Unreadable`); it moved, so locate it instead;
     /// - a history that does not open or has no checkpoint (`matter.checkpoint_failed`): the
     ///   history is opened before `matter.json` is written.
@@ -439,7 +441,8 @@ impl Matter {
     /// it). What an unread subfolder holds is not listed; a checkpoint keeps those files as they
     /// were, so the folder itself is in `unread`. The walk stops at the first entry past
     /// `limit` and never reads a folder that sorts after it. `matter.folder_missing` when the
-    /// folder is gone or its `matter.json` names another matter.
+    /// folder is gone, `matter.folder_not_a_matter` when its `matter.json` is missing, does not
+    /// read or names another matter.
     pub fn papers(&self, limit: usize) -> Result<crate::PaperList, Error> {
         json::check(&self.folder, self.id)?;
         papers::papers(&self.folder, &self.settings, limit)

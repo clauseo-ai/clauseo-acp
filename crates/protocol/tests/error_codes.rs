@@ -107,6 +107,28 @@ fn error_codes_match_record() {
     );
 }
 
+/// `matter.folder_not_a_matter`: its string, not retryable, and its row in the record, which says
+/// so too.
+#[test]
+fn folder_not_a_matter_is_its_own_code_and_not_retryable() {
+    let code = ErrorCode::MatterFolderNotAMatter;
+    assert_eq!(code.as_str(), "matter.folder_not_a_matter");
+    assert_eq!(
+        "matter.folder_not_a_matter".parse::<ErrorCode>().ok(),
+        Some(code)
+    );
+    assert!(!code.is_retryable());
+    assert!(!HostError::new(code, "no marker").retryable());
+    let row = rows(RECORD)
+        .into_iter()
+        .find(|row| row.code == "matter.folder_not_a_matter")
+        .expect("0003 has a row for matter.folder_not_a_matter");
+    assert_eq!(row.retryable, Some(false));
+    assert_eq!(row.meaning, code.meaning());
+    let index = |wanted| ErrorCode::ALL.iter().position(|code| *code == wanted);
+    assert!(index(code) < index(ErrorCode::Unknown));
+}
+
 #[test]
 fn display_writes_the_code_text() {
     assert_eq!(

@@ -227,6 +227,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Restore or undo refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable; `HostError.files`, the files to close |
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
+| Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
 
 ## 7. Matter
@@ -338,6 +339,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | A protected name in the matter is a shortcut (Windows, S15 PR4a2) | `ErrorCode::MatterProtectedLink` | no |
 | Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
+| The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

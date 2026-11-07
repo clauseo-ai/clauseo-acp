@@ -17,7 +17,8 @@ Count, modified: Timestamp }`, `skipped` reuses `SkippedFile`, and `unread` is a
 `MatterPath` folders. JSON: `{"list_papers":{"matter":"<id>"}}` answered by
 `{"papers":{"papers":[{"file","path","size","modified"}],"skipped":[{"path","reason"}],"unread":["<folder>"],"truncated":false}}`.
 Errors: `command.unknown_matter` for a matter the host does not know, `matter.folder_missing`
-when the folder is gone or its `matter.json` names another matter.
+when the folder is gone, `matter.folder_not_a_matter` when its `matter.json` is missing, does not
+read or names another matter (`matter.folder_missing` before 2026-11-07).
 
 **The folder as it is now, by the checkpoint's rules.** `Matter::papers` (crate `matters`) walks
 the folder with the checkpoint walk's own code (`walk.rs`): the same excluded names (`.git`,

@@ -9,8 +9,10 @@ use clauseo_protocol::{CheckpointId, ErrorCode, MatterId, MatterPath};
 /// Every failure of a matter operation. [`Error::code`] gives the code a client sees.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The folder is gone, or its `.clauseo/matter.json` is missing, unreadable or names another
-    /// matter (`matter.folder_missing`): the "Locate folder" answer.
+    /// The folder is gone (`matter.folder_missing`), or it is there but its
+    /// `.clauseo/matter.json` is missing, unreadable or names another matter
+    /// (`matter.folder_not_a_matter`): the "Locate folder" answer either way. [`Error::code`]
+    /// tells them apart by `reason`.
     #[error("the matter folder {} is missing: {reason}", folder.display())]
     FolderMissing {
         /// The folder the host passed.
@@ -117,7 +119,8 @@ pub enum Error {
     },
 }
 
-/// Why [`Error::FolderMissing`].
+/// Why [`Error::FolderMissing`]: `NoFolder` is `matter.folder_missing`, the others
+/// `matter.folder_not_a_matter`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingReason {
     /// The folder does not exist (moved, deleted, or its drive is not mounted).
@@ -195,7 +198,17 @@ impl Error {
     /// The protocol error code a client sees for this failure.
     pub const fn code(&self) -> ErrorCode {
         match self {
-            Self::FolderMissing { .. } => ErrorCode::MatterFolderMissing,
+            Self::FolderMissing {
+                reason: MissingReason::NoFolder,
+                ..
+            } => ErrorCode::MatterFolderMissing,
+            Self::FolderMissing {
+                reason:
+                    MissingReason::NoMatterJson
+                    | MissingReason::Unreadable
+                    | MissingReason::OtherMatter(_),
+                ..
+            } => ErrorCode::MatterFolderNotAMatter,
             Self::FolderRefused { .. } => ErrorCode::MatterFolderRefused,
             Self::FileLocked { .. } => ErrorCode::MatterFileLocked,
             Self::UnknownCheckpoint { .. }

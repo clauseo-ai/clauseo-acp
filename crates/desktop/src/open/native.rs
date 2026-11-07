@@ -130,4 +130,8 @@ impl Locate for HostHandle {
             matter,
         ))
     }
+
+    fn check_marker(&self, folder: &Path, matter: MatterId) -> Result<(), HostError> {
+        clauseo_host::check_matter_folder(folder, matter)
+    }
 }

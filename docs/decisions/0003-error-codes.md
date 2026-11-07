@@ -112,6 +112,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `sandbox.setup_failed` | The sandbox's set-up, or the check that the sandbox works, failed; trying again can succeed. | yes | host (the set-up or its check, decision record 0051) |
 | `sandbox.setup_required` | The firm requires the sandbox (sandbox.required) and this computer needs its one-time set-up first (not done, or its administrator prompt declined), so no agent was started; running the set-up fixes it. | no | host (`CreateThread` or a turn's launch under `sandbox.required`, cause `needs_set_up` or `set_up_refused`, decision record 0051) |
 | `sandbox.required` | The firm requires the sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a newer cause), so no agent was started. | no | host (`CreateThread` or a turn's launch under `sandbox.required`, any other cause, decision record 0051) |
+| `matter.folder_not_a_matter` | The matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, unreadable or belongs to another matter: locate the matter's folder. | no | matters (`Error::FolderMissing` with reason `NoMatterJson`, `Unreadable` or `OtherMatter`: open, locate, relink, every checkpoint), desktop (`open_file` and `reveal` for a folder without its marker) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -125,6 +126,13 @@ not mounted": a folder on a drive or network share that is not there, or does no
 the host's 10 s bound, comes back once the drive or share does, and the same call then works. It
 changes a code's meaning, which the rule above forbids, but no peer of another version decodes
 this code: the host and the app ship in one bundle.
+
+`matter.folder_not_a_matter` was added on 2026-11-07, at the orchestrator's request. Until then a
+folder that is there but whose `.clauseo/matter.json` is missing, unreadable or names another
+matter (a relink that could not repair it included) came back as `matter.folder_missing`, whose
+meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
+retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
+now comes only for a folder that is not there or does not answer.
 
 ## Consequences
 
