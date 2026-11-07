@@ -47,9 +47,9 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe w
 ; most likely quarantined by Windows security, while the machine's record shows a set-up, so it
 ; couldn't run --remove. A box; under /S a details line and exit code 21. setupExeRemoved: an
 ; installer found that program gone right after writing it; the install stays. A box; under /S a
-; details line and exit code 20. Drafts, for the app thread and stage F (2026-11-07).
-LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove its sandbox because Windows security removed its set-up program. The sandbox's hidden user accounts are still on this computer. Whoever looks after this computer can remove them; the steps are in Clauseo's notes for IT."
-LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo (its sandbox set-up program) while installing. Clauseo won't start AI agents on this computer until it's restored. Whoever looks after this computer can restore it; the steps are in Clauseo's notes for IT."
+; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
+LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
+LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
