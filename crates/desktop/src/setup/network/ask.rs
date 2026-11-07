@@ -1,7 +1,8 @@
 //! The OS asked about every target at once, within one budget ([`ask_all`]), and the lookups
 //! still running past it ([`Late`]), whose answers make the route again once they land. Each
 //! answer is a proxy, an explicit `DIRECT`, or unknown ([`OsAnswer`]): a failed, late or
-//! slot-refused lookup is no answer, so a refresh keeps the earlier one ([`kept_over_unknown`]).
+//! slot-refused lookup is no answer, so a refresh keeps the earlier one for up to
+//! [`KEEP_FOR`] ([`Known::merge`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -43,19 +44,59 @@ impl OsAnswer {
 /// Each target's answer.
 pub(crate) type Answered = BTreeMap<Url, OsAnswer>;
 
-/// `fresh` with each unknown answer replaced by `prior`'s for that target, when it has one: a
-/// resolve that asks about the same hosts as the last keeps a proxy over a transient failure, and
-/// only an explicit `DIRECT` takes it away. With no `prior` (a first route, or other hosts), an
-/// unknown answer stays unknown, so that target goes direct.
-pub(crate) fn kept_over_unknown(mut fresh: Answered, prior: Option<&Answered>) -> Answered {
-    for (target, answer) in &mut fresh {
-        if *answer == OsAnswer::Unknown
-            && let Some(kept) = prior.and_then(|prior| prior.get(target))
-        {
-            answer.clone_from(kept);
+/// How long an answer a real lookup gave is kept over later lookups with no answer, from when
+/// a real lookup last gave it: past it, no answer goes direct as in a first route, so a laptop
+/// whose new network fails every lookup does not keep an office's proxy for ever.
+pub(crate) const KEEP_FOR: Duration = Duration::from_mins(10);
+
+/// The answers behind a route, with when a real lookup last gave each (a monotonic reading).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Known {
+    pub(crate) answers: Answered,
+    confirmed: BTreeMap<Url, Duration>,
+}
+
+impl Known {
+    /// `fresh`, got at `now`, over these. A real answer is taken, confirmed now. An unknown one
+    /// keeps this route's answer for its target when `fresh` asks about the same targets (a
+    /// refresh, or settings that leave them) and that answer was confirmed under `keep_for` ago:
+    /// a proxy survives a transient failure, and only an explicit `DIRECT` takes it away. Else
+    /// it stays unknown, so that target goes direct (a first route, other hosts, or too old).
+    pub(crate) fn merge(&self, fresh: Answered, now: Duration, keep_for: Duration) -> Known {
+        let same = self.answers.keys().eq(fresh.keys());
+        let mut known = Known::default();
+        for (target, answer) in fresh {
+            let kept = (answer == OsAnswer::Unknown && same)
+                .then(|| Some((self.answers.get(&target)?, *self.confirmed.get(&target)?)))
+                .flatten()
+                .filter(|(_, at)| now.saturating_sub(*at) < keep_for);
+            match kept {
+                Some((kept, at)) => {
+                    known.answers.insert(target.clone(), kept.clone());
+                    known.confirmed.insert(target, at);
+                }
+                None if answer == OsAnswer::Unknown => {
+                    known.answers.insert(target, answer);
+                }
+                None => {
+                    known.answers.insert(target.clone(), answer);
+                    known.confirmed.insert(target, now);
+                }
+            }
         }
+        known
     }
-    fresh
+
+    /// With the real answers in `late` (lookups past the budget that landed at `now`) taken.
+    pub(crate) fn landed(mut self, late: Answered, now: Duration) -> Known {
+        for (target, answer) in late {
+            if answer != OsAnswer::Unknown {
+                self.answers.insert(target.clone(), answer);
+                self.confirmed.insert(target, now);
+            }
+        }
+        self
+    }
 }
 
 /// `os`'s answer for each of `targets`, all asked at once, each on its own thread: what has

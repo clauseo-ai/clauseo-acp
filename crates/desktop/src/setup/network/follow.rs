@@ -23,8 +23,9 @@
 //! A resolve that asks the OS about the same hosts as the last route (a refresh, or a settings
 //! change that leaves them as they were: an entry's variables or a CA file, say) never turns a
 //! proxy into direct on a transient failure: a lookup that failed, timed out, found no free slot
-//! or ran past the budget is no answer, and keeps the last route's answer for that target; only
-//! the OS saying `DIRECT` takes the proxy away. In a first route, or one asking about other
+//! or ran past the budget is no answer, and keeps the last route's answer for that target, for
+//! up to 10 minutes from when a real lookup last gave it ([`KEEP_FOR`]); only the OS saying
+//! `DIRECT` takes the proxy away sooner. In a first route, or one asking about other
 //! hosts, no answer goes direct. A lookup that lands late
 //! makes the route again with its answer, unless another route was made since. The thread ends
 //! once the [`NetworkFollow`] and its refreshers are gone.
@@ -42,8 +43,8 @@ use futures::future::{Either, Shared, select};
 use url::Url;
 
 use super::{
-    Answered, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, ProxyEnv, ask_all,
-    kept_over_unknown, os_targets, resolve,
+    Answered, KEEP_FOR, Known, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup,
+    ProxyEnv, ask_all, os_targets, resolve,
 };
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
@@ -56,7 +57,8 @@ pub(crate) const FIRST_ROUTE_WAIT: Duration = Duration::from_secs(5);
 
 /// How long one resolve waits for the OS's answers, all asked at once: the budget less a margin
 /// for handing the route on. A lookup past it has no answer in that route: direct in a first
-/// route, the earlier answer when the same hosts were asked last time ([`kept_over_unknown`]).
+/// route, the earlier answer when the same hosts were asked last time, for up to [`KEEP_FOR`]
+/// ([`Known::merge`]).
 pub(crate) const OS_LOOKUP_BUDGET: Duration = Duration::from_millis(4_750);
 
 /// How long a route is used before it is resolved again.
@@ -82,8 +84,10 @@ enum Ask {
 struct LateRoute {
     facts: NetworkFacts,
     env: ProxyEnv,
-    /// Every answer, those in time and those late (one still unknown keeps the earlier).
-    answers: Answered,
+    /// The answers the route was made from.
+    base: Known,
+    /// The lookups past the budget that answered.
+    landed: Answered,
 }
 
 /// When the last route was made, and from what read.
@@ -95,8 +99,10 @@ struct Freshness {
     /// How many routes have been made: late answers apply only to the resolve that asked.
     made: u64,
     /// The OS's answers behind the last route, one per host it asked about: kept over an unknown
-    /// one by a resolve that asks about the same hosts.
-    answers: Answered,
+    /// one by a resolve that asks about the same hosts, for up to `keep_for`.
+    answers: Known,
+    /// [`KEEP_FOR`], shorter in tests.
+    keep_for: Duration,
 }
 
 impl Freshness {
@@ -106,12 +112,19 @@ impl Freshness {
             fresh_for,
             last: None,
             made: 0,
-            answers: Answered::new(),
+            answers: Known::default(),
+            keep_for: KEEP_FOR,
         }
     }
 
+    /// `fresh` answers got now over the last route's ([`Known::merge`]).
+    fn merge(&self, fresh: Answered) -> Known {
+        self.answers
+            .merge(fresh, self.clock.monotonic(), self.keep_for)
+    }
+
     /// Notes a route made from `facts` and `answers` now.
-    fn resolved(&mut self, facts: NetworkFacts, answers: Answered) {
+    fn resolved(&mut self, facts: NetworkFacts, answers: Known) {
         self.last = Some((facts, self.clock.monotonic()));
         self.made += 1;
         self.answers = answers;
@@ -229,10 +242,13 @@ struct Resolver {
 
 impl Resolver {
     /// The route for `facts` and the answers behind it, the OS asked about every target at once
-    /// within the budget; when `last` (the last route's answers) asked about the same targets,
-    /// an unknown answer takes its.
-    fn resolve(&self, facts: &NetworkFacts, last: &Answered) -> (NetworkRoute, Answered) {
-        self.resolve_late(facts, last, |_late| {})
+    /// within the budget, its answers put over the last route's by `merge`.
+    fn resolve(
+        &self,
+        facts: &NetworkFacts,
+        merge: impl FnOnce(Answered) -> Known,
+    ) -> (NetworkRoute, Known) {
+        self.resolve_late(facts, merge, |_late| {})
     }
 
     /// [`Resolver::resolve`]; lookups still running past the budget are handed to `late` with
@@ -240,29 +256,24 @@ impl Resolver {
     fn resolve_late(
         &self,
         facts: &NetworkFacts,
-        last: &Answered,
+        merge: impl FnOnce(Answered) -> Known,
         late: impl FnOnce(Box<dyn FnOnce() -> LateRoute + Send>),
-    ) -> (NetworkRoute, Answered) {
+    ) -> (NetworkRoute, Known) {
         let env = (self.env)();
         let targets = os_targets(facts, &env, self.os_fallback);
-        // The same settings, for the OS: the same hosts asked about, whatever else changed.
-        let prior = last.keys().eq(targets.iter()).then_some(last);
         let answers = ask_all(targets, &self.os, self.budget);
-        let got = kept_over_unknown(answers.got, prior);
-        let route = route_from(facts, &env, self.os_fallback, &got);
+        let known = merge(answers.got);
+        let route = route_from(facts, &env, self.os_fallback, &known.answers);
         if let Some(running) = answers.late {
-            let (facts, mut kept) = (facts.clone(), got.clone());
-            late(Box::new(move || {
-                let landed = running.collect(LATE_WAIT);
-                kept.extend(landed.into_iter().filter(|(_, a)| *a != OsAnswer::Unknown));
-                LateRoute {
-                    facts,
-                    env,
-                    answers: kept,
-                }
+            let (facts, base) = (facts.clone(), known.clone());
+            late(Box::new(move || LateRoute {
+                landed: running.collect(LATE_WAIT),
+                facts,
+                env,
+                base,
             }));
         }
-        (route, got)
+        (route, known)
     }
 }
 
@@ -344,6 +355,13 @@ impl Follower {
         self
     }
 
+    /// With `clock` instead of the system's (tests).
+    #[cfg(test)]
+    pub(crate) fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.fresh.clock = clock;
+        self
+    }
+
     /// With `fresh_for` instead of [`ROUTE_FRESH_FOR`] (tests).
     #[cfg(test)]
     pub(crate) fn fresh_for(mut self, fresh_for: Duration) -> Self {
@@ -360,8 +378,8 @@ impl Follower {
 
     /// Resolves `facts` and hands the route on ([`Follower::hand`]).
     pub(crate) fn take(&mut self, facts: &NetworkFacts) {
-        let (route, answers) = self.resolver.resolve(facts, &self.fresh.answers);
-        self.fresh.resolved(facts.clone(), answers);
+        let (route, known) = self.resolver.resolve(facts, |got| self.fresh.merge(got));
+        self.fresh.resolved(facts.clone(), known);
         self.hand(route);
     }
 
@@ -530,15 +548,20 @@ fn serve(
         }
         if let Some(facts) = newest.or_else(|| fresh.stale().cloned()) {
             let made = fresh.made + 1;
-            let (route, answers) = resolver.resolve_late(&facts, &fresh.answers, |collect| {
-                watch_late(collect, made, send);
-            });
+            let (route, answers) = resolver.resolve_late(
+                &facts,
+                |got| fresh.merge(got),
+                |collect| {
+                    watch_late(collect, made, send);
+                },
+            );
             fresh.resolved(facts, answers);
             lock(follower).hand(route);
         } else if let Some((_, late)) = late.filter(|(made, _)| *made == fresh.made) {
             // No route made since they were asked: the route again with their answers, no lookup.
-            let route = route_from(&late.facts, &late.env, resolver.os_fallback, &late.answers);
-            fresh.answers = late.answers;
+            let known = late.base.landed(late.landed, fresh.clock.monotonic());
+            let route = route_from(&late.facts, &late.env, resolver.os_fallback, &known.answers);
+            fresh.answers = known;
             lock(follower).hand(route);
         }
         let network = lock(follower).last.clone();

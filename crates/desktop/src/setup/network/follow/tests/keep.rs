@@ -15,7 +15,7 @@ use clauseo_sandbox::{Route, UpstreamAnswer};
 use url::Url;
 
 use super::super::super::{
-    Answered, NetworkFacts, NetworkSlot, OsAnswer, ProxyEnv, kept_over_unknown, os_answer,
+    Answered, KEEP_FOR, Known, NetworkFacts, NetworkSlot, OsAnswer, ProxyEnv, os_answer,
 };
 use super::super::{Follower, NetworkFollow, follow};
 use super::{OS_PROXY, claude, codex, facts, hook_env, since};
@@ -143,18 +143,21 @@ fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
         (proxied.clone(), OsAnswer::Unknown),
     ]
     .into();
-    assert_eq!(kept_over_unknown(failed.clone(), Some(&last)), last);
-    assert_eq!(
-        kept_over_unknown(failed.clone(), None),
-        failed,
-        "nothing to keep"
-    );
+    let at = Duration::from_secs(100);
+    let known = Known::default().merge(last.clone(), at, KEEP_FOR);
+    let later = at + Duration::from_secs(60);
+    assert_eq!(known.merge(failed.clone(), later, KEEP_FOR).answers, last);
+    let nothing = Known::default().merge(failed.clone(), later, KEEP_FOR);
+    assert_eq!(nothing.answers, failed, "nothing to keep");
     let answered: Answered = [
-        (direct.clone(), OsAnswer::Proxy(NEW_PROXY.to_owned())),
-        (proxied.clone(), OsAnswer::Direct),
+        (direct, OsAnswer::Proxy(NEW_PROXY.to_owned())),
+        (proxied, OsAnswer::Direct),
     ]
     .into();
-    assert_eq!(kept_over_unknown(answered.clone(), Some(&last)), answered);
+    assert_eq!(
+        known.merge(answered.clone(), later, KEEP_FOR).answers,
+        answered
+    );
     // Through the follower: a cached DIRECT, then a failure on a refresh, stays direct.
     let os = Os::new(OsAnswer::Direct);
     let (network, hook) = inline(&os);
@@ -283,4 +286,62 @@ fn dropping_the_follow_ends_the_network_thread() {
         );
         block_on(AsyncIoTimer.after(Duration::from_millis(20)));
     }
+}
+
+/// A monotonic clock the test moves.
+#[derive(Clone, Default)]
+struct FakeClock(Arc<Mutex<Duration>>);
+
+impl FakeClock {
+    fn advance(&self, by: Duration) {
+        *lock(&self.0) += by;
+    }
+}
+
+impl clauseo_agents::Clock for FakeClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH + *lock(&self.0)
+    }
+    fn monotonic(&self) -> Duration {
+        *lock(&self.0)
+    }
+}
+
+/// A proxy is kept over failed lookups for at most 10 minutes from when a real lookup last gave
+/// it; a real answer meanwhile confirms it again; past the 10 minutes a failure goes direct, as
+/// in a first route (stage C's backstop: a new network that fails every lookup).
+#[test]
+fn a_kept_proxy_expires_ten_minutes_after_a_real_lookup_last_gave_it() {
+    assert_eq!(KEEP_FOR, Duration::from_mins(10));
+    let clock = FakeClock::default();
+    let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .fresh_for(Duration::ZERO)
+        .clock(Arc::new(clock.clone()));
+    let network = NetworkFollow::inline(follower);
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    let refresh = network.refresher();
+    network.update(facts());
+    os.set(OsAnswer::Unknown, Duration::ZERO);
+    clock.advance(Duration::from_mins(9));
+    refresh();
+    assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY), "at 9 min: kept");
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::ZERO);
+    refresh();
+    os.set(OsAnswer::Unknown, Duration::ZERO);
+    clock.advance(Duration::from_mins(9));
+    refresh();
+    assert_eq!(
+        proxy_of(&hook).as_deref(),
+        Some(OS_PROXY),
+        "confirmed at 9 min, kept at 18"
+    );
+    clock.advance(Duration::from_secs(60));
+    refresh();
+    assert_eq!(
+        proxy_of(&hook),
+        None,
+        "10 min after the last real answer: direct"
+    );
 }
