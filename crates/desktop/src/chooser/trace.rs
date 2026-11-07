@@ -6,6 +6,10 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
+/// The target of these lines: host.log keeps info only from `clauseo_*::lifecycle` targets
+/// (`clauseo_host::log_file`), so a plain module target would never reach the file.
+pub(crate) const TARGET: &str = "clauseo_desktop::chooser::lifecycle";
+
 /// When the app started, as `lib::run` marks it first thing.
 static LAUNCH: OnceLock<Instant> = OnceLock::new();
 
@@ -28,6 +32,7 @@ pub(crate) fn at_ms() -> u64 {
 /// Logs the chooser's step `what`, begun at `began`, with `detail` (no path).
 pub(crate) fn step(what: &str, began: Instant, detail: &str) {
     tracing::info!(
+        target: TARGET,
         at_ms = at_ms(),
         took_ms = since(began),
         detail,
@@ -38,5 +43,15 @@ pub(crate) fn step(what: &str, began: Instant, detail: &str) {
 /// Logs the start-up's step `what`, begun at `began`, on the same clock: the click's lines
 /// read against when the host came up.
 pub(crate) fn mark(what: &str, began: Instant, detail: &str) {
-    tracing::info!(at_ms = at_ms(), took_ms = since(began), detail, "{what}");
+    tracing::info!(target: TARGET, at_ms = at_ms(), took_ms = since(began), detail, "{what}");
+}
+
+#[cfg(test)]
+mod tests {
+    /// host.log keeps info lines only from a `clauseo_*` crate's `::lifecycle` target.
+    #[test]
+    fn the_target_is_one_host_log_keeps() {
+        assert!(super::TARGET.starts_with("clauseo_"));
+        assert!(super::TARGET.ends_with("::lifecycle"));
+    }
 }
