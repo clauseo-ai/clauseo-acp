@@ -91,6 +91,29 @@ mod pe {
             self.u32_at(self.optional + 112 + index * 8)
         }
 
+        /// Data directory `index`'s size in bytes, the four bytes after its RVA.
+        pub(crate) fn directory_size(&self, index: usize) -> usize {
+            self.u32_at(self.optional + 112 + index * 8 + 4)
+        }
+
+        /// The `Type` of each entry in the debug directory (data directory 6): 28-byte
+        /// `IMAGE_DEBUG_DIRECTORY` entries, the type 12 bytes into each. Empty when absent.
+        pub(crate) fn debug_types(&self) -> Vec<usize> {
+            let rva = self.directory(6);
+            if rva == 0 {
+                return Vec::new();
+            }
+            let table = self.offset(rva);
+            (0..self.directory_size(6) / 28)
+                .map(|n| self.u32_at(table + n * 28 + 12))
+                .collect()
+        }
+
+        /// The image's bytes.
+        pub(crate) fn bytes(&self) -> &[u8] {
+            &self.bytes
+        }
+
         /// The RVA to a file offset, through the section that holds it.
         pub(crate) fn offset(&self, rva: usize) -> usize {
             (0..self.sections)
@@ -209,6 +232,36 @@ fn the_exe_has_aslr_with_high_entropy_and_dep() {
         (0x100, "NX_COMPAT"),
     ] {
         assert_eq!(flags & flag, flag, "{name} is off: {flags:#x}");
+    }
+}
+
+/// The debug-directory entry types the exe may carry without a PDB (`IMAGE_DEBUG_TYPE_*`).
+/// `/Brepro` always adds a `REPRO` (16) entry holding the image's hash, `/DEBUG:NONE` or not.
+/// The linker may also add, without `/DEBUG`, `VC_FEATURE` (12) and `POGO` (13) from MSVC-built
+/// objects such as the CRT's, `ILTCG` (14) for LTCG objects, and `EX_DLLCHARACTERISTICS` (20)
+/// for `/CETCOMPAT`. None names a file or holds a path. `CODEVIEW` (2) is what names the PDB.
+#[cfg(all(windows, target_env = "msvc"))]
+const DEBUG_TYPES_WITHOUT_A_PDB: [usize; 5] = [12, 13, 14, 16, 20];
+
+/// No PDB, so no `CODEVIEW` entry: its GUID would hash rustc's random temp paths (`build.rs`).
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_exe_names_no_pdb() {
+    let pe = Pe::read();
+    let types = pe.debug_types();
+    assert!(
+        !types.contains(&2),
+        "a CodeView entry: /DEBUG:NONE didn't reach the link: {types:?}"
+    );
+    assert!(
+        types
+            .iter()
+            .all(|kind| DEBUG_TYPES_WITHOUT_A_PDB.contains(kind)),
+        "a debug entry of a type not vetted as PDB-free: {types:?}"
+    );
+    let text = String::from_utf8_lossy(pe.bytes()).to_ascii_lowercase();
+    for pdb in ["clauseo-sandbox-setup.pdb", "clauseo_sandbox_setup.pdb"] {
+        assert!(!text.contains(pdb), "the exe names {pdb}");
     }
 }
 

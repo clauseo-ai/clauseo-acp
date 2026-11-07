@@ -21,7 +21,8 @@
 // Cargo runs with the job's own environment (RUSTFLAGS and the CARGO_PROFILE_RELEASE_* flags),
 // so a sidecar gets the same release flags as the app, and its .pdb, .dSYM or .dwp lands in
 // target/<triple>/release beside the app's. The setup exe adds only path remaps to those flags,
-// and SOURCE_DATE_EPOCH, for a reproducible build (reproducibleEnv).
+// and SOURCE_DATE_EPOCH, for a reproducible build (reproducibleEnv); it has no .pdb
+// (crates/sandbox/build.rs).
 //
 // Node built-ins only. Tests: sidecars.test.mjs next to this file (ci.yml's fast lane).
 
@@ -70,13 +71,12 @@ const cargoPackageBin = (pkg, bin) => async (triple, ctx) => {
  * else RUSTFLAGS) and --remap-path-prefix for the repo root, cargo's home and the target dir, so
  * the target's crates carry no absolute path from the runner (a dependency's panic location, an
  * OUT_DIR file). Under --target, rustflags never reach the host's proc macros and build scripts,
- * and lld's PDB holds absolute object paths, so the exe is reproducible at one build path only
- * (crates/sandbox/build.rs). rustc applies the last prefix that matches, so the target dir,
+ * so the exe is reproducible at one build path only (crates/sandbox/build.rs). rustc applies the last prefix that matches, so the target dir,
  * inside the root, comes after it. CARGO_ENCODED_RUSTFLAGS (0x1f between flags) keeps a path
  * with spaces whole. Cargo hashes rustflags into its artifacts' names, so this build sits beside
  * the app's, not over it.
  * SOURCE_DATE_EPOCH is the commit's time (the job's own, when it sets one), for any build
- * script or tool that would stamp a date. The linker's half (/Brepro, /PDBALTPATH) is in
+ * script or tool that would stamp a date. The linker's half (/Brepro, /DEBUG:NONE) is in
  * crates/sandbox/build.rs; the toolchain is rust-toolchain.toml's, which rustup and cargo honour
  * in the repo.
  *
