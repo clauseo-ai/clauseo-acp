@@ -13,7 +13,15 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { PREFIX, RELEASE_TARGETS, SIDECARS, overlayProblem, placeSidecars } from "./sidecars.mjs";
+import {
+  PREFIX,
+  RELEASE_TARGETS,
+  SIDECARS,
+  buildSetupExe,
+  overlayProblem,
+  placeSidecars,
+  reproducibleEnv,
+} from "./sidecars.mjs";
 
 const scratch = await mkdtemp(join(tmpdir(), "sidecars-test-"));
 after(() => rm(scratch, { recursive: true, force: true }));
@@ -38,12 +46,15 @@ async function pin(dir, { none = [], missing = [] } = {}) {
 async function setup(pinOptions) {
   const root = await mkdtemp(join(scratch, "root-"));
   const cargoCalls = [];
+  const cargoEnvs = [];
   const fetchCalls = [];
   const options = {
     root,
     targetDir: "target",
-    cargo: (args) => {
+    commitTime: () => "1700000000",
+    cargo: (args, extra) => {
       cargoCalls.push(args);
+      cargoEnvs.push(extra);
       const triple = args[args.indexOf("--target") + 1];
       const name = args.includes("--bin") ? args[args.indexOf("--bin") + 1] : args[args.indexOf("-p") + 1];
       const out = join(root, "target", triple, "release", `${name}${triple.includes("-windows-") ? ".exe" : ""}`);
@@ -62,7 +73,7 @@ async function setup(pinOptions) {
   const overlay = async () =>
     JSON.parse(await readFile(join(root, "crates", "desktop", "release", "sidecars.generated.json"), "utf8"));
   const binaries = async () => (await readdir(join(root, "crates", "desktop", "binaries"))).sort();
-  return { root, run, overlay, binaries, cargoCalls, fetchCalls };
+  return { root, run, overlay, binaries, cargoCalls, cargoEnvs, fetchCalls, options };
 }
 
 const WINDOWS = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
@@ -212,4 +223,48 @@ test("the overlay check refuses any other key, a non-list, and a name without th
   }
   assert.match(overlayProblem({ bundle: { externalBin: ["binaries/agent-browser"] } }), /binaries\/clauseo-/);
   assert.match(overlayProblem({ bundle: { externalBin: ["../clauseo-mcp"] } }), /binaries\/clauseo-/);
+});
+
+test("only the setup exe's build gets the path remaps, after the job's rustflags", async () => {
+  const env = await setup();
+  await env.run("x86_64-pc-windows-msvc");
+  const at = env.cargoCalls.findIndex((args) => args.includes("clauseo-sandbox"));
+  const flags = env.cargoEnvs[at].CARGO_ENCODED_RUSTFLAGS.split("\x1f");
+  assert.deepEqual(flags.slice(-3).map((flag) => flag.split("=").at(-1)), ["/clauseo", "/cargo", "/target"]);
+  assert.ok(flags.includes(`--remap-path-prefix=${join(env.root, "target")}=/target`), flags.join(" "));
+  assert.equal(env.cargoEnvs[at].SOURCE_DATE_EPOCH, "1700000000");
+  const others = env.cargoEnvs.filter((_, n) => n !== at);
+  assert.deepEqual(others, others.map(() => undefined));
+});
+
+test("the remaps keep the job's rustflags, encoded or not, the target dir's last; the commit's time", () => {
+  const remaps = [
+    "--remap-path-prefix=/r=/clauseo",
+    "--remap-path-prefix=/h=/cargo",
+    "--remap-path-prefix=/r/t=/target",
+  ];
+  const where = (env) => ({ root: "/r", targetDir: "/r/t", commitTime: "17", env });
+  const flags = (env) => reproducibleEnv(where(env)).CARGO_ENCODED_RUSTFLAGS.split("\x1f");
+  assert.equal(reproducibleEnv(where({})).SOURCE_DATE_EPOCH, "17");
+  assert.equal(reproducibleEnv(where({ SOURCE_DATE_EPOCH: "9" })).SOURCE_DATE_EPOCH, "9");
+  assert.deepEqual(flags({ CARGO_HOME: "/h", RUSTFLAGS: " -C  force-frame-pointers=yes " }), [
+    "-C",
+    "force-frame-pointers=yes",
+    ...remaps,
+  ]);
+  assert.deepEqual(flags({ CARGO_HOME: "/h", RUSTFLAGS: "-C x", CARGO_ENCODED_RUSTFLAGS: "-C\x1fy=a b" }), [
+    "-C",
+    "y=a b",
+    ...remaps,
+  ]);
+  assert.deepEqual(flags({ CARGO_HOME: "/h" }), remaps);
+});
+
+test("--setup-exe's build places nothing, and refuses a target the exe doesn't ship on", async () => {
+  const env = await setup();
+  const path = await buildSetupExe("aarch64-pc-windows-msvc", env.options);
+  assert.equal(path, join(env.root, "target", "aarch64-pc-windows-msvc", "release", "clauseo-sandbox-setup.exe"));
+  assert.deepEqual(env.cargoCalls, [SETUP_CARGO("aarch64-pc-windows-msvc")]);
+  await assert.rejects(readdir(join(env.root, "crates")), { code: "ENOENT" });
+  await assert.rejects(buildSetupExe("x86_64-unknown-linux-gnu", env.options), /Windows release targets only/);
 });

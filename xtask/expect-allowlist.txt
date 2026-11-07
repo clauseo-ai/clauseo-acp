@@ -153,6 +153,8 @@ crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
 
+# The setup exe's VERSIONINFO .rc, written into OUT_DIR by the build script.
+crates/sandbox/build.rs write_out clippy::disallowed_methods
 crates/sandbox/examples/run_sandboxed/env.rs remove_secret clippy::disallowed_methods
 crates/sandbox/examples/run_sandboxed.rs jail::catch_termination unsafe_code
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).

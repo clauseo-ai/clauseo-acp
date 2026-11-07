@@ -17,6 +17,9 @@ publish = false
 # set is fixed (`cargo xtask check` enforces it); each change forces a near-cold rebuild.
 tauri = "2.12.4"
 tauri-build = "2.7.3"
+# The sandbox setup exe's VERSIONINFO (crates/sandbox/build.rs): the version tauri-build's
+# tauri-winres already locks, so no new crate.
+embed-resource = "3.0.12"
 # Only to name `InitializationScript` in crates/desktop/src/rust_only.rs; tauri does not re-export it.
 tauri-runtime = "2.12.2"
 tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
