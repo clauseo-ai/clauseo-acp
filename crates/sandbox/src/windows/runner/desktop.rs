@@ -31,6 +31,9 @@ use crate::windows::token::os::LocalDescriptor;
 
 /// `GENERIC_ALL`, the access the outer runner asks for on what it makes.
 const GENERIC_ALL: u32 = 0x1000_0000;
+/// `CWF_CREATE_ONLY`: `CreateWindowStationW` fails (`ERROR_ALREADY_EXISTS`) rather than open a
+/// station that already has the name.
+const CWF_CREATE_ONLY: u32 = 0x0000_0001;
 
 /// The agent's window station and its desktop, closed on drop (the outer runner keeps them for
 /// its whole run).
@@ -45,8 +48,9 @@ impl AgentDesktop {
     /// Makes the window station `name` and its desktop `Default`, each with `creator` (the
     /// desktop user) in its DACL while the desktop is made, then set to `station_sddl`'s and
     /// `desktop_sddl`'s DACL. This process's window station is switched to the new one only while
-    /// the desktop is made (a desktop is made on the caller's station), then back. A failure
-    /// names the call that failed.
+    /// the desktop is made (a desktop is made on the caller's station), then back. A station
+    /// that already has the name is a failure, never opened. A failure names the call that
+    /// failed.
     pub(super) fn create(
         name: &str,
         creator: &Sid,
@@ -65,7 +69,7 @@ impl AgentDesktop {
         let station = unsafe {
             CreateWindowStationW(
                 &HSTRING::from(name),
-                0,
+                CWF_CREATE_ONLY,
                 GENERIC_ALL,
                 Some(&raw const station_attributes),
             )
