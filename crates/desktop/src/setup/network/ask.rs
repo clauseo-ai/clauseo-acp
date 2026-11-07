@@ -44,8 +44,8 @@ impl OsAnswer {
 pub(crate) type Answered = BTreeMap<Url, OsAnswer>;
 
 /// `fresh` with each unknown answer replaced by `prior`'s for that target, when it has one: a
-/// refresh of the same read keeps a proxy over a transient failure, and only an explicit
-/// `DIRECT` takes it away. With no `prior` (a first route, or after the settings changed), an
+/// resolve that asks about the same hosts as the last keeps a proxy over a transient failure, and
+/// only an explicit `DIRECT` takes it away. With no `prior` (a first route, or other hosts), an
 /// unknown answer stays unknown, so that target goes direct.
 pub(crate) fn kept_over_unknown(mut fresh: Answered, prior: Option<&Answered>) -> Answered {
     for (target, answer) in &mut fresh {
