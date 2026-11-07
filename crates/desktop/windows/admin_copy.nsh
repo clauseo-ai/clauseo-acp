@@ -9,16 +9,21 @@
 ; lawyer's data folder ($LOCALAPPDATA\${BUNDLEID}) if it is missing, says a UAC prompt is next
 ; (adminCopyAsk), and starts $EXEPATH itself again with "runas" and
 ; `/S /CLAUSEO_ADMIN_SECTION /CLAUSEO_OWNER_SID=<sid> /CLAUSEO_DATA_DIR=<folder> /D=$INSTDIR`.
-; It waits for that instance however long it takes. --adopt checks that its parent (the elevated
-; instance) and that one's parent (this outer one) are alive, started in order and both
-; $EXEPATH, and that the outer one is unelevated with --owner-sid as its token user. NSIS holds
-; $EXEPATH open sharing only reads until it exits, so nothing can rewrite, rename or delete it
-; meanwhile.
+; It first refuses while Clauseo runs (its main window, CLAUSEO_MAIN_WINDOW_CLASS, found after the
+; template's own app-running check): adminCopyAppRunning, exit code 24, no prompt. It waits for
+; the elevated instance up to 10 minutes. --adopt checks that its parent (the elevated instance)
+; and that one's parent (this outer one) are alive, started in order and both $EXEPATH, and that
+; the outer one is unelevated with --owner-sid as its token user. NSIS holds $EXEPATH open sharing
+; only reads until it exits, which keeps other Windows accounts from rewriting, renaming or
+; deleting it meanwhile; a process already running as the lawyer can close that handle in this
+; process (DuplicateHandle) or inject into it and swap the file. That is decision 0049's residual
+; ("What stays open"), with persisted same-user code outside Clauseo's jobs.
 ;
 ; The elevated instance runs CLAUSEO_ELEVATED_BRANCH (admin_elevated.nsh), which the repo's copy
 ; of Tauri's template (windows/nsis/installer.nsi, decision 0035) inserts first in .onInit, and
 ; quits there: before any plug-in (so nothing is loaded from a plug-in folder under the lawyer's
-; %TEMP%), page or section of the template's.
+; %TEMP%), page or section of the template's. It refuses too while Clauseo's main window is there
+; (exit 97, the same outcome).
 ;
 ; The outer instance then says set up (a details line), or shows one box: declined, another
 ; account, or failed. The install has succeeded either way, with tier C. /S and /P can't ask: a
@@ -56,6 +61,17 @@
 !define CLAUSEO_ADMIN_NOT_RUN 99
 ; 98: the record names a newer admin copy than this installer's, which stays (nothing written).
 !define CLAUSEO_ADMIN_NEWER_KEPT 98
+; 97: Clauseo is running (its main window is there); nothing written.
+!define CLAUSEO_ADMIN_APP_RUNNING 97
+; 96: the per-machine installer stopped waiting for --adopt (CLAUSEO_ADMIN_WAIT_MS).
+!define CLAUSEO_ADMIN_TIMED_OUT 96
+; Clauseo's main window class, set where lib.rs builds the window (MAIN_WINDOW_CLASS; a test holds
+; them equal), so FindWindow finds Clauseo's main window and no other program's. Hidden and
+; minimised windows count: FindWindow finds every top-level window on the desktop.
+!define CLAUSEO_MAIN_WINDOW_CLASS "ClauseoMainWindow"
+; How long the outer instance waits for the elevated one, and the per-machine installer for
+; --adopt: 10 minutes, then a details line (adminCopyStillRunning); --adopt finishes by itself.
+!define CLAUSEO_ADMIN_WAIT_MS 600000
 ; The machine's tier-B record (S15 PR 2, record_values.rs), REG_SZ values in the 64-bit view the
 ; template's SetContext sets: who placed the admin copy (a SID, or "machine" for the per-machine
 ; installer), the set-up's owner, and the version of the admin copy (its build's semver).
@@ -69,23 +85,27 @@
 !define CLAUSEO_PROFILE_LIST "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
 ; The installers' own exit codes under /S (SetErrorLevel), clear of NSIS's 0 to 2 and of #638's
 ; 20 and 21 (packaging-setup-exe-missing). 22: a silent per-user install, which can't ask for the
-; UAC prompt, skipped the admin copy. 23: the per-machine installer's --adopt failed.
+; UAC prompt, skipped the admin copy. 23: the per-machine installer's --adopt failed. Only the last
+; code set is reported (docs/firm-it.md).
 !define CLAUSEO_EXIT_ADMIN_COPY_SKIPPED 22
 !define CLAUSEO_EXIT_ADMIN_COPY_FAILED 23
+; 24: the per-user install found Clauseo running and didn't set Safe workspace up.
+!define CLAUSEO_EXIT_APP_RUNNING 24
 
 ; The elevated instance's branch, which the template inserts first in .onInit.
 !include "${__FILEDIR__}\admin_elevated.nsh"
 
-; Writes the set-up program from this installer's payload into CLAUSEO_ADMIN_DIR and runs
-; `--adopt ARGS` from there with ExecWait, never through cmd.exe or anything else, as --adopt
-; checks its parents. $R8: its exit code, or CLAUSEO_ADMIN_NOT_RUN when the folder or the file
-; could not be written or the program not started. Only an elevated process can write there: the
-; folder inherits Program Files' rules, and --adopt then locks it (protected, owner
-; Administrators). Never a copy of $INSTDIR's program nor anything through $TEMP, either of which
-; could be swapped before it runs. SetOverwrite try: a file that can't be replaced (running, say)
-; is skipped with the error flag set, never NSIS's Abort/Retry/Ignore box, and --adopt doesn't
-; run. ARCH is read here, at the insertion, since the template defines it after :36.
-!macro CLAUSEO_ADMIN_COPY ARGS
+; Writes the set-up program from this installer's payload into CLAUSEO_ADMIN_DIR; the error flag
+; is set when the folder or the file could not be written. Only an elevated process can write
+; there: the folder inherits Program Files' rules, and --adopt then locks it (protected, owner
+; Administrators). The folder needs no link check: only administrators (and SYSTEM and
+; TrustedInstaller) can create or change anything under Program Files, so no one else can have put
+; a junction or link at Clauseo or Sandbox, and an administrator can already write anywhere.
+; Never a copy of $INSTDIR's program nor anything through $TEMP, either of which could be swapped
+; before it runs. SetOverwrite try: a file that can't be replaced (running, say) is skipped with
+; the error flag set, never NSIS's Abort/Retry/Ignore box. ARCH is read here, at the insertion,
+; since the template defines it after :36.
+!macro CLAUSEO_ADMIN_EXTRACT
   !ifndef CLAUSEO_SETUP_TRIPLE
     !if "${ARCH}" == "x64"
       !define CLAUSEO_SETUP_TRIPLE "x86_64-pc-windows-msvc"
@@ -95,19 +115,60 @@
       !error "hooks.nsh: no sandbox set-up program is built for ${ARCH}"
     !endif
   !endif
-  StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
   ClearErrors
   SetOutPath "${CLAUSEO_ADMIN_DIR}"
   ${IfNot} ${Errors}
     SetOverwrite try
     File "/oname=clauseo-sandbox-setup.exe" "${CLAUSEO_HOOKS_DIR}\..\binaries\clauseo-sandbox-setup-${CLAUSEO_SETUP_TRIPLE}.exe"
     SetOverwrite lastused
-    ${IfNot} ${Errors}
-      ExecWait '"${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe" --adopt ${ARGS}' $R8
-      ${If} ${Errors}
-        StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
-      ${EndIf}
+  ${EndIf}
+!macroend
+
+; The elevated branch's: CLAUSEO_ADMIN_EXTRACT, then `--adopt ARGS` from there with ExecWait,
+; never through cmd.exe or anything else, as --adopt checks its parents. ExecWait has no time
+; limit and the branch loads no plug-in, so the outer instance bounds its own wait on this one
+; (CLAUSEO_ADMIN_WAIT_MS). $R8: the exit code, or CLAUSEO_ADMIN_NOT_RUN when nothing ran.
+!macro CLAUSEO_ADMIN_COPY ARGS
+  StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
+  !insertmacro CLAUSEO_ADMIN_EXTRACT
+  ${IfNot} ${Errors}
+    ExecWait '"${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe" --adopt ${ARGS}' $R8
+    ${If} ${Errors}
+      StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
     ${EndIf}
+  ${EndIf}
+!macroend
+
+; The per-machine installer's: CLAUSEO_ADMIN_EXTRACT, then `--adopt ARGS` started directly
+; (CreateProcessW, no window, in the admin folder, which SetOutPath made current) and waited for
+; up to CLAUSEO_ADMIN_WAIT_MS. Plug-ins are the template's own there. $R8: the exit code,
+; CLAUSEO_ADMIN_TIMED_OUT past the wait (it finishes by itself), or CLAUSEO_ADMIN_NOT_RUN. A
+; 32-bit STARTUPINFOW is 68 bytes (cb first), a PROCESS_INFORMATION 16 (hProcess, hThread, ...).
+; Uses $1, $2, $R5, $R7 and $R9.
+!macro CLAUSEO_ADMIN_COPY_BOUNDED ARGS
+  StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
+  !insertmacro CLAUSEO_ADMIN_EXTRACT
+  ${IfNot} ${Errors}
+    StrCpy $R9 '"${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe" --adopt ${ARGS}'
+    System::Call '*(i 68, &i64) p .R5'
+    System::Call '*(&i16) p .R7'
+    System::Call 'kernel32::CreateProcessW(p 0, w R9, p 0, p 0, i 0, i 0x08000000, p 0, p 0, p R5, p R7) i .r1'
+    ${If} $1 <> 0
+      System::Call '*$R7(p .r1, p .r2)'
+      System::Call 'kernel32::CloseHandle(p r2)'
+      System::Call 'kernel32::WaitForSingleObject(p r1, i ${CLAUSEO_ADMIN_WAIT_MS}) i .r2'
+      ${If} $2 = 258
+        StrCpy $R8 ${CLAUSEO_ADMIN_TIMED_OUT}
+      ${ElseIf} $2 = 0
+        System::Call 'kernel32::GetExitCodeProcess(p r1, *i ${CLAUSEO_ADMIN_NOT_RUN} R8) i .r2'
+        ${If} $2 = 0
+          StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
+        ${EndIf}
+      ${EndIf}
+      System::Call 'kernel32::CloseHandle(p r1)'
+    ${EndIf}
+    System::Free $R5
+    System::Free $R7
   ${EndIf}
 !macroend
 
@@ -231,7 +292,9 @@
 
 ; The per-user installer asks for the admin section (header), at the end of a successful install.
 ; $R6 is the outcome: 0 set up (a details line), 1 failed, 2 another Windows account has it, 4
-; the prompt declined (each a box and a details line), 5 a newer copy kept (a details line).
+; the prompt declined (each a box and a details line), 5 a newer copy kept (a details line), 6
+; Clauseo running (a box, a details line and exit code 24), 7 still running after 10 minutes (a
+; details line).
 !macro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
   Push $R2
   Push $R3
@@ -257,6 +320,13 @@
     !insertmacro CLAUSEO_OWN_SID
     StrCpy $R3 "$LOCALAPPDATA\${BUNDLEID}"
     CreateDirectory "$R3"
+    ; Clauseo still running after the template's own check (Section Install's
+    ; CheckIfAppIsRunning): no prompt, outcome 6. FindWindow finds hidden windows too.
+    FindWindow $R5 "${CLAUSEO_MAIN_WINDOW_CLASS}"
+    ${If} $R5 <> 0
+      StrCpy $R6 6
+      StrCpy $R2 ""
+    ${EndIf}
     ${If} $R2 != ""
       MessageBox MB_OK|MB_ICONINFORMATION "$(adminCopyAsk)"
       ; ShellExecuteExW "runas" on this installer, as the uninstall hook starts --remove:
@@ -276,10 +346,13 @@
         DetailPrint "$(adminCopyWorking)"
         System::Call '*$R5(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
         ${If} $R7 <> 0
-          ; However long it takes (INFINITE, -1): --adopt checks this instance is alive. Only
-          ; an ended wait (WAIT_OBJECT_0, 0) reads the code, seeded "not run".
-          System::Call 'kernel32::WaitForSingleObject(p R7, i -1) i .R9'
-          ${If} $R9 = 0
+          ; Up to 10 minutes; past that (WAIT_TIMEOUT, 258), outcome 7, and the elevated instance
+          ; finishes by itself (--adopt checked this instance at its start). Only an ended wait
+          ; (WAIT_OBJECT_0, 0) reads the code, seeded "not run".
+          System::Call 'kernel32::WaitForSingleObject(p R7, i ${CLAUSEO_ADMIN_WAIT_MS}) i .R9'
+          ${If} $R9 = 258
+            StrCpy $R6 7
+          ${ElseIf} $R9 = 0
             System::Call 'kernel32::GetExitCodeProcess(p R7, *i ${CLAUSEO_ADMIN_NOT_RUN} R8) i .R9'
             ${If} $R9 = 0
               StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
@@ -292,12 +365,17 @@
       ${EndIf}
       System::Free $R5
     ${EndIf}
-    ; A newer copy kept: this instance's own check (98), or --adopt's (100 + 9).
+    ; A newer copy kept: this instance's own check (98), or --adopt's (100 + 9). Clauseo running:
+    ; this instance's check (outcome 6 already) or the elevated one's (97).
     ${If} $R8 = ${CLAUSEO_ADMIN_NEWER_KEPT}
       StrCpy $R6 5
+    ${ElseIf} $R8 = ${CLAUSEO_ADMIN_APP_RUNNING}
+      StrCpy $R6 6
     ${EndIf}
     ${If} $R6 <> 4
     ${AndIf} $R6 <> 5
+    ${AndIf} $R6 <> 6
+    ${AndIf} $R6 <> 7
       ; --adopt's own code from the instance's 100 + code; -1 when --adopt never ran (99, or
       ; NSIS's own 1 or 2). Every code is named: done, another account, and the rest failed.
       StrCpy $R9 -1
@@ -333,6 +411,12 @@
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyDeclined)"
     ${ElseIf} $R6 = 5
       DetailPrint "$(adminCopyNewerKept)"
+    ${ElseIf} $R6 = 6
+      DetailPrint "$(adminCopyAppRunning)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+      SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}
+    ${ElseIf} $R6 = 7
+      DetailPrint "$(adminCopyStillRunning)"
     ${EndIf}
   ${EndIf}
   Pop $R9
@@ -349,7 +433,7 @@
 ; whatever $INSTDIR is; --adopt takes any $INSTDIR that only SYSTEM, Administrators or
 ; TrustedInstaller can change. A box only interactively: never under /S (exit 23), /P or
 ; /UPDATE. A newer copy already there stays, with a details line. Keeps $0 to $4 and $R1; uses
-; $R5, $R7 and $R8, which NSIS_HOOK_POSTINSTALL keeps.
+; $R5, $R7, $R8 and $R9, which NSIS_HOOK_POSTINSTALL keeps.
 !macro CLAUSEO_ADMIN_COPY_MACHINE
   Push $0
   Push $1
@@ -366,7 +450,7 @@
     DetailPrint "$(adminCopyNewerKept)"
   ${Else}
     DetailPrint "$(adminCopyWorking)"
-    !insertmacro CLAUSEO_ADMIN_COPY '--per-machine --user-install-dir "$INSTDIR"'
+    !insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir "$INSTDIR"'
     SetOutPath "$INSTDIR"
     !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
   ${EndIf}
@@ -378,12 +462,15 @@
   Pop $0
 !macroend
 
-; The per-machine outcome of --adopt's code in $R8: done, a newer copy kept (9), or failed.
+; The per-machine outcome of --adopt's code in $R8: done, a newer copy kept (9), still running past
+; the wait (a details line), or failed.
 !macro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
   ${If} $R8 = ${CLAUSEO_ADOPT_DONE}
     DetailPrint "$(adminCopyDone)"
   ${ElseIf} $R8 = ${CLAUSEO_ADOPT_DOWNGRADE}
     DetailPrint "$(adminCopyNewerKept)"
+  ${ElseIf} $R8 = ${CLAUSEO_ADMIN_TIMED_OUT}
+    DetailPrint "$(adminCopyStillRunning)"
   ${Else}
     DetailPrint "$(adminCopyMachineFailed)"
     ${If} ${Silent}

@@ -10,7 +10,13 @@ ManifestDPIAwareness PerMonitorV2
   SetCompress off
 !else
   ; Set the compression algorithm. We default to LZMA.
-  SetCompressor /SOLID "{{compression}}"
+  ; >>> clauseo: no-solid
+  ; Clauseo's change to tauri-cli 2.12.2's template (decision 0035): no /SOLID, so the stub reads
+  ; each file straight from the installer instead of first unpacking the whole data into a file
+  ; in %TEMP% (NSIS fileform.c), which the per-user installer's elevated instance would read the
+  ; sandbox's set-up program from. Upstream's line: SetCompressor /SOLID "{{compression}}"
+  SetCompressor "{{compression}}"
+  ; <<< clauseo: no-solid
 !endif
 
 ; Keep above !include to stay ahead of any plugin command

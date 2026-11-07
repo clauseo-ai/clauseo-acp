@@ -133,16 +133,20 @@ Developer ID.
   `UiLanguage` too; keeping it keeps the value.
 - **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
   installer is built from `crates/desktop/windows/nsis/installer.nsi`
-  (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus one
-  marked block, `admin-section`, at the top of `.onInit` (S15 tier B, 2026-11-07). That block
-  runs the per-user installer's elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any
-  plug-in, page or section. The hooks alone couldn't do that: the template's `.onInit` calls a
-  plug-in under `/S`, which NSIS extracts into `$PLUGINSDIR` under `%TEMP%`, a folder the lawyer's
-  processes can rename while the elevated instance is about to load from it. A test holds the
-  copy to upstream plus a known list of named blocks (by SHA-256 of what is left with the blocks
-  taken out) and to the CLI version in `ui/package.json`, so CI fails when either moves. Every
-  Tauri upgrade copies the new template again, puts the blocks back and updates the pin. The
-  words list's per-machine lines are parked with it. The uninstall-declined line is S15a's.
+  (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus two
+  marked blocks (S15 tier B, 2026-11-07). `admin-section`, at the top of `.onInit`, runs the
+  per-user installer's elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in,
+  page or section. The hooks alone couldn't do that: the template's `.onInit` calls plug-ins
+  (`${RunningX64}` in `SetContext` on every run, `SemverCompare` under `/S`), which NSIS extracts
+  into `$PLUGINSDIR` under `%TEMP%`, a folder the lawyer's processes can rename while the elevated
+  instance is about to load from it. `no-solid` drops `/SOLID`, so the stub reads each file
+  straight from the installer instead of unpacking all its data into a file in `%TEMP%` first,
+  which the elevated instance would read the sandbox's set-up program from. A test holds the copy
+  to upstream plus a known list of named blocks (by SHA-256 of upstream's text, rebuilt with the
+  blocks taken out and the lines they stand in for put back) and to the CLI version in
+  `ui/package.json`, so CI fails when either moves. Every Tauri upgrade copies the new template
+  again, puts the blocks back and updates the pin. The words list's per-machine lines are parked
+  with it. The uninstall-declined line is S15a's.
 - **One installer line of our own.** Tauri's "Delete the application data" box removes the whole
   data folder, store included, so its label says what goes: "Also delete conversations, saved
   versions and settings" (unticked, as Tauri draws it). `customLanguageFiles` replaces the

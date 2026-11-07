@@ -81,11 +81,10 @@ fn the_admin_copy_is_written_from_the_payload_into_program_files_and_adopt_runs_
         &["!define CLAUSEO_ADMIN_DIR \"$PROGRAMFILES64\\Clauseo\\Sandbox\""],
     );
     line_with(&code, &["!define CLAUSEO_HOOKS_DIR \"${__FILEDIR__}\""]);
-    let body = macro_body(&code, "CLAUSEO_ADMIN_COPY");
+    let body = macro_body(&code, "CLAUSEO_ADMIN_EXTRACT");
     assert_run(
         body,
         &[
-            "StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}",
             "ClearErrors",
             "SetOutPath \"${CLAUSEO_ADMIN_DIR}\"",
             "${IfNot} ${Errors}",
@@ -93,12 +92,43 @@ fn the_admin_copy_is_written_from_the_payload_into_program_files_and_adopt_runs_
             "File \"/oname=clauseo-sandbox-setup.exe\" \"${CLAUSEO_HOOKS_DIR}\\..\\binaries\\\
              clauseo-sandbox-setup-${CLAUSEO_SETUP_TRIPLE}.exe\"",
             "SetOverwrite lastused",
+            "${EndIf}",
+        ],
+    );
+    // Then --adopt from there: the elevated branch's with ExecWait (plain NSIS), the per-machine
+    // installer's started directly and waited for up to 10 minutes.
+    let copy = macro_body(&code, "CLAUSEO_ADMIN_COPY");
+    assert_run(
+        copy,
+        &[
+            "StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}",
+            "!insertmacro CLAUSEO_ADMIN_EXTRACT",
             "${IfNot} ${Errors}",
             "ExecWait '\"${CLAUSEO_ADMIN_DIR}\\clauseo-sandbox-setup.exe\" --adopt ${ARGS}' $R8",
             "${If} ${Errors}",
             "StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}",
         ],
     );
+    let bounded = macro_body(&code, "CLAUSEO_ADMIN_COPY_BOUNDED");
+    assert_run(
+        bounded,
+        &[
+            "StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}",
+            "!insertmacro CLAUSEO_ADMIN_EXTRACT",
+            "${IfNot} ${Errors}",
+            "StrCpy $R9 '\"${CLAUSEO_ADMIN_DIR}\\clauseo-sandbox-setup.exe\" --adopt ${ARGS}'",
+        ],
+    );
+    line_with(bounded, &["kernel32::CreateProcessW(p 0, w R9,"]);
+    line_with(
+        bounded,
+        &["WaitForSingleObject(p r1, i ${CLAUSEO_ADMIN_WAIT_MS})"],
+    );
+    assert_run(
+        bounded,
+        &["${If} $2 = 258", "StrCpy $R8 ${CLAUSEO_ADMIN_TIMED_OUT}"],
+    );
+    line_with(&code, &["!define CLAUSEO_ADMIN_WAIT_MS 600000"]);
     // The build sidecars.mjs writes for each Windows target (binaries/<name>-<triple>.exe).
     for (arch, triple) in [
         ("x64", "x86_64-pc-windows-msvc"),
@@ -122,20 +152,23 @@ fn the_admin_copy_is_written_from_the_payload_into_program_files_and_adopt_runs_
         "ExecShell",
         "cmd",
     ] {
-        assert!(
-            body.iter().all(|line| !line.contains(refused)),
-            "{refused}: {body:?}"
-        );
+        for lines in [body, copy, bounded] {
+            assert!(
+                lines.iter().all(|line| !line.contains(refused)),
+                "{refused}: {lines:?}"
+            );
+        }
     }
     // The payload's only other copy is the template's own, beside the app: the hooks hold one
     // File, this one, inserted once by each installer.
     let all: Vec<String> = hook_code().into_iter().chain(code.clone()).collect();
     let files = all.iter().filter(|line| line.starts_with("File "));
     assert_eq!(files.count(), 1, "{all:?}");
-    let inserts = all
-        .iter()
-        .filter(|line| line.starts_with("!insertmacro CLAUSEO_ADMIN_COPY '"));
-    assert_eq!(inserts.count(), 2, "{all:?}");
+    for name in ["CLAUSEO_ADMIN_COPY", "CLAUSEO_ADMIN_COPY_BOUNDED"] {
+        let prefix = format!("!insertmacro {name} '");
+        let inserts = all.iter().filter(|line| line.starts_with(&prefix));
+        assert_eq!(inserts.count(), 1, "{name}: {all:?}");
+    }
 }
 
 #[test]
@@ -172,7 +205,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "DetailPrint \"$(adminCopyNewerKept)\"",
         "${Else}",
         "DetailPrint \"$(adminCopyWorking)\"",
-        "!insertmacro CLAUSEO_ADMIN_COPY '--per-machine --user-install-dir \"$INSTDIR\"'",
+        "!insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir \"$INSTDIR\"'",
         "SetOutPath \"$INSTDIR\"",
         "!insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS",
         "${EndIf}",
@@ -191,6 +224,8 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "DetailPrint \"$(adminCopyDone)\"",
         "${ElseIf} $R8 = ${CLAUSEO_ADOPT_DOWNGRADE}",
         "DetailPrint \"$(adminCopyNewerKept)\"",
+        "${ElseIf} $R8 = ${CLAUSEO_ADMIN_TIMED_OUT}",
+        "DetailPrint \"$(adminCopyStillRunning)\"",
         "${Else}",
         "DetailPrint \"$(adminCopyMachineFailed)\"",
         "${If} ${Silent}",
@@ -286,6 +321,7 @@ fn the_record_is_checked_before_anything_is_written_into_the_admin_folder() {
         "CLAUSEO_NEWER_THAN_THIS",
         "CLAUSEO_COMPARE_PART",
         "CLAUSEO_TAKE_NUMBER",
+        "CLAUSEO_ADMIN_EXTRACT",
         "CLAUSEO_ADMIN_COPY",
     ] {
         let body = macro_body(&code, name);
@@ -299,7 +335,10 @@ fn the_record_is_checked_before_anything_is_written_into_the_admin_folder() {
     for name in ["CLAUSEO_ELEVATED_BRANCH", "CLAUSEO_ADMIN_COPY_MACHINE"] {
         let body = macro_body(&code, name);
         let check = line_with(body, &["!insertmacro CLAUSEO_RECORD_CHECK"]);
-        let copy = line_with(body, &["!insertmacro CLAUSEO_ADMIN_COPY '"]);
+        let copy = line_with(
+            body,
+            &["!insertmacro CLAUSEO_ADMIN_COPY", "--user-install-dir"],
+        );
         assert!(check < copy, "{name}: {body:?}");
     }
 }

@@ -37,6 +37,8 @@
       "adminCopyOtherAccount",
       "adminCopyMachineFailed",
       "adminCopyNewerKept",
+      "adminCopyAppRunning",
+      "adminCopyStillRunning",
       "adminCopySkippedSilent"
     ],
     "slots": {

@@ -1,7 +1,9 @@
 //! The repo's NSIS template (`windows/nsis/installer.nsi`, `bundle.windows.nsis.template`) is
-//! tauri-cli 2.12.2's own plus a known list of named blocks, and the one block there is
-//! (`admin-section`, first in `.onInit`) runs the elevated branch of `admin_elevated.nsh`, which
-//! loads no plug-in, calls no function and reads nothing the lawyer can write before it extracts.
+//! tauri-cli 2.12.2's own plus a known list of named blocks: `no-solid` (no /SOLID, so nothing is
+//! unpacked into %TEMP%) and `admin-section` (first in `.onInit`), which runs the elevated branch
+//! of `admin_elevated.nsh`; that branch loads no plug-in, calls no function and reads nothing the
+//! lawyer can write before it extracts. Clauseo's main window class is the one the branch looks
+//! for.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -19,37 +21,76 @@ const TAURI_CLI: &str = "2.12.2";
 /// (tag tauri-cli-v2.12.2), 984 lines, LF, as the bundler embeds it.
 const UPSTREAM_SHA256: &str = "166f9677d42e81c7f712a1bf80d9d8c089c21d2967d8398474768b5eac14b494";
 
-/// The blocks the copy adds, in order: each one's name and the upstream line it follows directly.
-/// A new block is one more row here (and its lines in the template).
-const BLOCKS: [(&str, &str); 1] = [("admin-section", "Function .onInit")];
+/// A block the copy adds: its name, the upstream line it follows directly, and the upstream line
+/// it stands in for (none when it only adds lines).
+struct Block {
+    name: &'static str,
+    after: &'static str,
+    replaces: Option<&'static str>,
+}
+
+/// The blocks, in the template's order. A new block is one more row here (and its lines in the
+/// template).
+const BLOCKS: [Block; 2] = [
+    Block {
+        name: "no-solid",
+        after: "  ; Set the compression algorithm. We default to LZMA.",
+        replaces: Some("  SetCompressor /SOLID \"{{compression}}\""),
+    },
+    Block {
+        name: "admin-section",
+        after: "Function .onInit",
+        replaces: None,
+    },
+];
 
 const TEMPLATE: &str = "windows/nsis/installer.nsi";
 
-/// The template's blocks, each as (name, index of the line before it, its lines), and the text
-/// with every block taken out. Panics on an unclosed or mismatched marker.
-fn split_blocks(text: &str) -> (Vec<(String, usize, Vec<String>)>, String) {
+/// A block found in the template: its name, the index in the kept lines where it stood, and its
+/// lines (trimmed, markers left out).
+struct Found {
+    name: String,
+    at: usize,
+    lines: Vec<String>,
+}
+
+/// The template's blocks, and its lines with every block taken out. Panics on an unclosed or
+/// mismatched marker.
+fn split_blocks(text: &str) -> (Vec<Found>, Vec<String>) {
     let mut blocks = Vec::new();
-    let mut kept: Vec<&str> = Vec::new();
-    let mut open: Option<(String, usize, Vec<String>)> = None;
+    let mut kept: Vec<String> = Vec::new();
+    let mut open: Option<Found> = None;
     for line in text.split('\n') {
         let trimmed = line.trim();
         if let Some(name) = trimmed.strip_prefix("; >>> clauseo: ") {
             assert!(open.is_none(), "a block opens inside another: {name}");
-            open = Some((name.to_owned(), kept.len().wrapping_sub(1), Vec::new()));
+            open = Some(Found {
+                name: name.to_owned(),
+                at: kept.len(),
+                lines: Vec::new(),
+            });
         } else if let Some(name) = trimmed.strip_prefix("; <<< clauseo: ") {
             let block = open
                 .take()
                 .unwrap_or_else(|| panic!("{name} closes no block"));
-            assert_eq!(block.0, name, "a block closes under another name");
+            assert_eq!(block.name, name, "a block closes under another name");
             blocks.push(block);
         } else if let Some(block) = open.as_mut() {
-            block.2.push(trimmed.to_owned());
+            block.lines.push(trimmed.to_owned());
         } else {
-            kept.push(line);
+            kept.push(line.to_owned());
         }
     }
     assert!(open.is_none(), "a block is never closed");
-    (blocks, kept.join("\n"))
+    (blocks, kept)
+}
+
+/// The block named `name`.
+fn block_named<'a>(blocks: &'a [Found], name: &str) -> &'a Found {
+    blocks
+        .iter()
+        .find(|block| block.name == name)
+        .unwrap_or_else(|| panic!("no block {name}"))
 }
 
 #[test]
@@ -62,18 +103,28 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
     let conf: serde_json::Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
     assert_eq!(conf["bundle"]["windows"]["nsis"]["template"], TEMPLATE);
     let text = read(TEMPLATE);
-    let (blocks, upstream) = split_blocks(&text);
-    let names: Vec<&str> = blocks.iter().map(|(name, _, _)| name.as_str()).collect();
-    let known: Vec<&str> = BLOCKS.iter().map(|(name, _)| *name).collect();
+    let (blocks, kept) = split_blocks(&text);
+    let names: Vec<&str> = blocks.iter().map(|block| block.name.as_str()).collect();
+    let known: Vec<&str> = BLOCKS.iter().map(|block| block.name).collect();
     assert_eq!(names, known);
-    let upstream_lines: Vec<&str> = upstream.split('\n').collect();
-    for ((name, before, _), (_, anchor)) in blocks.iter().zip(BLOCKS) {
+    // Upstream again: each replacing block's line put back where the block stood.
+    let mut upstream = kept;
+    for (found, block) in blocks.iter().zip(&BLOCKS).rev() {
         assert_eq!(
-            upstream_lines[*before], anchor,
-            "{name} follows the wrong line"
+            upstream[found.at - 1],
+            block.after,
+            "{} follows the wrong line",
+            block.name
         );
+        if let Some(line) = block.replaces {
+            upstream.insert(found.at, line.to_owned());
+        }
+        // A line ending in a backslash would join the next one in NSIS.
+        for line in &found.lines {
+            assert!(!line.ends_with('\\'), "{}: {line}", block.name);
+        }
     }
-    let digest = Sha256::digest(upstream.as_bytes());
+    let digest = Sha256::digest(upstream.join("\n").as_bytes());
     let hex = digest.iter().fold(String::new(), |mut hex, byte| {
         write!(hex, "{byte:02x}").unwrap();
         hex
@@ -85,10 +136,22 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
 }
 
 #[test]
+fn no_solid_compresses_each_file_on_its_own() {
+    let (blocks, _) = split_blocks(&read(TEMPLATE));
+    let code: Vec<&str> = block_named(&blocks, "no-solid")
+        .lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| !line.is_empty() && !line.starts_with(';'))
+        .collect();
+    assert_eq!(code, ["SetCompressor \"{{compression}}\""]);
+}
+
+#[test]
 fn the_admin_section_block_only_inserts_the_elevated_branch_first_in_on_init() {
     let (blocks, _) = split_blocks(&read(TEMPLATE));
-    let (_, _, lines) = &blocks[0];
-    let code: Vec<&str> = lines
+    let code: Vec<&str> = block_named(&blocks, "admin-section")
+        .lines
         .iter()
         .map(String::as_str)
         .filter(|line| !line.is_empty() && !line.starts_with(';'))
@@ -197,6 +260,11 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
             "!insertmacro CLAUSEO_PARSE_ARGUMENTS",
             "${If} $R0 = 1",
             "SetRegView 64",
+            "FindWindow $R5 \"${CLAUSEO_MAIN_WINDOW_CLASS}\"",
+            "${If} $R5 <> 0",
+            "SetErrorLevel ${CLAUSEO_ADMIN_APP_RUNNING}",
+            "Quit",
+            "${EndIf}",
             "!insertmacro CLAUSEO_CHECK_SID $R2",
             "StrCpy $R4 \"\"",
             "${If} $R0 = 1",
@@ -249,4 +317,48 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
     line_with(sid, &["${AndIf} $R7 S!= $R5"]);
     let profile = macro_body(&code, "CLAUSEO_CHECK_PROFILE");
     line_with(profile, &["${If} $R5 == \"%\""]);
+}
+
+#[test]
+fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
+    // Unique to Clauseo (tao's default, `Tauri Window`, is every Tauri app's).
+    assert_eq!(crate::MAIN_WINDOW_CLASS, "ClauseoMainWindow");
+    let code = admin_code();
+    line_with(
+        &code,
+        &[&format!(
+            "!define CLAUSEO_MAIN_WINDOW_CLASS \"{}\"",
+            crate::MAIN_WINDOW_CLASS
+        )],
+    );
+    // Set where the main window is built.
+    let lib = read("src/lib.rs");
+    assert!(
+        lib.contains(".window_classname(MAIN_WINDOW_CLASS)"),
+        "lib.rs"
+    );
+    // The e2e close finds the main window by the same class.
+    let close = read("../../ui/e2e/app-windows/close.ts");
+    assert!(
+        close.contains(&format!(
+            "export const WINDOW_CLASS = \"{}\";",
+            crate::MAIN_WINDOW_CLASS
+        )),
+        "close.ts"
+    );
+    // Both instances look before anything happens: the outer one before it asks for the prompt.
+    let ask = macro_body(&code, "CLAUSEO_ASK_FOR_THE_ADMIN_SECTION");
+    let find = line_with(ask, &["FindWindow $R5 \"${CLAUSEO_MAIN_WINDOW_CLASS}\""]);
+    assert!(find < line_with(ask, &["$(adminCopyAsk)"]), "{ask:?}");
+    assert_run(
+        ask,
+        &[
+            "${ElseIf} $R6 = 6",
+            "DetailPrint \"$(adminCopyAppRunning)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+            "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
+        ],
+    );
+    line_with(&code, &["!define CLAUSEO_EXIT_APP_RUNNING 24"]);
+    line_with(&code, &["!define CLAUSEO_ADMIN_APP_RUNNING 97"]);
 }
