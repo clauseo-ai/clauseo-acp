@@ -48,23 +48,53 @@ pub fn key_id(tauri_key: &str) -> Result<u64, String> {
     }
 }
 
-/// The release guard: `Err` when a release build would embed a key that can't sign a real
-/// update. A build is a release when cargo's profile is `release` and `CLAUSEO_RELEASE_MODE` is
-/// `release`; such a build must not embed [`PLACEHOLDER_KEY_ID`] or [`TEST_KEY_ID`]. Any other
-/// build (debug, a dry or test run) may.
-pub fn release_guard(release_mode: Option<&str>, profile: &str, key_id: u64) -> Result<(), String> {
-    if release_mode != Some("release") || profile != "release" {
+/// The production updater key's id, as minisign prints it (16 hex digits): the one key a
+/// release build may embed. `None` until #527 adds Rohan's production key; #527 must set it
+/// here, in the same change that sets `plugins.updater.pubkey`. Until then every release build
+/// fails [`release_guard`], by design.
+pub const PRODUCTION_KEY_ID: Option<&str> = None;
+
+/// The name of the `VERSIONINFO` string that carries the embedded key's id (16 hex digits), so
+/// a release's assembly can check the key from the exe's file without running it (it asks for an
+/// administrator, so running it would prompt).
+pub const KEY_ID_VERSION_STRING: &str = "UpdaterKeyId";
+
+/// The release guard: in a release build (`CLAUSEO_RELEASE_MODE=release`, in any cargo profile)
+/// the embedded key must be [`PRODUCTION_KEY_ID`], which must be set. Any other build (a dry or
+/// test run, or a local one) may embed any key; the exe's `UpdaterKeyId` string says which.
+pub fn release_guard(release_mode: Option<&str>, key_id: u64) -> Result<(), String> {
+    release_guard_with(release_mode, key_id, PRODUCTION_KEY_ID)
+}
+
+/// [`release_guard`] with `pinned` as the production key's id.
+pub fn release_guard_with(
+    release_mode: Option<&str>,
+    key_id: u64,
+    pinned: Option<&str>,
+) -> Result<(), String> {
+    if release_mode != Some("release") {
+        return Ok(());
+    }
+    let found = format!("{key_id:016X}");
+    let Some(pinned) = pinned else {
+        return Err(format!(
+            "a release build (CLAUSEO_RELEASE_MODE=release) needs PRODUCTION_KEY_ID in \
+             crates/sandbox/src/windows/refresh/key.rs, which is unset (#527 sets it); the \
+             embedded updater key is {found}"
+        ));
+    };
+    if pinned.eq_ignore_ascii_case(&found) {
         return Ok(());
     }
     let named = match key_id {
         PLACEHOLDER_KEY_ID => "the placeholder key",
         TEST_KEY_ID => "the throwaway test key",
-        _ => return Ok(()),
+        _ => "a key other than the production one",
     };
     Err(format!(
-        "a release build (CLAUSEO_RELEASE_MODE=release) would embed {named} ({key_id:016X}) as \
-         the updater key the sandbox's admin copy trusts: set CLAUSEO_UPDATER_PUBKEY or \
-         plugins.updater.pubkey in crates/desktop/tauri.conf.json"
+        "a release build (CLAUSEO_RELEASE_MODE=release) would embed {named} ({found}) as the \
+         updater key the sandbox's admin copy trusts, not the production key {pinned}: set \
+         CLAUSEO_UPDATER_PUBKEY or plugins.updater.pubkey in crates/desktop/tauri.conf.json"
     ))
 }
 

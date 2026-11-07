@@ -14,12 +14,11 @@ pub(super) const PROFILE: &str = r"C:\Users\Rohan";
 pub(super) const OWNER: &str = "S-1-5-21-1-2-3-1001";
 
 /// The steps a crash can stop the run at, in the order they run.
-pub(super) const STEPS: [&str; 7] = [
+pub(super) const STEPS: [&str; 6] = [
     "stage",
     "secure_staged",
     "set_aside",
     "place_staged",
-    "delete_later",
     "write_version",
     "write_sha256",
 ];
@@ -167,9 +166,6 @@ impl Refresher for Fake {
         self.admin_file = self.set_aside.take();
         Ok(())
     }
-    fn delete_set_aside_later(&mut self) -> Result<(), Failed> {
-        self.step("delete_later")
-    }
     fn write_version(&mut self, version: &str) -> Result<(), Failed> {
         self.step("write_version")?;
         self.record.admin_copy_version = Some(version.to_owned());
@@ -212,4 +208,21 @@ pub(super) fn key() -> TestKey {
 
 pub(super) fn good() -> String {
     comment(signature::SIGNED_FILE, OWN)
+}
+
+/// The trusted comment for `exe` at its own `FILEVERSION`'s `X.Y.Z` (`OWN` when it has none).
+pub(super) fn good_for(exe: &[u8]) -> String {
+    let version = pe_version::file_version(exe)
+        .map_or_else(|| OWN.to_owned(), |[x, y, z, _]| format!("{x}.{y}.{z}"));
+    comment(signature::SIGNED_FILE, &version)
+}
+
+/// [`refresh`] on `fake`, trusting `key` and the x64 CPU type.
+pub(super) fn run_fake(fake: &mut Fake, key: &TestKey) -> RefreshExit {
+    run_on(fake, &key.public(), pe_version::MACHINE_X64)
+}
+
+/// [`refresh`] on `fake`, trusting `key` (Tauri's form) and `machine`.
+pub(super) fn run_on(fake: &mut Fake, key: &str, machine: u16) -> RefreshExit {
+    refresh(fake, &Trust { key, machine })
 }

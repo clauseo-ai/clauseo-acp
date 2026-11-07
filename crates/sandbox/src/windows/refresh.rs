@@ -9,7 +9,8 @@
 //! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path;
 //! 2. refuses a build whose updater key is the placeholder, before reading anything;
 //! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `OwnerSid`, `UserInstallDir` (a plain
-//!    local path, which must lie inside the owner's profile as `ProfileList` names it) and
+//!    local path, which must lie inside the owner's profile as `ProfileList` names it, a
+//!    temporary profile counting as none) and
 //!    `AdminCopyVersion`; nothing else comes from outside: no argument, no environment;
 //! 4. clears what an earlier refresh left in staging;
 //! 5. reads the exe and its `.sig` from the install folder, which the lawyer controls and may
@@ -19,26 +20,35 @@
 //!    written or deleted there;
 //! 6. copies the exe into the SYSTEM-only staging folder and reads it back from there;
 //! 7. verifies the staged bytes' signature (`signature.rs`), never the user folder's file, so
-//!    a swap after the check changes nothing; then refuses a staged exe whose `FILEVERSION`
-//!    (`pe_version.rs`) is older than the record's `AdminCopyVersion` ([`version_not_older`]);
+//!    a swap after the check changes nothing; requires the staged image's CPU type (`Machine`)
+//!    to be this copy's, so an exe for another CPU never replaces it; requires the staged exe's
+//!    `FILEVERSION` (`pe_version.rs`) to be the signed `version`'s core with a zero fourth
+//!    part; then refuses a signed version older than the record's `AdminCopyVersion` by semver
+//!    precedence (`version.rs`, [`version_not_older`]: a prerelease is older than its release);
 //! 8. stops when the staged SHA-256 is the record's `AdminCopySha256`; when it is the hash of
 //!    the file at the admin path (an earlier refresh stopped before its record writes), writes
-//!    the record and stops;
-//! 9. gives the staged file the admin copy's DACL, sets the running admin copy aside (a rename,
-//!    which a running exe allows), moves the staged file into place, and only then writes the
-//!    new `AdminCopyVersion`, then the new `AdminCopySha256`; the set-aside copy is deleted at
-//!    the next reboot or the next run.
+//!    the record and stops; refuses a version equal to the recorded one whose bytes differ;
+//! 9. gives the staged file the admin copy's DACL, sets the running admin copy aside in staging
+//!    (a rename, which a running exe allows) and moves the staged file into place, back to back
+//!    and write-through, and only then writes the new `AdminCopyVersion` (the signed version,
+//!    as signed), then the new `AdminCopySha256`. The set-aside copy stays in staging until the
+//!    next run, which starts from the new copy and so proves it runs, deletes it.
 //!
-//! A crash never leaves the record naming a file that isn't at the admin path. Until the hash
-//! write, the record holds the old hash: a crash between the two renames leaves no file at the
-//! admin path, which the launcher treats as a missing copy; a crash after them leaves the new
-//! file under the old hash, which the launcher refuses until the next run's step 8 writes its
-//! version and hash. The version goes first, so a recorded new hash always has its version. A
-//! failed move puts the old copy back.
+//! The record never names a hash the admin path doesn't hold: until the hash write it holds the
+//! old hash. A crash after both renames leaves the new file under the old hash, which the
+//! launcher refuses until the next run's step 8 writes its version and hash; the version goes
+//! first, so a recorded new hash always has its version. A failed move puts the old copy back.
+//! A crash, or the task's 5-minute kill, between the two renames is the one state no run can
+//! heal: no exe is at the task's path, so the task can't start. The launcher then finds the
+//! copy missing (`AdminCopyMissing`), and the app's words lead the lawyer to the installer's
+//! repair, which places a copy again; the old copy is still in staging under its set-aside
+//! name, so repair can restore it too. The gap is two write-through renames with nothing
+//! between them.
 //!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -61,12 +71,12 @@ mod staging;
 pub mod task;
 #[cfg(test)]
 mod test_signer;
+pub mod version;
 #[cfg(windows)]
 mod walk;
 #[cfg(windows)]
 mod windows_refresher;
 
-pub use pe_version::version_not_older;
 pub use rules::{
     ADMIN_COPY_SDDL, EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, hex, inside_profile, same_path,
     sddl_matches, task_sddl,
@@ -76,6 +86,7 @@ pub use task::{
     TASK_FOLDER, TASK_NAME, TaskError, register_refresh_task, remove_staging,
     request_admin_refresh, unregister_refresh_task,
 };
+pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, run};
 
@@ -89,6 +100,24 @@ pub const SIG_CAP: u64 = 4 * 1024;
 /// The updater key built in (`build.rs`): Tauri's base64 of a minisign public key, the
 /// placeholder in a build given none.
 pub const UPDATER_KEY: &str = env!("CLAUSEO_SANDBOX_UPDATER_KEY");
+/// This exe's COFF `Machine`, the only one a staged exe may have: the admin copy is this exe.
+pub const OWN_MACHINE: u16 = if cfg!(target_arch = "aarch64") {
+    pe_version::MACHINE_ARM64
+} else if cfg!(target_arch = "x86") {
+    pe_version::MACHINE_X86
+} else {
+    pe_version::MACHINE_X64
+};
+
+/// What a staged exe is checked against: the updater key and this copy's CPU type
+/// ([`UPDATER_KEY`] and [`OWN_MACHINE`] in the exe; the tests pass their own).
+#[derive(Debug, Clone, Copy)]
+pub struct Trust<'a> {
+    /// Tauri's base64 of the minisign public key.
+    pub key: &'a str,
+    /// The COFF `Machine` the staged image must have.
+    pub machine: u16,
+}
 
 /// The refresh's exit codes. They start at 32, clear of [`SetupExit`]'s, so the two never share
 /// a number whatever either appends; codes are appended from here on, never renumbered.
@@ -117,11 +146,13 @@ pub enum RefreshExit {
     /// 39: the new copy is in place, but the record's version or hash couldn't be written; the
     /// launcher refuses the copy until the next run writes them.
     RecordNotWritten,
-    /// 40: the staged exe is older than the record's `AdminCopyVersion`, or carries no readable
-    /// `FILEVERSION`.
+    /// 40: the signed version is older than the record's `AdminCopyVersion` (or the same, with
+    /// other bytes), or a version or the `FILEVERSION` can't be read.
     Downgrade,
     /// 41: `UserInstallDir` isn't inside the owner's profile, or the owner has none.
     OutsideProfile,
+    /// 42: the staged exe is for another CPU type than this copy.
+    WrongMachine,
 }
 
 impl RefreshExit {
@@ -139,6 +170,7 @@ impl RefreshExit {
             RefreshExit::RecordNotWritten => 39,
             RefreshExit::Downgrade => 40,
             RefreshExit::OutsideProfile => 41,
+            RefreshExit::WrongMachine => 42,
         }
     }
 }
@@ -239,8 +271,6 @@ pub trait Refresher {
     fn place_staged(&mut self) -> Result<(), Failed>;
     /// Moves the set-aside copy back to the admin path.
     fn restore_admin_copy(&mut self) -> Result<(), Failed>;
-    /// Schedules the set-aside copy's deletion at the next reboot.
-    fn delete_set_aside_later(&mut self) -> Result<(), Failed>;
     /// Writes `AdminCopyVersion` to the record.
     fn write_version(&mut self, version: &str) -> Result<(), Failed>;
     /// Writes `AdminCopySha256` (64 lowercase hex digits) to the record.
@@ -251,10 +281,9 @@ pub trait Refresher {
     fn log(&mut self, error: bool, line: &str);
 }
 
-/// Runs the refresh as the module says, with the key `key` ([`UPDATER_KEY`] in the exe; the
-/// tests pass their own).
-pub fn refresh(fs: &mut impl Refresher, key: &str) -> RefreshExit {
-    match run_steps(fs, key) {
+/// Runs the refresh as the module says, checking the staged exe against `trust`.
+pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
+    match run_steps(fs, trust) {
         Ok(line) => {
             fs.log(false, &line);
             RefreshExit::Done
@@ -277,9 +306,9 @@ struct Checked {
 }
 
 /// The steps; `Ok` carries the log line of a run that left the admin copy current.
-fn run_steps(fs: &mut impl Refresher, key: &str) -> Result<String, Refusal> {
+fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
     allowed(fs)?;
-    let placeholder = key::key_id(key).is_ok_and(|id| id == key::PLACEHOLDER_KEY_ID);
+    let placeholder = key::key_id(trust.key).is_ok_and(|id| id == key::PLACEHOLDER_KEY_ID);
     if placeholder {
         return Err((
             RefreshExit::PlaceholderKey,
@@ -303,7 +332,7 @@ fn run_steps(fs: &mut impl Refresher, key: &str) -> Result<String, Refusal> {
     let staged = fs
         .stage(&sources.exe)
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
-    let outcome = replace(fs, &staged, &sources.sig, &checked, key);
+    let outcome = replace(fs, &staged, &sources.sig, &checked, trust);
     if !matches!(outcome, Ok(Replaced::Swapped)) {
         fs.discard_staged();
     }
@@ -397,29 +426,33 @@ fn replace(
     staged: &[u8],
     sig: &[u8],
     checked: &Checked,
-    key: &str,
+    trust: &Trust<'_>,
 ) -> Result<Replaced, Refusal> {
-    verify(staged, sig, key).map_err(|error| {
-        let exit = match error {
-            SignatureError::PlaceholderKey => RefreshExit::PlaceholderKey,
-            SignatureError::BadKey(_)
-            | SignatureError::Malformed(_)
-            | SignatureError::WrongKey
-            | SignatureError::NotPrehashed
-            | SignatureError::Invalid
-            | SignatureError::WrongFile => RefreshExit::SignatureRefused,
-        };
-        (exit, error.to_string())
-    })?;
-    let version = pe_version::file_version(staged).map(pe_version::dotted);
-    let version = version.ok_or_else(|| {
+    let signed = verify(staged, sig, trust.key).map_err(|error| refused(&error))?;
+    let machine = pe_version::machine(staged);
+    if machine != Some(trust.machine) {
+        let found = machine.map_or_else(|| "none".to_owned(), |m| format!("{m:#06x}"));
+        let why = format!(
+            "the staged exe is for machine {found}, not this copy's {:#06x}",
+            trust.machine
+        );
+        return Err((RefreshExit::WrongMachine, why));
+    }
+    let file = pe_version::file_version(staged).ok_or_else(|| {
         let why = "the staged exe carries no readable FILEVERSION".to_owned();
         (RefreshExit::Downgrade, why)
     })?;
-    if !version_not_older(&checked.version, &version) {
+    if !version::matches_file_version(&signed.version, file) {
+        return Err(refused(&SignatureError::VersionMismatch {
+            signed: signed.version,
+            staged: pe_version::dotted(file),
+        }));
+    }
+    let order = version::compare(&checked.version, &signed.version);
+    if !order.is_some_and(Ordering::is_ge) {
         let why = format!(
-            "the staged exe's version {version} is older than the recorded {}",
-            checked.version
+            "the signed version {} is older than the recorded {}, or unreadable",
+            signed.version, checked.version
         );
         return Err((RefreshExit::Downgrade, why));
     }
@@ -432,11 +465,19 @@ fn replace(
         .admin_copy_sha256()
         .map_err(|why| (RefreshExit::ReplaceFailed, why))?;
     if at_admin == Some(sha) {
-        write_record(fs, &version, &hex)?;
+        write_record(fs, &signed.version, &hex)?;
         return Ok(Replaced::RecordWritten);
+    }
+    if order == Some(Ordering::Equal) {
+        let why = format!(
+            "the signed version {} is the recorded one, but its bytes differ from the copy in place",
+            signed.version
+        );
+        return Err((RefreshExit::Downgrade, why));
     }
     fs.secure_staged()
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
+    // The gap: from here to the move, no exe is at the task's path. Nothing runs in between.
     fs.set_aside_admin_copy()
         .map_err(|why| (RefreshExit::ReplaceFailed, why))?;
     if let Err(why) = fs.place_staged() {
@@ -446,12 +487,25 @@ fn replace(
         };
         return Err((RefreshExit::ReplaceFailed, format!("{why}; {restored}")));
     }
-    if let Err(why) = fs.delete_set_aside_later() {
-        let line = format!("the old copy stays in staging until the next run: {why}");
-        fs.log(true, &line);
-    }
-    write_record(fs, &version, &hex)?;
+    write_record(fs, &signed.version, &hex)?;
     Ok(Replaced::Swapped)
+}
+
+/// A refused signature's exit (35, or 36 for the placeholder key) and log line.
+fn refused(error: &SignatureError) -> Refusal {
+    let exit = match error {
+        SignatureError::PlaceholderKey => RefreshExit::PlaceholderKey,
+        SignatureError::BadKey(_)
+        | SignatureError::Malformed(_)
+        | SignatureError::WrongKey
+        | SignatureError::NotPrehashed
+        | SignatureError::Invalid
+        | SignatureError::WrongFile
+        | SignatureError::BadComment(_)
+        | SignatureError::NoVersion
+        | SignatureError::VersionMismatch { .. } => RefreshExit::SignatureRefused,
+    };
+    (exit, error.to_string())
 }
 
 /// The record's version, then its hash: a recorded new hash always has its version.

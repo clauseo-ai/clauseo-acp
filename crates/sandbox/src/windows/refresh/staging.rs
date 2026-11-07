@@ -28,8 +28,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_WRITE_THROUGH,
     FILE_SHARE_MODE, FileAttributeTagInfo, FlushFileBuffers, GetFileInformationByHandleEx,
-    MOVEFILE_DELAY_UNTIL_REBOOT, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
-    RemoveDirectoryW, WriteFile,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, RemoveDirectoryW, WriteFile,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
@@ -309,14 +308,6 @@ pub(super) fn rename(from: &Path, to: &Path) -> Result<(), Failed> {
     );
     // SAFETY: both names are NUL-terminated and outlive the call.
     unsafe { MoveFileExW(&from, &to, MOVEFILE_WRITE_THROUGH) }
-        .map_err(|error| failed("MoveFileExW", &error))
-}
-
-/// Schedules `path`'s deletion at the next reboot.
-pub(super) fn delete_at_reboot(path: &Path) -> Result<(), Failed> {
-    let name = HSTRING::from(path.as_os_str());
-    // SAFETY: the name is NUL-terminated and outlives the call; no new name.
-    unsafe { MoveFileExW(&name, PCWSTR::null(), MOVEFILE_DELAY_UNTIL_REBOOT) }
         .map_err(|error| failed("MoveFileExW", &error))
 }
 

@@ -6,10 +6,16 @@
 //! untrusted comment, the signature line, a trusted comment, the global signature). Only a
 //! prehashed signature (`ED`, BLAKE2b-512 of the file signed) is taken; the legacy form (`Ed`,
 //! the file itself signed) is refused. Once the signature and the global signature over the
-//! trusted comment both verify, the trusted comment, which the Tauri CLI writes as tab-separated
-//! `key:value` pairs, must name the file `clauseo-sandbox-setup.exe`, so a signed installer or
-//! any other artefact signed with the same key can't stand in for it. The version check is the
-//! caller's, on the verified bytes' own `VERSIONINFO` (`pe_version.rs`).
+//! trusted comment both verify, the trusted comment is read as the Tauri CLI writes it
+//! (tauri-cli 2.12, `updater_signature.rs`): `timestamp:<seconds>\tfile:<basename>\tversion:<v>`,
+//! tab-separated `key:value` fields, matched by key in any order. A field with no `:` or a key
+//! given twice is refused. `file` must be exactly `clauseo-sandbox-setup.exe`, so a signed
+//! installer or any other artefact signed with the same key can't stand in for it. `version`
+//! must be there; it comes back to the caller, which requires the staged bytes' own
+//! `FILEVERSION` to be its core (`version.rs`) and orders it against the record, so the
+//! signature binds the version the downgrade check uses. `timestamp` is informational.
+
+use std::collections::HashMap;
 
 use minisign_verify::{Error as MinisignError, PublicKey, Signature};
 
@@ -42,11 +48,32 @@ pub enum SignatureError {
     /// The trusted comment names another file, or none.
     #[error("the signature is for another file than {SIGNED_FILE}")]
     WrongFile,
+    /// The trusted comment has a field with no `:`, or a key given twice.
+    #[error("the signature's trusted comment is malformed: {0}")]
+    BadComment(&'static str),
+    /// The trusted comment carries no `version`, or an empty one.
+    #[error("the signature carries no version")]
+    NoVersion,
+    /// The staged exe's `FILEVERSION` isn't the signed `version`'s core (the caller's check).
+    #[error("the signature is for version {signed}, but the exe's FILEVERSION is {staged}")]
+    VersionMismatch {
+        /// The trusted comment's `version`.
+        signed: String,
+        /// The staged exe's `FILEVERSION`.
+        staged: String,
+    },
+}
+
+/// What a verified signature vouches for, beyond the bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signed {
+    /// The trusted comment's `version`, as written.
+    pub version: String,
 }
 
 /// Checks that `sig_file` (the `.sig`'s bytes) is a valid signature of `exe` by `key` (Tauri's
-/// base64 of a minisign public key), for [`SIGNED_FILE`].
-pub fn verify(exe: &[u8], sig_file: &[u8], key: &str) -> Result<(), SignatureError> {
+/// base64 of a minisign public key), for [`SIGNED_FILE`], and returns its signed version.
+pub fn verify(exe: &[u8], sig_file: &[u8], key: &str) -> Result<Signed, SignatureError> {
     let id = key_id(key).map_err(SignatureError::BadKey)?;
     if id == PLACEHOLDER_KEY_ID {
         return Err(SignatureError::PlaceholderKey);
@@ -77,15 +104,35 @@ pub fn verify(exe: &[u8], sig_file: &[u8], key: &str) -> Result<(), SignatureErr
         })?;
     // Only now is the trusted comment the signer's: the global signature verified above covers
     // it, and nothing before this line reads it.
-    let comment = signature.trusted_comment();
-    let file = comment
-        .split('\t')
-        .find_map(|pair| pair.strip_prefix("file:"));
-    if file == Some(SIGNED_FILE) {
-        Ok(())
-    } else {
-        Err(SignatureError::WrongFile)
+    let fields = fields(signature.trusted_comment())?;
+    if fields.get("file") != Some(&SIGNED_FILE) {
+        return Err(SignatureError::WrongFile);
     }
+    match fields.get("version") {
+        Some(version) if !version.is_empty() => Ok(Signed {
+            version: (*version).to_owned(),
+        }),
+        _ => Err(SignatureError::NoVersion),
+    }
+}
+
+/// The trusted comment's tab-separated `key:value` fields, by key (the value is everything
+/// after the first `:`). An empty comment has none; a field with no `:` or a key given twice
+/// is refused.
+fn fields(comment: &str) -> Result<HashMap<&str, &str>, SignatureError> {
+    let mut fields = HashMap::new();
+    if comment.is_empty() {
+        return Ok(fields);
+    }
+    for field in comment.split('\t') {
+        let (key, value) = field
+            .split_once(':')
+            .ok_or(SignatureError::BadComment("a field has no ':'"))?;
+        if fields.insert(key, value).is_some() {
+            return Err(SignatureError::BadComment("a field is given twice"));
+        }
+    }
+    Ok(fields)
 }
 
 /// Tauri's base64 wrapping of a minisign file undone: the text inside, or `None` when the

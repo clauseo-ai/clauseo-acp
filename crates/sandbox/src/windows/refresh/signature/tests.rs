@@ -21,11 +21,14 @@ fn a_good_signature_verifies() {
     let key = TestKey::new(0x1122_3344_5566_7788);
     let exe = exe();
     let sig = key.sign(&exe, &good_comment());
-    assert_eq!(verify(&exe, &sig, &key.public()), Ok(()));
+    let signed = Signed {
+        version: OWN.to_owned(),
+    };
+    assert_eq!(verify(&exe, &sig, &key.public()), Ok(signed.clone()));
     // A trailing line break, as an editor or the updater may leave, changes nothing.
     let mut with_newline = sig;
     with_newline.extend_from_slice(b"\r\n");
-    assert_eq!(verify(&exe, &with_newline, &key.public()), Ok(()));
+    assert_eq!(verify(&exe, &with_newline, &key.public()), Ok(signed));
 }
 
 #[test]
@@ -143,6 +146,13 @@ fn the_comment_must_name_this_exe() {
     for comment_text in [
         comment("Clauseo_1.4.0_x64-setup.exe", OWN),
         comment("clauseo-sandbox-setup.exe.sig", OWN),
+        // The name only as a substring, or under another key: not the file.
+        comment("xclauseo-sandbox-setup.exe", OWN),
+        comment("C:\\out\\clauseo-sandbox-setup.exe", OWN),
+        comment("clauseo-sandbox-setup.exe ", OWN),
+        comment("Clauseo-Sandbox-Setup.exe", OWN),
+        format!("timestamp:1\tnotfile:{SIGNED_FILE}\tversion:{OWN}"),
+        format!("timestamp:1\tversion:{OWN}\tfilename:{SIGNED_FILE}"),
         format!("timestamp:1\tversion:{OWN}"),
         String::new(),
     ] {
@@ -150,6 +160,54 @@ fn the_comment_must_name_this_exe() {
         assert_eq!(
             verify(&exe, &sig, &key.public()),
             Err(SignatureError::WrongFile),
+            "{comment_text:?}"
+        );
+    }
+}
+
+#[test]
+fn the_comment_is_matched_by_key_in_any_order_with_extra_fields() {
+    let key = TestKey::new(0x1122_3344_5566_7788);
+    let exe = exe();
+    for comment_text in [
+        // tauri-cli 2.12's own form.
+        format!("timestamp:1762500000\tfile:{SIGNED_FILE}\tversion:{OWN}"),
+        // Reordered, without a timestamp, with an extra field, with a ':' in a value.
+        format!("version:{OWN}\tfile:{SIGNED_FILE}\ttimestamp:1"),
+        format!("file:{SIGNED_FILE}\tversion:{OWN}"),
+        format!("timestamp:1\tfile:{SIGNED_FILE}\tversion:{OWN}\tbuilt-by:ci:windows"),
+    ] {
+        let sig = key.sign(&exe, &comment_text);
+        assert_eq!(
+            verify(&exe, &sig, &key.public()).map(|signed| signed.version),
+            Ok(OWN.to_owned()),
+            "{comment_text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_version_or_a_malformed_comment_is_refused() {
+    let key = TestKey::new(0x1122_3344_5566_7788);
+    let exe = exe();
+    let verdict = |comment_text: &str| verify(&exe, &key.sign(&exe, comment_text), &key.public());
+    assert_eq!(
+        verdict(&format!("timestamp:1\tfile:{SIGNED_FILE}")),
+        Err(SignatureError::NoVersion)
+    );
+    assert_eq!(
+        verdict(&format!("timestamp:1\tfile:{SIGNED_FILE}\tversion:")),
+        Err(SignatureError::NoVersion)
+    );
+    // A key given twice can't say which value the signer meant; a field with no ':' isn't one.
+    for comment_text in [
+        format!("file:{SIGNED_FILE}\tversion:{OWN}\tversion:9.9.9"),
+        format!("file:x.exe\tfile:{SIGNED_FILE}\tversion:{OWN}"),
+        format!("file:{SIGNED_FILE}\tversion:{OWN}\tstray"),
+        format!("file:{SIGNED_FILE}\t\tversion:{OWN}"),
+    ] {
+        assert!(
+            matches!(verdict(&comment_text), Err(SignatureError::BadComment(_))),
             "{comment_text:?}"
         );
     }

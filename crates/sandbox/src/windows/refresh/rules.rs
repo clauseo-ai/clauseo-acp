@@ -11,11 +11,11 @@ pub const REFRESH_ARG: &str = "--refresh";
 /// The task's execution limit: 5 minutes.
 pub const EXECUTION_LIMIT: &str = "PT5M";
 
-/// The descriptor of the task and its folder: protected; SYSTEM and Administrators full
-/// control; the record owner `owner` read and run (`FRFX`), so the app can ask for a run and
-/// can't change or delete the task.
+/// The descriptor of the task and its folder: owned by Administrators; protected; SYSTEM and
+/// Administrators full control; the record owner `owner` read and run (`FRFX`), so the app
+/// can ask for a run and can't change or delete the task.
 pub fn task_sddl(owner: &Sid) -> String {
-    format!("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
+    format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }
 
 /// The staging folder's owner and DACL: SYSTEM, alone, full control, inherited by what is made

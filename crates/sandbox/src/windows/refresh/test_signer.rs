@@ -72,9 +72,14 @@ pub(super) fn comment(file: &str, version: &str) -> String {
     format!("timestamp:1762500000\tfile:{file}\tversion:{version}")
 }
 
-/// A minimal PE32+ image whose one section, `.rsrc`, holds a `VERSIONINFO` with `version` as
-/// its `FILEVERSION`, then `tail` past the section (so two images of one version differ).
+/// A minimal x64 PE32+ image whose one section, `.rsrc`, holds a `VERSIONINFO` with `version`
+/// as its `FILEVERSION`, then `tail` past the section (so two images of one version differ).
 pub(super) fn image(version: [u16; 4], tail: &[u8]) -> Vec<u8> {
+    image_for(0x8664, version, tail)
+}
+
+/// [`image`] for the COFF `Machine` `machine`.
+pub(super) fn image_for(machine: u16, version: [u16; 4], tail: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0u8; 0x200];
     let put = |bytes: &mut Vec<u8>, at: usize, value: &[u8]| {
         if bytes.len() < at + value.len() {
@@ -87,7 +92,7 @@ pub(super) fn image(version: [u16; 4], tail: &[u8]) -> Vec<u8> {
     put(&mut bytes, 0, b"MZ");
     put(&mut bytes, 0x3C, &u32le(0x40));
     put(&mut bytes, 0x40, b"PE\0\0");
-    put(&mut bytes, 0x44, &u16le(0x8664));
+    put(&mut bytes, 0x44, &u16le(machine));
     put(&mut bytes, 0x46, &u16le(1));
     put(&mut bytes, 0x54, &u16le(240));
     let optional = 0x58;
