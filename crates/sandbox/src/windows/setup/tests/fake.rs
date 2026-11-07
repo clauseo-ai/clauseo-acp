@@ -1,6 +1,7 @@
 //! The set-up's seams faked in memory: [`FakeMachine`] records every call as a line of text and
 //! fails the calls it is told to; [`FakeAcl`] (`fake_acl.rs`) keeps the entries written, and
-//! `fake_more.rs` holds the surroundings and the call lines' folder names.
+//! `fake_more.rs` holds the surroundings, the call lines' folder names, and the machine's
+//! helpers outside the trait impl (its constructor and call recording).
 //! Profiles and `DeviceSync` are real folders in a temp folder, since the shared-write apply
 //! checks they exist, and the ledger is a real file there.
 
@@ -112,79 +113,6 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
-}
-
-impl FakeMachine {
-    /// A machine with only the owner's account, `DeviceSync`, an empty data folder and a 32 MiB
-    /// journal on [`VOLUME`].
-    pub(super) fn new(test: &str) -> FakeMachine {
-        super::fake_more::new_machine(test)
-    }
-
-    /// The data folder.
-    pub(super) fn data_dir(&self) -> PathBuf {
-        self.dir.path().join("data")
-    }
-
-    /// `%ProgramData%\Microsoft\DeviceSync`.
-    pub(super) fn device_sync(&self) -> PathBuf {
-        // One component at a time: a joined "a/b" keeps its `/` on Windows, so the path would
-        // print with mixed separators and not match the cause text.
-        self.dir
-            .path()
-            .join("ProgramData")
-            .join("Microsoft")
-            .join("DeviceSync")
-    }
-
-    /// The profile folder of the account `name`.
-    pub(super) fn profile_path(&self, name: &str) -> PathBuf {
-        self.dir.path().join("Users").join(name)
-    }
-
-    /// Fails the first call `line` with an injected error.
-    pub(super) fn fail(&mut self, line: &str) {
-        self.fails.push((
-            line.to_owned(),
-            MachineError::Other(format!("injected: {line}")),
-        ));
-    }
-
-    /// The calls since `from`.
-    pub(super) fn calls_since(&self, from: usize) -> Vec<&str> {
-        self.calls[from..].iter().map(String::as_str).collect()
-    }
-
-    /// Records `line`, failing it if told to.
-    fn call(&mut self, line: impl Into<String>) -> Result<(), MachineError> {
-        let line = line.into();
-        self.calls.push(line.clone());
-        assert!(self.panic_on.as_ref() != Some(&line), "a crash in {line}");
-        match self.fails.iter().position(|(text, _)| *text == line) {
-            Some(at) => Err(self.fails.remove(at).1),
-            None => Ok(()),
-        }
-    }
-
-    /// Records `line` as a call on the owner's files, and as made outside the owner when it was.
-    fn owner_call(&mut self, line: &str) -> Result<(), MachineError> {
-        if !self.acting.get() {
-            self.outside_owner.push(line.to_owned());
-        }
-        self.call(line)
-    }
-
-    fn new_sid(&mut self) -> Sid {
-        self.next_rid += 1;
-        sid(self.next_rid - 1)
-    }
-
-    fn account(&mut self, name: &str) -> Result<&mut Account, MachineError> {
-        self.state.accounts.get_mut(name).ok_or(MachineError::Os {
-            call: "NetUserGetInfo",
-            code: 2221,
-        })
-    }
 }
 
 impl Machine for FakeMachine {
