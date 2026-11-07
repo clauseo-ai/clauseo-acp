@@ -10,6 +10,7 @@ mod sandbox_link;
 mod set_aside;
 mod setup_exe_missing;
 mod sources;
+mod window_reach;
 #[cfg(windows)]
 mod windows;
 
