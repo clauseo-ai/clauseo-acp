@@ -11,6 +11,7 @@ use crate::{Clock, Error};
 
 mod failed;
 mod flights;
+mod pac;
 mod scheme;
 
 /// A clock the test moves by hand.
@@ -350,28 +351,6 @@ fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
     clock.advance(Duration::from_secs(1));
     failing.answer(Https, "example.test", 443);
     assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
-}
-
-/// A failed PAC lookup with nothing else set: from auto-detect, "no proxy here" (12180 no WPAD
-/// file, 12167 a `wpad` name with no script, 12178 the service off) is `DIRECT`, and a bad script
-/// (12166), a timeout (12002) and any code not expected are failed; from a PAC URL the firm named,
-/// every error is failed, 12167 included (stage C's review).
-#[test]
-fn a_pac_error_is_direct_only_for_no_proxy_here_from_auto_detect() {
-    use super::parse::{PacFrom, pac_error};
-    use super::settle;
-    for error in [12_180, 12_167, 12_178] {
-        let answer = settle(443, pac_error(PacFrom::AutoDetect, error));
-        assert_eq!(answer, UpstreamAnswer::Route(Route::Direct), "{error}");
-    }
-    for error in [12_166, 12_002, 0, 1, 12_179, 12_181, u32::MAX] {
-        let answer = settle(443, pac_error(PacFrom::AutoDetect, error));
-        assert_eq!(answer, UpstreamAnswer::Failed, "auto-detect {error}");
-    }
-    for error in [12_167, 12_178, 12_180, 12_166, 12_002] {
-        let answer = settle(443, pac_error(PacFrom::Url, error));
-        assert_eq!(answer, UpstreamAnswer::Failed, "PAC URL {error}");
-    }
 }
 
 #[test]

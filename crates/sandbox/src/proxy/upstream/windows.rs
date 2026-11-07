@@ -18,40 +18,46 @@ use windows::Win32::Networking::WinHttp::{
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
 use super::Route;
-use super::parse::{self, AUTOPROXY_SERVICE_ERROR, Bypass, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT};
+use super::parse::{
+    self, AUTOPROXY_SERVICE_ERROR, Bypass, PacAnswer, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT,
+};
 
 /// `WinHTTP`'s resolve, connect, send and receive timeouts for a PAC download, in milliseconds.
 const PAC_TIMEOUT_MS: i32 = 5_000;
 
 /// The system's route for `target` (`https://host:port/`). `Err` holds a reason with no URL.
-/// A WPAD lookup that failed, with nothing else set, is `Err` unless its error means no proxy
-/// here (12180, 12167, 12178: [`parse::pac_error`]); a PAC URL that fails is always `Err`.
-/// `WinHTTP` reports "no WPAD on this network" and a transient discovery failure with the same
-/// code (12180), so a transient one still reads as direct on a refresh.
+/// The PAC settings answer first ([`parse::pac_answer`]): a PAC URL before auto-detect, so a
+/// slow WPAD cannot use up the 10 s bound before it. A WPAD lookup that failed, with nothing else
+/// set, is `Err` unless its error means no proxy here (12180, 12167, 12178:
+/// [`parse::pac_error`]); a PAC URL that fails, with no WPAD route either, is `Err`. `WinHTTP`
+/// reports "no WPAD on this network" and a transient discovery failure with the same code
+/// (12180), so a transient one still reads as direct on a refresh.
 pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String> {
     let config = IeConfig::current()?;
     let auto_config_url = config.auto_config_url.take_string();
     let mut wpad = None;
     if config.auto_detect || auto_config_url.is_some() {
         let session = Session::open()?;
-        if config.auto_detect {
-            match session.proxy_for_url(target, &Pac::AutoDetect) {
-                Ok(route) => return Ok(route),
-                Err(error) => {
-                    let answer = parse::pac_error(PacFrom::AutoDetect, error);
-                    if answer.is_ok() {
-                        tracing::debug!(host, port, error, "no WPAD file here");
-                    } else {
-                        tracing::warn!(port, error, "WPAD failed; trying the next setting");
-                    }
-                    wpad = Some(answer);
+        let url = auto_config_url.as_deref().unwrap_or_default();
+        let answer =
+            parse::pac_answer(
+                config.auto_detect,
+                auto_config_url.is_some(),
+                |from| match from {
+                    PacFrom::Url => session.proxy_for_url(target, &Pac::Url(url)),
+                    PacFrom::AutoDetect => session.proxy_for_url(target, &Pac::AutoDetect),
+                },
+            );
+        match answer {
+            PacAnswer::Final(answer) => return answer,
+            PacAnswer::Fallback(answer) => {
+                match &answer {
+                    Ok(_) => tracing::debug!(host, port, "no WPAD file here"),
+                    Err(why) => tracing::warn!(port, %why, "WPAD failed; trying the next setting"),
                 }
+                wpad = Some(answer);
             }
-        }
-        if let Some(url) = auto_config_url {
-            return session
-                .proxy_for_url(target, &Pac::Url(&url))
-                .or_else(|error| parse::pac_error(PacFrom::Url, error));
+            PacAnswer::Unset => {}
         }
     }
     let Some(proxy) = config.proxy.take_string() else {

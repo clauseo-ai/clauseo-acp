@@ -223,6 +223,49 @@ pub(super) fn pac_error(from: PacFrom, error: u32) -> Result<Route, String> {
     }
 }
 
+/// What the PAC settings answer ([`pac_answer`]).
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PacAnswer {
+    /// The answer, whatever else is set.
+    Final(Result<Route, String>),
+    /// WPAD's, when auto-detect is the only PAC setting and it found no route: a static proxy
+    /// set beside it answers instead.
+    Fallback(Result<Route, String>),
+    /// Neither auto-detect nor a PAC URL is set.
+    Unset,
+}
+
+/// The PAC settings' answer, `ask` running one lookup (its Win32 error on failure). A PAC URL
+/// the settings name is asked first, so a slow WPAD (with its in-process retry) cannot use up
+/// the lookup's 10 s bound before it: a firm's GPO often sets both. Its route is the answer;
+/// when it fails, auto-detect's route, if it finds one, else the PAC URL's failure. With
+/// auto-detect alone, its route, or its error read by [`pac_error`] as a fallback.
+#[cfg(any(windows, test))]
+pub(super) fn pac_answer(
+    auto_detect: bool,
+    url_set: bool,
+    mut ask: impl FnMut(PacFrom) -> Result<Route, u32>,
+) -> PacAnswer {
+    if url_set {
+        let failed = match ask(PacFrom::Url) {
+            Ok(route) => return PacAnswer::Final(Ok(route)),
+            Err(error) => pac_error(PacFrom::Url, error),
+        };
+        if auto_detect && let Ok(route) = ask(PacFrom::AutoDetect) {
+            return PacAnswer::Final(Ok(route));
+        }
+        return PacAnswer::Final(failed);
+    }
+    if !auto_detect {
+        return PacAnswer::Unset;
+    }
+    match ask(PacFrom::AutoDetect) {
+        Ok(route) => PacAnswer::Final(Ok(route)),
+        Err(error) => PacAnswer::Fallback(pac_error(PacFrom::AutoDetect, error)),
+    }
+}
+
 /// A `WinHTTP` proxy string, as `WinHttpGetIEProxyConfigForCurrentUser` and
 /// `WinHttpGetProxyForUrl` give it: entries split by `;` or white space, each `host[:port]` or
 /// `scheme=host[:port]`, a host perhaps written `http://host`. For a CONNECT the first `https=`
