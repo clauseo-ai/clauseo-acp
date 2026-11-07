@@ -131,6 +131,7 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
+            | Error::NetworkUnfiltered { .. }
             | Error::ProtectedLink { .. } => None,
         }
     }
