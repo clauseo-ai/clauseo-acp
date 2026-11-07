@@ -1,8 +1,9 @@
-//! The refresh's reads of the user folder's exe and `.sig` (step 5), and of the admin copy:
-//! opened with `FILE_FLAG_OPEN_REPARSE_POINT`, so a link at the name is opened as itself and
-//! refused, never followed; then a regular disk file with one link and no more bytes than its
-//! cap, all checked on the handle the bytes are read from. The open shares only reading, so no
-//! one writes the file while it is read.
+//! The refresh's reads of a file by its path, for the files under Program Files the refresh owns
+//! (the staged copy, the admin copy), and the handle checks `walk.rs` uses on the install
+//! folder's files: opened with `FILE_FLAG_OPEN_REPARSE_POINT`, so a link at the name is opened as
+//! itself and refused, never followed; then a regular disk file with one link and no more bytes
+//! than its cap, all checked on the handle the bytes are read from. The open shares only
+//! reading, so no one writes the file while it is read.
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, ReadFile and the handle's file information"

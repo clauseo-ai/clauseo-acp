@@ -397,6 +397,23 @@ fn the_exe_carries_version_information_and_one_manifest() {
     );
 }
 
+/// The refresh's own reader (`refresh::pe_version`) finds the built exe's `FILEVERSION`: the
+/// app's version from `tauri.conf.json`, its four parts as `build.rs` writes them.
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_refresh_reads_the_built_exes_file_version() {
+    use clauseo_sandbox::windows::refresh::pe_version::{dotted, file_version};
+    let bytes = std::fs::read(EXE).unwrap();
+    let found = file_version(&bytes).expect("a FILEVERSION");
+    let conf = include_str!("../../desktop/tauri.conf.json");
+    let conf: serde_json::Value = serde_json::from_str(conf).unwrap();
+    let version = conf["version"].as_str().unwrap();
+    let core = version.split(['-', '+']).next().unwrap();
+    let mut parts: Vec<&str> = core.split('.').collect();
+    parts.resize(4, "0");
+    assert_eq!(dotted(found), parts.join("."));
+}
+
 #[cfg(not(windows))]
 #[test]
 #[expect(
