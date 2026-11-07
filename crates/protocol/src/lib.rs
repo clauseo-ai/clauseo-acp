@@ -244,7 +244,10 @@ wire_types! {
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
-    protection::{NotProtectedCause, Protection, ProtectionTier, ProtectionView},
+    protection::{
+        NotProtectedCause, Protection, ProtectionTier, ProtectionView, ProtectionWork,
+        UnsupportedWhy,
+    },
     query::{
         AgentSummary, BlobRange, DefaultLocation, FolderState, FolderSupportKind, HostQuery, MatterSummary, PageLimit, PaperSummary,
         PickedFolderSupport, QueryResult, ReadLen, RestorePreview, ThreadSummary, UndoPreview,

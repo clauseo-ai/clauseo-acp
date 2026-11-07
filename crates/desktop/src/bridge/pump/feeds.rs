@@ -9,7 +9,8 @@
 //!   `matters_changed` and `threads_changed` (not merged) go through as they come; when they
 //!   land, the restart also needs their current lists, unless the host makes a subscription's
 //!   first frame `all: true`. The settings window gets `settings_changed`, `connectors_changed`
-//!   (its Connectors section, R24) and `update_changed` of it, and any other label none
+//!   (its Connectors section, R24), `update_changed`, `protection_changed` and
+//!   `protection_view_changed` (its protection section, 0051) of it, and any other label none
 //!   ([`AppEvents`], 0028, 0037). The host's own catch-up after a subscribe carries the whole
 //!   connector state, so a restart reads nothing for it.
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows for `main` and
@@ -40,15 +41,17 @@ use crate::setup::SetupEvents;
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
-/// `settings_changed`, `connectors_changed` (R24) and `update_changed` (0037), so it never gets
+/// `settings_changed`, `connectors_changed` (R24), `update_changed` (0037), `protection_changed`
+/// and `protection_view_changed` (0051), so it never gets
 /// the matter and thread lists (0023) or an app event the host adds later. Any other label
 /// carries neither, whatever it follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppEvents {
     /// Every app and limits event: `main`.
     All,
-    /// The app feed's `settings_changed`, `connectors_changed` and `update_changed` only, and
-    /// the limits: the settings window.
+    /// The app feed's `settings_changed`, `connectors_changed`, `update_changed`,
+    /// `protection_changed` and `protection_view_changed` only, and the limits: the settings
+    /// window.
     SettingsAndLimits,
     /// No app or limits event: any other label.
     Nothing,
@@ -74,6 +77,8 @@ impl AppEvents {
                 json.starts_with(r#"{"settings_changed":"#)
                     || json.starts_with(r#"{"connectors_changed":"#)
                     || json.starts_with(r#"{"update_changed":"#)
+                    || json.starts_with(r#"{"protection_changed":"#)
+                    || json.starts_with(r#"{"protection_view_changed":"#)
             }
             (_, Self::Nothing) => false,
         }

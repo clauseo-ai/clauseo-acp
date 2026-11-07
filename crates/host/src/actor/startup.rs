@@ -25,7 +25,7 @@ use crate::write;
 
 /// Opens what the actor owns. Every read here awaits directly: the loop has not started.
 pub(super) async fn open(
-    config: HostConfig,
+    (config, first): (HostConfig, super::protection::Observed),
     spawner: LocalSpawner,
     post: async_channel::Sender<Input>,
     ready: mpsc::Sender<Result<(), Error>>,
@@ -85,6 +85,7 @@ pub(super) async fn open(
         pre_write_guard: parts.pre_write_guard,
         // Before `wiring` moves.
         connectors: super::connectors::ConnectorsOnActor::new(parts.wiring.connectors.clone()),
+        protection: super::protection::ProtectionHost::new(parts.sandbox, first),
         wiring: parts.wiring,
         counts: parts.counts,
         update,
@@ -167,6 +168,7 @@ fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     super::limits::start(actor, cached);
     super::browser_install::start(actor);
     super::connectors::start(actor);
+    super::protection::start(actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     tracing::info!(
         target: crate::log_file::LIFECYCLE,

@@ -187,6 +187,9 @@ mod limits_login;
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
 #[cfg(test)]
+#[path = "host/limits_sandbox.rs"]
+mod limits_sandbox;
+#[cfg(test)]
 #[path = "host/limits_stop.rs"]
 mod limits_stop;
 #[cfg(test)]
@@ -255,6 +258,12 @@ mod profile_rig;
 #[cfg(test)]
 #[path = "host/protection.rs"]
 mod protection;
+#[cfg(test)]
+#[path = "host/protection_edges.rs"]
+mod protection_edges;
+#[cfg(test)]
+#[path = "host/protection_rig.rs"]
+mod protection_rig;
 #[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;

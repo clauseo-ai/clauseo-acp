@@ -534,13 +534,17 @@ pub enum HostCommand {
     /// receipt; each answers `Done`, and the state reaches app subscribers as
     /// `HostEvent::ConnectorsChanged`. JSON: `{"connector": {"add": {"id": "case-law"}}}`.
     Connector(ConnectorCommand),
-    /// Try the sandbox's set-up or check again (decision record 0051); each matter whose
-    /// protection changes gets `HostEvent::ProtectionChanged`. No receipt. Until the host
-    /// builds it, `command.invalid`. JSON: `{"retry_protection": {}}`.
+    /// Try the sandbox's set-up or check again (decision record 0051): the set-up, with its
+    /// administrator prompt, when `ProtectionView::retry_asks_admin`, else a check. Answered
+    /// when it ends: `Done`, `sandbox.setup_refused` or `sandbox.setup_failed`; a second one
+    /// while it runs joins it. Each matter whose protection changes gets
+    /// `HostEvent::ProtectionChanged`. No receipt. `command.invalid` with no sandbox, or while a
+    /// removal runs. JSON: `{"retry_protection": {}}`.
     RetryProtection {},
     /// Remove the sandbox's set-up from this computer, after one administrator prompt (decision
-    /// record 0051); each matter then gets `HostEvent::ProtectionChanged`. No receipt. Until
-    /// the host builds it, `command.invalid`. JSON: `{"remove_sandbox_setup": {}}`.
+    /// record 0051); each matter then gets `HostEvent::ProtectionChanged`. Answered as
+    /// `RetryProtection` is. No receipt. `command.invalid` with no set-up, or while a set-up
+    /// runs. JSON: `{"remove_sandbox_setup": {}}`.
     RemoveSandboxSetup {},
 }
 

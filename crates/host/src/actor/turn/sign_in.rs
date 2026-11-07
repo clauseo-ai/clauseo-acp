@@ -150,7 +150,9 @@ pub(super) fn stop_for(actor: &Actor, thread: ThreadId) -> Option<StopFor> {
 
 /// Why a launch of `thread`'s agent may not start: `stop_agents` holds it, so what waits fails
 /// with `agent.auth_required` and a turn goes back held for the sign-in; or desktop refuses
-/// its new launches (`set_launch_refused`), so a turn fails with desktop's code.
+/// its new launches (`set_launch_refused`), so a turn fails with desktop's code; or
+/// `sandbox.required` is on with no working sandbox (`protection::refusal`), so a turn fails
+/// with `sandbox.setup_required` or `sandbox.required`.
 pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     if holds(actor, thread) {
         return Some(Error::refused(
@@ -158,17 +160,27 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
             "the agent starts again once its sign-in has changed",
         ));
     }
+    // `sandbox.required` with no working sandbox (decision record 0051), before the agent's
+    // lookup below, whose early return must never skip it. (That return is not reached from a
+    // launch, which always names a known thread.) The hold above goes first: it refuses too,
+    // and a held turn waits for the sign-in rather than failing.
+    if let Some(refused) = crate::actor::protection::refusal(actor) {
+        return Some(refused);
+    }
     let agent = &actor.threads.get(&thread)?.row.agent;
-    let code = actor
+    let in_force = actor
         .wiring
         .sign_in
         .refused
-        .in_force(agent, actor.clock.now().mono)?;
-    tracing::info!(%agent, code = code.as_str(), "a launch is refused");
-    Some(Error::refused(
-        code,
-        "Clauseo is not starting this agent for now",
-    ))
+        .in_force(agent, actor.clock.now().mono);
+    if let Some(code) = in_force {
+        tracing::info!(%agent, code = code.as_str(), "a launch is refused");
+        return Some(Error::refused(
+            code,
+            "Clauseo is not starting this agent for now",
+        ));
+    }
+    None
 }
 
 /// Whether `thread`'s launch waits for its agent's `agent.keys_loading` or

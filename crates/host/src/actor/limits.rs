@@ -41,7 +41,7 @@ use std::time::Duration;
 use clauseo_acp::{LimitSignal, LimitStatus};
 use clauseo_limits::{
     Action, Input as ModelInput, LimitHit, Limits, LiveSignal, LiveStatus, ProcessReaders,
-    ReadLimits, ReadOutcome,
+    ReadFailure, ReadLimits, ReadOutcome,
 };
 use clauseo_protocol::{
     AccountLimits, AgentId, AgentKind, HostEvent, LimitsView, Principal, RefreshWhy, ThreadId,
@@ -106,6 +106,9 @@ pub(crate) struct LimitsHost {
     stops: Vec<stops::PendingStop>,
     /// The number the next read started gets.
     next_read: u64,
+    /// The agents whose read `sandbox.required` refused, each logged once (decision record
+    /// 0051): no reader runs outside the jail until R17 PR-D/E runs it inside.
+    refused_reads: Vec<AgentKind>,
 }
 
 /// What the actor's own tasks and the limits subscriptions post back.
@@ -140,6 +143,7 @@ impl LimitsHost {
             asking: BTreeMap::new(),
             stops: Vec::new(),
             next_read: 0,
+            refused_reads: Vec::new(),
         }
     }
 }
@@ -393,9 +397,28 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
 }
 
 /// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
+/// Under `sandbox.required` no reader starts (it would run outside the jail, 0051): the read
+/// fails at once, so the plan-limits line shows it could not read.
 fn start_read(actor: &mut Actor, agent: AgentKind) {
     let number = actor.limits.next_read;
     actor.limits.next_read = number.saturating_add(1);
+    if actor.effective.settings().sandbox.required {
+        if !actor.limits.refused_reads.contains(&agent) {
+            actor.limits.refused_reads.push(agent);
+            tracing::info!(?agent, "limits not read: the firm requires the sandbox");
+        }
+        let outcome = ReadOutcome::Failed(ReadFailure::LaunchFailed(
+            "the firm requires the sandbox".to_owned(),
+        ));
+        actor.spawn_post(async move {
+            Input::Limits(LimitsInput::Read {
+                agent,
+                outcome,
+                number,
+            })
+        });
+        return;
+    }
     let read = actor.limits.reader.read(agent);
     actor.spawn_post(async move {
         let outcome = read.await;

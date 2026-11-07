@@ -188,7 +188,7 @@ pub enum HostQuery {
     /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
     ListSkillPacks,
     /// This computer's sandbox and the firm's protection settings (decision record 0051).
-    /// Answered `QueryResult::Protection`; until the host builds it, `command.invalid`.
+    /// Answered `QueryResult::Protection`, from the host's cache, at once.
     /// JSON: `"protection"`.
     Protection,
 }
