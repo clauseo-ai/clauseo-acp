@@ -156,7 +156,7 @@ pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
     HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, matter_path_in,
 };
-pub use matter::{Matter, remove_marker_of};
+pub use matter::{Matter, check_marker, remove_marker_of};
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};

@@ -243,6 +243,9 @@ error_codes! {
         sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does \
         not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a \
         newer cause), so no agent was started.";
+    MatterFolderNotAMatter = "matter.folder_not_a_matter", retryable: false, meaning: "The \
+        matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, \
+        unreadable or belongs to another matter: locate the matter's folder.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

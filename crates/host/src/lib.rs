@@ -226,6 +226,7 @@ mod file_link;
 mod handle;
 mod ids;
 pub mod log_file;
+mod matter_marker;
 mod matter_worker;
 mod pipeline;
 pub mod pre_write_guard;
@@ -266,6 +267,7 @@ pub use handle::{
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
+pub use matter_marker::check_matter_folder;
 #[cfg(feature = "test-support")]
 pub use search::SearchHold;
 pub use update::{

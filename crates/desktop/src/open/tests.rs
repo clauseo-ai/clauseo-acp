@@ -84,10 +84,12 @@ impl LinkConfirm for FakeConfirm {
     }
 }
 
-/// A host that knows one file ref and one matter.
+/// A host that knows one file ref and one matter, and the code its marker check refuses that
+/// matter's folder with (`None`: it passes).
 struct FakeHost {
     file: FileRefId,
     located: LocatedFile,
+    marker: Option<ErrorCode>,
 }
 
 impl Locate for FakeHost {
@@ -113,6 +115,15 @@ impl Locate for FakeHost {
         };
         Box::pin(async move { answer })
     }
+    fn check_marker(&self, folder: &Path, matter: MatterId) -> Result<(), HostError> {
+        assert_eq!(
+            (folder, matter),
+            (self.located.folder.as_path(), self.located.matter)
+        );
+        self.marker.map_or(Ok(()), |code| {
+            Err(HostError::new(code, "the marker check refused"))
+        })
+    }
 }
 
 fn file_ref() -> FileRefId {
@@ -123,10 +134,12 @@ fn matter_id() -> MatterId {
     MatterId::new(Uuid::now_v7()).unwrap()
 }
 
-/// A host whose one ref names `path` in the matter whose folder is `folder`.
+/// A host whose one ref names `path` in the matter whose folder is `folder`, a folder whose
+/// marker check passes.
 fn host(folder: &Path, path: &Path) -> FakeHost {
     FakeHost {
         file: file_ref(),
+        marker: None,
         located: LocatedFile {
             matter: matter_id(),
             folder: folder.to_path_buf(),
@@ -495,6 +508,33 @@ fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
     ));
     assert_eq!(code(missing), ErrorCode::MatterFolderMissing);
     assert_eq!(opener.opened(), []);
+}
+
+/// The host's marker check refusing the matter's folder (`matter.folder_not_a_matter`, for a
+/// folder that is there without the matter's `.clauseo/matter.json`) refuses a reveal and the
+/// open of a file in it with that code, and nothing opens; with the check passing both go ahead.
+/// The check itself is `clauseo_host::check_matter_folder`'s, tested in the host.
+#[test]
+fn the_marker_check_refuses_a_reveal_and_an_open() {
+    let scratch = Scratch::new("reveal-not-a-matter", &[]);
+    let (folder, brief, _) = matter_folder(&scratch);
+    let mut host = host(&folder, &brief);
+    let opener = FakeOpener::default();
+    let matter = RevealTarget::Matter(host.located.matter);
+    for refused_with in [
+        ErrorCode::MatterFolderNotAMatter,
+        ErrorCode::MatterFolderMissing,
+    ] {
+        host.marker = Some(refused_with);
+        let refused = block_on(reveal(&host, &opener, scratch.path(), matter));
+        assert_eq!(code(refused), refused_with);
+        assert_eq!(code(file(&host, &opener, host.file)), refused_with);
+    }
+    assert_eq!(opener.opened(), []);
+    host.marker = None;
+    block_on(reveal(&host, &opener, scratch.path(), matter)).unwrap();
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(opener.opened().len(), 2);
 }
 
 #[test]

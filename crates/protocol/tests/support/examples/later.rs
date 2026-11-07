@@ -73,6 +73,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxRequired,
             "the firm requires the sandbox; this computer is at tier C",
         ),
+        failed(
+            ErrorCode::MatterFolderNotAMatter,
+            "the matter folder has no .clauseo/matter.json",
+        ),
     ]
 }
 

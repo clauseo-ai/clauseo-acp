@@ -176,10 +176,14 @@ fn locate_refusals_leave_the_matter_unchanged() {
         (
             "a marker naming another matter",
             copy,
-            ErrorCode::MatterFolderMissing,
+            ErrorCode::MatterFolderNotAMatter,
         ),
-        ("no marker", plain, ErrorCode::MatterFolderMissing),
-        ("an unreadable marker", bad, ErrorCode::MatterFolderMissing),
+        ("no marker", plain, ErrorCode::MatterFolderNotAMatter),
+        (
+            "an unreadable marker",
+            bad,
+            ErrorCode::MatterFolderNotAMatter,
+        ),
         (
             "no folder",
             dir.work_path("gone"),
@@ -320,9 +324,11 @@ fn deleted_marker_another_matter_claims_is_not_relinked() {
         DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.code),
         _ => None,
     });
+    // The folder is there without its marker, and relink may not repair it: not a matter's
+    // folder, not a missing one.
     assert_eq!(
         failed,
-        Some(ErrorCode::MatterFolderMissing),
+        Some(ErrorCode::MatterFolderNotAMatter),
         "{ended:?}: {}",
         events.dump()
     );
@@ -330,5 +336,42 @@ fn deleted_marker_another_matter_claims_is_not_relinked() {
         !marker.exists(),
         "matter.json was written for a folder two matters record"
     );
+    host.shutdown();
+}
+
+/// Opening a matter whose folder is there but whose marker names a matter this install never
+/// had answers `matter.folder_not_a_matter` (not `matter.folder_missing`: the folder is there),
+/// and the marker is left as it was.
+#[test]
+fn a_folder_with_another_matters_marker_is_not_a_matter() {
+    let dir = Dir::new(
+        "marker_not_a_matter",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, FAKE);
+    host.shutdown();
+    let marker = folder.join(".clauseo/matter.json");
+    let foreign = MatterId::new(crate::support::foreign_uuid(42)).unwrap();
+    let text = format!(r#"{{"version":1,"matter_id":"{foreign}","created_at":0}}"#);
+    write::write(&marker, text.as_bytes());
+
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Summarise the brief.");
+    let ended = events.until_turn_ended(turn);
+    let failed = events.events().find_map(|event| match event {
+        DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.code),
+        _ => None,
+    });
+    assert_eq!(
+        failed,
+        Some(ErrorCode::MatterFolderNotAMatter),
+        "{ended:?}: {}",
+        events.dump()
+    );
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), text);
     host.shutdown();
 }

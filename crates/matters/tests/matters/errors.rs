@@ -47,7 +47,7 @@ fn hand_built() -> [(Error, ErrorCode); 15] {
                 folder: folder.clone(),
                 reason: MissingReason::NoMatterJson,
             },
-            ErrorCode::MatterFolderMissing,
+            ErrorCode::MatterFolderNotAMatter,
         ),
         (
             Error::FolderRefused {
@@ -116,6 +116,31 @@ fn hand_built() -> [(Error, ErrorCode); 15] {
             ErrorCode::MatterCheckpointFailed,
         ),
     ]
+}
+
+/// `FolderMissing` gives `matter.folder_missing` only for a folder that is not there; a folder
+/// that is there without this matter's marker gives `matter.folder_not_a_matter`.
+#[test]
+fn each_missing_reason_maps_to_its_code() {
+    let cases = [
+        (MissingReason::NoFolder, ErrorCode::MatterFolderMissing),
+        (
+            MissingReason::NoMatterJson,
+            ErrorCode::MatterFolderNotAMatter,
+        ),
+        (MissingReason::Unreadable, ErrorCode::MatterFolderNotAMatter),
+        (
+            MissingReason::OtherMatter(matter_id(2)),
+            ErrorCode::MatterFolderNotAMatter,
+        ),
+    ];
+    for (reason, code) in cases {
+        let err = Error::FolderMissing {
+            folder: PathBuf::from("/m"),
+            reason,
+        };
+        assert_eq!(err.code(), code, "{err:?}");
+    }
 }
 
 #[test]
@@ -252,7 +277,7 @@ fn folder_errors(fx: &Fixture) {
     assert!(!fx.root().join(matter_id(3).to_string()).exists());
 
     let err = Matter::open(fx.settings(), matter_id(1), &elsewhere).unwrap_err();
-    assert_code(&err, ErrorCode::MatterFolderMissing, "FolderMissing");
+    assert_code(&err, ErrorCode::MatterFolderNotAMatter, "FolderMissing");
     assert!(matches!(
         err,
         Error::FolderMissing {
@@ -262,6 +287,7 @@ fn folder_errors(fx: &Fixture) {
     ));
     crate::support::write(elsewhere.join(".clauseo/matter.json"), "not json");
     let err = Matter::open(fx.settings(), matter_id(1), &elsewhere).unwrap_err();
+    assert_code(&err, ErrorCode::MatterFolderNotAMatter, "FolderMissing");
     assert!(matches!(
         err,
         Error::FolderMissing {
@@ -270,10 +296,15 @@ fn folder_errors(fx: &Fixture) {
         }
     ));
 
-    // Locate and relink answer with the same codes.
+    // Locate and relink answer with the same codes: the folder is there, without this matter's
+    // marker, and relink does not repair a folder the history does not record.
     let err = Matter::locate(fx.settings(), matter_id(1), &elsewhere, &[]).unwrap_err();
-    assert_code(&err, ErrorCode::MatterFolderMissing, "FolderMissing");
+    assert_code(&err, ErrorCode::MatterFolderNotAMatter, "FolderMissing");
     let err = Matter::relink(fx.settings(), matter_id(1), &elsewhere, at(0), &[]).unwrap_err();
+    assert_code(&err, ErrorCode::MatterFolderNotAMatter, "FolderMissing");
+    // A folder that is not there stays `folder_missing`.
+    let gone = fx.dir.path().join("gone");
+    let err = Matter::open(fx.settings(), matter_id(1), &gone).unwrap_err();
     assert_code(&err, ErrorCode::MatterFolderMissing, "FolderMissing");
     let err = Matter::locate(fx.settings(), matter_id(1), &elsewhere, &refused).unwrap_err();
     assert_code(&err, ErrorCode::MatterFolderRefused, "FolderRefused");

@@ -63,6 +63,10 @@ pub(crate) trait Locate: Send + Sync {
     fn locate_file(&self, file: FileRefId) -> BoxFuture<'_, Result<LocatedFile, HostError>>;
     /// The folder of `matter`, or `command.unknown_matter`.
     fn matter_folder(&self, matter: MatterId) -> BoxFuture<'_, Result<PathBuf, HostError>>;
+    /// Whether `folder` is still `matter`'s folder, by its `.clauseo/matter.json`:
+    /// `matter.folder_missing` when it is not there, `matter.folder_not_a_matter` when it is
+    /// there without the matter's marker (`clauseo_host::check_matter_folder`).
+    fn check_marker(&self, folder: &Path, matter: MatterId) -> Result<(), HostError>;
 }
 
 /// Asks the lawyer whether to open a link, in a native dialog drawn by Rust: `true` to go
@@ -216,7 +220,10 @@ pub(crate) async fn open_external(
 /// [`BETWEEN_OPENS`]: `command.conflict`), asks the host what `file` names, checks it
 /// (`check_document`) and opens it with the default app for its type. A Word document whose
 /// path is too long for Word opens through its folders' short names, in Protected View, or is
-/// refused as `matter.document_path_too_long` (`word_path`).
+/// refused as `matter.document_path_too_long` (`word_path`). A matter folder that is not there is
+/// `matter.folder_missing`; one that is there without the matter's `.clauseo/matter.json` (none,
+/// unreadable, or another matter's) is `matter.folder_not_a_matter`
+/// (`Locate::check_marker`).
 pub(crate) async fn open_file(
     locate: &dyn Locate,
     opener: &dyn Opener,
@@ -226,6 +233,7 @@ pub(crate) async fn open_file(
 ) -> Result<OpenedFile, HostError> {
     let pass = gate.enter(now())?;
     let located = locate.locate_file(file).await?;
+    locate.check_marker(&located.folder, located.matter)?;
     let document = check_document(&located.path, &located.folder)?;
     let (path, protected_view) =
         word_path::word_open_path(&document.path, |folder| opener.short_folder(folder))
@@ -246,8 +254,10 @@ pub(crate) async fn open_file(
 }
 
 /// `reveal`: shows the matter's folder, or `app_data`, selected in its parent folder.
-/// `command.unknown_matter` from the host, and `matter.folder_missing` when the matter's folder
-/// is not there.
+/// `command.unknown_matter` from the host; `matter.folder_missing` when the matter's folder is
+/// not there, and `matter.folder_not_a_matter` when it is there without the matter's
+/// `.clauseo/matter.json` (`Locate::check_marker`); `internal` when the app data
+/// folder is not there.
 pub(crate) async fn reveal(
     locate: &dyn Locate,
     opener: &dyn Opener,
@@ -255,7 +265,11 @@ pub(crate) async fn reveal(
     target: RevealTarget,
 ) -> Result<(), HostError> {
     let folder = match target {
-        RevealTarget::Matter(matter) => locate.matter_folder(matter).await?,
+        RevealTarget::Matter(matter) => {
+            let folder = locate.matter_folder(matter).await?;
+            locate.check_marker(&folder, matter)?;
+            folder
+        }
         RevealTarget::AppData => app_data.to_path_buf(),
     };
     if !folder.is_dir() {

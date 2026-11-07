@@ -260,9 +260,10 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
     let MatterReply::BeforeTurn(Err(error)) = reply else {
         panic!("{reply:?}")
     };
+    // The folder is back, without its marker: not a matter's folder, not a missing one.
     assert_eq!(
         error.code(),
-        clauseo_protocol::ErrorCode::MatterFolderMissing
+        clauseo_protocol::ErrorCode::MatterFolderNotAMatter
     );
     assert!(!marker.exists(), "a later open wrote matter.json");
     spent.stop().unwrap();
