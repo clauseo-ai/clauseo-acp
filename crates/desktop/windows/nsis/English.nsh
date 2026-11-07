@@ -41,7 +41,7 @@ LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its pro
 ; removeSkippedSilent: a silent per-user uninstall (/S) can't ask for the UAC prompt that removing
 ; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
 ; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
-LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. Its sandbox folder is kept."
+LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

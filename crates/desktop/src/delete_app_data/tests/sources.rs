@@ -267,12 +267,11 @@ fn a_silent_per_user_uninstall_skips_the_elevated_removal_and_keeps_the_sandbox_
         "{body:?}"
     );
     let english = read("windows/nsis/English.nsh");
-    assert!(
-        english
-            .lines()
-            .any(|line| line.starts_with("LangString removeSkippedSilent ${LANG_ENGLISH} \"")),
-        "no removeSkippedSilent line in English.nsh"
-    );
+    // Stage F's words (#619), provisional: they say how to remove the protection.
+    let skipped = "LangString removeSkippedSilent ${LANG_ENGLISH} \"Clauseo didn't remove its \
+                   protection, because this uninstall is silent. To remove it, reinstall Clauseo \
+                   and uninstall it without /S.\"";
+    assert!(english.lines().any(|line| line == skipped), "{skipped}");
 }
 
 #[test]
