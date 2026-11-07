@@ -4,6 +4,18 @@
 
 use super::*;
 
+/// A typed path whose folder before the last cannot be read does not open; a missing last
+/// folder is `not_found`.
+#[test]
+fn a_typed_path_through_an_unreadable_folder_does_not_open() {
+    let (chooser, _release) = fake_chooser(r"C:\Users\rmehra\Desktop");
+    let id = open(&chooser, crate::open::now()).chooser;
+    let ghost = go(&chooser, id, r"C:\Users\Ghost\Work").unwrap();
+    assert_eq!(ghost.state, ListState::NotAllowed);
+    let missing = go(&chooser, id, r"C:\Users\Ghost").unwrap();
+    assert_eq!(missing.state, ListState::NotFound);
+}
+
 /// Lists the typed `path` in session `id` of `chooser`.
 fn go(chooser: &Chooser, id: u32, path: &str) -> Result<Listing, HostError> {
     let path = path.to_owned();
@@ -82,12 +94,25 @@ fn a_typed_path_goes_through_no_link_or_hidden_folder() {
     for device in [
         r"C:\Cases\CON",
         r"C:\nul.txt",
+        r"C:\nul .txt",
         r"C:\com1\x",
         r"C:\Lpt9.log",
         r"C:\aux",
+        r"C:\aux.d",
+        r"C:\CONIN$",
+        r"C:\conout$.x",
+        "C:\\COM\u{b9}",
+        "C:\\lpt\u{b3}.txt",
     ] {
         assert_eq!(Place::typed(device), None, "{device}");
     }
+    // A listed folder that only starts with a device name still shows and opens.
+    let (listed, more) = folders(vec![dir("aux.d"), dir("CON")]);
+    assert_eq!(
+        (listed, more),
+        (vec!["aux.d".to_owned(), "CON".to_owned()], false)
+    );
+    assert!(Place::drive('C').and_then(|c| c.child("aux.d")).is_some());
     assert!(Place::typed(r"C:\Console\Contracts").is_some());
 }
 
