@@ -1655,6 +1655,8 @@ export type ErrorCode =
 "sandbox.required" | 
 /** The matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, unreadable or belongs to another matter: locate the matter's folder. */
 "matter.folder_not_a_matter" | 
+/** A Windows setting or security tool blocks the sandbox (its set-up program is missing or was blocked, say), so no agent was started; whoever looks after this computer can fix it. */
+"sandbox.blocked" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

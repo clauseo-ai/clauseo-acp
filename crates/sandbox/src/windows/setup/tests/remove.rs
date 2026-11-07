@@ -503,5 +503,5 @@ fn the_exit_codes_append_to_the_set_ups_and_removed_is_the_hooks_0() {
     assert_eq!(SetupExit::RemovedPartly.as_code(), 4);
     assert_eq!(SetupExit::LockHeld.as_code(), 5);
     let codes: Vec<u8> = SetupExit::ALL.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, (0..7).collect::<Vec<u8>>(), "no number used twice");
+    assert_eq!(codes, (0..9).collect::<Vec<u8>>(), "no number used twice");
 }

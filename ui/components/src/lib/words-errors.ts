@@ -81,6 +81,7 @@ export type ErrorCode =
   | "sandbox.setup_failed"
   | "sandbox.setup_required"
   | "sandbox.required"
+  | "sandbox.blocked"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -183,6 +184,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
   "sandbox.required":
     "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+  // provisional placeholder (sandbox track): the app track writes this code's words (R17 PR-E)
+  "sandbox.blocked":
+    "Protection is blocked on this computer: a Windows setting or security tool stopped it, so Clauseo can't answer here. Ask whoever looks after this computer.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

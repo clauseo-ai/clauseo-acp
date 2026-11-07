@@ -66,6 +66,10 @@ mod accounts;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
+#[cfg(windows)]
+mod admin_remove;
+#[cfg(any(windows, test))]
+pub mod adopt;
 pub mod answers;
 pub mod args;
 #[cfg(windows)]

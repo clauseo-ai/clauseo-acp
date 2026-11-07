@@ -137,6 +137,8 @@ export const HI = {
     "जब तक इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता। आपका प्रश्न रखा गया है।",
   "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Protection is blocked on this computer: a Windows setting or security tool stopped it, so Clauseo can't answer here. Ask whoever looks after this computer.":
+    "इस कंप्यूटर पर संरक्षण अवरुद्ध है: Windows की किसी सेटिंग या सुरक्षा टूल ने इसे रोक दिया, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

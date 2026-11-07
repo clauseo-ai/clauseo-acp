@@ -25,6 +25,14 @@ pub const POOL_SIDS: &str = "PoolSids";
 pub const DATA_DIR: &str = "DataDir";
 /// `Removing` (`REG_DWORD`).
 pub const REMOVING: &str = "Removing";
+/// `AdminCopySha256` (`REG_SZ`): the admin copy's SHA-256, 64 lowercase hex digits, written by
+/// `--adopt` (`windows::admin_copy`), not by the set-up, and outside [`MachineRecord`].
+pub const ADMIN_COPY_SHA256: &str = "AdminCopySha256";
+/// `UserInstallDir` (`REG_SZ`): the install folder `--adopt` was given, absolute.
+pub const USER_INSTALL_DIR: &str = "UserInstallDir";
+/// The values the set-up owns, which a rollback or `--remove` deletes; the two `--adopt`
+/// writes stay until `--remove` takes the admin copy away.
+pub const SETUP_VALUES: [&str; 5] = [OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING];
 
 /// One registry value's data, as `RegSetValueExW` takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]

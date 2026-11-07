@@ -4,12 +4,15 @@
 //! - `--set-up --parent <pid> --data-dir <path> [--add <n>]`: set up, re-run or extend
 //!   (`--add`, 1 to [`POOL_CAP`]). The data folder is a plain drive-letter path (`C:\...`).
 //! - `--reclaim --parent <pid>`: the elevated clean-up (`PR4i`).
+//! - `--adopt --user-install-dir <path> (--data-dir <path> | --per-machine)`: run by the
+//!   installer's elevated step from the admin copy it just placed (`admin_copy`): lock the
+//!   admin folder, record the copy's hash and the install folder, then, per user, set up.
 //! - `--remove [--per-machine]`: the uninstall (`PR4j`). The hook adds `--per-machine` only in
 //!   the per-machine installer, chosen when the installer is built; nothing else ever. Who asked
 //!   comes from the process's recorded parent (D-B2), never from an argument.
 //!
-//! `--per-machine` is the one flag without a value. Every other flag takes its value as the next
-//! argument (never `--flag=value`). Each flag comes once.
+//! `--per-machine` is the one flag without a value, taken by `--remove` and `--adopt`. Every
+//! other flag takes its value as the next argument (never `--flag=value`). Each flag comes once.
 //! Anything else is a [`Usage`] error, and the exe exits `Usage`. `--parent` names the process
 //! that asked; the exe checks it against the parent Windows recorded (D-B2), so it never decides
 //! the owner alone. `--data-dir` is written as admin into the record's `DataDir`, so it is held
@@ -39,6 +42,14 @@ pub enum Mode {
         /// The process that asked (`--parent`).
         parent: u32,
     },
+    /// `--adopt`.
+    Adopt {
+        /// The app's install folder (`--user-install-dir`), recorded as `UserInstallDir`.
+        user_install_dir: PathBuf,
+        /// The installing user's data folder (`--data-dir`), for the set-up that follows; `None`
+        /// with `--per-machine`, which sets nobody up.
+        data_dir: Option<PathBuf>,
+    },
     /// `--remove`.
     Remove {
         /// `--per-machine`: a per-machine uninstall, which removes every pool the record names,
@@ -51,7 +62,8 @@ pub enum Mode {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
-         --reclaim --parent <pid> | --remove [--per-machine] ({0})"
+         --reclaim --parent <pid> | --adopt --user-install-dir <path> (--data-dir <path> | \
+         --per-machine) | --remove [--per-machine] ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -62,6 +74,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut parent = None;
     let mut data_dir = None;
     let mut add = None;
+    let mut install_dir = None;
     let mut per_machine = false;
     while let Some(flag) = args.next() {
         let flag = flag
@@ -78,6 +91,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             "--parent" => &mut parent,
             "--data-dir" => &mut data_dir,
             "--add" => &mut add,
+            "--user-install-dir" => &mut install_dir,
             other => return Err(Usage(format!("unknown argument {other:?}"))),
         };
         if slot.is_some() {
@@ -96,7 +110,10 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             Ok(())
         }
     };
-    if per_machine && mode != "--remove" {
+    if install_dir.is_some() && mode != "--adopt" {
+        return Err(Usage(format!("{mode} takes no --user-install-dir")));
+    }
+    if per_machine && !matches!(mode, "--remove" | "--adopt") {
         return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
     }
     match mode {
@@ -110,6 +127,19 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             refuse("--add", add.is_some())?;
             Ok(Mode::Reclaim {
                 parent: parent_of(parent)?,
+            })
+        }
+        "--adopt" => {
+            refuse("--parent", parent.is_some())?;
+            refuse("--add", add.is_some())?;
+            if per_machine == data_dir.is_some() {
+                return Err(Usage(format!(
+                    "--adopt takes --data-dir or {PER_MACHINE}, one of them"
+                )));
+            }
+            Ok(Mode::Adopt {
+                user_install_dir: path_of("--user-install-dir", install_dir)?,
+                data_dir: data_dir.map(|dir| data_dir_of(Some(dir))).transpose()?,
             })
         }
         "--remove" => {
@@ -150,11 +180,17 @@ fn add_of(value: &OsString) -> Result<u8, Usage> {
 /// stream), and a part ending in a dot or a space (which Windows would drop). The exe then
 /// resolves what passes as the owner (`exe.rs`), with no link on the way.
 pub fn data_dir_of(value: Option<OsString>) -> Result<PathBuf, Usage> {
-    let value = value.ok_or_else(|| Usage("--data-dir is missing".to_owned()))?;
+    path_of("--data-dir", value)
+}
+
+/// `flag`'s value held to [`data_dir_of`]'s rules: `--user-install-dir` is written as admin
+/// into the record too.
+fn path_of(flag: &str, value: Option<OsString>) -> Result<PathBuf, Usage> {
+    let value = value.ok_or_else(|| Usage(format!("{flag} is missing")))?;
     let Some(text) = value.to_str() else {
-        return Err(Usage("--data-dir isn't text".to_owned()));
+        return Err(Usage(format!("{flag} isn't text")));
     };
-    let refuse = |why: &str| Err(Usage(format!("--data-dir {text:?} {why}")));
+    let refuse = |why: &str| Err(Usage(format!("{flag} {text:?} {why}")));
     let Some((letter, rest)) = text.split_at_checked(2) else {
         return refuse("isn't a full path from a drive");
     };

@@ -1,5 +1,7 @@
 //! The setup exe's command line: every mode, every bad form, and the quoting round trip.
 
+use std::path::PathBuf;
+
 use super::*;
 
 fn parsed(line: &[&str]) -> Result<Mode, Usage> {
@@ -66,6 +68,23 @@ fn each_mode_parses_in_full() {
     assert_eq!(
         parsed(&["--remove", "--per-machine"]),
         Ok(Mode::Remove { per_machine: true })
+    );
+    let dir = r"C:\Users\l\AppData\Local\Clauseo";
+    let data = r"C:\Users\l\AppData\Local\chat.clauseo";
+    assert_eq!(
+        parsed(&["--adopt", "--user-install-dir", dir, "--data-dir", data]),
+        Ok(Mode::Adopt {
+            user_install_dir: PathBuf::from(dir),
+            data_dir: Some(PathBuf::from(data)),
+        })
+    );
+    let machine = r"C:\Program Files\Clauseo";
+    assert_eq!(
+        parsed(&["--adopt", "--per-machine", "--user-install-dir", machine]),
+        Ok(Mode::Adopt {
+            user_install_dir: PathBuf::from(machine),
+            data_dir: None,
+        })
     );
 }
 
@@ -166,6 +185,68 @@ fn every_bad_form_is_a_usage_error() {
 }
 
 #[test]
+fn every_bad_adopt_is_a_usage_error() {
+    let bad: &[&[&str]] = &[
+        // --adopt takes an install folder and exactly one of --data-dir and --per-machine.
+        &["--adopt"],
+        &["--adopt", "--data-dir", r"C:\d"],
+        &["--adopt", "--user-install-dir", r"C:\i"],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"C:\i",
+            "--per-machine",
+            "--data-dir",
+            r"C:\d",
+        ],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"C:\i",
+            "--data-dir",
+            r"C:\d",
+            "--parent",
+            "1",
+        ],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"C:\i",
+            "--data-dir",
+            r"C:\d",
+            "--add",
+            "1",
+        ],
+        &["--adopt", "--user-install-dir", "relative", "--per-machine"],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"C:\a\..\b",
+            "--per-machine",
+        ],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"\\server\share",
+            "--per-machine",
+        ],
+        &[
+            "--adopt",
+            "--user-install-dir",
+            r"C:\i",
+            "--user-install-dir",
+            r"C:\j",
+            "--per-machine",
+        ],
+        // --user-install-dir belongs to --adopt only.
+        &["--remove", "--user-install-dir", r"C:\i"],
+    ];
+    for line in bad {
+        assert!(parsed(line).is_err(), "{line:?} parsed");
+    }
+}
+
+#[test]
 fn a_parent_that_isnt_a_process_id_is_refused() {
     for parent in ["", "0", "-1", "+5", "12a", "0x10", " 5", "4294967296"] {
         let line = ["--set-up", "--parent", parent, "--data-dir", r"C:\d"];
@@ -212,7 +293,7 @@ fn a_data_dir_that_isnt_a_full_drive_path_is_refused() {
 #[test]
 fn the_usage_line_names_every_mode() {
     let text = parsed(&[]).unwrap_err().to_string();
-    for mode in ["--set-up", "--reclaim", "--remove"] {
+    for mode in ["--set-up", "--reclaim", "--adopt", "--remove"] {
         assert!(text.contains(mode), "{text}");
     }
 }

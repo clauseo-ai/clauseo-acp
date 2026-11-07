@@ -77,6 +77,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderNotAMatter,
             "the matter folder has no .clauseo/matter.json",
         ),
+        failed(
+            ErrorCode::SandboxBlocked,
+            "the sandbox can't run: clauseo-sandbox-setup.exe is missing or was blocked",
+        ),
     ]
 }
 

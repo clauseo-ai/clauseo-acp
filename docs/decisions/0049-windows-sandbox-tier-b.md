@@ -468,9 +468,43 @@ with Process Monitor that nothing loads from the exe's folder. If the delay-load
 those calls move to `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)` and `GetProcAddress`.
 
 A planted DLL stays the same class of risk as swapping the exe: both need an install folder a
-standard user can write. Swapping the exe itself stays open in a per-user install. The per-machine
-install closes both, since only administrators can write its folder under Program Files (PR4j's
-`--per-machine`, with stage F).
+standard user can write. The admin copy, below, closes both for per-user installs too: the exe
+that runs elevated is never the one in the install folder.
+
+### Admin copy
+
+Clauseo starts the setup exe elevated from one place only: `%ProgramFiles%\Clauseo\Sandbox\`
+(`FOLDERID_ProgramFiles`, never an environment variable), where the installer's elevated step puts
+a copy, for per-user and per-machine installs alike. The copy beside `Clauseo.exe` is never
+started elevated, by the app or by the uninstall hook.
+
+- **Placing it.** The installer extracts the exe there and runs that copy with
+  `--adopt --user-install-dir <path> (--data-dir <path> | --per-machine)`. `--adopt` refuses
+  unless it is elevated (or SYSTEM, per machine) and `current_exe()` is the admin copy's path.
+  Per user, the installing user is the recorded parent's token user; a record owned by another
+  account changes nothing and exits 2, and the install folder must be an existing folder inside
+  that user's profile (per machine: `%ProgramFiles%\Clauseo`). It then gives the folder and the
+  copy owner Administrators and a protected DACL (SYSTEM and Administrators full, Users read and
+  run), reads both back exactly, writes the copy's SHA-256 and the install folder to the record
+  as `AdminCopySha256` and `UserInstallDir`, and, per user, runs the normal set-up in-process.
+  Exits: 0 done, 1 usage, 2 another account, 3 failed, 5 lock held, 6 data folder not the
+  user's, 7 not elevated, 8 not the admin copy.
+- **Before each start, and each tier-B launch** (`UserSetup`, `check_launch`), the copy must be a
+  regular file (else `Blocked::AdminCopyMissing`); each of `%ProgramFiles%`, `Clauseo`, `Sandbox`
+  and the copy must be no reparse point, owned by SYSTEM, Administrators or TrustedInstaller,
+  with no allow entry that applies to it giving anyone else write, append, delete, delete-child,
+  `WRITE_DAC`, `WRITE_OWNER` or a generic right holding one (else `AdminCopyUnsafe`; deny entries
+  are ignored); and its SHA-256 must be the recorded one (else `AdminCopyChanged`). Each is
+  `sandbox.blocked`, not retryable, with words for IT. A tier-B launch hashes the copy each time.
+- **Removing it.** `--remove`, once no tier-B owner is left, deletes the two values, then
+  everything in the folder, then the folder. The running copy is renamed in place to a name
+  nothing starts and scheduled for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the
+  folder after it; a reinstall before the restart keeps its new copy. The SYSTEM task that
+  refreshes the copy after an update (`\Clauseo\SandboxRefresh`, staging in `Sandbox\staging\`)
+  is a later change; `remove_refresh_task` is where its removal goes.
+- **What stays open.** The installer's elevated step runs from wherever the lawyer started the
+  installer; a swapped installer is outside this decision. Keeping the copy current after an app
+  update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)
 
