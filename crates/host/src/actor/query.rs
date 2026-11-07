@@ -152,6 +152,7 @@ pub(super) fn query(
             let view = super::protection::view(actor);
             let _gone = reply.send(Ok(QueryResult::Protection(view)));
         }
+        HostQuery::AllowedSites => super::allowed::list(actor, reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));

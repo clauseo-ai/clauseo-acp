@@ -30,6 +30,7 @@ mod privacy;
 
 use clauseo_protocol::{
     AgentKind,
+    AllowScope,
     AppendTarget,
     BrowserInstallFailure,
     BrowserInstallState,

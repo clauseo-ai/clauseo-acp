@@ -81,6 +81,14 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxBlocked,
             "the sandbox can't run: clauseo-sandbox-setup.exe is missing or was blocked",
         ),
+        failed(
+            ErrorCode::BlocklistOverrideOff,
+            "allowing a site on the unsafe-site list is turned off",
+        ),
+        failed(
+            ErrorCode::BlocklistNoticeExpired,
+            "the blocked-site notice is no longer kept",
+        ),
     ]
 }
 

@@ -44,10 +44,10 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// What of `<data>` only Clauseo uses, named whether or not it exists at the launch (the
 /// launch adds every other entry that exists then, `launch.rs`), as rule patterns under it,
 /// each denied to Claude for Read and Edit: the skill packs' sources, the version store, the
-/// logs, the updater's downloads,
-/// the usage counts, the Windows sandbox's ledger, the limits reader's state, the browser's config,
-/// the settings file, the updater's marker, the counts' first-act marker, the host's store, the
-/// search index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
+/// logs, the updater's downloads, the usage counts, the Windows sandbox's ledger, the limits
+/// reader's state, the browser's config, the block list's store and the lawyer's allowed sites, the
+/// settings file, the updater's marker, the counts' first-act marker, the host's store, the search
+/// index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
 /// Under `agents`: Codex's home, the installs, the runtime and npm folders, the sign-in shim and
 /// markers, and in Claude's own home its login, its settings, its transcripts (every project's,
 /// with its subagents' and its memory; not the whole of `projects`, which also holds the large
@@ -58,7 +58,7 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
 /// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
 /// through them would land in the transcript.
-pub(crate) const DENIED: [&str; 35] = [
+pub(crate) const DENIED: [&str; 36] = [
     "run/*/relay-token",
     "skill-packs/**",
     "matters/**",
@@ -68,6 +68,7 @@ pub(crate) const DENIED: [&str; 35] = [
     "sandbox/**",
     "limits/**",
     "browser/**",
+    "blocklist/**",
     clauseo_settings::SETTINGS_FILE,
     "update.json",
     clauseo_counts::FIRST_ACT,

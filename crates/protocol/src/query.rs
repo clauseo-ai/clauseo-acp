@@ -8,11 +8,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    PackList, PackStatus, Protection, ProtectionView, QueueHoldReason, RestoreRequest,
-    SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus,
-    Timestamp, TurnId, UpdateView, ViewEntry,
+    AgentId, AgentKind, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString, Count,
+    Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource,
+    MatterStatus, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason,
+    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
+    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -191,6 +191,12 @@ pub enum HostQuery {
     /// Answered `QueryResult::Protection`, from the host's cache, at once.
     /// JSON: `"protection"`.
     Protection,
+    /// The sites the lawyer allowed despite the unsafe-site block list (decision record 0053,
+    /// PR 2), `Always` first, each sorted by host, then by matter. Listed whatever the policy
+    /// says: while `network.allow_unsafe_site_override` is off none is honoured, and
+    /// `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
+    /// JSON: `"allowed_sites"`.
+    AllowedSites,
 }
 
 /// A query's answer.
@@ -247,6 +253,8 @@ pub enum QueryResult {
     SkillPacks(Vec<PackStatus>),
     /// For `Protection`.
     Protection(ProtectionView),
+    /// For `AllowedSites`.
+    AllowedSites(Vec<AllowedSite>),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it

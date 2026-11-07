@@ -59,6 +59,10 @@ mod update;
 #[path = "commands/protection.rs"]
 mod protection;
 
+#[cfg(test)]
+#[path = "commands/allowed_sites.rs"]
+mod allowed_sites;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

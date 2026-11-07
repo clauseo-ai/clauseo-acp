@@ -1512,7 +1512,9 @@ expression: counts_schema()
         "sandbox.setup_required",
         "sandbox.required",
         "matter.folder_not_a_matter",
-        "sandbox.blocked"
+        "sandbox.blocked",
+        "blocklist.override_off",
+        "blocklist.notice_expired"
       ],
       "type": "string"
     },

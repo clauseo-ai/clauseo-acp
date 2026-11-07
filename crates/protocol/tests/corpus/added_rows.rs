@@ -457,4 +457,18 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (388, 0x8dc3_9a7b_41a9_bcdb),
         (290, 0x1e18_6bec_38d2_5a4f),
     ),
+    (
+        "added/turn_failed-BlocklistOverrideOff",
+        include_bytes!("added/turn_failed-BlocklistOverrideOff.jsonl"),
+        include_bytes!("added/turn_failed-BlocklistOverrideOff.msgpack"),
+        (374, 0xaf1d_7cf2_33d3_9c05),
+        (276, 0xe06b_9dcc_b19f_788b),
+    ),
+    (
+        "added/turn_failed-BlocklistNoticeExpired",
+        include_bytes!("added/turn_failed-BlocklistNoticeExpired.jsonl"),
+        include_bytes!("added/turn_failed-BlocklistNoticeExpired.msgpack"),
+        (364, 0x5d63_342b_9689_b794),
+        (266, 0xaedd_5424_3350_9aee),
+    ),
 ];

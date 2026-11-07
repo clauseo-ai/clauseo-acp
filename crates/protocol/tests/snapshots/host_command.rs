@@ -135,6 +135,15 @@ golden! { HostCommand::name_of {
     SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
     RetryProtection => retry_protection: HostCommand::RetryProtection {};
     RemoveSandboxSetup => remove_sandbox_setup: HostCommand::RemoveSandboxSetup {};
+    AllowBlockedSite => allow_blocked_site: HostCommand::AllowBlockedSite {
+        block_id: blocked_site_id(3),
+        scope: AllowScope::Matter,
+    };
+    RevokeAllowedSite => revoke_allowed_site: HostCommand::RevokeAllowedSite {
+        host: "evil.example".to_owned(),
+        scope: AllowScope::Matter,
+        matter: Some(matter_id(1)),
+    };
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }

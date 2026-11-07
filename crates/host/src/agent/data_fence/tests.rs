@@ -76,6 +76,8 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Read(//d/ata/agents/codex-acp/**)",
         "Read(//d/ata/agents/claude-acp/home/.credentials.json)",
         "Read(//d/ata/settings.json)",
+        "Read(//d/ata/blocklist/**)",
+        "Edit(//d/ata/blocklist/**)",
         "Edit(//d/ata/state.sqlite*)",
         "Read(//d/ata/search.sqlite*)",
         "Edit(//d/ata/search.sqlite*)",

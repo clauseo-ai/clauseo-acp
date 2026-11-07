@@ -10,7 +10,8 @@
 //! Each request passes these checks in order: the head, the token (agent listener only), the
 //! form and scheme (405, `Scheme`; 400 when there is no host to name), the silent list (403, no
 //! denial), the block list (403, `Blocked`, by name or IP literal, no DNS; it beats every
-//! allowlist entry), the port (403, `Port`), an IP literal that is not public or a `localhost` name
+//! allowlist entry; a host the lawyer allowed, exactly, skips it), the port (403, `Port`), an
+//! IP literal that is not public or a `localhost` name
 //! (403, `PrivateAddress`; no allowlist entry lets one through), the allowlist (403,
 //! `NotAllowed`), the route, the address check (403, `PrivateAddress`: every resolved address
 //! on a direct connection; through an upstream, an IP literal, or a name's local answers when
@@ -34,7 +35,7 @@ mod token;
 pub mod upstream;
 
 use crate::ports::ListenerFor;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -66,6 +67,13 @@ pub struct ProxyConfig {
     /// Hosts on it are refused with `Denial::Blocked` whatever the allowlist says. Unloaded,
     /// nothing is blocked.
     pub block: Arc<clauseo_blocklist::Current>,
+    /// The hosts the lawyer allowed despite the block list (ADR 0053, PR 2): the host's live
+    /// view for this launch's matter, its `Matter` allows and the `Always` ones, empty while
+    /// policy forbids overrides. Asked before the list, exactly by host; an allowed host is
+    /// then checked as any other (silent list, port, private address, allowlist). A change
+    /// reaches the next request, and a revoke closes the open tunnels and forwarded requests to
+    /// a host it removed that the list still names. Empty by default.
+    pub allowed: Arc<clauseo_blocklist::Allowed>,
     /// Straight out, a fixed proxy, or the system's.
     pub upstream: Upstream,
     /// The launch's sink. The proxy puts S14's rate cap in front of it.
@@ -88,8 +96,8 @@ pub struct ProxyConfig {
 }
 
 impl ProxyConfig {
-    /// A config with no record callback, no browser listener, an unloaded block list, and its
-    /// agent listener outside tier B's range ([`ListenerFor::Other`]).
+    /// A config with no record callback, no browser listener, an unloaded block list, no
+    /// allowed site, and its agent listener outside tier B's range ([`ListenerFor::Other`]).
     pub fn new(
         allow: Allowlist,
         silent: Allowlist,
@@ -100,6 +108,7 @@ impl ProxyConfig {
             allow,
             silent,
             block: Arc::default(),
+            allowed: Arc::default(),
             upstream,
             denials,
             record: None,
@@ -295,10 +304,13 @@ pub(crate) fn start_with(
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
     }
     let shared = Arc::new(Shared::new(config.allow));
+    let watcher = revoke_watcher(&shared, &config.block, &config.allowed);
+    config.allowed.watch(&watcher);
     let parts = server::Parts {
         shared: Arc::clone(&shared),
         silent: config.silent,
         block: config.block,
+        allowed: config.allowed,
         token: token.clone(),
         denials: config.denials,
         clock: SharedClock(options.clock),
@@ -317,8 +329,33 @@ pub(crate) fn start_with(
         browser_port,
         token,
         shared,
+        _watcher: watcher,
         stop: Some(stop),
         thread: Some(thread),
+    })
+}
+
+/// The watcher on the launch's allowed set: when a revoke removes hosts, it closes every open
+/// tunnel and forwarded request whose host is among them, is not allowed again, and is still on
+/// the block list. It runs on the revoking thread, after the swap, and does no I/O.
+fn revoke_watcher(
+    shared: &Arc<Shared>,
+    block: &Arc<clauseo_blocklist::Current>,
+    allowed: &Arc<clauseo_blocklist::Allowed>,
+) -> Arc<clauseo_blocklist::Watcher> {
+    let shared = Arc::downgrade(shared);
+    let block = Arc::clone(block);
+    let allowed = Arc::downgrade(allowed);
+    Arc::new(move |removed: &BTreeSet<String>| {
+        let (Some(shared), Some(allowed)) = (shared.upgrade(), allowed.upgrade()) else {
+            return;
+        };
+        let list = block.get();
+        let now = allowed.get();
+        shared.close_where(|name| {
+            let text = name.text();
+            removed.contains(&text) && !now.contains(&text) && server::listed(&list, name).is_some()
+        });
     })
 }
 
@@ -328,6 +365,9 @@ pub struct ProxyHandle {
     browser_port: Option<u16>,
     token: Token,
     shared: Arc<Shared>,
+    /// Closes open tunnels to a host whose allow (`ProxyConfig::allowed`) is revoked; held so
+    /// it lives as long as the proxy.
+    _watcher: Arc<clauseo_blocklist::Watcher>,
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -430,6 +470,9 @@ pub(crate) enum Unopened {
     NotAllowed,
     /// The launch has its most tunnels open.
     Busy,
+    /// The lawyer's allow for the host was revoked since the block list was asked, and the
+    /// list still names it.
+    Blocked,
 }
 
 impl Shared {
@@ -448,15 +491,21 @@ impl Shared {
         self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Opens a tunnel to `name` if the list still allows it and there is room.
+    /// Opens a tunnel to `name` if the list still allows it, `still` (asked under the lock,
+    /// so a revoke's watcher cannot miss the tunnel; it must do no I/O) says the block list
+    /// still lets it through, and there is room.
     pub(crate) fn open(
         &self,
         name: &Name,
         most: usize,
+        still: impl FnOnce(&Name) -> bool,
     ) -> Result<(u64, AbortRegistration), Unopened> {
         let mut live = self.live();
         if !live.allow.contains_name(name) {
             return Err(Unopened::NotAllowed);
+        }
+        if !still(name) {
+            return Err(Unopened::Blocked);
         }
         if live.tunnels.len() >= most {
             return Err(Unopened::Busy);
@@ -470,6 +519,17 @@ impl Shared {
 
     pub(crate) fn close(&self, id: u64) {
         self.live().tunnels.remove(&id);
+    }
+
+    /// Closes every open tunnel whose host `close` names.
+    fn close_where(&self, close: impl Fn(&Name) -> bool) {
+        self.live().tunnels.retain(|_, (host, handle)| {
+            let shut = close(host);
+            if shut {
+                handle.abort();
+            }
+            !shut
+        });
     }
 
     fn revoke(&self, name: &Name) {

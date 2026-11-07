@@ -33,6 +33,7 @@ fn config() -> ProxyConfig {
         allow: Allowlist::default(),
         silent: Allowlist::default(),
         block: Arc::default(),
+        allowed: Arc::default(),
         upstream: Upstream::Direct,
         denials: Arc::new(Ignore),
         record: None,

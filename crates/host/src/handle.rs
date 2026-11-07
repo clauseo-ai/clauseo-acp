@@ -46,7 +46,8 @@ pub struct LocatedFile {
 /// its sink passes it to [`HostHandle::site_blocked`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedSite {
-    /// The host name or IP address the agent asked for, as it asked.
+    /// The host name or IP address the agent asked for, as the proxy prints it (`Name::text`:
+    /// case folded, one trailing dot dropped, an IDN as punycode, an IPv6 address unbracketed).
     pub host: String,
     /// Why the list names it.
     pub tag: clauseo_blocklist::Tag,

@@ -138,6 +138,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod allowed_sites;
 mod approval;
 mod browser_install;
 mod command;
@@ -195,6 +196,7 @@ macro_rules! wire_types {
 
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
+    allowed_sites::{AllowScope, AllowedSite},
     approval::{
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
@@ -299,6 +301,7 @@ wire_types! {
 // What stands in a tool call's logged output for an elicitation value it echoed.
 pub use approval::WITHHELD;
 pub use command::{
+    MAX_ALLOWED_HOST_BYTES,
     MAX_CONNECTOR_ID_BYTES,
     MAX_DAY_START_SKEW_MS,
     MAX_ELICITATION_VALUES_BYTES,

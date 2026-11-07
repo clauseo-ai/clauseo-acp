@@ -32,6 +32,7 @@ use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
 use crate::snapshot::SnapshotWorker;
 
+mod allowed;
 mod app;
 mod app_lists;
 mod blocked;
@@ -172,6 +173,10 @@ pub(crate) struct Actor {
     /// The sites the egress proxy refused, per thread, for the running turn (`blocked.rs`).
     /// Boxed, so the host thread's close future stays under clippy's `large_futures` limit.
     pub(crate) blocked: Box<blocked::Blocks>,
+    /// The lawyer's allowed sites: the notices an allow can name, the stored allows and the
+    /// proxies' views (`allowed.rs`). Boxed, as is `blocked`, so the host thread's close future
+    /// stays under clippy's `large_futures` limit on Windows.
+    pub(crate) allowed: Box<allowed::AllowState>,
     /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
     pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
@@ -271,6 +276,7 @@ fn run(
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
+    let allowed_sites = blocklist::allowed_sites(&config);
     let blocklist = blocklist::take(&mut config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
@@ -280,6 +286,7 @@ fn run(
                 return Ok(None);
             }
         };
+        allowed::start(&mut actor, allowed_sites);
         startup::begin_startup(&mut actor);
         // Stops when this block ends, however it ends (`blocklist.rs`).
         let _blocklist = blocklist.and_then(|start| {

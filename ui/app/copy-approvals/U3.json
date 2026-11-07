@@ -815,5 +815,27 @@
     "status": "provisional",
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
+  "U3-err-blocklist.override_off": {
+    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
+    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "stage E (provisional; Rohan batch review)",
+    "note": "The \"Allow this site\" refusal when the firm's policy forbids overriding the unsafe-site list (ADR 0053)"
+  },
+  "U3-err-blocklist.notice_expired": {
+    "en": "This notice has expired. Open the site again, then allow it from the new notice.",
+    "hi": "यह सूचना अब पुरानी हो चुकी है। वेबसाइट फिर से खोलें, फिर नई सूचना से उसे अनुमति दें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "stage E (provisional; Rohan batch review)",
+    "note": "The \"Allow this site\" refusal for a blocked-site notice the host no longer keeps (too old, or from before a restart) (ADR 0053)"
   }
 }

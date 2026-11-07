@@ -1,8 +1,12 @@
-//! The block list's tests: parse, verify, matching, the rollback rule and the shared list.
+//! The block list's tests: parse, verify, matching, the rollback rule, the shared list and
+//! the allowed set.
 //! Fixtures are in `tests/data` (`make_fixtures.py` writes them, with throwaway keys).
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
+#[cfg(test)]
+#[path = "blocklist/allowed.rs"]
+mod allowed;
 #[cfg(test)]
 #[path = "blocklist/current.rs"]
 mod current;

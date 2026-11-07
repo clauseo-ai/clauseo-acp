@@ -20,6 +20,8 @@
 //! - [`Current`] is the list in use, shared read-only: readers clone an `Arc` under a read lock
 //!   held for the clone only, and an update swaps the `Arc`, so a reader never waits on a parse
 //!   and a swap never touches a request in flight.
+//! - [`Allowed`] is one launch's set of hosts the lawyer allowed despite the list (PR 2),
+//!   matched exactly and shared the same way; the proxy asks it before the list.
 //!
 //! Signature checking stays here and in the host; the proxy only receives a parsed list.
 
@@ -31,6 +33,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod allowed;
 mod current;
 mod error;
 mod generated;
@@ -39,6 +42,7 @@ mod list;
 mod parse;
 mod verify;
 
+pub use allowed::{Allowed, Watcher};
 pub use current::Current;
 pub use error::Error;
 pub use generated::{Generated, accept};

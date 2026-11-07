@@ -82,6 +82,8 @@ export type ErrorCode =
   | "sandbox.setup_required"
   | "sandbox.required"
   | "sandbox.blocked"
+  | "blocklist.override_off"
+  | "blocklist.notice_expired"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -187,6 +189,14 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (app track, Rohan's batch review): in design B's "Safe workspace" words
   "sandbox.blocked":
     "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" refused while the firm's policy forbids overriding
+  // the unsafe-site list (decision record 0053)
+  "blocklist.override_off":
+    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" from a blocked-site notice the host no longer
+  // keeps (decision record 0053)
+  "blocklist.notice_expired":
+    "This notice has expired. Open the site again, then allow it from the new notice.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

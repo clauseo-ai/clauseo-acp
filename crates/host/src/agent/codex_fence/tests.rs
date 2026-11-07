@@ -179,6 +179,7 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
     for subpath in [
         "logs",
         "settings.json",
+        "blocklist",
         "state.sqlite",
         "search.sqlite",
         "search.sqlite-wal",

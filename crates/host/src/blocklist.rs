@@ -12,8 +12,10 @@
 //! - The first fetch runs right after the start-up load, then one every interval, jittered,
 //!   with one short retry after a signature mismatch (`timing.rs`).
 //! - Each round reads the settings as they are then ([`Live`], which the actor refreshes on
-//!   every settings change): `network.unsafe_site_list_updates` off skips the fetch (the list
-//!   in use stays enforced), and `network.upstream_proxy` routes it (`fetch.rs`).
+//!   every `SettingsChanged` it publishes): `network.unsafe_site_list_updates` off skips the
+//!   fetch (the list in use stays enforced), and `network.upstream_proxy` routes it
+//!   (`fetch.rs`). The policy file is read only when the host starts, so a policy change takes
+//!   effect at the next start; a future runtime reload would publish `SettingsChanged`.
 //! - Anything that fails keeps the list in use and retries at the next interval; a 404 means
 //!   nothing is published yet and is logged at info. A list dated over a day ahead of the host
 //!   clock is refused; a list in use over 3 days old is logged once a day
@@ -24,6 +26,8 @@
 //!   restores the pair. No mismatched pair is ever read as good.
 //! - Redirects (`fetch.rs`): followed by hand, at most five hops, each resolved against the URL
 //!   before it, `https` only (when asked) and to an allowed host only.
+//! - The lawyer's allowed sites (PR 2, `allowed.rs`): the per-matter views the proxies read,
+//!   which the seams carry ([`BlockListSeams::with_allowed`]) and the actor publishes.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,12 +41,14 @@ use clauseo_sandbox::Upstream;
 
 use crate::clock::Clock;
 
+pub(crate) mod allowed;
 mod disk;
 mod fetch;
 mod live;
 mod timing;
 mod updater;
 
+pub use allowed::AllowedSites;
 pub(crate) use live::{Fetching, Live};
 pub(crate) use updater::{Round, Updater};
 
@@ -73,6 +79,7 @@ pub struct BlockListSeams {
     pub(crate) current: Arc<Current>,
     pub(crate) bundled: Option<PathBuf>,
     pub(crate) update: BlockListUpdate,
+    pub(crate) allowed: Arc<AllowedSites>,
 }
 
 impl BlockListSeams {
@@ -83,7 +90,21 @@ impl BlockListSeams {
             current,
             bundled,
             update,
+            allowed: Arc::default(),
         }
+    }
+
+    /// These seams with `allowed`, the views the host publishes the lawyer's allowed sites to
+    /// (a fresh one by default), shared with whatever starts the egress proxies.
+    #[must_use]
+    pub fn with_allowed(mut self, allowed: Arc<AllowedSites>) -> Self {
+        self.allowed = allowed;
+        self
+    }
+
+    /// The allowed sites' views, for whatever starts the egress proxies.
+    pub fn allowed(&self) -> &Arc<AllowedSites> {
+        &self.allowed
     }
 
     /// [`Self::new`] with [`BlockListUpdate::release`].
@@ -170,6 +191,16 @@ pub(crate) struct Start {
     /// The settings each round reads; the actor keeps a clone current.
     pub(crate) live: Live,
     pub(crate) clock: Arc<dyn Clock>,
+}
+
+/// The allowed sites' views `config`'s seams carry, or a fresh one without seams.
+pub(crate) fn allowed_sites(config: &crate::HostConfig) -> Arc<AllowedSites> {
+    config
+        .wiring
+        .blocklist
+        .as_ref()
+        .map(|seams| Arc::clone(&seams.allowed))
+        .unwrap_or_default()
 }
 
 /// Takes the block list's seams out of `config`, with what the thread needs beside them.

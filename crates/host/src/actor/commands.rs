@@ -312,6 +312,16 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         // Decision record 0051: held until the work ends, with no receipt.
         HostCommand::RetryProtection {} => protection(actor, ctx, ProtectionAsked::Retry),
         HostCommand::RemoveSandboxSetup {} => protection(actor, ctx, ProtectionAsked::Remove),
+        HostCommand::AllowBlockedSite { block_id, scope } => {
+            super::allowed::allow(actor, ctx, block_id, scope);
+        }
+        HostCommand::RevokeAllowedSite {
+            host,
+            scope,
+            matter,
+        } => {
+            super::allowed::revoke(actor, ctx, &host, scope, matter);
+        }
     }
 }
 

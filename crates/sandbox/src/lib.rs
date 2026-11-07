@@ -92,8 +92,9 @@
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
-//! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list, [`Upstream`], sink;
-//!   an unloaded block list blocks nothing and is logged once); the handle's ports,
+//! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
+//!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
+//!   once); the handle's ports,
 //!   `env()`, `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
 //!   [`upstream_for`] routes the host's own HTTPS.
 //! - Unix: [`BrowserSocketDir::create`] (a `flock`ed lock file beside it, then one atomic
