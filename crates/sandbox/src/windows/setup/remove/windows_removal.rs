@@ -45,6 +45,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
+use crate::windows::wfp;
 use crate::windows::{FolderSupport, folder_support};
 
 /// This Windows machine, as [`remove`](super::remove) drives it.
@@ -226,6 +227,18 @@ impl Removal for WindowsRemoval {
             );
         }
         Ok(())
+    }
+
+    fn remove_network(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        let removed = wfp::remove(&self.names.wfp, Some(owner))
+            .map_err(|error| MachineError::Other(error.cause()))?;
+        if removed.foreign_removed > 0 {
+            tracing::warn!(
+                count = removed.foreign_removed,
+                "removal deleted filters set-up didn't write"
+            );
+        }
+        removed.firewall.map_err(MachineError::Other)
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {
