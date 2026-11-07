@@ -460,15 +460,17 @@ KnownDLLs, and on the VM a `netutils.dll` planted beside the exe was mapped exec
 imports were not mitigated before this change: in a user-writable install folder, a planted DLL ran
 elevated.
 
-Transitive imports are now covered by delay-load plus `SetDefaultDllDirectories`. `netapi32.dll`
-and `userenv.dll` are linked `/DELAYLOAD` (with `delayimp.lib`), so they load at their first call.
+Transitive imports are now covered by delay-load plus `SetDefaultDllDirectories`. `netapi32.dll`,
+`userenv.dll` and `wtsapi32.dll` (the stop's process list, `WTSEnumerateProcessesExW`) are linked
+`/DELAYLOAD` (with `delayimp.lib`), so they load at their first call.
 That comes after the first statement of `main`,
 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so the delay-load helper's load and the
 loads of those DLLs' own imports search System32 only. No code runs before `main` that could call
-them. A CI test reads the exe's import and delay-import directories: both DLLs are delay-imports
+them. A CI test reads the exe's import and delay-import directories: those DLLs are delay-imports
 only, and every remaining normal import is a KnownDLL, an API set, or one of a vetted few whose own
 imports are all KnownDLLs; a new import fails the test by name. The VM re-run plants a DLL named
-after each import of `netapi32.dll` and `userenv.dll` beside the exe, runs `--set-up`, and checks
+after each import of `netapi32.dll` and `userenv.dll` beside the exe, runs `--set-up` (and, for
+`wtsapi32.dll`'s imports, `--stop`), and checks
 with Process Monitor that nothing loads from the exe's folder. If the delay-load proves unworkable,
 those calls move to `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)` and `GetProcAddress`.
 

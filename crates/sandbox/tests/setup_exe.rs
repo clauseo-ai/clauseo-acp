@@ -269,7 +269,7 @@ fn the_exe_names_no_pdb() {
 
 /// The imports that load after `main` has kept the DLL search to System32 (`build.rs`).
 #[cfg(all(windows, target_env = "msvc"))]
-const DELAYED: [&str; 2] = ["netapi32.dll", "userenv.dll"];
+const DELAYED: [&str; 3] = ["netapi32.dll", "userenv.dll", "wtsapi32.dll"];
 
 /// The normal imports the loader may resolve before `main`, when `DependentLoadFlags` covers
 /// only the import itself and not what it imports. Each is a `KnownDLL` on Windows 10 and 11
