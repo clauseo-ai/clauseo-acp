@@ -33,7 +33,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use clauseo_agents::file_stamp;
+use clauseo_agents::{FileStamp, file_stamp};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use futures::channel::mpsc::UnboundedReceiver;
@@ -41,7 +41,7 @@ use futures::future::{BoxFuture, FutureExt as _};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 
 use super::check::exempt;
-use super::{Entry, KEYCHAIN_STALE, POLL, Stamp, UNKNOWN_AGAIN, Verdict, check};
+use super::{Entry, KEYCHAIN_STALE, POLL, UNKNOWN_AGAIN, Verdict, check};
 use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::login_check::{LAWYER_CODEX, LOGIN_FILE};
@@ -73,8 +73,19 @@ pub(crate) fn watched(
     }
 }
 
+/// What one login file's stat found: its stamp, none there, or the stat's error kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stamp {
+    /// The file, by id and last write.
+    File(FileStamp),
+    /// No file (or a link, which is not the login).
+    Missing,
+    /// The stat failed for another reason.
+    Unreadable(std::io::ErrorKind),
+}
+
 /// `path`'s stat.
-fn stamp(path: &Path) -> Stamp {
+pub(crate) fn stamp(path: &Path) -> Stamp {
     match file_stamp(path) {
         Ok(Some(stamp)) => Stamp::File(stamp),
         Ok(None) => Stamp::Missing,
@@ -211,6 +222,17 @@ fn look(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Look {
     seen
 }
 
+/// Whether refresh-on-check's forced re-check of `agent` has come and a check could run.
+fn refresh_due(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> bool {
+    let identity = &backend.wiring.identity;
+    let verdict = identity.verdict(agent);
+    let checkable = !matches!(
+        verdict,
+        Verdict::Checking | Verdict::Changed | Verdict::KeyLogin
+    );
+    checkable && identity.refresh.fire_if_due(agent, now)
+}
+
 /// One look at every agent at `now` (the clock's monotonic time): the refusals the host could
 /// not be told tried again (`setup/refusal.rs`), each look's refusal set, and the agents due a
 /// check, which the caller runs.
@@ -222,6 +244,11 @@ async fn looks(backend: &AgentsBackend, now: Duration) -> Vec<AgentId> {
     let mut checks = Vec::new();
     for agent in backend.known.keys() {
         match look(backend, agent, now) {
+            // Refresh-on-check's one forced re-check has come (`refresh.rs`).
+            Look::Nothing if refresh_due(backend, agent, now) => {
+                tracing::info!(%agent, kind = "refresh_due", "identity");
+                checks.push(agent.clone());
+            }
             Look::Nothing => {}
             Look::Check => {
                 tracing::info!(%agent, kind = "login_changed", "identity");

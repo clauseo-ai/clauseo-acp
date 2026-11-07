@@ -2,6 +2,9 @@
 //! ([`on_state`]), one check of the login's account ([`check`]), the launch env's exemption
 //! ([`exempt`], [`exemption_changed`]), and what a changed account does ([`account_changed`]).
 
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clauseo_agents::{AccountHash, AccountRead, SigninState, Source, sign_in_limit};
@@ -10,12 +13,14 @@ use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
-use super::watch::stamps;
-use super::{Judged, Ticket, Verdict, Window};
+use super::refresh::{Plan, RETRY_AFTER, Refresh, modified};
+use super::watch::{stamp, stamps};
+use super::{Judged, Stamp, Ticket, Verdict, Window};
 use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::compose::is_running;
 use crate::setup::hook::{replaces_login, setup_vars_with};
+use crate::setup::login_check::LOGIN_FILE;
 use crate::setup::refusal;
 
 /// What [`on_state`] made of a state, for the pump.
@@ -210,21 +215,87 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
         return identity.verdict(agent);
     };
     refusal::sync(backend, agent).await;
-    let bound = std::pin::pin!(AsyncIoTimer.after(identity.bound));
-    let read = select(backend.agents.read_account(agent), bound).await;
-    let read = match read {
-        Either::Left((read, _)) => read,
-        Either::Right(((), _)) => AccountRead::Failed,
-    };
+    let (read, forced) = read_account(backend, agent, begun).await;
     let now = backend.compose.monotonic();
     let verdict = settle(backend, agent, &read, Some(ticket), now);
     tracing::info!(%agent, kind = verdict.kind(), "identity check");
+    if forced {
+        let after = codex_login(backend, agent).map_or(Stamp::Missing, |path| stamp(&path));
+        let confirmed = verdict == Verdict::Same;
+        identity.refresh.forced_ended(agent, confirmed, after);
+    }
     if verdict == Verdict::Changed {
         account_changed(backend, agent).await;
     } else {
         refusal::sync(backend, agent).await;
     }
     verdict
+}
+
+/// `agent`'s account, each read bounded by [`super::CHECK_BOUND`] (`Failed` past it), and
+/// whether it came from a forced refresh (`refresh.rs`): for Codex with refresh-on-check on,
+/// a read with `refreshToken: true` when its plan says so, one at a time in the process; one
+/// with no answer falls back to the plain read, and one forced re-check is due later.
+async fn read_account(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    now: Duration,
+) -> (AccountRead, bool) {
+    let identity = &backend.wiring.identity;
+    let refresh = &identity.refresh;
+    let login = codex_login(backend, agent).filter(|_| refresh.on);
+    let Some(login) = login else {
+        return (
+            bounded(backend.agents.read_account(agent), identity.bound).await,
+            false,
+        );
+    };
+    let before = stamp(&login);
+    let plan = refresh.plan(agent, before, modified(&login), backend.compose.wall(), now);
+    let Plan::Forced { retry } = plan else {
+        return (
+            bounded(backend.agents.read_account(agent), identity.bound).await,
+            false,
+        );
+    };
+    tracing::info!(%agent, "identity: forced refresh");
+    let agents = Arc::clone(&backend.agents);
+    let who = agent.clone();
+    let flight = refresh.forced(agent, move || agents.read_account_refreshed(&who));
+    let read = bounded(flight, identity.bound).await;
+    if !Refresh::no_answer(&read) {
+        return (read, true);
+    }
+    refresh.abandon(agent);
+    tracing::info!(%agent, "identity: forced refresh had no answer; unforced check used");
+    if retry {
+        let at = backend.compose.monotonic().saturating_add(RETRY_AFTER);
+        refresh.retry_at(agent, before, at);
+    }
+    (
+        bounded(backend.agents.read_account(agent), identity.bound).await,
+        false,
+    )
+}
+
+/// `read`'s answer, or `Failed` once `bound` passes first.
+async fn bounded(read: impl Future<Output = AccountRead>, bound: Duration) -> AccountRead {
+    let read = std::pin::pin!(read);
+    let bound = std::pin::pin!(AsyncIoTimer.after(bound));
+    match select(read, bound).await {
+        Either::Left((read, _)) => read,
+        Either::Right(((), _)) => AccountRead::Failed,
+    }
+}
+
+/// Codex's login file in `agent`'s home (for a reused login, the hard link of the lawyer's);
+/// `None` for Claude or an unknown agent.
+fn codex_login(backend: &AgentsBackend, agent: &AgentId) -> Option<PathBuf> {
+    if AgentKind::of(agent) != Some(AgentKind::Codex) {
+        return None;
+    }
+    let info = backend.known.get(agent)?;
+    Some(info.home.join(LOGIN_FILE))
 }
 
 /// The verdict of `read` for `agent`, set unless `ticket`'s check was overtaken; the first

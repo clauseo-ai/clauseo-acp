@@ -68,6 +68,7 @@ pub(super) fn stop_reads(hub: &SigninHub) {
 pub(in crate::worker) fn start_account<T: Timer + Send + Sync + 'static>(
     worker: &Worker<T>,
     start: SigninStart,
+    refresh: bool,
     reply: oneshot::Sender<AccountRead>,
 ) {
     let job = SigninJob {
@@ -87,7 +88,7 @@ pub(in crate::worker) fn start_account<T: Timer + Send + Sync + 'static>(
     let name = format!("clauseo-account-{}", job.ticket.agent);
     // A thread that did not start dropped `reply` with its closure: the caller reads `Failed`.
     drop(worker.shared.spawn_job(name, move || {
-        let read = futures::executor::block_on(account::read(&job));
+        let read = futures::executor::block_on(account::read(&job, refresh));
         // The caller may have stopped waiting.
         let _gone = reply.send(read);
     }));

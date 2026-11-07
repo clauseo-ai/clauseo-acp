@@ -112,6 +112,10 @@ impl crate::setup::backend::SetupAgents for Real {
         self.call("read_account");
         Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
     }
+    fn read_account_refreshed(&self, _: &AgentId) -> clauseo_agents::AccountFuture {
+        self.call("read_account_refreshed");
+        Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
+    }
 }
 
 fn fake(hold: Duration) -> (FakeSignin, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {

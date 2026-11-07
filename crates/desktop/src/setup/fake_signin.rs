@@ -511,6 +511,13 @@ impl SetupAgents for FakeSignin {
         };
         Box::pin(ready(read))
     }
+    /// A scripted agent's forced read is its plain one: no token is refreshed.
+    fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
+        if self.script(agent).is_none() {
+            return self.real.read_account_refreshed(agent);
+        }
+        self.read_account(agent)
+    }
 }
 
 #[cfg(test)]

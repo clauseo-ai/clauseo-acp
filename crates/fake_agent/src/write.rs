@@ -31,3 +31,24 @@ pub(crate) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result
 pub(crate) fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
+
+/// Appends `text` to `path`, creating it (`OpenOptions` with create and append).
+pub(crate) fn append(path: impl AsRef<Path>, text: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(text.as_bytes())
+}
+
+/// Writes `bytes` over `path` in place: the same file, its links kept, truncated first
+/// (`OpenOptions` with write and truncate).
+pub(crate) fn write_in_place(path: impl AsRef<Path>, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    file.write_all(bytes)
+}

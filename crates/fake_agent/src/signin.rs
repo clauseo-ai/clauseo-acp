@@ -60,6 +60,15 @@ const NO_EMAIL_METHOD: &str = "chatgpt-no-email";
 /// The marker `authMethod` for which Codex's `account/read` answers `account: null` while
 /// `login status` still says signed in.
 const NO_ACCOUNT_METHOD: &str = "no-account";
+/// The marker `authMethod` for which a forced refresh (`account/read` with `refreshToken:
+/// true`) is refused with a JSON-RPC error naming `refresh_token_reused`.
+const REFRESH_REFUSED_METHOD: &str = "refresh-refused";
+/// The marker `authMethod` for which a forced refresh gets no answer: the app-server closes
+/// before it answers (offline, a proxy down).
+const REFRESH_SILENT_METHOD: &str = "refresh-silent";
+/// The file in Codex's home to which the fake's app-server appends each `account/read`'s
+/// params, one JSON line each, so tests can tell a forced refresh from a plain read.
+pub(crate) const ACCOUNT_READ_LOG: &str = "fake-account-read-params";
 /// The email every marker and every status reply carries.
 const EMAIL: &str = "test@example.com";
 /// The one code `FAKE_SIGNIN=paste` accepts.
@@ -532,10 +541,7 @@ fn marker_method(folder: &Path) -> Option<String> {
 /// the engine's hard link of it into `CODEX_HOME` signs the home in, as Codex's own file would.
 /// The file is the test's dummy, never a real credential.
 fn marker(folder: &Path) -> Option<Marker> {
-    let path = [MARKER, CODEX_LOGIN_FILE]
-        .into_iter()
-        .map(|name| folder.join(name))
-        .find(|path| path.is_file())?;
+    let path = marker_path(folder)?;
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let marker = serde_json::from_str::<Value>(&text).unwrap_or_default();
     let field = |name: &str| marker[name].as_str().map(str::to_owned);
@@ -548,6 +554,14 @@ fn marker(folder: &Path) -> Option<Marker> {
         email,
         account_uuid: field("accountUuid"),
     })
+}
+
+/// The marker's file in `folder`: [`MARKER`], else Codex's login file; `None` with neither.
+fn marker_path(folder: &Path) -> Option<std::path::PathBuf> {
+    [MARKER, CODEX_LOGIN_FILE]
+        .into_iter()
+        .map(|name| folder.join(name))
+        .find(|path| path.is_file())
 }
 
 /// What a marker says: its `authMethod`, its email (`test@example.com` when it names none; none

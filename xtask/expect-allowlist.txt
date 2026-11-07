@@ -57,6 +57,8 @@ crates/desktop/src/setup/backend/tests/identity.rs replace clippy::disallowed_me
 # R17 review round: test set-up swapping and removing dummy login files, and timing the gate.
 crates/desktop/src/setup/backend/tests/identity_watch.rs files clippy::disallowed_methods
 crates/desktop/src/setup/backend/tests/identity_gate.rs gate_cost clippy::disallowed_methods
+# R17 refresh-on-check: test set-up dating and rewriting a dummy login file in place.
+crates/desktop/src/setup/backend/tests/identity_refresh.rs files clippy::disallowed_methods
 crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
 crates/desktop/src/setup/readers/tests.rs fake_file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
