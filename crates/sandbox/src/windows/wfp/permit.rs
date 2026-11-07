@@ -5,6 +5,7 @@
 
 use super::check::{NetworkGap, check_setup};
 use super::engine::Engine;
+use super::os_ports::check_ports;
 use super::spec::{Namespace, checked_ports, permit_ports};
 use crate::windows::sids::Sid;
 use crate::{Error, Policy};
@@ -30,7 +31,8 @@ pub fn check_launch_in(ns: &Namespace, user: &Sid, ports: &[u16]) -> Result<(), 
             code: error.code,
         })
         .map_err(unfiltered)?;
-    check_setup(ns, user, &mut engine).map_err(unfiltered)
+    check_setup(ns, user, &mut engine).map_err(unfiltered)?;
+    check_ports(true).map_err(unfiltered)
 }
 
 /// `cause` as the crate's error.
