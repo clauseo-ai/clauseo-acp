@@ -1,10 +1,11 @@
 //! The end sweeper's start through a recording fake: once a session on every end path, never in
-//! the job, and the host's stdin end set apart from the agent's.
+//! the job, and the host's stdin end set apart from the agent's; and the exit code on a cancel.
 
 use std::io;
 use std::sync::Mutex;
 
 use super::*;
+use crate::windows::runner::sweep::SWEPT;
 
 /// Records each step; fails the one named `fail`.
 #[derive(Default)]
@@ -99,7 +100,9 @@ fn each_end_path_starts_the_sweeper_once_whichever_comes_first() {
             assert!(!end.trigger(later), "{first:?} then {later:?}");
         }
         assert_eq!(end.steps().done(), STARTED, "{first:?}");
+        assert_eq!(end.began(), Some(first));
     }
+    assert_eq!(EndSweep::new(Record::default()).began(), None);
 }
 
 #[test]
@@ -146,4 +149,32 @@ fn the_agent_closing_its_stdin_starts_no_sweeper() {
     assert_eq!(end.steps().done(), Vec::<String>::new());
     assert_eq!(copy(&b""[..], io::sink()), CopyEnd::Source);
     assert_eq!(copy(&b"x"[..], Closed), CopyEnd::Destination);
+}
+
+#[test]
+fn a_cancel_the_sweeper_ended_exits_as_it_would_have_without_it() {
+    let reserved = crate::windows::runner::RunExit::AgentReserved.code();
+    let stdin = Some(EndSignal::Stdin);
+    // The agent exited on its own first (its stdin closed), then the sweeper ended the inner:
+    // the agent's code.
+    assert_eq!(exit_code(stdin, SWEPT, Some(0)), 0);
+    assert_eq!(exit_code(stdin, SWEPT, Some(3)), 3);
+    // ... passed on as any agent code is: never one in the runner's own range.
+    assert_eq!(exit_code(stdin, SWEPT, Some(SWEPT - 1)), reserved);
+    // The sweeper ended the agent, or the inner before any report: the host's job-end code.
+    assert_eq!(exit_code(stdin, SWEPT, Some(SWEPT)), HOST_ENDED);
+    assert_eq!(exit_code(stdin, SWEPT, None), HOST_ENDED);
+    assert_eq!(HOST_ENDED, 0xC1A0);
+    // A cancel the inner outlived: its code, as ever.
+    assert_eq!(exit_code(stdin, 0, Some(0)), 0);
+}
+
+#[test]
+fn past_a_cancel_the_inners_code_passes_as_the_agents() {
+    let reserved = crate::windows::runner::RunExit::AgentReserved.code();
+    for began in [None, Some(EndSignal::InnerExited), Some(EndSignal::Failed)] {
+        assert_eq!(exit_code(began, 7, Some(7)), 7, "{began:?}");
+        assert_eq!(exit_code(began, SWEPT, Some(0)), reserved, "{began:?}");
+        assert_eq!(exit_code(began, SWEPT, None), reserved, "{began:?}");
+    }
 }

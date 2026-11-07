@@ -54,9 +54,11 @@
 //!
 //! The runner exe (`clauseo-sandbox-run`, S15 `PR5`) runs as the user, so it gets no manifest,
 //! but it sits in the same folder and starts the agent under another account: it gets the same
-//! flag, and `userenv.dll` (`GetUserProfileDirectoryW`) delay-loaded, its one direct import
-//! that isn't vetted in `tests/setup_exe.rs`. It reaches no `Net*` call, so it doesn't import
-//! `netapi32.dll`; `/DELAYLOAD` of a DLL it doesn't import would only warn (LNK4199).
+//! flag, and `userenv.dll` (`GetUserProfileDirectoryW`) and `wtsapi32.dll`
+//! (`WTSEnumerateProcessesW`, the sweep's) delay-loaded, its direct imports that aren't vetted in
+//! `tests/setup_exe.rs` (neither is a `KnownDLL`). It reaches no
+//! `Net*` call, so it doesn't import `netapi32.dll`; `/DELAYLOAD` of a DLL it doesn't import
+//! would only warn (LNK4199).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -112,6 +114,7 @@ fn main() -> Result<(), Error> {
         for arg in [
             "/DEPENDENTLOADFLAG:0x800",
             "/DELAYLOAD:userenv.dll",
+            "/DELAYLOAD:wtsapi32.dll",
             "delayimp.lib",
         ] {
             println!("cargo:rustc-link-arg-bin=clauseo-sandbox-run={arg}");

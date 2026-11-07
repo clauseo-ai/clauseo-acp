@@ -14,7 +14,9 @@
 //! - **Default DACL:** the pool user and `SYSTEM` with full access, and the desktop user with
 //!   `SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE` (`0x101001`) only, so
 //!   the host can wait on, query and end the agent's processes (R5) and nothing else; no logon
-//!   SID, so another matter's agent can't `OpenProcess` this one (PR0 (d), spike B).
+//!   SID, so another matter's agent can't `OpenProcess` this one (PR0 (d), spike B). The pool
+//!   user is denied `WRITE_DAC` and `WRITE_OWNER` and `OWNER RIGHTS` is held to `READ_CONTROL`,
+//!   so what the agent makes with no descriptor of its own can't have its DACL changed by it.
 //! - `DISABLE_MAX_PRIVILEGE`, as the traverse spike's (B) row ran it
 //!   (`s15-spikes-traverse/s15.c:183`): every privilege but `SeChangeNotifyPrivilege` goes, and
 //!   that one must stay (§3, "Bypass traverse stays in the token").
@@ -135,11 +137,22 @@ impl fmt::Display for TokenSpec {
     }
 }
 
-/// The agent's default DACL: `D:(A;;GA;;;<pool user>)(A;;GA;;;SY)(A;;0x101001;;;<desktop
-/// user>)`, the spike's `pool` mode (`s15-spikes-userpool/s15.c:182`).
+/// The agent's default DACL: `D:(D;;0xc0000;;;<pool user>)(A;;GA;;;<pool user>)(A;;GA;;;SY)
+/// (A;;0x101001;;;<desktop user>)(A;;RC;;;OW)`, the spike's `pool` mode
+/// (`s15-spikes-userpool/s15.c:182`) with the pool user kept from changing what it makes:
+/// `WRITE_DAC` and `WRITE_OWNER` denied to it first, so the `GA` after grants neither, and
+/// `OWNER RIGHTS` held to `READ_CONTROL`, so as the owner it keeps no implied `WRITE_DAC` (an
+/// owner's implied rights pass by deny entries). An agent's process, and every process it starts
+/// with no descriptor of its own, can't rewrite its DACL to shut the sweep out (`runner/sweep.rs`).
 pub fn default_dacl(pool_user: &Sid, desktop_user: &Sid) -> String {
-    format!("D:(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})")
+    format!(
+        "D:(D;;0x{OWNER_WRITES:x};;;{pool_user})(A;;GA;;;{pool_user})(A;;GA;;;SY)\
+         (A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})(A;;RC;;;OW)"
+    )
 }
+
+/// `WRITE_DAC | WRITE_OWNER`: what the agent's default DACL denies the pool user.
+pub const OWNER_WRITES: u32 = 0x0004_0000 | 0x0008_0000;
 
 /// The agent token object's DACL: the pool user (the agent reads its own token) and `SYSTEM` with
 /// full access, the desktop user `TOKEN_QUERY`.
@@ -147,11 +160,26 @@ pub fn agent_token_sddl(pool_user: &Sid, desktop_user: &Sid) -> String {
     format!("D:P(A;;GA;;;{pool_user})(A;;GA;;;SY)(A;;0x8;;;{desktop_user})")
 }
 
-/// The inner runner's own process DACL (set by the outer while the inner is suspended, and by the
-/// inner itself): `SYSTEM` full, the desktop user wait, query and end, `OWNER RIGHTS` held to
-/// `READ_CONTROL`, and no pool user, so the agent (the same user) opens nothing of it.
-pub fn runner_process_sddl(desktop_user: &Sid) -> String {
-    format!("D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})(A;;RC;;;OW)")
+/// The runners' process DACL, the inner's and the end sweeper's (set by the outer while each is
+/// suspended, and by the inner itself): `SYSTEM` full, the desktop user and the desktop user's
+/// logon SID wait, query and end, `OWNER RIGHTS` held to `READ_CONTROL`, and no pool user, so
+/// the agent (the same user) opens nothing of it.
+///
+/// The logon SID's entry is for the pool user's sweeps (`runner/sweep.rs`):
+/// `CreateProcessWithLogonW` gives the inner and the end sweeper the desktop user's logon SID,
+/// enabled, so a next inner's first act can end a sweeper still running and a sweeper can end an
+/// inner still alive. The agent holds that SID deny-only (`TokenSpec::deny_only`), so an allow
+/// entry never matches it.
+/// A pool-user process a service started outside the job runs in the pool user's own logon
+/// session and doesn't hold it. Other matters' runners started from the same logon do, and can
+/// open this one, but their sweeps only end their own pool user's processes. A sweeper from
+/// before the desktop user signed out and in again holds the old logon SID, so a launch during
+/// its 60 s fails `RunExit::Sweep` and a retry works (accepted).
+pub fn runner_process_sddl(desktop_user: &Sid, logon: &Sid) -> String {
+    format!(
+        "D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})\
+         (A;;0x{DESKTOP_USER_RIGHTS:x};;;{logon})(A;;RC;;;OW)"
+    )
 }
 
 /// The inner runner's threads' DACL: `SYSTEM` full, the desktop user `SYNCHRONIZE`, `OWNER
