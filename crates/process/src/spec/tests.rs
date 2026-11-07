@@ -81,13 +81,23 @@ fn relative_cwd_is_invalid() {
 }
 
 #[test]
-fn cwd_must_be_a_folder() {
+fn cwd_must_be_a_folder_and_no_path_is_in_the_text() {
     let file = std::env::current_exe().unwrap();
-    let why = refused(spec(absolute("agent"), file));
-    assert!(why.ends_with("is not a folder"), "{why}");
-    let missing = absolute("clauseo-process-no-such-folder");
-    let why = refused(spec(absolute("agent"), missing));
-    assert!(why.ends_with("is not a folder"), "{why}");
+    let not_a_folder = spec(absolute("agent"), file.clone()).unwrap_err();
+    assert!(
+        matches!(not_a_folder, Error::NoWorkingFolder),
+        "{not_a_folder:?}"
+    );
+    assert!(!not_a_folder.to_string().contains(&*file.to_string_lossy()));
+    let gone = spec(
+        absolute("agent"),
+        absolute("clauseo-process-no-such-folder"),
+    )
+    .unwrap_err();
+    assert!(matches!(gone, Error::NoWorkingFolder), "{gone:?}");
+    assert!(!gone.to_string().contains("no-such-folder"), "{gone}");
+    let why = refused(spec(absolute("agent"), PathBuf::from("matter")));
+    assert!(!why.contains("matter"), "{why}");
 }
 
 #[test]

@@ -85,6 +85,31 @@ impl Error {
         }
     }
 
+    /// The text a failure's `detail` shows (`turn_failed`): the `Display` text, except a matter's
+    /// `FolderMissing`, which gives its reason and not its folder, and `FileLocked`, which gives
+    /// its wire message (the count of files), so no path of the matter's reaches the lawyer's
+    /// screen. The wire message of a command's refusal (an import's) still names the folder.
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Self::Matters(clauseo_matters::Error::FolderMissing { reason, .. }) => {
+                format!("matter: the matter's folder: {reason}")
+            }
+            Self::Matters(clauseo_matters::Error::FileLocked { .. }) => {
+                self.to_wire().message().to_owned()
+            }
+            Self::Invalid(_)
+            | Self::Refused(_)
+            | Self::Reducer(_)
+            | Self::Store(_)
+            | Self::Matters(_)
+            | Self::Process(_)
+            | Self::Acp(_)
+            | Self::Settings(_)
+            | Self::Closed
+            | Self::Internal(_) => self.to_string(),
+        }
+    }
+
     /// A state check's refusal with `code` and a detail for logs.
     pub(crate) fn refused(code: ErrorCode, message: impl Into<String>) -> Self {
         Self::Refused(HostError::new(code, message))
