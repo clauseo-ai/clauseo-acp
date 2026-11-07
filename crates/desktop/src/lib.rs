@@ -296,6 +296,7 @@ pub fn run() -> tauri::Result<()> {
             };
             app.manage(Bridge::with_setup(cell, setup));
             app.manage(counts::CountsState::default());
+            app.manage(dialogs::LastPick::default());
             open_main_window(app)?;
             start_host(app.handle().clone(), start, locations, parts)?;
             Ok(())
