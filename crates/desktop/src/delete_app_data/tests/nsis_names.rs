@@ -1,7 +1,7 @@
-//! The names the installer scripts may use: every `$NAME` in hooks.nsh and English.nsh is one NSIS
-//! knows, a register, or one of the template's variables that the hooks use. NSIS keeps an unknown
-//! name as literal text (the installer showed `$COMMONAPPDATA` unexpanded), so this test is what
-//! fails a misspelt name before a build.
+//! The names the installer scripts may use: every `$NAME` in hooks.nsh, English.nsh and Hindi.nsh
+//! is one NSIS knows, a register, or one of the template's variables that the hooks use. NSIS keeps
+//! an unknown name as literal text (the installer showed `$COMMONAPPDATA` unexpanded), so this test
+//! is what fails a misspelt name before a build.
 
 use super::sources::{hook_code, line_with, read};
 
@@ -97,7 +97,11 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
     let digit = |s: &str| s.len() == 1 && s.bytes().all(|b| b.is_ascii_digit());
     let register = |name: &str| digit(name) || name.strip_prefix('R').is_some_and(digit);
     let mut checked = 0;
-    for file in ["windows/hooks.nsh", "windows/nsis/English.nsh"] {
+    for file in [
+        "windows/hooks.nsh",
+        "windows/nsis/English.nsh",
+        "windows/nsis/Hindi.nsh",
+    ] {
         for (number, line) in read(file).lines().enumerate() {
             for name in variable_names(line) {
                 checked += 1;
