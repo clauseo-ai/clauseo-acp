@@ -819,9 +819,13 @@ once after. Results:
   user's AppContainer row proved nothing then. Run 42356413018 ran the control in a registered
   AppContainer profile with `internetClient` and `privateNetworkClientServer`, which Windows
   Firewall needs to let a package out, and it reached before and after the filters. The pool
-  user's AppContainer child didn't start in that run (its probe had no profile loaded to
-  register one in); the spike now starts probes with the user's profile, as a launch does, and
-  a step that never ran counts as information, never a pass. Pending that run.
+  user's AppContainer child has not been shown blocked: Windows refused to start it
+  (`CreateProcessW` with the AppContainer attributes: access denied, run 42357105557, with or
+  without the user's profile loaded), while the admin's starts. A step that never ran counts as
+  information, never a pass. The argument stands on token semantics: a lowbox token keeps the
+  user SID and groups, and its package check must pass as well as the normal access check,
+  whose first pass hits the deny entries for the pool user and group, so the block's condition
+  holds.
 - A derived token needs a default DACL its process can open (for example `Everyone`) to start;
   a hijacked agent can set one on its own derived token, so the rows give it one.
 
