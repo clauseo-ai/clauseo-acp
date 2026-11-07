@@ -386,14 +386,19 @@ impl Machine for WindowsMachine {
         })
     }
 
-    fn held_users(&mut self, pool: &[Sid], trusted: &[Sid]) -> Result<Vec<Sid>, MachineError> {
+    fn held_users(
+        &mut self,
+        pool: &[Sid],
+        trusted: &[Sid],
+        resets: &[Sid],
+    ) -> Result<Vec<Sid>, MachineError> {
         owned(self, |m| {
             let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
             let ledger = m.ledger(trusted);
             if let Err(error) = &ledger {
                 tracing::warn!(%error, "the ledger can't be read; every sandbox user is in use");
             }
-            Ok(matters.held_after_resets(pool, ledger))
+            Ok(matters.held_after_resets(pool, ledger, resets))
         })
     }
 

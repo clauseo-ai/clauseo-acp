@@ -134,17 +134,27 @@ impl MatterSids {
     }
 
     /// The users of `pool` that [`MatterSids::assign`] would hold back once the elevated set-up
-    /// has reset those [`MatterSids::resets_due`] names: the set-up's top-up counts the rest
-    /// free (`setup/top_up.rs`). The same rule as `assign` (`assign::held_back`): the rows as
+    /// has reset `resets`, the users its run acts on (read once, before, through
+    /// [`MatterSids::resets_due`]): the set-up's top-up counts the rest free
+    /// (`setup/top_up.rs`). The same rule as `assign` (`assign::held_back`): the rows as
     /// loaded, `ledger` (grants and hand-backs owed), the set-aside owners, the open sessions
-    /// and the marks left after the resets. A ledger or open sessions that can't be read hold
-    /// every user, as an unreadable set-aside manifest does.
-    pub fn held_after_resets(&self, pool: &[Sid], ledger: io::Result<Ledger>) -> Vec<Sid> {
+    /// and every mark but those of `resets`, so a release marked since that read stays held. A
+    /// ledger, or open sessions whose lock can't be taken, hold every user, as an unreadable
+    /// set-aside manifest does; an unreadable open-session record counts its matter open.
+    pub fn held_after_resets(
+        &self,
+        pool: &[Sid],
+        ledger: io::Result<Ledger>,
+        resets: &[Sid],
+    ) -> Vec<Sid> {
         let (Ok(ledger), Ok(open)) = (ledger, self.open_sessions()) else {
             return pool.to_vec();
         };
-        let due: BTreeSet<Sid> = self.resets_due().into_iter().collect();
-        let needs_reset: BTreeSet<Sid> = self.needs_reset.difference(&due).cloned().collect();
+        let marks = self
+            .needs_reset
+            .iter()
+            .filter(|user| !resets.contains(user));
+        let needs_reset: BTreeSet<Sid> = marks.cloned().collect();
         let set_aside = set_aside::set_aside_owners(&self.data_dir, self.owner_of);
         let held = assign::Holds {
             ledger: &ledger,

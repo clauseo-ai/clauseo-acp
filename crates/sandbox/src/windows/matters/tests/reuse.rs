@@ -5,8 +5,9 @@ use super::pool::{Launch, full, ledger_in, ledger_owing, pool, reread, sids_in, 
 use super::*;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use crate::windows::admit::PathKind;
-use crate::windows::ledger::EntryState;
+use crate::windows::ledger::{EntryState, ledger_path};
 use crate::windows::pool::assign::Why;
+use crate::windows::set_aside::SET_ASIDE_DIR;
 
 /// A folder of `matter`'s, as its grants name it.
 fn folder(matter: &MatterId) -> PathBuf {
@@ -306,8 +307,86 @@ fn the_top_ups_count_holds_back_what_assign_does() {
     sids.release(&new, UNIX_EPOCH).unwrap();
     // After the run's resets, users 1 and 3 are reset and free; user 2 still waits on its
     // hand-back.
-    let held = sids.held_after_resets(&pool(4), reread(&ledger)());
+    let resets = sids.resets_due();
+    assert_eq!(resets, [user(1), user(3)]);
+    let held = sids.held_after_resets(&pool(4), reread(&ledger)(), &resets);
     assert_eq!(held, [user(2)]);
     let unreadable = io::Error::other("unreadable");
-    assert_eq!(sids.held_after_resets(&pool(4), Err(unreadable)), pool(4));
+    let held = sids.held_after_resets(&pool(4), Err(unreadable), &resets);
+    assert_eq!(held, pool(4));
+}
+
+/// The count takes the resets the run acts on: a user marked after the run read them (a release
+/// landing between the reads) stays held, as the run won't reset it.
+#[test]
+fn the_top_ups_count_holds_a_user_marked_after_the_runs_read() {
+    let temp = TempDir::new("reuse-topup-late");
+    let records = TempDir::new("reuse-topup-late-ledger");
+    let ledger = ledger_in(records.path(), &pool(2));
+    let none = OpenSessions::default();
+    let mut sids = sids_in(&temp);
+    let (one, two) = (matter(), matter());
+    sids.launch(&one, &pool(2), reread(&ledger), &none).unwrap();
+    sids.launch(&two, &pool(2), reread(&ledger), &none).unwrap();
+    sids.release(&one, UNIX_EPOCH).unwrap();
+    let resets = sids.resets_due();
+    assert_eq!(resets, [user(1)]);
+    // Matter two is released after the run read its resets.
+    sids.release(&two, UNIX_EPOCH).unwrap();
+    let held = sids.held_after_resets(&pool(2), reread(&ledger)(), &resets);
+    assert_eq!(held, [user(2)], "marked since, not reset by this run");
+    let held = sids.held_after_resets(&pool(2), reread(&ledger)(), &sids.resets_due());
+    assert_eq!(held, Vec::<Sid>::new());
+}
+
+/// A pool of 4 whose matter's user 1 is released, so the run resets it: the data folder, the
+/// matters, the ledger's folder, the matter and the resets.
+fn one_released(test: &str) -> (TempDir, MatterSids, TempDir, MatterId, Vec<Sid>) {
+    let temp = TempDir::new(test);
+    let records = TempDir::new(&format!("{test}-ledger"));
+    let ledger = ledger_in(records.path(), &pool(4));
+    let mut sids = sids_in(&temp);
+    let one = matter();
+    let none = OpenSessions::default();
+    sids.launch(&one, &pool(4), reread(&ledger), &none).unwrap();
+    sids.release(&one, UNIX_EPOCH).unwrap();
+    let resets = sids.resets_due();
+    assert_eq!(resets, [user(1)]);
+    (temp, sids, records, one, resets)
+}
+
+/// Open sessions whose lock can't be taken, or a set-aside manifest that can't be read, hold
+/// every user, so the top-up makes its full shortfall; an open-session record that can't be read
+/// counts its matter open, holding the users its row names, as `assign` does.
+#[test]
+fn unreadable_session_records_and_manifests_hold_users_in_the_count() {
+    let count = |sids: &MatterSids, records: &TempDir, resets: &[Sid]| {
+        let ledger = Ledger::open(ledger_path(records.path()), &pool(4), &Reserved::default());
+        sids.held_after_resets(&pool(4), ledger, resets)
+    };
+    let place = |one: MatterId, name: &str| format!("{SANDBOX_DIR}/{SET_ASIDE_DIR}/{one}/{name}");
+
+    let (temp, sids, records, one, resets) = one_released("reuse-topup-record");
+    assert_eq!(
+        count(&sids, &records, &resets),
+        Vec::<Sid>::new(),
+        "reset by the run"
+    );
+    // The open-session record can't be read: matter one counts open, so user 1 is held.
+    temp.file(&place(one, "record.json"), "not json");
+    assert_eq!(count(&sids, &records, &resets), [user(1)]);
+
+    // Its lock can't be taken: the open sessions can't be read, so every user is held.
+    let (temp, sids, records, one, resets) = one_released("reuse-topup-lock");
+    drop(write::remove_owned_file(
+        &temp.path().join(place(one, "set-aside.lock")),
+    ));
+    temp.dir(&place(one, "set-aside.lock"));
+    assert!(sids.open_sessions().is_err());
+    assert_eq!(count(&sids, &records, &resets), pool(4));
+
+    // A manifest that can't be read: every user is held.
+    let (temp, sids, records, one, resets) = one_released("reuse-topup-manifest");
+    temp.file(&place(one, "manifest.json"), "not json");
+    assert_eq!(count(&sids, &records, &resets), pool(4));
 }
