@@ -64,8 +64,8 @@ struct Calls {
     token: Handle,
     /// This runner's user: the pool user, as the outer checked.
     me: Sid,
-    /// Lines logged before `ctl` opened.
-    held: Vec<String>,
+    /// Lines and reports told before `ctl` opened.
+    held: Vec<InnerReport>,
     ctl: Option<File>,
     launch: Option<InnerLaunch>,
 }
@@ -98,13 +98,16 @@ impl Inner for Calls {
     }
 
     fn log(&mut self, line: &str) {
-        let report = InnerReport::Log {
+        self.tell(InnerReport::Log {
             line: line.to_owned(),
-        };
+        });
+    }
+
+    fn tell(&mut self, report: InnerReport) {
         match &self.ctl {
-            // A line that can't be sent is lost; the run goes on.
+            // A report that can't be sent is lost (the outer is gone); the run goes on.
             Some(ctl) => drop(write_frame(ctl, &report)),
-            None => self.held.push(line.to_owned()),
+            None => self.held.push(report),
         }
     }
 
@@ -113,8 +116,8 @@ impl Inner for Calls {
             return Err(RunExit::Pipe);
         };
         self.ctl = Some(into_file(ctl));
-        for line in std::mem::take(&mut self.held) {
-            self.log(&line);
+        for report in std::mem::take(&mut self.held) {
+            self.tell(report);
         }
         Ok(())
     }

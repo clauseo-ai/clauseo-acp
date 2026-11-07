@@ -53,8 +53,9 @@ impl std::fmt::Debug for InnerLaunch {
     }
 }
 
-/// What the inner runner answers: any number of [`InnerReport::Log`] lines, one `Started` or
-/// `Failed`, and after `Started`, one `Exited`.
+/// What the inner runner answers: any number of [`InnerReport::Log`] lines and
+/// [`InnerReport::Escapee`] reports, one `Started` or `Failed`, and after `Started`, one
+/// `Exited`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum InnerReport {
@@ -82,6 +83,17 @@ pub enum InnerReport {
     Log {
         /// The line.
         line: String,
+    },
+    /// A sweep found processes of the pool user's it couldn't end (`sweep::SweepError::escapees`):
+    /// the outer exits [`RunExit::Escapee`](super::RunExit::Escapee). Sent at any time, the first
+    /// act's held until `ctl` opens, like `Log` lines.
+    Escapee {
+        /// The sweep point, as the log names it (`before launch`, `mid-session`, `session end`).
+        point: String,
+        /// How many.
+        count: u32,
+        /// Their image names, each once, at most `sweep::IMAGES_CAP`; never a path.
+        images: Vec<String>,
     },
 }
 

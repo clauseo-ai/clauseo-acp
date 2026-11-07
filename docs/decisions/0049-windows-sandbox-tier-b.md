@@ -1042,9 +1042,10 @@ leaves that profile, both naming the part.
     outer's stderr.
   - **First act.** The inner's first act once resumed, before it reads the launch or makes
     anything, is that sweep. It keeps only itself: the job is unnamed and its only full handle is
-    the outer's, and the inner has started nothing yet, so nothing else can be in it. A list that
-    can't be read, or a process of the pool user's that can't be opened, checked or ended, makes
-    the inner exit with `RunExit::Sweep` and start no agent, so the launch fails closed. The
+    the outer's, and the inner has started nothing yet, so nothing else can be in it. A process of
+    the pool user's that can't be opened or ended makes the inner exit with `RunExit::Escapee`
+    (below); a list that can't be read, or a process that can't be checked, with
+    `RunExit::Sweep`. Either way it starts no agent, so the launch fails closed. The
     timing holds because no code of the launch's runs before this sweep. The inner first limits
     its DLL search, sets its error mode and shuts its own token, and the only token anyone could
     have opened in the gap is the inner's own, as the pool user it already is. A process that
@@ -1067,7 +1068,8 @@ leaves that profile, both naming the part.
     inner sweeps every 30 s and keeps the job's processes (`IsProcessInJob` against that
     handle). When the agent exits, the inner sweeps once more before it exits. At both, and in
     the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
-    goes on with the rest; the sweep's next round and the next tick try it again.
+    goes on with the rest; the sweep's next round and the next tick try it again. One that can't
+    be opened or ended is also an escapee (below).
   - **The end sweeper.** The outer's first reaction to any end signal is to end its job
     (`TerminateJobObject`) and wait until no process is left in it (`ActiveProcesses` of
     `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 1.5 s, inside the
@@ -1121,7 +1123,7 @@ leaves that profile, both naming the part.
     the SID. Other matters' runners started from the same logon do, and can open these, but
     their sweeps only kill their own pool user's processes. Accepted: a sweeper from before the
     lawyer signed out and in again holds the old logon SID, so a launch during its up to 60 s
-    fails `RunExit::Sweep`, and a retry works.
+    can't open it and fails `RunExit::Escapee`, and a retry once it exited works.
   - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. The
     outer's job end gives the inner and the agent the sweeper's kill code (`RUN_EXIT_BASE +
     0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
@@ -1133,6 +1135,19 @@ leaves that profile, both naming the part.
     query-only handle to the job, which keeps the job open, and so its processes running, if
     the outer dies without ending it; on a cancel the outer ends the job at the stdin end, before
     the host's job end can kill it.
+  - **Escapees.** A process of the pool user's that a sweep can't open, even after the owner's
+    `WRITE_DAC` reopen, or can't end is an escapee: it lives outside every job, and no sweep of
+    the pool user's own can end it. The inner reports it on `ctl` (`InnerReport::Escapee`: the
+    sweep point, the count, and at most eight image names, never a path; the first act's report
+    is held until `ctl` opens, like its log lines). The first act exits `RunExit::Escapee`
+    (appended after `DllSearch`), and so does the end sweeper. The outer exits
+    `RunExit::Escapee` whenever any sweep of its session found one: the first act's, a tick's or
+    the end's (from `ctl`), or the end sweeper's (its exit code, when the outer still waits for
+    it, up to 20 s). That code wins over the agent's own, even 0, and over a cancel's: the run's
+    output came through, but the host must learn that the pool user has a live process no sweep of
+    its own can end, and the exit code is the one thing the host reads. The code the run would
+    have had is said on stderr. A process that only can't be checked (its job, its start time) and
+    a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task or BITS job stays until
@@ -1158,8 +1173,9 @@ leaves that profile, both naming the part.
   process because its default DACL grants its user, and that holds in session 0 too. A process
   that shuts its own DACL to its user, with an `OWNER RIGHTS` entry that takes away the owner's
   implied rights, can't be opened or ended by the pool user, but `WTSEnumerateProcessesW` still
-  names it as the pool user's. At the first act it fails the launch closed (`RunExit::Sweep`, no
-  agent); at the tick and the end it is logged and tried again. While it lives, every launch for
+  names it as the pool user's. At the first act it fails the launch closed (`RunExit::Escapee`,
+  no agent); at the tick and the end it is logged, reported, and tried again, and the run exits
+  `RunExit::Escapee`. While it lives, every launch for
   that pool user fails closed. The agent can make one of its own processes so (a process sets its
   own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
   or one a service starts; only one outside the job outlives the session. The agent can't change

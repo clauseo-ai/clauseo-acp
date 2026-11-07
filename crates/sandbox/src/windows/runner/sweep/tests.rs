@@ -361,7 +361,12 @@ fn past_the_first_act_a_failure_is_logged_once_and_the_rest_are_swept() {
         // Killing it starts a child, so the sweep makes a second round and tries 12 again.
         fake.spawns.insert(13, (14, pool_proc("child.exe")));
         let (got, lines) = run(&mut fake, &[], point);
-        assert_eq!(got, Err(SweepError::Left { count: 1 }), "{point}");
+        let left = SweepError::Left {
+            count: 1,
+            unkillable: 1,
+            images: vec!["hidden.exe".to_owned()],
+        };
+        assert_eq!(got, Err(left), "{point}");
         assert_eq!(fake.killed, [13, 14], "{point}");
         let failures: Vec<&String> = lines.iter().filter(|l| l.contains("hidden.exe")).collect();
         assert_eq!(
@@ -437,11 +442,15 @@ fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
     fake.procs.insert(31, pool_proc("task.exe"));
     let mut calls = NoClock(fake);
     let got = sweep(&mut calls, &sid(POOL), &[30], Point::Sweeper, &mut |_| {});
-    assert!(
-        matches!(&got, Err(SweepError::Started { pid: 30, code, .. }) if code == "6"),
-        "{got:?}"
+    assert_eq!(
+        got,
+        Err(SweepError::OwnStart {
+            code: "6".to_owned()
+        })
     );
     assert_eq!(calls.0.killed, Vec::<u32>::new());
+    // Not an escapee: no process of the pool user's was found unkillable.
+    assert_eq!(got.unwrap_err().escapees(), None);
 }
 
 /// A process of the pool user created at `started` by `parent`.
@@ -549,4 +558,108 @@ fn the_end_sweeper_gives_its_second_pass_result() {
     fake.deny_kill.insert(12, 1);
     let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |_| {});
     assert_eq!(got, Ok(vec![12]));
+}
+
+#[test]
+fn a_process_that_cant_be_opened_or_ended_is_an_escapee_and_one_that_cant_be_checked_isnt() {
+    let one = |image: &str| {
+        Some(Escapees {
+            count: 1,
+            images: vec![image.to_owned()],
+        })
+    };
+    let (pid, code) = (12, "5".to_owned());
+    let image = "hidden.exe".to_owned();
+    let open = SweepError::Open {
+        pid,
+        image: image.clone(),
+        code: code.clone(),
+    };
+    let kill = SweepError::Kill {
+        pid,
+        image: image.clone(),
+        code: code.clone(),
+    };
+    assert_eq!(open.escapees(), one("hidden.exe"));
+    assert_eq!(kill.escapees(), one("hidden.exe"));
+    let job = SweepError::Job {
+        pid,
+        image: image.clone(),
+        code: code.clone(),
+    };
+    let started = SweepError::Started { pid, image, code };
+    for plain in [
+        job,
+        started,
+        SweepError::List("5".to_owned()),
+        SweepError::StillRunning,
+        SweepError::Left {
+            count: 2,
+            unkillable: 0,
+            images: Vec::new(),
+        },
+    ] {
+        assert_eq!(plain.escapees(), None, "{plain:?}");
+    }
+    // The first act fails at the first one.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("hidden.exe"));
+    fake.deny_open.insert(12);
+    let got = run(&mut fake, &[], Point::Start).0.unwrap_err();
+    assert_eq!(got.escapees(), one("hidden.exe"));
+}
+
+#[test]
+fn a_later_sweep_counts_its_escapees_and_names_each_image_once_up_to_the_cap() {
+    for point in [Point::Tick, Point::End, Point::Sweeper] {
+        let mut fake = machine();
+        fake.job = point != Point::Sweeper;
+        // Two hidden copies of one image, nine others, and one that only can't be checked.
+        for pid in 20..22 {
+            fake.procs.insert(
+                pid,
+                Proc {
+                    hidden: true,
+                    ..pool_proc("same.exe")
+                },
+            );
+        }
+        let images = [
+            "a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe", "g.exe", "h.exe", "i.exe",
+        ];
+        for (pid, image) in (30..).zip(images) {
+            fake.procs.insert(pid, pool_proc(image));
+            fake.deny_kill.insert(pid, u32::MAX);
+        }
+        let got = run(&mut fake, &[], point).0.unwrap_err();
+        let escapees = got.escapees().unwrap();
+        assert_eq!(escapees.count, 11, "{point}");
+        assert_eq!(escapees.images.len(), IMAGES_CAP, "{point}");
+        assert_eq!(escapees.images[..2], ["same.exe", "a.exe"], "{point}");
+    }
+}
+
+#[test]
+fn the_end_sweepers_exit_code_says_escapee_sweep_or_nothing() {
+    let escapee = crate::windows::runner::RunExit::Escapee.code();
+    let sweep_code = crate::windows::runner::RunExit::Sweep.code();
+    // A process that shut its DACL outlives both passes: Escapee, whatever the removal did.
+    let mut fake = machine();
+    fake.procs.insert(
+        12,
+        Proc {
+            hidden: true,
+            ..pool_proc("hidden.exe")
+        },
+    );
+    let kills = end_sweep(&mut fake, &sid(POOL), &[30], &mut |_| {}).map(drop);
+    assert_eq!(end_sweeper_exit(&kills, true), escapee);
+    assert_eq!(end_sweeper_exit(&kills, false), escapee);
+    // Any other failure, of the kills or of the removal: Sweep.
+    assert_eq!(
+        end_sweeper_exit(&Err(SweepError::StillRunning), true),
+        sweep_code
+    );
+    assert_eq!(end_sweeper_exit(&Ok(()), false), sweep_code);
+    assert_eq!(end_sweeper_exit(&Ok(()), true), 0);
 }

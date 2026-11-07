@@ -17,6 +17,8 @@ struct Record {
     fail: Option<&'static str>,
     /// Told when the logon begins, which then takes a while.
     slow: Mutex<Option<mpsc::Sender<()>>>,
+    /// How the sweeper ended, for the outer's wait; `Unclean` (none kept) when unset.
+    swept: Option<Swept>,
 }
 
 impl Record {
@@ -61,6 +63,9 @@ impl SweeperSteps for Record {
     }
     fn log(&self, line: &str) {
         self.done.lock().unwrap().push(format!("log {line}"));
+    }
+    fn wait(&self) -> Swept {
+        self.swept.unwrap_or(Swept::Unclean)
     }
 }
 
@@ -285,5 +290,47 @@ fn past_a_cancel_the_inners_code_passes_as_the_agents() {
         assert_eq!(exit_code(began, 7, Some(7)), 7, "{began:?}");
         assert_eq!(exit_code(began, SWEPT, Some(0)), reserved, "{began:?}");
         assert_eq!(exit_code(began, SWEPT, None), reserved, "{began:?}");
+    }
+}
+
+#[test]
+fn an_escapee_makes_the_run_exit_escapee_whatever_the_agents_code() {
+    let escapee = crate::windows::runner::RunExit::Escapee.code();
+    let end = EndSweep::new(Record::default());
+    assert!(!end.escaped());
+    assert_eq!(end.outcome(0), 0);
+    assert_eq!(end.outcome(3), 3);
+    // The inner reported one on ctl (a tick's or the end's sweep): the agent's own code, even 0,
+    // and a cancel's, give way.
+    end.mark_escapee();
+    assert!(end.escaped());
+    for code in [0, 3, HOST_ENDED, SWEPT] {
+        assert_eq!(end.outcome(code), escapee, "{code:#x}");
+    }
+}
+
+#[test]
+fn the_end_sweepers_escapee_exit_is_the_runs_outcome() {
+    let escapee = crate::windows::runner::RunExit::Escapee.code();
+    let sweep = crate::windows::runner::RunExit::Sweep.code();
+    assert_eq!(Swept::from_exit(Some(0)), Swept::Clean);
+    assert_eq!(Swept::from_exit(Some(escapee)), Swept::Escapee);
+    assert_eq!(Swept::from_exit(Some(sweep)), Swept::Unclean);
+    assert_eq!(Swept::from_exit(None), Swept::Unclean);
+    let end = EndSweep::new(Record {
+        swept: Some(Swept::Escapee),
+        ..Record::default()
+    });
+    assert!(end.trigger(EndSignal::InnerExited));
+    assert_eq!(end.wait(), Swept::Escapee);
+    assert!(end.escaped());
+    assert_eq!(end.outcome(0), escapee);
+    for swept in [Swept::Clean, Swept::Unclean] {
+        let end = EndSweep::new(Record {
+            swept: Some(swept),
+            ..Record::default()
+        });
+        assert_eq!(end.wait(), swept);
+        assert_eq!(end.outcome(7), 7, "{swept:?}");
     }
 }
