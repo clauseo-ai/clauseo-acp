@@ -807,13 +807,13 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.blocked": {
-    "en": "Protection is blocked on this computer: a Windows setting or security tool stopped it, so Clauseo can't answer here. Ask whoever looks after this computer.",
-    "hi": "इस कंप्यूटर पर संरक्षण अवरुद्ध है: Windows की किसी सेटिंग या सुरक्षा टूल ने इसे रोक दिया, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+    "en": "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
+    "hi": "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र का इस्तेमाल नहीं कर सकता: कोई Windows सेटिंग या सुरक्षा सॉफ़्टवेयर इसे रोक रहा है, इसलिए कुछ भी शुरू नहीं हुआ। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "sandbox track (provisional placeholder; app track and a Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "sandbox track (provisional placeholder; the app track writes it in R17 PR-E)"
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   }
 }
