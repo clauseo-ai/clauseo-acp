@@ -245,6 +245,12 @@
   .room-centre[data-more] .room-composer {
     box-shadow: var(--shadow-dock);
   }
+  /* while Matters is open the list has the window: the composer leaves the bottom edge and follows the work, at the
+     page's end, where scrolling or Tab reaches it. Docked, the sign-in card (half a 640 by 480 window, more in Hindi
+     at a large text size) covered the list */
+  .room-window:has(> .room-rail[data-open]) .room-composer {
+    position: static;
+  }
   .room-status {
     height: auto;
     min-height: calc(var(--s5) * var(--k));
