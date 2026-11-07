@@ -459,9 +459,17 @@ Coming:
   - the OS is asked at start, when the settings change and again once the answer is a minute
     old, each time within 5 s; at start or after a settings change, a lookup slower than that
     counts as direct until it answers (up to 15 s more). On the minute's refresh, a lookup that
-    fails or is slow keeps the answer before it, for up to 10 minutes from the last real answer:
-    within that, only the OS answering `DIRECT` turns the proxy off. After changing networks (office, home, VPN), the new proxy is used within about a
-    minute.
+    fails or is slow keeps the answer before it, for up to 10 minutes from the last real answer,
+    while that proxy still takes a connection (Clauseo connects to it and closes, sending
+    nothing, within the 5 s): off the firm's network (a VPN dropped, a PAC file on an internal
+    server failing with it) it goes direct at once. One `DIRECT` while the proxy still answers
+    keeps the proxy until the next refresh says `DIRECT` again;
+  - after changing networks (office, home, VPN), new launches, installs and sign-ins use the new
+    proxy within about 2 minutes (the sandbox keeps each OS answer for 60 s). A running agent
+    keeps the proxy it started with: a tier-C agent for its whole run, while a tier-B agent goes
+    through Clauseo's egress proxy, which looks the upstream up per connection. An agent that
+    stops answering after a network change is restarted by ending its thread's turn or reopening
+    the matter.
 
   Known issue: on Windows, a machine-wide `SSL_CERT_FILE` (set by Anaconda, for example) can
   still break Codex even with `CODEX_CA_CERTIFICATE` set
