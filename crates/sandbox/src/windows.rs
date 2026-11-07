@@ -112,7 +112,7 @@ pub use clean_close::NtfsJournal;
 pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
 #[cfg(windows)]
-pub use folder::folder_support;
+pub use folder::{folder_support, label_support};
 #[cfg(windows)]
 pub use marker::setup_state;
 #[cfg(windows)]
@@ -145,4 +145,8 @@ pub enum FolderSupport {
     Network,
     /// The folder's volume keeps no permissions (FAT, exFAT).
     NoPermissions,
+    /// The caller can change the folder's permissions but not its owner or label: the DACL
+    /// grants `WRITE_DAC` and not `WRITE_OWNER`, so tier B can't give it the Low label. Only
+    /// [`label_support`] answers it, for the folders the plan labels.
+    CantLabel,
 }

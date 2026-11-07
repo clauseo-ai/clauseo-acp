@@ -145,6 +145,11 @@ pub enum ApplyFailure {
         /// What the pool user owns.
         owned: Owned,
     },
+    /// The Low label couldn't be written: the lawyer may change the item's permissions but not
+    /// its owner or label (no `WRITE_OWNER`). The gate refuses such a folder first
+    /// (`FolderSupport::CantLabel`); this is its fallback, should the folder change in between.
+    /// `apply` names the item in `Error::AclApply`'s `at`.
+    CantLabel,
 }
 
 /// What a pool user owns when a launch or set-up refuses as [`ApplyFailure::PoolOwned`]: the
@@ -188,6 +193,9 @@ impl fmt::Display for ApplyFailure {
             } => f.write_str(
                 "another sandbox user owns an item in it and it couldn't be handed back",
             ),
+            ApplyFailure::CantLabel => {
+                f.write_str("its integrity label can't be set (no right to change its owner)")
+            }
         }
     }
 }
@@ -207,7 +215,8 @@ impl From<ApplyFailure> for io::Error {
             | ApplyFailure::NoDacl
             | ApplyFailure::ChildShut
             | ApplyFailure::Link
-            | ApplyFailure::PoolOwned { .. }) => io::Error::other(other),
+            | ApplyFailure::PoolOwned { .. }
+            | ApplyFailure::CantLabel) => io::Error::other(other),
         }
     }
 }

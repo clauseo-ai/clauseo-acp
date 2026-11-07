@@ -2,12 +2,17 @@
 
 use super::*;
 use crate::test_support::remove_dir;
-use crate::windows::folder_support;
-use crate::windows::test_dacl::protect_with;
+use crate::windows::acl::descriptor;
+use crate::windows::test_dacl::{drop_privileges, protect_with};
 use crate::windows::tests::admin_share_path;
+use crate::windows::{folder_support, label_support};
 
 /// `OWNER RIGHTS` with Modify only: the owner loses `WRITE_DAC`.
 const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
+
+/// `OWNER RIGHTS` with Modify and `WRITE_DAC`, not `WRITE_OWNER`: the owner may re-permission
+/// the folder but not label it.
+const OWNER_RIGHTS_NO_WRITE_OWNER: &str = "D:P(A;OICI;0x1701bf;;;OW)";
 
 /// Asserts that `policy` is refused for `kind` with `want`, and that the ledger is as it was.
 fn assert_refused(w: &World, policy: &Policy, kind: PathKind, want: FolderRefusal) {
@@ -261,4 +266,26 @@ fn a_neighbour_under_a_junction_is_fenced_at_its_target_and_one_that_is_a_juncti
         panic!("not refused: {refused:?}");
     };
     assert_eq!(support, FolderRefusal::ReparsePoint);
+}
+
+#[test]
+fn a_matter_the_lawyer_cant_label_is_refused_and_left_as_it_was() {
+    let w = World::new("admit-win-cant-label");
+    let policy = w.full_policy();
+    let matter = w.canonical("matter");
+    protect_with(&matter, OWNER_RIGHTS_NO_WRITE_OWNER).unwrap();
+    // As the lawyer's token: no privilege that would grant WRITE_OWNER anyway.
+    drop_privileges();
+    assert_eq!(folder_support(&matter).unwrap(), FolderSupport::Ok);
+    assert_eq!(label_support(&matter).unwrap(), FolderSupport::CantLabel);
+    // Owner, group, DACL and label (`LABEL_SECURITY_INFORMATION`).
+    let before = descriptor(&matter).unwrap();
+    let groups = FakeFolders::default();
+    let admitted = admit(&policy, &w.at("data"), &Neighbours::default(), &groups);
+    let Err(Error::FolderUnsupported { path_kind, support }) = admitted else {
+        panic!("not refused: {admitted:?}");
+    };
+    let want = FolderRefusal::Support(FolderSupport::CantLabel);
+    assert_eq!((path_kind, support), (PathKind::Matter, want));
+    assert_eq!(descriptor(&matter).unwrap(), before);
 }

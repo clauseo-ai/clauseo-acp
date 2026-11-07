@@ -66,6 +66,9 @@ pub(crate) fn check(matter: Option<MatterId>, folder: &Path) -> Answer {
                 }
                 FolderSupport::Network => Some(FolderSupportKind::Network),
                 FolderSupport::NoPermissions => Some(FolderSupportKind::NoPermissions),
+                // Only `label_support` (tier B's gate) answers it, never `folder_support`; the
+                // nearest kind, should that change.
+                FolderSupport::CantLabel => Some(FolderSupportKind::CantChangePermissions),
             };
             tracing::info!(?matter, support = ?kind, "the matter folder was checked");
             Answer::Known(kind)
