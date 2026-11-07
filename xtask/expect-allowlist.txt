@@ -144,6 +144,8 @@ crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
 
 # Added by S18: the sign-in fake's Claude login, which runs the BROWSER command it is given.
 crates/fake_agent/src/signin.rs open_browser clippy::disallowed_methods
+# Added by S18: a sign-in fake whose parent died ends from its watch thread.
+crates/fake_agent/src/signin/parent.rs orphaned clippy::exit
 
 # Added by R7: store's write module (the lock file and the private database file), the one
 # BlobRef::new that cannot fail, the test-support fixture's fixed values, the tests' write
