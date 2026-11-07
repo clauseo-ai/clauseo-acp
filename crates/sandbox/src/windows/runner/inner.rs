@@ -31,7 +31,26 @@ pub fn run_inner(base: &str) -> u32 {
         Ok(launch) => launch,
         Err(_) => return RunExit::Pipe.code(),
     };
-    match start(&set, &launch) {
+    // First, before anything else: shut this runner's token, process, threads and later objects
+    // to the agent (`token::os::shut_self`); the outer shut the process and first thread while
+    // this runner was still suspended.
+    let shut = own_token()
+        .and_then(|token| shut_self(&token, &launch.desktop_user).map(|()| token))
+        .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e));
+    let token = match shut {
+        Ok(token) => token,
+        Err(Failure(exit, what)) => {
+            drop(write_frame(
+                &ctl,
+                &InnerReport::Failed {
+                    exit: exit.code(),
+                    what,
+                },
+            ));
+            return exit.code();
+        }
+    };
+    match start(&set, &launch, &token) {
         Ok(agent) => {
             if write_frame(&ctl, &InnerReport::Started { pid: agent.pid }).is_err() {
                 agent.kill(RunExit::Pipe.code());
@@ -61,16 +80,19 @@ pub fn run_inner(base: &str) -> u32 {
 
 /// Makes the folders and the token, opens the agent's pipes, and starts it on the desktop the
 /// outer runner made.
-fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<super::spawn::Process, Failure> {
-    let token = own_token().map_err(|e| fail(RunExit::Token, "OpenProcessToken", &e))?;
-    let me = user(&token).map_err(|e| fail(RunExit::Token, "token user", &e))?;
+fn start(
+    set: &PipeSet,
+    launch: &InnerLaunch,
+    token: &Handle,
+) -> Result<super::spawn::Process, Failure> {
+    let me = user(token).map_err(|e| fail(RunExit::Token, "token user", &e))?;
     if me != launch.pool_user {
         return Err(Failure(
             RunExit::Token,
             "the inner runner isn't the pool user".to_owned(),
         ));
     }
-    let logon = logon_sid(&token).map_err(|e| fail(RunExit::Token, "logon SID", &e))?;
+    let logon = logon_sid(token).map_err(|e| fail(RunExit::Token, "logon SID", &e))?;
     let spec = TokenSpec::for_pool(
         &me,
         &logon,
@@ -91,11 +113,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<super::spawn::Process, F
         return Err(Failure(RunExit::Pipe, "three pipes expected".to_owned()));
     };
     let agent_token =
-        make(&token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
-    // The agent runs as this runner's own user: shut this process, its thread and its token to
-    // it before it starts.
-    shut_self(&token, &launch.desktop_user)
-        .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e))?;
+        make(token, &spec).map_err(|e| fail(RunExit::Token, "restricted token", &e))?;
     let agent = start_agent(&Agent {
         token: &agent_token,
         desktop: &launch.desktop,
