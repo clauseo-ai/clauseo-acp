@@ -4,12 +4,13 @@
 //! with `SeDebugPrivilege` enabled first ([`enable_debug_privilege`]); the session's
 //! kill-on-close job (a duplicate of the outer runner's own handle to it), `IsProcessInJob`
 //! against that job, its pid list, and a service's state. Each gives a plain value or the Win32
-//! code, never a panic.
+//! code, never a panic. Also `probe wts`'s lists ([`wts_lines`]), run as a pool user.
 #![expect(
     unsafe_code,
-    reason = "FFI to the process, token, job, handle-duplication and service calls"
+    reason = "FFI to the process, token, job, handle-duplication, service and WTS calls"
 )]
 
+use std::collections::BTreeSet;
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
@@ -25,6 +26,9 @@ use windows::Win32::System::JobObjects::{
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
     JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, QueryInformationJobObject,
 };
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
+};
 use windows::Win32::System::Services::{
     CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceStatus, SC_HANDLE,
     SC_MANAGER_CONNECT, SERVICE_QUERY_STATUS, SERVICE_STATUS,
@@ -35,7 +39,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{BOOL, HSTRING, PCWSTR};
 
-use super::win::{Owned, UI_LIMITS, code_of, token_user};
+use super::win::{Owned, UI_LIMITS, code_of, own_token, sid_text, token_user};
 use super::{win_sec, win_thread};
 
 /// `ERROR_MORE_DATA`: the job's pid list didn't fit.
@@ -44,6 +48,8 @@ const MORE_DATA: u32 = 234;
 const GONE: u32 = 87;
 /// `ERROR_NOT_ALL_ASSIGNED`: the token doesn't hold the privilege.
 const NOT_ALL_ASSIGNED: u32 = 1300;
+/// How many image names `wts missing` prints.
+const WTS_NAMES: usize = 8;
 
 /// Enables `SeDebugPrivilege` in this process's token, so an admin harness can open every
 /// process (and the tokens its DACL lets it reach). The call that failed and its code otherwise;
@@ -330,4 +336,72 @@ pub(crate) fn service_state(name: &str) -> Result<u32, String> {
     unsafe { QueryServiceStatus(service.0, &raw mut status) }
         .map_err(|e| format!("QueryServiceStatus gave {}", code_of(&e)))?;
     Ok(status.dwCurrentState.0)
+}
+
+/// `probe wts`'s lines (`pool_verdict::wts_visibility` reads them), as the caller's user: `wts
+/// toolhelp <n>`, every process a Toolhelp snapshot shows (or `wts toolhelp-error <code>`);
+/// `wts enum <entries> sid <n> own <n>`, what `WTSEnumerateProcessesW` on
+/// `WTS_CURRENT_SERVER_HANDLE` returns: its entries, those with a user SID and those whose SID is
+/// the caller's (or `wts enum-error <code>`); then `wts missing <n> <images>`, the Toolhelp
+/// processes WTS left out and the first [`WTS_NAMES`] image names, comma-joined.
+pub(crate) fn wts_lines() -> Vec<String> {
+    let me = own_token().map(|facts| facts.user).unwrap_or_default();
+    let toolhelp = win_thread::processes();
+    let mut lines = vec![match &toolhelp {
+        Ok(found) => format!("wts toolhelp {}", found.len()),
+        Err(code) => format!("wts toolhelp-error {code}"),
+    }];
+    let mut info: *mut WTS_PROCESS_INFOW = std::ptr::null_mut();
+    let mut count = 0u32;
+    // SAFETY: `info` and `count` are live out-pointers; the array that comes back is freed once,
+    // below, with WTSFreeMemory.
+    let listed = unsafe {
+        WTSEnumerateProcessesW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            0,
+            1,
+            &raw mut info,
+            &raw mut count,
+        )
+    };
+    if let Err(error) = listed {
+        lines.push(format!("wts enum-error {}", code_of(&error)));
+        return lines;
+    }
+    let entries = if info.is_null() {
+        &[][..]
+    } else {
+        // SAFETY: the call wrote `count` entries at `info`, live until WTSFreeMemory.
+        unsafe { std::slice::from_raw_parts(info, usize::try_from(count).unwrap_or(0)) }
+    };
+    let (mut with_sid, mut own) = (0usize, 0usize);
+    let mut pids = BTreeSet::new();
+    for entry in entries {
+        pids.insert(entry.ProcessId);
+        if entry.pUserSid.is_invalid() {
+            continue;
+        }
+        with_sid += 1;
+        if sid_text(entry.pUserSid).is_ok_and(|sid| !me.is_empty() && sid.eq_ignore_ascii_case(&me))
+        {
+            own += 1;
+        }
+    }
+    let total = entries.len();
+    if !info.is_null() {
+        // SAFETY: the array WTSEnumerateProcessesW allocated, freed once; `entries` isn't used
+        // after this.
+        unsafe { WTSFreeMemory(info.cast()) };
+    }
+    lines.push(format!("wts enum {total} sid {with_sid} own {own}"));
+    if let Ok(found) = toolhelp {
+        let missing: Vec<&str> = found
+            .iter()
+            .filter(|p| !pids.contains(&p.pid))
+            .map(|p| p.image.as_str())
+            .collect();
+        let names: Vec<&str> = missing.iter().take(WTS_NAMES).copied().collect();
+        lines.push(format!("wts missing {} {}", missing.len(), names.join(",")));
+    }
+    lines
 }

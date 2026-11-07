@@ -41,6 +41,10 @@
 //! - `write <path>`: `write <code>` from opening it for writing (nothing is written).
 //! - `runners`, `breakaway`, `handles`, `desktop`: the security probes, `probe_sec.rs`.
 //! - `items <plant|check|remove> <tag>`: the `end-cleanup` row's items, `probe_items.rs`.
+//! - `wts`: the `wts-visibility` row's lists, run as a pool user outside any job:
+//!   `wts toolhelp <n>` (or `wts toolhelp-error <code>`), `wts enum <entries> sid <n> own <n>`
+//!   (`WTSEnumerateProcessesW`; or `wts enum-error <code>`) and `wts missing <n> <images>`
+//!   (`win_pool::wts_lines`).
 
 use std::io::BufRead as _;
 use std::process::{Command, ExitCode, Stdio};
@@ -95,6 +99,12 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         }
         "spawn-child" => spawn_child(),
         "items" => super::probe_items::run(rest),
+        "wts" => {
+            for line in super::win_pool::wts_lines() {
+                say(&line);
+            }
+            ExitCode::SUCCESS
+        }
         "echo" => echo(),
         "exit" => match rest.first().and_then(|n| exit_code(n)) {
             Some(n) => match u8::try_from(n) {

@@ -26,7 +26,7 @@ pub(crate) const DENIED: &str = "5";
 
 /// Runs `spec` as matter `which` to its end, noting its summary.
 pub(crate) fn run(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Finished, String> {
-    let done = launch(ctx.manifest, which, spec)?.finish(deadline(ctx.limit))?;
+    let done = launch(ctx, which, spec)?.finish(deadline(ctx.limit))?;
     ctx.note(&format!(
         "{which}: {} {}: {}",
         spec.program,
@@ -41,7 +41,17 @@ pub(crate) fn run(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Finished, S
 
 /// Starts the probe `args` as matter `which` and waits for its `pid` line.
 pub(crate) fn started(ctx: &Ctx<'_>, which: &str, args: &[&str]) -> Result<(Running, u32), String> {
-    let mut running = launch(ctx.manifest, which, &Spec::probe(ctx.manifest, args))?;
+    let running = launch(ctx, which, &Spec::probe(ctx.manifest, args))?;
+    pid_of(ctx, which, args, running)
+}
+
+/// Waits for the `pid` line of `running`, the probe `args` as matter `which`.
+pub(crate) fn pid_of(
+    ctx: &Ctx<'_>,
+    which: &str,
+    args: &[&str],
+    mut running: Running,
+) -> Result<(Running, u32), String> {
     let pid = running
         .line_after("pid ", deadline(ctx.limit))
         .and_then(|pid| pid.trim().parse::<u32>().ok())
@@ -201,7 +211,7 @@ fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
         ..Spec::default()
     };
     let until = deadline(ctx.limit);
-    let mut running = launch(m, "A", &spec)?;
+    let mut running = launch(ctx, "A", &spec)?;
     let paused = running.line_after(NODE_PAUSE, until).is_some();
     let early = paused.then(|| {
         for line in &running.stdout {
@@ -266,9 +276,10 @@ pub(crate) fn pipes(ctx: &Ctx<'_>) -> Result<String, String> {
     result
 }
 
-/// While A runs: matter `which`'s probe opens each of A's four runner pipes for read and for write,
-/// and every open must give 5. `B` is another pool user; `A` is a second agent of A's own matter
-/// (the same user), where 231 (busy) would mean the DACL and label let it through.
+/// While A runs: session `which`'s probe opens each of A's four runner pipes for read and for
+/// write, and every open must give 5 (231, busy, would mean the DACL and label let it through).
+/// `B` is another matter's pool user; `A2` is a second session of A's own matter, which runs as
+/// matter A's second pool user, since a pool user serves one live session at a time.
 pub(crate) fn pipes_as(ctx: &Ctx<'_>, which: &str) -> Result<String, String> {
     let names = win::list_pipes("clauseo-run-").map_err(|e| format!("listing pipes: {e}"))?;
     ctx.note(&format!("pipes listed: {names:?}"));
@@ -336,7 +347,7 @@ pub(crate) fn job(ctx: &Ctx<'_>) -> Result<String, String> {
 
 /// Row 6: stdin lines come back, and closing stdin ends the agent with 0.
 pub(crate) fn stdio(ctx: &Ctx<'_>) -> Result<String, String> {
-    let mut a = launch(ctx.manifest, "A", &Spec::probe(ctx.manifest, &["echo"]))?;
+    let mut a = launch(ctx, "A", &Spec::probe(ctx.manifest, &["echo"]))?;
     let until = deadline(ctx.limit);
     for word in ["one", "two"] {
         a.send(&format!("{word}\n"))?;

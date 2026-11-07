@@ -8,6 +8,10 @@ use super::sys::write_file;
 
 /// The manifest's file name in the harness root.
 pub(crate) const MANIFEST: &str = "s15-manifest.txt";
+/// The session key of matter A's second pool user: a pool user serves one live session at a
+/// time, so a second session of matter A (`pipes-same-matter`), and control (a) while A's
+/// session runs, take this one. It is granted matter A's folder and has a state folder of its own.
+pub(crate) const SECOND_A: &str = "A2";
 
 /// A pool user the harness runs as.
 #[derive(Debug, Clone, Default)]
@@ -29,7 +33,7 @@ pub(crate) struct Manifest {
     pub(crate) setup_ran: bool,
     /// The set-up exe prepare used, for cleanup's `--remove`.
     pub(crate) setup_exe: Option<PathBuf>,
-    /// Matter A's pool user, then matter B's.
+    /// Matter A's pool user, matter B's, then matter A's second ([`SECOND_A`]).
     pub(crate) pools: Vec<Pool>,
     /// `node.exe` in the bin folder.
     pub(crate) node: Option<PathBuf>,
@@ -72,12 +76,13 @@ impl Manifest {
         self.root.join("logs")
     }
 
-    /// Matter `which`'s (`A` or `B`) matter folder.
+    /// Matter `which`'s (`A` or `B`) matter folder; [`SECOND_A`]'s is matter A's.
     pub(crate) fn matter(&self, which: &str) -> PathBuf {
+        let which = if which == SECOND_A { "A" } else { which };
         self.root.join("matters").join(which).join("matter")
     }
 
-    /// Matter `which`'s state folder.
+    /// Session key `which`'s state folder (`A`, `B` or [`SECOND_A`], each its own).
     pub(crate) fn state(&self, which: &str) -> PathBuf {
         self.root.join("matters").join(which).join("state")
     }
@@ -173,5 +178,10 @@ impl Manifest {
     /// Matter A's pool user and matter B's, when prepare found two.
     pub(crate) fn pool_pair(&self) -> Option<(&Pool, &Pool)> {
         Some((self.pools.first()?, self.pools.get(1)?))
+    }
+
+    /// Matter A's second pool user ([`SECOND_A`]), when prepare found three.
+    pub(crate) fn second_a(&self) -> Option<&Pool> {
+        self.pools.get(2)
     }
 }
