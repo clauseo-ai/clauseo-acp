@@ -70,8 +70,9 @@ Developer ID.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
-  in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`). `check`
-  fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
+  in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`);
+  `blocklist.conf.json` (`bundle.resources`, the block-list snapshot: see "The block-list snapshot"
+  below). `check` fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
 - **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", after the installs
   and before the app is built (tauri-build checks that every `externalBin` file exists). It runs
   `.github/scripts/sidecars.mjs` for the leg's target ("Sidecars" below). A sidecar task adds a row to
@@ -265,6 +266,26 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   `--remove` does. The hook names a kept folder only when `GetFileAttributesW` says a real
   folder, and shows no box when the data folder is gone (exit 1 after an unlink-only run); when
   the data folder is itself a link (refused, so kept) its box names no path.
+
+## The block-list snapshot (stage F, 2026-11-07)
+
+- **Why it is bundled.** The app (`crates/blocklist`) enforces a signed list of unsafe sites, published
+  as clauseo-ai/blocklist's `current` release (`blocklist-v1.txt.gz` and its `.minisig`). Every
+  release, test and dry build ships the snapshot current at build time, at
+  `<resource_dir>/blocklist/` on all three platforms, so a fresh install has a list from its first
+  start. Dev, CI, e2e and smoke builds carry none; the app handles that.
+- **Verify before ship.** The `blocklist` job, in every mode, downloads both files and runs
+  `minisign -V` with `crates/blocklist/keys/stage-f.pub`, the key the app compiles in. The run fails
+  if the signature does not verify or if the signed trusted comment is not exactly
+  `clauseo-blocklist v1 generated=<YYYY-MM-DDTHH:MM:SSZ> entries=<n>`. Only then does it upload
+  `blocklist-snapshot`, which `build`, `sign-windows` and `measure-builds` download into a
+  gitignored `blocklist` folder in the desktop crate before they build or bundle. Each of their `tauri build`
+  and `tauri bundle` runs that passes `release.conf.json` passes `blocklist.conf.json` too, and
+  `latest-json.test.mjs` fails when one does not. The `--no-bundle` compiles need the files as well:
+  tauri-build copies every `bundle.resources` entry at compile time and fails on a missing one.
+- **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
+  summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
+  goes on: an older signed list is still better than none.
 
 ## Status
 
