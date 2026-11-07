@@ -88,7 +88,8 @@ pub enum Blocked {
     Policy,
     /// The set-up program, `clauseo-sandbox-setup.exe`, isn't beside the app as a regular file
     /// (`windows::bundled`), or starting it gave `ERROR_FILE_NOT_FOUND` (2) or
-    /// `ERROR_PATH_NOT_FOUND` (3): Windows security (Defender) can quarantine it. Tier B can't
+    /// `ERROR_PATH_NOT_FOUND` (3), or Windows security blocked it in place (`ERROR_VIRUS_INFECTED`
+    /// 225, `ERROR_VIRUS_DELETED` 226): Defender can quarantine it. Tier B can't
     /// top up, reclaim or be removed without it, so it refuses to launch too.
     ToolMissing,
 }
@@ -105,8 +106,9 @@ impl std::fmt::Display for Blocked {
                  whoever looks after this computer can allow it"
             }
             Blocked::ToolMissing => {
-                "Windows security removed clauseo-sandbox-setup.exe, Clauseo's set-up program; \
-                 whoever looks after this computer can restore it"
+                "clauseo-sandbox-setup.exe, Clauseo's set-up program, is missing or was blocked \
+                 (Windows security may have removed it); whoever looks after this computer can \
+                 restore it"
             }
         })
     }

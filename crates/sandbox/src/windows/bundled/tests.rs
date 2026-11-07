@@ -82,17 +82,22 @@ fn a_start_runs_only_once_the_exe_is_present() {
     assert_eq!(start_present(&exe, || Ok(7u32)), Ok(7));
 }
 
-/// Windows security can remove the exe between the check and the start: the start's 2 or 3
-/// is `ToolMissing` too, and 1223 and 1260 stay as they were.
+/// Windows security can remove the exe between the check and the start, or block it in place:
+/// the start's 2, 3, 225 or 226 is `ToolMissing` too, and 1223 and 1260 stay as they were.
 #[test]
 fn a_start_that_finds_no_file_is_tool_missing() {
     use crate::windows::setup::{
         ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_FILE_NOT_FOUND,
-        ERROR_PATH_NOT_FOUND, launch_error,
+        ERROR_PATH_NOT_FOUND, ERROR_VIRUS_DELETED, ERROR_VIRUS_INFECTED, launch_error,
     };
     let dir = TempDir::new("bundled-gone");
     let exe = dir.file(SETUP_EXE, "MZ");
-    for code in [ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND] {
+    for code in [
+        ERROR_FILE_NOT_FOUND,
+        ERROR_PATH_NOT_FOUND,
+        ERROR_VIRUS_INFECTED,
+        ERROR_VIRUS_DELETED,
+    ] {
         let gone = start_present(&exe, || Err::<u32, _>(launch_error(code)));
         assert_eq!(
             gone,
@@ -105,4 +110,24 @@ fn a_start_that_finds_no_file_is_tool_missing() {
         launch_error(ERROR_ACCESS_DISABLED_BY_POLICY),
         SetupError::Blocked(Blocked::Policy)
     );
+}
+
+/// Only a `FACILITY_WIN32` `HRESULT` or a plain Win32 code gives its low 16 bits: `E_NOINTERFACE`
+/// (`0x80004002`) and `E_POINTER` (`0x80004003`) end in 2 and 3 but aren't a missing exe.
+#[test]
+fn only_a_win32_hresult_is_read_as_its_win32_code() {
+    use crate::windows::setup::{launch_code, launch_error};
+    let hresult = |bits: u32| bits.cast_signed();
+    assert_eq!(launch_code(hresult(0x8007_0002)), 2);
+    assert_eq!(launch_code(hresult(0x8007_00E1)), 225);
+    assert_eq!(launch_code(hresult(0x8007_04C7)), 1223);
+    assert_eq!(launch_code(3), 3);
+    for (name, bits) in [("E_NOINTERFACE", 0x8000_4002), ("E_POINTER", 0x8000_4003)] {
+        let code = launch_code(hresult(bits));
+        assert_eq!(code, bits, "{name}");
+        let SetupError::Failed(why) = launch_error(code) else {
+            panic!("{name} is a failure, not a missing exe");
+        };
+        assert!(why.contains("didn't start"), "{name}: {why}");
+    }
 }

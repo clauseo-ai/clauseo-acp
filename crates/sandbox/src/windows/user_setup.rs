@@ -42,9 +42,9 @@ use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::setup::SetupExit;
 use super::setup::args::quote;
 use super::setup::around::Around;
-use super::setup::launch_error;
 use super::setup::result_file::{self, SetupResult};
 use super::setup::taken_file;
+use super::setup::{launch_code, launch_error};
 use super::sids::{Reserved, Sid};
 use crate::{SandboxSetup, SetupError, SetupState};
 
@@ -75,6 +75,8 @@ impl UserSetup {
 
     /// [`UserSetup::new`] with the setup exe bundled beside the running exe
     /// (`bundled::SETUP_EXE`).
+    // Dev residual: `pnpm tauri dev` places no sidecar (externalBin is release-only), so the
+    // exe is missing beside target\debug's app unless built there; tier B then fails closed.
     pub fn beside_app(data_dir: PathBuf) -> Result<UserSetup, SetupError> {
         let dir = bundle_dir().ok_or_else(|| {
             SetupError::Failed("the folder Clauseo runs from can't be found".to_owned())
@@ -307,8 +309,7 @@ fn start(exe: &Path, params: &str) -> Result<u32, SetupError> {
     // the call. The process handle it returns is owned by `Process` at once.
     let started = unsafe { ShellExecuteExW(&raw mut info) };
     if let Err(error) = started {
-        let code = u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX);
-        return Err(launch_error(code));
+        return Err(launch_error(launch_code(error.code().0)));
     }
     if info.hProcess.is_invalid() {
         return Err(SetupError::Failed(

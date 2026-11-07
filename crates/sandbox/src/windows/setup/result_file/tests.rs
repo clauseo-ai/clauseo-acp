@@ -190,8 +190,9 @@ fn the_launch_errors_map_as_d_b4_says() {
     );
     assert!(!APPROVER_LOGON_REFUSED.contains("ClauseoSandboxUsers"));
     assert!(APPROVER_LOGON_REFUSED.contains("whoever looks after this computer"));
-    // No file or folder at the exe's path: Windows security can remove it before the start.
-    for gone in [2, 3] {
+    // No file or folder at the exe's path (Windows security can remove it before the start),
+    // or Windows security blocked it in place.
+    for gone in [2, 3, 225, 226] {
         assert_eq!(
             launch_error(gone),
             SetupError::Blocked(Blocked::ToolMissing),
@@ -219,8 +220,8 @@ fn each_block_names_the_setting_for_it_and_no_path_or_sid() {
     let missing = Blocked::ToolMissing.to_string();
     assert_eq!(
         missing,
-        "Windows security removed clauseo-sandbox-setup.exe, Clauseo's set-up program; \
-         whoever looks after this computer can restore it"
+        "clauseo-sandbox-setup.exe, Clauseo's set-up program, is missing or was blocked \
+         (Windows security may have removed it); whoever looks after this computer can restore it"
     );
     for words in [logon, policy, missing] {
         assert!(
