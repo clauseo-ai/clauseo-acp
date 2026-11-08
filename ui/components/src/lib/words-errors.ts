@@ -86,6 +86,7 @@ export type ErrorCode =
   | "blocklist.notice_expired"
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
+  | "sandbox.cleaning_up"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -206,6 +207,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // Clauseo closes, because the host couldn't save that (decision record 0053)
   "blocklist.revoke_not_saved":
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
+  // provisional (sandbox track, for the app thread to replace): a launch refused while an earlier
+  // session's clean-up is still running (decision record 0049); retryable
+  "sandbox.cleaning_up":
+    "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
