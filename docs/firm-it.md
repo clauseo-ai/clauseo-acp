@@ -278,6 +278,14 @@ $fw = @(Get-NetFirewallRule -PolicyStore PersistentStore -ErrorAction SilentlyCo
         $_.Description -clike 'Clauseo sandbox - *' })
 $fw | Format-Table DisplayName, Direction, Description -AutoSize
 $fw | Remove-NetFirewallRule
+# 5b. Clauseo's two SYSTEM tasks, by exact path and name: listed, then removed; then their folder, if empty.
+$tasks = @(Get-ScheduledTask -TaskPath '\Clauseo\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -cin 'SandboxStop', 'SandboxRefresh' })
+$tasks | Format-Table TaskPath, TaskName -AutoSize
+$tasks | Unregister-ScheduledTask -Confirm:$false
+try {
+    $ts = New-Object -ComObject Schedule.Service; $ts.Connect(); $folder = $ts.GetFolder('\Clauseo')
+    if ($folder.GetTasks(1).Count -eq 0 -and $folder.GetFolders(0).Count -eq 0) { $ts.GetFolder('\').DeleteFolder('Clauseo', 0) }
+} catch { }
 # 6. The key, last.
 Remove-Item -Path $key -ErrorAction SilentlyContinue
 ```
@@ -306,6 +314,7 @@ its entry and keep its folder:
 
 ```powershell
 [pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' }).Count; Key = Test-Path $key }
+[pscustomobject]@{ Tasks = @(Get-ScheduledTask -TaskPath '\Clauseo\' -ErrorAction SilentlyContinue).Count }
 ```
 
 A `ClauseoSbNN` entry that remains is a link: check where it points, then remove just the link with `rmdir C:\Users\ClauseoSbNN` (cmd), which doesn't touch its target.
@@ -1131,7 +1140,11 @@ Clauseo version.
 
 **Removal.** Uninstalling Clauseo runs `clauseo-sandbox-setup.exe --remove --uninstall` (per
 machine, `--remove --uninstall --per-machine`), which deletes both tasks after the four admin-copy
-values and before the admin folder. Don't delete or change the tasks yourself.
+values and before the admin folder. Don't delete or change the tasks yourself, except in the
+by-hand clean-up ([Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand)).
+The running set-up program can't delete itself, so a file named
+`clauseo-sandbox-setup.exe.<number>.delete` can stay in `C:\Program Files\Clauseo\Sandbox` until
+the next restart, when Windows deletes it; if it is still there after a restart, delete it.
 
 ### If the SandboxStop task ends with 48
 
