@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-repair-cancel"
+description = "Enables the repair_cancel command without any pre-configured scope."
+commands.allow = ["repair_cancel"]
+
+[[permission]]
+identifier = "deny-repair-cancel"
+description = "Denies the repair_cancel command without any pre-configured scope."
+commands.deny = ["repair_cancel"]

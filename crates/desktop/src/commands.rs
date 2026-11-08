@@ -29,7 +29,7 @@ use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFil
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 25] = [
+pub(crate) const COMMANDS: [&str; 26] = [
     "dispatch",
     "query",
     "open_stream",
@@ -55,6 +55,7 @@ pub(crate) const COMMANDS: [&str; 25] = [
     "quit_app",
     "page_marks",
     "repair_install",
+    "repair_cancel",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -462,18 +463,34 @@ pub(crate) async fn quit_app<R: Runtime>(app: AppHandle<R>) -> Result<(), HostEr
 /// alone (`bridge/admit.rs`): `command.invalid` from any other window. `repair.not_eligible`
 /// where it can't run (not a per-user Windows install, no release or key, an update
 /// installing), `command.conflict` while one runs, `repair.download_failed`,
-/// `repair.verify_failed` and `repair.launch_failed` as it fails. Once the installer started,
-/// the window is gone and nothing answers.
+/// `repair.verify_failed` and `repair.launch_failed` as it fails; the download is given up after
+/// 10 minutes. `cancelled` after `repair_cancel`. Once the installer started, the window is gone
+/// and nothing answers.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn repair_install<R: Runtime>(
     webview: Webview<R>,
     bridge: State<'_, Bridge>,
     steps: Channel<crate::update::repair::RepairStep>,
-) -> Result<(), HostError> {
+) -> Result<crate::update::repair::RepairEnd, HostError> {
     crate::ipc::timed("repair_install", async {
         crate::bridge::admit_repair(webview.label())?;
         crate::update::repair::start(&webview, &bridge, steps).await
+    })
+    .await
+}
+
+/// Stops `repair_install`'s download (the card's Cancel): the attempt's folder and the marker
+/// are deleted, `repair_install` answers `cancelled`, and Restart to update passes again. Does
+/// nothing when no repair downloads. Granted to `main` alone and admitted from `main` alone
+/// (`bridge/admit.rs`), as `repair_install` is.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn repair_cancel<R: Runtime>(webview: Webview<R>) -> Result<(), HostError> {
+    crate::ipc::timed("repair_cancel", async {
+        crate::bridge::admit_repair(webview.label())?;
+        crate::update::repair::cancel();
+        Ok(())
     })
     .await
 }

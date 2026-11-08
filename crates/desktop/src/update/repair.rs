@@ -65,6 +65,53 @@ pub(crate) enum RepairStep {
     Launching,
 }
 
+/// How a repair that was not refused ended, as `repair_install` answers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    not(any(test, windows)),
+    expect(dead_code, reason = "only Windows runs a repair")
+)]
+pub(crate) enum RepairEnd {
+    /// The installer started and the app is quitting: no window hears this.
+    Started,
+    /// `repair_cancel` stopped the download; the attempt is deleted, and the card goes back to
+    /// its normal state.
+    Cancelled,
+}
+
+/// The running repair's cancel, while it downloads: `repair_cancel` sends on it.
+static CANCEL: Mutex<Option<futures::channel::oneshot::Sender<()>>> = Mutex::new(None);
+
+/// Stops the running repair's download, if one runs (`repair_cancel`): its attempt and marker
+/// are deleted and it answers `Cancelled`. Too late once the download is checked.
+pub(crate) fn cancel() {
+    if let Some(cancel) = crate::bridge::lock(&CANCEL).take() {
+        // The repair ended meanwhile: nothing to stop.
+        let _unheard = cancel.send(());
+    }
+}
+
+/// A repair's cancel: resolves when `repair_cancel` sends, never when its sender is dropped.
+#[cfg(windows)]
+async fn cancelled(receiver: futures::channel::oneshot::Receiver<()>) {
+    if receiver.await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// A repair's answer, and its end: [`RUNNING`] cleared unless the installer started (the app
+/// is quitting), so `InstallUpdate` passes again after a cancel, a refusal or a failure.
+#[cfg(any(test, windows))]
+fn finish(result: Result<RepairEnd, flow::Refusal>) -> Result<RepairEnd, HostError> {
+    drop(crate::bridge::lock(&CANCEL).take());
+    if result != Ok(RepairEnd::Started) {
+        RUNNING.store(false, Ordering::Release);
+    }
+    result.map_err(flow::Refusal::error)
+}
+
 /// Set while the repair destroys the windows: `lib.rs` then holds the exit that closing the last
 /// window asks for, so a failed start can bring the main window back.
 pub(crate) static HANDING_OVER: AtomicBool = AtomicBool::new(false);
@@ -259,7 +306,7 @@ pub(crate) async fn start<R: Runtime>(
     webview: &Webview<R>,
     bridge: &Bridge,
     steps: Channel<RepairStep>,
-) -> Result<(), HostError> {
+) -> Result<RepairEnd, HostError> {
     use clauseo_protocol::{ErrorCode, HostQuery, QueryResult};
     use tauri::Manager as _;
 
@@ -294,10 +341,7 @@ pub(crate) async fn start<R: Runtime>(
             Err(flow::Refusal::NotEligible)
         }
     };
-    if result.is_err() {
-        RUNNING.store(false, Ordering::Release);
-    }
-    result.map_err(flow::Refusal::error)
+    finish(result)
 }
 
 /// Runs `plan` over the app's seams, on a blocking thread: the hand-over sleeps and waits.
@@ -306,7 +350,7 @@ async fn run<R: Runtime>(
     app: tauri::AppHandle<R>,
     plan: plan::Plan,
     steps: Channel<RepairStep>,
-) -> Result<(), flow::Refusal> {
+) -> Result<RepairEnd, flow::Refusal> {
     use tauri::Manager as _;
     let Some(state) = app.try_state::<std::sync::Arc<RepairState>>() else {
         return Err(flow::Refusal::NotEligible);
@@ -319,8 +363,16 @@ async fn run<R: Runtime>(
         app: app.clone(),
     };
     let client = client().map_err(|()| flow::Refusal::DownloadFailed)?;
+    let (cancel, receiver) = futures::channel::oneshot::channel();
+    *crate::bridge::lock(&CANCEL) = Some(cancel);
     tauri::async_runtime::spawn_blocking(move || {
-        tauri::async_runtime::block_on(flow::run(&seams, &client, &plan))
+        tauri::async_runtime::block_on(flow::run(
+            &seams,
+            &client,
+            &plan,
+            flow::DOWNLOAD_BUDGET,
+            cancelled(receiver),
+        ))
     })
     .await
     // A panicked repair thread: release builds abort on panic, so only a dev build gets here.
@@ -333,7 +385,7 @@ pub(crate) fn start<R: Runtime>(
     _webview: &Webview<R>,
     _bridge: &Bridge,
     _steps: Channel<RepairStep>,
-) -> std::future::Ready<Result<(), HostError>> {
+) -> std::future::Ready<Result<RepairEnd, HostError>> {
     std::future::ready(Err(no_repair()))
 }
 

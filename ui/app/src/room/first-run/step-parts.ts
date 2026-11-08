@@ -67,6 +67,7 @@ export function repairOf(
     page: parts.firmInstall(state.view, state.managedBy) ? null : parts.repairPage(display),
     run: {
       onRepair: run.onRepair,
+      onCancel: run.onCancel,
       wait: run.wait,
       notes: [
         ...(run.failed === null ? [] : [run.failed]),

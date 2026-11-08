@@ -3,6 +3,8 @@
 //! HTTPS only, redirects included, and its timeouts), so a repair reaches the release the way an
 //! update does.
 
+use std::time::Instant;
+
 use url::Url;
 
 /// The largest `.sig` read: Tauri's is base64 of a few hundred bytes of minisign text.
@@ -20,13 +22,17 @@ pub(super) const INSTALLER_MAX: u64 = 64 * 1024 * 1024;
 pub(super) struct Failed(pub(super) &'static str);
 
 /// The `.sig` at `url`: its text, trimmed, at most [`SIGNATURE_MAX`] bytes.
-pub(super) async fn signature(client: &reqwest::Client, url: &Url) -> Result<String, Failed> {
-    let mut response = get(client, url).await?;
+pub(super) async fn signature(
+    client: &reqwest::Client,
+    url: &Url,
+    deadline: Instant,
+) -> Result<String, Failed> {
+    let mut response = get(client, url, deadline).await?;
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_failed| Failed("the signature's download broke off"))?
+        .map_err(|error| broke_off(&error, "the signature's download broke off"))?
     {
         body.extend_from_slice(&chunk);
         if body.len() > SIGNATURE_MAX {
@@ -42,14 +48,15 @@ pub(super) async fn signature(client: &reqwest::Client, url: &Url) -> Result<Str
 pub(super) async fn installer(
     client: &reqwest::Client,
     url: &Url,
+    deadline: Instant,
     mut write: impl FnMut(&[u8]) -> std::io::Result<()>,
 ) -> Result<u64, Failed> {
-    let mut response = get(client, url).await?;
+    let mut response = get(client, url, deadline).await?;
     let mut written = 0u64;
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_failed| Failed("the installer's download broke off"))?
+        .map_err(|error| broke_off(&error, "the installer's download broke off"))?
     {
         written = written.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
         if written > INSTALLER_MAX {
@@ -60,17 +67,43 @@ pub(super) async fn installer(
     Ok(written)
 }
 
-/// A GET of `url` that answered a success status.
-async fn get(client: &reqwest::Client, url: &Url) -> Result<reqwest::Response, Failed> {
-    let response = client.get(url.clone()).send().await.map_err(|error| {
-        Failed(if error.is_timeout() {
-            "the request timed out"
-        } else if error.is_connect() {
-            "the release could not be reached"
-        } else {
-            "the request failed"
-        })
-    })?;
+/// The line for a body that stopped: past the deadline, or `line`.
+fn broke_off(error: &reqwest::Error, line: &'static str) -> Failed {
+    Failed(if error.is_timeout() {
+        PAST_DEADLINE
+    } else {
+        line
+    })
+}
+
+/// The line for a download past its deadline.
+const PAST_DEADLINE: &str = "the download took longer than its deadline";
+
+/// A GET of `url` that answered a success status, the whole request (connection, headers and
+/// body) bounded by `deadline`.
+async fn get(
+    client: &reqwest::Client,
+    url: &Url,
+    deadline: Instant,
+) -> Result<reqwest::Response, Failed> {
+    let left = deadline.saturating_duration_since(crate::open::now());
+    if left.is_zero() {
+        return Err(Failed(PAST_DEADLINE));
+    }
+    let response = client
+        .get(url.clone())
+        .timeout(left)
+        .send()
+        .await
+        .map_err(|error| {
+            Failed(if error.is_timeout() {
+                PAST_DEADLINE
+            } else if error.is_connect() {
+                "the release could not be reached"
+            } else {
+                "the request failed"
+            })
+        })?;
     if !response.status().is_success() {
         return Err(Failed("the release answered an error status"));
     }

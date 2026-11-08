@@ -287,6 +287,7 @@ pub fn run() -> tauri::Result<()> {
             commands::quit_app,
             commands::page_marks,
             commands::repair_install,
+            commands::repair_cancel,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

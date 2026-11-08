@@ -4,8 +4,8 @@
 // step is the repair: the cause's line, the repair's line, "Get the installer" on a per-user
 // install (it opens the installed version's release page; the caller's act), and "Not now". Where
 // the app can fetch the installer itself, "Download and run the installer again" takes the act's
-// place (disabled, with its waiting line, while it runs; a refusal's words under the lines), and Get
-// the installer moves beside Not now as the fallback. Where
+// place (disabled, with its waiting line while it runs, and Cancel beside it while it downloads; a
+// refusal's words under the lines), and Get the installer moves beside Not now as the fallback. Where
 // the set-up is due with the copy there (after an in-app Remove) and asks an administrator, it says
 // Windows asks, and the "Unknown publisher" line before Windows' prompt: this screen is the confirm
 // (Ruled, 1). "Set up the Safe workspace" sends the set-up, and the line waits in the act's place
@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { useDisplay } from "../../lib/display.ts";
 import { pw, INSTALLER_CLOSE } from "../../lib/words-protection.ts";
 import { tbt } from "../../lib/words-toolbar.ts";
+import { ui } from "../../lib/words-ui.ts";
 import { Button } from "../../ui/button.tsx";
 import { NotProtectedMark } from "../not-protected.tsx";
 import { Say } from "../say.tsx";
@@ -64,27 +65,40 @@ const Act = ({ children, act }: { children: ReactNode; act?: ReactNode }) => (
   </div>
 );
 
-/** "Download and run the installer again": the act's button, disabled and busy while it runs. */
+/** "Download and run the installer again": the act's button, disabled and busy while it runs, and
+ * "Cancel" beside it while the download runs. */
 const RepairAgain = ({
   words,
   onRepair,
   busy,
+  onCancel,
 }: {
   words: WorkspaceWords;
   onRepair: () => void;
   busy: boolean;
-}) => (
-  <Button
-    kind="tone"
-    className="room-field-ask"
-    onClick={onRepair}
-    disabled={busy}
-    aria-busy={busy}
-    data-testid="protection-repair-again"
-  >
-    <span className="deva-nudge">{words.repairAgain}</span>
-  </Button>
-);
+  onCancel: (() => void) | undefined;
+}) => {
+  const { lang } = useDisplay();
+  return (
+    <>
+      <Button
+        kind="tone"
+        className="room-field-ask"
+        onClick={onRepair}
+        disabled={busy}
+        aria-busy={busy}
+        data-testid="protection-repair-again"
+      >
+        <span className="deva-nudge">{words.repairAgain}</span>
+      </Button>
+      {onCancel !== undefined && (
+        <Button kind="quiet" size="small" onClick={onCancel} data-testid="protection-repair-cancel">
+          <span className="deva-nudge">{ui(lang, "Cancel")}</span>
+        </Button>
+      )}
+    </>
+  );
+};
 
 /** The step, in the gate's place: it holds the composer's field until it has an outcome. */
 export function WorkspaceStep({
@@ -104,13 +118,18 @@ export function WorkspaceStep({
   onGetInstaller?: (() => void) | undefined;
   /** The in-app repair, for "repair": its press (without it, no button), its waiting line while it
    * runs, and the lines after the repair's (a refusal's words, the installer that didn't finish). */
-  repairRun?: { onRepair?: (() => void) | undefined; wait?: string | null; notes?: string[] };
+  repairRun?: {
+    onRepair?: (() => void) | undefined;
+    onCancel?: (() => void) | undefined;
+    wait?: string | null;
+    notes?: string[];
+  };
   /** Sends the set-up, once. */
   onSetUp: () => void;
   onNotNow: () => void;
 }) {
   const { lang } = useDisplay();
-  const { onRepair, wait = null, notes = [] } = repairRun;
+  const { onRepair, onCancel, wait = null, notes = [] } = repairRun;
   const installer =
     onGetInstaller === undefined ? null : (
       <Button
@@ -131,7 +150,12 @@ export function WorkspaceStep({
             onRepair === undefined ? (
               (installer ?? undefined)
             ) : (
-              <RepairAgain words={words} onRepair={onRepair} busy={wait !== null} />
+              <RepairAgain
+                words={words}
+                onRepair={onRepair}
+                busy={wait !== null}
+                onCancel={onCancel}
+              />
             )
           }
         >

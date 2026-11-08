@@ -41,6 +41,8 @@ export type RepairState = {
   failed: string | null;
   /** Whether this run has already brought the lawyer to the card or the set-up after `note`. */
   landed: boolean;
+  /** Whether this window's Cancel has been sent and its answer is still due, so a second press sends nothing. */
+  cancelling: boolean;
 };
 
 export type ProtectionState = {
@@ -73,7 +75,14 @@ const EMPTY: ProtectionState = {
   failed: null,
   step: null,
   managedBy: undefined,
-  repair: { available: false, note: null, step: null, failed: null, landed: false },
+  repair: {
+    available: false,
+    note: null,
+    step: null,
+    failed: null,
+    landed: false,
+    cancelling: false,
+  },
 };
 
 /** The repair's code for an installer that didn't start. */

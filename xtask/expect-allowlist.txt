@@ -62,6 +62,7 @@ crates/desktop/src/update/install_kind.rs writable unsafe_code
 crates/desktop/src/update/install_kind/windows.rs - unsafe_code
 crates/desktop/src/update/arch.rs native_is_arm64 unsafe_code
 crates/desktop/src/update/repair.rs RepairStep dead_code
+crates/desktop/src/update/repair.rs RepairEnd dead_code
 crates/desktop/src/update/repair.rs RepairNote::LaunchFailed dead_code
 crates/desktop/src/update/repair.rs now_secs clippy::disallowed_methods
 crates/desktop/src/update/repair/app.rs - clippy::disallowed_methods

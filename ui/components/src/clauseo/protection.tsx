@@ -72,6 +72,8 @@ type NoteProps = {
   onRepair?: (() => void) | undefined;
   /** Optional: the repair's waiting line while it runs; the button stays, disabled and busy. */
   repairWait?: string | null;
+  /** Optional: "Cancel" beside the busy repair button, while the download runs; without it, none. */
+  onCancel?: (() => void) | undefined;
 };
 
 /** The cause's own lines, in the page's language. */
@@ -165,8 +167,8 @@ const retryLabel = (
         ? pw(w.lang, "Add room")
         : w.v("Try again");
 
-/** The note's buttons: Get the installer, the in-app repair, the retry (or its waiting line), and
- * Understood, the act, last. */
+/** The note's buttons: Get the installer, the in-app repair (and its Cancel while it downloads), the
+ * retry (or its waiting line), and Understood, the act, last. */
 function NoteActions({
   w,
   retry,
@@ -175,7 +177,8 @@ function NoteActions({
   onGetInstaller,
   onRepair,
   repairWait,
-}: Pick<NoteProps, "onProtect" | "onGetInstaller" | "onRepair"> & {
+  onCancel,
+}: Pick<NoteProps, "onProtect" | "onGetInstaller" | "onRepair" | "onCancel"> & {
   w: ReturnType<typeof useVersionWords>;
   retry: string | null;
   waiting: string | null;
@@ -197,6 +200,11 @@ function NoteActions({
           data-testid="protection-repair-again"
         >
           <span className="deva-nudge">{pw(w.lang, "Download and run the installer again")}</span>
+        </Button>
+      )}
+      {onCancel !== undefined && (
+        <Button kind="quiet" onClick={onCancel} data-testid="protection-repair-cancel">
+          <span className="deva-nudge">{w.ui("Cancel")}</span>
         </Button>
       )}
       {retry !== null &&
@@ -231,6 +239,7 @@ export function NotProtectedNote({
   onGetInstaller,
   onRepair,
   repairWait = null,
+  onCancel,
 }: NoteProps) {
   const w = useVersionWords();
   const { platform } = useDisplay();
@@ -319,6 +328,7 @@ export function NotProtectedNote({
             onGetInstaller={onGetInstaller}
             onRepair={onRepair}
             repairWait={repairWait}
+            onCancel={onCancel}
           />
         }
       />

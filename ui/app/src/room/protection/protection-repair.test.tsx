@@ -68,6 +68,7 @@ const openNote = async () => {
   await settle();
 };
 const AGAIN = "Download and run the installer again";
+const cancelButton = () => inBody("protection-repair-cancel") as HTMLButtonElement | null;
 
 test("idle, then downloading (disabled and busy), then Windows' prompt; a second press starts nothing", async () => {
   const d = driven();
@@ -109,6 +110,59 @@ test("idle, then downloading (disabled and busy), then Windows' prompt; a second
   );
   expect(repairs()).toBe(1);
   expect(h!.transport.protectionCommands()).toEqual([]);
+});
+
+test("Cancel beside the busy button while the installer downloads; none while Windows' prompt is up, nor idle", async () => {
+  const d = driven();
+  await mount(d.repair);
+  await openNote();
+  expect(cancelButton()).toBeNull();
+  await h!.click(inBody("protection-repair-again"));
+  await settle();
+  expect(cancelButton()?.textContent).toBe("Cancel");
+  await act(async () => d.runs[0]!.step("downloading"));
+  await settle();
+  expect(cancelButton()).not.toBeNull();
+  await act(async () => d.runs[0]!.step("launching"));
+  await settle();
+  expect(cancelButton()).toBeNull();
+  expect(inBody("protection-repair-wait")?.textContent).toBe(
+    pw("en", "Windows will ask for permission. Choose Yes."),
+  );
+  expect(h!.transport.only("repair_cancel")).toEqual([]);
+});
+
+test("Cancel sends repair_cancel once; the cancelled answer leaves the card idle, with no error line", async () => {
+  const d = driven();
+  await mount(d.repair);
+  await openNote();
+  await h!.click(inBody("protection-repair-again"));
+  await settle();
+  await act(async () => d.runs[0]!.step("downloading"));
+  await settle();
+  const cancel = cancelButton()!;
+  // two presses before the answer: the second one sends nothing
+  await act(async () => {
+    cancel.click();
+    cancel.click();
+  });
+  await settle();
+  expect(h!.transport.only("repair_cancel")).toHaveLength(1);
+  expect(repairs()).toBe(1);
+  // the run answered "cancelled": the card is idle again
+  expect(cancelButton()).toBeNull();
+  expect(inBody("protection-repair-wait")).toBeNull();
+  expect(inBody("protection-failed")).toBeNull();
+  expect(inBody("protection-installer")).not.toBeNull();
+  const again = inBody("protection-repair-again") as HTMLButtonElement;
+  expect(again.disabled).toBe(false);
+  expect(again.getAttribute("aria-busy")).toBe("false");
+  await h!.click(again);
+  await settle();
+  expect(repairs()).toBe(2);
+  expect(inBody("protection-repair-wait")?.textContent).toBe(
+    pw("en", "Downloading the installer…"),
+  );
 });
 
 test.each([

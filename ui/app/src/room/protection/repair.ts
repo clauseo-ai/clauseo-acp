@@ -5,11 +5,12 @@
 // installer…", then "Windows will ask for permission. Choose Yes."; then the desktop closes every
 // window, starts the installer and quits, so nothing more is drawn. A refusal says its code's words,
 // and Get the installer (installer.ts) stays beside it, with the button offered again. A firm's
-// install, a build without the repair and the settings window keep today's repair as it is. After
-// the installer, display_info's `repair` brings the lawyer back once: to the card while the copy is
-// still missing ("The installer didn't finish…"), or to the set-up once it is there; a launch that
-// failed, with the window built again, says its code's words. The run lives in the window's
-// protection store (store/protection.ts), so the note and the step share it.
+// install, a build without the repair and the settings window keep today's repair as it is. While it
+// downloads, Cancel beside the button stops it (desktop's repair_cancel), and the card goes back to
+// idle with no line. After the installer, display_info's `repair` brings the lawyer back once: to the
+// card while the copy is still missing ("The installer didn't finish…"), or to the set-up once it is
+// there; a launch that failed, with the window built again, says its code's words. The run lives in
+// the window's protection store (store/protection.ts), so the note and the step share it.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { protectionErrorWords, pw } from "@clauseo/components/lib/words-protection.ts";
 import type { ProtectionState, ProtectionStore, RepairState } from "../../store/protection.ts";
@@ -34,16 +35,34 @@ export const repairOffered = (
   !firmInstall(state.view, state.managedBy);
 
 /** Runs the repair once: a press while one runs sends nothing. Each step lands in the store; a
- * refusal leaves its code. Once the installer starts the window is gone and nothing answers. */
+ * refusal leaves its code. Once the installer starts the window is gone and nothing answers. A
+ * cancelled run ("cancelled", the card's Cancel) goes back to idle with no line at all. */
 export async function runRepair(transport: HostTransport, store: ProtectionStore): Promise<void> {
   const send = transport.repairInstall;
   if (send === undefined || store.state().repair.step !== null) return;
   setRepair(store, { step: "starting", failed: null });
   try {
     await send.call(transport, (step) => setRepair(store, { step }));
-    setRepair(store, { step: null });
+    setRepair(store, { step: null, cancelling: false });
   } catch (thrown) {
-    setRepair(store, { step: null, failed: toHostError(thrown).code });
+    setRepair(store, { step: null, cancelling: false, failed: toHostError(thrown).code });
+  }
+}
+
+/** Stops the download (the card's Cancel). Only while it downloads, and once: a press while the
+ * answer is due sends nothing. A refused cancel (nothing downloads) leaves the run as it is. */
+export async function cancelRepair(
+  transport: HostTransport,
+  store: ProtectionStore,
+): Promise<void> {
+  const send = transport.repairCancel;
+  const { step, cancelling } = store.state().repair;
+  if (send === undefined || cancelling || (step !== "starting" && step !== "downloading")) return;
+  setRepair(store, { cancelling: true });
+  try {
+    await send.call(transport);
+  } catch {
+    setRepair(store, { cancelling: false });
   }
 }
 
@@ -51,6 +70,9 @@ export async function runRepair(transport: HostTransport, store: ProtectionStore
 export type RepairView = {
   /** "Download and run the installer again" shows, with this press; undefined for none. */
   onRepair: (() => void) | undefined;
+  /** "Cancel" beside the busy button while the download runs (not while Windows' prompt is up);
+   * undefined for none. */
+  onCancel: (() => void) | undefined;
   /** The waiting line while it runs (the button disabled); null when none runs. */
   wait: string | null;
   /** The last refusal in its code's words; null for none. */
@@ -68,12 +90,17 @@ export function repairView(
   state: ProtectionState,
   cause: Cause | null,
 ): RepairView {
-  const { step, failed, note } = state.repair;
+  const { step, failed, note, cancelling } = state.repair;
   const missing = needsInstaller(cause);
+  const downloading = step === "starting" || step === "downloading";
   return {
     onRepair: repairOffered(transport, state, cause)
       ? () => void runRepair(transport, store)
       : undefined,
+    onCancel:
+      transport.repairCancel !== undefined && downloading && !cancelling
+        ? () => void cancelRepair(transport, store)
+        : undefined,
     wait:
       step === null
         ? null

@@ -33,6 +33,7 @@ import type {
   PermissionRequestId,
   PickedFolder,
   QueryResult,
+  RepairEnd,
   RepairStep,
   RevealTarget,
   SettingsSection,
@@ -388,8 +389,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   async quitApp(): Promise<void> {
     await call(commands.quitApp());
   }
-  async repairInstall(onStep: (step: RepairStep) => void): Promise<void> {
-    await call(commands.repairInstall(new Channel<RepairStep>(onStep)));
+  async repairInstall(onStep: (step: RepairStep) => void): Promise<RepairEnd> {
+    return call(commands.repairInstall(new Channel<RepairStep>(onStep)));
+  }
+  async repairCancel(): Promise<void> {
+    await call(commands.repairCancel());
   }
   async openFile(file: FileRefId): Promise<OpenedFile> {
     return call(commands.openFile(file));

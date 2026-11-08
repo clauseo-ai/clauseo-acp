@@ -48,6 +48,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             quit_app,
             page_marks,
             repair_install,
+            repair_cancel,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

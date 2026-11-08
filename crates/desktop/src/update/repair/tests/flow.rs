@@ -16,9 +16,14 @@ use std::path::{Path, PathBuf};
 use clauseo_agents::testing::TestRegistry;
 
 use super::super::super::tests::file_binding::{TestKey, comment};
-use super::super::RepairStep;
-use super::super::flow::{self, ARGS, Refusal, Seams, Staged};
+use std::future::Future;
+use std::time::Duration;
+
+use clauseo_agents::testing::Behaviour;
+
+use super::super::flow::{self, ARGS, DOWNLOAD_BUDGET, Refusal, Seams, Staged};
 use super::super::plan::{self, Inputs, Plan};
+use super::super::{RepairEnd, RepairStep};
 use super::{VERSION, inputs};
 use crate::commands::ReleaseMode;
 use crate::test_support::Scratch;
@@ -219,10 +224,28 @@ fn client(registry: &TestRegistry) -> reqwest::Client {
         .unwrap()
 }
 
-/// Runs the flow of `planned` against `registry` over `stub`.
-fn run(stub: &Stub, registry: &TestRegistry, planned: &Plan) -> Result<(), Refusal> {
+/// Runs the flow of `planned` against `registry` over `stub`, with the real budget and no
+/// cancel.
+fn run(stub: &Stub, registry: &TestRegistry, planned: &Plan) -> Result<RepairEnd, Refusal> {
+    run_with(
+        stub,
+        registry,
+        planned,
+        DOWNLOAD_BUDGET,
+        std::future::pending(),
+    )
+}
+
+/// [`run`] with `budget` for the download and `cancel`.
+fn run_with(
+    stub: &Stub,
+    registry: &TestRegistry,
+    planned: &Plan,
+    budget: Duration,
+    cancel: impl Future<Output = ()>,
+) -> Result<RepairEnd, Refusal> {
     let client = client(registry);
-    tauri::async_runtime::block_on(flow::run(stub, &client, planned))
+    tauri::async_runtime::block_on(flow::run(stub, &client, planned, budget, cancel))
 }
 
 /// What a refusal before the launch ran: the attempt made and discarded, nothing marked,
@@ -243,7 +266,7 @@ fn this_versions_installer_is_checked_then_launched_after_the_windows_go() {
     let scratch = Scratch::new("repair-accepted", &[]);
     let stub = Stub::new(scratch.path());
     let (registry, planned) = release(X64, VERSION);
-    assert_eq!(run(&stub, &registry, &planned), Ok(()));
+    assert_eq!(run(&stub, &registry, &planned), Ok(RepairEnd::Started));
     assert_eq!(ARGS, ["/CLAUSEO_REPAIR"]);
     assert_eq!(
         stub.events(),
@@ -403,7 +426,7 @@ fn a_release_build_fetches_from_the_v_tag() {
     let scratch = Scratch::new("repair-release-tag", &[]);
     let stub = Stub::new(scratch.path());
     let (registry, planned) = release_in(ReleaseMode::Release, X64, VERSION);
-    assert_eq!(run(&stub, &registry, &planned), Ok(()));
+    assert_eq!(run(&stub, &registry, &planned), Ok(RepairEnd::Started));
     let fetched: Vec<_> = registry
         .requests()
         .into_iter()
@@ -460,6 +483,59 @@ fn a_quit_meanwhile_launches_nothing() {
             "announce Launching",
             "mark",
             "hand over",
+            "discard",
+            "unmark",
+        ]
+    );
+    assert_eq!(stub.folders(), 0);
+}
+
+/// A download that stalls past its budget (here 500 ms; the app's is 10 minutes for the `.sig` and
+/// the installer together) is given up as `repair.download_failed`, and the attempt deleted.
+#[test]
+fn a_download_past_its_deadline_is_given_up() {
+    let scratch = Scratch::new("repair-deadline", &[]);
+    let stub = Stub::new(scratch.path());
+    let (registry, planned) = release(X64, VERSION);
+    registry.then(planned.installer.path(), Behaviour::Stall);
+    let ended = run_with(
+        &stub,
+        &registry,
+        &planned,
+        Duration::from_millis(500),
+        std::future::pending(),
+    );
+    registry.release();
+    assert_eq!(ended, Err(Refusal::DownloadFailed));
+    assert_eq!(stub.events(), refused_before_launch(X64));
+    assert_eq!(stub.folders(), 0);
+}
+
+/// Cancel during the download stops it at once: the attempt and the marker are deleted,
+/// nothing is checked or launched, and the repair answers `Cancelled`.
+#[test]
+fn cancel_mid_download_deletes_the_attempt_and_launches_nothing() {
+    let scratch = Scratch::new("repair-cancel", &[]);
+    let stub = Stub::new(scratch.path());
+    let (registry, planned) = release(X64, VERSION);
+    registry.then(planned.installer.path(), Behaviour::Stall);
+    let (cancel, receiver) = futures::channel::oneshot::channel::<()>();
+    let ended = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            registry.wait_for_stalls(1);
+            cancel.send(()).unwrap();
+        });
+        run_with(&stub, &registry, &planned, DOWNLOAD_BUDGET, async {
+            receiver.await.unwrap();
+        })
+    });
+    registry.release();
+    assert_eq!(ended, Ok(RepairEnd::Cancelled));
+    assert_eq!(
+        stub.events(),
+        [
+            "announce Downloading",
+            "stage Clauseo_0.4.1_x64-setup.exe",
             "discard",
             "unmark",
         ]

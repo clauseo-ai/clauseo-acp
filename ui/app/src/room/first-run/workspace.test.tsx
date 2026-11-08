@@ -367,6 +367,33 @@ test("admin_copy_missing where the app fetches the installer: Download and run t
   expect(t.protectionCommands()).toEqual([]);
 });
 
+test("admin_copy_missing: Cancel while the installer downloads; the cancelled answer brings the step back to idle, with no line", async () => {
+  const s = scripted(PROT.missing);
+  s.host.repair = {
+    available: true,
+    run: (step) => {
+      step("downloading");
+      return new Promise<void>(() => {});
+    },
+  };
+  const t = await mount(s.host);
+  await signInNow(t);
+  await press(byId("protection-repair-again"));
+  await settle();
+  expect(byId("protection-repair-wait")?.textContent).toBe(pw("en", "Downloading the installer…"));
+  await press(byId("protection-repair-cancel"));
+  await settle();
+  expect(t.only("repair_cancel")).toHaveLength(1);
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair-cancel")).toBeNull();
+  expect(byId("protection-repair-wait")).toBeNull();
+  expect(byId("protection-repair-note")).toBeNull();
+  expect(byId("protection-installer")).not.toBeNull();
+  expect((byId("protection-repair-again") as HTMLButtonElement).disabled).toBe(false);
+  expect(t.only("repair_install")).toHaveLength(1);
+  expect(t.protectionCommands()).toEqual([]);
+});
+
 test("admin_copy_missing with repair_available false: Get the installer as today, and no new button", async () => {
   const s = scripted(PROT.missing);
   s.host.repair = { available: false };

@@ -10,20 +10,26 @@
 //!   loader opens it without sharing writes), so writing ends with two reopenings of that handle,
 //!   never of the path (`ReOpenFile`): a read handle sharing reads and writes (its share mode
 //!   must admit the write handle still open), the write handle closed, then a read handle
-//!   sharing reads only, and the middle one closed. Opening that last one fails if any writer
-//!   holds the file, and once it is open none can, nor rename or delete it. A writer that came
-//!   and went in between changed bytes the check then reads: the check reads back through this
-//!   last handle.
-//! - **The start**: `ShellExecuteExW` "open" on the file with [`super::flow::ARGS`], waiting
-//!   until the start is done (`SEE_MASK_NOASYNC`), on a thread with COM initialised as the shell
-//!   asks. Not the updater plugin's install: that takes the bytes and writes its own copy to the
-//!   temporary folder, runs it passive with `/UPDATE` (which skips the admin copy), and exits the
-//!   process at once. The installer is `asInvoker`; its own elevated step raises the one UAC
-//!   prompt. The handle is closed after the call returns.
+//!   sharing reads only, and the middle one closed. Opening that last one fails if a writer
+//!   handle is still open, and once it is open no new writer handle, rename or delete gets in.
+//!   It does not undo what the middle window let in: a process of the same user can open the
+//!   file for writing there, map it writable and close its handle, and that mapping survives the
+//!   seal. What catches altered bytes is the read-back through this last handle, which the check
+//!   verifies; a change after it is the same-user residual decision 0049 accepts ("What stays
+//!   open"), as is the gap before the installer opens its own image.
+//! - **The start**: `CreateProcessW` with the sealed path as the application name and
+//!   `"<path>" /CLAUSEO_REPAIR` as the command line: no shell, so no file-type lookup (an
+//!   `HKCU\Software\Classes\exefile` override can't redirect it), no search path, and no handle
+//!   inherited, started in `%SystemRoot%\System32`. The installer is `asInvoker`; its own elevated
+//!   step raises the one UAC prompt. One that asks to start elevated (`ERROR_ELEVATION_REQUIRED`)
+//!   is a failed launch, never retried through the shell. Not the updater plugin's install: that
+//!   takes the bytes and writes its own copy to the temporary folder, runs it passive with
+//!   `/UPDATE` (which skips the admin copy), and exits the process at once. The handle is closed
+//!   after the call returns.
 
 #![expect(
     unsafe_code,
-    reason = "FFI to CreateDirectoryW with a security descriptor, ReOpenFile and ShellExecuteExW"
+    reason = "FFI to CreateDirectoryW with a security descriptor, ReOpenFile and CreateProcessW"
 )]
 #![expect(
     clippy::disallowed_methods,
@@ -34,11 +40,12 @@
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
+use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
-    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
+    CloseHandle, ERROR_ELEVATION_REQUIRED, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
 };
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -51,15 +58,11 @@ use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES,
     FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, ReOpenFile,
 };
-use windows::Win32::System::Com::{
-    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+use windows::Win32::System::Threading::{
+    CreateProcessW, GetCurrentProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
+    PROCESS_INFORMATION, STARTUPINFOW,
 };
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows::Win32::UI::Shell::{
-    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW,
-};
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::core::{HSTRING, PCWSTR, PWSTR, w};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::flow::Staged;
 use super::sweep::PREFIX;
@@ -109,16 +112,16 @@ impl Stage {
         if self.held.is_none() {
             return Err(io::Error::other("the installer is not held"));
         }
-        let exe = HSTRING::from(self.exe.as_os_str());
-        let folder = HSTRING::from(self.folder.as_os_str());
-        let parameters = HSTRING::from(args.join(" "));
-        // The shell wants COM on the calling thread: a thread of its own, joined.
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| shell_open(&exe, &parameters, &folder))
-                .join()
-                .unwrap_or_else(|_panicked| Err(io::Error::other("the start panicked")))
-        })
+        let started = create_process(&self.exe, args);
+        if let Err(error) = &started
+            && error.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED.0.cast_signed())
+        {
+            tracing::warn!(
+                target: super::super::install::LIFECYCLE,
+                "repair: the installer asked to start elevated; not started"
+            );
+        }
+        started
     }
 
     /// Closes the handle and deletes the folder. The folder is ours and fresh: no link in it.
@@ -221,28 +224,72 @@ fn owned(handle: HANDLE) -> File {
     unsafe { File::from_raw_handle(handle.0) }
 }
 
-/// `ShellExecuteExW` "open" on `exe` with `parameters`, in `folder`, COM initialised for the
-/// call. Returns once the start is done.
-fn shell_open(exe: &HSTRING, parameters: &HSTRING, folder: &HSTRING) -> io::Result<()> {
-    // SAFETY: no reserved pointer; balanced by CoUninitialize below when it succeeded.
-    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
-    let mut info = SHELLEXECUTEINFOW {
-        cbSize: u32::try_from(size_of::<SHELLEXECUTEINFOW>()).unwrap_or(u32::MAX),
-        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
-        lpVerb: w!("open"),
-        lpFile: PCWSTR(exe.as_ptr()),
-        lpParameters: PCWSTR(parameters.as_ptr()),
-        lpDirectory: PCWSTR(folder.as_ptr()),
-        nShow: SW_SHOWNORMAL.0,
+/// `CreateProcessW` on `exe` (the application name, the verified path: no search, no shell)
+/// with the command line `"<exe>" <args>`, inheriting no handle, its working folder
+/// `%SystemRoot%\System32` (`GetSystemDirectoryW`) rather than the attempt's, so nothing it
+/// loads by a relative name comes from beside it. Returns once the process exists; its handles
+/// are closed at once, as nothing waits for it.
+fn create_process(exe: &Path, args: &[&str]) -> io::Result<()> {
+    let application = HSTRING::from(exe.as_os_str());
+    let directory = HSTRING::from_wide(&system_directory()?);
+    // CreateProcessW may write to the command line: a buffer of our own, NUL-terminated.
+    let mut line: Vec<u16> = std::iter::once(u16::from(b'"'))
+        .chain(exe.as_os_str().encode_wide())
+        .chain(std::iter::once(u16::from(b'"')))
+        .chain(
+            args.iter()
+                .flat_map(|arg| std::iter::once(u16::from(b' ')).chain(arg.encode_utf16())),
+        )
+        .chain(std::iter::once(0))
+        .collect();
+    let startup = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(u32::MAX),
         ..Default::default()
     };
-    // SAFETY: `info` and the strings it points at are alive for the call.
-    let started = unsafe { ShellExecuteExW(&raw mut info) }.map_err(io::Error::from);
-    if com.is_ok() {
-        // SAFETY: balances the CoInitializeEx above on this thread.
-        unsafe { CoUninitialize() };
+    let mut process = PROCESS_INFORMATION::default();
+    // SAFETY: the strings and the command line buffer are alive and NUL-terminated for the call;
+    // `startup` and `process` are live; no handle is inherited.
+    unsafe {
+        CreateProcessW(
+            &application,
+            Some(PWSTR(line.as_mut_ptr())),
+            None,
+            None,
+            false,
+            PROCESS_CREATION_FLAGS(0),
+            None,
+            &directory,
+            &raw const startup,
+            &raw mut process,
+        )
     }
-    started
+    .map_err(io::Error::from)?;
+    // SAFETY: both handles came from CreateProcessW above and are closed once.
+    unsafe {
+        drop(CloseHandle(process.hThread));
+        drop(CloseHandle(process.hProcess));
+    }
+    Ok(())
+}
+
+/// `%SystemRoot%\System32`, as `GetSystemDirectoryW` gives it (no environment variable read).
+fn system_directory() -> io::Result<Vec<u16>> {
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = vec![0u16; 260];
+    loop {
+        // SAFETY: `buffer` is a live, writable slice for the call.
+        let written = unsafe { GetSystemDirectoryW(Some(&mut buffer)) };
+        let written = usize::try_from(written).unwrap_or(usize::MAX);
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if written < buffer.len() {
+            buffer.truncate(written);
+            return Ok(buffer);
+        }
+        // Too small: `written` is the size wanted, its NUL included.
+        buffer.resize(written, 0);
+    }
 }
 
 /// Whether a window of Clauseo's main window class (`lib.rs`'s `MAIN_WINDOW_CLASS`) exists in

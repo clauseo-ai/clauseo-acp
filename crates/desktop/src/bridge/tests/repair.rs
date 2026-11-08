@@ -1,9 +1,12 @@
-//! `repair_install`'s admission (0037): the main window alone, which shows the Safe workspace's
-//! card. The settings window never runs an installer, nor does any other window. While a repair
-//! runs, `InstallUpdate` is refused: two installers at once.
+//! `repair_install`'s and `repair_cancel`'s admission (0037; both go through `admit_repair`): the
+//! main window alone, which shows the Safe workspace's card. The settings window never runs an
+//! installer, nor does any other window. While a repair runs, `InstallUpdate` is refused: two
+//! installers at once.
 
 use super::*;
 
+/// `repair_install` and its Cancel, `repair_cancel`, from `main` only (and granted to `main` only:
+/// `commands::tests::the_settings_window_is_allowed_exactly_its_commands`).
 #[test]
 fn only_the_main_window_may_run_the_installer() {
     assert_eq!(admit_repair(crate::MAIN_WINDOW), Ok(()));

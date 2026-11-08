@@ -121,6 +121,7 @@ export function ProtectionNote({
         extra={extra}
         onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
         onRepair={run.onRepair}
+        onCancel={run.onCancel}
         repairWait={run.wait}
         onClose={close}
         onProtect={retry ? press : undefined}

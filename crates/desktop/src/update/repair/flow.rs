@@ -17,15 +17,25 @@
 //! Any failure discards the attempt (the handle closed, the folder deleted) and answers its
 //! code; one after the windows went brings the main window back ([`Seams::bring_back`]).
 
+use std::future::Future;
 use std::io;
+use std::pin::pin;
+use std::time::{Duration, Instant};
+
+use futures::future::Either;
 
 use clauseo_protocol::{ErrorCode, HostError};
 
 use super::super::file_binding::{check_update_file, line};
 use super::super::install::LIFECYCLE;
-use super::RepairStep;
 use super::fetch;
 use super::plan::Plan;
+use super::{RepairEnd, RepairStep};
+
+/// How long the `.sig` and the installer may take together before the download is given up
+/// (`repair.download_failed`): several times what today's installer (about 21 MB) needs on a
+/// slow line, short enough that a stalled one never leaves the card waiting for good.
+pub(super) const DOWNLOAD_BUDGET: Duration = Duration::from_mins(10);
 
 /// The installer's arguments: interactive (never `/S`: the lawyer sees the installer), and
 /// stage F's switch, which makes it wait for Clauseo to be gone before its app-running checks
@@ -117,7 +127,9 @@ pub(super) async fn run<S: Seams>(
     seams: &S,
     client: &reqwest::Client,
     plan: &Plan,
-) -> Result<(), Refusal> {
+    budget: Duration,
+    cancel: impl Future<Output = ()>,
+) -> Result<RepairEnd, Refusal> {
     tracing::info!(
         target: LIFECYCLE,
         version = plan.version,
@@ -129,9 +141,24 @@ pub(super) async fn run<S: Seams>(
         tracing::warn!(target: LIFECYCLE, kind = %error.kind(), "repair: no folder for the download");
         Refusal::DownloadFailed
     })?;
-    let signature = match download(&mut stage, client, plan).await {
-        Ok(signature) => signature,
-        Err(failed) => {
+    // The `.sig` and the installer together get `budget`; a cancel ends either at once.
+    let deadline = crate::open::now() + budget;
+    let downloaded = {
+        let download = pin!(download(&mut stage, client, plan, deadline));
+        match futures::future::select(download, pin!(cancel)).await {
+            Either::Left((result, _cancel)) => Some(result),
+            Either::Right(((), _download)) => None,
+        }
+    };
+    let signature = match downloaded {
+        Some(Ok(signature)) => signature,
+        None => {
+            seams.discard(stage);
+            seams.unmark();
+            tracing::info!(target: LIFECYCLE, "repair: cancelled during the download; deleted");
+            return Ok(RepairEnd::Cancelled);
+        }
+        Some(Err(failed)) => {
             seams.discard(stage);
             tracing::warn!(target: LIFECYCLE, what = failed.0, "repair: the download failed");
             return Err(Refusal::DownloadFailed);
@@ -147,7 +174,7 @@ pub(super) async fn run<S: Seams>(
         return Err(Refusal::VerifyFailed);
     }
     tracing::info!(target: LIFECYCLE, version = plan.version, "repair: the installer verified");
-    hand_over_and_launch(seams, stage)
+    hand_over_and_launch(seams, stage).map(|()| RepairEnd::Started)
 }
 
 /// The `.sig`, then the installer into `stage`.
@@ -155,9 +182,13 @@ async fn download<S: Staged>(
     stage: &mut S,
     client: &reqwest::Client,
     plan: &Plan,
+    deadline: Instant,
 ) -> Result<String, fetch::Failed> {
-    let signature = fetch::signature(client, &plan.signature).await?;
-    let bytes = fetch::installer(client, &plan.installer, |chunk| stage.write(chunk)).await?;
+    let signature = fetch::signature(client, &plan.signature, deadline).await?;
+    let bytes = fetch::installer(client, &plan.installer, deadline, |chunk| {
+        stage.write(chunk)
+    })
+    .await?;
     tracing::info!(target: LIFECYCLE, bytes, "repair: the installer downloaded");
     Ok(signature)
 }

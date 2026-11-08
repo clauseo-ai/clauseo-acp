@@ -276,3 +276,21 @@ fn the_exit_is_held_only_while_the_windows_are_handed_over() {
     super::HANDING_OVER.store(false, Ordering::Release);
     assert!(!super::holds_exit(None));
 }
+
+/// A repair's end clears the running flag (so Restart to update passes again) after a cancel, a
+/// refusal or a failure; only a started installer keeps it, as the app quits.
+#[test]
+fn restart_to_update_is_unblocked_unless_the_installer_started() {
+    use super::flow::Refusal;
+    use super::{RepairEnd, finish, running, set_running};
+    set_running(true);
+    assert_eq!(finish(Ok(RepairEnd::Cancelled)), Ok(RepairEnd::Cancelled));
+    assert!(!running());
+    set_running(true);
+    assert!(finish(Err(Refusal::DownloadFailed)).is_err());
+    assert!(!running());
+    set_running(true);
+    assert_eq!(finish(Ok(RepairEnd::Started)), Ok(RepairEnd::Started));
+    assert!(running());
+    set_running(false);
+}

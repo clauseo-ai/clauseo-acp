@@ -51,6 +51,7 @@ const RELEASE: &[&str] = &[
     "quit_app",
     "page_marks",
     "repair_install",
+    "repair_cancel",
 ];
 
 /// What the `e2e` build adds: `E2E_COMMANDS` in `src/commands.rs`.

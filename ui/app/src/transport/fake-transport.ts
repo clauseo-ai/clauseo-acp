@@ -20,8 +20,9 @@ import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts"
 import {
   protectionCommandOf,
   quietScan,
+  FakeRepairs,
+  type FakeRepairCall,
   repairInfoOf,
-  runFakeRepair,
   type FakeProtectionHost,
 } from "./fake-protection.ts";
 import type { FakeSetupHost } from "./fake-setup.ts";
@@ -86,7 +87,7 @@ export type FakeCall =
   | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "quit_app" }
-  | { call: "repair_install" }
+  | FakeRepairCall
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -180,6 +181,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   #sessions = 0;
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
+  readonly #repairs = new FakeRepairs((call) => this.calls.push(call));
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
@@ -550,10 +552,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.quitApp?.());
   }
 
-  async repairInstall(onStep: (step: RepairStep) => void): Promise<void> {
-    this.calls.push({ call: "repair_install" });
-    await this.#answer(() => runFakeRepair(this.host.protection?.repair, onStep));
+  async repairInstall(onStep: (step: RepairStep) => void) {
+    return this.#answer(() => this.#repairs.start(this.host.protection?.repair, onStep));
   }
+
+  repairCancel = async (): Promise<void> => this.#repairs.cancel();
 
   async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });

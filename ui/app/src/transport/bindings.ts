@@ -185,10 +185,18 @@ export const commands = {
 	 *  alone (`bridge/admit.rs`): `command.invalid` from any other window. `repair.not_eligible`
 	 *  where it can't run (not a per-user Windows install, no release or key, an update
 	 *  installing), `command.conflict` while one runs, `repair.download_failed`,
-	 *  `repair.verify_failed` and `repair.launch_failed` as it fails. Once the installer started,
-	 *  the window is gone and nothing answers.
+	 *  `repair.verify_failed` and `repair.launch_failed` as it fails; the download is given up after
+	 *  10 minutes. `cancelled` after `repair_cancel`. Once the installer started, the window is gone
+	 *  and nothing answers.
 	 */
-	repairInstall: (steps: Channel<RepairStep>) => typedError<null, HostError>(__TAURI_INVOKE("repair_install", { steps })),
+	repairInstall: (steps: Channel<RepairStep>) => typedError<RepairEnd, HostError>(__TAURI_INVOKE("repair_install", { steps })),
+	/**
+	 *  Stops `repair_install`'s download (the card's Cancel): the attempt's folder and the marker
+	 *  are deleted, `repair_install` answers `cancelled`, and Restart to update passes again. Does
+	 *  nothing when no repair downloads. Granted to `main` alone and admitted from `main` alone
+	 *  (`bridge/admit.rs`), as `repair_install` is.
+	 */
+	repairCancel: () => typedError<null, HostError>(__TAURI_INVOKE("repair_cancel")),
 };
 
 /* Constants */
@@ -4533,6 +4541,16 @@ export type RenameSource =
 "placeholder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  How a repair that was not refused ended, as `repair_install` answers it. */
+export type RepairEnd = 
+/**  The installer started and the app is quitting: no window hears this. */
+"started" | 
+/**
+ *  `repair_cancel` stopped the download; the attempt is deleted, and the card goes back to
+ *  its normal state.
+ */
+"cancelled";
 
 /**  What the window is told about the repair, through `display_info`. */
 export type RepairNote = 

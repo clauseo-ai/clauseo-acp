@@ -6,6 +6,7 @@ import type {
   FolderRefId,
   FolderScanned,
   ProtectionView,
+  RepairEnd,
   RepairNote,
   RepairStep,
 } from "./protocol.ts";
@@ -47,9 +48,11 @@ export type FakeRepairHost = {
   available?: boolean;
   /** display_info's repair; null when left out. */
   note?: RepairNote | null;
-  /** Answers each repair_install, saying its steps through `onStep`; throwing refuses. Left out, it
-   * says both steps and never answers, as the desktop does once its window is gone. */
-  run?: (onStep: (step: RepairStep) => void) => void | Promise<void>;
+  /** Answers each repair_install, saying its steps through `onStep`: nothing or "started" when the
+   * installer starts, "cancelled" when it stops itself; throwing refuses. Left out, it says both
+   * steps and waits for repair_cancel, as the desktop does once its window is gone. A repair_cancel
+   * ends a scripted run as "cancelled" too. */
+  run?: (onStep: (step: RepairStep) => void) => RepairEnd | void | Promise<RepairEnd | void>;
 };
 
 /** display_info's repair fields for a scripted repair. */
@@ -58,13 +61,49 @@ export const repairInfoOf = (repair: FakeRepairHost | undefined) => ({
   repair: repair?.note ?? null,
 });
 
-/** One repair_install, as the script answers it. */
+/** One repair_install, as the script answers it: `stopped` (repair_cancel) ends it as "cancelled". */
 export async function runFakeRepair(
   repair: FakeRepairHost | undefined,
   onStep: (step: RepairStep) => void,
-): Promise<void> {
-  if (repair?.run !== undefined) return repair.run(onStep);
+  stopped: Promise<void>,
+): Promise<RepairEnd> {
+  const cancelled = stopped.then((): RepairEnd => "cancelled");
+  if (repair?.run !== undefined) {
+    const end = await Promise.race([repair.run(onStep), cancelled]);
+    return end === "cancelled" ? end : "started";
+  }
   onStep("downloading");
   onStep("launching");
-  return new Promise<void>(() => {});
+  return cancelled;
+}
+
+/** The repair calls the fake records. */
+export type FakeRepairCall = { call: "repair_install" } | { call: "repair_cancel" };
+
+/** The fake's repair_install calls: repair_cancel stops the one running (the desktop runs one at a time). */
+export class FakeRepairs {
+  #stop: () => void = () => {};
+  readonly #record: (call: FakeRepairCall) => void;
+  constructor(record: (call: FakeRepairCall) => void) {
+    this.#record = record;
+  }
+  /** One repair_install; the latest one is the one repair_cancel stops. */
+  start(
+    repair: FakeRepairHost | undefined,
+    onStep: (step: RepairStep) => void,
+  ): Promise<RepairEnd> {
+    this.#record({ call: "repair_install" });
+    return runFakeRepair(
+      repair,
+      onStep,
+      new Promise<void>((done) => {
+        this.#stop = () => done();
+      }),
+    );
+  }
+  /** repair_cancel: stops the running repair, which then answers "cancelled". */
+  cancel(): void {
+    this.#record({ call: "repair_cancel" });
+    this.#stop();
+  }
 }
