@@ -1,12 +1,14 @@
 //! The pipe's instance bookkeeping over a fake [`Pipes`] that, like the kernel, refuses more than
 //! [`MAX_INSTANCES`]: across accept, client-gone, failed-connect, failed-listen and
 //! send-drops-all sequences the count of open instances never reaches zero, and a replacement
-//! is always made before the instance it replaces is closed.
+//! is always made before the instance it replaces is closed. A client that connects and leaves
+//! before it is serviced (232, 233) is routine: the listener listens again in place, and only a
+//! later instance that can't be made ends the run.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::super::Failed;
-use super::super::instances::{Instances, MAX_INSTANCES, Pipes};
+use super::super::instances::{Connect, Instances, MAX_INSTANCES, Pipes};
 
 /// What the fake's handles are refused.
 #[derive(Default, PartialEq, Eq)]
@@ -26,8 +28,11 @@ struct FakePipes {
     open: BTreeSet<u32>,
     /// The fewest instances open just after any close.
     lowest: Option<usize>,
-    accepted: HashMap<u32, Option<bool>>,
+    accepted: HashMap<u32, Connect>,
     gone: HashSet<u32>,
+    relisten_fails: bool,
+    /// Lines written to each instance's client.
+    received: HashMap<u32, usize>,
     writes_fail: bool,
     create_fails: bool,
     refused: Refused,
@@ -67,8 +72,19 @@ impl Pipes for FakePipes {
         Ok(self.refused != Refused::Owner)
     }
 
-    fn accepted(&mut self, pipe: &mut u32) -> Option<bool> {
-        self.accepted.get(pipe).copied().unwrap_or(Some(false))
+    fn accepted(&mut self, pipe: &mut u32) -> Connect {
+        self.accepted.get(pipe).copied().unwrap_or(Connect::Waiting)
+    }
+
+    fn relisten(&mut self, pipe: &mut u32) -> Result<(), Failed> {
+        assert!(self.open.contains(pipe), "{pipe} relistened closed");
+        if self.relisten_fails {
+            self.calls.push(format!("relisten {pipe} failed"));
+            return Err("ConnectNamedPipe failed (5)".to_owned());
+        }
+        self.calls.push(format!("relisten {pipe}"));
+        self.accepted.remove(pipe);
+        Ok(())
     }
 
     fn alive(&mut self, pipe: &u32) -> Result<bool, Failed> {
@@ -79,7 +95,11 @@ impl Pipes for FakePipes {
     }
 
     fn write(&mut self, pipe: &u32, _line: &[u8]) -> bool {
-        !self.writes_fail && !self.gone.contains(pipe)
+        let went = !self.writes_fail && !self.gone.contains(pipe);
+        if went {
+            *self.received.entry(*pipe).or_default() += 1;
+        }
+        went
     }
 
     fn close(&mut self, pipe: u32) {
@@ -93,7 +113,7 @@ impl Pipes for FakePipes {
 /// The current listener's client connects, and the instances are polled.
 fn connect(inst: &mut Instances<FakePipes>) -> Result<usize, Failed> {
     let pipe = inst.pipes().newest();
-    inst.pipes().accepted.insert(pipe, Some(true));
+    inst.pipes().accepted.insert(pipe, Connect::Connected);
     inst.poll()
 }
 
@@ -138,7 +158,7 @@ fn an_accepted_listener_is_replaced_before_it_leaves_the_slot_and_a_gone_client_
 #[test]
 fn a_failed_connect_is_closed_only_after_its_replacement() {
     let mut inst = FakePipes::start();
-    inst.pipes().accepted.insert(0, None);
+    inst.pipes().accepted.insert(0, Connect::Failed);
     assert_eq!(inst.poll(), Ok(0));
     assert!(at(&mut inst, "create 1") < at(&mut inst, "close 0"));
     never_zero(&mut inst);
@@ -155,7 +175,7 @@ fn a_listen_that_fails_ends_the_run_with_the_instances_kept() {
     // On a failed connect: the failed one stays until the name is deleted.
     let mut inst = FakePipes::start();
     inst.pipes().create_fails = true;
-    inst.pipes().accepted.insert(0, None);
+    inst.pipes().accepted.insert(0, Connect::Failed);
     assert!(inst.poll().is_err());
     never_zero(&mut inst);
     // On every client gone at the cap, with no listener: the last is kept rather than closed.
@@ -246,7 +266,7 @@ fn a_long_mixed_run_never_reaches_zero() {
             }
             3 => {
                 let newest = inst.pipes().newest();
-                inst.pipes().accepted.insert(newest, None);
+                inst.pipes().accepted.insert(newest, Connect::Failed);
                 drop(inst.poll());
             }
             _ => {
@@ -271,5 +291,79 @@ fn a_peek_the_handle_may_not_make_ends_the_run_and_drops_no_client() {
     // Nothing closed: the run deletes the name, then closes them all.
     assert_eq!((inst.clients(), inst.count()), (2, 3));
     assert!(!inst.pipes().calls.iter().any(|c| c.starts_with("close")));
+    never_zero(&mut inst);
+}
+
+/// The current listener's client connects and leaves before it is serviced (232 or 233, from
+/// the connect or its completion), and the instances are polled.
+fn come_and_go(inst: &mut Instances<FakePipes>) -> Result<usize, Failed> {
+    let pipe = inst.pipes().newest();
+    inst.pipes().accepted.insert(pipe, Connect::Left);
+    inst.poll()
+}
+
+#[test]
+fn a_client_gone_before_it_was_serviced_is_dropped_and_the_long_lived_one_keeps_receiving() {
+    let mut inst = FakePipes::start();
+    // The long-lived reader: instance 0.
+    assert_eq!(connect(&mut inst), Ok(1));
+    // At the listener (1): its client left before the connect was serviced.
+    assert_eq!(come_and_go(&mut inst), Ok(1));
+    assert!(inst.pipes().calls.contains(&"relisten 1".to_owned()));
+    assert_eq!(inst.count(), 2);
+    // A client that connected (2 replaces 1), then left before its first line: dropped.
+    assert_eq!(connect(&mut inst), Ok(2));
+    inst.pipes().gone.insert(1);
+    assert_eq!(inst.send(b"x\n"), Ok(()));
+    assert_eq!(inst.clients(), 1);
+    assert_eq!(inst.send(b"y\n"), Ok(()));
+    assert_eq!(inst.pipes().received.get(&0), Some(&2));
+    assert_eq!(inst.poll(), Ok(1));
+    never_zero(&mut inst);
+}
+
+#[test]
+fn a_rapid_connect_disconnect_loop_never_ends_the_run() {
+    let mut inst = FakePipes::start();
+    connect(&mut inst).unwrap();
+    for round in 0u32..500 {
+        match round % 4 {
+            // Gone before the connect was serviced: listens again in place.
+            0 | 1 => assert_eq!(come_and_go(&mut inst), Ok(1)),
+            // Connected, then gone by the next poll: dropped, the reader kept.
+            2 => {
+                assert_eq!(connect(&mut inst), Ok(2));
+                let newest = inst.pipes().newest();
+                inst.pipes().gone.insert(newest - 1);
+                assert_eq!(inst.poll(), Ok(1));
+            }
+            _ => assert_eq!(inst.send(b"x\n"), Ok(())),
+        }
+        never_zero(&mut inst);
+        assert!(inst.count() <= 2);
+    }
+    assert_eq!(inst.pipes().received.get(&0), Some(&125));
+}
+
+#[test]
+fn a_listener_that_cant_listen_again_is_replaced_and_only_a_failed_create_ends_the_run() {
+    let mut inst = FakePipes::start();
+    connect(&mut inst).unwrap();
+    inst.pipes().relisten_fails = true;
+    assert_eq!(come_and_go(&mut inst), Ok(1));
+    assert!(at(&mut inst, "create 2") < at(&mut inst, "close 1"));
+    never_zero(&mut inst);
+    // A genuine failure to keep a listener: no later instance can be made. 74.
+    inst.pipes().create_fails = true;
+    assert!(come_and_go(&mut inst).is_err());
+    assert_eq!(inst.count(), 2);
+    never_zero(&mut inst);
+    // A 232 or 233 alone, with creates failing, never ends it: the instance is reused.
+    let mut inst = FakePipes::start();
+    connect(&mut inst).unwrap();
+    inst.pipes().create_fails = true;
+    for _ in 0..20 {
+        assert_eq!(come_and_go(&mut inst), Ok(1));
+    }
     never_zero(&mut inst);
 }

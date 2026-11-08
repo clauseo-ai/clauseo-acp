@@ -8,10 +8,15 @@
 //!
 //! - a listener whose client connected leaves the listening slot only once its replacement is
 //!   made (or the instances are at [`MAX_INSTANCES`], when the count stays the same);
-//! - a listener whose connect failed is closed only once its replacement is made;
+//! - a listener whose client connected and left before it was serviced (`ERROR_NO_DATA`,
+//!   `ERROR_PIPE_NOT_CONNECTED`) is normal, not a failure: it is disconnected and listens again
+//!   in place, so the count doesn't change;
+//! - a listener whose connect failed, or that can't listen again, is closed only once its
+//!   replacement is made;
 //! - each poll listens again (when there is room) before it prunes the clients that left, so a
 //!   client that connects and leaves within one poll is closed with a listener already open;
-//! - a client that left, or whose write failed, is closed only when another instance is left;
+//! - a client that left, or whose write failed (232 and 233 included), is closed only when
+//!   another instance is left;
 //!   before closing the last one, a listener is made;
 //! - a later instance must be owned by SYSTEM (checked on its handle), or the run ends;
 //! - a later instance that can't be made, or a count that reaches zero all the same, ends the
@@ -23,16 +28,35 @@ use super::Failed;
 /// The most instances: clients, and one listening while there is room.
 pub const MAX_INSTANCES: usize = 8;
 
+/// What a listener's connect came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connect {
+    /// Still waiting for a client.
+    Waiting,
+    /// A client is connected.
+    Connected,
+    /// A client connected and left before it was serviced (`ERROR_NO_DATA` or
+    /// `ERROR_PIPE_NOT_CONNECTED`): the instance listens again.
+    Left,
+    /// The connect failed otherwise.
+    Failed,
+}
+
 /// The pipe's instances as the bookkeeping sees them.
 pub trait Pipes {
     /// One instance.
     type Pipe;
-    /// A later instance (never the first), its connect pending.
+    /// A later instance (never the first), its connect pending. A client that connects and
+    /// leaves before the connect is even asked for is no failure: the instance comes back, and
+    /// [`Pipes::accepted`] says [`Connect::Left`].
     fn create(&mut self) -> Result<Self::Pipe, Failed>;
     /// Whether `pipe`'s owner is LOCAL SYSTEM, read from its handle.
     fn owned_by_system(&mut self, pipe: &Self::Pipe) -> Result<bool, Failed>;
-    /// Whether `pipe`'s client has connected: `None` when the connect failed.
-    fn accepted(&mut self, pipe: &mut Self::Pipe) -> Option<bool>;
+    /// What `pipe`'s connect came to.
+    fn accepted(&mut self, pipe: &mut Self::Pipe) -> Connect;
+    /// Disconnects `pipe`, whose client left, and listens on it again. `Err` when it can't,
+    /// and the instance is replaced.
+    fn relisten(&mut self, pipe: &mut Self::Pipe) -> Result<(), Failed>;
     /// Whether `pipe`'s client is still there. `Err` when that can't be told (the handle
     /// lacks the access to ask), which ends the run rather than drop every client unseen.
     fn alive(&mut self, pipe: &Self::Pipe) -> Result<bool, Failed>;
@@ -79,8 +103,13 @@ impl<P: Pipes> Instances<P> {
     pub fn poll(&mut self) -> Result<usize, Failed> {
         if let Some(mut listener) = self.listener.take() {
             match self.pipes.accepted(&mut listener) {
-                Some(false) => self.listener = Some(listener),
-                Some(true) => {
+                Connect::Waiting => self.listener = Some(listener),
+                Connect::Left => match self.pipes.relisten(&mut listener) {
+                    // The same instance listens again; the count doesn't move.
+                    Ok(()) => self.listener = Some(listener),
+                    Err(_why) => self.replace_failed(listener)?,
+                },
+                Connect::Connected => {
                     // The replacement first, when there is room for both.
                     if self.clients.len() + 2 <= MAX_INSTANCES {
                         match self.later() {
@@ -93,19 +122,7 @@ impl<P: Pipes> Instances<P> {
                     }
                     self.clients.push(listener);
                 }
-                None => {
-                    // A failed connect: its instance goes once another is there.
-                    if self.clients.len() + 2 <= MAX_INSTANCES {
-                        match self.later() {
-                            Ok(next) => self.listener = Some(next),
-                            Err(why) => {
-                                self.listener = Some(listener);
-                                return Err(why);
-                            }
-                        }
-                    }
-                    self.pipes.close(listener);
-                }
+                Connect::Failed => self.replace_failed(listener)?,
             }
         }
         // Listen again before pruning, so a client that came and went in one poll is closed
@@ -132,6 +149,22 @@ impl<P: Pipes> Instances<P> {
         self.listen_if_room()?;
         self.checked()?;
         Ok(self.clients.len())
+    }
+
+    /// A listener that failed, out of the slot: it closes once its replacement is made. `Err`
+    /// (with it back in the slot, to close after the name is deleted) ends the run.
+    fn replace_failed(&mut self, listener: P::Pipe) -> Result<(), Failed> {
+        if self.clients.len() + 2 <= MAX_INSTANCES {
+            match self.later() {
+                Ok(next) => self.listener = Some(next),
+                Err(why) => {
+                    self.listener = Some(listener);
+                    return Err(why);
+                }
+            }
+        }
+        self.pipes.close(listener);
+        Ok(())
     }
 
     /// A listener, when there is none and room for one.

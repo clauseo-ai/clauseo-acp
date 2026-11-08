@@ -1,8 +1,12 @@
 //! The watcher's pipe server and the key that publishes its name (`protocol.rs` says what both
 //! are). Every instance is overlapped, so the serving loop never blocks on a client: a connect
 //! is polled, a client's departure is seen by `PeekNamedPipe`, and a write that doesn't finish
-//! within [`WRITE_WAIT_MS`] is cancelled and its client dropped. Which instance is made or closed
-//! when is `instances.rs`'s, which never lets the count reach zero.
+//! within [`WRITE_WAIT_MS`] is cancelled and its client dropped. A client that connects and
+//! leaves before it is serviced makes `ConnectNamedPipe` (or its completion) answer
+//! `ERROR_NO_DATA` (232) or `ERROR_PIPE_NOT_CONNECTED` (233): the instance is disconnected and
+//! listens again ([`Connect::Left`]), never a failure of the run; on a peek or a write, the
+//! client is dropped. Which instance is made or closed when is `instances.rs`'s, which never
+//! lets the count reach zero.
 #![expect(
     unsafe_code,
     reason = "FFI to the named pipe, overlapped I/O, security and registry calls"
@@ -11,8 +15,9 @@
 use std::io;
 
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED,
-    ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0, WIN32_ERROR,
+    ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_NO_DATA,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree,
+    WAIT_OBJECT_0, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
     GetSecurityInfo, SE_KERNEL_OBJECT, SE_OBJECT_TYPE, SE_REGISTRY_KEY,
@@ -35,11 +40,11 @@ use windows::Win32::System::Registry::{
     REG_CREATED_NEW_KEY, REG_OPTION_VOLATILE, REG_SAM_FLAGS, REG_SZ, RegCloseKey, RegCreateKeyExW,
     RegDeleteKeyExW, RegOpenKeyExW, RegSetValueExW,
 };
-use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
 use windows::core::HSTRING;
 
 use super::Failed;
-use super::instances::{Instances, MAX_INSTANCES, Pipes};
+use super::instances::{Connect, Instances, MAX_INSTANCES, Pipes};
 use super::protocol::{KEY_SDDL, KeyStart, PIPE_VALUE, WATCH_KEY, key_start, pipe_name, pipe_sddl};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
@@ -60,6 +65,8 @@ pub(super) struct Instance {
     _event: Handle,
     /// The connect is still outstanding.
     pending: bool,
+    /// A client connected and left before it was serviced: the instance listens again.
+    left: bool,
 }
 
 /// The real [`Pipes`]: instances of one name, with one descriptor.
@@ -153,25 +160,49 @@ impl WinPipes {
         // SAFETY: no attributes and no name; the event is owned by `Handle`.
         let event =
             Handle(unsafe { CreateEventW(None, true, false, None) }.map_err(|e| os_error(&e))?);
-        let mut io = Box::new(OVERLAPPED {
+        let io = Box::new(OVERLAPPED {
             hEvent: event.0,
             ..OVERLAPPED::default()
         });
-        // SAFETY: a live server end; `io` is boxed and kept with the pipe until the connect is
-        // done or cancelled and waited for (`Instance`'s drop).
-        let pending = match unsafe { ConnectNamedPipe(pipe.0, Some(&raw mut *io)) } {
-            Ok(()) => false,
-            Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => false,
-            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => true,
-            Err(error) => return Err(os_error(&error)),
-        };
-        Ok(Instance {
+        let mut instance = Instance {
             pipe,
             io,
             _event: event,
-            pending,
-        })
+            pending: false,
+            left: false,
+        };
+        instance.connect()?;
+        Ok(instance)
     }
+}
+
+impl Instance {
+    /// Starts the connect. A client that connected and already left (232, 233) only marks the
+    /// instance [`Instance::left`]; any other error is the caller's.
+    fn connect(&mut self) -> io::Result<()> {
+        // SAFETY: the instance's own manual-reset event, live with it.
+        unsafe { ResetEvent(self.io.hEvent) }.map_err(|e| os_error(&e))?;
+        *self.io = OVERLAPPED {
+            hEvent: self.io.hEvent,
+            ..OVERLAPPED::default()
+        };
+        // SAFETY: a live server end with no I/O outstanding; `io` is boxed and kept with the
+        // pipe until the connect is done or cancelled and waited for (`Instance`'s drop).
+        let started = unsafe { ConnectNamedPipe(self.pipe.0, Some(&raw mut *self.io)) };
+        (self.pending, self.left) = match started {
+            Ok(()) => (false, false),
+            Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => (false, false),
+            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => (true, false),
+            Err(error) if gone(error.code()) => (false, true),
+            Err(error) => return Err(os_error(&error)),
+        };
+        Ok(())
+    }
+}
+
+/// Whether `code` says the client connected and left before it was serviced.
+fn gone(code: windows::core::HRESULT) -> bool {
+    code == ERROR_NO_DATA.to_hresult() || code == ERROR_PIPE_NOT_CONNECTED.to_hresult()
 }
 
 impl Pipes for WinPipes {
@@ -188,20 +219,41 @@ impl Pipes for WinPipes {
             .map_err(|error| format!("the pipe's owner couldn't be read: {error}"))
     }
 
-    fn accepted(&mut self, pipe: &mut Instance) -> Option<bool> {
+    fn accepted(&mut self, pipe: &mut Instance) -> Connect {
+        if pipe.left {
+            return Connect::Left;
+        }
         if !pipe.pending {
-            return Some(true);
+            return Connect::Connected;
         }
         // SAFETY: the event is the connect's, live with the instance.
         if unsafe { WaitForSingleObject(pipe.io.hEvent, 0) } != WAIT_OBJECT_0 {
-            return Some(false);
+            return Connect::Waiting;
         }
         let mut moved = 0u32;
         // SAFETY: the connect was started with this OVERLAPPED on this pipe and has completed.
         let done =
             unsafe { GetOverlappedResult(pipe.pipe.0, &raw const *pipe.io, &raw mut moved, false) };
         pipe.pending = false;
-        done.is_ok().then_some(true)
+        match done {
+            Ok(()) => Connect::Connected,
+            Err(error) if gone(error.code()) => {
+                pipe.left = true;
+                Connect::Left
+            }
+            Err(_) => Connect::Failed,
+        }
+    }
+
+    fn relisten(&mut self, pipe: &mut Instance) -> Result<(), Failed> {
+        // Only a finished connect is redone: `pending` is false whenever `left` is set.
+        if pipe.pending {
+            return Err("the pipe's connect is still outstanding".to_owned());
+        }
+        disconnect(&pipe.pipe);
+        pipe.left = false;
+        pipe.connect()
+            .map_err(|error| format!("the pipe couldn't listen again in place: {error}"))
     }
 
     fn alive(&mut self, pipe: &Instance) -> Result<bool, Failed> {
