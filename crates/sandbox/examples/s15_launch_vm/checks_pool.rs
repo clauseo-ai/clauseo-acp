@@ -9,10 +9,12 @@
 //! Every session here runs `probe hold`, which prints its pid and exits at the end of its stdin,
 //! so the session ends the way a host's does and the runner's own end runs.
 //!
-//! A pool user serves one live session at a time: a session's first act ends every other process
-//! of its user, and its end sweeper (`clauseo-sandbox-run --sweep`, as that user) ends them for up
-//! to about 60 s after it. So before the harness starts a session, or a process of its own as a
-//! pool user outside a session, it waits until that user has no process left ([`settle`]).
+//! A pool user serves one live session at a time: a session's first act and its ticks end every
+//! process of its user outside its job, and its end ends the job. Nothing of the pool user's runs
+//! after a session's end but what escaped. So before the harness starts a session, or a process
+//! of its own as a pool user outside a session, it waits until that user has no process left
+//! ([`settle`]), so a session's sweep doesn't end the harness's process and an escapee isn't
+//! counted against the next session.
 //!
 //! `child-token-default-dacl` (information only) runs `probe child-token` as A through the
 //! runner: whether the agent's child may open its own token with `TOKEN_ADJUST_DEFAULT`.
@@ -44,17 +46,18 @@ const END_GRACE: Duration = Duration::from_secs(10);
 const BENIGN_START: Duration = Duration::from_secs(30);
 /// The services `agent-token-config` records: Secondary Logon, WMI, Task Scheduler and BITS.
 const SERVICES: [&str; 4] = ["seclogon", "Winmgmt", "Schedule", "BITS"];
-/// How long [`settle`] waits for a pool user's processes to end (its end sweeper runs up to
-/// about 60 s).
-pub(crate) const SETTLE: Duration = Duration::from_secs(75);
+/// How long [`settle`] waits for a pool user's processes to end: a job's processes end at the
+/// job's end and the harness's own within their limits, while one that escaped never ends by
+/// itself, so a short wait covers the teardown and a longer one would only delay the failure.
+pub(crate) const SETTLE: Duration = Duration::from_secs(20);
 /// How long `probe wts` may run before the harness ends it.
 const WTS_LIMIT: Duration = Duration::from_secs(30);
 
 /// Waits until the harness's listing finds no process of `pool`'s user, for up to [`SETTLE`], so
-/// a session or process started next isn't ended by an earlier session's end sweeper or first
-/// act. A wait is noted; what is still there after it fails the step, named. A listing that
-/// can't be taken, or a harness without `SeDebugPrivilege` (it may not see that user's
-/// processes), is noted and doesn't stop the step.
+/// a process started next isn't ended by a session's sweep, and an earlier session's escapee
+/// isn't counted against the next. A wait is noted; what is still there after it fails the
+/// step, named. A listing that can't be taken, or a harness without `SeDebugPrivilege` (it may
+/// not see that user's processes), is noted and doesn't stop the step.
 pub(crate) fn settle(ctx: &Ctx<'_>, pool: &Pool) -> Result<(), String> {
     if let Err(why) = win_pool::enable_debug_privilege() {
         ctx.note(&format!(
@@ -93,7 +96,8 @@ pub(crate) fn settle(ctx: &Ctx<'_>, pool: &Pool) -> Result<(), String> {
         if since.elapsed() >= SETTLE {
             return Err(format!(
                 "{} still has processes {} s after the harness began waiting for them to end \
-                 (an earlier session's end sweeper would end the next): {left:?}",
+                 (they escaped an earlier session, or a process of the harness's outlived its \
+                 row): {left:?}",
                 pool.name,
                 SETTLE.as_secs()
             ));
@@ -317,7 +321,7 @@ fn gone_line(benign: &Benign, since: Instant, wait: Duration) -> String {
 /// The `sweep-before-logon` row: a benign process of A's pool user (named in the launch message
 /// the harness writes, so known before the session), started outside the job before the session,
 /// is gone by the time the agent prints its first line. The harness waits for A's user to have no
-/// process left first ([`settle`]), so an earlier session's end sweeper can't be what ends it,
+/// process left first ([`settle`]), so the benign process is that user's only one at the start,
 /// and starts the session without that wait (the benign process must still run then).
 pub(crate) fn before_logon(ctx: &Ctx<'_>) -> Result<String, String> {
     let pool = pool_of(ctx.manifest, "A")?;

@@ -207,7 +207,7 @@ pub(crate) struct Finished {
 }
 
 /// Starts `spec` through the runner as session key `which`'s pool user, once no process of
-/// that user is left (`checks_pool::settle`): its last session's end sweeper is done.
+/// that user is left (`checks_pool::settle`): its last session has ended, and nothing escaped it.
 pub(crate) fn launch(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Running, String> {
     settle(ctx, pool_of(ctx.manifest, which)?)?;
     launch_now(ctx.manifest, which, spec)
