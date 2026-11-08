@@ -2128,15 +2128,18 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   sweep can't read or delete (through the Task Scheduler or its file, step 3, or one only the
   task files or the cache show, the cross-check), a flood of tasks or Task Scheduler folders
   (more than 10 000 folders, or 100 000 task files or cache keys, or one folder whose
-  descriptor shuts SYSTEM out), or a task file it keeps a write handle open on. No
+  descriptor shuts SYSTEM out), a task file it keeps a write handle open on, or, if it can
+  create them, a stray file or a junction it plants under `System32\Tasks` (a file the cache
+  holds no task for has no `SD` to read, and a reparse point fails the file walk). No
   `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
   15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
   F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
   gives the pool user nothing beyond that. It clears once the cause is gone and a sweep ends
-  0: an administrator deletes the task (or the folders), after which the next launch's sweep
-  completes, or runs `--remove` (with no pool recorded there is nothing to sweep). The
-  Application log's sweep line says which count is non-zero (unreadable, not listed, folders
-  not listed), never which task. A task the file shows isn't the pool's no longer blocks.
+  0: an administrator deletes the task (or the folders, or the stray file or junction), after
+  which the next launch's sweep completes, or runs `--remove` (with no pool recorded there is
+  nothing to sweep). The Application log's sweep line says which count is non-zero (unreadable,
+  not listed, folders not listed), never which task. A task the file shows isn't the pool's no
+  longer blocks.
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
