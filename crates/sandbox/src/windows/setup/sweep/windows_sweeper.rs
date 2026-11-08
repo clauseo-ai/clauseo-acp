@@ -1,7 +1,8 @@
 //! The sweep's real [`Sweeper`]: the gate's reads (`pool_steps::windows_gate`), BITS
 //! (`pool_steps::windows_bits`), the Task Scheduler's COM API (`ITaskService`, connected as this
-//! process, LOCAL SYSTEM under the task), `LookupAccountNameW`, the record's lock and values
-//! (`pool_steps::windows_record`), and the Event Log.
+//! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`),
+//! `LookupAccountNameW`, the record's lock and values (`pool_steps::windows_record`), and the
+//! Event Log.
 #![expect(
     unsafe_code,
     reason = "COM calls to the Task Scheduler, and LookupAccountNameW"
@@ -10,7 +11,9 @@
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED};
-use windows::Win32::Security::{LookupAccountNameW, PSID, SID_NAME_USE};
+use windows::Win32::Security::{
+    LookupAccountNameW, OWNER_SECURITY_INFORMATION, PSID, SID_NAME_USE,
+};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::TaskScheduler::{
     IRegisteredTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
@@ -183,6 +186,17 @@ impl Sweeper for WindowsSweeper {
 
     fn lookup_account(&mut self, name: &str) -> Result<Sid, Failed> {
         lookup_account(name)
+    }
+
+    fn task_sddl(&mut self, folder: &ITaskFolder, name: &str) -> Result<String, Failed> {
+        // SAFETY: a live folder and a BSTR that outlives the call.
+        let task =
+            unsafe { folder.GetTask(&BSTR::from(name)) }.map_err(failed("ITaskFolder::GetTask"))?;
+        let owner = i32::try_from(OWNER_SECURITY_INFORMATION.0).unwrap_or(i32::MAX);
+        // SAFETY: a live task; the owner's part alone.
+        let sddl = unsafe { task.GetSecurityDescriptor(owner) }
+            .map_err(failed("IRegisteredTask::GetSecurityDescriptor"))?;
+        Ok(sddl.to_string())
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<String, Failed> {
