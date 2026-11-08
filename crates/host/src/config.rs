@@ -288,14 +288,15 @@ impl HostConfig {
         self
     }
 
-    /// What the firm's Chrome and Edge `RemoteDebuggingAllowed` says (default: this machine's
-    /// registry, managed preferences or policy folders), for tests that pass a fake.
+    /// What the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` says, for tests that
+    /// pass a fake (default under `test-support`: nothing set; in production, this machine's
+    /// registry, managed preferences or policy folders).
     #[cfg(feature = "test-support")]
     pub fn with_remote_debugging_policy(
         mut self,
         policy: Arc<dyn clauseo_settings::chromium_policy::RemoteDebuggingPolicy>,
     ) -> Self {
-        self.wiring.rd_policy = policy;
+        self.wiring.rd_policy = Arc::new(crate::browser::rd_policy::RdPolicy::new(policy));
         self
     }
 

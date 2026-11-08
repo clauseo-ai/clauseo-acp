@@ -117,9 +117,9 @@ pub(crate) struct RunFolders {
     /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
     /// `Loopback::Ports(session.ports.loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
-    /// Whether the firm's browser policy left the browser out (`browser::rd_policy`):
-    /// `BrowserBlockedByPolicy`.
-    pub(crate) browser_blocked: bool,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`.
+    pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
     /// written by the launch prep only when a pack loaded. R17 passes this to
     /// `PolicyBuilder::read_only_in_state`.
@@ -171,7 +171,7 @@ impl RunFolders {
             root,
             chrome: None,
             browser_session: None,
-            browser_blocked: false,
+            browser_blocked: None,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
@@ -386,7 +386,7 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
     let browser = if slot { browser } else { browser.skipped() };
     let prepared = browser.prepare(data, &run.key.id());
     (run.chrome, run.browser_session) = (prepared.chrome, prepared.session);
-    run.browser_blocked = prepared.blocked_by_policy;
+    run.browser_blocked = prepared.policy_block;
     // The launch offers the browser only once its Chrome was found and claimed.
     let offered = run.chrome.is_some() && run.browser_session.is_some();
     run.egress = egress.open(run.key, offered);

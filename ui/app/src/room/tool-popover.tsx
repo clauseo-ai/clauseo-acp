@@ -1,7 +1,8 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome, the
 // download: Download Chrome is the consent, then its bar, Unpacking, then the reason Ready for new conversations or what
-// went wrong with Try again. Under the browser the firm's policy blocks, the reason in full.
+// went wrong with Try again. Under the browser the firm's policy blocks, or whose policy Clauseo couldn't check, the
+// reason in full.
 // A tool
 // the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
 // there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line

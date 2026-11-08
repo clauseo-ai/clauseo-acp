@@ -1,10 +1,13 @@
-//! The firm's Chrome and Edge `RemoteDebuggingAllowed` through the host: false turns the browser
-//! off with `BrowserBlockedByPolicy` before any Chrome is picked (a forced one, or Chrome for
-//! Testing in the roots), unless the firm's Clauseo policy allows Clauseo's browser anyway; a
-//! policy that says nothing, or cannot be read, leaves the browser on.
+//! The firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` through the host: false turns
+//! the browser off with `BrowserBlockedByPolicy` before any Chrome is picked (a forced one, or
+//! Chrome for Testing in the roots), and a place that cannot be read with
+//! `BrowserPolicyUnreadable`, until a later launch reads it, unless the firm's Clauseo policy
+//! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
+//! browser on.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use clauseo_host::browser::chrome::{ChromeRoots, Platform};
 use clauseo_host::{HostConfig, TestProxy};
@@ -37,6 +40,23 @@ impl RemoteDebuggingPolicy for Says {
     }
 }
 
+/// A firm policy whose first read fails at Edge's user place, and whose later reads find
+/// nothing set.
+#[derive(Debug, Default)]
+struct FailsOnce(AtomicUsize);
+
+impl RemoteDebuggingPolicy for FailsOnce {
+    fn read(&self) -> RemoteDebugging {
+        let first = self.0.fetch_add(1, Ordering::SeqCst) == 0;
+        let said = if first {
+            Found::Unreadable("the registry read failed (5)".to_owned())
+        } else {
+            Found::Absent
+        };
+        Says(said).read()
+    }
+}
+
 /// How the session finds its Chrome.
 #[derive(Clone, Copy)]
 enum Chrome {
@@ -54,6 +74,20 @@ fn reason(
     policy: Option<&str>,
     chrome: Chrome,
 ) -> Option<ToolsUnavailableReason> {
+    reasons(test, Arc::new(Says(says)), policy, chrome, 1)
+        .pop()
+        .expect("one launch")
+}
+
+/// The browser state each of `launches` `CLAUDE` sessions shows, one after the other, each in
+/// a thread of its own, under `rd_policy` and the firm's Clauseo `policy` if any.
+fn reasons(
+    test: &str,
+    rd_policy: Arc<dyn RemoteDebuggingPolicy>,
+    policy: Option<&str>,
+    chrome: Chrome,
+    launches: usize,
+) -> Vec<Option<ToolsUnavailableReason>> {
     let dir = Dir::new(test, &[]);
     let claude = template(
         &dir,
@@ -93,22 +127,26 @@ fn reason(
                 ..Hook::default()
             }))
             .with_egress_proxy(Arc::new(TestProxy(8123)))
-            .with_remote_debugging_policy(Arc::new(Says(says)));
+            .with_remote_debugging_policy(rd_policy);
         with_chrome(config, chrome, roots)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
-    turn(&host, thread);
-    let tools = first_frame_tools(&host, thread);
-    host.shutdown();
-    let state = tools
-        .iter()
-        .find(|state| state.tool == ClauseoTool::Browser)
-        .expect("the header shows the browser");
-    match &state.availability {
-        clauseo_protocol::ToolAvailability::Unavailable { reason } => Some(*reason),
-        _ => None,
+    let mut found = Vec::new();
+    for _ in 0..launches {
+        let thread = host.create_thread(matter, CLAUDE);
+        turn(&host, thread);
+        let tools = first_frame_tools(&host, thread);
+        let state = tools
+            .iter()
+            .find(|state| state.tool == ClauseoTool::Browser)
+            .expect("the header shows the browser");
+        found.push(match &state.availability {
+            clauseo_protocol::ToolAvailability::Unavailable { reason } => Some(*reason),
+            _ => None,
+        });
     }
+    host.shutdown();
+    found
 }
 
 fn with_chrome(config: HostConfig, chrome: Chrome, roots: ChromeRoots) -> HostConfig {
@@ -150,15 +188,40 @@ fn the_firms_clauseo_policy_allows_the_browser_anyway() {
 }
 
 #[test]
-fn a_policy_that_says_nothing_or_cannot_be_read_does_not_block() {
-    let unreadable = Found::Unreadable("the registry read failed (5)".to_owned());
+fn a_policy_that_says_nothing_true_or_a_bad_value_does_not_block() {
+    let bad = Found::BadValue("the REG_SZ is not an integer".to_owned());
     assert_eq!(
         reason("rd_absent", Found::Absent, None, Chrome::Forced),
         None
     );
+    assert_eq!(reason("rd_bad", bad, None, Chrome::Forced), None);
+    assert_eq!(reason("rd_on", Found::Allowed, None, Chrome::Forced), None);
+}
+
+#[test]
+fn a_read_error_blocks_this_launch_and_the_next_launch_reads_again() {
     assert_eq!(
-        reason("rd_unreadable", unreadable, None, Chrome::Forced),
+        reasons(
+            "rd_unreadable",
+            Arc::new(FailsOnce::default()),
+            None,
+            Chrome::Forced,
+            2
+        ),
+        [Some(ToolsUnavailableReason::BrowserPolicyUnreadable), None]
+    );
+}
+
+#[test]
+fn the_firms_clauseo_policy_allows_the_browser_when_the_policy_was_not_read() {
+    let unreadable = Found::Unreadable("the folder was not read (permission denied)".to_owned());
+    assert_eq!(
+        reason(
+            "rd_unreadable_allowed",
+            unreadable,
+            Some(ALLOW),
+            Chrome::Forced
+        ),
         None
     );
-    assert_eq!(reason("rd_on", Found::Allowed, None, Chrome::Forced), None);
 }

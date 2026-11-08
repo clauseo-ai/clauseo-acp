@@ -1,26 +1,32 @@
-//! Chrome's and Edge's own `RemoteDebuggingAllowed` policy, as a firm's IT sets it for those
-//! browsers. Every browser Clauseo drives needs remote debugging (agent-browser speaks CDP), and
-//! false turns it off. Chrome for Testing reads its own policy location, and
+//! Chrome's, Edge's and Chromium's own `RemoteDebuggingAllowed` policy, as a firm's IT sets it
+//! for those browsers. Every browser Clauseo drives needs remote debugging (agent-browser speaks
+//! CDP), and false turns it off. Chrome for Testing reads its own policy location, and
 //! chrome-headless-shell none, so a browser Clauseo downloaded would not refuse by itself. The
-//! host reads the firm's Chrome and Edge values here, before it picks any browser, and starts
-//! none when one is false, unless Clauseo's own policy allows it
+//! host reads the firm's values here, before it picks any browser, and starts none when one is
+//! false or a place cannot be read, unless Clauseo's own policy allows it
 //! (`browser.allow_when_remote_debugging_disabled`).
 //!
-//! Where it is read, for the computer and the user:
-//! - Windows: `RemoteDebuggingAllowed` under `SOFTWARE\Policies\Google\Chrome` and
-//!   `SOFTWARE\Policies\Microsoft\Edge`, in `HKLM` and in `HKCU` (a `REG_DWORD`, 0 is false);
+//! Where it is read, for the computer and the user, taking what Chrome's own policy conversion
+//! takes as a boolean:
+//! - Windows: `RemoteDebuggingAllowed` under `SOFTWARE\Policies\Google\Chrome`,
+//!   `SOFTWARE\Policies\Microsoft\Edge` and `SOFTWARE\Policies\Chromium`, in `HKLM` and in
+//!   `HKCU` (a `REG_DWORD`, or a `REG_SZ` holding an integer; 0 is false, any other true);
 //!   [`read_registry`] over a [`Registry`].
 //! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge` and
-//!   `org.chromium.Chromium`, the computer's and the login user's (a boolean);
-//!   [`read_managed_prefs`].
-//! - Linux: every `*.json` in Chrome's, Edge's and Chromium's `managed` policy folders
+//!   `org.chromium.Chromium`, the computer's and the login user's (a boolean, or the integer 0
+//!   or 1); [`read_managed_prefs`].
+//! - Linux: every `*.json` in Chrome's, Edge's and Chromium's `managed` policy folders (a
+//!   boolean, or the integer 0 or 1), at most [`MAX_FILES`] files of [`MAX_FILE_BYTES`] each
 //!   (Chrome takes this policy only as mandatory, never as recommended: its definition does not
 //!   set `can_be_recommended`); [`read_linux`].
 //!
 //! Every store comes in through a trait ([`Registry`], [`PolicyTree`]), so the tests use fakes,
-//! and every reader's logic is compiled and tested on every OS. A value that is missing, or a
-//! store that cannot be read, never turns the browser off: it is reported as
-//! [`Found::Absent`] or [`Found::Unreadable`], whose reason names no path.
+//! and every reader's logic is compiled and tested on every OS. Each place says one of three
+//! things besides true or false: nothing set (the key, value, file or folder is missing,
+//! [`Found::Absent`]); a bad value (read, but malformed or of a type Chrome does not take,
+//! [`Found::BadValue`], ignored as Chrome ignores it); or a read error (anything else, past a cap
+//! included, [`Found::Unreadable`]: nothing is known, so the host starts no browser). The
+//! reasons name no path.
 
 #[cfg(test)]
 mod tests;
@@ -41,7 +47,7 @@ pub enum Browser {
     Chrome,
     /// Microsoft Edge.
     Edge,
-    /// Chromium-branded builds (Linux and macOS; a forced browser path can point at one).
+    /// Chromium-branded builds (a forced browser path can point at one).
     Chromium,
 }
 
@@ -72,8 +78,11 @@ pub enum Found {
     Allowed,
     /// `RemoteDebuggingAllowed` false: remote debugging is off.
     Disallowed,
-    /// The store could not be read, or holds a value of another type. Why, with no path or
-    /// value.
+    /// A value was read but is malformed, or of a type Chrome does not take: ignored, as Chrome
+    /// ignores it. Why, with no path or value.
+    BadValue(String),
+    /// The store could not be read (not missing: denied, failed, or past a cap), so nothing is
+    /// known there. Why, with no path or value.
     Unreadable(String),
 }
 
@@ -85,8 +94,8 @@ pub struct RemoteDebugging {
     pub found: Vec<(Place, Found)>,
 }
 
-/// Reads the firm's Chrome and Edge `RemoteDebuggingAllowed`. Blocking (registry or files):
-/// call it off the host's actor.
+/// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed`. Blocking (registry or
+/// files): call it off the host's actor.
 pub trait RemoteDebuggingPolicy: Send + Sync + fmt::Debug {
     /// What every place says now.
     fn read(&self) -> RemoteDebugging;
@@ -96,6 +105,11 @@ pub trait RemoteDebuggingPolicy: Send + Sync + fmt::Debug {
 /// policy folders on Linux; nothing elsewhere.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemPolicy;
+
+/// A reader that finds nothing set anywhere: the host's default in its tests, so they never
+/// read the machine they run on.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NothingSet;
 
 /// A registry root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,20 +129,29 @@ pub trait Registry {
 
 /// Files and folders, as [`read_managed_prefs`] and [`read_linux`] read them.
 pub trait PolicyTree {
-    /// The file's bytes; `Ok(None)` when it is missing.
-    fn read(&self, path: &Path) -> io::Result<Option<Vec<u8>>>;
-    /// The `*.json` files in `dir`, sorted; empty when the folder is missing.
+    /// The file's bytes, at most `max + 1` of them (so a longer file shows as longer than
+    /// `max`); `Ok(None)` when it is missing.
+    fn read(&self, path: &Path, max: u64) -> io::Result<Option<Vec<u8>>>;
+    /// The `*.json` files in `dir` (folders left out), sorted; empty when the folder is
+    /// missing. It may stop listing once it has more than [`MAX_FILES`].
     fn json_files(&self, dir: &Path) -> io::Result<Vec<PathBuf>>;
 }
+
+/// The most `*.json` files read from one Linux folder; more is a read error.
+pub const MAX_FILES: usize = 256;
+
+/// The most bytes read from one Linux policy file (1 MiB); a longer file is a read error.
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// The real file system, following links.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemTree;
 
 /// The registry keys, by browser.
-pub const REGISTRY_KEYS: [(Browser, &str); 2] = [
+pub const REGISTRY_KEYS: [(Browser, &str); 3] = [
     (Browser::Chrome, r"SOFTWARE\Policies\Google\Chrome"),
     (Browser::Edge, r"SOFTWARE\Policies\Microsoft\Edge"),
+    (Browser::Chromium, r"SOFTWARE\Policies\Chromium"),
 ];
 
 /// The managed preferences domains, by browser.
@@ -152,6 +175,22 @@ impl RemoteDebugging {
             .iter()
             .find(|(_, found)| *found == Found::Disallowed)
             .map(|(place, _)| *place)
+    }
+
+    /// Each place that could not be read, with why.
+    pub fn unreadable(&self) -> impl Iterator<Item = (Place, &str)> {
+        self.found.iter().filter_map(|(place, found)| match found {
+            Found::Unreadable(why) => Some((*place, why.as_str())),
+            _ => None,
+        })
+    }
+
+    /// Each place that holds a bad value, with why.
+    pub fn bad_values(&self) -> impl Iterator<Item = (Place, &str)> {
+        self.found.iter().filter_map(|(place, found)| match found {
+            Found::BadValue(why) => Some((*place, why.as_str())),
+            _ => None,
+        })
     }
 }
 
@@ -183,13 +222,23 @@ impl RemoteDebuggingPolicy for SystemPolicy {
     }
 }
 
+impl RemoteDebuggingPolicy for NothingSet {
+    fn read(&self) -> RemoteDebugging {
+        RemoteDebugging::default()
+    }
+}
+
 impl PolicyTree for SystemTree {
-    fn read(&self, path: &Path) -> io::Result<Option<Vec<u8>>> {
-        match std::fs::read(path) {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
+    fn read(&self, path: &Path, max: u64) -> io::Result<Option<Vec<u8>>> {
+        use std::io::Read as _;
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut bytes = Vec::new();
+        file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+        Ok(Some(bytes))
     }
 
     fn json_files(&self, dir: &Path) -> io::Result<Vec<PathBuf>> {
@@ -200,9 +249,14 @@ impl PolicyTree for SystemTree {
         };
         let mut files = Vec::new();
         for entry in entries {
-            let path = entry?.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
+            let entry = entry?;
+            let path = entry.path();
+            // Chrome lists files only; a link is followed when it is read.
+            if path.extension().is_some_and(|ext| ext == "json") && !entry.file_type()?.is_dir() {
                 files.push(path);
+            }
+            if files.len() > MAX_FILES {
+                break;
             }
         }
         files.sort();
@@ -210,7 +264,7 @@ impl PolicyTree for SystemTree {
     }
 }
 
-/// The four registry places: `HKLM` then `HKCU`, Chrome then Edge in each.
+/// The six registry places: `HKLM` then `HKCU`, Chrome, Edge, then Chromium in each.
 pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
     let mut found = Vec::new();
     for (hive, scope) in [
@@ -220,9 +274,7 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
         for (browser, key) in REGISTRY_KEYS {
             let said = match registry.value(hive, key, VALUE) {
                 Ok(None) => Found::Absent,
-                Ok(Some(RegValue::Dword(0))) => Found::Disallowed,
-                Ok(Some(RegValue::Dword(_))) => Found::Allowed,
-                Ok(Some(_)) => Found::Unreadable("the value is not a REG_DWORD".to_owned()),
+                Ok(Some(value)) => registry_says(&value),
                 Err(code) => Found::Unreadable(format!("the registry read failed ({code})")),
             };
             found.push((Place { browser, scope }, said));
@@ -231,10 +283,27 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
     RemoteDebugging { found }
 }
 
+/// What a registry value says, as Chrome converts it to a boolean: a `REG_DWORD`, or a `REG_SZ`
+/// holding an integer (spaces around it allowed); 0 is false, any other number true.
+pub fn registry_says(value: &RegValue) -> Found {
+    match value {
+        RegValue::Dword(0) => Found::Disallowed,
+        RegValue::Dword(_) => Found::Allowed,
+        RegValue::Sz(text) => match text.trim().parse::<i64>() {
+            Ok(0) => Found::Disallowed,
+            Ok(_) => Found::Allowed,
+            Err(_) => Found::BadValue("the REG_SZ is not an integer".to_owned()),
+        },
+        RegValue::MultiSz(_) | RegValue::Other(_) => {
+            Found::BadValue("the value is neither a REG_DWORD nor a REG_SZ".to_owned())
+        }
+    }
+}
+
 /// The six macOS places: the computer's file then the user's, Chrome, Edge, then Chromium in
 /// each.
 /// `looked_up` is the login user ([`managed_prefs::login_user`]); without one, the user's
-/// places are unreadable.
+/// file cannot be found, so the user's places are read errors.
 pub fn read_managed_prefs(
     tree: &dyn PolicyTree,
     looked_up: io::Result<Option<String>>,
@@ -270,7 +339,7 @@ pub fn read_managed_prefs(
 
 /// What one managed preferences file says.
 fn plist_file(tree: &dyn PolicyTree, path: &Path) -> Found {
-    match tree.read(path) {
+    match tree.read(path, u64::MAX) {
         Ok(None) => Found::Absent,
         Ok(Some(bytes)) => plist_says(&bytes),
         Err(error) => Found::Unreadable(format!("the file was not read ({})", error.kind())),
@@ -283,18 +352,32 @@ pub fn plist_says(bytes: &[u8]) -> Found {
         .ok()
         .and_then(plist::Value::into_dictionary)
     else {
-        return Found::Unreadable("not a property list dictionary".to_owned());
+        return Found::BadValue("not a property list dictionary".to_owned());
     };
     match dict.get(VALUE) {
         None => Found::Absent,
         Some(plist::Value::Boolean(false)) => Found::Disallowed,
         Some(plist::Value::Boolean(true)) => Found::Allowed,
-        Some(_) => Found::Unreadable("the value is not a boolean".to_owned()),
+        Some(plist::Value::Integer(number)) => zero_or_one(number.as_signed()),
+        Some(_) => Found::BadValue(NOT_A_BOOLEAN.to_owned()),
+    }
+}
+
+/// Why a value is bad when it is neither a boolean nor the integer 0 or 1.
+const NOT_A_BOOLEAN: &str = "the value is not a boolean, 0 or 1";
+
+/// The integer 0 as false and 1 as true; any other is a bad value.
+fn zero_or_one(number: Option<i64>) -> Found {
+    match number {
+        Some(0) => Found::Disallowed,
+        Some(1) => Found::Allowed,
+        _ => Found::BadValue(NOT_A_BOOLEAN.to_owned()),
     }
 }
 
 /// The Linux places: each `*.json` in Chrome's, Edge's, then Chromium's `managed` folder,
-/// one entry per file; a folder with no file says [`Found::Absent`] once.
+/// one entry per file; a folder with no file says [`Found::Absent`] once. A folder of more
+/// than [`MAX_FILES`] files, or a file of more than [`MAX_FILE_BYTES`], is a read error.
 pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
     let mut found = Vec::new();
     for (browser, dir) in LINUX_DIRS {
@@ -303,6 +386,11 @@ pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
             scope: Scope::Machine,
         };
         let files = match tree.json_files(Path::new(dir)) {
+            Ok(files) if files.len() > MAX_FILES => {
+                let why = format!("the folder holds more than {MAX_FILES} policy files");
+                found.push((place, Found::Unreadable(why)));
+                continue;
+            }
             Ok(files) => files,
             Err(error) => {
                 let why = format!("the folder was not read ({})", error.kind());
@@ -314,8 +402,11 @@ pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
             found.push((place, Found::Absent));
         }
         for file in files {
-            let said = match tree.read(&file) {
+            let said = match tree.read(&file, MAX_FILE_BYTES) {
                 Ok(None) => Found::Absent,
+                Ok(Some(bytes)) if bytes.len() as u64 > MAX_FILE_BYTES => {
+                    Found::Unreadable("a file is larger than 1 MiB".to_owned())
+                }
                 Ok(Some(bytes)) => json_says(&bytes),
                 Err(error) => Found::Unreadable(format!("a file was not read ({})", error.kind())),
             };
@@ -328,12 +419,13 @@ pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
 /// What a JSON policy file's `RemoteDebuggingAllowed` says.
 pub fn json_says(bytes: &[u8]) -> Found {
     let Ok(serde_json::Value::Object(map)) = serde_json::from_slice(bytes) else {
-        return Found::Unreadable("a file is not a JSON object".to_owned());
+        return Found::BadValue("a file is not a JSON object".to_owned());
     };
     match map.get(VALUE) {
         None => Found::Absent,
         Some(serde_json::Value::Bool(false)) => Found::Disallowed,
         Some(serde_json::Value::Bool(true)) => Found::Allowed,
-        Some(_) => Found::Unreadable("the value is not a boolean".to_owned()),
+        Some(serde_json::Value::Number(number)) => zero_or_one(number.as_i64()),
+        Some(_) => Found::BadValue(NOT_A_BOOLEAN.to_owned()),
     }
 }

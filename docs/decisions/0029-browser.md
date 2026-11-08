@@ -1008,15 +1008,20 @@ The launch-prep thread (`actor/turn/launch_checks.rs`), never the actor, picks e
 Chrome and keeps it on the session's `RunFolders` (`chrome`), which fills
 `{browser_executable}`. It looks only when `tools.browser` is on and there is a proxy, so a
 session that cannot get the browser makes no file system calls for it. Before any of the steps
-below, the prep reads the firm's own Chrome and Edge `RemoteDebuggingAllowed` (registry
-`HKLM`/`HKCU`; macOS managed preferences files, Chromium's `org.chromium.Chromium` too; Linux
-`managed` policy folders of Chrome, Edge (`/etc/opt/edge`) and Chromium (`/etc/chromium`);
-`clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`). Chrome for Testing reads
-its own policy key and chrome-headless-shell none, so a false anywhere starts no browser at all,
-and the entry drops with `BrowserBlockedByPolicy`, unless the firm's Clauseo policy sets
-`browser.allow_when_remote_debugging_disabled` (policy only, a security key, default false). A
-missing value or an unreadable store does not block; it is logged once, with no path
-(`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In order:
+below, the prep reads the firm's own Chrome, Edge and Chromium `RemoteDebuggingAllowed` (registry
+`HKLM`/`HKCU`, `SOFTWARE\Policies\Chromium` too; macOS managed preferences files,
+`org.chromium.Chromium` too; Linux `managed` policy folders of Chrome, Edge (`/etc/opt/edge`)
+and Chromium (`/etc/chromium`), at most 256 files of 1 MiB each;
+`clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`), taking what Chrome's own
+conversion takes (a `REG_SZ` `"0"` is false). Chrome for Testing reads its own policy key and
+chrome-headless-shell none, so a false anywhere starts no browser at all, and the entry drops with
+`BrowserBlockedByPolicy`. Nothing set, or a value Chrome would not take, does not block; a place
+that cannot be read (not missing: denied, failed or past a cap) means nothing is known, so with no
+false elsewhere the entry drops with its own `BrowserPolicyUnreadable`, read again at the next
+launch. The firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
+security key, default false) overrides both. Each unread place and bad value is logged once per
+host, with no path (`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In
+order:
 
 1. Google Chrome installed: on macOS `/Applications/Google Chrome.app/Contents/MacOS/Google
    Chrome`, then the same under `~/Applications`; on Windows `%ProgramFiles%`,

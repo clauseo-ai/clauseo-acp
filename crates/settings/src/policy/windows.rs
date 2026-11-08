@@ -21,8 +21,9 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, REG_DWORD,
-    REG_MULTI_SZ, REG_ROUTINE_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_RT_ANY, RRF_SUBKEY_WOW6464KEY,
-    RegCloseKey, RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegQueryInfoKeyW,
+    REG_EXPAND_SZ, REG_MULTI_SZ, REG_ROUTINE_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_RT_ANY,
+    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegEnumValueW, RegGetValueW, RegOpenKeyExW,
+    RegQueryInfoKeyW,
 };
 use windows::core::{HSTRING, PWSTR};
 
@@ -191,7 +192,9 @@ impl Drop for Key {
     }
 }
 
-/// This machine's registry, one value at a time, for [`crate::chromium_policy`].
+/// This machine's registry, one value at a time, for [`crate::chromium_policy`]: a `REG_DWORD`, a
+/// `REG_SZ` or `REG_EXPAND_SZ` (as Chrome reads both) of up to [`MAX_STRING_BYTES`], or the type
+/// of anything else.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SystemRegistry;
 
@@ -202,7 +205,7 @@ impl ChromiumRegistry for SystemRegistry {
             Hive::CurrentUser => HKEY_CURRENT_USER,
         };
         let mut kind = REG_VALUE_TYPE(0);
-        let mut data = [0u8; 4];
+        let mut data = [0u8; MAX_STRING_BYTES];
         let mut len = u32::try_from(data.len()).unwrap_or(0);
         // SAFETY: the key and value names are NUL-terminated wide strings that outlive the call;
         // `kind` and `len` are valid places, and `data` is writable for the `len` bytes passed.
@@ -220,17 +223,21 @@ impl ChromiumRegistry for SystemRegistry {
         if read == ERROR_FILE_NOT_FOUND {
             return Ok(None);
         }
-        // Longer than a DWORD: a string or binary value, of the wrong type either way.
+        // Longer than any integer a string could hold: a bad value whatever its type.
         if read == ERROR_MORE_DATA {
             return Ok(Some(RegValue::Other(kind.0)));
         }
         if read != ERROR_SUCCESS {
             return Err(read.0);
         }
-        Ok(Some(if kind == REG_DWORD && len == 4 {
-            RegValue::Dword(u32::from_le_bytes(data))
-        } else {
-            RegValue::Other(kind.0)
+        let bytes = data.get(..len as usize).unwrap_or(&[]);
+        let kind = if kind == REG_EXPAND_SZ { REG_SZ } else { kind };
+        Ok(Some(match kind {
+            REG_DWORD | REG_SZ => reg_value(kind.0, bytes),
+            _ => RegValue::Other(kind.0),
         }))
     }
 }
+
+/// The most bytes of a Chromium policy string value read: an integer with room for spaces.
+const MAX_STRING_BYTES: usize = 256;

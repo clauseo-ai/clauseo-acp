@@ -641,7 +641,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `skills.allow_scripts` | boolean | false | `REG_DWORD` 0 or 1 | 0: a pack holding a script or program is not loaded. With 1 such files are copied, never run by Clauseo, though the agent can run them. **Security key**: `false` if a source is unreadable or the value does not type |
 | `skills.enabled` | object: pack id to `sha256:<64 lowercase hex>`, the hash the pack had when turned on | empty | `REG_SZ`, JSON | `{"nda-kit": "sha256:a1b2…"}` (all 64 digits). A pack whose files no longer hash to its value is not loaded. Replaces the user's whole map and locks it. Until turning a pack on from the app ships (0040, PR-E), this is the map in the user's `settings.json` |
 | `update.mode` | `auto`, `notify`, `none` | `auto` | `REG_SZ` | `none`: Clauseo never checks for an update or installs one, and shows that your organisation manages updates. `auto` installs a downloaded update when Clauseo next opens; `notify` waits for the user. **Security key**: locks at `none` if a source is unreadable or the value does not type. A policy name this version doesn't know turns updates off until Clauseo is updated by hand; add new update.* policies only after the matching version is rolled out. Per-machine installs, and Macs where the user cannot write the `.app` itself or the folder it sits in, never update themselves anyway. Updates run only once release builds carry the update endpoint (R23 PR 6); until then every build shows updates as managed |
-| `browser.allow_when_remote_debugging_disabled` | boolean | false | `REG_DWORD` 0 or 1 | 1: Clauseo's browser may start on a computer where your firm turned off Chrome's or Edge's remote debugging ([below](#browser-automation-and-remotedebuggingallowed)). Policy only: a `settings.json` value is ignored with a warning. **Security key**: false if a source is unreadable |
+| `browser.allow_when_remote_debugging_disabled` | boolean | false | `REG_DWORD` 0 or 1 | 1: Clauseo's browser may start on a computer where your firm turned off Chrome's, Edge's or Chromium's remote debugging, or where Clauseo can't read that policy ([below](#browser-automation-and-remotedebuggingallowed)). Policy only: a `settings.json` value is ignored with a warning. **Security key**: false if a source is unreadable |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -677,39 +677,57 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 ### Browser automation and RemoteDebuggingAllowed
 
 Clauseo's browser drives Chrome (or Chrome for Testing, which Clauseo can download) through
-Chrome's remote debugging. Chrome's and Edge's `RemoteDebuggingAllowed` policy turns that off.
-Chrome for Testing reads its own policy location rather than Chrome's, so Clauseo checks your
-Chrome and Edge policy itself. It does this before it starts any browser, whichever browser it
+Chrome's remote debugging. Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns
+that off. Chrome for Testing reads its own policy location rather than Chrome's, so Clauseo checks
+your Chrome, Edge and Chromium policy itself. It does this before it starts any browser, whichever browser it
 would pick.
 
 **What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
-in Chrome's and Edge's policy locations, and Chromium's on macOS and Linux:
+in Chrome's, Edge's and Chromium's policy locations. It takes the same values Chrome does:
 
-- **Windows:** `HKLM\SOFTWARE\Policies\Google\Chrome`, `HKCU\SOFTWARE\Policies\Google\Chrome`,
-  `HKLM\SOFTWARE\Policies\Microsoft\Edge` and `HKCU\SOFTWARE\Policies\Microsoft\Edge`. Each is
-  a `REG_DWORD`, where 0 means false.
+- **Windows:** `SOFTWARE\Policies\Google\Chrome`, `SOFTWARE\Policies\Microsoft\Edge` and
+  `SOFTWARE\Policies\Chromium`, each under both `HKLM` and `HKCU`. A `REG_DWORD` of 0 is false
+  and any other number true; a `REG_SZ` holding a whole number counts the same way, so `"0"`
+  (spaces around it allowed) is false too.
 - **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`,
   `com.microsoft.Edge.plist` and `org.chromium.Chromium.plist`, plus the same files under
-  `/Library/Managed Preferences/<user>/` for the signed-in user. Each value is a boolean.
-- **Linux:** every `*.json` in `/etc/opt/chrome/policies/managed/`,
-  `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`. Clauseo skips
-  `recommended/`, because Chrome doesn't take this policy as a recommendation either.
+  `/Library/Managed Preferences/<user>/` for the signed-in user. The value is a boolean, or the
+  integer 0 (false) or 1 (true).
+- **Linux:** every `*.json` file in `/etc/opt/chrome/policies/managed/`,
+  `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`; other files are
+  skipped, as Chrome skips them. The value is a boolean, or the integer 0 (false) or 1 (true).
+  Clauseo reads at most 256 `.json` files in each folder and 1 MiB in each file; a folder or
+  file past either limit counts as one it can't read (below). Clauseo skips `recommended/`,
+  because Chrome doesn't take this policy as a recommendation either.
 
 **What Clauseo doesn't read.** Brave's policy, and Chrome or Edge policy pushed from the cloud
 (Chrome Browser Cloud Management, Edge management service) that is not written to the registry,
 a managed preferences file or a policy folder. To have Clauseo honour such a policy, deploy
 `RemoteDebuggingAllowed` through one of the places above too.
 
-**The rule.** If any of these says false, Clauseo's browser doesn't start, and the app tells the
-lawyer that your firm doesn't allow apps to control a browser on this computer. If a value is
-missing, or a source can't be read, that alone doesn't block: Clauseo writes one line to the host
-log naming which browser and scope it couldn't read (never a path). Clauseo reads Chrome's and
-Edge's policy again each time a session starts its browser, so a change there applies to the next
-session; its own key below, like every Clauseo policy key, applies on the next start.
+**The rule.** Each place says one of five things:
+
+- **False:** Clauseo's browser doesn't start, and the app tells the lawyer that your firm doesn't
+  allow apps to control a browser on this computer.
+- **True, or nothing set** (the key, value, file or folder doesn't exist): no block.
+- **A value Chrome wouldn't accept** (a `REG_BINARY`, a string that isn't a whole number, a
+  plist or JSON file that doesn't parse, any other number than 0 or 1 in a plist or JSON file):
+  ignored, as Chrome ignores it. No block.
+- **A place Clauseo can't read** (permission denied or any other read failure, or past a limit
+  above): Clauseo doesn't know what it says, so its browser doesn't start, and the app tells the
+  lawyer Clauseo couldn't check this computer's browser settings. A false elsewhere still wins:
+  the lawyer then hears that your firm doesn't allow it.
+
+Clauseo writes one line to the host log for each place it couldn't read and each value it
+ignored, naming the browser and scope (never a path), once each time Clauseo starts. It reads
+this policy again each time a session starts its browser, so a change there, or a place that
+reads again, applies to the next session; its own key below, like every Clauseo policy key,
+applies on the next start.
 
 **Allowing Clauseo specifically.** Set Clauseo's policy key
 `browser.allow_when_remote_debugging_disabled` to true. Clauseo's browser then starts despite
-`RemoteDebuggingAllowed` false, and Chrome and Edge themselves stay as your policy sets them. A
+`RemoteDebuggingAllowed` false, or a place Clauseo can't read, and Chrome, Edge and Chromium
+themselves stay as your policy sets them. A
 user's `settings.json` can't set this key; only policy can. Set it the same way as any Clauseo
 policy key (above):
 

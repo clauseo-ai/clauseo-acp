@@ -166,6 +166,17 @@ export const UET: Entry[] = [
     ),
     [browser("browser_blocked_by_policy")],
   ),
+  // the firm's browser policy couldn't be read: the reason, then in full under it, no download
+  entry("UET-46", lineWords("Couldn't check browser settings"), [
+    browser("browser_policy_unreadable"),
+  ]),
+  entry(
+    "UET-47",
+    popWords(
+      "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one. If this keeps happening, ask your IT team.",
+    ),
+    [browser("browser_policy_unreadable")],
+  ),
   // the foot
   entry("UET-15", popWords("Open Settings"), [web("off")]),
   entry(

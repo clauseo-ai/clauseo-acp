@@ -11,7 +11,8 @@
 //! 3. No free browser slot: `TooManyBrowsers`.
 //! 4. No proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
-//!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`.
+//!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
@@ -66,8 +67,8 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) proxy_set: bool,
     /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
-    /// Whether the firm's browser policy left the browser out (`browser::rd_policy`).
-    pub(crate) blocked_by_policy: bool,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,
     /// The Chrome picked for this session, if any.
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
@@ -161,8 +162,8 @@ fn browser_entry(
     if !inputs.proxy_set {
         return Err(ToolsUnavailableReason::NoProxy);
     }
-    if inputs.blocked_by_policy {
-        return Err(ToolsUnavailableReason::BrowserBlockedByPolicy);
+    if let Some(reason) = inputs.blocked_by_policy {
+        return Err(reason);
     }
     let executable = inputs
         .executable

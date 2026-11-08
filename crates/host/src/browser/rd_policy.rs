@@ -1,61 +1,120 @@
-//! Whether the firm's own browser policy lets Clauseo's browser start: Chrome's and Edge's
-//! `RemoteDebuggingAllowed`, read by `clauseo_settings::chromium_policy`. Every browser Clauseo
-//! drives needs remote debugging, and Chrome for Testing and chrome-headless-shell do not read
-//! the firm's Chrome or Edge policy themselves, so the launch prep asks [`blocked`] before it
-//! picks any browser (`launch_checks/browser.rs`). A false anywhere starts none, unless the
-//! firm's Clauseo policy allows Clauseo's browser anyway
-//! (`browser.allow_when_remote_debugging_disabled`); the entry then drops with
-//! `BrowserBlockedByPolicy`. A missing value or an unreadable store does not block. Blocking
-//! reads: off the actor (the launch prep).
+//! Whether the firm's own browser policy lets Clauseo's browser start: Chrome's, Edge's and
+//! Chromium's `RemoteDebuggingAllowed`, read by `clauseo_settings::chromium_policy`. Every
+//! browser Clauseo drives needs remote debugging, and Chrome for Testing and
+//! chrome-headless-shell do not read the firm's policy themselves, so the launch prep asks
+//! [`RdPolicy::check`] before it picks any browser (`launch_checks/browser.rs`), at every
+//! launch: nothing is kept between launches.
+//!
+//! A false anywhere starts none (`BrowserBlockedByPolicy`). Otherwise a place that could not be
+//! read starts none either (`BrowserPolicyUnreadable`): nothing is known there, and the lawyer is
+//! not told the firm turned the browser off. Either way the firm's Clauseo policy can allow
+//! Clauseo's browser anyway (`browser.allow_when_remote_debugging_disabled`). Nothing set, or a
+//! value Chrome would not take, does not block. Blocking reads: off the actor (the launch prep).
 
 #[cfg(test)]
 mod tests;
 
-use std::sync::Once;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use clauseo_settings::chromium_policy::{Found, RemoteDebugging, RemoteDebuggingPolicy};
+use clauseo_protocol::ToolsUnavailableReason;
+use clauseo_settings::chromium_policy::{RemoteDebugging, RemoteDebuggingPolicy};
 
-/// Whether the session gets no browser: some place says `RemoteDebuggingAllowed` false and
-/// `allowed_anyway` (the firm's `browser.allow_when_remote_debugging_disabled`) is false.
-/// Logs each place it could not read, once per host; never a path.
-pub(crate) fn blocked(policy: &dyn RemoteDebuggingPolicy, allowed_anyway: bool) -> bool {
-    static UNREADABLE_LOGGED: Once = Once::new();
-    let read = policy.read();
-    UNREADABLE_LOGGED.call_once(|| log_unreadable(&read));
-    decide(&read, allowed_anyway)
+/// The wiring's reader of the firm's browser policy, with its log-once guards: each place it
+/// could not read, and each bad value, is logged the first time this reader sees one (once per
+/// host), with no path.
+#[derive(Debug)]
+pub(crate) struct RdPolicy {
+    reader: Arc<dyn RemoteDebuggingPolicy>,
+    unreadable_logged: AtomicBool,
+    bad_logged: AtomicBool,
 }
 
-/// [`blocked`]'s rule over what was read, with its log line.
-fn decide(read: &RemoteDebugging, allowed_anyway: bool) -> bool {
-    match read.turned_off_by() {
-        None => false,
-        Some(place) if allowed_anyway => {
-            tracing::info!(
-                %place,
-                "the firm's browser policy turns remote debugging off; its Clauseo policy allows \
-                 Clauseo's browser anyway"
-            );
-            false
+impl RdPolicy {
+    /// The rule over `reader`.
+    pub(crate) fn new(reader: Arc<dyn RemoteDebuggingPolicy>) -> Self {
+        Self {
+            reader,
+            unreadable_logged: AtomicBool::new(false),
+            bad_logged: AtomicBool::new(false),
         }
-        Some(place) => {
-            tracing::warn!(
-                %place,
-                "the session has no browser: the firm's browser policy turns remote debugging off"
-            );
-            true
+    }
+
+    /// The reader the host uses unless a test passes one: this machine's stores, or in this
+    /// crate's tests and its dependents' (`test-support`) one that finds nothing set, so no
+    /// test reads the machine it runs on.
+    pub(crate) fn wired() -> Self {
+        #[cfg(any(test, feature = "test-support"))]
+        let reader = Arc::new(clauseo_settings::chromium_policy::NothingSet);
+        #[cfg(not(any(test, feature = "test-support")))]
+        let reader = Arc::new(clauseo_settings::chromium_policy::SystemPolicy);
+        Self::new(reader)
+    }
+
+    /// Why the session gets no browser, read now; `None` when it may have one.
+    /// `allowed_anyway` is the firm's `browser.allow_when_remote_debugging_disabled`.
+    pub(crate) fn check(&self, allowed_anyway: bool) -> Option<ToolsUnavailableReason> {
+        let read = self.reader.read();
+        self.log_once(&read);
+        decide(&read, allowed_anyway)
+    }
+
+    /// The first unreadable place and the first bad value this reader sees, each logged once.
+    fn log_once(&self, read: &RemoteDebugging) {
+        if read.unreadable().next().is_some()
+            && !self.unreadable_logged.swap(true, Ordering::Relaxed)
+        {
+            for (place, why) in read.unreadable() {
+                tracing::warn!(
+                    %place,
+                    why,
+                    "the firm's browser policy was not read there; until it is, the session has \
+                     no browser"
+                );
+            }
+        }
+        if read.bad_values().next().is_some() && !self.bad_logged.swap(true, Ordering::Relaxed) {
+            for (place, why) in read.bad_values() {
+                tracing::warn!(
+                    %place,
+                    why,
+                    "the firm's browser policy holds a value Chrome ignores; Clauseo ignores it too"
+                );
+            }
         }
     }
 }
 
-/// One warning for each place that could not be read; it does not block.
-fn log_unreadable(read: &RemoteDebugging) {
-    for (place, found) in &read.found {
-        if let Found::Unreadable(why) = found {
-            tracing::warn!(
-                %place,
-                why = %why,
-                "the firm's browser policy was not read there; it does not turn the browser off"
-            );
-        }
+/// [`RdPolicy::check`]'s rule over what was read, with its log line: a false wins over a read
+/// error, and the firm's Clauseo opt-in overrides both.
+fn decide(read: &RemoteDebugging, allowed_anyway: bool) -> Option<ToolsUnavailableReason> {
+    let (place, reason) = if let Some(place) = read.turned_off_by() {
+        (place, ToolsUnavailableReason::BrowserBlockedByPolicy)
+    } else if let Some((place, _)) = read.unreadable().next() {
+        (place, ToolsUnavailableReason::BrowserPolicyUnreadable)
+    } else {
+        return None;
+    };
+    let off = reason == ToolsUnavailableReason::BrowserBlockedByPolicy;
+    if allowed_anyway {
+        tracing::info!(
+            %place,
+            turned_off = off,
+            "the firm's browser policy turns remote debugging off or was not read; its Clauseo \
+             policy allows Clauseo's browser anyway"
+        );
+        return None;
     }
+    if off {
+        tracing::warn!(
+            %place,
+            "the session has no browser: the firm's browser policy turns remote debugging off"
+        );
+    } else {
+        tracing::warn!(
+            %place,
+            "the session has no browser: the firm's browser policy was not read"
+        );
+    }
+    Some(reason)
 }

@@ -11,7 +11,7 @@ use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
-use clauseo_settings::chromium_policy::{RemoteDebuggingPolicy, SystemPolicy};
+use crate::browser::rd_policy::RdPolicy;
 
 use super::EgressProxy;
 
@@ -37,9 +37,10 @@ pub(crate) struct LaunchWiring {
     /// Where the launch prep looks for Chrome; `None` is this machine's roots
     /// (`ChromeRoots::system` with the data folder as app data).
     pub(crate) chrome_roots: Option<ChromeRoots>,
-    /// Reads the firm's Chrome and Edge `RemoteDebuggingAllowed` before any browser is
-    /// picked (`browser::rd_policy`); this machine's stores unless a test passes a fake.
-    pub(crate) rd_policy: Arc<dyn RemoteDebuggingPolicy>,
+    /// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` before any browser
+    /// is picked (`browser::rd_policy`): this machine's stores in production, nothing set in
+    /// tests (`RdPolicy::wired`) unless a test passes a fake.
+    pub(crate) rd_policy: Arc<RdPolicy>,
     /// The browser slots: the limit from the machine's memory, and the sessions holding one.
     pub(crate) browser_slots: BrowserSlots,
     /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
@@ -86,7 +87,7 @@ impl Default for LaunchWiring {
             path_prepend: None,
             browser_executable: None,
             chrome_roots: None,
-            rd_policy: Arc::new(SystemPolicy),
+            rd_policy: Arc::new(RdPolicy::wired()),
             browser_slots: BrowserSlots::new(None),
             #[cfg(unix)]
             browser_socket_root: None,

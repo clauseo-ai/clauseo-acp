@@ -79,6 +79,11 @@ open_unit_enum! {
         /// policy does not allow Clauseo's browser anyway
         /// (`browser.allow_when_remote_debugging_disabled`).
         BrowserBlockedByPolicy,
+        /// The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+        /// can be set could not be read (not missing: denied or failed), so Clauseo does not know
+        /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+        /// not allow Clauseo's browser anyway. Checked again at the next launch.
+        BrowserPolicyUnreadable,
     }
     test mod tools_unavailable_reason;
 }
