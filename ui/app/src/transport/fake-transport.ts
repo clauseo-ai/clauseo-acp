@@ -19,6 +19,7 @@ import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
 import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
 import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
+import { displayInfoOf, type FakeDisplayHost } from "./fake-display.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
@@ -110,7 +111,7 @@ export type FakeNextHost = {
   first?: () => readonly AppEvent[];
 };
 
-export type FakeHost = {
+export type FakeHost = FakeDisplayHost & {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   /** Answers the folder picker; a promise holds it open (the picker's line shows while it waits). */
@@ -132,14 +133,6 @@ export type FakeHost = {
   openSettings?: () => void | Promise<void>;
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
-  platform?: DisplayInfo["platform"];
-  /** The release date display_info reports; null, the dev and CI build's, when left out. */
-  releaseDate?: DisplayInfo["release_date"];
-  /** Whether display_info says this is a test build; false, a release build's, when left out. */
-  testBuild?: boolean;
-  /** The release mode display_info reports: `test` in a test build, `release` otherwise, when
-   * left out. */
-  releaseMode?: DisplayInfo["release_mode"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
   /** UD2: the `folder_scanned` events a `scan_folder` the host took plays, in order, to every app listener. Left out,
@@ -569,12 +562,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   }
 
   async displayInfo(): Promise<DisplayInfo> {
-    return {
-      platform: this.host.platform ?? "linux",
-      release_date: this.host.releaseDate ?? null,
-      test_build: this.host.testBuild ?? false,
-      release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
-    };
+    return displayInfoOf(this.host);
   }
 
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
