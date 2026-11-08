@@ -2369,17 +2369,25 @@ The orchestrator's rulings change the interface above in these ways:
   re-check, and the `PrepareRun` retries while a set-up runs) share one 180 s wall-clock budget;
   running out refuses with `LeftoverProcess` or the set-up's words. The **work steps** (the
   plan, `check_launch`'s scan, the set-aside's pass, `apply`) take as long as the matter's size
-  needs, with no wall-clock cap, but a stall timer: if their progress (`Walk::tick`,
-  `Walk::walked`) doesn't move for 60 s, the walk cancels, undoes and fails with
-  `Error::PrepareStalled`. The walk looks at its cancel and its progress before and after every
-  step, and `apply` sees both at each folder (`Walk::cancelled`). The cancel is looked at once
-  more after `apply`: a cancel that came during it undoes and is never prepared.
+  needs, up to a 20 min cap, under a stall timer: if their counted progress (`Walk::advance(n)`,
+  `Walk::walked`: items scanned, set aside or applied) doesn't rise for 60 s, or the cap
+  passes, the walk cancels, undoes and fails with `Error::PrepareStalled`. A call that counts
+  nothing is no progress, so a step that loops without doing anything stalls. The walk looks
+  at its cancel and its progress before and after every step, and `apply` sees both at each
+  folder (`Walk::cancelled`). The cancel is looked at once more after `apply`: a cancel that
+  came during it undoes and is never prepared.
+- **The session's end has the same limits.** `after_session`'s repair and set-aside pass get
+  the walk's stall rule and 20 min cap through `Ending::walk`, not a wall bound, so a big
+  matter's end runs as long as its progress rises. A step that stalls or passes the cap stops
+  (`Cancelled`), and the end goes on: the clean-close record notes the failure, then `EndRun`
+  and the matter's release run.
 - **A step that never returns makes the matter stuck.** It can't be interrupted, and nothing is
-  undone around it from another thread (it could still grant once it returns). A walk with no
-  progress for the stall timer plus 60 s of grace, or a reserve, an undo, a release or a
-  session's end running for 180 s plus the grace, makes `reserve` mark the matter stuck and
-  refuse it with `Error::MatterStuck` (`Internal`, not retryable: "Restart Clauseo to continue
-  with this matter") until Clauseo restarts.
+  undone around it from another thread (it could still grant once it returns). A walk or a
+  session's end with no progress for the stall timer plus 60 s of grace (or past the cap plus
+  the grace), or a reserve, an undo or a release running for 180 s plus the grace, makes
+  `reserve` mark the matter stuck and refuse it with `Error::MatterStuck` (`Internal`, not
+  retryable: "Restart Clauseo to continue with this matter") until Clauseo restarts. A session's
+  end stuck this way frees the matter once its steps return.
 - **One set of launchers per sandbox folder.** `Launchers::with_steps` takes the folder's
   `tier-b-launchers.lock` without waiting, before it clears what a crash left, and holds it
   while anything of the launchers' can still run. A second set, in this Clauseo or another, is
@@ -2415,9 +2423,23 @@ The orchestrator's rulings change the interface above in these ways:
     gone, never on a count read before it;
   - identify the detached end sweeper by its **process handle and creation time**, recorded when
     it started, never by name; `pool_user_processes` in `launch` stays as the backstop;
-  - tick the work steps' progress at least every few seconds, and make every wait a timed one;
+  - count the work steps' progress (`Walk::advance`) at least every few seconds, **from the
+    walking thread itself, never from a heartbeat thread**, and make every wait a timed one;
+  - **keep owed pool users across restarts.** A pool user whose `EndRun` failed is held back
+    in memory only (`registry.owed`). C5 persists it, or `clear_stale` finds run groups still
+    populated at start and ends them before any reuse;
+  - turn an `EndRun` failure into a Repair warning, retried on a timer and kept across
+    restarts, not just a warn log and `PoolFull{size:1}`;
+  - **quarantine a slot until its run is truly empty**: a slot whose run may still have a
+    process isn't handed to another claim;
+  - give claim ids a per-run random prefix (or the process start time), so a slot record's
+    claim can't collide across restarts, and keep `clear_stale` before the first claim;
   - keep the pool users out of the sandbox data folder (no access at all), where
     `tier-b-launchers.lock` and the records live.
+- **Accepted: the launcher's check-to-spawn window.** `TierBLauncher` checks the session is
+  still launched (`is_launched`) and then starts the outer; an `after_session` that begins in
+  between isn't seen. This is accepted: the pass and the undo are decided by the registry's
+  lock, and an outer started in the gap is the next launch's leftover, stopped or refused.
 - **A gate for C5: `apply`'s grants name the run's group.** A failed or cancelled walk undoes
   the session's work, but not the permission entries `apply` wrote (by design: the next walk
   continues from them). C5 must confirm that those entries name the run's group
