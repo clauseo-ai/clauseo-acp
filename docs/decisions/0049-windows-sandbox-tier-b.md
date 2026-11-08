@@ -573,8 +573,9 @@ started elevated, by the app or by the uninstall hook.
   between calls; the launch and the elevated start hash it every time.
 - **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
   rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
-  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopSequence`, `StopNext`, `SweepCompleted`,
-  `SweepSequence`, `SweepNext`) and, as the owner, the unclean-session markers, but the copy, its
+  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopSequence`, `StopNext`, `SweepLastExit`,
+  `SweepLastSequence`, `SweepCompleted`, `SweepSequence`, `SweepNext`) and, as the owner, the
+  unclean-session markers, but the copy, its
   four values and the SYSTEM tasks
   (refresh, stop and sweep) stay, so a later
   in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
@@ -1283,7 +1284,9 @@ leaves that profile, both naming the part.
       (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
       to 15 s): until that sweep ran, a task the escapee registered is live. One still short
       refuses the logon (`RunExit::AwaitingSweep`) without requesting a stop, which would end
-      every session. One awaiting the sweep before its final stop whose sweep completed, now or
+      every session. One whose sweep the last run already served and ended 56 refuses at once,
+      with the sweep still requested (`RunExit::LeftoverTask`, `0xE0C15014`, appended; "When a
+      sweep ends 56"). One awaiting the sweep before its final stop whose sweep completed, now or
       earlier, is re-marked to `AwaitingFinalStop`, the stop is requested and the logon refused
       (`RunExit::AwaitingStop`); one that couldn't be re-marked (`StopNext` unreadable, the
       write failed) refuses it with `RunExit::AwaitingSweep`, no stop requested. One awaiting a
@@ -1306,7 +1309,9 @@ leaves that profile, both naming the part.
       clean-close record is touched, finds every marker awaiting a sweep clean, or requests the
       sweep and reads `SweepSequence` every 100 ms for up to 15 s (inside the host's 180 s); one
       still short refuses the launch with `Error::UncleanSession` (appended,
-      `sandbox.cleaning_up`, retryable). A marker whose stop completed is re-marked first, and
+      `sandbox.cleaning_up`, retryable), or at once with `Blocked::LeftoverTask` when the last
+      sweep already served that number and ended 56 ("When a sweep ends 56"). A marker whose
+      stop completed is re-marked first, and
       the launch then waits for its sweep; one that couldn't be re-marked (`SweepNext`
       unreadable, the write failed) refuses the launch the same way. A marker still awaiting its
       stop, first or final, is F4's and doesn't hold the launch, and so is one whose sweep before
@@ -2118,7 +2123,24 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    already past `n`, a write that fails or a lock that stays held is 59. A run that is ended or
    ends non-zero never writes them. The three values are set-up values outside the record
    proper (`SETUP_VALUES`, each sequence before its next), deleted with the record by
-   `--remove`, and every write opens the key without making it.
+   `--remove`, and every write opens the key without making it;
+6. on every run past the gate, whatever its exit, writes `SweepLastExit` and then, when it
+   reserved one, `SweepLastSequence = n`, outside the set-up lock (one instance runs at a time),
+   before its log line. The exit goes first, so a reader between the two writes pairs a new
+   exit with an older number, which can only make it wait. A write that fails keeps the exit
+   and is named in the log line.
+
+The sweep's values in the record's key (`HKLM\SOFTWARE\Clauseo\Sandbox`, its DACL as every
+record value's: SYSTEM and Administrators full, `BUILTIN\Users` read, so the lawyer reads them;
+set-up values, deleted by `--remove`, the last run's first):
+
+| Value | Type | Written | Read by |
+|---|---|---|---|
+| `SweepNext` | `REG_QWORD` | each run, under the lock, before the walk (step 0) | a session's end, as its marker's `M` |
+| `SweepCompleted` | `REG_QWORD` | a run that ends 0, under the lock | no one (diagnostics) |
+| `SweepSequence` | `REG_QWORD` | a run that ends 0, under the lock, after `SweepCompleted` | launches and F4: a marker is clean once it reaches `M` |
+| `SweepLastExit` | `REG_DWORD` | every run past the gate, before its log line | launches and F4 ("When a sweep ends 56") |
+| `SweepLastSequence` | `REG_QWORD` | the same run, after `SweepLastExit`, when it reserved `n` | launches and F4 |
 
 It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
 process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
@@ -2172,7 +2194,20 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 
 56 wins over 57. Only a run that ends 0 writes `SweepSequence`, and only `SweepSequence` clears
 a marker awaiting a sweep ("The runner", "The unclean-session marker"): nothing reads the task's
-result.
+result, only `SweepLastExit`.
+
+**When a sweep ends 56.** The run records `SweepLastExit = 56` and `SweepLastSequence = n`
+(step 6). A launch whose marker awaits sweep `M` reads both as the lawyer: when the last exit
+is 56 and `n >= M`, the sweep it would wait for already ran after its marker and found a task
+it can't remove, so a 15 s wait would end the same way. It still requests a fresh sweep, fire
+and forget, then refuses at once with `Blocked::LeftoverTask` (`sandbox.blocked`, cause
+`leftover_task`, not retryable); F4 refuses the logon the same way with `RunExit::LeftoverTask`
+(`0xE0C15014`), whose `no_sandbox()` is `SetUpBlocked(LeftoverTask)`. Any other last exit, a
+56 at a number below `M` (no sweep has served the marker yet), or nothing recorded keeps the
+15 s wait (`RunExit::AwaitingSweep` at F4). It heals itself: once an administrator deletes the
+task, the sweep that launch requested (or the next) ends 0 and writes `SweepSequence`, and the
+next launch goes. An automatic recycle of the pool's slots (a fresh pool user in place of one
+whose task can't be removed) is under evaluation as the next step.
 
 **Misuse.** As with the stop, any code running as the lawyer can start the task or end a run.
 A run deletes only the pool users' tasks and BITS jobs. An ended run never writes
@@ -2190,9 +2225,10 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   `SD` it makes unreadable or ownerless. A stray file someone else owns, or a cache key whose
   task can't run, no longer blocks; a vendor's runnable key with no file, or any task hidden
   from SYSTEM's listing, does, until the planned recycle (P2). No
-  `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
-  15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
-  F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
+  `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch is
+  refused at once with `sandbox.blocked` (`leftover_task`, "When a sweep ends 56"), and that
+  pool user's logons are refused by F4 (`RunExit::LeftoverTask`). This fails closed: it stops
+  the sandbox working, never lets a pool task through, and
   gives the pool user nothing beyond that. It clears once the cause is gone and a sweep ends
   0: an administrator deletes the task (or the folders, or the stray file or junction), after
   which the next launch's sweep completes, or runs `--remove` (with no pool recorded there is
@@ -2251,8 +2287,13 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   counting a pool task new to the second walk.
 - VM row (not run): as a pool user, register a task whose descriptor shuts SYSTEM out (so the
   listing hides it), then run `--sweep-tasks`. Expect 56, the log line counting it not
-  listed, the task left, and the next launch refused with `sandbox.cleaning_up` until an
-  administrator deletes it.
+  listed, the task left, and the next launch refused with `sandbox.blocked` (`leftover_task`)
+  until an administrator deletes it.
+- VM row (not run): as a pool user, plant a hidden task (one whose descriptor shuts SYSTEM out)
+  and end the session, so its sweep ends 56. Expect `SweepLastExit = 56` and
+  `SweepLastSequence` equal to the marker's number, readable as the lawyer (`reg query`), and
+  the next launch refused with `sandbox.blocked` / `leftover_task` within 1 s, a sweep requested
+  (the task's last run time moves). Delete the task as an administrator: the next launch goes.
 - Elevated test (not run yet):
   `elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0`: a
   standard test user registers, from XML, a task whose descriptor denies SYSTEM and
@@ -2350,7 +2391,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
 - **Errors:** `Error` with `code()` and `cause()`. Appended: `PoolFull` (the host shows
   `NotProtectedCause::PoolFull`), `NotPrepared` (retryable: the host goes back to `prepare`) and
   `Cancelled`. `UncleanSession` (`sandbox.cleaning_up`, retryable) is the launch check's, for a
-  marker whose sweep didn't complete within 15 s; a later launch checks again. There is no "matter
+  marker whose sweep didn't complete within 15 s; a later launch checks again. A marker whose
+  sweep already ran and ended 56 is `Blocked(LeftoverTask)` (`sandbox.blocked`) instead. There
+  is no "matter
   busy" error: a matter's second concurrent session gets a pool user of its own (the
   extra-user-per-matter PR).
 - **The exit:** the host decodes the child's exit status with `RunOutcome::from_exit` (`Agent`,
@@ -2361,7 +2404,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   ahead once it completed.
   `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
   user's awaits a sweep that didn't complete within 15 s, or its completed stop (or sweep)
-  couldn't be re-marked; a later launch checks again.
+  couldn't be re-marked; a later launch checks again. `RunExit::LeftoverTask` (`0xE0C15014`)
+  is the same refusal at once when the last sweep served that marker and ended 56; its
+  `no_sandbox()` is `SetUpBlocked(LeftoverTask)`.
 - **The desktop's start:** once, before any launch and off the UI thread,
   `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
   stop and sweep tasks for what they still await. It never waits.
