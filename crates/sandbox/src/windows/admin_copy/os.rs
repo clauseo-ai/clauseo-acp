@@ -117,7 +117,7 @@ pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
     clippy::disallowed_methods,
     reason = "deletes a link in the admin folder, only administrators' to change"
 )]
-pub(crate) fn lock_tree_skipping(dir: &Path, skip: Option<&str>) -> io::Result<()> {
+pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
     lock_down(dir, true)?;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -126,7 +126,7 @@ pub(crate) fn lock_tree_skipping(dir: &Path, skip: Option<&str>) -> io::Result<(
         }
         let path = entry.path();
         match found(&path)? {
-            Found::Folder => lock_tree_skipping(&path, None)?,
+            Found::Folder => lock_tree(&path, None)?,
             Found::File => lock_down(&path, false)?,
             Found::Link => {
                 std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;

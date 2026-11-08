@@ -187,31 +187,27 @@ fn every_run_past_the_clear_leaves_no_staging_folder() {
     let mut fake = Fake::new(&old(), &new(), &key, &good());
     assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
     assert!(fake.calls.contains(&"leave_staging"));
-    assert!(fake.at_restart, "scheduled for deletion at restart");
+    assert_eq!(
+        fake.staging,
+        Staging::AtRestart,
+        "scheduled for deletion at restart"
+    );
     // Nothing to swap, or a refusal or failure at any step after staging: the staged file is
     // discarded and the folder removed.
     let mut current = Fake::new(&old(), &old(), &key, &good_for(&old()));
     assert_eq!(run_fake(&mut current, &key), RefreshExit::Done);
-    assert!(
-        !current.staging && !current.at_restart,
-        "{:?}",
-        current.calls
-    );
+    assert_eq!(current.staging, Staging::Absent, "{:?}", current.calls);
     for fail in ["stage", "secure_staged", "hold", "set_aside"] {
         let mut fake = Fake::new(&old(), &new(), &key, &good());
         fake.fail = Some(fail);
         assert_ne!(run_fake(&mut fake, &key), RefreshExit::Done, "{fail}");
         assert!(fake.calls.contains(&"leave_staging"), "{fail}");
-        assert!(
-            !fake.staging && !fake.at_restart,
-            "{fail}: {:?}",
-            fake.calls
-        );
+        assert_eq!(fake.staging, Staging::Absent, "{fail}: {:?}", fake.calls);
     }
     // A source refused before staging: the run still ends by leaving no folder.
     let mut fake = Fake::new(&old(), &new(), &key, &good());
     fake.source_exe = Err(SourceError::Missing);
     assert_eq!(run_fake(&mut fake, &key), RefreshExit::SourceRefused);
     assert!(fake.calls.contains(&"leave_staging"));
-    assert!(!fake.staging);
+    assert_eq!(fake.staging, Staging::Absent);
 }
