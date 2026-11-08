@@ -29,12 +29,30 @@ pub fn strip_hfs_ignorables(name: &str) -> Cow<'_, str> {
     }
 }
 
-/// Whether `name` is the ASCII name `want` as the file system may open it: without its
-/// [`hfs_ignorable`] code points, then by [`name_key`], then without ASCII case (NTFS too).
+/// Whether `name` is the lowercase ASCII name `want` as some file system may open it: without
+/// its [`hfs_ignorable`] code points, then by [`name_key`]'s caseless fold on every OS (NTFS
+/// opens `objectſ`, U+017F, as `objects`; folding more than one file system does only lists
+/// more). For the launch walk's git names; a name that is not UTF-8 folds ASCII case only.
 pub(crate) fn opens_as(name: &OsStr, want: &str) -> bool {
+    debug_assert!(!want.bytes().any(|b| b.is_ascii_uppercase()), "{want}");
     match name.to_str() {
-        Some(text) => name_key(OsStr::new(&*strip_hfs_ignorables(text))).eq_ignore_ascii_case(want),
+        Some(text) => caseless_key(&strip_hfs_ignorables(text)) == want,
         None => name.eq_ignore_ascii_case(want),
+    }
+}
+
+/// [`name_key`]'s fold of UTF-8 `text`: NFD of the full case fold of NFD.
+fn caseless_key(text: &str) -> String {
+    if text.is_ascii() {
+        return text.to_ascii_lowercase();
+    }
+    let nfd: String = text.nfd().collect();
+    let folded: String = nfd.chars().default_case_fold().collect();
+    // The second NFD only when the fold changed something (most scripts have no case).
+    if folded == nfd {
+        nfd
+    } else {
+        folded.nfd().collect()
     }
 }
 
@@ -55,17 +73,7 @@ pub(super) fn name_key(name: &OsStr) -> Cow<'_, OsStr> {
                 Cow::Borrowed(name)
             }
         }
-        Some(text) => {
-            let nfd: String = text.nfd().collect();
-            let folded: String = nfd.chars().default_case_fold().collect();
-            // The second NFD only when the fold changed something (most scripts have no case).
-            let key = if folded == nfd {
-                nfd
-            } else {
-                folded.nfd().collect()
-            };
-            Cow::Owned(OsString::from(key))
-        }
+        Some(text) => Cow::Owned(OsString::from(caseless_key(text))),
         None => Cow::Owned(name.to_ascii_lowercase()),
     }
 }
@@ -124,7 +132,9 @@ pub(super) fn same_name(a: &OsStr, b: &OsStr) -> bool {
 mod tests {
     use std::borrow::Cow;
 
-    use super::{hfs_ignorable, strip_hfs_ignorables};
+    use std::ffi::OsStr;
+
+    use super::{hfs_ignorable, opens_as, strip_hfs_ignorables};
 
     #[test]
     fn a_name_with_an_ignorable_strips_and_folds_to_git() {
@@ -162,6 +172,30 @@ mod tests {
                 matches!(strip_hfs_ignorables(name), Cow::Borrowed(n) if n == name),
                 "{name}"
             );
+        }
+    }
+
+    /// The walk's git names on every OS: ignorables stripped, then the caseless fold, so the
+    /// long s (U+017F) and the Kelvin sign (U+212A) fold to `s` and `k` as NTFS or APFS may.
+    #[test]
+    fn opens_as_strips_and_folds_on_every_os() {
+        for (name, want) in [
+            ("HEAD", "head"),
+            ("He\u{200D}aD", "head"),
+            ("objects", "objects"),
+            ("OBJECT\u{17F}", "objects"),
+            ("obj\u{FEFF}ectſ", "objects"),
+            ("\u{212A}eep", "keep"),
+            ("commonDir", "commondir"),
+        ] {
+            assert!(opens_as(OsStr::new(name), want), "{name:?}");
+        }
+        for (name, want) in [
+            ("HEADS", "head"),
+            ("object", "objects"),
+            ("head\u{200B}", "head"),
+        ] {
+            assert!(!opens_as(OsStr::new(name), want), "{name:?}");
         }
     }
 }

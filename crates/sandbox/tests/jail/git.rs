@@ -146,7 +146,8 @@ fn a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule() {
 }
 
 /// A bare repository needs no `.git` name: `HEAD`, `objects/` and `refs/` make one. No `HEAD`
-/// is made, and one that exists at launch is read-only with its whole folder.
+/// is made, and a folder holding one at launch is read-only with its whole tree, as is the
+/// folder a `commondir` beside it names.
 #[test]
 fn no_head_is_made_and_an_existing_bare_repository_is_read_only() {
     let w = World::new();
@@ -155,6 +156,11 @@ fn no_head_is_made_and_an_existing_bare_repository_is_read_only() {
     w.file("m1/old.git/config", "[core]\n\tbare = true\n");
     w.dir("m1/old.git/objects");
     w.dir("m1/old.git/refs/heads");
+    // A lone HEAD the agent could complete, and a worktree-style git dir's commondir target.
+    w.file("m1/lone/HEAD", "ref: refs/heads/main\n");
+    w.file("m1/wt/HEAD", "ref: refs/heads/main\n");
+    w.file("m1/wt/commondir", "../common\n");
+    w.dir("m1/common");
     let (launcher, _) = launcher(w.builder().build().unwrap());
     let m1 = w.at("m1");
     let before = tree(&m1.join("old.git"));
@@ -166,6 +172,9 @@ fn no_head_is_made_and_an_existing_bare_repository_is_read_only() {
         "touch old.git/objects/x",
         "touch old.git/refs/heads/main",
         "mv old.git old2.git",
+        "printf '../common\\n' > lone/commondir",
+        "mkdir lone/objects",
+        "printf '[core]\\n\\tfsmonitor = x\\n' > common/config",
     ] {
         sh(&launcher, &m1, script, &[]).assert_refused();
     }

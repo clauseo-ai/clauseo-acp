@@ -148,35 +148,61 @@ fn a_git_file_names_its_folder_inside_the_matter_only() {
     assert_eq!(scan.git_dirs(), [matter.join(".bare/worktrees/a")]);
 }
 
-/// A folder holding a `HEAD` file and `objects` and `refs` folders, or `HEAD` and a
-/// `commondir` file, is a git dir to git, names spelled with HFS+'s ignorables too; a missing
-/// part, a `HEAD` folder or a layout inside a `.git` is not listed.
+/// Every folder outside a `.git` holding a `HEAD` file is listed, whole layout or lone `HEAD`
+/// (the agent could complete it), names spelled with HFS+'s ignorables or folded case too; a
+/// `HEAD` folder, `HEADS` or a `HEAD` inside a `.git` is not.
 #[test]
-fn repository_shaped_folders_are_listed() {
+fn every_folder_holding_a_head_is_listed() {
     let dir = TempDir::new("links-bare");
-    for (folder, head, objects) in [
-        ("matter/bare.git", "HEAD", "objects"),
-        ("matter/docs/old", "head", "objects"),
-        ("matter/hfs", "HE\u{200D}AD", "obj\u{200C}ects"),
-        ("matter/.git/modules/m", "HEAD", "objects"),
+    for (folder, head) in [
+        ("matter/bare.git", "HEAD"),
+        ("matter/docs/old", "head"),
+        ("matter/hfs", "HE\u{200D}AD"),
+        ("matter/lone", "HEAD"),
+        ("matter/.git/modules/m", "HEAD"),
     ] {
         dir.file(&format!("{folder}/{head}"), "ref: refs/heads/main\n");
-        dir.dir(&format!("{folder}/{objects}"));
-        dir.dir(&format!("{folder}/refs"));
     }
-    dir.file("matter/wt/HEAD", "ref: refs/heads/main\n");
-    dir.file("matter/wt/commondir", "../..\n");
-    dir.file("matter/no-refs/HEAD", "ref: refs/heads/main\n");
-    dir.dir("matter/no-refs/objects");
-    dir.file("matter/commondir-dir/HEAD", "ref: refs/heads/main\n");
-    dir.dir("matter/commondir-dir/commondir");
+    dir.dir("matter/bare.git/objects");
+    dir.dir("matter/bare.git/refs");
     dir.dir("matter/head-dir/HEAD");
-    dir.dir("matter/head-dir/objects");
-    dir.dir("matter/head-dir/refs");
+    dir.file("matter/heads/HEADS", "x\n");
     let scan = scan_matter(&dir.path().join("matter")).unwrap();
     let matter = canon(&dir.path().join("matter"));
-    let want = ["bare.git", "docs/old", "hfs", "wt"].map(|f| matter.join(f));
+    let want = ["bare.git", "docs/old", "hfs", "lone"].map(|f| matter.join(f));
     assert_eq!(scan.bare_repos(), want);
+}
+
+/// The folder a `commondir` beside a `HEAD` names, relative to that folder, is a git dir too
+/// (git reads its `config`), under the `gitdir:` rule: one outside the matter, or the matter
+/// itself, is left out. An ignorable or long-s spelling of `commondir` counts.
+#[test]
+fn the_folder_a_commondir_names_inside_the_matter_is_listed() {
+    let dir = TempDir::new("links-commondir");
+    dir.dir("matter/common");
+    dir.dir("matter/common2");
+    dir.dir("outside/common");
+    for (wt, name, line) in [
+        ("a", "commondir", "../common\n"),
+        ("b", "common\u{200C}dir", "../common2\n"),
+        ("c", "commondir", "../../outside/common\n"),
+        ("d", "commondir", "..\n"),
+    ] {
+        dir.file(&format!("matter/{wt}/HEAD"), "ref: refs/heads/main\n");
+        dir.file(&format!("matter/{wt}/{name}"), line);
+    }
+    // No HEAD beside it: not a git dir, its commondir is not read.
+    dir.file("matter/e/commondir", "../common\n");
+    dir.dir("matter/f");
+    dir.file("matter/f/COMMONDIR", "../f\n");
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(
+        scan.git_dirs(),
+        [matter.join("common"), matter.join("common2")]
+    );
+    let bare = ["a", "b", "c", "d"].map(|f| matter.join(f));
+    assert_eq!(scan.bare_repos(), bare);
 }
 
 /// A `HEAD` that is a symbolic link counts too (git once wrote HEAD as one).
@@ -187,26 +213,6 @@ fn a_symlink_head_makes_a_repository_shaped_folder() {
     dir.file("matter/r/refs/heads/main", "0000\n");
     dir.dir("matter/r/objects");
     dir.symlink("matter/r/HEAD", Path::new("refs/heads/main"));
-    let scan = scan_matter(&dir.path().join("matter")).unwrap();
-    let matter = canon(&dir.path().join("matter"));
-    assert_eq!(scan.bare_repos(), [matter.join("r")]);
-}
-
-/// `objects` and `refs` as symbolic links to folders count as folders: git follows them, and
-/// so does the shape check (`fs::metadata` on each entry).
-#[cfg(unix)]
-#[test]
-fn objects_and_refs_linked_to_folders_make_a_repository_shaped_folder() {
-    let dir = TempDir::new("links-bare-linked-parts");
-    dir.dir("matter/store/objects");
-    dir.dir("matter/store/refs");
-    dir.file("matter/r/HEAD", "ref: refs/heads/main\n");
-    dir.symlink("matter/r/objects", Path::new("../store/objects"));
-    dir.symlink("matter/r/refs", Path::new("../store/refs"));
-    dir.file("matter/f/HEAD", "ref: refs/heads/main\n");
-    dir.file("matter/f/target", "a file\n");
-    dir.symlink("matter/f/objects", Path::new("target"));
-    dir.symlink("matter/f/refs", Path::new("target"));
     let scan = scan_matter(&dir.path().join("matter")).unwrap();
     let matter = canon(&dir.path().join("matter"));
     assert_eq!(scan.bare_repos(), [matter.join("r")]);
