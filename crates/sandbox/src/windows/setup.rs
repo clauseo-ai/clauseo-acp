@@ -127,6 +127,8 @@ mod record_key;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;
+#[cfg(windows)]
+pub(crate) use record_write::read_record_value;
 pub mod registered;
 pub mod remove;
 mod resets;

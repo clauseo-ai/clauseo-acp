@@ -10,7 +10,7 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, GRACE, SessionEnd, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
-use super::marker::{marked, remove_marker};
+use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
@@ -104,8 +104,8 @@ fn marked_outer(
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
-    // From here every end path first ends the job, waits for it to empty, and requests the
-    // `SYSTEM` sweep task (`end.rs`).
+    // From here every end path first ends the job, waits for it to empty, reads `SweepNext` and
+    // requests the `SYSTEM` sweep task (`end.rs`).
     let end: End = Arc::new(SessionEnd::new(OsEnd {
         data_dir,
         desktop,
@@ -114,11 +114,12 @@ fn marked_outer(
         cwd,
         job: OnceLock::new(),
         marker,
+        pool_user: message.pool_user.clone(),
     }));
     let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
-        end.wait();
+        end.finish();
     }
     match result {
         // An escapee found at the first act, a tick or the inner's end is the run's outcome; the
@@ -355,8 +356,8 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// gets [`DRAIN`] again. On a cancel the exit code is the one the run would have had
 /// without the job's end (`end::exit_code`). A sweep of the session that found an escapee makes
 /// it [`RunExit::Escapee`] (`SessionEnd::outcome`), the code it replaces said on stderr. The
-/// outer then waits for the sweep task's result (`SessionEnd::wait`), which never changes the
-/// exit code; a clean end (`SessionEnd::clean`) removes the session's unclean-session marker.
+/// outer then writes what the session's marker waits for (`SessionEnd::finish`), with no wait
+/// for any task's run.
 fn relay(
     inner: &Process,
     ctl: ServerPipe,
@@ -418,15 +419,7 @@ fn relay(
         }
     });
     tell_status(last.as_ref(), code);
-    let swept = end.wait();
-    if end.clean(swept, reported.is_some())
-        && let Err(error) = remove_marker(&end.steps().marker)
-    {
-        say(&format!(
-            "clauseo-sandbox-run: {}",
-            os("the session marker's removal", &error)
-        ));
-    }
+    end.finish();
     if end.escaped() {
         say(&format!(
             "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"
