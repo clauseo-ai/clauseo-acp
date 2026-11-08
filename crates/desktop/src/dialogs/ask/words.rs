@@ -7,8 +7,9 @@ use clauseo_protocol::Language;
 
 use crate::dialogs::words::{Key, fill, isolate, text};
 
-/// One question's words, in one language, its slots filled.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One question's words, in one language, its slots filled. Its `Debug` prints none of them:
+/// the title and message hold names and paths.
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct AskWords {
     /// The title: the task dialog's main instruction, the alert's bold line.
     pub(super) title: String,
@@ -26,18 +27,31 @@ pub(super) struct AskWords {
     pub(super) allow_always: String,
 }
 
+/// No words: they hold names and paths.
+impl std::fmt::Debug for AskWords {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AskWords").finish_non_exhaustive()
+    }
+}
+
 impl AskWords {
     /// `dialog`'s words in `language`.
     pub(super) fn new(language: Language, dialog: &Dialog) -> Self {
         let word = |key| text(language, key).to_owned();
         let (title, message) = title_and_message(language, dialog);
+        // Switching protection off confirms with its own word, on every platform: on Linux
+        // it stands for Allow once, beside Always allow for this matter.
+        let (allow, allow_once) = match dialog {
+            Dialog::SwitchOff { .. } => (Key::AskSwitchOffConfirm, Key::AskSwitchOffConfirm),
+            _ => (Key::AskAllow, Key::AskAllowOnce),
+        };
         Self {
             title,
             message,
-            allow: word(Key::AskAllow),
+            allow: word(allow),
             refuse: word(Key::AskRefuse),
             remember: word(Key::AskRemember),
-            allow_once: word(Key::AskAllowOnce),
+            allow_once: word(allow_once),
             allow_always: word(Key::AskAllowAlways),
         }
     }

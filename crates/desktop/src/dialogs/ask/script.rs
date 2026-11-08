@@ -24,7 +24,6 @@ const ANSWERS_VAR: &str = "E2E_DIALOG_ANSWERS";
 const PICKS_VAR: &str = "E2E_DIALOG_PICKS";
 
 /// The dialogs answered from a script.
-#[derive(Debug)]
 pub(super) struct Scripted {
     answers: Mutex<VecDeque<DialogAnswer>>,
     picks: Mutex<VecDeque<Option<PathBuf>>>,
@@ -61,6 +60,18 @@ impl Scripted {
             answers: Mutex::new(answers),
             picks: Mutex::new(picks),
         }
+    }
+}
+
+/// The answers left, and the number of picks: no path.
+impl std::fmt::Debug for Scripted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let answers = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        let picks = self.picks.lock().unwrap_or_else(PoisonError::into_inner);
+        f.debug_struct("Scripted")
+            .field("answers", &*answers)
+            .field("picks", &picks.len())
+            .finish()
     }
 }
 

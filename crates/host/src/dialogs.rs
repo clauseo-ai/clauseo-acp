@@ -6,8 +6,11 @@
 //! Contract:
 //! - Every call blocks until the lawyer answers, so the host makes it off its actor.
 //! - Escape, the close button, a dialog that fails or never shows: [`DialogAnswer::Refuse`],
-//!   and a picker gives `None`. Nothing but a press of an allowing button allows.
+//!   and a picker gives `None`. Nothing but a press of an allowing button allows. (macOS'
+//!   alert can't tell Escape from Don't allow, so there Escape honours the Remember checkbox.)
 //! - The dialog says only what the host passes; nothing the agent wrote reaches it.
+//! - No path, host or matter name reaches a log: `Dialog`'s and `Pick`'s `Debug` print only
+//!   their kind and flags.
 //! - No host logic asks yet (R18 PR 3 does).
 
 use std::path::PathBuf;
@@ -21,8 +24,9 @@ pub trait NativeDialogs: Send + Sync {
     fn pick(&self, pick: Pick) -> Option<PathBuf>;
 }
 
-/// One question about widening a matter's reach.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One question about widening a matter's reach. Its `Debug` leaves out every path, host and
+/// name.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Dialog {
     /// A refused path: a folder, or the exact file when it is another matter's.
     Folder {
@@ -74,8 +78,8 @@ pub enum DialogAnswer {
     RefuseForMatter,
 }
 
-/// A native picker's request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A native picker's request. Its `Debug` leaves out the path and the name.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Pick {
     /// Where the picker opens.
     pub start: PathBuf,
@@ -84,6 +88,49 @@ pub struct Pick {
     /// The name of the matter the pick is for, which the picker's title names.
     pub matter_name: String,
 }
+
+/// The kind and flags only: no path, host or matter name.
+impl std::fmt::Debug for Dialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Folder {
+                is_file,
+                other_matter,
+                ..
+            } => f
+                .debug_struct("Folder")
+                .field("is_file", is_file)
+                .field("other_matter", &other_matter.is_some())
+                .finish_non_exhaustive(),
+            Self::Site { shared_hosting, .. } => f
+                .debug_struct("Site")
+                .field("shared_hosting", shared_hosting)
+                .finish_non_exhaustive(),
+            Self::SwitchOff { .. } => f.debug_struct("SwitchOff").finish_non_exhaustive(),
+            Self::ConfirmPick {
+                is_file,
+                other_matter,
+                ..
+            } => f
+                .debug_struct("ConfirmPick")
+                .field("is_file", is_file)
+                .field("other_matter", &other_matter.is_some())
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+/// The flag only: no path or matter name.
+impl std::fmt::Debug for Pick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pick")
+            .field("files_too", &self.files_too)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(feature = "test-support")]
 mod fake;

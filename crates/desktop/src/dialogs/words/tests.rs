@@ -103,9 +103,9 @@ fn the_words_are_the_reviewed_copy() {
     }
 }
 
-/// The keys the app thread has yet to put in Hindi: each has English, and its Hindi is either
-/// Devanagari already or listed in `PENDING_HINDI`, where English stands in, once, and only
-/// after the reviewed keys (so the review ids of those stay as they are).
+/// The keys not yet reviewed: each has English, and its Hindi is either Devanagari or listed in
+/// `PENDING_HINDI`, where English stands in until the app thread writes it. Each pending key is
+/// listed once, after the reviewed keys (so the review ids of those stay as they are).
 #[test]
 fn a_key_without_hindi_is_pending_and_still_has_english() {
     for key in Key::ALL {
@@ -118,7 +118,7 @@ fn a_key_without_hindi_is_pending_and_still_has_english() {
             "{key:?}: {hi}"
         );
         if PENDING_HINDI.contains(&key) {
-            assert_eq!(hi, en, "{key:?}: a pending key stands in English");
+            assert!(hi == en || devanagari(hi), "{key:?}: {hi}");
         }
     }
     for (n, key) in PENDING_HINDI.iter().enumerate() {

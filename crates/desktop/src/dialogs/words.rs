@@ -80,6 +80,8 @@ pub(crate) enum Key {
     AskSwitchOffTitle,
     /// R18, its message.
     AskSwitchOffMessage,
+    /// R18, its confirming button, in place of Allow (Hindi: the app thread's provisional word).
+    AskSwitchOffConfirm,
     /// R18, confirming a picked folder: the title.
     AskPickFolderTitle,
     /// R18, confirming a picked file: the title.
@@ -95,7 +97,7 @@ pub(crate) enum Key {
 impl Key {
     /// Every key, in review order (ND-01 first).
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 39] = [
+    pub(crate) const ALL: [Self; 40] = [
         Self::Cancel,
         Self::AlwaysTitle,
         Self::AlwaysMessage,
@@ -130,6 +132,7 @@ impl Key {
         Self::AskSharedHostingNote,
         Self::AskSwitchOffTitle,
         Self::AskSwitchOffMessage,
+        Self::AskSwitchOffConfirm,
         Self::AskPickFolderTitle,
         Self::AskPickFileTitle,
         Self::AskPickMessage,
@@ -196,6 +199,7 @@ fn en(key: Key) -> &'static str {
             "Without protection, Clauseo can read and change files anywhere on this computer and \
              open any site while it works on {matter}."
         }
+        Key::AskSwitchOffConfirm => "Switch off",
         Key::AskPickFolderTitle => "Let Clauseo read the folder you picked?",
         Key::AskPickFileTitle => "Let Clauseo read the file you picked?",
         Key::AskPickMessage => "While working on {matter}, Clauseo will be able to read {path}.",
@@ -225,6 +229,7 @@ fn hi(key: Key) -> &'static str {
              उससे साइन इन कर सकते हैं।"
         }
         Key::SwitchOk => "साइन आउट करके आगे बढ़ें",
+        Key::AskSwitchOffConfirm => "बंद करें",
         // The app thread writes these (PENDING_HINDI); English until then.
         Key::AskAllow
         | Key::AskRefuse
@@ -253,8 +258,9 @@ fn hi(key: Key) -> &'static str {
     }
 }
 
-/// The keys whose Hindi the app thread writes: English stands in the Hindi table until then,
-/// and the tests of the Hindi (and of the review page, where they have no id yet) skip them.
+/// The keys whose Hindi the app thread writes: English stands in the Hindi table until then
+/// (`AskSwitchOffConfirm` has its provisional word already), and the tests of the Hindi and of
+/// the review page, where they have no id yet, skip them.
 #[cfg(test)]
 pub(crate) const PENDING_HINDI: &[Key] = &[
     Key::AskAllow,
@@ -276,6 +282,7 @@ pub(crate) const PENDING_HINDI: &[Key] = &[
     Key::AskSharedHostingNote,
     Key::AskSwitchOffTitle,
     Key::AskSwitchOffMessage,
+    Key::AskSwitchOffConfirm,
     Key::AskPickFolderTitle,
     Key::AskPickFileTitle,
     Key::AskPickMessage,

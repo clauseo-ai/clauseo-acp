@@ -1,12 +1,12 @@
-//! macOS and Linux: a widening question as rfd's message dialog with three buttons (rfd draws
-//! no checkbox), built on the main thread as `dialogs::confirm` builds its own, and awaited on
-//! the calling thread.
+//! Linux: a widening question as rfd's message dialog with three buttons (rfd draws no
+//! checkbox), built on the main thread as `dialogs::confirm` builds its own, and awaited on the
+//! calling thread.
 
 use clauseo_host::DialogAnswer;
 use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime, WebviewWindow};
 
-use super::answer::{ThreeButtons, order};
+use super::answer::ThreeButtons;
 use super::words::AskWords;
 
 /// Asks `words`'s question over `main`, when there is one, and waits for the answer. A dialog
@@ -16,12 +16,7 @@ pub(super) fn ask<R: Runtime>(
     main: Option<WebviewWindow<R>>,
     words: &AskWords,
 ) -> DialogAnswer {
-    let three = ThreeButtons::new(
-        order(cfg!(target_os = "macos")),
-        &words.allow_once,
-        &words.allow_always,
-        &words.refuse,
-    );
+    let three = ThreeButtons::new(&words.allow_once, &words.allow_always, &words.refuse);
     let buttons = three.buttons();
     let (title, message) = (words.title.clone(), words.message.clone());
     let (tx, rx) = std::sync::mpsc::channel();

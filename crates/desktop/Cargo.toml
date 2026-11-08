@@ -146,6 +146,22 @@ windows = { workspace = true, features = [
 # open_file's default app for a type on macOS (src/open/mac_app.rs): CFString and CFURL.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
+# R18's widening question (src/dialogs/ask/macos.rs, 0054): NSAlert, run modally (NSApplication:
+# runModal and its button returns), its suppression checkbox (NSButton, with NSControl,
+# NSResponder and NSView for suppressionButton, NSCell for its state), the texts as NSString, and
+# objc2's MainThreadMarker. Already in the lock through rfd; no new crate.
+objc2 = { workspace = true, features = ["std"] }
+objc2-foundation = { workspace = true, features = ["std", "NSString"] }
+objc2-app-kit = { workspace = true, features = [
+  "std",
+  "NSAlert",
+  "NSApplication",
+  "NSButton",
+  "NSCell",
+  "NSControl",
+  "NSResponder",
+  "NSView",
+] }
 # The machine's total memory on macOS (src/machine_memory.rs): sysctlbyname("hw.memsize"). The
 # updater's install kind (src/update/install_kind.rs): access(2) on the .app's folder.
 libc = { workspace = true }

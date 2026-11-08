@@ -14,7 +14,7 @@ pub struct FakeDialogs {
     script: Mutex<Script>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Script {
     answers: VecDeque<DialogAnswer>,
     picks: VecDeque<Option<PathBuf>>,
@@ -53,6 +53,18 @@ impl FakeDialogs {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Script> {
         self.script.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Counts only: no path or name.
+impl std::fmt::Debug for Script {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Script")
+            .field("answers", &self.answers)
+            .field("picks", &self.picks.len())
+            .field("asked", &self.asked.len())
+            .field("picked", &self.picked.len())
+            .finish()
     }
 }
 

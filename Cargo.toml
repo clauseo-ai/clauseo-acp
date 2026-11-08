@@ -185,6 +185,12 @@ rustix = "1.1.5"
 # clauseo-sandbox: the macOS proxy settings and PAC runs of the egress proxy's upstream lookup
 # (crates/sandbox/src/proxy/upstream/macos.rs). Only the modules the crate line names.
 objc2-cf-network = { version = "0.3.2", default-features = false }
+# clauseo-desktop: R18's widening question on macOS, an NSAlert with its suppression checkbox
+# (crates/desktop/src/dialogs/ask/macos.rs, decision record 0054). All three are already in
+# Cargo.lock through rfd, at these versions; the crate line names the features.
+objc2 = { version = "0.6.5", default-features = false }
+objc2-foundation = { version = "0.3.2", default-features = false }
+objc2-app-kit = { version = "0.3.2", default-features = false }
 # clauseo-counts: its compile-fail test (dev only). Its gzip uses the flate2 entry above, whose
 # default rust_backend is pure Rust and builds for wasm32.
 trybuild = "1.0.122"

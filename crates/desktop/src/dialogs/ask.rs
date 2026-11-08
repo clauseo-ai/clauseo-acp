@@ -3,18 +3,20 @@
 //!
 //! - Windows: a task dialog (`windows.rs`) with Allow and Don't allow, and a "Remember for this
 //!   matter" checkbox; Don't allow is the default button.
-//! - macOS and Linux (`rfd_ask.rs`): rfd's message dialog with three buttons, Allow once,
-//!   Always allow for this matter and Don't allow; there is no "Don't allow for this matter".
-//!   macOS waits for `NSAlert` with its suppression checkbox, which needs `objc2-app-kit`, a
-//!   dependency the architecture table does not list yet (a decision record first).
+//! - macOS (`macos.rs`): an `NSAlert` with Don't allow (on Escape; Return presses nothing)
+//!   and Allow, and the same checkbox as its suppression button, run modally on the main thread
+//!   (decision record 0054).
+//! - Linux (`rfd_ask.rs`): rfd's message dialog with three buttons, Allow once, Always allow
+//!   for this matter and Don't allow; rfd has no checkbox, so no "Don't allow for this matter".
 //! - The pickers: the dialog plugin's file dialog, a folder or a file per `Pick::files_too`.
 //! - The `e2e` build answers from `E2E_DIALOG_ANSWERS` and `E2E_DIALOG_PICKS` when either is
 //!   set (`script.rs`).
 //!
 //! Contract: Escape, the close button and a dialog that failed or never showed refuse
-//! ([`answer`]); a cancelled or failed picker gives `None`. Every call blocks; the host makes
-//! them off its actor, and a call on the main thread, which would wait on itself, refuses at
-//! once. No path reaches the log.
+//! ([`answer`]), except that macOS' Escape presses Don't allow, which honours the checkbox; a
+//! cancelled or failed picker gives `None`. Every call blocks; the host makes them off its
+//! actor, and a call on the main thread, which would wait on itself, refuses at once. No path
+//! reaches the log.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,7 +26,9 @@ use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_dialog::DialogExt as _;
 
 mod answer;
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(all(unix, not(target_os = "macos")))]
 mod rfd_ask;
 #[cfg(any(feature = "e2e", test))]
 mod script;
@@ -62,11 +66,16 @@ impl<R: Runtime> NativeDialogs for DesktopDialogs<R> {
             return DialogAnswer::Refuse;
         }
         let words = words::AskWords::new(crate::ui_language::current(), &dialog);
-        let main = self.app.get_webview_window(crate::MAIN_WINDOW);
         #[cfg(windows)]
-        let answer = windows::ask(main.as_ref(), &words);
-        #[cfg(not(windows))]
-        let answer = rfd_ask::ask(&self.app, main, &words);
+        let answer = windows::ask(self.app.get_webview_window(crate::MAIN_WINDOW), &words);
+        #[cfg(target_os = "macos")]
+        let answer = macos::ask(&self.app, &words);
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let answer = rfd_ask::ask(
+            &self.app,
+            self.app.get_webview_window(crate::MAIN_WINDOW),
+            &words,
+        );
         answer
     }
 

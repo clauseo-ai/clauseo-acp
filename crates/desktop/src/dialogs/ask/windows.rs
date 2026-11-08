@@ -12,15 +12,15 @@ use windows::Win32::UI::Controls::{
 };
 use windows::core::{BOOL, HSTRING, PCWSTR};
 
-use super::answer::{ALLOW, REFUSE, from_task_dialog};
+use super::answer::{ALLOW, REFUSE, from_press, task_dialog_press};
 use super::words::AskWords;
 
 /// Asks `words`'s question over `main`, when there is one, and waits for the answer. A dialog
 /// that fails refuses.
-pub(super) fn ask<R: Runtime>(main: Option<&WebviewWindow<R>>, words: &AskWords) -> DialogAnswer {
+pub(super) fn ask<R: Runtime>(main: Option<WebviewWindow<R>>, words: &AskWords) -> DialogAnswer {
     let parent = main.and_then(|main| main.hwnd().ok());
     match task_dialog(parent, words) {
-        Ok((pressed, remember)) => from_task_dialog(pressed, remember),
+        Ok((pressed, remember)) => from_press(task_dialog_press(pressed), remember),
         Err(err) => {
             tracing::warn!(code = err.code().0, "the widening dialog failed: refused");
             DialogAnswer::Refuse

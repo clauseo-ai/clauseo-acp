@@ -7,22 +7,40 @@ use clauseo_host::{Dialog, DialogAnswer, NativeDialogs, Pick};
 use clauseo_protocol::Language;
 use rfd::{MessageButtons, MessageDialogResult};
 
-use super::answer::{ALLOW, REFUSE, ThreeButtons, from_task_dialog, order};
+use super::answer::{
+    ALERT_ALLOW, ALERT_REFUSE, ALLOW, Press, REFUSE, ThreeButtons, alert_press, from_press,
+    task_dialog_press,
+};
 use super::script::Scripted;
 use super::words::{AskWords, pick_title};
 
 /// Win32's IDCANCEL: Escape, Alt+F4 and the close button.
 const IDCANCEL: i32 = 2;
 
+/// `NSModalResponseStop`, `NSModalResponseAbort` and `NSModalResponseCancel`: a modal session
+/// ended by something other than a button.
+const ALERT_ENDED_OTHERWISE: [isize; 3] = [-1000, -1001, 0];
+
 #[test]
-fn the_task_dialog_maps_button_and_checkbox() {
-    assert_eq!(from_task_dialog(ALLOW, true), DialogAnswer::AllowForMatter);
-    assert_eq!(from_task_dialog(ALLOW, false), DialogAnswer::AllowOnce);
+fn a_press_and_the_checkbox_give_the_answer() {
+    assert_eq!(from_press(Press::Allow, true), DialogAnswer::AllowForMatter);
+    assert_eq!(from_press(Press::Allow, false), DialogAnswer::AllowOnce);
     assert_eq!(
-        from_task_dialog(REFUSE, true),
+        from_press(Press::Refuse, true),
         DialogAnswer::RefuseForMatter
     );
-    assert_eq!(from_task_dialog(REFUSE, false), DialogAnswer::Refuse);
+    assert_eq!(from_press(Press::Refuse, false), DialogAnswer::Refuse);
+    assert_eq!(from_press(Press::Neither, true), DialogAnswer::Refuse);
+    assert_eq!(from_press(Press::Neither, false), DialogAnswer::Refuse);
+}
+
+#[test]
+fn the_task_dialog_maps_button_and_checkbox() {
+    let answer = |pressed, remember| from_press(task_dialog_press(pressed), remember);
+    assert_eq!(answer(ALLOW, true), DialogAnswer::AllowForMatter);
+    assert_eq!(answer(ALLOW, false), DialogAnswer::AllowOnce);
+    assert_eq!(answer(REFUSE, true), DialogAnswer::RefuseForMatter);
+    assert_eq!(answer(REFUSE, false), DialogAnswer::Refuse);
 }
 
 /// Escape, Alt+F4 and the close button (IDCANCEL), and no button at all, refuse, and never
@@ -31,7 +49,33 @@ fn the_task_dialog_maps_button_and_checkbox() {
 fn escape_refuses_on_windows_whatever_the_checkbox() {
     for remember in [false, true] {
         for pressed in [IDCANCEL, 0, 1, -1, 102] {
-            assert_eq!(from_task_dialog(pressed, remember), DialogAnswer::Refuse);
+            let answer = from_press(task_dialog_press(pressed), remember);
+            assert_eq!(answer, DialogAnswer::Refuse);
+        }
+    }
+}
+
+/// macOS: Don't allow is the first button added (on Escape), Allow the second; the suppression
+/// checkbox maps as Windows' checkbox does, Escape included (it presses Don't allow).
+#[test]
+fn the_alert_maps_button_and_checkbox() {
+    assert_eq!(ALERT_REFUSE, 1000);
+    assert_eq!(ALERT_ALLOW, 1001);
+    let answer = |response, remember| from_press(alert_press(response), remember);
+    assert_eq!(answer(ALERT_ALLOW, true), DialogAnswer::AllowForMatter);
+    assert_eq!(answer(ALERT_ALLOW, false), DialogAnswer::AllowOnce);
+    assert_eq!(answer(ALERT_REFUSE, true), DialogAnswer::RefuseForMatter);
+    assert_eq!(answer(ALERT_REFUSE, false), DialogAnswer::Refuse);
+}
+
+/// A modal session the alert's buttons did not end (stopped, aborted, cancelled: the app
+/// quitting) refuses whatever the checkbox says.
+#[test]
+fn an_alert_ended_otherwise_refuses_on_macos_whatever_the_checkbox() {
+    for remember in [false, true] {
+        for response in ALERT_ENDED_OTHERWISE.into_iter().chain([1002, 1]) {
+            let answer = from_press(alert_press(response), remember);
+            assert_eq!(answer, DialogAnswer::Refuse, "{response}");
         }
     }
 }
@@ -44,27 +88,15 @@ fn drawn(buttons: &ThreeButtons) -> [String; 3] {
     }
 }
 
-fn three(macos: bool) -> ThreeButtons {
-    ThreeButtons::new(order(macos), "Once", "Always", "No")
-}
-
-/// macOS: Don't allow first, so Return (`NSAlert`'s first button) refuses; each label gives its
-/// own answer.
-#[test]
-fn macos_draws_dont_allow_first_and_maps_each_label() {
-    let buttons = three(true);
-    assert_eq!(drawn(&buttons), ["No", "Once", "Always"]);
-    let custom = |label: &str| buttons.answer(&MessageDialogResult::Custom(label.to_owned()));
-    assert_eq!(custom("Once"), DialogAnswer::AllowOnce);
-    assert_eq!(custom("Always"), DialogAnswer::AllowForMatter);
-    assert_eq!(custom("No"), DialogAnswer::Refuse);
+fn three() -> ThreeButtons {
+    ThreeButtons::new("Once", "Always", "No")
 }
 
 /// Linux: the gtk dialog awaited answers the positions' plain results, and its plain `Cancel`
 /// is both the third button and Escape, so the third is Don't allow.
 #[test]
 fn linux_draws_dont_allow_third_and_maps_positions_and_labels() {
-    let buttons = three(false);
+    let buttons = three();
     assert_eq!(drawn(&buttons), ["Once", "Always", "No"]);
     assert_eq!(
         buttons.answer(&MessageDialogResult::Yes),
@@ -81,27 +113,17 @@ fn linux_draws_dont_allow_third_and_maps_positions_and_labels() {
 }
 
 /// rfd's plain `Cancel` (Escape, the close button, a stopped or failed dialog), `Ok` and an
-/// unknown label refuse on both.
+/// unknown label refuse; nothing refuses for the matter (rfd has no checkbox).
 #[test]
 fn escape_refuses_with_rfd() {
-    for macos in [true, false] {
-        let buttons = three(macos);
-        for result in [
-            MessageDialogResult::Cancel,
-            MessageDialogResult::Ok,
-            MessageDialogResult::Custom(String::new()),
-            MessageDialogResult::Custom("Allow".to_owned()),
-        ] {
-            assert_eq!(buttons.answer(&result), DialogAnswer::Refuse, "{result:?}");
-        }
-    }
-}
-
-/// Neither order offers "Don't allow for this matter": rfd has three buttons and no checkbox.
-#[test]
-fn rfd_offers_no_refusal_for_the_matter() {
-    for macos in [true, false] {
-        assert!(!order(macos).contains(&DialogAnswer::RefuseForMatter));
+    let buttons = three();
+    for result in [
+        MessageDialogResult::Cancel,
+        MessageDialogResult::Ok,
+        MessageDialogResult::Custom(String::new()),
+        MessageDialogResult::Custom("Allow".to_owned()),
+    ] {
+        assert_eq!(buttons.answer(&result), DialogAnswer::Refuse, "{result:?}");
     }
 }
 
@@ -212,6 +234,36 @@ fn the_message_follows_the_dialog() {
     assert!(shared.starts_with(&plain) && shared.len() > plain.len());
 }
 
+/// Switching protection off confirms with "Switch off" (Hindi "बंद करें") in place of Allow, on
+/// every platform; Don't allow and the checkbox stay.
+#[test]
+fn switching_off_confirms_with_its_own_word() {
+    let off = Dialog::SwitchOff {
+        matter_name: "Smith".to_owned(),
+    };
+    let en = AskWords::new(Language::En, &off);
+    assert_eq!(
+        (en.allow.as_str(), en.allow_once.as_str()),
+        ("Switch off", "Switch off")
+    );
+    assert_eq!(en.refuse, "Don't allow");
+    assert_eq!(en.remember, "Remember for this matter");
+    let hi = AskWords::new(Language::Hi, &off);
+    assert_eq!(
+        (hi.allow.as_str(), hi.allow_once.as_str()),
+        ("बंद करें", "बंद करें")
+    );
+    let site = Dialog::Site {
+        host: "court.example".to_owned(),
+        shared_hosting: false,
+    };
+    let other = AskWords::new(Language::En, &site);
+    assert_eq!(
+        (other.allow.as_str(), other.allow_once.as_str()),
+        ("Allow", "Allow once")
+    );
+}
+
 #[test]
 fn the_picker_title_names_the_matter() {
     let pick = |files_too| Pick {
@@ -255,4 +307,20 @@ fn the_script_answers_in_order_then_refuses() {
     assert_eq!(script.pick(pick()), None);
     let empty = Scripted::new(None, Vec::new());
     assert_eq!(empty.ask(off()), Refuse);
+}
+
+/// The words' and the script's `Debug` print no name, path or host.
+#[test]
+fn debug_prints_no_name_or_path() {
+    for dialog in every_dialog() {
+        let words = AskWords::new(Language::En, &dialog);
+        let debug = format!("{words:?}");
+        for secret in ["Smith", "Brown", "brief", "court"] {
+            assert!(!debug.contains(secret), "{debug}");
+        }
+    }
+    let script = Scripted::new(Some("allow_once"), vec![PathBuf::from("/m/Brown")]);
+    let debug = format!("{script:?}");
+    assert!(!debug.contains("Brown"), "{debug}");
+    assert!(debug.contains("AllowOnce"), "{debug}");
 }
