@@ -457,6 +457,17 @@ pub fn last_refresh_run() -> Result<LastRun, TaskError> {
     })
 }
 
+/// The watch task's last result (`IRegisteredTask::LastTaskResult`): the watcher's exit code
+/// (`WatchExit`) once a run ended, else a scheduler status (`SCHED_S_TASK_RUNNING`). Read as
+/// whoever calls it; the denial reporter's client reads it when no pipe was published, to tell
+/// a provider with no free session (68) apart. Blocks on COM calls: call it off the UI thread.
+pub fn last_watch_result() -> Result<i32, TaskError> {
+    with_task(SystemTask::Watch, |task| {
+        // SAFETY: a live task; it reads a value into memory the call owns.
+        unsafe { task.LastTaskResult() }.map_err(com("IRegisteredTask::LastTaskResult"))
+    })
+}
+
 /// Runs `then` on the registered `task`, inside a COM apartment that outlives it.
 fn with_task<T>(
     task: SystemTask,

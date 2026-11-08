@@ -460,7 +460,7 @@ fn subsystem(handle: &Handle) -> Option<bool> {
 /// process with no thread (one that has exited, kept by a handle). The list reads each token as
 /// this process: a token whose DACL shuts out SYSTEM gets no SID (CI run 42416074600), and its
 /// process's owner names it instead (`pick::user_of`).
-fn listed_users() -> Result<BTreeMap<u32, (Option<Sid>, u32)>, Failed> {
+pub(crate) fn listed_users() -> Result<BTreeMap<u32, (Option<Sid>, u32)>, Failed> {
     let mut level = INFO_LEVEL_1;
     let mut info = PWSTR::null();
     let mut count = 0u32;

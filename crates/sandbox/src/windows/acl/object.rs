@@ -434,7 +434,7 @@ fn ladder(extra: u32, mut open: impl FnMut(u32) -> io::Result<Handle>) -> io::Re
 }
 
 /// Opens `wide` (verbatim, NUL-terminated) for `access`, never following a link.
-fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
+pub(in crate::windows) fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
     let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     // SAFETY: `wide` is NUL-terminated and outlives the call; no security attributes or
     // template are passed, and the handle is owned by `Handle` from here.

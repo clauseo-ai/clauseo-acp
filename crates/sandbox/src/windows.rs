@@ -47,6 +47,10 @@
 //!   next launch reads the journal from it, through `NtfsJournal` on Windows, and skips the
 //!   own-tree walks and the set-aside scan when nothing in the trees changed, walks only the
 //!   changed folders when a few did, and walks in full on any doubt.
+//! - [`watch_client`]: the denial reporter's client (0049). Each launch registers its pool user
+//!   and policy; one connection per host to the SYSTEM watcher's checked pipe turns the
+//!   watcher's lines into `Denial::Path`, with `would_deny` (`acl/authz.rs`) deciding the
+//!   access of a plain open. The fallback is the host-side source.
 //!
 //! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
 //! no Windows call, so they build and are tested on every OS; the folder check, the registry and
@@ -109,6 +113,9 @@ mod test_world;
 mod tests;
 #[cfg(windows)]
 mod user_setup;
+// The denial reporter's client: its order and checks build everywhere for the tests.
+#[cfg(any(windows, test))]
+pub mod watch_client;
 pub mod wfp;
 mod write;
 pub mod writer;
