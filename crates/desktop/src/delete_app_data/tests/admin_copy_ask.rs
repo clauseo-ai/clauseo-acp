@@ -27,12 +27,18 @@ fn the_outer_instance_reads_its_own_sid_from_its_token() {
 fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_update_or_silent() {
     let code = hook_code();
     let post = macro_body(&code, "NSIS_HOOK_POSTINSTALL");
-    // The mode block's last lines; only the set-up program check (setup_exe_missing.rs) follows.
+    // The mode block's last lines: the ask, then repair mode's relaunch (repair.rs); only the
+    // set-up program check (setup_exe_missing.rs) follows.
     let end = post.iter().rposition(|line| line == "!endif").unwrap() + 1;
-    let tail: Vec<&str> = post[end - 3..end].iter().map(String::as_str).collect();
+    let tail: Vec<&str> = post[end - 4..end].iter().map(String::as_str).collect();
     assert_eq!(
         tail,
-        ["!else", &format!("!insertmacro {ASK}"), "!endif"],
+        [
+            "!else",
+            &format!("!insertmacro {ASK}"),
+            "!insertmacro CLAUSEO_REPAIR_RELAUNCH",
+            "!endif"
+        ],
         "{post:?}"
     );
     let admin = admin_code();
