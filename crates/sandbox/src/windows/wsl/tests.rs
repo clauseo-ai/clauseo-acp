@@ -489,7 +489,7 @@ fn a_package_with_no_msi_is_unverifiable_where_wsl_2_can_run_and_refuses_nothing
 }
 
 #[test]
-fn a_package_registered_for_the_lawyer_only_is_wsl_present_with_no_pending_upgrade() {
+fn a_package_registered_for_the_lawyer_only_is_compared_from_the_lawyers_registration() {
     let alone = || FakeWsl {
         group: Some(group()),
         record: Some(WslRecord::default()),
@@ -497,16 +497,46 @@ fn a_package_registered_for_the_lawyer_only_is_wsl_present_with_no_pending_upgra
         ..FakeWsl::default()
     };
     // No service, no class, no machine-wide package: the lawyer's own registration is WSL.
-    assert_eq!(upgrade(&alone()), Upgrade::LawyerOnly);
+    assert_eq!(upgrade(&alone()), Upgrade::NoMsi);
     assert_eq!(check(&alone()), Ok(Found::Denied(0)));
-    // With the lifted WSL, an MSI older than it is no upgrade a pool user can start.
-    let mut fake = FakeWsl::lifted();
+    let lifted = |msi: Option<&str>| {
+        let mut fake = FakeWsl::lifted();
+        apply(&mut fake, &group()).unwrap();
+        fake.user_packages = vec![package("3.0.3.0")];
+        fake.msi_version = msi.map(str::to_owned);
+        fake
+    };
+    // The MSI as new as the lawyer's package, or newer.
+    for msi in ["3.0.3", "3.1.0"] {
+        assert_eq!(upgrade(&lifted(Some(msi))), Upgrade::LawyerOnly, "{msi}");
+        assert_eq!(check(&lifted(Some(msi))), Ok(Found::Denied(2)), "{msi}");
+    }
+    // Older: an upgrade is pending, the lawyer's package's as a machine-wide one's.
+    let fake = lifted(Some("2.0.0"));
+    assert_eq!(upgrade(&fake), Upgrade::Pending);
+    assert_eq!(check(&fake), Err(Blocked::WslUpgradePending));
+    // A version that can't be read or parsed: unverifiable where WSL 2 can run.
+    let mut failing = lifted(Some("3.0.3"));
+    failing.fail.push("msi version".to_owned());
+    let mut junk = lifted(Some("3.0.3"));
+    junk.user_packages.push(package("3.x.3.0"));
+    for fake in [lifted(Some("3.0")), failing, junk] {
+        assert_eq!(upgrade(&fake), Upgrade::LawyerUnreadable);
+        assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    }
+    let mut fake = inbox();
     apply(&mut fake, &group()).unwrap();
     fake.user_packages = vec![package("3.0.3.0")];
-    fake.msi_version = Some("2.0.0".to_owned());
-    assert_eq!(check(&fake), Ok(Found::Denied(2)));
+    fake.msi_version = Some("3.0".to_owned());
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    // With neither service no WSL 2 can run: nothing is refused.
+    let mut fake = alone();
+    fake.msi_version = Some("junk".to_owned());
+    assert_eq!(upgrade(&fake), Upgrade::LawyerUnreadable);
+    assert_eq!(check(&fake), Ok(Found::Denied(0)));
     // A machine-wide registration is still read first, and decides.
-    fake.packages = vec![package("3.0.3.0")];
+    let mut fake = lifted(Some("3.0.3"));
+    fake.packages = vec![package("3.1.0.0")];
     assert_eq!(check(&fake), Err(Blocked::WslUpgradePending));
     // The lawyer's registrations unreadable: can't be judged.
     let mut fake = alone();

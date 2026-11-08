@@ -64,10 +64,10 @@ pub enum Found {
 ///   targets that can't be listed, or a packaged registration of any of [`CLASSES`] is
 ///   [`Blocked::WslDenyUnverifiable`], whichever WSL is here: the inbox one (`LxssManager`)
 ///   runs WSL2's VMs too, from Windows 10 2004 on; so is a package or MSI version that can't
-///   be read or parsed ([`Upgrade::Unreadable`]);
-/// - else a pending upgrade ([`Upgrade::Pending`]: the MSI older than the package) is
-///   [`Blocked::WslUpgradePending`]; a package registered for the lawyer only
-///   ([`Upgrade::LawyerOnly`]) is WSL present, with no upgrade a pool user could start;
+///   be read or parsed ([`Upgrade::Unreadable`]), and, with either service installed (WSL 2
+///   can run), the lawyer's own package's ([`Upgrade::LawyerUnreadable`]);
+/// - else a pending upgrade ([`Upgrade::Pending`]: the MSI older than the package, the
+///   lawyer's own registration's included) is [`Blocked::WslUpgradePending`];
 /// - a package with no MSI version ([`Upgrade::NoMsi`]) is no upgrade under way, and may stay
 ///   so for good (the Store package installed, its MSI never run), so "let the update complete"
 ///   would never end. With either service installed, WSL 2 can run beside an MSI WSL doesn't
@@ -124,7 +124,8 @@ pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
         return Err(Blocked::WslDenyMissing);
     }
     let no_msi = upgrade == Upgrade::NoMsi && (lifted || inbox);
-    if unverifiable || no_msi || upgrade == Upgrade::Unreadable {
+    let lawyer_unreadable = upgrade == Upgrade::LawyerUnreadable && (lifted || inbox);
+    if unverifiable || no_msi || lawyer_unreadable || upgrade == Upgrade::Unreadable {
         return Err(Blocked::WslDenyUnverifiable);
     }
     if upgrade == Upgrade::Pending {
