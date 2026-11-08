@@ -21,6 +21,10 @@ pub const SET_UP_ARG: &str = "--serve-set-up";
 /// The set-up task's execution limit: 30 minutes, for a set-up (users, logons, filters) and
 /// the clients waiting behind it; the app waits as long for its reply (`serve::REPLY_WAIT`).
 pub const SET_UP_EXECUTION_LIMIT: &str = "PT30M";
+/// `TASK_INSTANCES_QUEUE`: a start while it runs queues another run.
+pub const INSTANCES_QUEUE: i32 = 1;
+/// `TASK_INSTANCES_IGNORE_NEW`: a start while it runs is dropped.
+pub const INSTANCES_IGNORE_NEW: i32 = 2;
 
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
 /// fixed argument. They share the principal (LOCAL SYSTEM) and the settings `task.rs` gives
@@ -90,11 +94,22 @@ impl SystemTask {
         }
     }
 
+    /// Its instances policy, as the Task Scheduler numbers it (`TASK_INSTANCES_POLICY`): queue or
+    /// ignore new, as [`SystemTask::queues`] says.
+    pub fn instances(self) -> i32 {
+        if self.queues() {
+            INSTANCES_QUEUE
+        } else {
+            INSTANCES_IGNORE_NEW
+        }
+    }
+
     /// Whether `found` is this task as `register_task` would register it now for `starters`, its
     /// action `path` (quoted, [`action_path`]) and its descriptor `sddl` as Windows writes it
-    /// back: the one action and argument, LOCAL SYSTEM at the highest level, the instances policy,
-    /// the limit, a logon trigger only where one belongs, and the descriptor. Anything else is a
-    /// definition that differs, which an elevated set-up registers again.
+    /// back: the one action and argument with no working folder, LOCAL SYSTEM at the highest level,
+    /// the instances policy exactly (parallel or stop-existing is no ignore-new), the limit,
+    /// enabled and not hidden, a logon trigger only where one belongs, and the descriptor.
+    /// Anything else is a definition that differs, which an elevated set-up registers again.
     pub fn registered_as(
         self,
         found: &Registered,
@@ -111,8 +126,11 @@ impl SystemTask {
             && found.arguments == self.argument()
             && system
             && found.service_highest
-            && found.queues == self.queues()
+            && found.working_dir.is_empty()
+            && found.instances == self.instances()
             && found.limit == self.execution_limit()
+            && found.enabled
+            && !found.hidden
             && found.triggers == triggers
             && sddl_matches(&found.sddl, sddl)
     }
@@ -238,10 +256,16 @@ pub struct Registered {
     pub user: String,
     /// Whether it runs as a service account at the highest run level.
     pub service_highest: bool,
-    /// Whether a start while it runs queues another (`TASK_INSTANCES_QUEUE`).
-    pub queues: bool,
+    /// Its instances policy, as the Task Scheduler numbers it (`TASK_INSTANCES_POLICY`).
+    pub instances: i32,
     /// Its execution limit.
     pub limit: String,
+    /// The action's working folder (`IExecAction::WorkingDirectory`); empty for none.
+    pub working_dir: String,
+    /// Whether it is enabled (`ITaskSettings::Enabled`).
+    pub enabled: bool,
+    /// Whether it is hidden (`ITaskSettings::Hidden`).
+    pub hidden: bool,
     /// How many triggers it has.
     pub triggers: i32,
     /// Its owner and DACL, as read back.

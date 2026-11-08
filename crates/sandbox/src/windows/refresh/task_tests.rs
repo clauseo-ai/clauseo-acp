@@ -160,3 +160,76 @@ fn a_missing_task_or_folder_is_not_registered_whichever_code_windows_gives() {
     assert!(!not_registered(0x8007_0005));
     assert!(!not_registered(2));
 }
+
+/// A change to a read-back definition, and what it is.
+type Change = (&'static str, fn(&mut Registered));
+
+/// `spec` for `starters` as a fresh `register_task` reads back, its action `path`.
+fn fresh(spec: SystemTask, starters: &Starters, path: &str) -> Registered {
+    Registered {
+        path: path.to_owned(),
+        arguments: spec.argument().to_owned(),
+        actions: 1,
+        user: "SYSTEM".to_owned(),
+        service_highest: true,
+        instances: INSTANCES_IGNORE_NEW,
+        limit: spec.execution_limit().to_owned(),
+        working_dir: String::new(),
+        enabled: true,
+        hidden: false,
+        triggers: i32::from(spec.at_logon() && starters.owner().is_some()),
+        sddl: starters.sddl(),
+    }
+}
+
+#[test]
+fn a_fresh_registration_is_current_and_any_change_to_its_definition_is_not() {
+    let path = r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#;
+    let owner = Sid::parse("S-1-12-1-3263492174-1177263218-2391161522-1513380577").unwrap();
+    for starters in [
+        Starters::Owner(owner),
+        Starters::Interactive { denied: None },
+    ] {
+        let sddl = starters.sddl();
+        for spec in [SystemTask::Refresh, SystemTask::Stop, SystemTask::SetUp] {
+            let current = fresh(spec, &starters, path);
+            // Read back as it was written: no registration again on every set-up.
+            assert!(
+                spec.registered_as(&current, &starters, path, &sddl),
+                "{spec:?}"
+            );
+            let changes: [Change; 13] = [
+                ("parallel", |found| found.instances = 0),
+                ("queue", |found| found.instances = INSTANCES_QUEUE),
+                ("stop existing", |found| found.instances = 3),
+                ("disabled", |found| found.enabled = false),
+                ("hidden", |found| found.hidden = true),
+                ("a working folder", |found| {
+                    found.working_dir = r"C:\Temp".to_owned();
+                }),
+                ("another program", |found| {
+                    found.path = r#""C:\x.exe""#.to_owned();
+                }),
+                ("another argument", |found| {
+                    found.arguments = "--other".to_owned();
+                }),
+                ("two actions", |found| found.actions = 2),
+                ("another user", |found| {
+                    found.user = "S-1-5-21-1-2-3-1001".to_owned();
+                }),
+                ("not highest", |found| found.service_highest = false),
+                ("another limit", |found| found.limit = "PT72H".to_owned()),
+                ("another trigger", |found| found.triggers += 1),
+            ];
+            for (change, apply) in changes {
+                let mut found = current.clone();
+                apply(&mut found);
+                assert!(
+                    !spec.registered_as(&found, &starters, path, &sddl),
+                    "{spec:?}: {change}"
+                );
+            }
+        }
+    }
+    assert_eq!((INSTANCES_QUEUE, INSTANCES_IGNORE_NEW), (1, 2));
+}

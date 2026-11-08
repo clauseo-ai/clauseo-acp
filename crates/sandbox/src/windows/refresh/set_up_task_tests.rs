@@ -162,3 +162,45 @@ fn elevated_a_standard_user_can_start_the_set_up_task_beside_another_owners_stop
     // The descriptor change left the folder's own.
     assert!(same(&folder.read_back(None), FOLDER_SDDL));
 }
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again() {
+    use windows::Win32::Foundation::VARIANT_BOOL;
+    use windows::Win32::System::TaskScheduler::{TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE};
+
+    use super::task::with_task_in;
+    use super::task_check::ensure_in;
+    use super::{INSTANCES_IGNORE_NEW, INSTANCES_QUEUE};
+
+    assert_eq!(INSTANCES_QUEUE, TASK_INSTANCES_QUEUE.0);
+    assert_eq!(INSTANCES_IGNORE_NEW, TASK_INSTANCES_IGNORE_NEW.0);
+    if !gate("elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again") {
+        return;
+    }
+    let exe = PathBuf::from(format!(r"{}\cmd.exe", system32()));
+    let _apartment = Apartment::enter().unwrap();
+    let service = service().unwrap();
+    let folder = Folder {
+        service: &service,
+        name: format!("ClauseoTestEnsure{}", std::process::id()),
+    };
+    let starters = Starters::Interactive { denied: None };
+    let ensure = || ensure_in(&folder.name, SystemTask::SetUp, &starters, &exe);
+    // Missing: registered. Then read back as written: current, not registered again.
+    assert_eq!(ensure(), Ok(true));
+    assert_eq!(
+        ensure(),
+        Ok(false),
+        "a fresh registration reads back current"
+    );
+    // Disabled by hand: registered again, then current.
+    with_task_in(&folder.name, SystemTask::SetUp, |task| {
+        // SAFETY: a live registered task; a plain value.
+        unsafe { task.SetEnabled(VARIANT_BOOL::from(false)) }.unwrap();
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(ensure(), Ok(true), "a disabled task is registered again");
+    assert_eq!(ensure(), Ok(false));
+}

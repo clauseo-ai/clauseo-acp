@@ -36,9 +36,9 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::TaskScheduler::{
     IExecAction, ILogonTrigger, IRegisteredTask, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_STATE_QUEUED, TASK_STATE_RUNNING,
-    TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_CREATE_OR_UPDATE, TASK_INSTANCES_POLICY, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_RUNLEVEL_HIGHEST, TASK_STATE_QUEUED, TASK_STATE_RUNNING, TASK_TRIGGER_LOGON,
+    TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, Interface};
@@ -52,7 +52,7 @@ use crate::windows::sids::Sid;
 /// The task's folder.
 pub const TASK_FOLDER: &str = "\\Clauseo";
 /// The folder's name under the root, for creating and deleting it.
-const FOLDER_NAME: &str = "Clauseo";
+pub(super) const FOLDER_NAME: &str = "Clauseo";
 /// LOCAL SYSTEM, as the task's principal.
 const SYSTEM: &str = "S-1-5-18";
 
@@ -187,13 +187,8 @@ pub(super) fn register_in(
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
-        let instances = if spec.queues() {
-            TASK_INSTANCES_QUEUE
-        } else {
-            TASK_INSTANCES_IGNORE_NEW
-        };
         settings
-            .SetMultipleInstances(instances)
+            .SetMultipleInstances(TASK_INSTANCES_POLICY(spec.instances()))
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)

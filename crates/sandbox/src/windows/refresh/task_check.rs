@@ -7,15 +7,18 @@
     reason = "FFI to the Task Scheduler's task definition interfaces"
 )]
 
+use std::path::Path;
+
+use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, IRegisteredTask, TASK_INSTANCES_POLICY, TASK_INSTANCES_QUEUE,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_LOGON_TYPE, TASK_RUNLEVEL_HIGHEST, TASK_RUNLEVEL_TYPE,
+    IExecAction, IRegisteredTask, TASK_INSTANCES_POLICY, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_LOGON_TYPE, TASK_RUNLEVEL_HIGHEST, TASK_RUNLEVEL_TYPE,
 };
 use windows::core::{BSTR, Interface};
 
 use super::staging::as_read_back;
-use super::task::{TaskError, register_task, with_task};
+use super::task::{FOLDER_NAME, TaskError, register_in, with_task_in};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{Registered, Starters, SystemTask, action_path};
 
@@ -23,9 +26,21 @@ use super::{Registered, Starters, SystemTask, action_path};
 /// now: `Ok(true)` when it was registered again, `Ok(false)` when it was already current. A
 /// definition that can't be read counts as one that differs.
 pub fn ensure_task(spec: SystemTask, starters: &Starters) -> Result<bool, TaskError> {
-    let path = action_path(&sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME));
+    let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
+    ensure_in(FOLDER_NAME, spec, starters, &exe)
+}
+
+/// [`ensure_task`] in the folder `\<folder_name>`, its action `exe`: the tests' own folder and
+/// program, the production ones otherwise.
+pub(super) fn ensure_in(
+    folder_name: &str,
+    spec: SystemTask,
+    starters: &Starters,
+    exe: &Path,
+) -> Result<bool, TaskError> {
+    let path = action_path(exe);
     let sddl = as_read_back(&starters.sddl()).map_err(TaskError::Descriptor)?;
-    let current = match with_task(spec, |task| Ok(read(task))) {
+    let current = match with_task_in(folder_name, spec, |task| Ok(read(task))) {
         Ok(Some(found)) => spec.registered_as(&found, starters, &path, &sddl),
         Ok(None) | Err(TaskError::NotRegistered) => false,
         Err(error) => return Err(error),
@@ -33,7 +48,7 @@ pub fn ensure_task(spec: SystemTask, starters: &Starters) -> Result<bool, TaskEr
     if current {
         return Ok(false);
     }
-    register_task(spec, starters)?;
+    register_in(folder_name, spec, starters, exe)?;
     Ok(true)
 }
 
@@ -49,11 +64,13 @@ fn read(task: &IRegisteredTask) -> Option<Registered> {
         let actions = definition.Actions().ok()?;
         actions.Count(&raw mut found.actions).ok()?;
         let exec: IExecAction = actions.get_Item(1).ok()?.cast().ok()?;
-        let (mut path, mut arguments) = (BSTR::new(), BSTR::new());
+        let (mut path, mut arguments, mut working) = (BSTR::new(), BSTR::new(), BSTR::new());
         exec.Path(&raw mut path).ok()?;
         exec.Arguments(&raw mut arguments).ok()?;
+        exec.WorkingDirectory(&raw mut working).ok()?;
         found.path = path.to_string();
         found.arguments = arguments.to_string();
+        found.working_dir = working.to_string();
         let principal = definition.Principal().ok()?;
         let mut user = BSTR::new();
         principal.UserId(&raw mut user).ok()?;
@@ -66,7 +83,12 @@ fn read(task: &IRegisteredTask) -> Option<Registered> {
         let settings = definition.Settings().ok()?;
         let mut instances = TASK_INSTANCES_POLICY::default();
         settings.MultipleInstances(&raw mut instances).ok()?;
-        found.queues = instances == TASK_INSTANCES_QUEUE;
+        found.instances = instances.0;
+        let (mut enabled, mut hidden) = (VARIANT_BOOL::default(), VARIANT_BOOL::default());
+        settings.Enabled(&raw mut enabled).ok()?;
+        settings.Hidden(&raw mut hidden).ok()?;
+        found.enabled = enabled.as_bool();
+        found.hidden = hidden.as_bool();
         let mut limit = BSTR::new();
         settings.ExecutionTimeLimit(&raw mut limit).ok()?;
         found.limit = limit.to_string();
