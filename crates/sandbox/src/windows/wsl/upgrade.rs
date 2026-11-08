@@ -12,6 +12,16 @@
 //! is `MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...`,
 //! and the newest listed counts.
 //!
+//! A package registered for one user only may not be listed there: its packaged-COM
+//! registration is that user's, in `HKCU\Software\Classes\PackagedCom\Package`. So with none in
+//! `HKLM`, the lawyer's own (the check runs as the lawyer) is read before taking it as
+//! [`Upgrade::NoPackage`]. A package registered only for the lawyer is
+//! [`Upgrade::LawyerOnly`]: WSL is present, but no upgrade a pool user could start is pending.
+//! COM activates a packaged class only for a user the package is registered for, through that
+//! user's own registration, and a pool user's hive holds none, so a pool user can't activate
+//! `WslInstaller`'s class; the lawyer may, and an upgrade the lawyer starts is the refresh's to
+//! cover (its `MsiInstaller` trigger).
+//!
 //! [`Blocked::WslUpgradePending`]: crate::Blocked::WslUpgradePending
 
 use super::seam::WslRead;
@@ -27,6 +37,9 @@ type Version = (u32, u32, u32);
 pub enum Upgrade {
     /// No WSL package is registered: nothing can upgrade through it.
     NoPackage,
+    /// The WSL package is registered for the lawyer only (`HKCU`): WSL is here, but a pool
+    /// user can't start its upgrade.
+    LawyerOnly,
     /// The installed MSI is as new as the package, or newer.
     Current,
     /// The MSI is missing or older than the package: an upgrade is pending.
@@ -56,7 +69,8 @@ fn package_version(full_name: &str) -> Option<Version> {
     version(rest.split('_').next()?)
 }
 
-/// Whether a WSL upgrade is pending, as the module says. A read that fails, a listed full name
+/// Whether a WSL upgrade is pending, as the module says. A read that fails (the lawyer's own
+/// registrations' too), a listed full name
 /// whose version doesn't parse, or an MSI version that doesn't parse, is
 /// [`Upgrade::Unreadable`]; a missing MSI version is [`Upgrade::Pending`], as WSL's installer
 /// takes it.
@@ -65,7 +79,11 @@ pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
         return Upgrade::Unreadable;
     };
     if names.is_empty() {
-        return Upgrade::NoPackage;
+        return match reg.user_wsl_packages() {
+            Err(_) => Upgrade::Unreadable,
+            Ok(mine) if mine.is_empty() => Upgrade::NoPackage,
+            Ok(_) => Upgrade::LawyerOnly,
+        };
     }
     let Some(versions) = names
         .iter()

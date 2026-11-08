@@ -77,6 +77,9 @@ impl WslRead for Throwaway {
     fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
         Ok(Vec::new())
     }
+    fn user_wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        Ok(Vec::new())
+    }
     fn group(&self) -> Option<Sid> {
         Some(self.group.clone())
     }
@@ -193,14 +196,16 @@ fn elevated_wsls_deny_is_applied_checked_and_removed_on_a_throwaway_appid() {
         "the key's owner and DACL stay"
     );
     assert_eq!(wsl::check(&machine), Ok(Found::Denied(1)));
-    // The upgrade check's two reads work on the real registry, unelevated keys both.
+    // The upgrade check's three reads work on the real registry, unelevated keys all.
     let reader = WindowsWsl::reader();
     eprintln!(
-        "WSL packages {:?}, MSI version {:?}",
+        "WSL packages {:?}, the user's {:?}, MSI version {:?}",
         reader.wsl_packages(),
+        reader.user_wsl_packages(),
         reader.msi_version()
     );
     assert!(reader.wsl_packages().is_ok() && reader.msi_version().is_ok());
+    assert!(reader.user_wsl_packages().is_ok());
     assert_eq!(
         machine.recorded().unwrap().app_ids,
         std::slice::from_ref(&app_id)

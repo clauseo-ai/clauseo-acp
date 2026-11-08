@@ -18,8 +18,8 @@ use windows::Win32::Security::{
     GetSecurityDescriptorLength, IsValidSecurityDescriptor, PSECURITY_DESCRIPTOR,
 };
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_SET_VALUE,
-    KEY_WOW64_64KEY, REG_BINARY, REG_OPTION_BACKUP_RESTORE, RRF_RT_REG_BINARY,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE,
+    KEY_SET_VALUE, KEY_WOW64_64KEY, REG_BINARY, REG_OPTION_BACKUP_RESTORE, RRF_RT_REG_BINARY,
     RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegDeleteValueW, RegEnumKeyExW, RegGetValueW,
     RegOpenKeyExW, RegSetValueExW,
 };
@@ -106,12 +106,30 @@ fn found(call: &'static str, code: WIN32_ERROR) -> Result<bool, WslError> {
 
 /// `HKLM\<path>` opened to read and list it; `None` when it isn't there.
 fn open(path: &str) -> Result<Option<Key>, WslError> {
+    open_in(HKEY_LOCAL_MACHINE, path)
+}
+
+/// `<root>\<path>` opened to read and list it; `None` when it isn't there.
+fn open_in(root: HKEY, path: &str) -> Result<Option<Key>, WslError> {
     let subkey = HSTRING::from(path);
     let mut opened = HKEY::default();
     let access = KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS | KEY_WOW64_64KEY;
     // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
-    let code = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, &subkey, None, access, &raw mut opened) };
+    let code = unsafe { RegOpenKeyExW(root, &subkey, None, access, &raw mut opened) };
     Ok(found("RegOpenKeyExW", code)?.then_some(Key(opened)))
+}
+
+/// The WSL package's full names among the subkeys of `<root>\<PACKAGED_PACKAGES>`.
+fn packages_in(root: HKEY) -> Result<Vec<String>, WslError> {
+    let Some(key) = open_in(root, PACKAGED_PACKAGES)? else {
+        return Ok(Vec::new());
+    };
+    let prefix = format!("{PACKAGE_NAME}_");
+    let names = subkeys(&key)?;
+    Ok(names
+        .into_iter()
+        .filter(|name| name.starts_with(&prefix))
+        .collect())
 }
 
 /// Whether `HKLM\<path>` is there.
@@ -349,15 +367,11 @@ impl WslRead for WindowsWsl {
     }
 
     fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
-        let Some(key) = open(PACKAGED_PACKAGES)? else {
-            return Ok(Vec::new());
-        };
-        let prefix = format!("{PACKAGE_NAME}_");
-        let names = subkeys(&key)?;
-        Ok(names
-            .into_iter()
-            .filter(|name| name.starts_with(&prefix))
-            .collect())
+        packages_in(HKEY_LOCAL_MACHINE)
+    }
+
+    fn user_wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        packages_in(HKEY_CURRENT_USER)
     }
 
     fn group(&self) -> Option<Sid> {

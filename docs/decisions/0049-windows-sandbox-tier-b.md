@@ -2492,7 +2492,14 @@ which the installer's first event starts. The check mirrors that test: the packa
 packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
 `MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...` (the newest
 listed), which `Users` can read; the MSI's from `Version`, as WSL reads it. A package listed is WSL present, even before
-its MSI is in. The MSI's version missing or older is `WslUpgradePending`; a version that can't be
+its MSI is in. A package registered for one user only may be missing there, its packaged-COM registration
+being that user's (`HKCU\Software\Classes\PackagedCom\Package`), so with none in `HKLM` the check
+(running as the lawyer) reads the lawyer's own before it decides there is no package. A package
+registered only for the lawyer is WSL present but no pending upgrade: COM activates a packaged
+class only for a user the package is registered for, through that user's own registration, and a
+pool user's hive has none, so a pool user can't activate `WslInstaller`'s class; an upgrade the
+lawyer starts is the refresh trigger's to cover. Its registrations unreadable is
+`WslDenyUnverifiable`. The MSI's version missing or older is `WslUpgradePending`; a version that can't be
 read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
 shown first. The lawyer's words: "finish or let the WSL update complete, then try again". Not
 verified on the VM: that the packaged-COM key lists the package for a machine where only another
