@@ -175,6 +175,8 @@ crates/sandbox/src/windows/refresh/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/refresh/windows_tests.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/refresh/walk.rs - unsafe_code
 crates/sandbox/src/windows/refresh/windows_refresher.rs - unsafe_code
+crates/sandbox/src/windows/refresh/wsl_phase/windows_lock.rs - unsafe_code
+crates/sandbox/src/windows/refresh/wsl_phase/windows_watch.rs - unsafe_code
 crates/sandbox/src/windows/refresh/test_signer.rs compress clippy::many_single_char_names
 crates/sandbox/src/windows/refresh/test_signer.rs g clippy::many_single_char_names
 crates/sandbox/examples/run_sandboxed/env.rs remove_secret clippy::disallowed_methods

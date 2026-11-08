@@ -13,8 +13,8 @@ use sha2::{Digest, Sha256};
 use windows::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::EventLog::{
-    DeregisterEventSource, EVENTLOG_ERROR_TYPE, EVENTLOG_INFORMATION_TYPE, RegisterEventSourceW,
-    ReportEventW,
+    DeregisterEventSource, EVENTLOG_ERROR_TYPE, EVENTLOG_INFORMATION_TYPE, EVENTLOG_WARNING_TYPE,
+    REPORT_EVENT_TYPE, RegisterEventSourceW, ReportEventW,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_SZ, RegCloseKey, RegFlushKey,
@@ -25,10 +25,14 @@ use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKno
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::{Handle, read_capped};
+use super::wsl_phase::Installer;
+use super::wsl_phase::windows_lock;
+use super::wsl_phase::windows_watch::{self, Watch};
 use super::{
-    EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded,
-    refresh, staging, walk, wsl_deny, wsl_upgrade,
+    EXE_CAP, Failed, Locked, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL,
+    SourceError, SourceFile, Sources, Trust, UPDATER_KEY, Waited, WslDenyExit, WslRunLock,
+    WslUpgrade, WslUpgradeExit, WslUpgraded, WslWatch, refresh, staging, walk, wsl_deny,
+    wsl_upgrade,
 };
 use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
@@ -82,6 +86,10 @@ pub struct WindowsRefresher {
     held: Option<Handle>,
     /// The set-up lock, held through the run.
     lock: Option<Held>,
+    /// `--wsl-deny`'s change notification, opened at its first arm.
+    watch: Option<Watch>,
+    /// `--wsl-deny`'s run lock, while held (`wsl_phase/run_lock.rs`).
+    run_lock: Option<std::fs::File>,
 }
 
 impl Default for WindowsRefresher {
@@ -97,6 +105,8 @@ impl WindowsRefresher {
             sandbox: sandbox_dir(),
             held: None,
             lock: None,
+            watch: None,
+            run_lock: None,
         }
     }
 
@@ -315,6 +325,99 @@ impl Refresher for WindowsRefresher {
     }
 }
 
+impl WslWatch for WindowsRefresher {
+    fn now(&mut self) -> std::time::Duration {
+        windows_watch::now()
+    }
+
+    fn watch(&mut self) -> Result<(), Failed> {
+        let watch = match &mut self.watch {
+            Some(watch) => watch,
+            None => self.watch.insert(Watch::open()?),
+        };
+        let armed = watch.arm();
+        if armed.is_err() {
+            // Dropped: the next arm opens a new watch.
+            self.watch = None;
+        }
+        armed
+    }
+
+    fn wait_change(&mut self, time: std::time::Duration) -> Waited {
+        let Some(watch) = &mut self.watch else {
+            self.pause(time);
+            return Waited::Quiet;
+        };
+        match watch.wait(time) {
+            Ok(true) => Waited::Changed,
+            Ok(false) => Waited::Quiet,
+            Err(why) => {
+                // Dropped, and this wait timed; the next arm (on the schedule's next loop)
+                // opens a new watch. The schedule logs it, once while the watch is down.
+                self.watch = None;
+                self.pause(time);
+                Waited::Failed(why)
+            }
+        }
+    }
+
+    fn warn(&mut self, line: &str) {
+        event_warning(line);
+    }
+
+    fn installer(&mut self) -> Installer {
+        windows_watch::installer()
+    }
+
+    fn wsl_present(&mut self) -> bool {
+        let found = wsl::inspect(&wsl::WindowsWsl::reader());
+        !matches!(found, Ok(wsl::Found::NoWsl))
+    }
+
+    fn recorded_key_missing(&mut self) -> Result<bool, Failed> {
+        use crate::windows::wsl::{WslRead as _, WslWrite as _};
+        let reg = wsl::WindowsWsl::writer(RECORD_KEY);
+        let record = reg.recorded().map_err(|error| error.to_string())?;
+        for app_id in &record.app_ids {
+            if !reg
+                .app_id_exists(app_id)
+                .map_err(|error| error.to_string())?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+impl WslRunLock for WindowsRefresher {
+    fn run_lock(&mut self) -> Locked {
+        let (locked, file) = windows_lock::take();
+        self.run_lock = file;
+        locked
+    }
+
+    fn run_unlock(&mut self) {
+        self.run_lock = None;
+    }
+
+    fn ask_again(&mut self) -> Result<(), Failed> {
+        windows_lock::ask_again(RECORD_KEY)
+    }
+
+    fn take_again(&mut self) -> Result<bool, Failed> {
+        windows_lock::take_again(RECORD_KEY)
+    }
+
+    fn asked_again(&mut self) -> Result<bool, Failed> {
+        windows_lock::asked_again(RECORD_KEY)
+    }
+
+    fn check_copy(&mut self) -> Result<(), Failed> {
+        windows_lock::check_copy()
+    }
+}
+
 impl WslUpgrade for WindowsRefresher {
     fn pool_busy(&mut self) -> Result<bool, Failed> {
         let pool = sandbox_pool_sids().map_err(|error| format!("the record: {error}"))?;
@@ -406,6 +509,21 @@ fn write_record_string(name: &str, text: &str) -> Result<(), Failed> {
 /// `error`. A log that can't be written is dropped: the exit code still says what happened.
 /// The stop task (`setup::stop`) logs through it too.
 pub fn event_log(error: bool, line: &str) {
+    let kind = if error {
+        EVENTLOG_ERROR_TYPE
+    } else {
+        EVENTLOG_INFORMATION_TYPE
+    };
+    report(kind, line);
+}
+
+/// Writes `line` to the Application log as a warning, as [`event_log`] does.
+fn event_warning(line: &str) {
+    report(EVENTLOG_WARNING_TYPE, line);
+}
+
+/// Writes `line` to the Application log as `kind`.
+fn report(kind: REPORT_EVENT_TYPE, line: &str) {
     // SAFETY: the source name is a static NUL-terminated string; the handle, when given, is
     // deregistered below.
     let Ok(source) = (unsafe { RegisterEventSourceW(PCWSTR::null(), EVENT_SOURCE) }) else {
@@ -413,11 +531,6 @@ pub fn event_log(error: bool, line: &str) {
     };
     let text = HSTRING::from(line);
     let strings = [PCWSTR(text.as_ptr())];
-    let kind = if error {
-        EVENTLOG_ERROR_TYPE
-    } else {
-        EVENTLOG_INFORMATION_TYPE
-    };
     // SAFETY: the handle is registered; `strings` holds one NUL-terminated string that
     // outlives the call; no SID or raw data.
     let _reported = unsafe { ReportEventW(source, kind, 0, 1, None, 0, Some(&strings), None) };

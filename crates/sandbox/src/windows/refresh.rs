@@ -74,6 +74,10 @@ use sha2::{Digest, Sha256};
 mod exit;
 #[cfg(test)]
 mod fake;
+#[cfg(test)]
+mod fake_lock;
+#[cfg(test)]
+mod fake_watch;
 #[cfg(windows)]
 pub mod installed;
 pub mod key;
@@ -125,7 +129,10 @@ pub use task::{
 pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny, run_wsl_upgrade};
-pub use wsl_phase::{WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, wsl_deny, wsl_upgrade};
+pub use wsl_phase::{
+    Installer, Locked, Waited, WslDenyExit, WslRunLock, WslUpgrade, WslUpgradeExit, WslUpgraded,
+    WslWatch, wsl_deny, wsl_upgrade,
+};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
@@ -238,7 +245,7 @@ pub trait Refresher {
     fn log(&mut self, error: bool, line: &str);
     /// Re-applies WSL's deny under the set-up lock (`wsl_phase.rs`); a line when it changed any.
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed>;
-    /// Waits `time` (`--wsl-deny`'s re-checks); the fake only notes it.
+    /// Waits `time` (`--wsl-deny`'s settle after a change, `wsl_phase/schedule.rs`).
     fn pause(&mut self, time: std::time::Duration);
 }
 

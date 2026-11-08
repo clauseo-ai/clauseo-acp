@@ -19,8 +19,10 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 /// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it re-applies WSL's deny and does
 /// nothing else.
 pub const WSL_DENY_ARG: &str = "--wsl-deny";
-/// The WSL deny task's execution limit: 2 minutes, for its phase, which waits 10 s for the lock.
-pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT2M";
+/// The WSL deny task's execution limit: 6 minutes. Its run holds while a Windows Installer
+/// install is in progress and ends by its own budget, 30 s inside this
+/// (`wsl_phase/schedule.rs`).
+pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT6M";
 /// The WSL upgrade task's one argument (`wsl_phase::wsl_upgrade`): it installs WSL's pending
 /// upgrade when one is owed and no pool user has a process, then re-applies WSL's deny.
 pub(super) const WSL_UPGRADE_ARG: &str = "--wsl-upgrade";
@@ -143,6 +145,17 @@ impl SystemTask {
         }
     }
 
+    /// What a start while it runs does: the WSL deny task's starts in parallel, and finds the
+    /// run lock held (`wsl_phase/run_lock.rs`): it asks the running one for one more run and
+    /// exits at once, so nothing queues behind a run that may hold 330 s, and a forged flood
+    /// costs only processes that exit at once. Every other task drops it.
+    pub fn instances(self) -> Instances {
+        match self {
+            SystemTask::WslDeny => Instances::Parallel,
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::WslUpgrade => Instances::IgnoreNew,
+        }
+    }
+
     /// Its description, as the Task Scheduler shows it.
     pub fn description(self) -> &'static str {
         match self {
@@ -157,6 +170,18 @@ impl SystemTask {
             }
         }
     }
+}
+
+/// What the Task Scheduler does with a start that comes while the task runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Instances {
+    /// Dropped (`TASK_INSTANCES_IGNORE_NEW`).
+    IgnoreNew,
+    /// Run once the running one ends (`TASK_INSTANCES_QUEUE`). No task uses it now: queued
+    /// runs had no bound but the Task Scheduler's.
+    Queue,
+    /// Run at once, beside the running one (`TASK_INSTANCES_PARALLEL`).
+    Parallel,
 }
 
 /// One step of the uninstaller's removal of the admin copy (`setup::admin_remove`).

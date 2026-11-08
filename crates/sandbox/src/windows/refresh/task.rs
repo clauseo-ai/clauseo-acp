@@ -11,7 +11,7 @@
 //!   else, on demand
 //!   (the refresh also at the record owner's logon; the WSL deny task on Windows Installer's
 //!   events, `rules::Trigger`, with no value queries), needs no network, stops after its limit
-//!   (5 minutes, 2 minutes, 2 minutes, 5 minutes), and never runs twice at once. Its descriptor
+//!   (5 minutes, 2 minutes, 6 minutes, 5 minutes), and never runs twice at once. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
@@ -34,14 +34,14 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::TaskScheduler::{
     IEventTrigger, IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService,
     TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT, TASK_TRIGGER_LOGON,
-    TaskScheduler,
+    TASK_INSTANCES_PARALLEL, TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT, TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
-use super::rules::{Trigger, msi_event_query};
+use super::rules::{Instances, Trigger, msi_event_query};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
@@ -279,10 +279,15 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
-        // A start while it runs is dropped: the WSL deny task's phase is quick and idempotent,
-        // so a burst of installer events gives one run, and one after it ends another.
+        // A start while it runs is dropped, but the WSL deny task's runs beside it
+        // (`SystemTask::instances`), meets the run lock, asks for one more run and exits.
+        let instances = match spec.instances() {
+            Instances::IgnoreNew => TASK_INSTANCES_IGNORE_NEW,
+            Instances::Queue => TASK_INSTANCES_QUEUE,
+            Instances::Parallel => TASK_INSTANCES_PARALLEL,
+        };
         settings
-            .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
+            .SetMultipleInstances(instances)
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)
@@ -412,9 +417,9 @@ pub fn request_pool_stop() -> bool {
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxWslDeny` now, as whoever calls it: the launch
 /// check calls it as the lawyer, unelevated, when WSL's deny is missing
-/// (`clean_close::wsl_heal`), then waits for the deny. It returns once the run is queued; a run
-/// already going on keeps going and this start is dropped (`TASK_INSTANCES_IGNORE_NEW`). Blocks
-/// on COM calls.
+/// (`clean_close::wsl_heal`), then waits for the deny. It returns once the run is started; with
+/// a run already going on, this one asks it for one more run and exits
+/// (`wsl_phase/run_lock.rs`). Blocks on COM calls.
 pub fn request_wsl_deny() -> Result<(), TaskError> {
     run_task(SystemTask::WslDeny)
 }

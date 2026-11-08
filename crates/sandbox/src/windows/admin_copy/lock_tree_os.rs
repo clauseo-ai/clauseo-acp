@@ -22,7 +22,7 @@ use crate::windows::acl::object::{Child, Object, os_error};
 
 /// [`os::lock_down`](super::os::lock_down) on `dir` and, below it, on every folder and file but
 /// `skip` (a name in `dir`); a link below is deleted, `dir` being one is refused.
-pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
+pub(crate) fn lock_tree(dir: &Path, skip: &[String]) -> io::Result<()> {
     let root = Object::open_folder(dir)?;
     if root.reparse() || !root.folder {
         return Err(io::Error::other(
@@ -33,11 +33,11 @@ pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
 }
 
 /// Locks the open folder `folder`, then each entry it lists but `skip`, as the module says.
-fn lock_level(folder: &Object, skip: Option<&str>) -> io::Result<()> {
+fn lock_level(folder: &Object, skip: &[String]) -> io::Result<()> {
     lock(folder)?;
     for child in folder.children()? {
         let name = OsString::from_wide(&child.name);
-        if skip.is_some_and(|skip| name.eq_ignore_ascii_case(skip)) {
+        if skip.iter().any(|skip| name.eq_ignore_ascii_case(skip)) {
             continue;
         }
         if child.reparse {
@@ -54,7 +54,7 @@ fn lock_level(folder: &Object, skip: Option<&str>) -> io::Result<()> {
                 "an entry in the admin folder changed while it was locked",
             ));
         } else if object.folder {
-            lock_level(&object, None)?;
+            lock_level(&object, &[])?;
         } else {
             lock(&object)?;
         }
