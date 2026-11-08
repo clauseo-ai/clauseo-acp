@@ -209,7 +209,11 @@ They remove what the set-up makes:
   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList`, which
   hides it from the sign-in screen;
 - the group's deny entry on `C:\ProgramData\Microsoft\DeviceSync`;
-- the group `ClauseoSandboxUsers`, once it has no members;
+- the group `ClauseoSandboxUsers`, once it has no members. Set-up also gives the group the user
+  right "Deny log on through Remote Desktop Services", so no sandbox user can sign in over Remote
+  Desktop; `--remove` takes it off before deleting the group. These commands leave it: once the
+  group is gone, the entry names a SID no account has, which does nothing. Local Security Policy
+  (`secpol.msc`, User Rights Assignment) shows it as a bare SID, which you may delete there;
 - the key `HKLM\SOFTWARE\Clauseo\Sandbox`. After a per-machine install, the installer's key
   `HKLM\SOFTWARE\Clauseo\Clauseo` stays beside it. After a per-user install, `HKLM\SOFTWARE\Clauseo`
   is left empty, and you can delete it once you have checked that it is.

@@ -33,10 +33,13 @@ build 26100):
 
 - **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
   in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
-  needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
-  user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
-  logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
-  under a restricted token, not write-restricted, so reads are checked too:
+  needs another admin prompt. The pool users are hidden from the sign-in screen, and the group
+  holds "Deny log on through Remote Desktop Services" (`SeDenyRemoteInteractiveLogonRight`),
+  granted by every set-up and taken off by the removal before the group goes, so no pool user
+  signs in over Remote Desktop either. Each matter is assigned one pool user. The runner logs on
+  as that user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without
+  it the logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The
+  agent runs under a restricted token, not write-restricted, so reads are checked too:
   - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
     matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;
@@ -697,9 +700,10 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
   `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
-  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record. The
-  first failure stops the run: exit 4, the record kept with `Removing` and every pool SID (so a
-  later run still trusts the ledger), the ledger kept. A re-run skips what is gone.
+  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group's Remote Desktop
+  deny, then the group; the record. The first failure stops the run: exit 4, the record kept
+  with `Removing` and every pool SID (so a later run still trusts the ledger), the ledger kept. A
+  re-run skips what is gone.
 - **The ledger, as the owner** (the parent is the owner): `DataDir`, which the owner can
   influence, is checked as `--data-dir` is and used only while acting as the owner; every matter
   is forgotten (`forget_matter`) acting as the owner, with a standard user's token: an elevated
