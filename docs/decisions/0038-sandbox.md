@@ -124,6 +124,18 @@ follow a link, never enter a `.git`, and skip any folder whose `statfs` lacks `M
 matter on a network volume is never scanned, which is logged (to become the shared
 `network_paths` rules once #766 lands; whether to refuse such matters is the host's call).
 
+Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
+seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
+10 s the watch rewrites `watch-canary` in the set-aside folder it uses, which is on the matter's
+volume, denied to the agent and watched by the same stream (one stream, two paths). When no
+event for it comes within 2 s, the stream counts as silent, logged, and the matter is scanned
+whole every 2 s until the canary's event comes again (about 4 ms after the write on this Mac).
+**The 30 s pass:** the watch keeps every folder of the matter with its file ID and its
+modification and status-change times (from its launch walk, then from its own listings); every
+30 s it reads them again and lists only the folders whose ID or times changed, adding their new
+subfolders to be listed in turn. A pass stops after 250 ms of work and the next goes on from
+there. Either backstop's find ends the session as an event's does.
+
 **Kill first, then set aside.** On the first find while the agent may run, the watch ends every
 process of the session and moves nothing until none is left: a loop moving ready repositories in
 would otherwise keep one present most of the time. A process group or tree misses a child that
@@ -139,8 +151,12 @@ PID (a process can spawn with the "disclaim" attribute and be its own), and a pa
 (`sandbox_check` answers "denied" for every process on a path that doesn't exist). The session
 counts as over only when its group is empty and no process carries the probe; its kill is
 `TreeKill` plus SIGKILL to each probed process, checked again just before its signal, sent again
-every 0.1 s; after 10 s the final scan runs anyway, logged. A watch thread that panics ends the
-session; an attach to a thread already gone ends it too.
+every 0.1 s; after 10 s the final scan runs anyway, logged, and the session's record stays (below).
+The probe fails closed: a `sandbox_check` that errs on a running process counts it as the
+session's, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
+the control name" rules a process out. A process can't shed the probe from inside: a nested
+`sandbox-exec` can't apply a profile, and `launchctl submit` hands launchd no job (jail tests).
+A watch thread that panics ends the session; an attach to a thread already gone ends it too.
 
 Then the final scan sets each item aside by one `rename(2)` that never replaces into
 `<set-aside>/<UTC time>-<session>-<random>/item`, beside a `record.json` (the original path,
@@ -165,11 +181,23 @@ is gone. Nothing else is ever deleted; macOS has no restore of these items.
 
 **The matter's state file**, `<git set-aside>/matters/<hash of the matter>.json` under a
 `flock`, records each running session: its host process (pid and start), its probe name, its
-set-aside folder and its launch baseline. The session's own watch removes it after its final
-scan. At each launch, before the watch takes anything in the matter for the lawyer's, a session
-whose host is gone (or, in this host, whose watch is not running) never ran its final scan: its
-surviving processes are killed by its probe and its scan runs from its baseline, every folder
-counted as old, so a repository-shaped folder loses only its `HEAD`.
+set-aside folder and its launch baseline, and the matter's path. The session's own watch removes
+it after its final scan, unless the kill's 10 s ran out with a process left. A session whose
+host is gone (or, in this host, whose watch is not running) never ran its final scan, or ran it
+with a process left: its surviving processes are killed by its probe (up to 3 s) and its scan
+runs from its baseline, every folder counted as old, so a repository-shaped folder loses only
+its `HEAD`. That happens at the **host's start**, for every matter (`git_watch_start_up`, which
+the host calls once on a thread of its own with its git set-aside folder), and at each launch of
+the matter, before the watch takes anything in it for the lawyer's. The record stays while a
+process of it is left, or while the matter can't be found (a disk not plugged in), for the next
+try. At the **host's quit**, `git_watch_quit(within)` refuses further launches, kills every
+running session by its probe (again every 50 ms) and waits up to `within` for the watches to
+run their final scans; a watch that doesn't finish keeps its record for the next start.
+
+The launch's walk and the watch agree on what a repository is: `objects`, `refs` and
+`commondir` links count wherever they lead, dangling ones too, in both. So every folder the
+watch leaves alone as a launch repository is one the policy made read-only; a dangling link
+can't make one the watch exempts and the policy doesn't cover.
 
 **`commondir` targets.** A launch repository's (or `.git`'s) `commondir` that names the matter,
 the state folder, a missing path or any folder no read-only rule covers would let the agent
@@ -408,6 +436,11 @@ given.
   opened handle, with no folding.
 
 Residual risks:
+- **A matter on a network volume is never watched.** The git watch skips every folder whose
+  `statfs` lacks `MNT_LOCAL` (`FSEvents` doesn't report other machines' changes, and a scan
+  over the network is slow), so an agent can leave a repository in such a matter and nothing
+  sets it aside; only the profile's name denies stop a new `.git` or `HEAD` there. Whether to
+  refuse such matters is the host's call.
 - On FAT32 volumes two siblings can differ only in normalisation (U+0958 and U+0915 U+093C were
   made as two folders on a FAT32 image; on an exFAT image the second form of each of U+0958, ऩ
   and café reported "already exists", as on APFS). A Seatbelt rule that allows one then also
