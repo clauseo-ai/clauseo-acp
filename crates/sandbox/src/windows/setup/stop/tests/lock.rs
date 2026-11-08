@@ -1,5 +1,6 @@
 //! A stop that can't take the set-up lock still stops the pool's processes and cancels their
-//! jobs, writing nothing to the record; and each mark checks the record still holds the pool.
+//! jobs, writing nothing to the record but `ResetOwed`; and each mark checks the record still
+//! holds the pool.
 
 use super::*;
 
@@ -7,7 +8,7 @@ use super::*;
 const AT_FIRST_MARK: usize = 2;
 
 #[test]
-fn a_held_lock_still_stops_everything_but_writes_nothing() {
+fn a_held_lock_still_stops_everything_and_writes_only_the_owed_resets() {
     let mut fake = Fake::new(&[1010, 1011]);
     fake.marks = Marks::ReserveBusy;
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
@@ -26,16 +27,19 @@ fn a_held_lock_still_stops_everything_but_writes_nothing() {
         "{:?}",
         fake.done
     );
-    // Nothing written: no StopNext, no marks, no completion; the lock tried once, so its wait
-    // came once.
+    // Nothing written under the lock: no StopNext, no marks, no completion; the lock tried once,
+    // so its wait came once. Every pool user found is owed a reset, without the lock.
     assert!(fake.values.is_empty(), "{:?}", fake.values);
     assert_eq!(fake.resets, Vec::<Sid>::new());
+    assert_eq!(fake.owed, [sid(1010), sid(1011)]);
     assert_eq!(fake.locks, 1);
     let (error, line) = &fake.logged[0];
     assert!(*error, "{line}");
     assert!(
         line.contains("3 processes stopped")
-            && line.contains("nothing was written to the record: StopNext wasn't reserved"),
+            && line.contains(
+                "nothing but ResetOwed was written to the record: StopNext wasn't reserved"
+            ),
         "{line}"
     );
 }

@@ -1728,9 +1728,10 @@ the admin copy.
    when absent), keeps it as `n` and writes it one higher, then gives the lock back. A record
    gone or changed, or a write that fails, is 50 and a read that fails 46, with nothing stopped.
    A lock that stays held doesn't stop the kill: a set-up holding the lock must not keep an
-   escapee alive. The run goes on with no number, writes nothing to the record (no
-   `ResetSids`, no `StopCompleted` or `StopSequence`, and no second lock wait), and ends 50
-   at best (48 wins). The steps the pool's shared sequence takes are `pool_steps::sequence`'s,
+   escapee alive. The run goes on with no number and writes nothing to the record under the
+   lock (no `ResetSids`, no `StopCompleted` or `StopSequence`, and no second lock wait). It
+   still records every pool user it finds, owed a reset in `ResetOwed` without the lock
+   (step 6), and ends 50 at best (48 wins). The steps the pool's shared sequence takes are `pool_steps::sequence`'s,
    which `--sweep-tasks` takes too. The task runs one instance at a time, so no two
    reservations overlap. A run that later ends non-zero, or is ended, has still used its number;
 4. passes over the processes until one pass finds none of the pool's. Each pass takes a Toolhelp
@@ -1792,8 +1793,15 @@ the admin copy.
    marked, 49). Each user is added as soon as a pass or the BITS step finds
    it, so a run the task's limit kills has still marked every user it saw. A pass that finds a
    process of unknown user marks every pool user at once, since it may be any of theirs (the
-   run still ends at 48). Once the lock stays
-   held or a write fails, no more users are tried (49), so the wait comes once at most.
+   run still ends at 48). Once the lock stays held, at a mark or at step 3a, this mark and
+   every later one of the run go to `ResetOwed` instead (`REG_MULTI_SZ` of SIDs, a set-up
+   value `--remove` deletes, written only by the stop as SYSTEM; `stop/owed.rs`), without the
+   lock: read it, merge the users in, write it, read it back, up to 3 tries. So the wait comes
+   once at most, and a stop that killed without the lock still records the reset its kill
+   owes. Before, such a stop marked nothing, and the next stop found nothing, wrote
+   `StopSequence` and cleared the marker with no reset listed. A run whose marks went to
+   `ResetOwed` doesn't try its completion and ends 49 (or 50). A write that fails, a record
+   that no longer holds the pool, or `ResetOwed` not written in 3 tries stops the marks (49).
    Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run;
 7. only on a run that will end 0 (every pool user's process gone, every pool BITS job cancelled,
    `ResetSids` written), under the set-up lock, re-reads `PoolSids` and checks it is still the set
@@ -1802,7 +1810,11 @@ the admin copy.
    the BITS step's enumeration, so a pool process started after it isn't claimed covered), and
    only then `StopSequence = n` (`REG_QWORD`), the number step 3a reserved. A later stop's larger
    `n` overwrites it; it is never lowered. `StopNext`, `StopSequence` and `StopCompleted` are
-   set-up values outside the record proper, deleted with the record by `--remove`. Every write the
+   set-up values outside the record proper, deleted with the record by `--remove`. Under the
+   same hold of the lock, once the record and the sequence are checked and before either value
+   is written, it folds `ResetOwed` (this run's or an earlier one's) into `ResetSids` and
+   deletes it (`owed::fold`, `sequence::completed_after`): no `StopSequence` clears a marker
+   while a reset is owed only there. A fold that fails is 49, with nothing written after it. Every write the
    stop makes opens the record's key without making it, so a stop still running after `--remove`
    can't bring the key back. A run that is ended, interrupted by the task's limit, or exits
    non-zero never writes the pair and leaves an earlier one as it is. A record gone or changed, a
@@ -1839,8 +1851,8 @@ cancelled and not), and says so when a pass couldn't read the process list. Its 
 | 46 | the record can't be read, or its `PoolSids`, `OwnerSid` or `StopNext` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
 | 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
-| 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
-| 50 | `StopNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing stopped), or the lock stayed held (the processes were still stopped and the jobs cancelled, nothing written to the record) |
+| 49 | the processes were stopped, but their users couldn't be added to `ResetSids` (write failed, record gone or pool changed) nor owed in `ResetOwed`, or the lock stayed held at a mark (the users owed in `ResetOwed`), or `ResetOwed` couldn't be folded, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
+| 50 | `StopNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing stopped), or the lock stayed held (the processes were still stopped, the jobs cancelled and the users owed in `ResetOwed`, nothing else written to the record) |
 
 **The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
 only the owner's `secrets.bin` may hold (DPAPI, as the owner). Its open-session check and its

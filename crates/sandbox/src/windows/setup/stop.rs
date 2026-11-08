@@ -20,10 +20,10 @@
 //!    under the set-up lock (a bounded wait), it checks the record still holds the pool, reads
 //!    `StopNext` (1 when absent), keeps it as `n` and writes it one higher. A record gone or
 //!    changed, or a write that fails, is 50 and a read that fails 46, with nothing stopped. A
-//!    lock that stays held doesn't stop the kill: the run goes on without a number and writes
-//!    nothing to the record (no marks, no completion), ending 50 at best, so a set-up holding
-//!    the lock can't keep an escapee alive. The task runs one instance at a time, so no two
-//!    reservations overlap;
+//!    lock that stays held doesn't stop the kill: the run goes on without a number, owes its
+//!    users' resets in `ResetOwed` ([`owed`], step 6) and writes nothing else to the record (no
+//!    completion), ending 50 at best, so a set-up holding the lock can't keep an escapee alive.
+//!    The task runs one instance at a time, so no two reservations overlap;
 //! 4. passes over the processes until one finds none of the pool's: each takes a snapshot and
 //!    reads each process's user ([`Process`]) from the kernel's process list
 //!    (`WTSEnumerateProcessesExW`), with the token's user as a cross-check. The list reads the
@@ -64,19 +64,23 @@
 //!    with it. Each user is added as soon as it is found, so a run the task's 2-minute limit
 //!    kills has marked every user it saw. A pass that finds a process of unknown user marks every
 //!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
-//!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
-//!    at most;
-//! 7. only then, on a run that will end 0, writes `StopCompleted`, then `StopSequence = n`, under
-//!    the set-up lock ([`sequence::completed`], `record_values::STOP_NEXT`), once it has checked
-//!    the record still holds the pool this run worked from (the same set of SIDs) and that
-//!    `StopSequence` isn't already past `n`. `StopCompleted` is when the last clean observation
-//!    began, not when it is written: the earlier of the pass that found no pool user's process
-//!    (after which nothing was stopped) and the BITS step's enumeration, so a pool process
+//!    the lock stays held (or step 3a's did), this and every later mark of the run goes to
+//!    `ResetOwed` instead, without the lock ([`owed::owe`]), so the lock's wait comes once at
+//!    most and a reset is owed for every user the run found; such a run doesn't try step 7 and
+//!    ends 49 (50 without a number). A write that fails, a record that no longer holds the
+//!    pool, or `ResetOwed` not written stops the marks (49);
+//! 7. only then, on a run that will end 0, under the set-up lock ([`sequence::completed_after`],
+//!    `record_values::STOP_NEXT`), once it has checked the record still holds the pool this run
+//!    worked from (the same set of SIDs) and that `StopSequence` isn't already past `n`, folds
+//!    `ResetOwed` (its own and earlier runs') into `ResetSids` and deletes it ([`owed::fold`]),
+//!    then writes `StopCompleted`, then `StopSequence = n`. `StopCompleted` is when the last clean
+//!    observation began, not when it is written: the earlier of the pass that found no pool user's
+//!    process (after which nothing was stopped) and the BITS step's enumeration, so a pool process
 //!    started after it isn't claimed covered. A run the task's end kills, or one that ends
 //!    non-zero, never writes them and leaves an earlier pair as it is (`StopNext` still counted
-//!    up). A record gone or changed, a sequence past `n`, a write that fails, or a lock that
-//!    stays held is 49. Every write opens the record's key without making it, so a stop still
-//!    running after `--remove` can't bring the key back.
+//!    up). A record gone or changed, a sequence past `n`, a write that fails, or a lock that stays
+//!    held is 49. Every write opens the record's key without making it, so a stop still running
+//!    after `--remove` can't bring the key back.
 //!
 //! The owner may end the task: it holds read and execute on it (`FRFX`, `refresh::task_sddl`),
 //! since starting a task needs execute (CI run 42416074600), and execute ends one too. So an
@@ -109,6 +113,7 @@ use crate::windows::sids::Sid;
 pub use super::pool_steps::{Failed, Pool};
 pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
 
+mod owed;
 mod pick;
 #[cfg(test)]
 mod tests;
@@ -140,14 +145,16 @@ pub enum StopExit {
     /// be read), a process snapshot or the BITS list couldn't be taken, or the BITS list reached
     /// [`JOBS_CAP`].
     NotStopped,
-    /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids`, or
-    /// `StopCompleted` and `StopSequence` couldn't be written (the set-up lock stayed held, a
-    /// write failed, the record was gone or its pool changed, or `StopSequence` was past `n`).
+    /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids` (a
+    /// write failed or the record was gone or its pool changed) nor owed in `ResetOwed`, or
+    /// `ResetOwed` couldn't be folded, or `StopCompleted` and `StopSequence` couldn't be
+    /// written (the set-up lock stayed held, a write failed, the record was gone or its pool
+    /// changed, or `StopSequence` was past `n`).
     NotMarked,
     /// 50: `StopNext` couldn't be reserved before the first snapshot: the record was gone or its
     /// pool changed, or the write failed (nothing was stopped), or the set-up lock stayed held
-    /// (the processes were still stopped and the jobs cancelled, but nothing was written to the
-    /// record). 48 wins over it.
+    /// (the processes were still stopped, the jobs cancelled and the users owed a reset in
+    /// `ResetOwed`, but nothing else was written to the record). 48 wins over it.
     NotReserved,
 }
 
@@ -202,6 +209,11 @@ pub trait Stopper: Gate + Bits + Record {
     fn pause(&mut self);
     /// Adds `users` to the record's `ResetSids`, keeping what it lists.
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
+    /// The record's `ResetOwed`; empty when it is missing. Read with or without the lock.
+    fn read_owed(&mut self) -> Result<Vec<Sid>, Failed>;
+    /// Writes the record's `ResetOwed` as `users`, deleting it when there are none; never
+    /// makes the record's key.
+    fn write_owed(&mut self, users: &[Sid]) -> Result<(), Failed>;
     /// Asks the Task Scheduler to run `\Clauseo\SandboxSweep`; `Err` names the failed call.
     fn request_sweep(&mut self) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
@@ -234,6 +246,8 @@ struct Passes {
     marked: BTreeSet<Sid>,
     /// Why a mark failed; once set, no more are tried.
     mark_failed: Option<String>,
+    /// The set-up lock stayed held: marks go to `ResetOwed`, without it.
+    lockless: bool,
     /// The pool users' BITS jobs cancelled.
     jobs_cancelled: usize,
     /// BITS jobs not cancelled: a pool user's whose cancel failed, or one whose owner couldn't
@@ -276,16 +290,16 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
             return Err((StopExit::NotPool, format!("nothing was stopped: {why}")));
         }
     };
-    // A lock that stays held stops nothing less: the run goes on, writing nothing.
+    // A lock that stays held stops nothing less: the run goes on, owing its resets.
     let (n, unreserved) = match sequence::reserve(fs, STOP, &pool.users) {
         Ok(n) => (n, None),
         Err(NotReserved::Lock(why)) => (0, Some(why)),
         Err(why) => return Err(not_reserved(why)),
     };
-    let mut passes = Passes::default();
-    if unreserved.is_some() {
-        passes.mark_failed = Some("nothing is written without a reserved number".to_owned());
-    }
+    let mut passes = Passes {
+        lockless: unreserved.is_some(),
+        ..Passes::default()
+    };
     let ran = run_passes(fs, &pool.users, &mut passes);
     // What the processes left (a task, a job) is the sweep's: asked for once the kills are done.
     let requested = match fs.request_sweep() {
@@ -339,10 +353,17 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         return not_stopped("a process's user couldn't be read, so it may be a pool user's");
     }
     if let Some(why) = unreserved {
-        let line = format!("{counts}; nothing was written to the record: {UNRESERVED}: {why}");
+        let line = format!(
+            "{counts}; nothing but ResetOwed was written to the record: {UNRESERVED}: {why}"
+        );
         return Err((StopExit::NotReserved, line));
     }
     if let Some(why) = passes.mark_failed {
+        return Err((StopExit::NotMarked, format!("{counts}; {why}")));
+    }
+    // The lock's wait came once: the completion isn't tried after it.
+    if passes.lockless {
+        let why = "the set-up lock stayed held: the users found are owed a reset in ResetOwed";
         return Err((StopExit::NotMarked, format!("{counts}; {why}")));
     }
     // The earlier clean observation: nothing the record claims covered started before it.
@@ -350,7 +371,8 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     let Some(at) = clean else {
         return not_stopped("no pass found the pool clear");
     };
-    sequence::completed(fs, STOP, at, n, &pool.users)
+    // Every owed reset is in ResetSids before StopSequence clears a marker.
+    sequence::completed_after(fs, STOP, (at, n), &pool.users, owed::fold)
         .map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
     let retried = passes.retried;
     Ok(format!(
@@ -449,9 +471,10 @@ fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resu
 
 /// Step 6: the users of `passes.found` and `passes.suspects` not yet marked are added to
 /// `ResetSids` under the set-up lock, and to `passes.marked`, once the record is checked to
-/// still hold `pool` (a set-up may have changed it since the gate). Nothing is done when there
-/// are none, or once a mark has failed (`passes.mark_failed`), so the lock's wait comes once at
-/// most.
+/// still hold `pool` (a set-up may have changed it since the gate). Once the lock stays held
+/// (`passes.lockless`), they are owed in `ResetOwed` instead, without it. Nothing is done when
+/// there are none, or once a mark has failed (`passes.mark_failed`), so the lock's wait comes
+/// once at most.
 fn mark_new(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) {
     if passes.mark_failed.is_some() {
         return;
@@ -464,14 +487,16 @@ fn mark_new(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) {
     if new.is_empty() {
         return;
     }
-    let marked = match fs.lock() {
-        Ok(true) => {
-            let marked = still_holds(fs, pool).and_then(|()| fs.mark_for_reset(&new));
-            fs.unlock();
-            marked
-        }
-        Ok(false) => Err("the set-up lock stayed held".to_owned()),
-        Err(why) => Err(why),
+    let marked = if passes.lockless {
+        owed::owe(fs, &new)
+    } else if let Ok(true) = fs.lock() {
+        let marked = still_holds(fs, pool).and_then(|()| fs.mark_for_reset(&new));
+        fs.unlock();
+        marked
+    } else {
+        // Owed without the lock, as every later mark of the run is.
+        passes.lockless = true;
+        owed::owe(fs, &new)
     };
     match marked {
         Ok(()) => passes.marked.extend(new),

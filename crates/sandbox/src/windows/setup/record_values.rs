@@ -94,6 +94,12 @@ impl CopyOwner {
 /// again. Outside [`MachineRecord`]. The next set-up resets each listed user of the pool, even
 /// one a matter holds, once no session is open (`resets.rs`), and takes it off the list.
 pub const RESET_SIDS: &str = "ResetSids";
+/// `ResetOwed` (`REG_MULTI_SZ`, a set-up value): the pool users a stop found while it couldn't
+/// take the set-up lock, which it adds here without the lock (read, merge, write, read back),
+/// since only the set-up lock guards [`RESET_SIDS`]. Only the stop task, as SYSTEM, writes it.
+/// The next stop that holds the lock folds it into `ResetSids` and deletes it, before it writes
+/// [`STOP_SEQUENCE`], so no marker clears with a reset still owed only here.
+pub const RESET_OWED: &str = "ResetOwed";
 /// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the last completed
 /// stop's last clean observation began (the pass that found no pool user's process, or the BITS
 /// enumeration, whichever began first), not when it was written; written only by a run that
@@ -136,13 +142,14 @@ pub const SWEEP_NEXT: &str = "SweepNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 12] = [
+pub const SETUP_VALUES: [&str; 13] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
     DATA_DIR,
     REMOVING,
     RESET_SIDS,
+    RESET_OWED,
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
@@ -465,6 +472,9 @@ mod tests {
         // The stop task's marks go with the set-up's values, so `--remove` deletes them.
         assert_eq!(RESET_SIDS, "ResetSids");
         assert!(SETUP_VALUES.contains(&RESET_SIDS));
+        // And the resets a stop owed without the lock.
+        assert_eq!(RESET_OWED, "ResetOwed");
+        assert!(SETUP_VALUES.contains(&RESET_OWED));
         // So do its completion's.
         assert_eq!(
             (STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT),
