@@ -1014,20 +1014,70 @@ leaves that profile, both naming the part.
   comes back as `AgentReserved`, never as a runner or set-up failure. The host removes the
   launch file if the outer exits without having removed it. If the outer is killed between the
   logon and the job, a suspended inner runner is left that never runs.
-- **A window station and desktop of the agent's own.** The outer makes a window station,
-  `ClauseoRun-<16 hex>` from 64 random bits of its own (not the pipe base, which the pipe listing
-  shows), with `CWF_CREATE_ONLY`, so a station that already has the name fails the launch rather
-  than being opened. It holds one desktop. Both name only `SYSTEM` and the pool user, are
-  labelled Low, and are made before the inner runner joins the job; the agent starts on it.
-  Neither the lawyer's `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a
-  service window station grants the token anything, and user32 then fails to start the agent
-  (`0xC0000142`; the first Windows runs of the harness). Its own station also keeps the agent's
-  clipboard and global atoms apart from the lawyer's.
-- **UI limits on the job:** reading and writing the clipboard, global atoms, other processes'
+- **A window station and desktop of the agent's own** (`runner/station.rs` holds the order,
+  `runner/desktop.rs` the calls). The agent runs on `<station>\Default`, its own station's one
+  desktop, made by the outer before the inner runner joins the job. Neither the lawyer's
+  `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a service window station
+  grants the token anything, and user32 then fails to start the agent (`0xC0000142`; the first
+  Windows runs of the harness). Its own station also keeps the agent's clipboard and global
+  atoms apart from the lawyer's.
+  - **Why not a named station.** The outer first made `ClauseoRun-<16 hex>` by name. The outer
+    runs as the lawyer, unelevated, and `\Sessions\<n>\Windows\WindowStations` grants
+    `CreateChild` to `Administrators` alone, so the call failed with 5 and every launch failed
+    (`RunExit::Token`). Every earlier test had run elevated.
+  - **How it is made** (verified by hand on Windows Server 2025 and Windows 11 ARM64). The outer
+    logs the run's pool user on with `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, with the password
+    it already holds for the inner's `CreateProcessWithLogonW` (users hold the interactive
+    right by default; a batch logon fails with 1385). Acting as that logon
+    (`ImpersonateLoggedOnUser`, then a check that the thread's token is the pool user's at
+    `SecurityImpersonation`), it calls `CreateWindowStationW(NULL, …)`: Windows names an
+    unnamed station `Service-0x0-<logon LUID>$`, one per logon, so parallel launches get
+    their own. `RevertToSelf` runs on every path out of that step (a guard's drop), and a
+    `RevertToSelf` that fails ends the process: nothing may run on a thread still acting as
+    the pool user. The logon's token is closed at once; the station outlives it. The outer reads
+    the name (`GetUserObjectInformationW(UOI_NAME)`), opens the station by it as the lawyer
+    with `READ_CONTROL | WRITE_DAC | WRITE_OWNER | WINSTA_CREATEDESKTOP`, and makes the lawyer
+    its owner. It switches this process to the station for `CreateDesktopW("Default")` alone,
+    asking for `READ_CONTROL | WRITE_DAC | WRITE_OWNER` and the desktop use rights `0xC7` (the
+    first three alone fail with 8), and switches back; a failed switch back fails the launch.
+    Last, as their owner, it sets both last descriptors.
+  - **The descriptor it is made with** is always explicit: the default DACL grants `Everyone`
+    and `RESTRICTED` `0xF037F`. `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<lawyer>)(A;;0x2007F;;;OW)`
+    for the station; the pool user owns it until the lawyer takes it, and the `OWNER RIGHTS`
+    entry, held to use rights, takes away the owner's implied `READ_CONTROL | WRITE_DAC`, so no
+    pool process rewrites its DACL in that window. The desktop is made with
+    `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<lawyer>)(A;;0xC7;;;OW)`.
+  - **The last descriptors** (`token::station_sddl`, `token::desktop_sddl`), protected and
+    labelled Low: `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<lawyer>)(A;;0x2007F;;;<pool>)
+    (A;;0x2007F;;;OW)S:(ML;;NW;;;LW)` on the station and `D:P(A;;0xF01FF;;;SY)
+    (A;;0xE0000;;;<lawyer>)(A;;0xC7;;;<pool>)(A;;0xC7;;;OW)S:(ML;;NW;;;LW)` on the desktop, the
+    matter SID given the pool's rights after the pool user when the launch restricts with one.
+    The pool's station rights must be `READ_CONTROL` and `0x7F`: less, and user32 fails to start
+    the agent's GUI DLLs (`0x45A`). Without the Low label a Low agent hangs in conhost's start
+    (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0xC7`,
+    and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
+    or `DELETE` (read by hand on both machines). The lawyer keeps `READ_CONTROL | WRITE_DAC |
+    WRITE_OWNER` and no use right.
+  - **Nothing to clean.** The station goes with its last handle: the outer's, held until its
+    `serve` returns, and the inner's and the agent's own.
+  - **Any failure refuses the launch**, with the call named (`the agent's window station:
+    CreateWindowStationW failed (5)`), as `RunExit::Token`, whose meaning already covered the
+    agent's desktop, so no code is added. A `LogonUserW` refused for the password (1326) or the
+    logon right (1385) is `RunExit::Password` or `RunExit::LogonRight`, as the inner's own
+    logon's would be, so tier detection still names the set-up's cause. There is never a
+    fallback to `WinSta0` or a shared station.
+  - **The Security log.** Each launch adds one 4624 of logon type 2 for the pool user, from the
+    outer's process, and a 4634 when it ends; no 4672, since the pool users hold no
+    administrator rights (`docs/firm-it.md`, "Sandbox sign-ins in the Security log").
+- **UI limits on the job:** every `JOB_OBJECT_UILIMIT_*` flag (`0xFF`, `runner::UI_LIMIT_MASK`,
+  which `spawn::UI_LIMITS` is checked against as it compiles), defence in depth behind the
+  agent's own station: reading and writing the clipboard, global atoms, other processes'
   USER handles, system parameters, display settings, exiting Windows, and making or switching
   desktops. `WinSta0`, not the desktop, owns the clipboard and the global atom table, so a
   private desktop alone doesn't keep an agent from the lawyer's; Chromium's sandbox sets the same
-  limits. The desktop limit keeps the agent from making its desktop the one the lawyer sees.
+  limits. The desktop limit keeps the agent from making its desktop the one the lawyer sees, and
+  from making one on its own station, whose DACL grants the pool user `WINSTA_CREATEDESKTOP`.
+  The agent's tools (PowerShell, cmd, node, python, git) ran under `0xFF` in a hand test.
 - **The token** is (B) as above, made by the inner runner from its own token with
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
