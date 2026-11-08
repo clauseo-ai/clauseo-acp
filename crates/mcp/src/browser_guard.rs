@@ -208,9 +208,15 @@ fn serve(
     let reaper = reaper::Reaper::start(&socket_dir, session, &command.cwd, run.id())
         .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
     let launcher = session::Launcher {
-        executable: env
-            .get(env::EXECUTABLE_PATH)
-            .map_or_else(PathBuf::new, PathBuf::from),
+        executable: env.get(env::EXECUTABLE_PATH).and_then(|asked| {
+            let trusted = chrome::pinned::Trusted::here();
+            let real =
+                chrome::pinned::check(Path::new(asked), &trusted, chrome::pinned::modifiable);
+            if real.is_none() {
+                note("the Chrome the host named is not one Clauseo installed or trusts");
+            }
+            real
+        }),
         cwd: command.cwd.clone(),
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),

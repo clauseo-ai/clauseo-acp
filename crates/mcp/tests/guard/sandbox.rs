@@ -165,6 +165,41 @@ fn agent_browser_arguments_naming_a_weakening_switch_are_refused() {
     }
 }
 
+/// P8: an agent running the guard itself with its own wrapper as Chrome (one that would add
+/// `--no-sandbox`). The wrapper is no Chrome the guard trusts, so the call gets the plain
+/// sentence and nothing starts (`src/browser_guard/chrome/pinned.rs`).
+#[test]
+fn a_chrome_the_guard_does_not_trust_is_never_started() {
+    let scratch = Scratch::new("sandbox_untrusted");
+    let log = scratch.log();
+    let mut command = guard_command(&scratch, &example("echo_stub"), &[log.as_os_str()]);
+    command.env_remove(crate::support::TRUSTED_KNOB);
+    let mut guard = Guard::start(command);
+    guard.send_call("open");
+    let answer = guard.read();
+    assert_eq!(answer["id"], "open", "{answer}");
+    assert_eq!(answer["error"]["code"], -32603, "{answer}");
+    assert_eq!(
+        answer["error"]["message"],
+        "The browser Clauseo was asked to use isn't one it installed or trusts, so it won't \
+         start it.",
+        "{answer}"
+    );
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    assert!(
+        last.ends_with("is not one Clauseo installed or trusts; the guard never starts it"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains(scratch.path().to_str().unwrap()),
+        "no path: {stderr}"
+    );
+    assert_eq!(launches(&scratch), 0, "Chrome started: {stderr}");
+    assert!(!log.exists(), "agent-browser never started");
+}
+
 /// Chrome that exits at its start with nothing the guard recognises is not started again either:
 /// the call gets the ordinary failed start, not the sandbox's sentence, and the guard exits 1
 /// with the existing failed-start error.

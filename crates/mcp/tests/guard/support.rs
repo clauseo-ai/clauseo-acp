@@ -135,7 +135,12 @@ pub(crate) fn example(name: &str) -> PathBuf {
     path
 }
 
-/// The variables the host sets, valid: the socket folder on Unix only.
+/// The test-support variable naming a folder whose every file the guard trusts as Chrome
+/// (`browser_guard/chrome/pinned.rs`).
+pub(crate) const TRUSTED_KNOB: &str = "CLAUSEO_TEST_GUARD_TRUSTED_DIR";
+
+/// The variables the host sets, valid, and the folder the guard trusts: the socket folder on
+/// Unix only.
 pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
     let path = |name: &str| scratch.path().join(name).to_str().unwrap().to_owned();
     let mut vars = vec![
@@ -152,6 +157,11 @@ pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
         (
             "AGENT_BROWSER_STREAM_PORT".to_owned(),
             STREAM_PORT.to_owned(),
+        ),
+        // The guard starts only a Chrome it trusts; a test-support build trusts this folder's.
+        (
+            TRUSTED_KNOB.to_owned(),
+            scratch.path().to_str().unwrap().to_owned(),
         ),
     ];
     if cfg!(unix) {

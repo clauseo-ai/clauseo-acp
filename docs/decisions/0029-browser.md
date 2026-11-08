@@ -40,11 +40,11 @@ passed exactly as given. Anything else exits 2 with a reason and the mode's usag
 
 | Variable | Value |
 |---|---|
-| `AGENT_BROWSER_CONFIG`, `AGENT_BROWSER_EXECUTABLE_PATH` | from the guard's environment, set by the host; each must be an existing file at an absolute path; on Windows a path starting with two slashes or backslashes (a network share or device path) or `\??` is refused before anything reads it |
+| `AGENT_BROWSER_CONFIG`, `AGENT_BROWSER_EXECUTABLE_PATH` | from the guard's environment, set by the host; each must be an existing file at an absolute path; on Windows a path starting with two slashes or backslashes (a network share or device path) or `\??` is refused before anything reads it. The executable path only names a candidate: the guard starts Chrome at its resolved path, and only where it trusts one ("The pinned browser", below) |
 | `AGENT_BROWSER_PROXY` | from the guard's environment; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero |
 | `AGENT_BROWSER_SESSION` | from the guard's environment; 1 to 64 of `A-Z a-z 0-9 _ -` |
 | `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too |
-| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` only. agent-browser no longer launches Chrome (next row); the value holds should it ever. Until the S27 launch fix it also carried `--remote-debugging-port=<--cdp-port>`, which broke every launch ("Chrome on the claimed port", below) |
+| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` only. On the guard's tool path agent-browser launches no Chrome (next row); the value holds should it ever. The agent can still start a Chrome through agent-browser outside that path ("The residual: a browser the agent starts itself", below). Until the S27 launch fix it also carried `--remote-debugging-port=<--cdp-port>`, which broke every launch ("Chrome on the claimed port", below) |
 | `AGENT_BROWSER_CDP` | `ws://127.0.0.1:<--cdp-port>/devtools/browser/<id>`, the endpoint of the Chrome the guard started, read from Chrome's stderr; agent-browser connects to it instead of launching a Chrome |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | `600000` |
 | `AGENT_BROWSER_MAX_OUTPUT` | `25000` (characters; see below) |
@@ -240,7 +240,14 @@ on Windows.
      check admits allow-listed names there (`mcp.rs:2682`). `--headed`, `-p`, `--proxy=x` and
      `-Rohan` are refused; `-5`, `-10`, `-`, `--`, `---x`, `- item`, `--Select--` and `-Select-`
      (placeholder options on Indian government forms) pass. The rule is a shape, not a list of
-     flag names, so a flag added upstream is refused too.
+     flag names, so a flag added upstream is refused too. Each piece of a string split on commas
+     and whitespace is held to the same shape (`x,--no-sandbox` and `a --headed` are refused,
+     `Smith, J., 2019 - see p. 4` passes), since a value can be split again downstream
+     (`AGENT_BROWSER_ARGS` is split on both), and a string that names a switch weakening Chrome's
+     sandbox anywhere (`chrome::sandbox::weakening_in`, `x--NO-SANDBOX`) is refused as "the
+     browser setting <name>". The cost is a false refusal of typed text that happens to name one
+     (`single-process`). Neither path reaches Chrome through the tool path today; this is a second
+     layer.
 5. A refused request is answered with its own id:
    `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`,
    and never reaches the child. A refused notification (no `id`) is dropped unanswered.
@@ -290,7 +297,8 @@ connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-443
   never written through. On Windows both steps resolve the path again, so a junction swapped in
   between the check and the write would redirect it; that is bounded by the jail, since the
   guard runs in the agent's jail with the agent's rights (below), so such a write reaches nothing
-  the agent could not write itself. Its
+  the agent could not write itself. That holds while Chrome and the guard share the agent's
+  jail; Chrome's own jail ("The residual", below) moves the profile out of the agent's reach. Its
   `Default/Preferences` sends downloads to a staging folder in it (below) and allows "insecure
   content" (`mixed_script`) for `http://` pages only (`http://*:*`): Chrome otherwise holds an
   `http://` download of a "high-risk" type (`.md`, `.pdf`) until someone clicks Keep, which
@@ -366,8 +374,10 @@ Behaviour that changes with it:
   (`browser.rs:784`, `browser.rs:2563-2574`), and Chrome resets it when the client that set it
   disconnects. agent-browser's explicit `download` tool, with a path the agent picks, is not in
   `--tools core` and is unchanged.
-- **Launch options from the agent** (`extraArgs` and the like) have no effect: agent-browser
-  launches nothing. `headed` and `webgpu` were refused already.
+- **Launch options from the agent** (`extraArgs` and the like) have no effect on the tool path:
+  agent-browser's MCP server launches nothing. `headed` and `webgpu` were refused already. Off
+  that path the agent can run agent-browser, or write to its daemon, itself ("The residual",
+  below).
 
 **No process outlives the guard.** Chrome is the guard's child, on Unix the leader of its own
 process group. On every way out of the guard (stdin's end after the close request, a refused
@@ -432,7 +442,8 @@ finished downloads and deletes the profile. On Windows the job does all of it.
   lock file happen under an exclusive lock on `<cwd>/chrome-profiles.lock`, so no sweep finds a
   lock file its run does not hold yet.
 - The reaper and the guard run in the agent's jail, so they can signal nothing the agent could
-  not. The guard holds no CDP connection of its own.
+  not. The guard holds no CDP connection of its own. So does the Chrome the guard starts, for
+  now: Chrome's own jail ("The residual", below) is what takes the agent's rights from it.
 
 **Tests.** `crates/mcp/tests/guard/lifecycle.rs` runs the guard with stub Chrome and
 agent-browser binaries (`examples/chrome_stub.rs`, `daemon_stub.rs`, whose daemon leaves the
@@ -607,7 +618,9 @@ profile, and in its 10 s idle the proxy sees only `page.test`.
 The rule: the guard never passes `--no-sandbox` or any other switch that turns off or loosens
 Chrome's own sandbox, refuses to start Chrome with one, and refuses the browser when the sandbox
 cannot start. There is no retry without the sandbox. Enforced in the launcher, with tests, not
-by convention.
+by convention. It covers every Chrome the guard starts (#803, and the check after the start
+below), and only those: a browser the agent starts itself, outside the guard, is "The residual"
+below.
 
 **The switches** (Chromium main, November 2026), matched as Chrome reads them: after `--`, `-`
 or `/`, whitespace trimmed (all Unicode whitespace, as Chrome on Windows trims it,
@@ -652,12 +665,57 @@ start, past the check above. Before each start the guard removes both keys; noth
 host condition). The guard's own command line refuses (exit 2) agent-browser's arguments, and
 `AGENT_BROWSER_ARGS`, naming any of these anywhere in a value (`--args=...,--no-sandbox`).
 
-**What can reach Chrome's command line.** Only the guard's own constants, the proxy URL (checked
-to be `http://127.0.0.1:<port>`), the profile path and the claimed port. Nothing the agent sends:
-agent-browser only connects to the guard's Chrome (`AGENT_BROWSER_CDP`) and never launches one,
-so its `--args`, `AGENT_BROWSER_ARGS` (fixed to the WebRTC flag) and the config file (`{}`,
-written by the host) never reach Chrome; and the filter refuses every flag-shaped string in a
-tool call and every `extraArgs` token but six output flags (`filter.rs`).
+**What can reach the command line of the Chrome the guard starts.** Only the guard's own
+constants, the proxy URL (checked to be `http://127.0.0.1:<port>`), the profile path and the
+claimed port. Nothing the agent sends through the guard's tool path: agent-browser only connects
+to the guard's Chrome (`AGENT_BROWSER_CDP`) and never launches one, so its `--args`,
+`AGENT_BROWSER_ARGS` (fixed to the WebRTC flag) and the config file (`{}`, written by the host)
+never reach Chrome; and the filter refuses every flag-shaped string in a tool call, every string
+with a flag-shaped piece when split on commas and whitespace (`x,--no-sandbox`, `a --headed`),
+every string naming a switch of this section anywhere (`weakening_in`, so typed text holding
+`single-process` is refused too), and every `extraArgs` token but six output flags
+(`filter.rs`; `agent_browser_eval`'s `script` stays exempt). The binary is pinned as well: a
+wrapper named as Chrome is never started ("The pinned browser", next). This is the guard's path
+only; what the agent can start without the guard is "The residual", below.
+
+### The pinned browser (`browser_guard/chrome/pinned.rs`)
+
+`AGENT_BROWSER_EXECUTABLE_PATH` reaches the guard through its environment, which an agent that
+runs `clauseo-mcp browser-guard` itself chooses (P8 of the jail plan): a wrapper there would add
+`--no-sandbox` behind every check on the guard's own arguments. So the variable names only a
+candidate. The guard resolves it (every link, `..` and junction followed) once, at its start, and
+starts that resolved file, never the name given, and only when it is:
+- a system install at its fixed place: `/Applications/Google Chrome.app/Contents/MacOS/Google
+  Chrome` on macOS; `Google\Chrome\Application\chrome.exe` or
+  `Microsoft\Edge\Application\msedge.exe` under `C:\Program Files` or `C:\Program Files (x86)`
+  on Windows; on Linux (development and CI) `/opt/google/chrome/google-chrome` or `chrome`,
+  `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/lib/chromium/chromium` or
+  `/usr/lib/chromium-browser/chromium-browser`;
+- Chrome for Testing as the host installs it, `<data>/browsers/chrome-<digits and dots>/<the
+  zip's binary>`. On macOS `<data>` is the default data folder of the guard's user, found from
+  the user database, never from the environment, so `CLAUSEO_DATA_DIR` moves nothing here. On
+  Windows the guard may run as the slot's sandbox user, whose folders are not the lawyer's, so
+  any data folder's install passes, but only if that user can change neither the binary nor any
+  folder above it: the guard opens each for `FILE_WRITE_DATA`, `FILE_APPEND_DATA`,
+  `FILE_DELETE_CHILD`, `DELETE`, `WRITE_DAC` and `WRITE_OWNER` in turn, and any open that works
+  refuses. A file the agent wrote is its own, and an owner always gets `WRITE_DAC`. Windows'
+  system installs get the same test.
+
+A link from a trusted place to anywhere else resolves to that elsewhere and is refused. Anything
+else fails the first tool call with "The browser Clauseo was asked to use isn't one it installed
+or trusts, so it won't start it.", and the guard exits 1 naming no path. The host's own Chrome
+pick (`host/src/browser/chrome.rs`) still looks in `~/Applications` (macOS) and
+`%LOCALAPPDATA%` (Windows), which the guard refuses; the host should stop picking those, so
+Chrome for Testing is used there instead. Tests: `chrome/pinned/tests.rs` (the pinned install
+passes on a fake data folder; a wrapper, a wrong version folder or binary, and a link from the
+install folder to a temp folder are refused; the Windows rule with a stubbed probe), and
+`tests/guard/sandbox.rs`, `a_chrome_the_guard_does_not_trust_is_never_started`. The tests start
+stubs through `CLAUSEO_TEST_GUARD_TRUSTED_DIR`, read only in a `test-support` build.
+
+What the check rests on, not verified on a machine: on macOS that the jail keeps the agent from
+writing `/Applications/Google Chrome.app` and the data folder's `browsers/` (the agent is the
+same user, so permissions say nothing there); on Windows that the probe's six opens cover every
+right that lets the sandbox user replace the file (G17's Windows row).
 
 **The refusal.** Chrome's stderr, read up to its endpoint line, is matched against the messages
 Chromium prints when the sandbox cannot start:
@@ -1059,7 +1117,16 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   `http://127.0.0.1:<stream port>/` passes the stream server's Origin check (`http.rs:127-146`)
   and can post to `/api/command` (`http.rs:270-290`), which relaunches Chrome with any
   arguments, executable or profile; `/api/sessions` has no Origin check at all
-  (`http.rs:249-268`). A name that resolves to a local address, a redirect, or a page's own
+  (`http.rs:249-268`). The proxy rule stops a page only. The agent itself reaches all three
+  directly from its jail, with a forged `Origin` where one is checked: `/api/command`,
+  `/api/sessions` and the daemon's socket (or Windows port), whose newline-JSON protocol takes a
+  `launch` with any arguments (`actions.rs:5308-5336`). agent-browser v0.41.1 has no per-session
+  secret for any of them: the daemon reads lines with no handshake (`daemon.rs:548-600`), and the
+  stream server checks only `Origin` or `Referer` against `Host` (`http.rs:139-146`). Its one
+  token, `AGENT_BROWSER_DASHBOARD_ACCESS_TOKEN`, is the dashboard's, and is skipped for any
+  loopback `Host` (`dashboard.rs:289-310`), which a direct client sets at will. A token added
+  upstream would help little while agent-browser runs in the agent's jail as the agent's user:
+  the agent can read that process's environment and memory. This is "The residual", below. A name that resolves to a local address, a redirect, or a page's own
   `fetch` all reach the proxy without passing the guard's `url` check, which is why that check
   is only extra defence. The smoke test needs a test-only exception for its local page.
 - **The proxy handles absolute-form requests.** For `http://` targets, Chrome and reqwest send
@@ -1078,11 +1145,32 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   socket and Chrome's CDP and stream ports (none has authentication, `daemon.rs:548`). On the
   in-jail path neither can hold: one Seatbelt profile cannot tell the agent from the browser,
   so everything Chrome may write or reach, the agent may too, and the guard, which checks its
-  folders only at start (`browser_guard.rs`), cannot stop a later swap of one for a link. What
-  keeps it safe is that a swapped link, or a direct CDP or stream call, reaches nothing beyond
-  the jail: Seatbelt checks resolved paths, and Chrome is jailed too. Real separation needs
-  Chrome in its own jail, the outside-jail fallback (`BrowserLaunch::OutsideJail`), which is a
-  row of G17 item 1.
+  folders only at start (`browser_guard.rs`), cannot stop a later swap of one for a link. A
+  swapped link or a direct CDP call reaches nothing beyond the jail: Seatbelt checks resolved
+  paths, and Chrome runs in the same jail. A stream or daemon call is worse: it can start a
+  Chrome with weakened switches ("The residual", below), still with at most the jail's rights.
+  Real separation needs Chrome in a jail of its own, which `BrowserLaunch::OutsideJail` stands
+  for today. The name mixes up "outside the agent's jail" with "in its own jail": stage C's
+  variant means the second, never Chrome with no jail, and should be renamed (`OwnJail`) when it
+  is built. Whether Chrome's own sandbox starts inside a Seatbelt profile of Clauseo's is a row
+  of G17 item 1.
+
+### The residual: a browser the agent starts itself
+
+The agent can start our Chrome, or our agent-browser, itself with switches that weaken Chrome's
+sandbox: by running either binary from its jail (Chrome is in its runtime paths, P1; agent-
+browser takes `--executable-path` and `--args`, P2), or by asking agent-browser's daemon or
+stream server for a `launch` (P3 to P5, previous section). It takes a deliberate act, gives at
+most the agent jail's rights, and matters only together with an exploit of Chrome's renderer;
+Clauseo pins the current Stable and refreshes it every 3 hours through the signed browser-pins
+manifest. A browser the agent downloads or brings is not this residual: on macOS the jail's
+`file-map-executable` rule, and on Windows stage C's inherited deny of `FILE_EXECUTE` on the
+sandbox user's writable folders, keep the agent from running native code it wrote. The guarded
+path always runs Chrome with its own sandbox (#803 and the check after the start, "Chrome's
+sandbox, never weakened"), starts only a pinned binary ("The pinned browser"), and filters
+flags hidden inside longer strings (`filter.rs`). The residual closes once Chrome runs in a jail
+of its own after launch, macOS first (option (a) of the jail plan): the agent's jail then holds
+no Chrome binary and no launch control but start and stop.
 - **The host treats `<state>/browser` as agent-writable.** The host runs outside the jail, so it
   follows no link there when it reads or writes: agent-browser's config file (already so:
   `browser::write_config` refuses a linked folder and replaces a link at the file name),
@@ -1336,8 +1424,10 @@ memory reader to reuse (searched for `sysinfo`, `total_memory`, `MemTotal`, `hw.
 #### Where Chrome runs (`BrowserLaunch`)
 
 `HostConfig::with_browser_launch` takes `BrowserLaunch::InJail` (the default, the only one
-built) or `OutsideJail { cdp_port }`, stage C's switch, under which the entry would carry
-`AGENT_BROWSER_CDP` instead of starting Chrome. `OutsideJail` is refused for now with
+built: the guard starts Chrome inside the agent's jail, as the agent's child) or
+`OutsideJail { cdp_port }`, stage C's switch, under which Chrome runs outside the agent's jail,
+in a jail of its own ("The residual"), and the entry would carry `AGENT_BROWSER_CDP` instead of
+starting Chrome. `OutsideJail` is refused for now with
 `UnsupportedLaunch` ("... is not built yet"), tested in `config/tests.rs`.
 
 #### Seed and deny lists
