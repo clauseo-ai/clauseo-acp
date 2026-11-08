@@ -177,6 +177,10 @@ expression: text
     (regex #"^/dev/ttys[0-9]+$")
     (extension "com.apple.sandbox.pty")))
 
+; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by
+; name. NVRAM variables, read or written (`nvram -p`).
+(deny nvram* (with message "clauseo-4242-7"))
+
 ; The matter and the state folder: read and write.
 (allow file-read* file-write*
   (subpath (param "MATTER"))

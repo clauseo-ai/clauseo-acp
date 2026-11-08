@@ -183,6 +183,7 @@ impl Writer {
         self.line(&deny_default);
         self.line("");
         self.text.push_str(BASE);
+        self.default_gaps();
         self.allows(policy, &p);
         self.keychain(policy, &p);
         self.denies(policy, &p);
@@ -192,6 +193,19 @@ impl Writer {
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
+    }
+
+    /// The operations `(deny default)` leaves allowed, refused by name. No later rule allows
+    /// them, so they hold for the whole profile. Measured on macOS 27.2 (26B123), 2026-11-09:
+    /// a jailed `nvram -p` printed every variable until this rule named it
+    /// (`tests/jail/deny.rs`).
+    fn default_gaps(&mut self) {
+        self.text.push_str(concat!(
+            "\n; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by\n",
+            "; name. NVRAM variables, read or written (`nvram -p`).\n",
+        ));
+        let nvram = format!("(deny nvram* {})", self.message);
+        self.line(&nvram);
     }
 
     /// The policy's allows, before any of its denies.
