@@ -213,6 +213,14 @@ impl Removal for Remover {
         Machine::copy_owner(&mut self.m)
     }
 
+    fn disable_set_up_task(&mut self) -> Result<(), MachineError> {
+        self.call("disable_set_up_task")
+    }
+
+    fn stop_set_up_task(&mut self) -> Result<(), MachineError> {
+        self.call("stop_set_up_task")
+    }
+
     fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
         self.call("unregister_stop_task")?;
         self.m.state.stop_task = None;

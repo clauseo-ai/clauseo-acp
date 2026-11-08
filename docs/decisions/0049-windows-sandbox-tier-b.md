@@ -726,7 +726,9 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   prompt with `--remove --per-machine` (an elevated process may remove the whole record, whoever
   asks; when the owner asks, the ledger work still runs as the owner).
 - **Order**, under the set-up lock, waited for at most 60 s (else exit 5, nothing touched; with
-  no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
+  no record, the lock is still tried without waiting, and a set-up holding it is exit 5). The
+  uninstaller's `--uninstall` first disables the set-up task and stops its run, which may hold the
+  lock for two hours, then waits for the lock as above:
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
   `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
   sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record (its
@@ -1994,7 +1996,8 @@ member can start the task but is served nothing. Plain
 per-user `--adopt` doesn't register it. Every elevated set-up (the prompt's `--set-up`,
 `--adopt`'s) registers it again when it is missing or its definition differs
 (`refresh::ensure_task`, `Machine::ensure_set_up_task`), so a lawyer whose task was deleted meets
-the prompt once; the task's own run doesn't register itself. `--remove --uninstall` takes it down
+the prompt once; the task's own run doesn't register itself. A task it finds disabled gets an
+Event Log line in fixed words ("the Clauseo set-up task was disabled; set-up turned it back on"). `--remove --uninstall` takes it down
 first among the tasks (`refresh::TEARDOWN`). Every `\Clauseo` task goes the same way
 (`refresh::RETIRE`): disabled, then its running instance stopped, then deleted, so no start
 lands between the stop and the delete. The app's `--remove` keeps it, so the owner can set up
@@ -2037,7 +2040,8 @@ upgrade's 60-62 and 67, and the denial watcher's 68, "provider full"):
    name someone took while no instance was left is 64; a client that closed before the server
    reached it is let go and the wait goes on).
    A spare instance waits while one client is served, so the name is never free while the server
-   runs. A client has 2 s to send its request, so one that sends nothing holds no one up.
+   runs. With no spare, the name is unpublished before the client goes, and a fresh random name
+   is published once a new first instance holds it. A client has 2 s to send its request, so one that sends nothing holds no one up.
 
 **Each client**, in order:
 

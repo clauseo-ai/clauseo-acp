@@ -10,7 +10,7 @@ use clauseo_protocol::MatterId;
 
 use super::create::Failed;
 use super::journal_plan::{JournalAction, journal_plan};
-use super::machine::{Machine, MachineError, owned};
+use super::machine::{Ensured, Machine, MachineError, TASK_REENABLED, owned};
 use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
@@ -45,8 +45,10 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// An elevated set-up then registers the set-up task again when it is missing or its definition
 /// differs (`Machine::ensure_set_up_task`): per user for `owner`, per machine for interactive
 /// users with the pool's `group` refused. So a lawyer whose task was deleted meets the prompt
-/// once, not on every set-up. The set-up task's own run doesn't: per machine it gives the task
-/// the deny of `group`, which may exist only since this run (`Machine::deny_set_up_to`, every
+/// once, not on every set-up. One it found disabled is written to the Event Log
+/// ([`TASK_REENABLED`]), so IT sees it turned back on. The set-up task's own run doesn't: per
+/// machine it gives the task the deny of `group`, which may exist only since this run
+/// (`Machine::deny_set_up_to`, every
 /// run, as a reinstall gives the task its install-time descriptor), as a pool user holds `IU`
 /// too; per user the task names the owner alone and needs nothing. A failure is
 /// [`Step::SetUpTask`]; a task run on an install with no set-up task skips the deny. The set-up
@@ -83,9 +85,14 @@ pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid, group: &Sid) -> Res
         .register_stop_task(owner)
         .map_err(|error| failed(Step::StopTask, "SandboxStop", &error))?;
     let per_machine = (!refresh).then_some(group);
-    let healed = machine
+    let ensured = machine
         .ensure_set_up_task(owner, per_machine)
         .map_err(|error| failed(Step::SetUpTask, "SandboxSetUp", &error))?;
+    if ensured == Some(Ensured::ReEnabled) {
+        // A crashed uninstall or IT disabled it: IT sees that this set-up turned it back on.
+        machine.event_log(TASK_REENABLED);
+    }
+    let healed = ensured.is_some();
     if !refresh && !healed {
         let denied = machine
             .deny_set_up_to(group)

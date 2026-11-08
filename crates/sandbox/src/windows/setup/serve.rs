@@ -30,7 +30,7 @@
 //!    can connect and wait; the task queues a start made as this process ends, and the app
 //!    starts it again when the pipe stays missing, so no request is dropped. A client is let go
 //!    only once the spare instance holds the name; with no spare, the name is unpublished first,
-//!    and published again once a new first instance holds it ([`release`]).
+//!    and a fresh random name published once a new first instance holds it ([`release`]).
 //!
 //! Each client is served in this order, each failure a reply and one log line naming no user,
 //! SID or path:
@@ -186,9 +186,10 @@ pub trait Pipe {
     /// Makes the spare instance, unless one is waiting already: `Err` why not. [`serve`] calls
     /// it before each client is let go, so an instance of this process's holds the name then.
     fn spare(&mut self) -> Result<(), String>;
-    /// With no instance of this process's left, makes the next one the first again
-    /// (`FILE_FLAG_FIRST_PIPE_INSTANCE`): [`Unmade::Taken`] when someone made the name meanwhile.
-    fn first(&mut self) -> Result<(), Unmade>;
+    /// With no instance of this process's left, makes a first instance
+    /// (`FILE_FLAG_FIRST_PIPE_INSTANCE`) under the fresh `name`, the pipe's name from then on:
+    /// [`Unmade::Taken`] when someone made that name first.
+    fn first(&mut self, name: &str) -> Result<(), Unmade>;
     /// Sends `line` and lets the client go.
     fn reply(&mut self, client: Self::Client, line: &[u8]);
 }
@@ -270,15 +271,9 @@ pub fn run<P: Pipe>(
             return ServeExit::NoRecord;
         }
     };
-    let token = match host.random() {
-        Ok(bytes) => token(&bytes),
-        Err(error) => {
-            host.log(true, &format!("--serve-set-up: the pipe's name: {error}"));
-            return ServeExit::Unpublished;
-        }
-    };
-    let Some(name) = pipe_name(&token) else {
-        return ServeExit::Unpublished;
+    let (mut token, name) = match draw(host) {
+        Ok(drawn) => drawn,
+        Err(exit) => return exit,
     };
     let mut pipe = match open(&name, &sddl) {
         Ok(pipe) => pipe,
@@ -302,7 +297,7 @@ pub fn run<P: Pipe>(
         host.unpublish(&token);
         return ServeExit::Unpublished;
     }
-    let exit = serve(&mut pipe, host, &token);
+    let exit = serve(&mut pipe, host, &mut token);
     host.unpublish(&token);
     exit
 }
@@ -310,7 +305,7 @@ pub fn run<P: Pipe>(
 /// Step 5: each client in turn, until none comes or the run's time is short. Before a client is
 /// let go the spare instance is made, so the name is never without an instance of this
 /// process's while it is published ([`release`]).
-fn serve<P: Pipe>(pipe: &mut P, host: &mut impl Host, token: &str) -> ServeExit {
+fn serve<P: Pipe>(pipe: &mut P, host: &mut impl Host, token: &mut String) -> ServeExit {
     let mut wait = FIRST_WAIT;
     loop {
         if host.elapsed() + wait + CLIENT_LIMIT > RUN_LIMIT {
@@ -344,15 +339,27 @@ fn serve<P: Pipe>(pipe: &mut P, host: &mut impl Host, token: &str) -> ServeExit 
     }
 }
 
-/// Sends `reply` to `client` and lets it go, with an instance of this process's left holding the
-/// name: the spare, made first. When it can't be made, letting the client go leaves the name
-/// with no instance, free for anyone to make while it is still published, so the name is
-/// unpublished first, a new first instance made once the client is gone, and the name published
-/// again only then. `Err` is the exit when the name was taken meanwhile, or a step failed.
+/// A run's token and pipe name, drawn at random ([`TOKEN_BYTES`]); `Err` the exit when not.
+fn draw(host: &mut impl Host) -> Result<(String, String), ServeExit> {
+    let token = match host.random() {
+        Ok(bytes) => token(&bytes),
+        Err(error) => {
+            host.log(true, &format!("--serve-set-up: the pipe's name: {error}"));
+            return Err(ServeExit::Unpublished);
+        }
+    };
+    let name = pipe_name(&token).ok_or(ServeExit::Unpublished)?;
+    Ok((token, name))
+}
+
+/// Sends `reply` to `client` and lets it go, with an instance of this process's holding the name:
+/// the spare, made first. With none, the name is unpublished before the client goes, and once
+/// it is gone a first instance is made under a fresh random name (anyone may have read the old
+/// one), which becomes `published` and is published only then. `Err` is the exit then.
 fn release<P: Pipe>(
     pipe: &mut P,
     host: &mut impl Host,
-    token: &str,
+    published: &mut String,
     client: P::Client,
     reply: &Reply,
 ) -> Result<(), ServeExit> {
@@ -364,9 +371,10 @@ fn release<P: Pipe>(
         true,
         &format!("--serve-set-up: no spare instance of the pipe: {error}"),
     );
-    host.unpublish(token);
+    host.unpublish(published);
     pipe.reply(client, &reply.to_line());
-    match pipe.first() {
+    let (fresh, name) = draw(host)?;
+    match pipe.first(&name) {
         Ok(()) => {}
         Err(Unmade::Taken) => {
             host.log(true, "--serve-set-up: another process took the pipe's name");
@@ -377,7 +385,8 @@ fn release<P: Pipe>(
             return Err(ServeExit::PipeFailed);
         }
     }
-    if let Err(error) = host.publish(token) {
+    *published = fresh;
+    if let Err(error) = host.publish(published) {
         host.log(
             true,
             &format!("--serve-set-up: publishing the pipe's name: {error}"),

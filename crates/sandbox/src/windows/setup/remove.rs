@@ -25,7 +25,9 @@
 //! [`SetupExit::Failed`], nothing touched and the record kept.
 //!
 //! The order, under the machine-wide set-up lock, waited for at most [`REMOVE_LOCK_WAIT_MS`]
-//! (past that [`SetupExit::LockHeld`], nothing touched; the hook's own bound is 120 s, K3). A
+//! (past that [`SetupExit::LockHeld`], nothing touched; the hook's own bound is 120 s, K3).
+//! The uninstaller's removal first disables the set-up task and stops its run, which may hold
+//! the lock for up to two hours (`quiet_set_up_task`). A
 //! first read before the lock that finds no record still tries the lock, without waiting: a
 //! set-up holding it may be writing the first record, so that is `LockHeld` too, never 0.
 //!
@@ -204,7 +206,7 @@ pub fn remove(
     acl: &mut impl AclWriter,
     per_machine: bool,
 ) -> Result<Removed, RemoveFailure> {
-    remove_then(machine, acl, per_machine, &mut |_| {})
+    remove_then(machine, acl, per_machine, false, &mut |_| {})
 }
 
 /// [`remove`], then `while_locked` with the set-up lock still held, given what was removed: the
@@ -212,10 +214,13 @@ pub fn remove(
 /// lock without waiting, skips rather than race the staging folder's removal. `while_locked`
 /// runs on every success but a per-user one by someone else decided before the lock
 /// ([`Removed::NotOwner`]): the pool has an owner then, so the copy isn't this removal's.
+/// `uninstall` is `--uninstall`: the set-up task is disabled and stopped before the lock is
+/// waited for ([`quiet_set_up_task`]).
 pub fn remove_then(
     machine: &mut impl Removal,
     acl: &mut impl AclWriter,
     per_machine: bool,
+    uninstall: bool,
     while_locked: &mut dyn FnMut(&Removed),
 ) -> Result<Removed, RemoveFailure> {
     // Read once before the lock, so a machine with nothing set up, or a per-user uninstall by
@@ -230,6 +235,9 @@ pub fn remove_then(
     }
     if let Decision::Stop(removed) = decide(machine, before.as_ref(), per_machine)? {
         return Ok(removed);
+    }
+    if uninstall {
+        quiet_set_up_task(machine);
     }
     lock(machine, REMOVE_LOCK_WAIT_MS)?;
     let locked = Locked(machine);
@@ -255,6 +263,21 @@ pub fn remove_then(
         })?;
     while_locked(&removed);
     Ok(removed)
+}
+
+/// Before the uninstaller's removal waits for the lock: the set-up task disabled, so no set-up
+/// starts from here on, then its running instance stopped, whose set-up gives the lock back as
+/// it ends (a run may last two hours, past the lock's wait). Each is idempotent, and one that
+/// fails is logged and left to the lock's wait, as before; the teardown deletes the task.
+fn quiet_set_up_task(machine: &mut impl Removal) {
+    if let Err(error) = machine.disable_set_up_task() {
+        let cause = cause_of(&error);
+        tracing::warn!(%cause, "the set-up task couldn't be disabled");
+    }
+    if let Err(error) = machine.stop_set_up_task() {
+        let cause = cause_of(&error);
+        tracing::warn!(%cause, "the set-up task's run couldn't be stopped");
+    }
 }
 
 /// The set-up lock, waited for up to `wait_ms`; held still is [`SetupExit::LockHeld`].

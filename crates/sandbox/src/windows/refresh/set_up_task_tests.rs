@@ -21,7 +21,7 @@ use windows::core::BSTR;
 use super::staging::as_read_back;
 use super::task::{Apartment, register_in, service, set_starters_in};
 use super::windows_tests::{system32, try_in_cmd};
-use super::{FOLDER_SDDL, Starters, SystemTask, sddl_matches};
+use super::{Ensured, FOLDER_SDDL, Starters, SystemTask, sddl_matches};
 use crate::test_support::TempDir;
 use crate::windows::record::current_user_sid;
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -188,10 +188,10 @@ fn elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again()
     let starters = Starters::Interactive { denied: None };
     let ensure = || ensure_in(&folder.name, SystemTask::SetUp, &starters, &exe);
     // Missing: registered. Then read back as written: current, not registered again.
-    assert_eq!(ensure(), Ok(true));
+    assert_eq!(ensure(), Ok(Ensured::Registered));
     assert_eq!(
         ensure(),
-        Ok(false),
+        Ok(Ensured::Current),
         "a fresh registration reads back current"
     );
     // Disabled by hand: registered again, then current.
@@ -201,6 +201,10 @@ fn elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again()
         Ok(())
     })
     .unwrap();
-    assert_eq!(ensure(), Ok(true), "a disabled task is registered again");
-    assert_eq!(ensure(), Ok(false));
+    assert_eq!(
+        ensure(),
+        Ok(Ensured::ReEnabled),
+        "a disabled task is registered again, and said to be"
+    );
+    assert_eq!(ensure(), Ok(Ensured::Current));
 }

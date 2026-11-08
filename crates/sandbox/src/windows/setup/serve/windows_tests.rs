@@ -76,8 +76,8 @@ impl Pipe for Seen<'_> {
         self.0.spare()
     }
 
-    fn first(&mut self) -> Result<(), Unmade> {
-        self.0.first()
+    fn first(&mut self, name: &str) -> Result<(), Unmade> {
+        self.0.first(name)
     }
 
     fn reply(&mut self, client: Self::Client, line: &[u8]) {

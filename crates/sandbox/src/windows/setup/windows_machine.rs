@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::accounts::{self, Kind};
+use super::event_line::fixed_words;
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
     GROUP_COMMENT, GroupFacts, LogonRight, Machine, MachineError, Password, ProfileDir,
@@ -449,9 +450,9 @@ impl Machine for WindowsMachine {
         &mut self,
         owner: &Sid,
         group: Option<&Sid>,
-    ) -> Result<bool, MachineError> {
+    ) -> Result<Option<refresh::Ensured>, MachineError> {
         if !self.heals {
-            return Ok(false);
+            return Ok(None);
         }
         let starters = match group {
             None => Starters::Owner(owner.clone()),
@@ -459,12 +460,16 @@ impl Machine for WindowsMachine {
                 denied: Some(group.clone()),
             },
         };
-        let again = refresh::ensure_task(SystemTask::SetUp, &starters)
+        let ensured = refresh::ensure_task(SystemTask::SetUp, &starters)
             .map_err(|error| MachineError::Other(error.to_string()))?;
-        if again {
+        if ensured == refresh::Ensured::Registered {
             tracing::warn!("the set-up task was missing or changed; registered again");
         }
-        Ok(true)
+        Ok(Some(ensured))
+    }
+
+    fn event_log(&mut self, line: &str) {
+        refresh::event_log(false, fixed_words(line));
     }
 
     fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {

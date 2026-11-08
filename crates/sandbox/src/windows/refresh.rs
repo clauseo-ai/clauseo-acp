@@ -109,6 +109,7 @@ mod windows_refresher;
 #[cfg(windows)]
 pub(crate) mod windows_tests;
 
+pub use crate::windows::setup::{Ensured, TASK_REENABLED};
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{

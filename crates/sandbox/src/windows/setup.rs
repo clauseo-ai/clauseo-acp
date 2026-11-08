@@ -146,7 +146,9 @@ mod top_up;
 #[cfg(windows)]
 mod windows_machine;
 
-pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart};
+pub use machine::{
+    Ensured, LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, TASK_REENABLED,
+};
 pub use outcome::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
     ERROR_LOGON_TYPE_NOT_GRANTED, ERROR_VIRUS_DELETED, ERROR_VIRUS_INFECTED, JournalOutcome,

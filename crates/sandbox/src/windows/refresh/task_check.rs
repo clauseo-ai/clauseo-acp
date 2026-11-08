@@ -20,12 +20,13 @@ use windows::core::{BSTR, Interface};
 use super::staging::as_read_back;
 use super::task::{FOLDER_NAME, TaskError, register_in, with_task_in};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
-use super::{Registered, Starters, SystemTask, action_path};
+use super::{Ensured, Registered, Starters, SystemTask, action_path};
 
 /// Registers `spec` for `starters` unless it is there as `register_task` would register it
-/// now: `Ok(true)` when it was registered again, `Ok(false)` when it was already current. A
-/// definition that can't be read counts as one that differs.
-pub fn ensure_task(spec: SystemTask, starters: &Starters) -> Result<bool, TaskError> {
+/// now: [`Ensured::Registered`] when it was registered again, [`Ensured::ReEnabled`] when the
+/// one there was disabled, [`Ensured::Current`] when it was already current. A definition that
+/// can't be read counts as one that differs.
+pub fn ensure_task(spec: SystemTask, starters: &Starters) -> Result<Ensured, TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     ensure_in(FOLDER_NAME, spec, starters, &exe)
 }
@@ -37,19 +38,26 @@ pub(super) fn ensure_in(
     spec: SystemTask,
     starters: &Starters,
     exe: &Path,
-) -> Result<bool, TaskError> {
+) -> Result<Ensured, TaskError> {
     let path = action_path(exe);
     let sddl = as_read_back(&starters.sddl()).map_err(TaskError::Descriptor)?;
-    let current = match with_task_in(folder_name, spec, |task| Ok(read(task))) {
-        Ok(Some(found)) => spec.registered_as(&found, starters, &path, &sddl),
-        Ok(None) | Err(TaskError::NotRegistered) => false,
+    let (current, disabled) = match with_task_in(folder_name, spec, |task| Ok(read(task))) {
+        Ok(Some(found)) => (
+            spec.registered_as(&found, starters, &path, &sddl),
+            !found.enabled,
+        ),
+        Ok(None) | Err(TaskError::NotRegistered) => (false, false),
         Err(error) => return Err(error),
     };
     if current {
-        return Ok(false);
+        return Ok(Ensured::Current);
     }
     register_in(folder_name, spec, starters, exe)?;
-    Ok(true)
+    Ok(if disabled {
+        Ensured::ReEnabled
+    } else {
+        Ensured::Registered
+    })
 }
 
 /// `task`'s definition as [`Registered`]; `None` when any of it can't be read.
