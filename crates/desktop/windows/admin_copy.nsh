@@ -26,12 +26,12 @@
 ; %TEMP%), page or section of the template's. It refuses too while Clauseo's main window is there
 ; (exit 97, the same outcome).
 ;
-; The outer instance then says set up (a details line), or shows one box: declined, blocked
-; (this computer's settings refused the elevation), another account, or failed. The install has succeeded either way, with tier C. /S and /P can't ask: a
-; details line, and exit code 22 for /S. /UPDATE (Tauri's updater) skips it without a word; S15
-; PR 3's task refreshes the copy. Running the installer again by hand runs it again (--adopt is
-; idempotent; `File` overwrites the copy, whose locked DACL gives Administrators and SYSTEM full
-; control).
+; The outer instance then says set up (a details line), or shows one box: declined, blocked (this
+; computer's settings refused the elevation), another account, or failed. The install has succeeded
+; either way, with tier C. /S and /P can't ask: a details line, and exit code 22 for /S. /UPDATE
+; (Tauri's updater) skips it without a word; S15 PR 3's task refreshes the copy. Running the
+; installer again by hand runs it again (--adopt is idempotent; `File` overwrites the copy, whose
+; locked DACL gives Administrators and SYSTEM full control).
 ;
 ; The per-machine installer is elevated already: its NSIS_HOOK_POSTINSTALL writes the copy to the
 ; same folder, whatever $INSTDIR is, and runs `--adopt --per-machine` (CLAUSEO_ADMIN_COPY_MACHINE)
@@ -87,6 +87,11 @@
 !define CLAUSEO_RECORD_MACHINE "machine"
 !define CLAUSEO_RECORD_OWNER_SID "OwnerSid"
 !define CLAUSEO_RECORD_VERSION "AdminCopyVersion"
+; UAC's policy key (HKLM, 64-bit view) and its value for standard users' elevation prompts:
+; ConsentPromptBehaviorUser 0 automatically denies them, with no prompt (1 and 3 ask for an
+; administrator's credentials). Microsoft, "User Account Control settings and configuration".
+!define CLAUSEO_UAC_POLICY_KEY "SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+!define CLAUSEO_UAC_USER_PROMPT "ConsentPromptBehaviorUser"
 ; Each user's profile folder, as Windows records it (HKLM, administrators only):
 ; <key>\<SID>\ProfileImagePath.
 !define CLAUSEO_PROFILE_LIST "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
@@ -345,6 +350,62 @@ Var ClauseoAdminTimedOut
   ${EndIf}
 !macroend
 
+; $R4 this process's TokenElevationType (1 default, no linked token: a standard user, or an
+; administrator with UAC off; 2 elevated; 3 limited, an administrator's filtered token), 0 when
+; unread; $R7 0 when CheckTokenMembership finds BUILTIN\Administrators (S-1-5-32-544, well-known
+; SID 26) not enabled in this process's token, else 1, unread included. A filtered administrator's
+; token holds that group for deny only, which CheckTokenMembership doesn't count, so membership
+; alone can't tell them from a standard user; the elevation type does (Microsoft,
+; TOKEN_ELEVATION_TYPE and CheckTokenMembership). TokenElevationType is class 18, a DWORD;
+; TOKEN_QUERY is 8; a SID is at most 68 bytes (SECURITY_MAX_SID_SIZE); a null token handle has
+; CheckTokenMembership use this thread's own token. Uses $R5 and $R9.
+!macro CLAUSEO_TOKEN_KIND
+  StrCpy $R4 0
+  StrCpy $R7 1
+  System::Call 'advapi32::OpenProcessToken(p -1, i 8, *p .R5) i .R9'
+  ${If} $R9 <> 0
+    System::Call 'advapi32::GetTokenInformation(p R5, i 18, *i .R4, i 4, *i .R9) i .R9'
+    ${If} $R9 = 0
+      StrCpy $R4 0
+    ${EndIf}
+    System::Call 'kernel32::CloseHandle(p R5)'
+  ${EndIf}
+  System::Call '*(&i68) p .R5'
+  System::Call 'advapi32::CreateWellKnownSid(i 26, p 0, p R5, *i 68) i .R9'
+  ${If} $R9 <> 0
+    System::Call 'advapi32::CheckTokenMembership(p 0, p R5, *i .R7) i .R9'
+    ${If} $R9 = 0
+      StrCpy $R7 1
+    ${EndIf}
+  ${Else}
+    StrCpy $R7 1
+  ${EndIf}
+  System::Free $R5
+!macroend
+
+; $R9 1 when Windows will refuse this user's elevation without asking: ConsentPromptBehaviorUser
+; is 0 (read from the 64-bit view) and this process's user is a standard user (TokenElevationType
+; 1, not in BUILTIN\Administrators), the only user that value governs. Then the notice before
+; the prompt is skipped, since no prompt comes; the launch fails with 1260 and says
+; adminCopyBlocked. 0 otherwise: a value that is absent, not a DWORD or unreadable may ask, and an
+; administrator, filtered or not, gets the administrators' consent prompt. Uses $R4, $R5 and $R7.
+!macro CLAUSEO_ASK_AUTO_DENIED
+  StrCpy $R9 0
+  SetRegView 64
+  ClearErrors
+  ReadRegDWORD $R4 HKLM "${CLAUSEO_UAC_POLICY_KEY}" "${CLAUSEO_UAC_USER_PROMPT}"
+  ${IfNot} ${Errors}
+  ${AndIf} $R4 S== "0"
+    !insertmacro CLAUSEO_TOKEN_KIND
+    StrCpy $R9 0
+    ${If} $R4 = 1
+    ${AndIf} $R7 = 0
+      StrCpy $R9 1
+    ${EndIf}
+  ${EndIf}
+  SetRegView lastused
+!macroend
+
 ; The per-user installer asks for the admin section (header), at the end of a successful install.
 ; $R6 is the outcome: 0 set up (a details line), 1 failed, 2 another Windows account has it, 4
 ; the prompt declined, 9 the elevation refused by this computer's settings (each a box and a
@@ -388,7 +449,11 @@ Var ClauseoAdminTimedOut
       StrCpy $R2 ""
     ${EndIf}
     ${If} $R2 != ""
-      MessageBox MB_OK|MB_ICONINFORMATION "$(adminCopyAsk)"
+      ; The notice, unless Windows will refuse without asking (CLAUSEO_ASK_AUTO_DENIED).
+      !insertmacro CLAUSEO_ASK_AUTO_DENIED
+      ${If} $R9 <> 1
+        MessageBox MB_OK|MB_ICONINFORMATION "$(adminCopyAsk)"
+      ${EndIf}
       ; ShellExecuteExW "runas" on this installer, as the uninstall hook starts --remove:
       ; SEE_MASK_NOCLOSEPROCESS (0x40) for the exit code, SEE_MASK_FLAG_NO_UI (0x400) for no
       ; error box of Windows' own (the consent prompt still shows), SEE_MASK_NOZONECHECKS
@@ -431,7 +496,8 @@ Var ClauseoAdminTimedOut
         ; 1260 is what the VM measured for a policy-refused elevation (a standard user with
         ; ConsentPromptBehaviorUser 0: ShellExecuteExW failed, last error 1260); 5 comes under
         ; other UAC settings. Both are outcome 9; anything else stays outcome 1.
-        DetailPrint "Windows refused the elevation (error $R9)"
+        ; adminCopyElevationError holds $R9, which NSIS expands when it prints the string.
+        DetailPrint "$(adminCopyElevationError)"
         ${If} $R9 = 1260
         ${OrIf} $R9 = 5
           StrCpy $R6 9

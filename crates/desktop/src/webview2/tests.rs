@@ -220,16 +220,16 @@ fn the_installer_language_files_name_the_product_through_nsis() {
 }
 
 #[test]
-fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_26_once_each() {
+fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_27_once_each() {
     // Tauri's 27, the eight lines windows/hooks.nsh shows after the app deletes its data or about
     // S15's removal (deleteAppDataFailed, deleteAppDataKept, deleteAppDataKeptFailed,
     // deleteAppDataFailedUnnamed, removeStillRunning, removeSkippedSilent, removeExeMissing and
     // removeAdminCopyRefused), which tests there hold to the hook, its two about the firm-policy
     // folder (policyFolderExists and policyFolderFailed), the installers' setupExeRemoved, its
-    // twelve about the admin copy (adminCopyAsk, adminCopyWorking, adminCopyDone,
-    // adminCopyDeclined, adminCopyBlocked, adminCopyFailed, adminCopyOtherAccount,
-    // adminCopyMachineFailed, adminCopyNewerKept, adminCopyAppRunning, adminCopyStillRunning and
-    // adminCopySkippedSilent),
+    // thirteen about the admin copy (adminCopyAsk, adminCopyWorking, adminCopyDone,
+    // adminCopyDeclined, adminCopyBlocked, adminCopyElevationError, adminCopyFailed,
+    // adminCopyOtherAccount, adminCopyMachineFailed, adminCopyNewerKept, adminCopyAppRunning,
+    // adminCopyStillRunning and adminCopySkippedSilent),
     // the per-machine installer's and uninstaller's about their temporary folders
     // (installTempFailed and uninstallTempFailed), and the uninstaller's when it isn't started in
     // place (uninstallNotInPlace).
@@ -237,12 +237,12 @@ fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_26_once_eac
     let mut orders = Vec::new();
     for (file, constant) in [english, hindi] {
         let strings = lang_strings(&file);
-        assert_eq!(strings.len(), 53, "{file}");
+        assert_eq!(strings.len(), 54, "{file}");
         let order: Vec<String> = strings.iter().map(|(key, _, _)| key.clone()).collect();
         let mut keys = order.clone();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 53, "{file}");
+        assert_eq!(keys.len(), 54, "{file}");
         assert!(
             strings.iter().all(|(_, used, _)| used == constant),
             "{file}: every string is {constant}'s"

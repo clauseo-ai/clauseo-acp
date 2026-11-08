@@ -10,9 +10,9 @@
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
 ; (removeSkippedSilent, 2026-11-07); then the two drafts about a set-up program Windows security
 ; removed (removeExeMissing, setupExeRemoved, 2026-11-07), the draft for an admin copy the
-; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the twelve the installer shows
-; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07; adminCopyBlocked
-; 2026-11-08), then the one the
+; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the thirteen the installer shows
+; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07; adminCopyBlocked and
+; adminCopyElevationError 2026-11-08), then the one the
 ; per-machine installer shows when it can't make its protected temporary folder
 ; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07), and
 ; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07).
@@ -67,14 +67,18 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 ; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
 ; these lines), needs one UAC prompt at install. Their Hindi is in Hindi.nsh. Provisional (app
 ; thread and stage F, 2026-11-07).
-; adminCopyAsk: a box just before the prompt, saying it is coming and why; the prompt may name the
-; publisher "Unknown Publisher" while the installer is unsigned.
+; adminCopyAsk: a box just before the prompt, saying it may come and why; the prompt may name the
+; publisher "Unknown Publisher" while the installer is unsigned. Skipped when Windows will refuse
+; without asking (a standard user, ConsentPromptBehaviorUser 0). Provisional (app thread,
+; 2026-11-08).
 ; adminCopyWorking and adminCopyDone: details-list lines while the set-up runs (it can take a few
 ; minutes) and once it is done.
 ; adminCopyDeclined: the prompt was declined; for a standard user, whoever looks after the
 ; computer types their password into it. adminCopyBlocked: Windows refused the elevation outright
 ; (error 1260, or 5 under some UAC settings), as for a standard user whom this computer's settings
 ; give no prompt to approve; not a person's No. Provisional (app thread, 2026-11-08).
+; adminCopyElevationError: a details line with the error of any refused elevation but a person's
+; No, $R9 the error number. Provisional (app thread, 2026-11-08).
 ; adminCopyFailed: the set-up ran and failed (or couldn't
 ; start). adminCopyOtherAccount: another Windows account on this computer already has tier B.
 ; Each a box and a details line, per-user installs.
@@ -86,11 +90,12 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 ; adminCopyStillRunning: the set-up outlasted the installer's 10-minute wait; it may still be
 ; running, or may have stopped, and Settings' Safe workspace in the app shows which; details list
 ; only (exit code 23 for a silent per-machine install).
-LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up the Safe workspace. It will say the publisher is unknown. That's expected: it's this installer asking. Choose Yes."
+LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows may ask for permission to set up the Safe workspace. If it does, it will say the publisher is unknown. That's expected: it's this installer asking. Choose Yes."
 LangString adminCopyWorking ${LANG_ENGLISH} "Setting up the Safe workspace. This can take a few minutes."
 LangString adminCopyDone ${LANG_ENGLISH} "The Safe workspace is set up."
 LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because permission was refused when Windows asked. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
 LangString adminCopyBlocked ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because your Windows account isn't allowed to approve this change. To set it up, ask whoever looks after this computer to run this installer with an administrator account, or to install Clauseo for all users."
+LangString adminCopyElevationError ${LANG_ENGLISH} "Windows didn't run the program that sets up the Safe workspace as an administrator (error $R9)."
 LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
 LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
 LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
