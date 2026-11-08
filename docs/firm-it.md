@@ -74,6 +74,12 @@ What a silent (`/S`) install can return:
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 | 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
 
+A silent per-user install exits 22 by design: it can't show the Windows prompt, so the Safe
+workspace isn't set up. Deployment tools such as Intune and SCCM treat any non-zero code as a
+failure. Either add 22 as a success code (in Intune, the app's **Return codes**: 22, Success), or
+deploy the per-machine installer, which is elevated already and places the set-up program without
+a prompt; each lawyer's Safe workspace is then set up from Clauseo's first-run step, as above.
+
 A 23 after a 10-minute wait means the placing may still be running; it finishes on its own. A
 `/S` run as SYSTEM (Intune) runs in session 0, which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
 
@@ -610,6 +616,8 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
   folder on a network share, and keep DLP from flagging its cookie and cache writes, or expect a
   blank window or lost state (Microsoft,
   [Prevent security tools from blocking WebView2 apps](https://learn.microsoft.com/microsoft-edge/webview2/concepts/security-tools)).
+  Avoid process exclusions for `node.exe`: they stop scanning of every file it opens, including
+  the ones the AI tool writes across the matter.
 - **Data stays local:** everything Clauseo keeps per user is in `%LOCALAPPDATA%\ai.clauseo.desktop`
   (`crates/settings/src/locations.rs`, `Locations::resolve_for`), never in the roaming profile.
   New matters go in `Documents\Clauseo` unless `matters.default_location` says otherwise.
