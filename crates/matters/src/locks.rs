@@ -173,6 +173,35 @@ pub fn matter_path_in(folder: &Path, path: &Path) -> Option<MatterPath> {
     path_in(folder, path, Fold::FileSystem)
 }
 
+/// [`held_open_at`] for a path a caller already resolved, absolute, every link in it followed
+/// and every `..` taken (the host's network-safe walk): it is compared as it is with `folder`'s
+/// canonical path, never canonicalised again, so a link swapped in after the caller's check is
+/// not followed by a second resolve. Only `folder` (the lawyer's) is canonicalised.
+pub fn held_open_resolved(folder: &Path, resolved: &Path) -> Option<(MatterPath, HeldOpen)> {
+    let (root, inside) = resolved_in(folder, resolved, Fold::Safety)?;
+    held_open(&root, &inside).map(|held| (inside, held))
+}
+
+/// [`matter_path_in`] for a path a caller already resolved ([`held_open_resolved`]): compared as
+/// it is, never canonicalised again.
+pub fn matter_path_of_resolved(folder: &Path, resolved: &Path) -> Option<MatterPath> {
+    resolved_in(folder, resolved, Fold::FileSystem).map(|(_, inside)| inside)
+}
+
+/// The folder's canonical path and the matter path the resolved `path` names under it,
+/// compared by `fold`; when `folder` does not canonicalise, `path`'s text under `folder`'s (no
+/// `.` or `..` part), as [`matter_path_in`] falls back.
+fn resolved_in(folder: &Path, path: &Path, fold: Fold) -> Option<(PathBuf, MatterPath)> {
+    if !path.is_absolute() {
+        return None;
+    }
+    match dunce::canonicalize(folder) {
+        Ok(root) => relative_to(&root, path, fold).map(|inside| (root, inside)),
+        Err(_) => MatterPath::from_relative(path.strip_prefix(folder).ok()?)
+            .map(|inside| (folder.to_path_buf(), inside)),
+    }
+}
+
 /// [`matter_path_in`] with the folder's parts compared by `fold`.
 fn path_in(folder: &Path, path: &Path, fold: Fold) -> Option<MatterPath> {
     let joined = folder.join(path);

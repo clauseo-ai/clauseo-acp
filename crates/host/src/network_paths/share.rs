@@ -4,26 +4,35 @@
 //! strictly: one spelling of the matter folder, no `.` or `..` anywhere, names compared with
 //! ASCII case folding only, so any doubt leaves the path a network path an agent named.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::resolve::{Disk, Walked, walk};
 use super::{NetEnv, refused_windows_name};
 
-/// Whether a path an agent named (absolute, or taken from the matter folder `matter`) may be
-/// handed to the file system: only when the network-safe walk vouches for it (no network
-/// location in its text, on its way or as a link's target, nothing it can't look at:
-/// [`walk`] on `disk`, fail-closed). Never one that lies by its text in `matter` kept on a
+/// Where a path an agent named (absolute, or taken from the matter folder `matter`) leads, when
+/// it may be handed to the file system: only when the network-safe walk vouches for it (no
+/// network location in its text, on its way or as a link's target, nothing it can't look at:
+/// [`walk`] on `disk`, fail-closed). `None` for one that lies by its text in `matter` kept on a
 /// share: that one is the lawyer's own, judged by its text alone, untouched.
-pub(crate) fn may_touch(path: &Path, matter: &Path, disk: &Disk<'_>) -> bool {
+///
+/// The caller touches the walked path it gets back, never the agent's text again: canonicalising
+/// the text a second time would resolve it anew, after the check (a link swapped in since then
+/// would be followed). What remains is the window between the walk and the caller's own open;
+/// closing it needs a no-follow open per name (a follow-up).
+pub(crate) fn touchable(path: &Path, matter: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
     let joined = matter.join(path);
     let net = disk.net;
     if refused_windows_name(path, net)
         || under_share_matter(path, matter, net)
         || under_share_matter(&joined, matter, net)
+        || net.is_network(path)
     {
-        return false;
+        return None;
     }
-    !net.is_network(path) && matches!(walk(&joined, disk), Walked::Local(_))
+    match walk(&joined, disk) {
+        Walked::Local(walked) => Some(walked),
+        Walked::Refused => None,
+    }
 }
 
 /// Whether `path` lies, by its text alone, at or under `matter` when `matter` is itself a

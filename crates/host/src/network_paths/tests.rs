@@ -239,3 +239,22 @@ fn a_linux_mount_table_is_read_as_bytes_and_an_unparsable_one_is_unknown() {
     assert_eq!(linux_remote_mounts(b"/dev/sda1 /\n"), None);
     assert_eq!(linux_remote_mounts(b""), Some(Vec::new()));
 }
+
+/// A remote mount recorded under the data volume's spelling inside a firmlinked folder matches
+/// the agent's path in either spelling; so it does when the firmlinks are unknown (the names
+/// from the root, a deny's safe side).
+#[test]
+fn a_mount_recorded_on_the_data_volume_matches_its_firmlinked_form() {
+    let known = mac_net(&["/System/Volumes/Data/Users/a/share"]);
+    let unknown = NetEnv {
+        firmlinks: None,
+        ..mac_net(&["/System/Volumes/Data/Users/a/share"])
+    };
+    for net in [&known, &unknown] {
+        assert!(network("/Users/a/share/x.docx", net));
+        assert!(network("/users/A/SHARE", net));
+        assert!(!network("/Users/a/other/x", net));
+    }
+    assert!(network("/System/Volumes/Data/Users/a/share/x", &known));
+    assert!(!network("/Users/a/x", &known));
+}

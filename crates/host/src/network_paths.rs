@@ -18,7 +18,8 @@
 //!   form first (`/usr/share/firmlinks`; refused when that can't be read).
 //! - A URL (`smb://`, `afp://`, `nfs://`, `file://` and any other scheme).
 //! - A path at or under a remote mount point ([`NetEnv::remote_mounts`]): on macOS each mount
-//!   without `MNT_LOCAL`, or of type `smbfs`, `nfs`, `afpfs`, `webdav` or `autofs`; on Linux
+//!   without `MNT_LOCAL`, or of type `smbfs`, `nfs`, `afpfs`, `webdav` or `autofs` (one recorded
+//!   under the data volume's spelling also in its firmlinked form); on Linux
 //!   each `/proc/self/mounts` entry whose type is not a known local one (`linux.rs`).
 //!
 //! Names a deny matches against an ASCII name (`/net`, `.nofollow`) fold as a case-insensitive
@@ -32,7 +33,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization as _;
 
 pub(crate) use ascii_fold::name_folds_to;
-pub(crate) use share::{may_touch, under_share_matter};
+pub(crate) use share::{touchable, under_share_matter};
 pub(crate) use windows_names::refused_windows_name;
 
 mod ascii_fold;
@@ -47,6 +48,8 @@ mod share;
 pub(crate) mod tests;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+pub(crate) use windows::short_path;
 mod windows_names;
 
 /// What [`is_network_path`] compares a path against.
@@ -175,7 +178,12 @@ pub(crate) fn is_network_path(path: &Path, net: &NetEnv) -> bool {
             return true;
         }
     }
-    net.remote_mounts.iter().any(|mount| under(path, mount))
+    net.remote_mounts.iter().any(|mount| {
+        under(path, mount)
+            || (net.macos
+                && macos_rules::mount_form(&mount.to_string_lossy(), net)
+                    .is_some_and(|form| under(path, Path::new(&form))))
+    })
 }
 
 /// A mount name as a network check compares it: [`fold_name`] (which normalises to NFD, as

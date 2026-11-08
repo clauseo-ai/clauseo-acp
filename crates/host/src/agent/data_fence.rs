@@ -36,12 +36,13 @@
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use clauseo_matters::{HeldOpen, held_open_at};
+use clauseo_matters::{HeldOpen, held_open_resolved};
 use clauseo_protocol::MatterPath;
+use identity::DataIdentity;
 use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, may_touch, refused_windows_name};
+use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 
@@ -253,36 +254,46 @@ impl FenceCheck {
 
     /// [`Self::touches_data_as`] on `disk`. A path that is, or leads to, a network location
     /// counts as in `<data>` (found before anything touches it), unless it lies by its text in
-    /// the matter folder the lawyer keeps on a share, which counts as outside, untouched.
+    /// the matter folder the lawyer keeps on a share, which counts as outside, untouched. A data
+    /// folder that is itself on the network (redirected app data) is never touched for its
+    /// identity: a path that resolves locally can't be in it, and every network path is refused.
+    /// An identity that can't be read refuses the request ([`DataIdentity`]).
     pub(crate) fn touches_data_on(&self, insensitive: bool, disk: &Disk<'_>) -> bool {
+        let anything = !self.paths.is_empty() || !self.words.is_empty() || !self.roots.is_empty();
         let home = self.home.as_deref();
-        let Found::Path(real_data) = resolve::resolve(&self.data, &self.cwd, home, disk) else {
-            return !self.paths.is_empty() || !self.words.is_empty() || !self.roots.is_empty();
+        let network_data = disk.net.is_network(&self.data);
+        let real_data = if network_data {
+            self.data.clone()
+        } else {
+            match resolve::resolve(&self.data, &self.cwd, home, disk) {
+                Found::Path(real_data) => real_data,
+                Found::Refused | Found::ShareMatter => return anything,
+            }
+        };
+        let identity = if network_data {
+            DataIdentity::none(disk.fs)
+        } else {
+            match DataIdentity::capture(disk.fs, &real_data) {
+                Some(identity) => identity,
+                None => return anything,
+            }
         };
         let data = key(&real_data, insensitive);
-        let own = self.own(&real_data, insensitive, disk);
-        // `<data>`'s identity and its folders' (device or volume and file number): a local path
-        // is in `<data>` when it or a folder above it is `<data>`, whatever its text.
-        let data_id = disk.fs.identity(&real_data);
-        let data_line: Vec<(u64, u128)> = real_data
-            .ancestors()
-            .filter_map(|folder| disk.fs.identity(folder))
-            .collect();
-        let in_data_by_identity = |path: &Path| {
-            data_id.is_some_and(|id| {
-                path.ancestors()
-                    .any(|folder| disk.fs.identity(folder) == Some(id))
-            })
+        let own = if network_data {
+            Vec::new()
+        } else {
+            self.own(&real_data, insensitive, disk, &identity)
         };
         let inside = |found: &Found| match found {
             Found::Refused => true,
             Found::ShareMatter => false,
+            Found::Path(_) if network_data => false,
             Found::Path(path) => {
                 let text = key(path, insensitive);
                 if text.starts_with(&data) {
                     !own.iter().any(|folder| text.starts_with(folder))
                 } else {
-                    in_data_by_identity(path)
+                    identity.holds(path)
                 }
             }
         };
@@ -294,7 +305,7 @@ impl FenceCheck {
                 resolve::resolve_all(path, &self.cwd, home, disk)
             }
         };
-        let embedded = self.embedded(&real_data, insensitive);
+        let embedded = self.embedded(&real_data, !network_data, insensitive, disk.net.windows);
         let reached = self
             .paths
             .iter()
@@ -303,14 +314,20 @@ impl FenceCheck {
         // A search from a folder that holds `<data>` (or is it) reaches all of it.
         let holds = |found: &Found| {
             inside(found)
-                || matches!(found, Found::Path(root) if data.starts_with(&key(root, insensitive))
-                    || disk.fs.identity(root).is_some_and(|id| data_line.contains(&id)))
+                || matches!(found, Found::Path(root) if !network_data
+                    && (data.starts_with(&key(root, insensitive)) || identity.is_on_line(root)))
         };
         reached || self.roots.iter().any(|root| agent(root).iter().any(holds))
     }
 
     /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.
-    fn own(&self, real_data: &Path, insensitive: bool, disk: &Disk<'_>) -> Vec<Vec<OsString>> {
+    fn own(
+        &self,
+        real_data: &Path,
+        insensitive: bool,
+        disk: &Disk<'_>,
+        identity: &DataIdentity<'_>,
+    ) -> Vec<Vec<OsString>> {
         let home = self.home.as_deref();
         let data = key(real_data, insensitive);
         let mut own = Vec::new();
@@ -332,19 +349,10 @@ impl FenceCheck {
         if let Found::Path(cwd) = resolve::resolve(&self.cwd, &self.cwd, home, disk) {
             let cwd_key = key(&cwd, insensitive);
             // A matter folder that holds `<data>` by identity (another spelling of one of its
-            // folders) counts for nothing either.
-            let holds_by_identity = disk.fs.identity(&cwd).is_some_and(|id| {
-                real_data
-                    .ancestors()
-                    .any(|folder| disk.fs.identity(folder) == Some(id))
-            });
-            let data_id = disk.fs.identity(real_data);
-            let in_data_by_identity = data_id.is_some_and(|id| {
-                cwd.ancestors()
-                    .any(|folder| disk.fs.identity(folder) == Some(id))
-            });
+            // folders) counts for nothing either, nor one whose identity can't be read.
+            let holds_by_identity = identity.is_on_line(&cwd);
             let linked = matches!(disk.fs.entry(&self.cwd), Ok(Entry::Link))
-                && (cwd_key.starts_with(&data) || in_data_by_identity);
+                && (cwd_key.starts_with(&data) || identity.holds(&cwd));
             if !data.starts_with(&cwd_key) && !holds_by_identity && !linked {
                 own.push(cwd_key);
             }
@@ -352,30 +360,31 @@ impl FenceCheck {
         own
     }
 
-    /// The paths that start, inside a shell word, where the data folder's text does: its path
-    /// as configured and as resolved (each with `/` too on Windows) and its `~/…`, `$HOME/…` and
-    /// `${HOME}/…` forms. Bash expands `$HOME` in double quotes; a single-quoted one is caught too.
-    fn embedded(&self, real_data: &Path, insensitive: bool) -> Vec<PathBuf> {
-        let mut needles: Vec<String> = Vec::new();
-        for spelling in [self.data.as_path(), real_data] {
-            needles.extend(spelling.to_str().map(str::to_owned));
-            if let Some(home) = &self.home
-                && let Ok(under) = spelling.strip_prefix(home)
-                && let Some(under) = under.to_str()
-            {
-                needles.push(format!("~/{under}"));
-                needles.push(format!("$HOME/{under}"));
-                needles.push(format!("${{HOME}}/{under}"));
-            }
-        }
-        if cfg!(windows) {
-            let slashed: Vec<String> = needles.iter().map(|n| n.replace('\\', "/")).collect();
-            needles.extend(slashed);
-        }
-        needles.dedup();
+    /// The paths that start, inside a shell word, where one of the data folder's spellings does
+    /// ([`words::needles`]: as configured and as resolved, its short name when `local`, its
+    /// home and folder variable forms), each checked as the data folder's path followed by the
+    /// rest of the word. Bash expands `$HOME` in double quotes; a single-quoted one is caught
+    /// too.
+    fn embedded(
+        &self,
+        real_data: &Path,
+        local: bool,
+        insensitive: bool,
+        windows: bool,
+    ) -> Vec<PathBuf> {
+        let var = |name: &str| std::env::var_os(name).map(PathBuf::from);
+        let needles = words::needles(&words::Spellings {
+            paths: [self.data.as_path(), real_data],
+            short: local.then(|| words::short_name(real_data)).flatten(),
+            home: self.home.as_deref(),
+            var: &var,
+            windows,
+        });
         self.words
             .iter()
-            .flat_map(|word| command::embedded_paths(word, &needles, insensitive))
+            .flat_map(|word| {
+                command::embedded_paths(word, &needles, real_data, insensitive, windows)
+            })
             .collect()
     }
 }
@@ -391,7 +400,8 @@ pub(crate) enum PathsChecked {
 
 /// The data-folder check, then the held-open check of `paths` in the matter `folder`. A path
 /// that is or leads to a network location, or lies by its text in a matter folder on a share,
-/// is never looked at for being held ([`may_look`]).
+/// is never looked at for being held; one that may be is looked at by the path the network-safe
+/// walk resolved, never by its text again ([`touchable`]).
 pub(crate) fn check_paths(
     folder: &Path,
     paths: Vec<PathBuf>,
@@ -402,18 +412,13 @@ pub(crate) fn check_paths(
     if fence.is_some_and(|fence| fence.touches_data_on(FOLD_CASE, &disk)) {
         return PathsChecked::DataFolder;
     }
+    let walk = Disk::resolved(&net);
     PathsChecked::Held(
         paths
             .into_iter()
-            .filter(|path| may_look(folder, path, &Disk::vouch(&net)))
-            .find_map(|path| held_open_at(folder, &path)),
+            .filter_map(|path| touchable(&path, folder, &walk))
+            .find_map(|walked| held_open_resolved(folder, &walked)),
     )
-}
-
-/// Whether the held-open check may look at `path` (absolute, or taken from the matter
-/// `folder`) on the disk: only when the network-safe walk vouches for it ([`may_touch`]).
-fn may_look(folder: &Path, path: &Path, disk: &Disk<'_>) -> bool {
-    may_touch(path, folder, disk)
 }
 
 /// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny
@@ -436,6 +441,7 @@ mod bypass_tests;
 mod command;
 #[cfg(test)]
 mod command_tests;
+mod identity;
 mod input;
 mod launch;
 #[cfg(test)]
@@ -450,3 +456,6 @@ mod search;
 mod search_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod windows_tests;
+mod words;

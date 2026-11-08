@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::FenceCheck;
 use super::resolve::Disk;
-use super::{FenceCheck, may_look};
 use crate::network_paths::NetEnv;
 #[cfg(unix)]
 use crate::network_paths::resolve::tests::Fake;
@@ -59,7 +59,7 @@ pub(super) fn look(folder: &Path, path: &Path, net: &NetEnv, fs: &FakeFs) -> boo
         real: &real,
         net,
     };
-    may_look(folder, path, &disk)
+    crate::network_paths::touchable(path, folder, &disk).is_some()
 }
 
 /// Windows' rules with drive `Z:` a mapped share.
@@ -333,7 +333,7 @@ fn a_folded_or_normalised_spelling_of_a_mount_is_refused_untouched() {
 }
 
 /// A path in a share matter is never looked at by the held-open check, the guard or the
-/// after-turn tool paths (they share `may_touch`): judged by its text, and the ask goes to the
+/// after-turn tool paths (they share `touchable`): judged by its text, and the ask goes to the
 /// lawyer.
 #[test]
 fn a_path_in_a_share_matter_is_never_touched_by_a_held_or_tool_path_check() {
@@ -381,4 +381,73 @@ fn a_wildcard_or_url_word_is_not_refused() {
         &fs
     ));
     assert!(look(Path::new("/m"), Path::new("docs/*.docx"), &net, &fs));
+}
+
+/// An identity the fence can't read (any error but a missing name) refuses the request, never
+/// turning the identity backstop off: the data folder's own, or one of a path's folders. A
+/// missing name is no error.
+#[cfg(unix)]
+#[test]
+fn an_identity_that_cannot_be_read_refuses_the_request() {
+    let net = plain_net(false);
+    let mut fs = FakeFs::with(&[("/other/x", Fake::File)]);
+    fs.ids.insert(PathBuf::from("/d"), (1, 7));
+    fs.ids.insert(PathBuf::from("/other"), (1, 8));
+    assert!(!refused(&fence("/m", &["/other/x"]), &net, &fs));
+    assert!(!refused(&fence("/m", &["/other/new.docx"]), &net, &fs));
+    fs.unreadable_ids.push(PathBuf::from("/other"));
+    assert!(refused(&fence("/m", &["/other/x"]), &net, &fs));
+    let mut search = fence("/m", &[]);
+    search.roots = vec![PathBuf::from("/other")];
+    assert!(refused(&search, &net, &fs));
+    let mut fs = FakeFs::with(&[("/other/x", Fake::File)]);
+    fs.unreadable_ids.push(PathBuf::from("/d"));
+    assert!(refused(&fence("/m", &["/other/x"]), &net, &fs));
+    // With nothing to check there is nothing to refuse.
+    assert!(!refused(&fence("/m", &[]), &net, &fs));
+}
+
+/// A data folder that is itself on the network (redirected app data): its identity is never
+/// read, so nothing on the share is touched; a local path can't be in it, and every network path,
+/// a link to one or a word naming the data folder's share is refused.
+#[cfg(unix)]
+#[test]
+fn a_data_folder_on_the_network_is_never_touched_and_local_paths_pass() {
+    let net = windows_net();
+    let data = r"\\srv\profiles\a\AppData\Roaming\Clauseo";
+    let with_data = |paths: &[&str]| {
+        let mut check = fence("/m", paths);
+        check.data = PathBuf::from(data);
+        check
+    };
+    let fs = FakeFs::with(&[
+        ("/m/brief.docx", Fake::File),
+        ("/m/link", Fake::Link(r"\\srv\profiles\a".into())),
+    ]);
+    assert!(!refused(
+        &with_data(&["/m/brief.docx", "/m/new.docx", "notes/x.md"]),
+        &net,
+        &fs
+    ));
+    for path in [
+        r"\\srv\profiles\a\AppData\Roaming\Clauseo\state.sqlite",
+        r"\\other\share\x",
+        "/m/link/AppData/Roaming/Clauseo/x",
+    ] {
+        assert!(refused(&with_data(&[path]), &net, &fs), "{path}");
+    }
+    let mut word = with_data(&[]);
+    word.words = vec![format!("type {data}\\state.sqlite")];
+    assert!(refused(&word, &net, &fs));
+    let mut search = with_data(&[]);
+    search.roots = vec![PathBuf::from("/m")];
+    assert!(!refused(&search, &net, &fs));
+    assert_eq!(network_touched(&fs), Vec::<PathBuf>::new());
+    assert!(
+        !fs.touched()
+            .iter()
+            .any(|path| path.to_string_lossy().contains("profiles")),
+        "{:?}",
+        fs.touched()
+    );
 }
