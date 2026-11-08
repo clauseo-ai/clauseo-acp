@@ -12,6 +12,7 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::Ensured;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -232,13 +233,16 @@ pub trait Machine {
     /// An elevated set-up's self-heal: registers the set-up task `\Clauseo\SandboxSetUp` when
     /// it is missing or its definition differs (`refresh::ensure_task`), as this process: for
     /// `owner` alone with no `group` (per user), for interactive users with `group` refused (per
-    /// machine). `Ok(true)` once the task is as given; `Ok(false)` when this run doesn't heal
-    /// it: the set-up task's own run, which needs no prompt to be set up again.
+    /// machine). What it found and did once the task is as given; `None` when this run doesn't
+    /// heal it: the set-up task's own run, which needs no prompt to be set up again.
     fn ensure_set_up_task(
         &mut self,
         owner: &Sid,
         group: Option<&Sid>,
-    ) -> Result<bool, MachineError>;
+    ) -> Result<Option<Ensured>, MachineError>;
+    /// Writes `line`, fixed words, to the Application Event Log as information
+    /// (`refresh::event_log`, through `event_line::fixed_words`), for IT to see.
+    fn event_log(&mut self, line: &str);
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

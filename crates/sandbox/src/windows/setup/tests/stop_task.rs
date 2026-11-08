@@ -253,3 +253,31 @@ fn removing_a_per_user_pool_leaves_adopts_task() {
     assert!(!machine.lines().iter().any(|l| l == "unregister_stop_task"));
     assert_eq!(machine.m.state.stop_task.as_ref(), Some(&owner()));
 }
+
+#[test]
+fn a_set_up_task_found_disabled_is_turned_back_on_and_written_to_the_event_log() {
+    use crate::windows::refresh::TASK_REENABLED;
+    use crate::windows::setup::event_line::fixed_words;
+    let line = format!("event_log {TASK_REENABLED}");
+    let mut machine = installed("setup-tasks-disabled", Some(CopyOwner::Machine));
+    machine.run = Run::Elevated;
+    machine.state.set_up_task_disabled = true;
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let calls = machine.calls_since(0);
+    let healed = calls
+        .iter()
+        .position(|c| c.starts_with("ensure_set_up_task"));
+    let logged = calls.iter().position(|c| *c == line);
+    assert!(
+        healed.is_some() && logged == healed.map(|at| at + 1),
+        "{calls:?}"
+    );
+    // Its words are fixed: the filter keeps them whole.
+    assert_eq!(fixed_words(TASK_REENABLED), TASK_REENABLED);
+    // Found enabled on the next set-up: nothing written.
+    let from = machine.calls.len();
+    let req = request(&mut machine, 0, Vec::new());
+    set_up(&mut machine, &mut acl, &req).unwrap();
+    assert!(!machine.calls_since(from).contains(&line.as_str()));
+}

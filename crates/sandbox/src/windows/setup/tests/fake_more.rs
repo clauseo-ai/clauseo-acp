@@ -175,6 +175,8 @@ pub(super) struct State {
     /// Who the set-up task was last registered for by a set-up's self-heal: the owner, and
     /// per machine the group refused.
     pub(super) set_up_task: Option<(Sid, Option<Sid>)>,
+    /// The set-up task is there but disabled, until a self-heal registers it again.
+    pub(super) set_up_task_disabled: bool,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -207,6 +209,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             refresh_task: None,
             set_up_denied: None,
             set_up_task: None,
+            set_up_task_disabled: false,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
