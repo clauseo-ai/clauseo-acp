@@ -2305,6 +2305,15 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   task, delete its `Tasks\{Id}` key as SYSTEM, then `schtasks /run` it: expect a failure,
   or no run (its action leaves no trace). If it runs, a key alone whose `Tasks` key is missing
   must be held to its owner too.
+- VM row (not run), and elevated test (not run yet)
+  `elevated_a_standard_user_cant_register_a_task_for_another_principal`: the file-and-cache
+  rule trusts a task file naming someone else because a standard user can't register a task
+  for another principal without that principal's credentials. As a standard user, register
+  (through `ITaskFolder::RegisterTask`) a task whose `<Principal>` holds another local user's
+  `<UserId>` with `InteractiveToken` and no password, then one holding
+  `<GroupId>S-1-5-32-545</GroupId>`: expect both refused, while the same user's own task
+  registers. If either registers, a trusted file naming someone else proves nothing and the
+  rule must go back to 56 for an odd `SD`.
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.
