@@ -59,7 +59,7 @@ fn an_overlapping_dynamic_range_refuses() {
         assert!(!refused.unwrap_err().needs_setup());
     }
     let next_to_it = PortsSeen {
-        dynamic: vec![dynamic_span(46_200, 3_000).unwrap(), (40_000, 46_099)],
+        dynamic: vec![dynamic_span(46_612, 3_000).unwrap(), (40_000, 46_099)],
         ..PortsSeen::default()
     };
     assert_eq!(ports_usable(&next_to_it, ours), Ok(()));
@@ -92,6 +92,10 @@ fn a_listener_in_the_range_must_be_this_process_s() {
             listener(46_100, 100, None),
             listener(46_101, 100, Some(app)),
             listener(9_222, 300, Some(r"C:\Chrome\chrome.exe")),
+            // Another slot's Chrome in its pool ports: set-up's filters let only that slot's
+            // user listen there, and the browser's gate checks the launch's own slot.
+            listener(46_400, 301, Some(r"C:\Chrome\chrome.exe")),
+            listener(65_100, 302, None),
         ],
         ..default_range()
     };

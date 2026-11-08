@@ -7,7 +7,10 @@
 //! - the excluded ports, by test binds (`ports::refused_ports` says why there is no list to
 //!   read);
 //! - the TCP listeners, from `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER`, IPv4 and
-//!   IPv6, any address, each with its process's program (`QueryFullProcessImageNameW`).
+//!   IPv6, any address, each with its process's program (`QueryFullProcessImageNameW`);
+//! - for the slot claims and the browser's gate (`ports.rs`): every TCP socket's local port
+//!   (`TCP_TABLE_OWNER_PID_ALL`), the listeners' processes, and whether a process is in a Job
+//!   Object (`IsProcessInJob`).
 
 #![expect(
     unsafe_code,
@@ -20,8 +23,8 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
-    TCP_TABLE_OWNER_PID_LISTENER,
+    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_CLASS,
+    TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows::Win32::System::Com::{
@@ -29,6 +32,7 @@ use windows::Win32::System::Com::{
     CoSetProxyBlanket, CoUninitialize, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
     RPC_C_IMP_LEVEL_IMPERSONATE,
 };
+use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -38,7 +42,7 @@ use windows::Win32::System::Wmi::{
     IWbemClassObject, IWbemLocator, WBEM_FLAG_CONNECT_USE_MAX_WAIT, WBEM_FLAG_FORWARD_ONLY,
     WBEM_FLAG_RETURN_IMMEDIATELY, WbemLocator,
 };
-use windows::core::{BSTR, HRESULT, PCWSTR, PWSTR, w};
+use windows::core::{BOOL, BSTR, HRESULT, PCWSTR, PWSTR, w};
 
 use super::check::NetworkGap;
 use super::port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
@@ -227,7 +231,7 @@ fn number(row: &IWbemClassObject, name: PCWSTR) -> Result<Option<u16>, NetworkGa
 fn listeners() -> Result<Vec<Listener>, NetworkGap> {
     let mut found = Vec::new();
     for family in [AF_INET.0, AF_INET6.0] {
-        let table = table(family)?;
+        let table = table(family, TCP_TABLE_OWNER_PID_LISTENER)?;
         for (port, pid) in rows(&table, family == AF_INET6.0) {
             if TIER_B_PORTS.contains(&port) {
                 found.push(Listener {
@@ -241,22 +245,54 @@ fn listeners() -> Result<Vec<Listener>, NetworkGap> {
     Ok(found)
 }
 
-/// `GetExtendedTcpTable`'s listener table for `family`, in an aligned buffer.
-fn table(family: u16) -> Result<Vec<u64>, NetworkGap> {
+/// Every TCP listener, IPv4 and IPv6, any address, as (port, process id).
+pub(crate) fn listener_rows() -> Result<Vec<(u16, u32)>, NetworkGap> {
+    every_row(TCP_TABLE_OWNER_PID_LISTENER)
+}
+
+/// The local port of every TCP socket, IPv4 and IPv6, any state (listening, connected, or
+/// closing in `TIME_WAIT`): a port Windows lent as a connection's source port is here.
+pub(crate) fn ports_in_use() -> Result<BTreeSet<u16>, NetworkGap> {
+    Ok(every_row(TCP_TABLE_OWNER_PID_ALL)?
+        .into_iter()
+        .map(|(port, _)| port)
+        .collect())
+}
+
+/// Every row of `class`'s table, IPv4 then IPv6, as (port, process id).
+fn every_row(class: TCP_TABLE_CLASS) -> Result<Vec<(u16, u32)>, NetworkGap> {
+    let mut found = Vec::new();
+    for family in [AF_INET.0, AF_INET6.0] {
+        found.extend(rows(&table(family, class)?, family == AF_INET6.0));
+    }
+    Ok(found)
+}
+
+/// Whether process `pid` is in the Job Object `job`; `None` when it can't be opened or asked.
+/// A gate, not the boundary: the pid is read from the TCP table first, so a process that exited
+/// and whose pid Windows gave to another in between is asked about instead.
+pub(crate) fn process_in_job(pid: u32, job: std::os::windows::io::RawHandle) -> Option<bool> {
+    // SAFETY: an ordinary open; the handle is closed below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut inside = BOOL::default();
+    // SAFETY: `process` is open; `job` is the caller's live job handle, borrowed for the call;
+    // `inside` is a live out-pointer.
+    let asked = unsafe { IsProcessInJob(process, Some(HANDLE(job)), &raw mut inside) };
+    // SAFETY: opened above, closed once.
+    drop(unsafe { CloseHandle(process) });
+    asked.ok()?;
+    Some(inside.as_bool())
+}
+
+/// `GetExtendedTcpTable`'s `class` table for `family`, in an aligned buffer.
+fn table(family: u16, class: TCP_TABLE_CLASS) -> Result<Vec<u64>, NetworkGap> {
     let mut buffer: Vec<u64> = Vec::new();
     for _ in 0..8 {
         let mut size = u32::try_from(buffer.len() * 8).unwrap_or(u32::MAX);
         let pointer = (!buffer.is_empty()).then(|| buffer.as_mut_ptr().cast());
         // SAFETY: `pointer` is `size` writable bytes, or none to ask for the size.
         let result = unsafe {
-            GetExtendedTcpTable(
-                pointer,
-                &raw mut size,
-                false,
-                u32::from(family),
-                TCP_TABLE_OWNER_PID_LISTENER,
-                0,
-            )
+            GetExtendedTcpTable(pointer, &raw mut size, false, u32::from(family), class, 0)
         };
         match result {
             0 => return Ok(buffer),

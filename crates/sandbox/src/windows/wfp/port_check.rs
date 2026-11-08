@@ -1,14 +1,17 @@
-//! Whether tier B's ports (`ports::TIER_B_PORTS`) are usable on this machine (S15 PR7), with no
-//! Windows call. Set-up's static permits open the range to every pool user, so nothing but
-//! Clauseo's own listeners may sit there: Windows' TCP dynamic range must not overlap it (the OS
-//! would hand its ports to any program's port-0 bind), no port of it may be excluded (Hyper-V,
-//! WSL and Docker reserve ranges Windows then refuses to bind), and at each launch every TCP
-//! listener in it must be this app's. `os_ports.rs` reads the machine.
+//! Whether tier B's static ports (`ports::TIER_B_PORTS`, blocks H and P) are usable on this
+//! machine (S15 PR7, 0049 "Loopback ports per slot"), with no Windows call. Windows' TCP dynamic
+//! range must not overlap them (the OS would hand their ports to any program's port-0 bind), no
+//! port of them may be excluded (Hyper-V, WSL and Docker reserve ranges Windows then refuses to
+//! bind), and at each launch every TCP listener in block H must be this app's. A listener in
+//! block P is a pool user's, and set-up's filters let only that slot's own user listen there; the
+//! browser's gate (`ports::gate`) checks the launch's own slot. Block D sits inside the dynamic
+//! range by design and isn't checked here: a port of it that is taken or excluded turns the
+//! browser off for one run. `os_ports.rs` reads the machine.
 
 use std::ops::RangeInclusive;
 
 use super::check::NetworkGap;
-use crate::ports::TIER_B_PORTS;
+use crate::ports::{HOST_BLOCK, TIER_B_PORTS};
 
 /// A TCP listener as Windows lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +54,7 @@ pub fn is_ours(listener: &Listener, own_pid: u32) -> bool {
 }
 
 /// Checks `seen` for tier B: no dynamic range overlapping the range, no port of it reserved,
-/// and every listener in it one that `ours` accepts.
+/// and every listener in block H one that `ours` accepts.
 pub fn ports_usable(seen: &PortsSeen, ours: impl Fn(&Listener) -> bool) -> Result<(), NetworkGap> {
     if let Some(&(first, last)) = seen
         .dynamic
@@ -70,7 +73,7 @@ pub fn ports_usable(seen: &PortsSeen, ours: impl Fn(&Listener) -> bool) -> Resul
     let foreign = seen
         .listeners
         .iter()
-        .find(|listener| TIER_B_PORTS.contains(&listener.port) && !ours(listener));
+        .find(|listener| HOST_BLOCK.contains(&listener.port) && !ours(listener));
     if let Some(listener) = foreign {
         return Err(NetworkGap::ForeignListener {
             port: listener.port,

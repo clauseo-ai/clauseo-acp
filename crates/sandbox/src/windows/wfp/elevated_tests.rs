@@ -9,7 +9,7 @@ use super::engine::{Engine, Entry, dacl_of};
 use super::spec::{Namespace, NetworkSetup, Object};
 use super::{check_launch_in, install, remove};
 use crate::Error;
-use crate::ports::TIER_B_PORTS;
+use crate::ports::Slot;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_dacl::elevated;
@@ -72,7 +72,7 @@ fn assert_dacl_holds(engine: &Engine, ns: &Namespace, object: Object) {
 }
 
 /// What a launch's check says for `user` now.
-fn checked(user: &Sid) -> Result<(), NetworkGap> {
+fn checked(user: &Sid) -> Result<Slot, NetworkGap> {
     let mut engine = Engine::open(false, "Clauseo sandbox test check").unwrap();
     check_setup(&Namespace::test(), user, &mut engine)
 }
@@ -89,11 +89,22 @@ fn elevated_install_extend_check_and_remove() {
     let (group, a, b, c) = (fake(4000), fake(4001), fake(4002), fake(4003));
     assert_eq!(checked(&a), Err(NetworkGap::NotSetUp), "a clean slate");
 
-    let setup = |pool: &[Sid]| NetworkSetup::new(&owner, &group, pool).unwrap();
+    // Each fake user's slot is its RID mod 32: 4001 is slot 1.
+    let slot = |n: u8| Slot::new(n).unwrap();
+    let setup = |pool: &[Sid]| {
+        let slots: Vec<(Slot, Sid)> = pool
+            .iter()
+            .map(|sid| {
+                let rid: u32 = sid.as_str().rsplit('-').next().unwrap().parse().unwrap();
+                (slot(u8::try_from(rid % 32).unwrap()), sid.clone())
+            })
+            .collect();
+        NetworkSetup::new(&owner, &group, &slots).unwrap()
+    };
     let report = install(&ns, &setup(&[a.clone(), b.clone()])).unwrap();
     // WFP's filters are all there whatever the firewall says (it is only reported). This also
     // shows WFP takes NOT_EQUAL over a descriptor and a port range.
-    assert_eq!(report.filters, 8);
+    assert_eq!(report.filters, 12 + 2 * 7);
     eprintln!("firewall: {:?}", report.firewall);
     let engine = Engine::open(false, "Clauseo sandbox test DACLs").unwrap();
     for object in [
@@ -104,25 +115,27 @@ fn elevated_install_extend_check_and_remove() {
         assert_dacl_holds(&engine, &ns, object);
     }
     drop(engine);
-    assert_eq!(checked(&a), Ok(()));
-    assert_eq!(checked(&b), Ok(()));
+    let (slot_a, slot_b) = (slot(1), slot(2));
+    assert_eq!(checked(&a), Ok(slot_a));
+    assert_eq!(checked(&b), Ok(slot_b));
     assert_eq!(checked(&c), Err(NetworkGap::PoolUserNotCovered));
 
     // A re-run changes nothing; an extend covers the new user.
     let again = install(&ns, &setup(&[b.clone(), a.clone()])).unwrap();
     assert_eq!(again.foreign_removed, 0);
-    assert_eq!(checked(&a), Ok(()));
+    assert_eq!(checked(&a), Ok(slot_a));
     install(&ns, &setup(&[a.clone(), b, c.clone()])).unwrap();
-    assert_eq!(checked(&c), Ok(()));
-    // Ports from the range the launch check takes, so only the filters decide.
-    let first = *TIER_B_PORTS.start();
-    check_launch_in(&ns, &a, &[first, first + 1]).unwrap();
-    let outside = *TIER_B_PORTS.end() + 1;
+    assert_eq!(checked(&c), Ok(slot(3)));
+    // Ports of A's slot the launch check takes, so only the filters decide.
+    let first = *slot_a.host().start();
+    let checked_slot = check_launch_in(&ns, &a, &[first, *slot_a.daemon().end()]).unwrap();
+    assert_eq!(checked_slot, slot_a);
+    let outside = *slot_b.pool().start();
     match check_launch_in(&ns, &a, &[first, outside]) {
         Err(Error::NetworkUnfiltered {
             cause: NetworkGap::PortOutsideRange(port),
         }) if port == outside => {}
-        other => panic!("port {outside}, outside the range, got {other:?}"),
+        other => panic!("port {outside}, another slot's, got {other:?}"),
     }
     match check_launch_in(&ns, &fake(4009), &[first]) {
         Err(Error::NetworkUnfiltered {

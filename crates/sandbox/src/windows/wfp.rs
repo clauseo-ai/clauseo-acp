@@ -47,6 +47,7 @@ mod permit;
 mod port_check;
 pub mod rules;
 mod sddl;
+mod slot_filters;
 pub mod spec;
 #[cfg(any(windows, test))]
 mod writes;
@@ -61,7 +62,9 @@ pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
 pub use os_ports::{check_ports, dynamic_port_ranges};
 #[cfg(windows)]
-pub use permit::{check_launch, check_launch_in};
+pub(crate) use os_ports::{listener_rows, ports_in_use, process_in_job};
+#[cfg(windows)]
+pub use permit::{check_launch, check_launch_in, check_slot};
 pub use port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
 pub use spec::{FirewallOutcome, FirewallTrouble, Namespace, NetworkReport, NetworkSetup};
 

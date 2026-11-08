@@ -19,7 +19,11 @@ fn a_set_up_covers_every_pool_user_before_its_marker() {
     let report = set_up_fresh(&mut machine, &mut acl);
     let pool = sids(&[1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008]);
     assert_eq!(report.network.covered, pool);
-    assert_eq!(report.network.filters, 14, "6 blocks and 8 permits");
+    assert_eq!(
+        report.network.filters,
+        12 + 8 * 7,
+        "12 blocks and 7 filters for each of 8 slots"
+    );
     assert_eq!(report.network.firewall, FirewallOutcome::Applied);
     let networks = &machine.around.networks;
     assert_eq!(networks.len(), 1);
@@ -92,7 +96,7 @@ fn a_firewall_group_policy_ignores_leaves_the_set_up_done_on_wfp_alone() {
     machine.around.firewall = Some(FirewallOutcome::Ineffective(why.clone()));
     let report = set_up_fresh(&mut machine, &mut acl);
     assert_eq!(report.network.firewall, FirewallOutcome::Ineffective(why));
-    assert_eq!(report.network.filters, 14, "every filter is still built");
+    assert_eq!(report.network.filters, 68, "every filter is still built");
     assert!(machine.state.marker.is_some());
     assert!(FIREWALL_UNDER_POLICY.contains("AllowLocalPolicyMerge"));
 }
@@ -113,7 +117,7 @@ fn a_firewall_that_fails_with_wfp_ok_passes_with_a_note() {
             FirewallOutcome::Ineffective(trouble.words()),
             "{trouble:?}"
         );
-        assert_eq!(report.network.filters, 14, "{trouble:?}");
+        assert_eq!(report.network.filters, 68, "{trouble:?}");
         assert!(
             machine.state.marker.is_some(),
             "{trouble:?}: set-up is done"

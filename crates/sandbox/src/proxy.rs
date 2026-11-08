@@ -88,10 +88,11 @@ pub struct ProxyConfig {
     /// the browser (tier B, decision D10) must not open one: another matter's agent could send
     /// traffic through it under this launch's list.
     pub browser: bool,
-    /// Who the agent listener is for: [`ListenerFor::TierB`] for a tier-B launch, whose agent
-    /// reaches only `ports::TIER_B_PORTS` on Windows; [`ListenerFor::Other`] (from
-    /// [`ProxyConfig::new`]) for any other. The browser listener, which takes no token, is
-    /// always bound as `Other`, outside the range every pool user reaches (S15 PR7).
+    /// Who the listeners are for: [`ListenerFor::TierB`] for a tier-B launch, whose agent
+    /// reaches only its slot's ports on Windows; [`ListenerFor::Other`] (from
+    /// [`ProxyConfig::new`]) for any other. The browser listener binds for the same: on a tier-B
+    /// launch it takes no token, so it binds in the slot's host ports, which no other pool user
+    /// reaches (0049, "Loopback ports per slot").
     pub listener: ListenerFor,
 }
 
@@ -294,8 +295,8 @@ pub(crate) fn start_with(
     };
     let (agent, port) = bind(config.listener)?;
     let (browser, browser_port) = if config.browser {
-        // No token on this one, so never where a pool user's static permit reaches.
-        let (listener, port) = bind(ListenerFor::Other)?;
+        // No token on this one: on a tier-B launch only its own slot's user reaches it.
+        let (listener, port) = bind(config.listener)?;
         (Some(listener), Some(port))
     } else {
         (None, None)

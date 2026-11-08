@@ -52,6 +52,7 @@ fn stray(ns: &Namespace, layer: Layer, n: u16) -> FilterSpec {
             | Layer::RecvAcceptV6
             | Layer::AssignV4
             | Layer::AssignV6 => Condition::Protocol(6),
+            Layer::ListenV4 | Layer::ListenV6 => Condition::LocalPorts(1, 1),
         }],
     }
 }

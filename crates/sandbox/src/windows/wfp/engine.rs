@@ -21,13 +21,14 @@ use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWP_ACTION_BLOCK, FWP_ACTION_PERMIT, FWP_BYTE_BLOB, FWP_UINT8, FWP_VALUE0, FWP_VALUE0_0,
     FWPM_ACTION0, FWPM_DISPLAY_DATA0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_NONE,
     FWPM_FILTER_FLAG_PERSISTENT, FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-    FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4,
-    FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
-    FWPM_SESSION_FLAG_DYNAMIC, FWPM_SESSION0, FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0,
-    FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0,
-    FwpmFilterDeleteByKey0, FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0,
-    FwpmSubLayerDeleteByKey0, FwpmTransactionAbort0, FwpmTransactionBegin0, FwpmTransactionCommit0,
+    FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_LISTEN_V4, FWPM_LAYER_ALE_AUTH_LISTEN_V6,
+    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+    FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4, FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V6,
+    FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0, FWPM_SESSION_FLAG_DYNAMIC, FWPM_SESSION0,
+    FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FwpmEngineClose0, FwpmEngineOpen0,
+    FwpmFilterAdd0, FwpmFilterDeleteById0, FwpmFilterDeleteByKey0, FwpmProviderAdd0,
+    FwpmProviderDeleteByKey0, FwpmSubLayerAdd0, FwpmSubLayerDeleteByKey0, FwpmTransactionAbort0,
+    FwpmTransactionBegin0, FwpmTransactionCommit0,
 };
 use windows::Win32::System::Rpc::RPC_C_AUTHN_WINNT;
 use windows::core::{GUID, PCWSTR, PWSTR};
@@ -107,6 +108,8 @@ fn layer_key(layer: Layer) -> GUID {
         Layer::RecvAcceptV6 => FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
         Layer::AssignV4 => FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4,
         Layer::AssignV6 => FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V6,
+        Layer::ListenV4 => FWPM_LAYER_ALE_AUTH_LISTEN_V4,
+        Layer::ListenV6 => FWPM_LAYER_ALE_AUTH_LISTEN_V6,
     }
 }
 
@@ -124,6 +127,8 @@ fn layer_of(key: GUID) -> Option<Layer> {
         Layer::RecvAcceptV6,
         Layer::AssignV4,
         Layer::AssignV6,
+        Layer::ListenV4,
+        Layer::ListenV6,
     ]
     .into_iter()
     .find(|&layer| layer_key(layer) == key)
@@ -165,13 +170,31 @@ impl Engine {
 
     /// Begins an explicit transaction, aborted unless [`Transaction::commit`] runs.
     pub(super) fn transaction(&self) -> Result<Transaction<'_>, WfpError> {
-        // SAFETY: the handle is open while `self` lives.
-        let code = unsafe { FwpmTransactionBegin0(self.handle, 0) };
-        check("FwpmTransactionBegin0", code, &[])?;
+        self.begin()?;
         Ok(Transaction {
             engine: self,
             committed: false,
         })
+    }
+
+    /// Begins an explicit transaction; the caller commits or aborts it.
+    pub(super) fn begin(&self) -> Result<(), WfpError> {
+        // SAFETY: the handle is open while `self` lives.
+        let code = unsafe { FwpmTransactionBegin0(self.handle, 0) };
+        check("FwpmTransactionBegin0", code, &[])
+    }
+
+    /// Commits the session's transaction.
+    pub(super) fn commit(&self) -> Result<(), WfpError> {
+        // SAFETY: the handle is open while `self` lives.
+        let code = unsafe { FwpmTransactionCommit0(self.handle) };
+        check("FwpmTransactionCommit0", code, &[])
+    }
+
+    /// Aborts the session's transaction.
+    pub(super) fn abort(&self) {
+        // SAFETY: the handle is open while `self` lives.
+        unsafe { FwpmTransactionAbort0(self.handle) };
     }
 
     /// Adds the persistent provider of `ns`, with the descriptor `sddl` (`None`: WFP's
@@ -321,9 +344,7 @@ pub(super) struct Transaction<'a> {
 impl Transaction<'_> {
     /// Commits the transaction.
     pub(super) fn commit(mut self) -> Result<(), WfpError> {
-        // SAFETY: the engine's handle is open while the transaction borrows it.
-        let code = unsafe { FwpmTransactionCommit0(self.engine.handle) };
-        check("FwpmTransactionCommit0", code, &[])?;
+        self.engine.commit()?;
         self.committed = true;
         Ok(())
     }
@@ -332,8 +353,7 @@ impl Transaction<'_> {
 impl Drop for Transaction<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            // SAFETY: the engine's handle is open while the transaction borrows it.
-            unsafe { FwpmTransactionAbort0(self.engine.handle) };
+            self.engine.abort();
         }
     }
 }
