@@ -30,6 +30,8 @@
 //! R18 replaces it.
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -43,8 +45,10 @@ use clauseo_sandbox::{
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::browser::BrowserPrep;
+use crate::blocklist::FirstLoad;
 use crate::browser::deny_hosts::DENY_HOSTS;
 use crate::browser::seed_sites::SEED_SITES;
+use crate::clock::Clock;
 use crate::config::{EgressProxy, SessionKey};
 use crate::handle::BlockedSite;
 
@@ -95,24 +99,40 @@ pub(super) struct EgressPrep {
     block: Option<Arc<Current>>,
     /// The actor's input channel, for the sink's blocked-site reports.
     post: async_channel::Sender<Input>,
+    /// The block list's first load, to wait for before the proxy opens: only with a proxy and
+    /// a bundled snapshot (`blocklist/first_load.rs`).
+    first_load: Option<FirstLoad>,
 }
 
 /// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
 /// the session's browser.
 pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep) -> EgressPrep {
+    let proxy = actor.wiring.proxy.clone().filter(|_| browser.wanted());
+    let seams = actor.wiring.blocklist.as_ref();
     EgressPrep {
-        proxy: actor.wiring.proxy.clone().filter(|_| browser.wanted()),
+        first_load: seams
+            .filter(|seams| proxy.is_some() && seams.bundled.is_some())
+            .map(|seams| seams.first_load.clone()),
+        proxy,
         agent: agent.clone(),
-        block: actor
-            .wiring
-            .blocklist
-            .as_ref()
-            .map(|seams| Arc::clone(seams.current())),
+        block: seams.map(|seams| Arc::clone(seams.current())),
         post: actor.post.clone(),
     }
 }
 
 impl EgressPrep {
+    /// The wait for the block list's first load, at most `FIRST_LOAD_WAIT` on `clock`, when
+    /// this launch's proxy should wait for it; the launch prep awaits it before its thread.
+    /// Boxed: the launch's future stays small (`large_futures` on Windows).
+    pub(super) fn block_list_wait(
+        &self,
+        clock: Arc<dyn Clock>,
+    ) -> Option<Pin<Box<dyn Future<Output = ()>>>> {
+        let first_load = self.first_load.clone()?;
+        let current = self.block.clone()?;
+        Some(Box::pin(first_load.wait(clock, current)))
+    }
+
     /// Opens `key`'s proxy, when the session gets one, its token-free browser listener bound
     /// only when the launch offers the browser (`browser`, `ProxyConfig::browser`). Under tier C
     /// a launch without the browser gets no proxy at all: nothing would go through it. The jail

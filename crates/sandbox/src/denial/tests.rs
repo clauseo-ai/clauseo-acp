@@ -71,6 +71,36 @@ fn twenty_pass_and_the_twenty_first_is_dropped_at_the_next_window() {
     assert_eq!(got[21], path_denial(100));
 }
 
+/// A block-list refusal has its own budget: a burst of other refusals that used theirs up does
+/// not hold it back, and its own twenty-first is held back like any other.
+#[test]
+fn a_blocked_refusal_passes_after_a_burst_of_others() {
+    let clock = HandClock::default();
+    let cap = CappedSink::with_clock(Kept::default(), &clock);
+    for n in 0..25 {
+        cap.denied(path_denial(n));
+    }
+    let blocked = |n: u16| Denial::Blocked {
+        host: "evil.example".to_owned(),
+        port: n,
+        listed: "evil.example".to_owned(),
+        tag: clauseo_blocklist::Tag::Phishing,
+        generated: clauseo_blocklist::Generated::parse("2026-11-07T06:00:00Z").unwrap(),
+    };
+    for n in 0..21 {
+        cap.denied(blocked(n));
+    }
+    let got = cap.inner().denials();
+    assert_eq!(got.len(), 40);
+    assert_eq!(got[20], blocked(0));
+    assert_eq!(got.last(), Some(&blocked(19)));
+
+    clock.set(1_000);
+    cap.denied(path_denial(100));
+    let got = cap.inner().denials();
+    assert_eq!(got[40], Denial::Dropped { count: 6 });
+}
+
 #[test]
 fn tick_delivers_the_count_with_no_later_denial() {
     let clock = HandClock::default();

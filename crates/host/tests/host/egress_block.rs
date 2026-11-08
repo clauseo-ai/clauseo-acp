@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_blocklist::{BlockList, Current, Generated, Header, parse_plain};
-use clauseo_host::{AppSubscription, BlockListSeams, BlockListUpdate, EgressProxy, SessionKey};
+use clauseo_host::{
+    AppSubscription, BlockListSeams, BlockListUpdate, EgressProxy, ManualClock, SessionKey,
+};
 use clauseo_protocol::{BlockedSiteId, HostEvent, Principal, SiteTag};
 use clauseo_sandbox::{Denial, DenialSink, ProxyConfig, ProxyHandle, Upstream, start_proxy};
 use futures::StreamExt as _;
@@ -22,6 +24,14 @@ use crate::egress::claude_then;
 use crate::profile_rig::{CLAUDE, Hook, Wired, browser_server, turn};
 use crate::settings::decode;
 use crate::support::{Dir, Running, wait};
+
+/// The launch's wait for the block list's first load (`blocklist/first_load.rs`): no other
+/// host timer has this delay.
+const FIRST_LOAD_WAIT: Duration = Duration::from_secs(4);
+
+/// The run whose clock starts at 2026-11-07T06:13:20Z, just after the signed fixtures were
+/// made, so the updater does not set them aside as dated ahead.
+const FIXTURE_RUN: u16 = 1120;
 
 /// Both are seed sites, so the session's allowlist lets them through when no list names them.
 const LISTED: &str = "sci.gov.in";
@@ -162,10 +172,25 @@ fn no_fetch() -> BlockListUpdate {
 /// A host with a running Claude session that has the browser and `proxy`, with the block list's
 /// seams on `proxy.block` when it has one, after one turn; and its app subscription.
 fn session(dir: &Dir, proxy: &Arc<RealProxy>) -> (Running, AppSubscription) {
+    let seams = proxy
+        .block
+        .clone()
+        .map(|current| BlockListSeams::new(current, None, no_fetch()));
+    session_with(dir, proxy, 0, seams, |_clock| {})
+}
+
+/// [`session`] on run `run`'s clock with `seams`, `while_launching` started on its own thread
+/// with the host clock before the prompt.
+fn session_with(
+    dir: &Dir,
+    proxy: &Arc<RealProxy>,
+    run: u16,
+    seams: Option<BlockListSeams>,
+    while_launching: impl FnOnce(ManualClock) + Send + 'static,
+) -> (Running, AppSubscription) {
     claude_then(dir, &json!([{"name": "browser"}]), &[]);
     let wired: Arc<dyn EgressProxy> = Arc::<RealProxy>::clone(proxy);
-    let block = proxy.block.clone();
-    let host = dir.start_launching(0, Wired::new(dir), move |config| {
+    let host = dir.start_launching(run, Wired::new(dir), move |config| {
         let config = config
             .with_profile_hook(Box::new(Hook {
                 servers: vec![browser_server()],
@@ -173,11 +198,13 @@ fn session(dir: &Dir, proxy: &Arc<RealProxy>) -> (Running, AppSubscription) {
             }))
             .with_egress_proxy(wired)
             .with_browser_executable(Some(PathBuf::from("/chrome")));
-        match block {
-            Some(current) => BlockListSeams::new(current, None, no_fetch()).apply(config),
+        match seams {
+            Some(seams) => seams.apply(config),
             None => config,
         }
     });
+    let clock = host.clock.clone();
+    let _detached = std::thread::spawn(move || while_launching(clock));
     let sub = wait(
         "subscribe_app",
         host.handle.subscribe_app(Principal::LocalDesktop),
@@ -274,5 +301,77 @@ fn without_seams_nothing_is_refused() {
     proxy.barrier("barrier.example");
     let (_id, site, count) = next_notice(&mut sub);
     assert_eq!((site.as_str(), count), ("barrier.example", 1));
+    host.shutdown();
+}
+
+/// Seams on `current` with the signed fixture `list` (key A, `evil.example` on it) as the
+/// bundled snapshot in `dir`, the first load held until `release` sends or drops.
+fn bundled_seams(
+    dir: &Dir,
+    current: Arc<Current>,
+    release: std::sync::mpsc::Receiver<()>,
+) -> BlockListSeams {
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../blocklist/tests/data");
+    let bundled = dir.folder("bundled", &[]);
+    for (fixture, name) in [
+        ("list.txt.gz", clauseo_blocklist::LIST_FILE),
+        ("list.txt.gz.minisig", clauseo_blocklist::SIGNATURE_FILE),
+    ] {
+        crate::write::write(
+            &bundled.join(name),
+            &std::fs::read(data.join(fixture)).unwrap(),
+        );
+    }
+    let key = std::fs::read_to_string(data.join("key-a.pub")).unwrap();
+    let mut update = no_fetch();
+    update.keys = vec![key.lines().nth(1).unwrap().to_owned()];
+    let release = Mutex::new(release);
+    BlockListSeams::new(current, Some(bundled), update).before_first_load(move || {
+        let _released = release.lock().unwrap().recv();
+    })
+}
+
+/// Waits until the launch arms its wait for the first load.
+fn until_the_launch_waits(clock: &ManualClock) {
+    while wait("the launch's block list wait", clock.next_armed()) != FIRST_LOAD_WAIT {}
+}
+
+/// A launch that starts while the first load is held waits for it: once the load is let go,
+/// its proxy refuses a site on the bundled list and the app is told.
+#[test]
+fn a_launch_during_a_slow_first_load_gets_the_list() {
+    let dir = Dir::new("egress_block_first_load", &[]);
+    let current = Arc::new(Current::default());
+    let proxy = real_proxy(Some(Arc::clone(&current)));
+    let (release, held) = std::sync::mpsc::channel();
+    let seams = bundled_seams(&dir, current, held);
+    let (host, mut sub) = session_with(&dir, &proxy, FIXTURE_RUN, Some(seams), move |clock| {
+        until_the_launch_waits(&clock);
+        release.send(()).unwrap();
+    });
+    assert_eq!(proxy.connect("evil.example"), 403);
+    let (_id, site, count) = next_notice(&mut sub);
+    assert_eq!((site.as_str(), count), ("evil.example", 1));
+    host.shutdown();
+}
+
+/// A first load that does not end within the wait: the launch goes on, on the host clock, with
+/// the list in use (none), so nothing is blocked; the first notice is the barrier's.
+#[test]
+fn a_launch_goes_on_after_the_first_load_wait() {
+    let dir = Dir::new("egress_block_first_load_late", &[]);
+    let current = Arc::new(Current::default());
+    let proxy = real_proxy(Some(Arc::clone(&current)));
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let seams = bundled_seams(&dir, current, held);
+    let (host, mut sub) = session_with(&dir, &proxy, FIXTURE_RUN, Some(seams), |clock| {
+        until_the_launch_waits(&clock);
+        clock.advance(FIRST_LOAD_WAIT);
+    });
+    assert_eq!(proxy.connect(LISTED), 200);
+    proxy.barrier("barrier.example");
+    let (_id, site, _count) = next_notice(&mut sub);
+    assert_eq!(site, "barrier.example", "nothing was blocked before it");
+    drop(release);
     host.shutdown();
 }

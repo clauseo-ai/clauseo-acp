@@ -345,6 +345,7 @@ pub(super) fn prepare(
     };
     let clock = std::sync::Arc::clone(&actor.clock);
     let check_clock = std::sync::Arc::clone(&actor.clock);
+    let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     actor.spawn_post(async move {
         if let Some(keys_wait) = keys_wait {
@@ -360,11 +361,7 @@ pub(super) fn prepare(
                 result: Err(error),
             });
         }
-        // Whether a slot is there for the browser after a wait; without one, it is.
-        let slot = match slot_wait {
-            Some(slot_wait) => slot_wait.await,
-            None => true,
-        };
+        let slot = browser::slot_then_block_list(slot_wait, block_list_wait).await;
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
