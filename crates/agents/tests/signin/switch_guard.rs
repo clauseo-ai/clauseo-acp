@@ -35,10 +35,14 @@ fn a_login_over_clauseo_s_own_needs_the_confirmed_switch() {
     assert_eq!(agents.use_different_account(&codex()), refused());
     assert_eq!(agents.try_again(&codex()), refused());
     assert_eq!(fx.codex_runs(&["login"]).len(), before, "a login ran");
+    let reads = fx.codex_runs(&["app-server"]).len();
     agents.sign_in_switching(&codex(), Method::Browser).unwrap();
-    let last = events.until_end().1;
-    assert!(matches!(last, SigninState::SignedIn { .. }), "{last:?}");
-    assert_eq!(fx.codex_runs(&["login"]).len(), before + 1);
+    // The switch is let through, and the sign-in's quick check finds Clauseo's own login still
+    // valid: signed in with it, no login run ("Use different account" always runs a new login).
+    // The state names the account `account/read` returned, so the lawyer sees which one it is.
+    assert_eq!(events.until_end().1, crate::codex_cli::signed_in());
+    assert_eq!(fx.codex_runs(&["login"]).len(), before);
+    assert_eq!(fx.codex_runs(&["app-server"]).len(), reads + 1);
 }
 
 #[test]
