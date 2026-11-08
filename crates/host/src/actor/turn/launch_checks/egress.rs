@@ -35,7 +35,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clauseo_blocklist::Current;
+use clauseo_blocklist::{Allowed, Current};
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_sandbox::ports::ListenerFor;
 use clauseo_sandbox::{
@@ -45,7 +45,7 @@ use clauseo_sandbox::{
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::browser::BrowserPrep;
-use crate::blocklist::FirstLoad;
+use crate::blocklist::{AllowedSites, FirstLoad};
 use crate::browser::deny_hosts::DENY_HOSTS;
 use crate::browser::seed_sites::SEED_SITES;
 use crate::clock::Clock;
@@ -102,6 +102,8 @@ pub(super) struct EgressPrep {
     /// The block list's first load, to wait for before the proxy opens: only with a proxy and
     /// a bundled snapshot (`blocklist/first_load.rs`).
     first_load: Option<FirstLoad>,
+    /// The allowed sites' views; the launch takes its matter's when its proxy opens.
+    allowed: Arc<AllowedSites>,
 }
 
 /// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
@@ -117,6 +119,7 @@ pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep)
         agent: agent.clone(),
         block: seams.map(|seams| Arc::clone(seams.current())),
         post: actor.post.clone(),
+        allowed: Arc::clone(actor.allowed.sites()),
     }
 }
 
@@ -143,7 +146,12 @@ impl EgressPrep {
         let denials = Arc::new(CountDenials::reporting(key, self.post));
         match proxy.open(
             key,
-            proxy_config(&self.agent, Arc::clone(&denials), self.block, browser),
+            proxy_config(
+                &self.agent,
+                Arc::clone(&denials),
+                (self.block, self.allowed.for_matter(key.matter)),
+                browser,
+            ),
         ) {
             Ok(()) => Some(Arc::new(EgressGuard {
                 proxy,
@@ -169,12 +177,13 @@ impl EgressPrep {
 }
 
 /// The proxy config for `agent`'s session, its refusals counted in `denials` (see the module
-/// header), refusing the hosts on `block` (an empty list when `None`), with the browser
-/// listener when the launch offers the browser (`browser`).
+/// header), refusing the hosts on `block` (an empty list when `None`) but those on `allowed`
+/// (the session's matter's live view, `AllowedSites::for_matter`), with the browser listener
+/// when the launch offers the browser (`browser`).
 pub(crate) fn proxy_config(
     agent: &AgentId,
     denials: Arc<CountDenials>,
-    block: Option<Arc<Current>>,
+    (block, allowed): (Option<Arc<Current>>, Arc<Allowed>),
     browser: bool,
 ) -> ProxyConfig {
     // The plan sign-in's hosts hold the API-key sign-in's: the session's real sign-in is read
@@ -189,8 +198,9 @@ pub(crate) fn proxy_config(
         silent: hosts(DENY_HOSTS.iter().map(|deny| deny.host)),
         // The shared list the updater swaps (0053), read per request; none loaded without seams.
         block: block.unwrap_or_default(),
-        // None allowed yet: the lawyer's allowed sites reach the session's proxy in R17 PR-D.
-        allowed: Arc::default(),
+        // Held by the proxy, and with it its revoke watcher, for the session's life: the proxy
+        // lives until `EgressGuard` closes it at the run's removal.
+        allowed,
         upstream: Upstream::System,
         denials,
         record: None,

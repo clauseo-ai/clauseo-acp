@@ -15,7 +15,7 @@ use clauseo_blocklist::{BlockList, Current, Generated, Header, parse_plain};
 use clauseo_host::{
     AppSubscription, BlockListSeams, BlockListUpdate, EgressProxy, ManualClock, SessionKey,
 };
-use clauseo_protocol::{BlockedSiteId, HostEvent, Principal, SiteTag};
+use clauseo_protocol::{BlockedSiteId, HostEvent, MatterId, Principal, SiteTag};
 use clauseo_sandbox::{Denial, DenialSink, ProxyConfig, ProxyHandle, Upstream, start_proxy};
 use futures::StreamExt as _;
 use serde_json::json;
@@ -34,14 +34,14 @@ const FIRST_LOAD_WAIT: Duration = Duration::from_secs(4);
 const FIXTURE_RUN: u16 = 1120;
 
 /// Both are seed sites, so the session's allowlist lets them through when no list names them.
-const LISTED: &str = "sci.gov.in";
+pub(crate) const LISTED: &str = "sci.gov.in";
 const LATER: &str = "delhihighcourt.nic.in";
 
-const FIRST: &str = "2026-11-07T06:00:00Z";
+pub(crate) const FIRST: &str = "2026-11-07T06:00:00Z";
 const SECOND: &str = "2026-11-07T12:00:00Z";
 
 /// A list made at `made` naming `hosts` as phishing.
-fn list(made: &str, hosts: &[&str]) -> BlockList {
+pub(crate) fn list(made: &str, hosts: &[&str]) -> BlockList {
     let mut lines: Vec<String> = hosts.iter().map(|host| format!("{host} p")).collect();
     lines.sort_unstable();
     let text = format!("{}\n", lines.join("\n"));
@@ -52,15 +52,20 @@ fn list(made: &str, hosts: &[&str]) -> BlockList {
     parse_plain(text.as_bytes(), header).unwrap()
 }
 
-/// An upstream proxy that answers every `CONNECT` with 200 and then closes: a site that passed.
+/// An upstream proxy that answers every `CONNECT` with 200, then echoes the tunnel's bytes until
+/// the proxy closes it: a site that passed.
 fn upstream() -> url::Url {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let _detached = std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
-            let _head = read_head(&mut stream);
-            let _sent = stream.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n");
+            let _echo = std::thread::spawn(move || {
+                let _head = read_head(&mut stream);
+                let _sent = stream.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n");
+                let mut back = stream.try_clone().unwrap();
+                let _copied = std::io::copy(&mut stream, &mut back);
+            });
         }
     });
     url::Url::parse(&format!("http://127.0.0.1:{port}")).unwrap()
@@ -82,7 +87,7 @@ fn read_head(stream: &mut TcpStream) -> String {
 /// The real proxy (`start_proxy`) with the host's config, only its upstream pointed at the
 /// local [`upstream`]. Each open checks the config's list is `block`'s (or empty, with none),
 /// and keeps the session's sink for [`RealProxy::barrier`].
-struct RealProxy {
+pub(crate) struct RealProxy {
     open: Mutex<BTreeMap<SessionKey, ProxyHandle>>,
     sinks: Mutex<Vec<Arc<dyn DenialSink>>>,
     upstream: url::Url,
@@ -135,31 +140,49 @@ impl RealProxy {
         });
     }
 
-    /// The one open session's browser port.
-    fn port(&self) -> u16 {
+    /// The browser port of the one open session in `matter`, or of the one open session.
+    fn port(&self, matter: Option<MatterId>) -> u16 {
         let open = self.open.lock().unwrap();
-        assert_eq!(open.len(), 1, "one session");
-        open.values().next().unwrap().browser_port().unwrap()
+        let mut ports = open
+            .iter()
+            .filter(|(key, _)| matter.is_none_or(|matter| key.matter == matter))
+            .map(|(_, handle)| handle.browser_port().unwrap());
+        let port = ports.next().expect("an open session");
+        assert!(ports.next().is_none(), "one session");
+        port
     }
 
-    /// The status of a `CONNECT` to `host:443` through the session's browser listener.
-    fn connect(&self, host: &str) -> u16 {
-        let mut stream = TcpStream::connect(("127.0.0.1", self.port())).unwrap();
+    /// A `CONNECT` to `host:443` through the browser listener of the session in `matter` (the
+    /// one session with `None`): its status, and the stream (the open tunnel on a 200).
+    pub(crate) fn tunnel(&self, matter: Option<MatterId>, host: &str) -> (u16, TcpStream) {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.port(matter))).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(60)))
             .unwrap();
         let request = format!("CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n");
         stream.write_all(request.as_bytes()).unwrap();
         let head = read_head(&mut stream);
-        head.split(' ')
+        let status = head
+            .split(' ')
             .nth(1)
             .and_then(|code| code.parse().ok())
-            .unwrap_or_else(|| panic!("no status: {head:?}"))
+            .unwrap_or_else(|| panic!("no status: {head:?}"));
+        (status, stream)
+    }
+
+    /// The status of a `CONNECT` to `host:443` through the session in `matter`.
+    pub(crate) fn connect_in(&self, matter: MatterId, host: &str) -> u16 {
+        self.tunnel(Some(matter), host).0
+    }
+
+    /// The status of a `CONNECT` to `host:443` through the one session.
+    fn connect(&self, host: &str) -> u16 {
+        self.tunnel(None, host).0
     }
 }
 
 /// Update settings that never reach a list (a closed local port), so only the test swaps it.
-fn no_fetch() -> BlockListUpdate {
+pub(crate) fn no_fetch() -> BlockListUpdate {
     let mut update = BlockListUpdate::release();
     update.list_url = "http://127.0.0.1:9/list.gz".to_owned();
     update.signature_url = "http://127.0.0.1:9/list.gz.minisig".to_owned();
@@ -188,6 +211,20 @@ fn session_with(
     seams: Option<BlockListSeams>,
     while_launching: impl FnOnce(ManualClock) + Send + 'static,
 ) -> (Running, AppSubscription) {
+    let (host, sub) = start_host(dir, proxy, run, seams, while_launching);
+    open_session(dir, &host, "m");
+    (host, sub)
+}
+
+/// A host on run `run`'s clock whose sessions get the browser and `proxy`, with `seams`, and
+/// its app subscription; `while_launching` started on its own thread with the host clock.
+pub(crate) fn start_host(
+    dir: &Dir,
+    proxy: &Arc<RealProxy>,
+    run: u16,
+    seams: Option<BlockListSeams>,
+    while_launching: impl FnOnce(ManualClock) + Send + 'static,
+) -> (Running, AppSubscription) {
     claude_then(dir, &json!([{"name": "browser"}]), &[]);
     let wired: Arc<dyn EgressProxy> = Arc::<RealProxy>::clone(proxy);
     let host = dir.start_launching(run, Wired::new(dir), move |config| {
@@ -210,15 +247,20 @@ fn session_with(
         host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap();
-    let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
-    turn(&host, thread);
     (host, sub)
+}
+
+/// A new matter `name` with a Claude session, after one turn, so its proxy is open.
+pub(crate) fn open_session(dir: &Dir, host: &Running, name: &str) -> MatterId {
+    let matter = host.create_matter(name, &dir.folder(name, &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(host, thread);
+    matter
 }
 
 /// The next `SiteBlocked` notice on `sub` (id, host, count), waited for up to the watchdog;
 /// any other event is skipped.
-fn next_notice(sub: &mut AppSubscription) -> (BlockedSiteId, String, u32) {
+pub(crate) fn next_notice(sub: &mut AppSubscription) -> (BlockedSiteId, String, u32) {
     loop {
         let item = wait("a SiteBlocked notice", sub.next()).expect("the app stream ended");
         if let HostEvent::SiteBlocked {
@@ -237,7 +279,7 @@ fn next_notice(sub: &mut AppSubscription) -> (BlockedSiteId, String, u32) {
     }
 }
 
-fn real_proxy(block: Option<Arc<Current>>) -> Arc<RealProxy> {
+pub(crate) fn real_proxy(block: Option<Arc<Current>>) -> Arc<RealProxy> {
     Arc::new(RealProxy {
         open: Mutex::new(BTreeMap::new()),
         sinks: Mutex::new(Vec::new()),
