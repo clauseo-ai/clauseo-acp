@@ -2033,12 +2033,35 @@ record handed to the writer never reaches the pipe. Log lines carry counts only 
 dropped): no path, no SID. A pool user's paths go only to the record's owner, whose files they
 mostly are.
 
-**Cost** (spike pass 2, real-time, the same consumer logic). The consumer used 0.1 % of a core
-in every activity (at most 0.32 % in any run): about 88–96 % of events are dropped at once, by
-SID for 12 and by an empty or missed IRP lookup for 24. Nearly all the cost is kernel-side
-generation: about 0 at idle (235 events/s), 0.15 % of a core for an editing turn, and 1.85 %
-(SE 1.94) during `npm ci` (10,875 events/s, 649 kept). No events were lost. Latency is the 1 s
-flush.
+**Cost.** Nearly all of it is the kernel generating Kernel-File events, which grows with the
+whole machine's file activity, not the pool's.
+- **Spike pass 2** (real time, the same consumer logic): the consumer used 0.1 % of a core in
+  every activity (at most 0.32 % in any run). About 88–96 % of events are dropped at once, by SID
+  for 12 and by an empty or missed IRP lookup for 24. Latency is the 1 s flush.
+- **By activity:** idle is nil (about 235 events/s); an editing turn about 0.25 % of a core
+  (about 3,600 events/s); `npm ci` about 10,900 events/s on average.
+- **ETW pass 3** (10 ABBA `npm ci` pairs): kernel and consumer together average **6.25 % of one
+  core** (SE 1.88), **5.03 %** without the first pair, and about 3–4 % net of Defender. The
+  consumer itself is about 0.09 %. npm's wall time is unchanged (21.6 s against 21.7 s), and no
+  events were lost.
+- **The decision:** ship with the event-rate breaker below (8,000 events/s for 10 s; the final
+  value comes from W12), an IT off switch, `DenialReporter=0` under
+  `HKLM\SOFTWARE\Policies\Clauseo\Sandbox` (part B's client reads it before it starts the task),
+  and W11 (an idle session plus 10 minutes of Word and Explorer, ABBA). Running the trace only
+  during tool calls is held back unless W11 shows an idle cost.
+
+**The event-rate breaker** (`breaker.rs`, pure, over a fake clock in tests). The callback
+counts every Kernel-File event before the SID check (one relaxed atomic add), and the serving
+loop takes the count once a second as a rate. At or above `PAUSE_RATE`, **8,000 events/s**, for
+10 seconds in a row, it trips: it disables the provider on the session (`EnableTraceEx2` with
+`EVENT_CONTROL_CODE_DISABLE_PROVIDER`), clears the pending Creates, and sends
+`{"v":1,"paused":{"secs":60,"reason":"rate"}}`. After 60 s it enables the provider again and
+sends `{"v":1,"resumed":true}`. Every trip is logged, as counts only. The rate, window and pause
+are constants in code: 8,000 sits between editing (about 3,600/s) and `npm ci` (about 10,900/s
+on average), so it should trip on a long `npm ci` and never on editing. When
+`HKLM\SOFTWARE\Policies\Clauseo\Sandbox\WatchRateLog` (a DWORD) is 1, the watcher logs each
+second's rate, a number a line with no path, so W12 can set the final constant from the
+distribution. A pause that can't disable or re-enable the provider exits 73.
 
 **Exit codes** (`WatchExit`; 68, then from 70; 69 is SetUp's):
 
@@ -2049,7 +2072,7 @@ flush.
 | 70 | not LOCAL SYSTEM, or not run from the admin copy |
 | 71 | there is no record, it can't be read, or its `PoolSids` or `OwnerSid` is malformed |
 | 72 | a SID in `PoolSids` isn't a pool user |
-| 73 | the session couldn't be started, the provider enabled, or the consumer opened |
+| 73 | the session couldn't be started, the provider enabled, or the consumer opened; or the breaker couldn't disable or re-enable it |
 | 74 | the pipe couldn't be made, its name published, or its clients polled; a later instance couldn't be made or isn't SYSTEM's; or the key is someone else's |
 | 75 | the trace ended while serving |
 
@@ -2067,6 +2090,8 @@ flush.
 | W8 | Squatting after a client-gone: a pool user spins `CreateNamedPipeW` on the published name while the runner connects and disconnects over and over (and while all clients drop at once); the pool user's pipe never receives a line, and the watcher either serves on or exits 74 with the key gone | open |
 | W9 | A killed watcher: `taskkill /f` it while serving; the key and session are left; the next start replaces the key, stops the session and serves, and `--remove` deletes both | open |
 | W10 | After W9 with no consumer, `%SystemRoot%\System32\LogFiles\WMI\RtBackup` holds no `ClauseoSandboxWatch` spill, or the next start removes it | open |
+| W11 | Idle cost: an idle session, then 10 minutes of Word and Explorer, ABBA with the watcher on and off; kernel and consumer CPU. An idle cost reopens running the trace only during tool calls | open |
+| W12 | The breaker, with `WatchRateLog=1`: `npm ci` logs its per-second rates (the final `PAUSE_RATE` comes from that distribution); a trip pauses after 10 s at the rate, sends `paused`, resumes 60 s later with `resumed`; an editing turn never trips it | open |
 
 ### The launcher (PR6 interface)
 

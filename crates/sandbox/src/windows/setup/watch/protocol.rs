@@ -21,8 +21,9 @@
 //!   only: the client must never open or check it, which would reach a server a pool user chose
 //!   with the lawyer's credentials. `net` is optional and false when absent, so `v` stays 1.
 //!   `dropped` counts the refusals the rate held back, those the consumer's channel had no room
-//!   for, Creates whose name was too long, and the events ETW itself lost. The client reads; it
-//!   never writes.
+//!   for, Creates whose name was too long, and the events ETW itself lost. When the event-rate
+//!   breaker trips (`breaker.rs`), `{"v":1,"paused":{"secs":60,"reason":"rate"}}`: no refusal
+//!   is seen for `secs`; then `{"v":1,"resumed":true}`. The client reads; it never writes.
 //! - **Rate:** at most [`RECORDS_PER_SECOND`] refusals a second; the rest are counted and sent
 //!   as one `dropped` line when the second ends (the runner caps at 20 a second).
 
@@ -123,6 +124,29 @@ pub enum Line {
         /// How many.
         dropped: u64,
     },
+    /// The breaker tripped: nothing is seen for a while.
+    Paused {
+        /// [`VERSION`].
+        v: u32,
+        /// How long, and why.
+        paused: Paused,
+    },
+    /// The breaker's pause ended.
+    Resumed {
+        /// [`VERSION`].
+        v: u32,
+        /// Always true.
+        resumed: bool,
+    },
+}
+
+/// A pause: how long, and why (`rate` today).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Paused {
+    /// Seconds.
+    pub secs: u64,
+    /// Why.
+    pub reason: String,
 }
 
 impl Line {
@@ -130,7 +154,10 @@ impl Line {
     pub fn parse(text: &str) -> Option<Line> {
         let line: Line = serde_json::from_str(text).ok()?;
         let v = match &line {
-            Line::Denied { v, .. } | Line::Dropped { v, .. } => *v,
+            Line::Denied { v, .. }
+            | Line::Dropped { v, .. }
+            | Line::Paused { v, .. }
+            | Line::Resumed { v, .. } => *v,
         };
         (v == VERSION).then_some(line)
     }
@@ -165,6 +192,16 @@ fn is_false(flag: &bool) -> bool {
 /// A `dropped` line with its `\n`.
 pub fn dropped_line(dropped: u64) -> String {
     format!("{{\"v\":{VERSION},\"dropped\":{dropped}}}\n")
+}
+
+/// A `paused` line for a pause of `secs` for the event rate, with its `\n`.
+pub fn paused_line(secs: u64) -> String {
+    format!("{{\"v\":{VERSION},\"paused\":{{\"secs\":{secs},\"reason\":\"rate\"}}}}\n")
+}
+
+/// A `resumed` line with its `\n`.
+pub fn resumed_line() -> String {
+    format!("{{\"v\":{VERSION},\"resumed\":true}}\n")
 }
 
 /// `access` back from its name on the wire.

@@ -24,7 +24,9 @@
 //!    [`protocol::RECORDS_PER_SECOND`], to every client. The pipe's instances never reach zero
 //!    (`instances.rs`); a later instance that can't be made, or isn't SYSTEM's, ends the run
 //!    with 74. Every [`serve::OWNER_CHECK`] it reads the record again: another owner (or none)
-//!    ends the run with 0, so it never serves a previous owner after a new set-up;
+//!    ends the run with 0, so it never serves a previous owner after a new set-up. The
+//!    event-rate breaker (`breaker.rs`) disables the provider for a minute after ten seconds
+//!    at or above [`breaker::PAUSE_RATE`] events a second, and tells the clients;
 //! 7. exits once the last client has gone, after [`lifetime::LAST_CLIENT_GRACE`], or when none
 //!    came within [`lifetime::FIRST_CLIENT_WAIT`]: it stops the session, deletes the published
 //!    name and exits 0. A trace that ends on its own is 75.
@@ -44,6 +46,7 @@ pub use consumer::{Access, Consumer, Record};
 pub use lifetime::{Lifetime, Verdict};
 pub use serve::serve;
 
+pub mod breaker;
 pub mod consumer;
 pub mod instances;
 pub mod lifetime;
@@ -149,6 +152,16 @@ pub trait Watcher {
     fn open_pipe(&mut self, owner: &Sid) -> Result<(), Failed>;
     /// Deletes the published name and closes every instance of the pipe.
     fn close_pipe(&mut self);
+    /// How many Kernel-File events the callback has seen since the trace began.
+    fn events(&mut self) -> u64;
+    /// The breaker tripped: disables the provider on the session; the consumer clears its
+    /// pending Creates before it reads the next event.
+    fn pause_trace(&mut self) -> Result<(), Failed>;
+    /// The pause ended: enables the provider again.
+    fn resume_trace(&mut self) -> Result<(), Failed>;
+    /// Whether `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\WatchRateLog` is 1: log each second's
+    /// event rate (a number only).
+    fn rate_log(&mut self) -> bool;
     /// Waits up to `wait` for the consumer, then gives what it produced.
     fn records(&mut self, wait: Duration) -> Delivery;
     /// Takes clients that connected, drops those that left, and gives how many are connected.

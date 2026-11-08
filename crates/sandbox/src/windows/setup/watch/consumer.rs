@@ -334,6 +334,12 @@ impl Pairing {
         }
     }
 
+    /// Forgets every pending Create (the breaker paused the trace: their ends won't come).
+    fn clear(&mut self) {
+        self.pending.clear();
+        self.order.clear();
+    }
+
     /// `irp` was reused by a Create that isn't a pool user's: its pending Create is gone.
     fn forget(&mut self, irp: u64) {
         self.pending.remove(&irp);
@@ -404,6 +410,11 @@ impl Consumer {
     /// How many pool Creates wait.
     pub fn pending(&self) -> usize {
         self.pairing.len()
+    }
+
+    /// Forgets every pending Create: the breaker paused the trace, so their ends won't come.
+    pub fn clear_pending(&mut self) {
+        self.pairing.clear();
     }
 
     /// One Kernel-File event at `now`. A Create not of a pool user's is dropped here, its

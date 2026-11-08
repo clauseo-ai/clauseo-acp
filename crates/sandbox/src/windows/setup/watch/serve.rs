@@ -1,11 +1,13 @@
 //! Step 6, the serving loop, with no Windows call: once per [`TICK`] it takes what the consumer
 //! produced, sends each refusal the rate admits, sends what was dropped once a second, polls
-//! the clients and steps the [`Lifetime`]. Every [`OWNER_CHECK`] it reads the record again.
+//! the clients and steps the [`Lifetime`] and the [`Breaker`]. Every [`OWNER_CHECK`] it reads
+//! the record again.
 
 use std::time::Duration;
 
+use super::breaker::{Action, Breaker, PAUSE};
 use super::lifetime::{Lifetime, Verdict};
-use super::protocol::{RateLimit, denied_line, dropped_line};
+use super::protocol::{RateLimit, denied_line, dropped_line, paused_line, resumed_line};
 use super::{Delivery, Pool, Refusal, WatchExit, Watcher};
 
 /// How long one wait for the consumer lasts: the loop's tick.
@@ -32,6 +34,8 @@ pub fn serve(w: &mut impl Watcher, pool: &Pool) -> Result<String, Refusal> {
     let mut life = Lifetime::new(w.now());
     let mut rate = RateLimit::new(w.now());
     let mut checked_at = w.now();
+    let rate_log = w.rate_log();
+    let mut breaker = Breaker::new(w.now(), w.events());
     let (mut sent, mut dropped, mut refused) = (0u64, 0u64, 0u64);
     let stop = loop {
         let records = match w.records(TICK) {
@@ -66,6 +70,7 @@ pub fn serve(w: &mut impl Watcher, pool: &Pool) -> Result<String, Refusal> {
         let clients = w
             .clients()
             .map_err(|why| no_pipe(&format!("its clients couldn't be polled: {why}")))?;
+        brake(w, &mut breaker, now, rate_log)?;
         if now.saturating_sub(checked_at) >= OWNER_CHECK {
             checked_at = now;
             // A record that can't be read now is read again at the next check.
@@ -96,8 +101,49 @@ pub fn serve(w: &mut impl Watcher, pool: &Pool) -> Result<String, Refusal> {
     } else {
         format!(", {refused} not of the pool refused")
     };
+    let trips = match breaker.trips() {
+        0 => String::new(),
+        n => format!(", paused {n} times for the event rate"),
+    };
     Ok(format!(
-        "{why}; {} clients, {sent} sent, {dropped} dropped{refused}",
+        "{why}; {} clients, {sent} sent, {dropped} dropped{refused}{trips}",
         life.served()
     ))
+}
+
+/// Steps the breaker at `now`: logs the second's rate when asked, and pauses or resumes the
+/// trace, telling the clients. A trace that can't be paused or resumed ends the run (73).
+fn brake(
+    w: &mut impl Watcher,
+    breaker: &mut Breaker,
+    now: Duration,
+    rate_log: bool,
+) -> Result<(), Refusal> {
+    let step = breaker.step(now, w.events());
+    if rate_log && let Some(rate) = step.second {
+        w.log(
+            false,
+            &format!("the sandbox's watcher's event rate: {rate}"),
+        );
+    }
+    let no_trace = |why: String| (WatchExit::NoTrace, format!("the breaker: {why}"));
+    match step.action {
+        Some(Action::Pause) => {
+            w.pause_trace().map_err(no_trace)?;
+            w.send(&paused_line(PAUSE.as_secs()))
+                .map_err(|why| no_pipe(&why))?;
+            let n = breaker.trips();
+            w.log(
+                false,
+                &format!("the sandbox's watcher: paused for the event rate ({n})"),
+            );
+        }
+        Some(Action::Resume) => {
+            w.resume_trace().map_err(no_trace)?;
+            w.send(&resumed_line()).map_err(|why| no_pipe(&why))?;
+            w.log(false, "the sandbox's watcher: resumed after its pause");
+        }
+        None => {}
+    }
+    Ok(())
 }
