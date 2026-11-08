@@ -214,6 +214,7 @@ fn elevated_accounts_group_hidden_user_and_record() {
         users: format!("{FAMILY}U"),
         journals: false,
         wfp: crate::windows::wfp::Namespace::test(),
+        launch_deny: false,
     };
     assert!(user.len() <= 20 && names.group.len() <= 20, "{user}");
     let data = TempDir::new("windows-machine-accounts");

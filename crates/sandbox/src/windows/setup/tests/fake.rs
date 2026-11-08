@@ -16,6 +16,7 @@ use crate::windows::acl_plan::Sid;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
+use crate::windows::machine_launch::{Change, Guard, LaunchApplied, LaunchRemoved};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
@@ -113,6 +114,8 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
+    /// What `launch_deny` answers; `None` is an applied guard that added the deny.
+    pub(super) launch: Option<LaunchApplied>,
 }
 
 impl Machine for FakeMachine {
@@ -519,6 +522,28 @@ impl Machine for FakeMachine {
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
         self.call(format!("network {}", rids(setup.pool())))?;
         Ok(self.around.network(setup))
+    }
+
+    fn launch_deny(&mut self, group: &Sid) -> Result<LaunchApplied, MachineError> {
+        assert!(
+            !self.acting.get(),
+            "the COM launch deny is written as admin"
+        );
+        self.call(format!("launch_deny {}", rid(group)))?;
+        Ok(self.launch.clone().unwrap_or(LaunchApplied {
+            guard: Guard::Applied,
+            change: Change::Added,
+            why: None,
+        }))
+    }
+
+    fn launch_deny_remove(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError> {
+        assert!(
+            !self.acting.get(),
+            "the COM launch deny is removed as admin"
+        );
+        self.call(format!("launch_deny_remove {}", rid(group)))?;
+        Ok(LaunchRemoved::Restored)
     }
 
     fn protect_for_owner(

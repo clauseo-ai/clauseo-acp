@@ -3,7 +3,8 @@
 //! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`) and the top-up to
 //! [`MIN_FREE_AFTER_RUN`] free users (`top_up.rs`); and `--remove` over the same fake
 //! (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`); and the network step
-//! (`network.rs`, S15 PR7) and the group's Remote Desktop deny (`remote_logon.rs`).
+//! (`network.rs`, S15 PR7), the group's Remote Desktop deny (`remote_logon.rs`) and the COM
+//! launch deny (`launch_deny.rs`).
 
 use std::path::PathBuf;
 
@@ -17,6 +18,7 @@ mod extend;
 mod fake;
 mod fake_acl;
 mod fake_more;
+mod launch_deny;
 mod local_low;
 mod network;
 mod owner;
@@ -102,6 +104,7 @@ fn fresh_calls() -> Vec<String> {
             "exists DeviceSync",
             "owner_of DeviceSync",
             "network 1001,1002,1003,1004,1005,1006,1007,1008",
+            "launch_deny 1000",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",

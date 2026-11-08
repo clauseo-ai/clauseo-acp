@@ -54,6 +54,8 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
+    /// Step 8c (the COM launch deny) ran, so a group this run made loses it before it goes.
+    pub(super) launch_denied: bool,
 }
 
 impl Run {
@@ -69,6 +71,7 @@ impl Run {
             ledger: None,
             kept: Vec::new(),
             reset: Vec::new(),
+            launch_denied: false,
         }
     }
 
@@ -179,6 +182,11 @@ fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -
         return false;
     };
     let result = match machine.group_members(group) {
+        // The COM launch deny names the group: it goes first, and a group it can't leave stays.
+        Ok(0) if run.launch_denied => machine
+            .remove_remote_logon_deny(group)
+            .and_then(|()| machine.launch_deny_remove(group))
+            .and_then(|_removed| machine.delete_group(group)),
         Ok(0) => machine
             .remove_remote_logon_deny(group)
             .and_then(|()| machine.delete_group(group)),

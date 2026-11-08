@@ -9,6 +9,7 @@ use clauseo_protocol::MatterId;
 
 use super::machine::MachineError;
 use crate::windows::apply::Applied;
+use crate::windows::machine_launch::LaunchApplied;
 use crate::windows::pool::PoolUser;
 use crate::windows::shared_writes::SharedWrites;
 use crate::windows::sids::Sid;
@@ -366,6 +367,10 @@ pub struct SetupReport {
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
+    /// The COM launch deny (step 8c, `windows::machine_launch`): the guard's state, what was
+    /// written and why it is degraded; `Err` when the step couldn't run. Never a failure of the
+    /// set-up: a degraded guard leaves WSL's other layers on.
+    pub launch_deny: Result<LaunchApplied, String>,
 }
 
 /// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool

@@ -14,6 +14,7 @@ use super::fake::{FakeAcl, FakeMachine, OWNER, rid, rids};
 use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
+use crate::windows::machine_launch::LaunchRemoved;
 use crate::windows::pool::MachineRecord;
 use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
@@ -246,6 +247,11 @@ impl Removal for Remover {
         );
         self.call("remove_network".to_owned())?;
         Ok(self.firewall_failure.map(str::to_owned))
+    }
+
+    fn remove_launch_deny(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError> {
+        self.call(format!("remove_launch_deny {}", rid(group)))?;
+        Ok(LaunchRemoved::Restored)
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

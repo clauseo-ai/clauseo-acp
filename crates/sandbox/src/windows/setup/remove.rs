@@ -42,7 +42,9 @@
 //!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
 //!    process that won't stop, which must not run unfiltered while a user's removal fails. A
 //!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
-//! 5. `DeviceSync`'s deny;
+//! 5. `DeviceSync`'s deny, then the COM launch deny for the group (`machine_launch::remove`:
+//!    our denies only, or the backup put back byte for byte when the value is what Clauseo
+//!    wrote), before the group goes, so no deny names a SID that is gone;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left, its "Deny log on through
@@ -72,6 +74,7 @@ use std::path::PathBuf;
 use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
 use super::record_values::CopyOwner;
+use crate::windows::machine_launch::LaunchRemoved;
 use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
@@ -119,6 +122,8 @@ pub struct RemoveReport {
     /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
     /// since the WFP filters (the enforcing layer) went (S15 PR7).
     pub firewall: Option<String>,
+    /// What the COM launch deny's removal did to `MachineLaunchRestriction`.
+    pub launch_deny: LaunchRemoved,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -156,6 +161,8 @@ pub enum RemoveStep {
     RemoteLogon,
     /// Removing the owner's unclean-session markers, as the owner, before the record.
     Markers,
+    /// Taking the COM launch deny for the group off (`machine_launch::remove`).
+    LaunchDeny,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -177,6 +184,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
             RemoveStep::Markers => "removing the sandbox's unclean-session markers",
+            RemoveStep::LaunchDeny => "taking the sandbox users' COM launch deny off",
         })
     }
 }
@@ -410,6 +418,9 @@ fn steps(
             format!("DeviceSync's deny: {cause}"),
         )
     })?;
+    report.launch_deny = machine
+        .remove_launch_deny(&record.group)
+        .map_err(|e| (RemoveStep::LaunchDeny, cause_of(&e)))?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
     if acting == Acting::Owner {
