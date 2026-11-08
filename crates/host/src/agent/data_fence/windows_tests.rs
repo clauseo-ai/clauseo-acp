@@ -169,3 +169,74 @@ fn a_doubled_separator_in_a_shell_word_is_refused() {
     check.words = vec!["cat /home//a//.other/x".to_owned()];
     assert!(!refused(&check, &plain_net(false), &fs));
 }
+
+/// A word that mixes long and short names (`C:\Users\JONATH~1\AppData\…`,
+/// `C:\Users\Jonathan\APPDAT~1\…`) is found: each name of the data folder is searched in its long
+/// and its short form, and so is the rest under the home folder.
+#[test]
+fn a_word_mixing_long_and_short_names_of_the_data_folder_is_found() {
+    let data = r"C:\Users\Jonathan\AppData\Roaming\Clauseo";
+    let var = |name: &str| {
+        (name == "APPDATA").then(|| PathBuf::from(r"C:\Users\Jonathan\AppData\Roaming"))
+    };
+    let needles = needles(&Spellings {
+        paths: [Path::new(data), Path::new(data)],
+        short: Some(PathBuf::from(r"C:\Users\JONATH~1\APPDAT~1\Roaming\Clauseo")),
+        home: Some(Path::new(r"C:\Users\Jonathan")),
+        var: &var,
+        windows: true,
+    });
+    let want = PathBuf::from(format!(r"{data}\state.sqlite"));
+    for word in [
+        r"C:\Users\JONATH~1\AppData\Roaming\Clauseo\state.sqlite",
+        r"C:\Users\Jonathan\APPDAT~1\Roaming\Clauseo\state.sqlite",
+        r"C:\Users\JONATH~1\APPDAT~1\Roaming\Clauseo\state.sqlite",
+        r"c:/users/jonath~1/appdata/roaming/clauseo/state.sqlite",
+        r"%USERPROFILE%\APPDAT~1\Roaming\Clauseo\state.sqlite",
+        r"~\APPDAT~1\Roaming\Clauseo\state.sqlite",
+    ] {
+        let got = found(&format!("type \"{word}\""), &needles, data);
+        assert!(
+            got.iter().any(|path| one_separator(path) == want),
+            "{word}: {got:?}"
+        );
+    }
+    // Another short name in the same place is another folder.
+    assert_eq!(
+        found(
+            r"C:\Users\JONATH~2\AppData\Roaming\Clauseo\x",
+            &needles,
+            data
+        ),
+        Vec::<PathBuf>::new()
+    );
+}
+
+/// Names that don't pair up one for one, or too many mixes, still search the short spelling.
+#[test]
+fn an_unpaired_or_huge_short_name_still_searches_the_all_short_spelling() {
+    let none = |_: &str| None;
+    let search = |data: &str, short: &str| {
+        needles(&Spellings {
+            paths: [Path::new(data), Path::new(data)],
+            short: Some(PathBuf::from(short)),
+            home: None,
+            var: &none,
+            windows: true,
+        })
+    };
+    let unpaired = search(r"C:\Long Name\Clauseo", r"C:\LONGNA~1\x\Clauseo");
+    assert!(unpaired.iter().any(|n| n == r"C:\LONGNA~1\x\Clauseo"));
+    let long = r"C:\Aaaaaaaaa\Bbbbbbbbb\Ccccccccc\Ddddddddd\Eeeeeeeee\Clauseo";
+    let short = r"C:\AAAAAA~1\BBBBBB~1\CCCCCC~1\DDDDDD~1\EEEEEE~1\Clauseo";
+    let huge = search(long, short);
+    assert!(huge.iter().any(|n| n == short));
+    assert!(huge.iter().any(|n| n == long));
+    assert!(huge.len() <= 2, "{huge:?}");
+    // Four names with a short form: every mix (sixteen).
+    let four = search(
+        r"C:\Aaaaaaaaa\Bbbbbbbbb\Ccccccccc\Ddddddddd\Clauseo",
+        r"C:\AAAAAA~1\BBBBBB~1\CCCCCC~1\DDDDDD~1\Clauseo",
+    );
+    assert_eq!(four.len(), 16, "{four:?}");
+}
