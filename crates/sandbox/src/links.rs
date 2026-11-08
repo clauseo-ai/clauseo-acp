@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::policy::{same, under};
-use crate::{Error, PROTECTED_AT_ANY_DEPTH, strip_hfs_ignorables};
+use crate::policy::{opens_as, same, under};
+use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -88,9 +88,9 @@ impl MatterScan {
         &self.git_dirs
     }
 
-    /// The repository-shaped folders outside any `.git`, sorted: each holds a `HEAD` file and
-    /// `objects` and `refs` folders, which git's discovery takes for a bare repository (no
-    /// `.git` name involved). One stat of each folder per `HEAD` the walk lists.
+    /// The repository-shaped folders outside any `.git`, sorted: each holds a `HEAD` file or link
+    /// and either `objects` and `refs` folders or a `commondir` file, which git's discovery
+    /// takes for a git dir (no `.git` name involved).
     pub fn bare_repos(&self) -> &[PathBuf] {
         &self.bare
     }
@@ -218,6 +218,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git_dirs.sort();
     scan.git_dirs.dedup();
     scan.bare.sort();
+    scan.bare.dedup();
     scan.nested.sort();
     Ok(scan)
 }
@@ -234,6 +235,9 @@ impl Walk {
                 .any(|protected| name.eq_ignore_ascii_case(protected));
         if nested && !kind.is_symlink() {
             self.scan.nested.push(path.clone());
+        }
+        if (kind.is_file() || kind.is_symlink()) && opens_as(&name, "HEAD") {
+            self.bare_repo(&path);
         }
         if kind.is_symlink() {
             match symlink_finding(matter, &path, kind) {
@@ -261,24 +265,37 @@ impl Walk {
                     self.scan.git_dirs.push(dir);
                 }
             }
-            if name
-                .to_str()
-                .is_some_and(|n| strip_hfs_ignorables(n).eq_ignore_ascii_case("HEAD"))
-            {
-                self.bare_repo(&path);
-            }
             self.hard_link(path, entry);
         }
     }
 
-    /// Lists the folder holding the `HEAD` file at `head` if it has `objects` and `refs`
-    /// folders too: a bare repository's layout.
+    /// Lists the folder holding the `HEAD` file or link at `head` if it is a repository to git:
+    /// `objects` and `refs` folders beside it, or a `commondir` file (a linked worktree's git
+    /// dir). Names compare by [`opens_as`], so one HFS+ opens under an ignorable spelling counts;
+    /// that takes one listing of the folder per `HEAD`.
     fn bare_repo(&mut self, head: &Path) {
         let Some(folder) = head.parent() else {
             return;
         };
-        let dir = |name: &str| fs::metadata(folder.join(name)).is_ok_and(|m| m.is_dir());
-        if dir("objects") && dir("refs") {
+        let Ok(entries) = fs::read_dir(folder) else {
+            return;
+        };
+        let (mut objects, mut refs, mut commondir) = (false, false, false);
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let found = ["objects", "refs", "commondir"].map(|want| opens_as(&name, want));
+            if !found.contains(&true) {
+                continue;
+            }
+            // Followed, as git follows them.
+            let Ok(meta) = fs::metadata(entry.path()) else {
+                continue;
+            };
+            objects |= found[0] && meta.is_dir();
+            refs |= found[1] && meta.is_dir();
+            commondir |= found[2] && meta.is_file();
+        }
+        if (objects && refs) || commondir {
             self.scan.bare.push(folder.to_owned());
         }
     }

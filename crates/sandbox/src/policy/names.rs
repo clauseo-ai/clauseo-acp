@@ -29,6 +29,15 @@ pub fn strip_hfs_ignorables(name: &str) -> Cow<'_, str> {
     }
 }
 
+/// Whether `name` is the ASCII name `want` as the file system may open it: without its
+/// [`hfs_ignorable`] code points, then by [`name_key`], then without ASCII case (NTFS too).
+pub(crate) fn opens_as(name: &OsStr, want: &str) -> bool {
+    match name.to_str() {
+        Some(text) => name_key(OsStr::new(&*strip_hfs_ignorables(text))).eq_ignore_ascii_case(want),
+        None => name.eq_ignore_ascii_case(want),
+    }
+}
+
 /// The key of `name`. On macOS, Unicode canonical caseless matching: NFD of the full case fold
 /// (CaseFolding.txt statuses C and F, not Turkic) of NFD, the folding a case-insensitive APFS
 /// volume documents. So `क़` as U+0958 and as U+0915 U+093C, `É` and `é`, `ß` and `ss` share a
