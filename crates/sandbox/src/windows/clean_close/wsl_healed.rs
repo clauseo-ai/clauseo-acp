@@ -26,7 +26,8 @@ pub enum WslHealed {
     /// ("upgrade failed, deny applied", exit 52): WSL is as it was, the deny verified on it.
     UpgradeFailed,
     /// A WSL upgrade was pending and isn't installed: the task couldn't be started, its run
-    /// ended without it, or the wait ran out. The deny was verified, so the launch went on.
+    /// ended without it, or the wait ran out with no run going. The deny was verified, so the
+    /// launch went on.
     UpgradeUnfinished,
 }
 
