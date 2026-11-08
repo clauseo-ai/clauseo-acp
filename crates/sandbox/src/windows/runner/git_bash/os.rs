@@ -34,6 +34,7 @@ use crate::windows::record;
 use crate::windows::runner::LaunchMessage;
 use crate::windows::runner::env::GitEnv;
 use crate::windows::runner::paths::WinPath;
+use crate::windows::runner::stub::STUB;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::LocalDescriptor;
 
@@ -73,6 +74,8 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
         Ok(Ready { tree, held }) => GitBash {
             env: GitEnv {
                 tree: Some(tree),
+                stub: None,
+                off: None,
                 lawyer_git,
                 long_names,
             },
@@ -82,9 +85,18 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
             say(&format!(
                 "clauseo-sandbox-run: Git Bash is off for this run: {off}"
             ));
+            let stub = stub();
+            if stub.is_none() {
+                say(
+                    "clauseo-sandbox-run: the Git Bash stub isn't there, so Claude Code may look \
+                     for another Git Bash, which fails under the sandbox user",
+                );
+            }
             GitBash {
                 env: GitEnv {
                     tree: None,
+                    stub,
+                    off: Some(off.to_string()),
                     lawyer_git,
                     long_names,
                 },
@@ -92,6 +104,15 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
             }
         }
     }
+}
+
+/// The stub (`stub::STUB` in the admin folder, once its chain passes its check), when it is a
+/// regular file there.
+fn stub() -> Option<WinPath> {
+    let admin = admin_os::admin_dir_checked().ok()?;
+    let stub = STUB.iter().fold(admin, |path, part| path.join(part));
+    open_plain(stub.to_str()?, SHARE_ALL).ok()?;
+    WinPath::parse(stub.to_str()?)
 }
 
 /// The per-machine Git installs the lawyer's `PATH` may name: `HKLM\SOFTWARE\GitForWindows`'s

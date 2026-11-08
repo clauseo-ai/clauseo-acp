@@ -12,9 +12,10 @@
 //!   `GIT_CONFIG_VALUE_0=openssl`; any other `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.
 //! - **Git Bash** (0049, "The Git tree"; [`GitEnv`], made by `git_bash.rs`): with the run's
 //!   checked tree, `CLAUDE_CODE_GIT_BASH_PATH` at `<tree>\bin\bash.exe` and `<tree>\cmd` first
-//!   in `PATH`, so the agent's `git` is the tree's and finds the tree's `sh.exe`. Either way
-//!   the spec's `CLAUDE_CODE_GIT_BASH_PATH` goes, and so does each `PATH` entry in the lawyer's
-//!   Git: with no tree the agent gets no Git, never the lawyer's.
+//!   in `PATH`, so the agent's `git` is the tree's and finds the tree's `sh.exe`. With none,
+//!   `CLAUDE_CODE_GIT_BASH_PATH` at the stub (`stub.rs`) and the reason in its `OFF_VAR`, so
+//!   Claude Code never looks for the lawyer's Git Bash. Either way the spec's values of both go,
+//!   and so does each `PATH` entry in the lawyer's Git: the agent never gets the lawyer's Git.
 //! - **CA bundle** (`s15-spikes-traverse.md` (d): codex's rustls finds no roots under the token):
 //!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at the bundle, when the launch names one.
 //!   `SSL_CERT_FILE` makes every OpenSSL tool trust exactly the machine's roots, as intended.
@@ -30,6 +31,7 @@
 use std::collections::BTreeMap;
 
 use super::paths::{WinPath, text_within};
+use super::stub::OFF_VAR;
 use super::{LaunchError, LaunchMessage};
 
 /// The git variables that turn on its OpenSSL backend (§3).
@@ -87,6 +89,10 @@ pub fn profile_folders(message: &LaunchMessage) -> Result<Vec<String>, LaunchErr
 pub struct GitEnv {
     /// The run's checked Git tree; `None` when Git Bash is off for the run.
     pub tree: Option<WinPath>,
+    /// With no tree, the stub (`<admin>\git\_off\bash.exe`) when it is there.
+    pub stub: Option<WinPath>,
+    /// With no tree, why Git Bash is off, for the stub to say.
+    pub off: Option<String>,
     /// The lawyer's per-machine Git installs, which no `PATH` entry of the agent's may lie in.
     pub lawyer_git: Vec<WinPath>,
     /// `PATH` entries with their long forms (`GetLongPathNameW`), where they differ: an entry
@@ -140,6 +146,12 @@ pub fn agent_env(
     }
     for (name, value) in set {
         out.insert(name.to_uppercase(), (name, value));
+    }
+    if let (None, Some(stub)) = (&git.tree, &git.stub) {
+        let off = git.off.clone().unwrap_or_else(|| "unknown".to_owned());
+        for (name, value) in [(GIT_BASH_VAR, stub.display()), (OFF_VAR, off)] {
+            out.insert(name.to_owned(), (name.to_owned(), value));
+        }
     }
     if let Some(tree) = &git.tree {
         out.insert(
@@ -235,6 +247,7 @@ fn overridden(name: &str, message: &LaunchMessage) -> bool {
     let upper = name.to_ascii_uppercase();
     SET.contains(&upper.as_str())
         || upper == GIT_BASH_VAR
+        || upper == OFF_VAR
         || upper == "GIT_CONFIG_COUNT"
         || upper
             .strip_prefix("GIT_CONFIG_KEY_")

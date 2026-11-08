@@ -96,6 +96,7 @@ mod policy;
 mod spawn;
 #[cfg(any(windows, test))]
 mod start;
+pub mod stub;
 #[cfg(any(windows, test))]
 mod sweep;
 #[cfg(windows)]

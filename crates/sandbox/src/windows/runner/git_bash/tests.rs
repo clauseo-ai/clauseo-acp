@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use super::*;
 use crate::windows::runner::LaunchMessage;
 use crate::windows::runner::env::{GIT_BASH_VAR, GitEnv, agent_env};
+use crate::windows::runner::stub::{OFF_VAR, STUB, is_stub, stub_line};
 
 const ADMIN: &str = r"C:\Program Files\Clauseo\Sandbox";
 const POOL: &str = "S-1-5-21-1-2-3-1005";
@@ -432,6 +433,7 @@ fn env_with(tree: Option<&str>) -> Vec<(String, String)> {
         tree: tree.map(|t| WinPath::parse(t).unwrap()),
         lawyer_git: vec![WinPath::parse(r"C:\Program Files\Git").unwrap()],
         long_names: Vec::new(),
+        ..GitEnv::default()
     };
     let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
     agent_env(&launch(SPEC_PATH), &profile, &git).unwrap()
@@ -471,6 +473,7 @@ fn with_no_tree_the_agent_gets_no_git_bash_and_never_the_lawyer_s() {
         tree: None,
         lawyer_git: vec![WinPath::parse(r"C:\Program Files\Git").unwrap()],
         long_names: Vec::new(),
+        ..GitEnv::default()
     };
     let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
     let only_git = launch(r"C:\Program Files\Git\cmd");
@@ -499,6 +502,7 @@ fn a_short_name_of_the_lawyer_s_git_is_caught_by_its_long_form() {
             ),
             (r"D:\TOOLS~1".to_owned(), r"D:\Tools Two".to_owned()),
         ],
+        ..GitEnv::default()
     };
     let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
     let spec = launch(
@@ -510,4 +514,60 @@ fn a_short_name_of_the_lawyer_s_git_is_caught_by_its_long_form() {
         Some(r"D:\TOOLS~1"),
         "other entries stay as written"
     );
+}
+
+const STUB_PATH: &str = r"C:\Program Files\Clauseo\Sandbox\git\_off\bash.exe";
+
+fn env_of(git: &GitEnv, spec: &LaunchMessage) -> Vec<(String, String)> {
+    agent_env(spec, &WinPath::parse(r"C:\Users\Lawyer").unwrap(), git).unwrap()
+}
+
+#[test]
+fn off_points_claude_code_at_the_stub_with_the_reason() {
+    let mut spec = launch(SPEC_PATH);
+    spec.env.push((OFF_VAR.to_owned(), "the spec's".to_owned()));
+    let off = GitEnv {
+        stub: Some(WinPath::parse(STUB_PATH).unwrap()),
+        off: Some(Off::Squatted.to_string()),
+        lawyer_git: vec![WinPath::parse(r"C:\Program Files\Git").unwrap()],
+        ..GitEnv::default()
+    };
+    let env = env_of(&off, &spec);
+    assert_eq!(
+        get(&env, GIT_BASH_VAR),
+        Some(STUB_PATH),
+        "never the lawyer's bash"
+    );
+    assert_eq!(get(&env, OFF_VAR), Some(Off::Squatted.to_string().as_str()));
+    assert_eq!(get(&env, "PATH"), Some(r"C:\Windows\system32;D:\Tools"));
+    let on = GitEnv {
+        tree: Some(WinPath::parse(&tree()).unwrap()),
+        ..off
+    };
+    let env = env_of(&on, &spec);
+    assert_eq!(
+        get(&env, GIT_BASH_VAR),
+        Some(format!(r"{}\bin\bash.exe", tree()).as_str()),
+        "the tree's bash, the stub unused"
+    );
+    assert_eq!(get(&env, OFF_VAR), None, "the spec's goes");
+}
+
+#[test]
+fn the_stub_is_the_runner_named_bash_exe_and_says_one_line() {
+    assert_eq!(STUB, ["git", "_off", "bash.exe"]);
+    assert!(is_stub(std::path::Path::new(STUB_PATH)));
+    assert!(is_stub(std::path::Path::new(r"C:\x\BASH.EXE")));
+    assert!(!is_stub(std::path::Path::new(
+        r"C:\x\clauseo-sandbox-run.exe"
+    )));
+    assert!(!is_stub(std::path::Path::new(r"C:\x\bash.exe.old")));
+    assert_eq!(
+        stub_line(Some("the record can't be read")),
+        "Git Bash isn't available in the Safe workspace for this session: the record can't be read"
+    );
+    assert!(stub_line(None).ends_with(": unknown"));
+    assert!(stub_line(Some("\n\t ")).ends_with(": unknown"));
+    let long = stub_line(Some(&format!("a\nb{}", "x".repeat(1000))));
+    assert!(!long.contains('\n') && long.len() < 400, "{long}");
 }
