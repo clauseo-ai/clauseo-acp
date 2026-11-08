@@ -19,11 +19,10 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, CreateRestrictedToken, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, GetLengthSid,
-    GetSecurityDescriptorDacl, GetTokenInformation, IsTokenRestricted,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
-    SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenGroups,
-    TokenIntegrityLevel,
+    GetSecurityDescriptorDacl, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS,
+    TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
+    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel, TokenRestrictedSids,
 };
 use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -173,17 +172,26 @@ pub(in crate::windows) fn logon_sid(token: &Handle) -> io::Result<Sid> {
 
 /// Every group of `token` (`TokenGroups`), with its attributes: enabled, deny-only or not.
 pub(in crate::windows) fn groups(token: &Handle) -> io::Result<Vec<(Sid, u32)>> {
-    let buffer = information(token, TokenGroups)?;
+    sid_list(token, TokenGroups)
+}
+
+/// The SIDs `class` of `token` lists (a `TOKEN_GROUPS`), with their attributes.
+fn sid_list(token: &Handle, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<(Sid, u32)>> {
+    let buffer = information(token, class)?;
     let bytes = size_of_val(buffer.as_slice());
-    if bytes < size_of::<TOKEN_GROUPS>() {
+    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    // An empty list (no restricting SIDs) may be only its count, shorter than a TOKEN_GROUPS.
+    if bytes < offset {
         return Err(io::Error::other("the token's groups are too short"));
     }
     let groups = buffer.as_ptr().cast::<TOKEN_GROUPS>();
-    // SAFETY: `buffer` holds at least a TOKEN_GROUPS, aligned (u64 words), as GetTokenInformation
-    // wrote it.
+    // SAFETY: `buffer` holds at least the count, aligned (u64 words), as GetTokenInformation
+    // wrote it; only that field is read.
     let count = unsafe { (*groups).GroupCount };
     let count = usize::try_from(count).map_err(io::Error::other)?;
-    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     count
         .checked_mul(size_of::<SID_AND_ATTRIBUTES>())
         .and_then(|len| len.checked_add(offset))
@@ -221,11 +229,11 @@ pub(in crate::windows) fn integrity(token: &Handle) -> io::Result<u32> {
         .ok_or_else(|| io::Error::other("the token's label isn't an integrity level"))
 }
 
-/// Whether `token` is restricted: it has restricting SIDs (`IsTokenRestricted`, whose `FALSE`,
-/// an `Err` here, means it hasn't).
-pub(in crate::windows) fn restricted(token: &Handle) -> bool {
-    // SAFETY: the token is open with TOKEN_QUERY.
-    unsafe { IsTokenRestricted(token.0) }.is_ok()
+/// Whether `token` is restricted: it lists restricting SIDs (`TokenRestrictedSids`). A list
+/// that can't be read is an error, never "not restricted": `IsTokenRestricted`'s `FALSE`
+/// means both, so it isn't used.
+pub(in crate::windows) fn restricted(token: &Handle) -> io::Result<bool> {
+    Ok(!sid_list(token, TokenRestrictedSids)?.is_empty())
 }
 
 /// Makes the agent's token from `base` (the runner's own token) as `spec` says. The result is a

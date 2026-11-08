@@ -25,7 +25,7 @@ pub struct ClientFacts {
     pub session: u32,
     /// Every group in the token, enabled, deny-only or not.
     pub groups: Vec<Sid>,
-    /// Whether the token is restricted (`IsTokenRestricted`).
+    /// Whether the token lists restricting SIDs (`TokenRestrictedSids`).
     pub restricted: bool,
     /// The relative id of the token's integrity level.
     pub integrity: u32,

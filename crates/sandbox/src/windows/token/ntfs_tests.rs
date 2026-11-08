@@ -111,6 +111,9 @@ fn the_agent_token_holds_what_the_spec_says_when_read_back() {
     let spec = TokenSpec::for_pool(&user, &logon, &desktop, None).unwrap();
     let made = os::make(&own, &spec).unwrap();
     let token = made.0;
+    // The set-up pipe's gate reads this (`os::restricted`): from the list, never a guess.
+    assert_eq!(os::restricted(&made).ok(), Some(true));
+    assert_eq!(os::restricted(&own).ok(), Some(false));
 
     assert_eq!(privileges(token), ["SeChangeNotifyPrivilege"]);
 

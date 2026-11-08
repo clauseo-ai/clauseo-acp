@@ -170,7 +170,7 @@ impl Pipe for WindowsPipe {
                 user: user(&token)?,
                 session,
                 groups: groups(&token)?.into_iter().map(|(sid, _)| sid).collect(),
-                restricted: restricted(&token),
+                restricted: restricted(&token)?,
                 integrity: integrity(&token)?,
             })
         })();
