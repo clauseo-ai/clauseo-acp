@@ -2013,7 +2013,8 @@ machine's deny. It doesn't for this `LocalService` class: with
 `AppID` with its own `LocalService`, the pool user's `wsl -l` and `CreateInstance(ce7e)` were
 still denied, and all 8 DCOM 10016 events named the machine's `AppID` `{370121D2-…}`, never the
 per-user one. So the deny isn't extended to the pool users' hives, and the check reads only
-`HKLM`.
+`HKLM`. R5d covered only Windows Server 2025 and the lifted `AppID` (`{370121D2-…}`): the inbox
+`LxssUserSessionInBox`'s `AppID`, and Windows 10 and 11, weren't tried, and stay VM rows.
 
 **The deny** (`windows::wsl`). The targets are found at each run, never hard-coded: every AppID
 whose `LocalService` is `WSLService` or `LxssManager` (listing `HKLM\SOFTWARE\Classes\AppID`
