@@ -12,6 +12,7 @@ use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUE
 mod completed;
 mod jobs;
 mod lock;
+mod owed;
 mod record;
 mod sequence;
 mod users;
@@ -74,6 +75,12 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
+    /// The record's `ResetOwed`.
+    owed: Vec<Sid>,
+    /// How many of the next `ResetOwed` writes seem to go but don't land.
+    owed_lost: usize,
+    /// Why `ResetOwed`'s clearing fails, if it does.
+    owed_clear_fails: Option<&'static str>,
     /// The record's `REG_QWORD` values: `StopNext`, `StopCompleted`, `StopSequence`.
     values: BTreeMap<&'static str, u64>,
     /// The set-up lock's tries.
@@ -116,6 +123,9 @@ impl Fake {
             marks: Marks::Written,
             held: false,
             resets: Vec::new(),
+            owed: Vec::new(),
+            owed_lost: 0,
+            owed_clear_fails: None,
             values: BTreeMap::new(),
             locks: 0,
             pool_reads: 0,
@@ -262,6 +272,29 @@ impl Stopper for Fake {
         }
         self.resets = crate::windows::setup::record_values::resets_with(&self.resets, users);
         self.done.push(format!("mark {}", users.len()));
+        Ok(())
+    }
+
+    fn read_owed(&mut self) -> Result<Vec<Sid>, Failed> {
+        Ok(self.owed.clone())
+    }
+
+    fn write_owed(&mut self, users: &[Sid]) -> Result<(), Failed> {
+        if users.is_empty() {
+            assert!(self.held, "cleared under the set-up lock, once folded");
+            if let Some(why) = self.owed_clear_fails {
+                return Err(why.to_owned());
+            }
+            self.done.push("clear owed".to_owned());
+        } else {
+            assert!(!self.held, "owed without the lock");
+            self.done.push(format!("owe {}", users.len()));
+            if self.owed_lost > 0 {
+                self.owed_lost -= 1;
+                return Ok(());
+            }
+        }
+        self.owed = users.to_vec();
         Ok(())
     }
 

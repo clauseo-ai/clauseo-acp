@@ -25,8 +25,9 @@ use super::lock::Descriptor;
 use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
-    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without, sids_value,
+    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_OWED,
+    RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without,
+    sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -129,8 +130,30 @@ pub(crate) fn read_texts(key: &str, names: &[&str]) -> Result<Vec<Option<String>
 /// The record's `ResetSids` (`record_values::RESET_SIDS`): empty when the key or the value is
 /// missing; a malformed list is an error, never a shorter list.
 pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
+    read_sids(key, RESET_SIDS)
+}
+
+/// The record's `ResetOwed` (`record_values::RESET_OWED`), as [`read_reset_sids`] reads
+/// `ResetSids`.
+pub(crate) fn read_reset_owed(key: &str) -> Result<Vec<Sid>, MachineError> {
+    read_sids(key, RESET_OWED)
+}
+
+/// Writes the record's `ResetOwed` as `users`, deleting it when there are none, in the key as
+/// it is: never made ([`open_existing`]). The stop task calls it as SYSTEM, without the lock
+/// to add users (`stop/owed.rs`) and under it to clear the value once folded.
+pub(crate) fn write_reset_owed(key: &str, users: &[Sid]) -> Result<(), MachineError> {
+    if users.is_empty() {
+        return delete_values(key, &[RESET_OWED]);
+    }
+    set_value(&open_existing(key)?, RESET_OWED, &sids_value(users))
+}
+
+/// The record's `REG_MULTI_SZ` list of SIDs `value`: empty when the key or the value is
+/// missing; a malformed list is an error, never a shorter list.
+fn read_sids(key: &str, value: &str) -> Result<Vec<Sid>, MachineError> {
     let subkey = HSTRING::from(key);
-    let name = HSTRING::from(RESET_SIDS);
+    let name = HSTRING::from(value);
     let units = read_units(
         PCWSTR(subkey.as_ptr()),
         PCWSTR(name.as_ptr()),
@@ -141,7 +164,7 @@ pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
         return Ok(Vec::new());
     };
     pool_sids_from_multi_sz(&units)
-        .map_err(|error| MachineError::Other(format!("the record's ResetSids: {error}")))
+        .map_err(|error| MachineError::Other(format!("the record's {value}: {error}")))
 }
 
 /// Adds `users` to the record's `ResetSids`, keeping what it lists, in the key as it is: never

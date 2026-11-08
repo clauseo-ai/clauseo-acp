@@ -105,9 +105,21 @@ pub fn completed(
     n: u64,
     pool: &[Sid],
 ) -> Result<(), Failed> {
+    completed_after(fs, values, (at, n), pool, |_| Ok(()))
+}
+
+/// [`completed`], with `first` run under the same hold of the lock once the record is checked,
+/// before either value is written: a failure writes neither. The stop folds `ResetOwed` there.
+pub fn completed_after<R: Record>(
+    fs: &mut R,
+    values: Values,
+    (at, n): (u64, u64),
+    pool: &[Sid],
+    first: impl FnOnce(&mut R) -> Result<(), Failed>,
+) -> Result<(), Failed> {
     let written = match fs.lock() {
         Ok(true) => {
-            let written = completed_locked(fs, values, at, n, pool);
+            let written = completed_locked(fs, values, at, n, pool, first);
             fs.unlock();
             written
         }
@@ -118,12 +130,13 @@ pub fn completed(
 }
 
 /// [`completed`]'s steps, with the lock held.
-fn completed_locked(
-    fs: &mut impl Record,
+fn completed_locked<R: Record>(
+    fs: &mut R,
     values: Values,
     at: u64,
     n: u64,
     pool: &[Sid],
+    first: impl FnOnce(&mut R) -> Result<(), Failed>,
 ) -> Result<(), Failed> {
     let still = fs.pool()?;
     if !holds(still.map(|pool| pool.users), pool) {
@@ -135,6 +148,7 @@ fn completed_locked(
         let name = values.sequence;
         return Err(format!("{name} is already {seen}, past this run's {n}"));
     }
+    first(fs)?;
     fs.write_value(values.completed, at)?;
     fs.write_value(values.sequence, n)
         .map_err(|why| format!("{} wasn't written after it: {why}", values.sequence))
