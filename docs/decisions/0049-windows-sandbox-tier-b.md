@@ -2175,6 +2175,15 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - VM row (not run): after the sweep deletes a task, does `GetRunningTasks` still list that
   task's running instance, and does `IRunningTask::Stop` still stop it? Step 4 relies on both.
   If not, the instance step finds nothing and the instance runs on, like X above.
+- VM row (not run): as an administrator, plant a stray task file under `System32\Tasks`
+  that no cache key holds (owned by Administrators), and a stale `TaskCache\Tree` key with
+  an `Id` value and no task file (its `SD` naming SYSTEM, or none); run `--sweep-tasks`,
+  then launch twice. Expect each run 0 with the log line counting one task file and one cache
+  key ignored, and both launches working.
+- VM row (not run): as a pool user, register a task whose descriptor shuts SYSTEM out (so the
+  listing hides it), then run `--sweep-tasks`. Expect 56, the log line counting it not
+  listed, the task left, and the next launch refused with `sandbox.cleaning_up` until an
+  administrator deletes it.
 - Elevated test (not run yet):
   `elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0`: a
   standard test user registers, from XML, a task whose descriptor denies SYSTEM and
