@@ -11,9 +11,10 @@
 //! held handle. Revocation isn't checked (`WTD_REVOKE_NONE`, `WTD_REVOCATION_CHECK_NONE`), and
 //! `WTD_CACHE_ONLY_URL_RETRIEVAL` keeps chain building off the network, so an offline machine
 //! verifies as an online one does. The signer's chain must then pass
-//! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
-//! Microsoft's own roots, which a root an administrator (or anyone) added can't stand in for;
-//! and its leaf certificate must list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
+//! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with the application-root
+//! flag ([`policy_para`]): it ends in one of Microsoft's own roots, Root 2011 included, which a
+//! root an administrator (or anyone) added can't stand in for; and its leaf certificate must
+//! list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, NtCreateFile, GetSecurityInfo and WinVerifyTrust"
@@ -37,7 +38,7 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::Cryptography::{
     CERT_CHAIN_CONTEXT, CERT_CHAIN_POLICY_MICROSOFT_ROOT, CERT_CHAIN_POLICY_PARA,
     CERT_CHAIN_POLICY_STATUS, CTL_USAGE, CertGetEnhancedKeyUsage, CertVerifyCertificateChainPolicy,
-    szOID_PKIX_KP_CODE_SIGNING,
+    MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG, szOID_PKIX_KP_CODE_SIGNING,
 };
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
@@ -265,9 +266,8 @@ fn owner(file: &OwnedHandle) -> Result<String, String> {
     owner
 }
 
-/// Whether the open file's signature, once `WinVerifyTrust` trusts it, chains to a Microsoft
-/// root, as the module says.
-fn signature(file: &OwnedHandle, path: &str) -> Result<Signature, String> {
+/// The open file's signature, once `WinVerifyTrust` trusts it, as the module says.
+pub(super) fn signature(file: &OwnedHandle, path: &str) -> Result<Signature, String> {
     let wide = HSTRING::from(path);
     let mut info = WINTRUST_FILE_INFO {
         cbStruct: u32::try_from(size_of::<WINTRUST_FILE_INFO>()).unwrap_or(0),
@@ -306,8 +306,20 @@ fn signature(file: &OwnedHandle, path: &str) -> Result<Signature, String> {
     verdict
 }
 
-/// Whether the first signer's chain in `state` passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`
-/// (no flags: Microsoft's product roots, never the test root or an application root).
+/// The `CERT_CHAIN_POLICY_MICROSOFT_ROOT` parameters: Microsoft's product roots and its
+/// application root, never the test root. `wsl.msi` chains Microsoft Corporation, Microsoft Code
+/// Signing PCA 2024, then Microsoft Root Certificate Authority 2011, which flag 0 doesn't accept
+/// (`0x800B0109`, `CERT_E_UNTRUSTEDROOT`, on the VM); `kernel32.dll`'s Root 2010 passes either way.
+pub(super) fn policy_para() -> CERT_CHAIN_POLICY_PARA {
+    CERT_CHAIN_POLICY_PARA {
+        cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_PARA>()).unwrap_or(0),
+        dwFlags: MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG,
+        ..CERT_CHAIN_POLICY_PARA::default()
+    }
+}
+
+/// The first signer's chain in `state`: whether it passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`
+/// with [`policy_para`], and whether its leaf is for code signing.
 fn verdict(state: HANDLE) -> Result<Signature, String> {
     let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     // SAFETY: `state` is WinVerifyTrust's live state, closed by the caller after this returns;
@@ -326,10 +338,7 @@ fn verdict(state: HANDLE) -> Result<Signature, String> {
     if chain.is_null() {
         return Err(none());
     }
-    let para = CERT_CHAIN_POLICY_PARA {
-        cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_PARA>()).unwrap_or(0),
-        ..CERT_CHAIN_POLICY_PARA::default()
-    };
+    let para = policy_para();
     let mut status = CERT_CHAIN_POLICY_STATUS {
         cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_STATUS>()).unwrap_or(0),
         ..CERT_CHAIN_POLICY_STATUS::default()
@@ -407,3 +416,6 @@ unsafe fn leaf_code_signing(chain: *const CERT_CHAIN_CONTEXT) -> Result<bool, St
 fn code(error: &windows::core::Error) -> u32 {
     u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX)
 }
+
+#[cfg(test)]
+mod tests;
