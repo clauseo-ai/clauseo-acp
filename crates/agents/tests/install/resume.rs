@@ -20,7 +20,9 @@ use clauseo_agents::testing::trace;
 use clauseo_agents::{Agents, FailureKind, InstallState};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, kill};
 
-use crate::support::{A_PACKAGES, Events, Fixture, TREE_POLL, agent_a};
+#[cfg(unix)]
+use crate::support::TREE_POLL;
+use crate::support::{A_PACKAGES, Events, Fixture, agent_a};
 
 /// The fake npm that is interrupted: writes two 64 KiB entries into the npm cache its first
 /// argument names (as npm's `_cacache` does, under names no other run uses), then its pid as
@@ -40,13 +42,15 @@ fs.renameSync(file + '.tmp', file);
 setInterval(() => {}, 1000);
 ";
 
-/// The fake npm whose tree outlives it a moment: a child in its group, then its pid as
-/// `<n>.pid` in the folder its first argument names, then sleeps. The child, killed with the
-/// group, is reaped by init, so the tree is seldom gone at the instant npm's handle drops.
+/// The fake npm whose tree outlives it a moment: a child in its group (its pid as `<n>.child`),
+/// then its pid as `<n>.pid` in the folder its first argument names, then sleeps. On Unix the
+/// child, killed with the group, is reaped by init, so the tree is seldom gone at the instant
+/// npm's handle drops.
 const HANGING_TREE_NPM: &str = "\
 const fs = require('fs'), path = require('path');
 const [dir, n] = process.argv.slice(1);
-require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+fs.writeFileSync(path.join(dir, n + '.child'), String(child.pid));
 const file = path.join(dir, n + '.pid');
 fs.writeFileSync(file + '.tmp', String(process.pid));
 fs.renameSync(file + '.tmp', file);
@@ -428,7 +432,45 @@ fn installing_goes_out_before_node_s_unpack_and_its_failure_is_a_setup_failure()
     assert_eq!(fetched, 1, "the archive downloaded once");
 }
 
+/// The `n`th fake npm's tree: its pid and its child's, once both are written.
+fn tree_pids(fx: &Fixture, n: usize) -> [u32; 2] {
+    let npm = fake_pid(fx, n);
+    let child = std::fs::read_to_string(pid_dir(fx).join(format!("{n}.child"))).unwrap();
+    [npm, child.trim().parse().expect("a pid")]
+}
+
+/// Waits until the job has removed the temp folder npm ran in, then checks that npm's whole
+/// tree (`pids`) had ended by then: the folder never goes while the tree may hold a file in it.
+fn folder_went_after_the_tree(fx: &Fixture, pids: [u32; 2]) {
+    let start = Instant::now();
+    loop {
+        let temp = std::fs::read_dir(fx.install_root(&agent_a()))
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp-"));
+        if !temp {
+            break;
+        }
+        assert!(
+            start.elapsed() < DEADLINE,
+            "the temp folder was not removed"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for pid in pids {
+        let running = clauseo_process::running(pid);
+        if running {
+            kill(pid);
+        }
+        assert!(
+            !running,
+            "npm's tree ran on after its temp folder went: {pid}"
+        );
+    }
+}
+
 /// The polls for npm's tree armed so far.
+#[cfg(unix)]
 fn tree_polls(fx: &Fixture) -> usize {
     fx.timer
         .armed()
@@ -445,11 +487,16 @@ fn a_pause_mid_npm_ci_waits_for_npm_s_tree() {
     let ci_runs = Arc::new(AtomicUsize::new(0));
     let (agents, events) = start(&fx, &[Fake::HangTree], &ci_runs);
     agents.install(&agent_a());
-    fake_pid(&fx, 0);
+    let pids = tree_pids(&fx, 0);
+    #[cfg(unix)]
     let before = tree_polls(&fx);
     agents.pause(&agent_a());
     events.until(&agent_a(), |state| *state == InstallState::Paused);
+    folder_went_after_the_tree(&fx, pids);
     assert!(agents.shutdown(Duration::from_secs(10)), "the job ended");
+    // Unix only: the child outlives the group's kill until init reaps it, so the wait polls.
+    // Windows' TerminateJobObject has usually emptied the job by the first check.
+    #[cfg(unix)]
     assert!(
         tree_polls(&fx) > before,
         "the pause waited for npm's tree: {:?}",
@@ -464,14 +511,18 @@ fn an_npm_ci_past_its_limit_waits_for_npm_s_tree() {
     let ci_runs = Arc::new(AtomicUsize::new(0));
     let (agents, _events) = start(&fx, &[Fake::HangTree], &ci_runs);
     agents.install(&agent_a());
-    fake_pid(&fx, 0);
+    let pids = tree_pids(&fx, 0);
+    #[cfg(unix)]
     let before = tree_polls(&fx);
     fx.timer.fire_next(Duration::from_mins(10));
+    folder_went_after_the_tree(&fx, pids);
     let start = Instant::now();
     while !fx.timer.install_waits().contains(&BACKOFF_FIRST) {
         assert!(start.elapsed() < DEADLINE, "no back-off after the limit");
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Unix only, as in the pause's test: on Windows the job is usually empty at once.
+    #[cfg(unix)]
     assert!(
         tree_polls(&fx) > before,
         "the limit waited for npm's tree: {:?}",
