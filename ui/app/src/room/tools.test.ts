@@ -138,11 +138,10 @@ test("sameTools reads two lists the same only when every tool and state match", 
 });
 
 const POLICY =
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you. " +
-  "Your IT team can allow it for Clauseo alone.";
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
-  "It checks again the next time it needs one. If this keeps happening, ask your IT team.";
+  "It checks again the next time it needs one.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
@@ -452,7 +451,7 @@ test("a browser policy Clauseo couldn't check offers no download either, and say
     reason: "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
     note:
       "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
-      "अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+      "अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
   });
 });
 

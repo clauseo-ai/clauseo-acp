@@ -29,12 +29,12 @@ export const HI = {
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: no download helps
   // (provisional Hindi, app track final)
-  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you. Your IT team can allow it for Clauseo alone.":
-    "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता। आपकी IT टीम केवल Clauseo के लिए इसकी अनुमति दे सकती है।",
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.":
+    "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
   // under the browser's reason when Clauseo couldn't read that policy, in full
   // (provisional Hindi, app track final)
-  "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one. If this keeps happening, ask your IT team.":
-    "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+  "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.":
+    "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */
