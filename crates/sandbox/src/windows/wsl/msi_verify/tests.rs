@@ -4,17 +4,24 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::{InstallError, LOCAL_SYSTEM, MsiFiles, MsiUpgrade, TRUSTED_INSTALLER, upgrade_with};
+use super::{
+    InstallError, LOCAL_SYSTEM, MsiFiles, MsiUpgrade, Signature, TRUSTED_INSTALLER, upgrade_with,
+};
 use crate::windows::wsl::FakeWsl;
 
 const APPS: &str = r"C:\Program Files\WindowsApps";
+/// A Microsoft code-signing signature.
+const SIGNED: Signature = Signature {
+    microsoft_root: true,
+    code_signing: true,
+};
 const PACKAGE: &str = "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe";
 
 /// What the fake answers, and what happened, in order.
 struct Fake {
     open: Result<(), String>,
     owner: Result<&'static str, String>,
-    signed: Result<bool, String>,
+    signed: Result<Signature, String>,
     events: Rc<RefCell<Vec<String>>>,
 }
 
@@ -23,7 +30,7 @@ impl Fake {
         Fake {
             open: Ok(()),
             owner: Ok(TRUSTED_INSTALLER),
-            signed: Ok(true),
+            signed: Ok(SIGNED),
             events: Rc::default(),
         }
     }
@@ -55,7 +62,7 @@ impl MsiFiles for Fake {
         self.owner.clone().map(str::to_owned)
     }
 
-    fn microsoft_signed(&self, _msi: &Held, path: &str) -> Result<bool, String> {
+    fn signature(&self, _msi: &Held, path: &str) -> Result<Signature, String> {
         self.log(format!("signer {path}"));
         self.signed.clone()
     }
@@ -169,10 +176,22 @@ fn an_untrusted_signature_or_a_chain_to_another_root_is_refused() {
     assert!(assert_refused(&files).contains("WinVerifyTrust"));
     // Trusted, but its chain ends in a root that isn't Microsoft's.
     let files = Fake {
-        signed: Ok(false),
+        signed: Ok(Signature {
+            microsoft_root: false,
+            ..SIGNED
+        }),
         ..Fake::passing()
     };
     assert!(assert_refused(&files).contains("Microsoft root"));
+    // A Microsoft chain whose leaf isn't for code signing.
+    let files = Fake {
+        signed: Ok(Signature {
+            code_signing: false,
+            ..SIGNED
+        }),
+        ..Fake::passing()
+    };
+    assert!(assert_refused(&files).contains("code-signing"));
 }
 
 #[test]

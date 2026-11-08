@@ -12,7 +12,8 @@
 //! `WTD_CACHE_ONLY_URL_RETRIEVAL` keeps chain building off the network, so an offline machine
 //! verifies as an online one does. The signer's chain must then pass
 //! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
-//! Microsoft's own roots, which a root an administrator (or anyone) added can't stand in for.
+//! Microsoft's own roots, which a root an administrator (or anyone) added can't stand in for;
+//! and its leaf certificate must list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, NtCreateFile, GetSecurityInfo and WinVerifyTrust"
@@ -34,8 +35,9 @@ use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::Cryptography::{
-    CERT_CHAIN_POLICY_MICROSOFT_ROOT, CERT_CHAIN_POLICY_PARA, CERT_CHAIN_POLICY_STATUS,
-    CertVerifyCertificateChainPolicy,
+    CERT_CHAIN_CONTEXT, CERT_CHAIN_POLICY_MICROSOFT_ROOT, CERT_CHAIN_POLICY_PARA,
+    CERT_CHAIN_POLICY_STATUS, CTL_USAGE, CertGetEnhancedKeyUsage, CertVerifyCertificateChainPolicy,
+    szOID_PKIX_KP_CODE_SIGNING,
 };
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
@@ -55,7 +57,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-use super::msi_verify::MsiFiles;
+use super::msi_verify::{MsiFiles, Signature};
 use super::upgrade::PACKAGE_MSI;
 
 /// What a folder's open asks for, and shares: no delete, so it can't be renamed while held.
@@ -95,8 +97,8 @@ impl MsiFiles for WindowsMsiFiles {
         owner(&msi.file)
     }
 
-    fn microsoft_signed(&self, msi: &HeldMsi, path: &str) -> Result<bool, String> {
-        microsoft_signed(&msi.file, path)
+    fn signature(&self, msi: &HeldMsi, path: &str) -> Result<Signature, String> {
+        signature(&msi.file, path)
     }
 }
 
@@ -265,7 +267,7 @@ fn owner(file: &OwnedHandle) -> Result<String, String> {
 
 /// Whether the open file's signature, once `WinVerifyTrust` trusts it, chains to a Microsoft
 /// root, as the module says.
-fn microsoft_signed(file: &OwnedHandle, path: &str) -> Result<bool, String> {
+fn signature(file: &OwnedHandle, path: &str) -> Result<Signature, String> {
     let wide = HSTRING::from(path);
     let mut info = WINTRUST_FILE_INFO {
         cbStruct: u32::try_from(size_of::<WINTRUST_FILE_INFO>()).unwrap_or(0),
@@ -291,7 +293,7 @@ fn microsoft_signed(file: &OwnedHandle, path: &str) -> Result<bool, String> {
     let status =
         unsafe { WinVerifyTrust(no_ui, &raw mut action, (&raw mut data).cast::<c_void>()) };
     let verdict = if status == 0 {
-        microsoft_root(data.hWVTStateData)
+        verdict(data.hWVTStateData)
     } else {
         let status = status.cast_unsigned();
         Err(format!(
@@ -306,7 +308,7 @@ fn microsoft_signed(file: &OwnedHandle, path: &str) -> Result<bool, String> {
 
 /// Whether the first signer's chain in `state` passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`
 /// (no flags: Microsoft's product roots, never the test root or an application root).
-fn microsoft_root(state: HANDLE) -> Result<bool, String> {
+fn verdict(state: HANDLE) -> Result<Signature, String> {
     let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     // SAFETY: `state` is WinVerifyTrust's live state, closed by the caller after this returns;
     // each pointer is checked for null before it is used and is owned by that state.
@@ -344,7 +346,61 @@ fn microsoft_root(state: HANDLE) -> Result<bool, String> {
     if !checked.as_bool() {
         return Err(format!("{PACKAGE_MSI}'s chain policy couldn't be checked"));
     }
-    Ok(status.dwError == 0)
+    // SAFETY: `chain` is live, as above.
+    let code_signing = unsafe { leaf_code_signing(chain) }?;
+    Ok(Signature {
+        microsoft_root: status.dwError == 0,
+        code_signing,
+    })
+}
+
+/// Whether the leaf certificate of `chain`'s first simple chain lists the code-signing EKU
+/// (`szOID_PKIX_KP_CODE_SIGNING`). One with no EKU extension (valid for every use) doesn't.
+///
+/// # Safety
+///
+/// `chain` must be a live chain context.
+unsafe fn leaf_code_signing(chain: *const CERT_CHAIN_CONTEXT) -> Result<bool, String> {
+    let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
+    // SAFETY: the caller's chain is live; each count is checked before its array is read.
+    let leaf = unsafe {
+        if (*chain).cChain == 0 {
+            return Err(none());
+        }
+        let simple = *(*chain).rgpChain;
+        if simple.is_null() || (*simple).cElement == 0 {
+            return Err(none());
+        }
+        let element = *(*simple).rgpElement;
+        if element.is_null() {
+            return Err(none());
+        }
+        (*element).pCertContext
+    };
+    if leaf.is_null() {
+        return Err(none());
+    }
+    let mut size = 0u32;
+    // SAFETY: a live certificate; a size query first, with no buffer.
+    unsafe { CertGetEnhancedKeyUsage(leaf, 0, None, &raw mut size) }.map_err(|_failed| none())?;
+    let len = usize::try_from(size).map_err(|_too_big| none())?;
+    let words = len.div_ceil(size_of::<usize>()).max(1);
+    // A `usize` buffer, so the `CTL_USAGE` the call writes at its start is aligned.
+    let mut buffer = vec![0usize; words];
+    let usage = buffer.as_mut_ptr().cast::<CTL_USAGE>();
+    // SAFETY: `buffer` holds at least `size` bytes, aligned for `CTL_USAGE`.
+    unsafe { CertGetEnhancedKeyUsage(leaf, 0, Some(usage), &raw mut size) }
+        .map_err(|_failed| none())?;
+    // SAFETY: the call filled `usage` and the identifiers it points to, inside `buffer`.
+    let found = unsafe {
+        let count = usize::try_from((*usage).cUsageIdentifier).unwrap_or(0);
+        let ids = (*usage).rgpszUsageIdentifier;
+        (0..count).any(|at| {
+            let id = *ids.add(at);
+            !id.is_null() && id.as_bytes() == szOID_PKIX_KP_CODE_SIGNING.as_bytes()
+        })
+    };
+    Ok(found)
 }
 
 /// An error's Win32 code.

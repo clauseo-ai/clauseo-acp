@@ -2265,7 +2265,8 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   revocation not checked and URL retrieval cache-only, so an offline machine verifies as an
   online one does, and the signer's chain must pass
   `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
-  Microsoft's own roots, so a root added to the machine's store can't stand in for one. The
+  Microsoft's own roots, so a root added to the machine's store can't stand in for one; and the
+  leaf certificate must list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The
   handle stays open, shared for reading only, and the two folders without delete sharing, until
   msiexec has ended, so nothing is swapped between the checks and the install; msiexec gets the
   path that was opened. A failed check is a failed upgrade (its reason names no path): the run still re-applies
