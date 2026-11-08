@@ -188,7 +188,19 @@ impl Writer {
         self.credential_link_metadata(&p);
         self.read_only_state(&p);
         self.browser_sockets(policy);
+        self.git_set_aside(policy);
         self.network(policy);
+    }
+
+    /// The git watch's set-aside folder, last of the file rules: inside a hidden path already
+    /// (the policy checked), denied again so no later allow can reach it.
+    fn git_set_aside(&mut self, policy: &Policy) {
+        let Some(dir) = policy.git_set_aside() else {
+            return;
+        };
+        self.note("\n; The git watch's set-aside folder: never the agent's, whatever came above.");
+        let dir = subpath(&self.param("GIT_SET_ASIDE", dir));
+        self.rule("deny", "file-read* file-write*", &[dir]);
     }
 
     /// The policy's allows, before any of its denies.

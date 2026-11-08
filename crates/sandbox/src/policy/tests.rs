@@ -5,6 +5,7 @@ mod allowed;
 mod links;
 mod nested;
 mod reallowed;
+mod set_aside;
 mod tmpdir;
 mod unicode;
 

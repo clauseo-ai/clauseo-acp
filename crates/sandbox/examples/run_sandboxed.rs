@@ -3,11 +3,14 @@
 //!
 //! ```text
 //! cargo run -p clauseo-sandbox --example run_sandboxed -- --matter <dir> --state <dir>
-//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>]
-//!     [--loopback <port>]... [--browser-sockets] [--env K=V]... [--env-file <p>]
-//!     [--stdin] [--print-spec] -- <cmd> [args]
+//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--git-set-aside <p>]
+//!     [--proxy-port <n>] [--loopback <port>]... [--browser-sockets] [--env K=V]...
+//!     [--env-file <p>] [--stdin] [--print-spec] -- <cmd> [args]
 //! ```
 //!
+//! `--git-set-aside <p>` is where the git watch sets aside what the command leaves in the matter
+//! for git to trust (decision record 0038); it must be inside a hidden path, and defaults to
+//! `<first --hidden>/sandbox/git-set-aside`. Without either the launch is refused.
 //! `cmd` is an absolute path and runs in the matter with stdin closed; its stdout and stderr come
 //! through. `--env K=V` (repeatable) adds one variable to `cmd`'s environment; a later `K` wins.
 //! `--env-file <path>` (once) reads one `K=V` per line from a file only its owner can read, and
@@ -90,6 +93,7 @@ mod jail {
         runtime: Vec<PathBuf>,
         read: Vec<PathBuf>,
         hidden: Vec<PathBuf>,
+        git_set_aside: Option<PathBuf>,
         proxy_port: Option<u16>,
         loopback: Vec<u16>,
         browser_sockets: bool,
@@ -101,7 +105,7 @@ mod jail {
     }
 
     const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> [--runtime <p>]... \
-                         [--read <p>]... [--hidden <p>]... [--proxy-port <n>] \
+                         [--read <p>]... [--hidden <p>]... [--git-set-aside <p>] [--proxy-port <n>] \
                          [--loopback <port>]... [--browser-sockets] [--env K=V]... \
                          [--env-file <p>] [--stdin] [--print-spec] -- <cmd> [args]";
 
@@ -190,6 +194,7 @@ mod jail {
                 "--runtime" => args.runtime.push(value("--runtime")?),
                 "--read" => args.read.push(value("--read")?),
                 "--hidden" => args.hidden.push(value("--hidden")?),
+                "--git-set-aside" => args.git_set_aside = Some(value("--git-set-aside")?),
                 "--proxy-port" => {
                     let port = value("--proxy-port")?;
                     let port = port.to_string_lossy();
@@ -283,6 +288,13 @@ mod jail {
         }
         for p in args.read {
             builder = builder.read(p);
+        }
+        let set_aside = args.git_set_aside.or_else(|| {
+            let first = args.hidden.first()?;
+            Some(first.join("sandbox").join("git-set-aside"))
+        });
+        if let Some(dir) = set_aside {
+            builder = builder.git_set_aside(dir);
         }
         for p in args.hidden {
             builder = builder.hidden(p);

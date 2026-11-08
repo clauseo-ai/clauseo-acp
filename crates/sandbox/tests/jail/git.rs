@@ -3,6 +3,9 @@
 //! in the matter: one the agent made would be the lawyer's, run by the lawyer's git.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use clauseo_sandbox::{Denial, GitItem};
 
 use crate::support::{World, git, git_outside, launcher, run_outside, sh, tree};
 
@@ -117,11 +120,11 @@ fn no_git_can_be_made_or_renamed_onto_anywhere_in_the_matter() {
     .assert_ok();
 }
 
-/// The known gap (0038): the name rule sees only the rename's destination, so a folder that
-/// already holds a `.git`, made outside the matter, can be moved in. The follow-up (a scan on the
-/// lawyer's side) flips this test.
+/// The name rule sees only the rename's destination, so a folder that already holds a `.git`,
+/// made outside the matter, can be moved in; the lawyer-side git watch (0038) sets it aside, with
+/// its record, and the launch's sink hears of it.
 #[test]
-fn a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule() {
+fn a_folder_holding_a_git_moved_in_ends_set_aside() {
     let w = World::new();
     w.dir("data/run/s1/tmp");
     let m1 = w.at("m1");
@@ -133,7 +136,7 @@ fn a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule() {
         .unwrap();
     let home = policy.state().to_string_lossy().into_owned();
     let foo = policy.tmpdir().join("foo").to_string_lossy().into_owned();
-    let (launcher, _) = launcher(policy);
+    let (launcher, denials) = launcher(policy);
     git(
         &launcher,
         &["init", "-q", &foo],
@@ -142,7 +145,23 @@ fn a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule() {
     )
     .assert_ok();
     sh(&launcher, &m1, r#"mv "$1" foo"#, &[&foo]).assert_ok();
-    assert!(m1.join("foo/.git/HEAD").is_file());
+    let notice = loop {
+        match denials.recv_timeout(Duration::from_secs(3)) {
+            Ok(Denial::GitSetAside { path, what, .. }) => break (path, what),
+            Ok(_) => {}
+            Err(error) => panic!("no set-aside within 3 s: {error}"),
+        }
+    };
+    assert_eq!(notice, (PathBuf::from("foo/.git"), GitItem::DotGit));
+    assert!(m1.join("foo").is_dir() && !m1.join("foo/.git").exists());
+    let set_aside = w.at("data/sandbox/git-set-aside");
+    let folders: Vec<PathBuf> = std::fs::read_dir(&set_aside)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.join("record.json").is_file())
+        .collect();
+    assert_eq!(folders.len(), 1, "{folders:?}");
+    assert!(folders[0].join("item/HEAD").is_file());
 }
 
 /// A bare repository needs no `.git` name: `HEAD`, `objects/` and `refs/` make one. No `HEAD`

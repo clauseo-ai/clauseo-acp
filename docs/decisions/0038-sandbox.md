@@ -93,12 +93,56 @@ macOS and in the Windows ACL plan (a whole-tree DenyWrite). The cost: a folder w
 named `HEAD` (rare in a matter) is read-only to the agent, and a matter whose root holds one is
 read-only entirely.
 
-What the name rules cannot see, covered by the lawyer-side watch (a follow-up): a folder that
-already holds a `.git` or a bare layout, made in `TMPDIR`, the state or notes folder, and moved
-into the matter (checked on this Mac, kept as the jail test
-`a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule`); a directory clonefile
-(`cp -c -R`) of such a folder into the matter; a symbolic link in the matter to a `.git` outside
-it.
+**The git watch** (`src/macos/git_watch`, the lawyer-side backstop). A name rule sees only the
+last name of a create or a rename's destination, so it can't stop what arrives under another
+name: a folder already holding a `.git` or a bare layout, made in `TMPDIR`, the state or notes
+folder (writable, same volume), and moved into the matter (`git init $TMPDIR/foo && mv
+$TMPDIR/foo <matter>/foo`, checked on this Mac); a directory clonefile (`cp -c -R`) of one; a
+symbolic link in the matter to a repository outside it. On an HFS+ matter volume the regexes
+can't cover every spelling either. So each jailed launch starts a watch on the matter, outside
+the jail, before the agent, and it runs until the agent's process tree is gone. It sets aside:
+
+- a new `.git` (folder, or file naming a `gitdir:`);
+- a new repository-shaped folder (`HEAD`, a file or a link, with `objects` and `refs` folders
+  or a `commondir` file), whole; in a folder that existed at launch, only its `HEAD`;
+- a new `HEAD` file or link, or its folder when that is new and repository-shaped;
+- a new symbolic link whose target resolves outside the matter, or doesn't resolve; one leading
+  inside the matter stays.
+
+Names compare with the HFS+ ignorables stripped, then by the policy's fold. What was there at
+launch stays while it keeps its file ID: the walk's `.git`s and outbound links, and the bare
+repositories and folders of the watch's own walk at its start (one more walk of the matter per
+launch, before the agent runs). How it watches: `FSEvents` on the matter (file events, no defer,
+0.1 s latency, a minimal binding to CoreServices; the workspace has no FSEvents crate). A created,
+renamed-in or cloned folder is scanned whole; a dropped or must-scan event, or a changed root,
+rescans the matter; a stream that can't start falls back to a full scan every 2 s, logged; and a
+full scan runs once the tree is gone. Scans never follow a link, never enter a `.git`, and skip
+any folder whose `statfs` lacks `MNT_LOCAL` (no network volumes; to become the shared
+`network_paths` rules once #766 lands).
+
+Each item moves by one `rename(2)` that never replaces into
+`<data_dir>/sandbox/git-set-aside/<UTC time>-<session>-<n>/item`, beside a `record.json` (the
+original path, what it was, the time, the session, how it moved). The folder is
+`PolicyBuilder::git_set_aside`: `build()` refuses one outside every hidden path or meeting the
+matter or any path allowed again, and the profile denies it with `file-read* file-write*` as its
+last file rule, so the agent can neither read nor write it. A launch is refused when the policy
+names none, or it can't be made. Nothing is ever deleted; macOS has no restore of these items.
+
+A move that fails while the agent may run (`EXDEV`, a matter on another volume, or any other
+error) fails closed: the watch ends the session through `process`'s `TreeKill` (the group's
+SIGKILL, then the listed descendants, as the stop's kill; sent again each second, and after
+10 s the final scan runs whether or not the tree is gone), and once the tree is gone renames each such item in place to
+`<name>-set-aside-by-clauseo-<n>`, which git never reads, and records it. Two sessions on one
+matter each run their own watch; the second to reach an item finds it gone and does nothing.
+
+Each set-aside reaches the launch's sink, uncapped, as `Denial::GitSetAside { path, what,
+moved_to, session_ended }`: `notice()` is the lawyer's text ("An agent left a .git folder in
+Clients/Acme. Clauseo moved it aside because your own git tools would run code from it as
+you."), and `refusal()` the agent's ("Clauseo set aside foo/.git: an agent can't create a git
+repository inside a matter. Clone or init in your scratch folder instead."). The policy cost,
+plainly: agents can't clone or init a repository into a matter, whether by name or by moving one
+in; they work in their own scratch or state folder. A `.git` or bare repository the lawyer makes
+in the matter while a session runs is set aside too, which is accepted.
 
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than

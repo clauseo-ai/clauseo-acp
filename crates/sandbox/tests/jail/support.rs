@@ -137,6 +137,7 @@ impl World {
             .claude_store(self.at("claude"))
             .hidden(self.at("data"))
             .hidden(self.at("m2"))
+            .git_set_aside(self.at("data/sandbox/git-set-aside"))
     }
 }
 

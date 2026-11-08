@@ -8,8 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
+use clauseo_process::{
+    LaunchSpec, Launched, Launcher, SpawnOptions, TreeKill, TreeWatch, spawn_in_tree,
+};
 
+use super::git_watch::{self, Session};
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -30,6 +33,11 @@ pub(crate) type LaunchSink = CappedSink<Arc<dyn DenialSink>>;
 /// denial watcher, which starts `log stream` if it is the first; dropping the launcher
 /// unregisters it, and the last one stops the watcher. So the host keeps the launcher alive
 /// while its agent runs: denials of an agent whose launcher is gone are not reported.
+///
+/// Each launch starts the git watch on the matter before the agent, and it runs until the
+/// agent's tree is gone, whatever happens to the launcher (decision record 0038). A launch is
+/// refused when the policy names no [`git_set_aside`](crate::PolicyBuilder::git_set_aside)
+/// folder or that folder can't be made.
 pub struct SeatbeltLauncher {
     policy: Arc<Policy>,
     profile: SeatbeltProfile,
@@ -37,6 +45,8 @@ pub struct SeatbeltLauncher {
     opts: SpawnOptions,
     sink: Arc<LaunchSink>,
     registration: Mutex<Option<Registration>>,
+    /// Numbers this launcher's launches, for the git watch's session ids.
+    launches: AtomicU64,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -68,6 +78,7 @@ impl SeatbeltLauncher {
             opts: opts.clear_env(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
+            launches: AtomicU64::new(0),
         }
     }
 
@@ -132,7 +143,38 @@ impl Launcher for SeatbeltLauncher {
             source,
         })?;
         self.register();
-        spawn_in_tree(&jailed, &self.opts)
+        let n = self.launches.fetch_add(1, Ordering::Relaxed);
+        let notices = Arc::clone(self.sink.inner());
+        let watching = git_watch::start(&self.policy, format!("{}-{n}", self.tag), notices)
+            .map_err(|source| clauseo_process::Error::Os {
+                what: "the git watch could not start",
+                source,
+            })?;
+        let launched = spawn_in_tree(&jailed, &self.opts)?;
+        watching.attach(Box::new(Tree {
+            watch: launched.handle.tree_watch(),
+            kill: launched.handle.tree_kill(),
+        }));
+        Ok(launched)
+    }
+}
+
+/// The jailed tree, for the git watch: it ends with the tree, and ends the tree when a `.git`
+/// can't leave the matter.
+struct Tree {
+    watch: TreeWatch,
+    kill: TreeKill,
+}
+
+impl Session for Tree {
+    fn gone(&self) -> bool {
+        self.watch.gone()
+    }
+
+    fn end(&self) {
+        if !self.kill.kill() {
+            tracing::error!("the jailed tree's kill did not go");
+        }
     }
 }
 

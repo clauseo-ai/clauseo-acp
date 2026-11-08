@@ -14,6 +14,8 @@ mod store;
 pub use links::LINK_RULES_MAX;
 pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
+#[cfg(target_os = "macos")]
+pub(crate) use names::{name_key, path_key};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
 };
@@ -145,6 +147,7 @@ pub struct Policy {
     link_targets: Vec<PathBuf>,
     link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
+    git_set_aside: Option<PathBuf>,
 }
 
 /// The policy's inputs, as given. [`PolicyBuilder::build`] checks and canonicalises them.
@@ -169,6 +172,7 @@ pub struct PolicyBuilder {
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     scan: Option<MatterScan>,
+    git_set_aside: Option<PathBuf>,
 }
 
 impl Policy {
@@ -254,6 +258,12 @@ impl Policy {
     /// runtime and read paths are allowed again after them; allowed folders are not.
     pub fn hidden(&self) -> &[PathBuf] {
         &self.hidden
+    }
+
+    /// The folder the macOS git watch sets aside into ([`PolicyBuilder::git_set_aside`]),
+    /// denied whole by the profile.
+    pub fn git_set_aside(&self) -> Option<&Path> {
+        self.git_set_aside.as_deref()
     }
 
     /// The loopback ports the agent may connect out to (the proxy's listeners, the connector
@@ -520,6 +530,15 @@ impl PolicyBuilder {
         self
     }
 
+    /// Where the macOS git watch sets aside a `.git` an agent left in the matter:
+    /// `<data_dir>/sandbox/git-set-aside` (decision record 0038). It need not exist; it must be
+    /// inside a hidden path and apart from every path the agent reaches. The macOS launcher
+    /// refuses to launch without it.
+    pub fn git_set_aside(mut self, dir: impl Into<PathBuf>) -> PolicyBuilder {
+        self.git_set_aside = Some(dir.into());
+        self
+    }
+
     /// The home folder the refusals compare with; `std::env::home_dir()` unless set. Tests
     /// set it so the "home folder" refusal runs without the real one.
     pub fn home(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
@@ -559,6 +578,8 @@ impl PolicyBuilder {
     ///   findings give way to [`Policy::link_folders`], nearest folder first, never the matter
     ///   root or a folder holding a `.git`; if that cannot fit, the build is refused with the
     ///   count. Seatbelt fails to compile a profile with a few thousand such rules.
+    /// - The git set-aside folder must be inside a hidden path and may not hold or sit inside
+    ///   the matter or any path allowed again.
     /// - Proxy ports and [`Loopback::Ports`] are sorted and de-duplicated.
     pub fn build(self) -> Result<Policy, Error> {
         build::build(self)

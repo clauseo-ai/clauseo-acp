@@ -135,7 +135,7 @@ mod run;
 #[cfg(any(windows, test))]
 mod scan;
 #[cfg(any(windows, test))]
-mod time;
+use crate::utc as time;
 
 /// Why an item was set aside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -68,6 +68,87 @@ pub enum Denial {
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
     },
+    /// The macOS git watch set aside something an agent left in the matter while a session ran
+    /// that the lawyer's own git tools, or an editor's, would trust: a `.git`, a bare
+    /// repository's folder or `HEAD`, or a link leading out of the matter (decision record
+    /// 0038). git would run its hooks and `core.fsmonitor` as the lawyer. [`Denial::notice`]
+    /// is the lawyer's text. Never rate-capped.
+    GitSetAside {
+        /// Its path, relative to the matter's root.
+        path: PathBuf,
+        /// What it was.
+        what: GitItem,
+        /// Where it is now: in Clauseo's set-aside folder, or, when it could not move there,
+        /// its new name in place (`<name>-set-aside-by-clauseo-<n>`). `None` when even that
+        /// rename failed.
+        moved_to: Option<PathBuf>,
+        /// The move out of the matter failed while the agent ran, so the session was ended
+        /// first (fail-closed).
+        session_ended: bool,
+    },
+}
+
+/// What the git watch set aside ([`Denial::GitSetAside`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitItem {
+    /// A `.git` folder, or a `.git` file naming a `gitdir:`.
+    DotGit,
+    /// A new folder laid out as a bare repository: `HEAD`, `objects` and `refs`.
+    BareRepo,
+    /// The `HEAD` file that made a folder that already existed a repository.
+    BareRepoHead,
+    /// A link whose target is outside the matter, or can't be found.
+    OutsideLink,
+}
+
+impl Denial {
+    /// The agent's refusal line, for the denials that carry one: [`Denial::GitSetAside`], so
+    /// the agent can work elsewhere.
+    pub fn refusal(&self) -> Option<String> {
+        let Denial::GitSetAside { path, what, .. } = self else {
+            return None;
+        };
+        let path = path.display();
+        Some(match what {
+            GitItem::DotGit | GitItem::BareRepo | GitItem::BareRepoHead => format!(
+                "Clauseo set aside {path}: an agent can't create a git repository inside a \
+                 matter. Clone or init in your scratch folder instead."
+            ),
+            GitItem::OutsideLink => format!(
+                "Clauseo set aside {path}: an agent can't leave a link inside a matter that \
+                 leads outside it. Work on the files in your scratch folder instead."
+            ),
+        })
+    }
+
+    /// The lawyer's notice, for the denials that carry one: [`Denial::GitSetAside`].
+    pub fn notice(&self) -> Option<String> {
+        let Denial::GitSetAside { path, what, .. } = self else {
+            return None;
+        };
+        let place = match path.parent() {
+            Some(folder) if !folder.as_os_str().is_empty() => folder.display().to_string(),
+            _ => "the matter's top folder".to_owned(),
+        };
+        let why = "because your own git tools would run code from it as you.";
+        Some(match what {
+            GitItem::DotGit => {
+                format!("An agent left a .git folder in {place}. Clauseo moved it aside {why}")
+            }
+            GitItem::BareRepo => format!(
+                "An agent left a git repository folder in {place}. Clauseo moved it aside {why}"
+            ),
+            GitItem::BareRepoHead => format!(
+                "An agent turned {place} into a git repository. Clauseo moved its HEAD file \
+                 aside {why}"
+            ),
+            GitItem::OutsideLink => format!(
+                "An agent left a link in {place} that leads outside the matter. Clauseo moved it \
+                 aside because your own git tools could follow it and run code as you."
+            ),
+        })
+    }
 }
 
 /// The kind of file access refused.
