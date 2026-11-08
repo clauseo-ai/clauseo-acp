@@ -5,7 +5,10 @@
 // repair is the installer (design B, blocked.ts's needsInstaller), the notice says so and asks IT
 // to install Clauseo again: a firm install's repair, with no button. A full pool says R17 PR-E's
 // sandbox.pool_full words; a build without the Safe workspace says it comes in an update
-// (not_built); every other cause says sandbox.required's (required-words.ts), then a block's own line.
+// (not_built); every other cause says sandbox.required's (required-words.ts), then a block's own
+// line. Where only the firm can act (a firm-only block, a computer that can't provide it, a
+// sandbox.blocked refusal), "Copy details for IT" follows (it-details.ts).
+import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
@@ -16,6 +19,7 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
 import { blockLine, needsInstaller, repairLine } from "./blocked.ts";
 import { retryProtection } from "./commands.ts";
+import { itDetails } from "./it-details.ts";
 import { requiredFixable, requiredWords } from "./required-words.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
 
@@ -40,6 +44,9 @@ export function RequiredNotice({
   const block = repair ? null : blockLine(lang, cause);
   const waiting = fixable ? waitingWords(lang, state, cause) : null;
   const failed = fixable ? failedWords(lang, state) : null;
+  const forIt =
+    itDetails.required(lang, cause) ??
+    (fixable ? itDetails.refused(lang, state.failed, cause) : null);
   return (
     <div
       className="room-required"
@@ -70,6 +77,7 @@ export function RequiredNotice({
           <Say>{failed}</Say>
         </p>
       )}
+      {forIt !== null && <CopyForIt lang={lang} text={forIt} testId="protection-it" />}
       {confirm}
     </div>
   );

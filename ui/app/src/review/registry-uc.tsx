@@ -35,7 +35,7 @@ import {
 const CLAUDE: AgentId = "claude-acp";
 const THREAD = "00000000-0000-4000-8000-0000000000c1";
 const np = (cause: unknown): Protection => ({ not_protected: { cause } }) as Protection;
-const P = {
+export const P = {
   b: { protected: { tier: "b" } } as Protection,
   a: { protected: { tier: "a" } } as Protection,
   needs: np("needs_set_up"),
@@ -66,7 +66,10 @@ const viewOf = (computer: Protection, over: Partial<ProtectionView> = {}): Prote
 });
 
 /** A protection host whose commands never answer, so a wait stays in view. */
-const held = (computer: Protection, over: Partial<ProtectionView> = {}): FakeProtectionHost => ({
+export const held = (
+  computer: Protection,
+  over: Partial<ProtectionView> = {},
+): FakeProtectionHost => ({
   view: () => viewOf(computer, over),
   command: () => new Promise<void>(() => {}),
 });
@@ -78,7 +81,7 @@ const quiet = () =>
     JSON.stringify({ computer: true, matters: [MATTER.matter] }),
   );
 
-type RoomScene = {
+export type RoomScene = {
   protection: Protection;
   computer?: Protection;
   over?: Partial<ProtectionView>;
@@ -108,10 +111,10 @@ const roomHost = (s: RoomScene) => () => {
 const pressing = (press: string[] | undefined, children: React.ReactNode) =>
   press === undefined ? children : <PressInOrder press={press}>{children}</PressInOrder>;
 
-const LINE = '[data-testid="workspace-line"]';
+export const LINE = '[data-testid="workspace-line"]';
 const SETUP = '[data-testid="protection-setup"]';
 
-const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
+export const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
   id,
   words,
   screen,
@@ -159,7 +162,7 @@ const first = (
 });
 
 /** The settings window at the Safe workspace. */
-const settings = (
+export const settings = (
   id: string,
   key: SettingsKey | WordsRef,
   protection: FakeProtectionHost,
@@ -176,7 +179,7 @@ const settings = (
 
 const pw = (key: ProtectionKey) => protectionWords(key);
 const fw = (key: FirstLaunchKey) => firstLaunchWords(key);
-const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
+export const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
 const REFUSED_INVALID: FakeProtectionHost = {
   view: () => {
     throw { code: "command.invalid", message: "not admitted yet", retryable: false };

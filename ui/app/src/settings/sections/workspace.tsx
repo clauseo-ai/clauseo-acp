@@ -6,10 +6,13 @@
 // block says its reason's line (blocked.ts); where the repair is the installer, its line stands in
 // the button's place, with "Get the installer" on a personal install (installer.ts). The waiting
 // line stands in the button's place while a command runs, and a refusal's words under the block.
+// A block only the firm can act on, or a sandbox.blocked refusal, adds "Copy details for IT"
+// (it-details.ts) under them.
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
 // command and on each protection_changed.
+import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
@@ -33,6 +36,7 @@ import {
   setUpFixes,
 } from "../../room/protection/blocked.ts";
 import { openInstallerPage, repairPage } from "../../room/protection/installer.ts";
+import { itDetails } from "../../room/protection/it-details.ts";
 import type { SectionContext } from "../sections.tsx";
 import { Managed } from "./parts.tsx";
 import { removeSetUp, setUpAgain } from "./workspace-commands.ts";
@@ -147,6 +151,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
   const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
   const block = blockLine(lang, cause);
   const failed = failedWords(lang, state);
+  const forIt = itDetails.blocked(lang, cause) ?? itDetails.refused(lang, state.failed, cause);
   const act = repair ? (
     page === null ? null : (
       <Button
@@ -237,6 +242,11 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
         <p className="set-ws-failed" role="status" data-testid="protection-failed">
           {w.say(failed)}
         </p>
+      )}
+      {forIt !== null && (
+        <div className="mt-s2">
+          <CopyForIt lang={lang} text={forIt} testId="protection-it" />
+        </div>
       )}
       {off && view.required && (
         <p className="set-note" data-testid="protection-required">

@@ -27,6 +27,16 @@ export const HI = {
   "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
   "Copy details for IT": "IT के लिए विवरण कॉपी करें",
   "Message copied": "संदेश कॉपी हो गया",
+  // the facts in a note for IT (words-first-launch.ts's itNote), each "key: value" (new,
+  // provisional)
+  "Code: {code}": "कोड: {code}",
+  "Reason: {reason}": "कारण: {reason}",
+  "Site: {site}": "वेबसाइट: {site}",
+  "Addresses: {list}": "पते: {list}",
+  "Program: {path}": "प्रोग्राम: {path}",
+  "Program hash: {hash}": "प्रोग्राम का हैश: {hash}",
+  "Clauseo version: {version}": "Clauseo संस्करण: {version}",
+  "Clauseo for firm IT: {url}": "फ़र्म IT के लिए Clauseo: {url}",
   "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
     "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
   "{name} needs {need} MB free on this computer, and {free} MB is free.":

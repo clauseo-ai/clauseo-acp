@@ -439,6 +439,7 @@ test.each([
     ),
   );
   expect(one("protection-block")?.textContent).toBe(line);
+  expect(one("protection-it")?.textContent).toBe("Copy details for IT");
   expect(one("protection-repair")).toBeNull();
   expect(one("protection-installer")).toBeNull();
   expect(one("protection-setup")).toBeNull();
@@ -471,6 +472,27 @@ test.each([
     expect(t.protectionCommands()).toEqual(["retry_protection"]);
   },
 );
+
+test("a firm-only block offers Copy details for IT: its reason and version, never a matter's path; stage C's don't", async () => {
+  const path = "C:\\Users\\asha\\Matters\\Sharma v. State of Delhi";
+  const writeText = vi.fn(async (_text: string) => {});
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  await mount({ view: () => view(np({ blocked: { reason: "policy", path } })) });
+  await press(one("protection-it"));
+  expect(writeText).toHaveBeenCalledWith(
+    `Clauseo's Safe workspace is blocked on this computer.\nReason: policy\nClauseo version: ${APP_VERSION}\nClauseo for firm IT: https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/firm-it.md#sandbox-policy`,
+  );
+  expect(writeText.mock.calls[0]![0]).not.toContain(path);
+  expect(one("protection-it")?.textContent).toBe("Message copied");
+  Reflect.deleteProperty(navigator, "clipboard");
+  for (const reason of ["tool_missing", "admin_copy_changed", "admin_copy_unsafe"]) {
+    await act(async () => root?.unmount());
+    store?.dispose();
+    document.body.replaceChildren();
+    await mount({ view: () => view(np({ blocked: { reason } })) });
+    expect(one("protection-it")).toBeNull();
+  }
+});
 
 test("#protection opens the Safe workspace, the name the wire gives it", async () => {
   await mount({ view: () => view(PROT.a) }, "mac", "#protection");

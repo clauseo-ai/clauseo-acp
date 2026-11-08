@@ -103,4 +103,10 @@ export const HI = {
   // sandbox.blocked, a command's refusal (not in ErrorCode on this base; #639 adds it)
   "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.":
     "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+  // the lead line of a note for IT ("Copy details for IT", room/protection/it-details.ts): a block,
+  // or the firm's requirement this computer can't meet (new, provisional)
+  "Clauseo's Safe workspace is blocked on this computer.":
+    "इस कंप्यूटर पर Clauseo का सुरक्षित कार्यक्षेत्र अवरुद्ध है।",
+  "The firm requires Clauseo's Safe workspace, and this computer can't provide it.":
+    "फ़र्म Clauseo का सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता।",
 } as const;

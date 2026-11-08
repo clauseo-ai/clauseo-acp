@@ -19,6 +19,7 @@ import { IconNotProtected } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
 import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
+import { CopyForIt } from "./copy-for-it.tsx";
 import { Say } from "./say.tsx";
 
 /** Why the matter is not protected, as the note says it. "setup" is the older name of "set_up_refused". */
@@ -53,6 +54,7 @@ export function NotProtectedNote({
   waiting = null,
   failed = null,
   extra = [],
+  forIt = null,
   onClose,
   onProtect,
   onGetInstaller,
@@ -77,6 +79,9 @@ export function NotProtectedNote({
   /** Optional: lines after the cause's body, in the page's language (design B: the block's reason,
    * the repair). */
   extra?: string[];
+  /** Optional: the note for IT on a line only the firm can act on; "Copy details for IT" shows
+   * beside the close (copy-for-it.tsx). */
+  forIt?: string | null;
   onClose: () => void;
   /** The retry: set protection up, try again, or add room. Without it, no retry shows. */
   onProtect?: (() => void) | undefined;
@@ -256,6 +261,9 @@ export function NotProtectedNote({
                   <span className="deva-nudge">{retry}</span>
                 </Button>
               ))}
+            {forIt !== null && (
+              <CopyForIt lang={w.lang} text={forIt} size="default" testId="protection-it" />
+            )}
             <AlertDialogClose render={<Button kind="primary" />}>
               <span className="deva-nudge">{w.v("Understood")}</span>
             </AlertDialogClose>
