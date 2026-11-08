@@ -140,6 +140,11 @@ mod pins;
 mod platform;
 mod python;
 mod receipt;
+#[cfg_attr(
+    not(any(windows, test, feature = "test-support")),
+    expect(dead_code, reason = "only Windows and tests settle Codex's rg.exe")
+)]
+mod sac;
 mod signin;
 mod snapshot;
 mod state;
@@ -163,6 +168,9 @@ pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use python::{python_command_dir, python_contents_match, python_path_dirs};
 pub use receipt::{install_folder, install_root, script_path};
+#[cfg(feature = "test-support")]
+pub use sac::SacForTests;
+pub use sac::SacState;
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,

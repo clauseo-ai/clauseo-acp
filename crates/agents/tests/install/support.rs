@@ -51,6 +51,11 @@ pub(crate) fn agent_b() -> AgentId {
     AgentId::new("agent-b").unwrap()
 }
 
+/// `dep-a`'s stand-in for Codex's bundled ripgrep, below the package folder.
+pub(crate) const SAC_RG: &str = "vendor/x86_64-pc-windows-msvc/codex-path/rg.exe";
+/// Its bytes.
+pub(crate) const FAKE_RG: &[u8] = b"a stand-in for codex's rg.exe\n";
+
 /// The registry path of package `name`'s tarball.
 pub(crate) fn tarball_path(name: &str) -> String {
     format!("/{name}/-/{name}-1.0.0.tgz")
@@ -98,6 +103,9 @@ pub(crate) fn tarballs() -> BTreeMap<&'static str, Vec<u8>> {
     for name in A_PACKAGES.into_iter().chain(B_PACKAGES) {
         let files: Vec<(&str, &[u8])> = if name.starts_with("adapter-") {
             vec![("dist/index.js", script)]
+        } else if name == "dep-a" {
+            // Codex's Windows layout, for the Smart App Control tests (`sac.rs`).
+            vec![("index.js", b"module.exports = 1;\n"), (SAC_RG, FAKE_RG)]
         } else {
             vec![("index.js", b"module.exports = 1;\n")]
         };

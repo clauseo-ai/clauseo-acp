@@ -40,6 +40,10 @@ pub struct AgentsConfig {
     /// the field does not exist.
     #[cfg(feature = "test-support")]
     pub ready_for_tests: BTreeMap<AgentId, crate::state::Installed>,
+    /// Tests only: Smart App Control's state and Codex's layouts, used instead of the registry
+    /// and the pinned layouts, on any OS (`sac`). Outside `test-support` the field does not exist.
+    #[cfg(feature = "test-support")]
+    pub sac_for_tests: Option<crate::sac::SacForTests>,
 }
 
 impl AgentsConfig {
@@ -58,6 +62,8 @@ impl AgentsConfig {
             clock: Arc::new(SystemClock),
             #[cfg(feature = "test-support")]
             ready_for_tests: BTreeMap::new(),
+            #[cfg(feature = "test-support")]
+            sac_for_tests: None,
         }
     }
 }
