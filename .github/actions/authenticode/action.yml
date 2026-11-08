@@ -1,0 +1,143 @@
+# Authenticode-signs, in place, every PE file in one flat folder: release.yml's sign-windows runs it
+# three times per Windows leg (S20a, docs/decisions/0035-release-builds.md). Only when signing is on
+# (check's output `signing`): never with it off, so a build without it is the same as before.
+#
+# - backend "signpath": the folder goes up as a workflow artifact, SignPath's GitHub action submits
+#   it (the route that gives SignPath the origin data its open-source signing requires) and waits,
+#   and the signed files it downloads replace the ones in the folder, file for file. The artifact
+#   configuration must sign every *.exe and *.dll at the zip's root (upload-artifact zips the
+#   folder's contents).
+# - backend "selfsigned": a dry run's plumbing proof (release.yml's input sign_test_selfsigned).
+#   Windows PowerShell signs each file with the throwaway certificate whose thumbprint is in
+#   CLAUSEO_SELFSIGNED_THUMBPRINT. Not trusted by anything; it shows the steps cover every file.
+# - Either way, the last step fails unless every PE file in the folder now has a signature
+#   (latest-json.mjs --unsigned).
+# - The caller has checked out the repo (this action and the script are read from it) and set up
+#   Node. SignPath's action reads the artifact with the job's token, so the job needs
+#   `actions: read`.
+
+name: Authenticode-sign a folder
+description: Signs every .exe and .dll in a flat folder in place, through SignPath or a throwaway certificate, and checks each is signed.
+
+inputs:
+  backend:
+    description: '"signpath" or "selfsigned".'
+    required: true
+  path:
+    description: The folder. Its *.exe and *.dll, at its root, are signed in place.
+    required: true
+  artifact-name:
+    description: The name of the workflow artifact SignPath signs, unique in the run (signpath only).
+    required: true
+  signpath-api-token:
+    description: The SignPath API token of a submitter (signpath only).
+    required: false
+    default: ""
+  signpath-organization-id:
+    description: SignPath organization ID (signpath only).
+    required: false
+    default: ""
+  signpath-project-slug:
+    description: SignPath project slug (signpath only).
+    required: false
+    default: ""
+  signpath-signing-policy-slug:
+    description: SignPath signing policy slug (signpath only).
+    required: false
+    default: ""
+  signpath-artifact-configuration-slug:
+    description: SignPath artifact configuration slug (signpath only).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check the backend and the folder
+      shell: bash
+      env:
+        BACKEND: ${{ inputs.backend }}
+        FOLDER: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        case "$BACKEND" in
+          signpath | selfsigned) ;;
+          *) echo "::error::authenticode: backend is \"$BACKEND\", not signpath or selfsigned"; exit 1 ;;
+        esac
+        [ -d "$FOLDER" ] || { echo "::error::authenticode: no folder $FOLDER"; exit 1; }
+        if [ -n "$(find "$FOLDER" -mindepth 2 -type f)" ]; then
+          echo "::error::authenticode: $FOLDER has subfolders; it signs a flat folder"
+          exit 1
+        fi
+        ls -l "$FOLDER"
+
+    - name: Upload the folder for SignPath
+      id: upload
+      if: inputs.backend == 'signpath'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.path }}
+        if-no-files-found: error
+        retention-days: 1
+        overwrite: true
+
+    - name: Sign it with SignPath and wait
+      if: inputs.backend == 'signpath'
+      uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+      with:
+        api-token: ${{ inputs.signpath-api-token }}
+        organization-id: ${{ inputs.signpath-organization-id }}
+        project-slug: ${{ inputs.signpath-project-slug }}
+        signing-policy-slug: ${{ inputs.signpath-signing-policy-slug }}
+        artifact-configuration-slug: ${{ inputs.signpath-artifact-configuration-slug }}
+        github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+        wait-for-completion: true
+        # Long enough for a release policy that waits for a person's approval.
+        wait-for-completion-timeout-in-seconds: 3600
+        output-artifact-directory: ${{ runner.temp }}/authenticode-signed/${{ inputs.artifact-name }}
+
+    - name: Put SignPath's files in place of the folder's
+      if: inputs.backend == 'signpath'
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.path }}
+        SIGNED: ${{ runner.temp }}/authenticode-signed/${{ inputs.artifact-name }}
+      run: |
+        set -euo pipefail
+        for file in "$FOLDER"/*; do
+          name=$(basename "$file")
+          [ -f "$SIGNED/$name" ] || { echo "::error::authenticode: SignPath returned no $name"; exit 1; }
+          cp "$SIGNED/$name" "$file"
+        done
+
+    - name: Sign it with the throwaway certificate
+      if: inputs.backend == 'selfsigned'
+      shell: powershell
+      env:
+        FOLDER: ${{ inputs.path }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $thumbprint = $env:CLAUSEO_SELFSIGNED_THUMBPRINT
+        if (-not $thumbprint) { throw 'authenticode: CLAUSEO_SELFSIGNED_THUMBPRINT is not set' }
+        $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint"
+        $files = @(Get-ChildItem -LiteralPath $env:FOLDER -File | Where-Object { $_.Extension -in '.exe', '.dll' })
+        if ($files.Count -eq 0) { throw "authenticode: no .exe or .dll in $env:FOLDER" }
+        foreach ($file in $files) {
+          $null = Set-AuthenticodeSignature -LiteralPath $file.FullName -Certificate $certificate -HashAlgorithm SHA256
+          # Untrusted by design (UnknownError for its root): what counts is that it is this certificate's.
+          $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+          if ($signature.SignerCertificate.Thumbprint -ne $thumbprint) {
+            throw "authenticode: $($file.Name) was not signed: $($signature.StatusMessage)"
+          }
+          "signed $($file.Name) ($($signature.Status))"
+        }
+
+    - name: Every PE file in the folder is signed
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_WORKSPACE/.github/scripts/latest-json.mjs" --unsigned "$FOLDER" ||
+          { echo "::error::authenticode: a PE file in $FOLDER is still unsigned (listed above)"; exit 1; }

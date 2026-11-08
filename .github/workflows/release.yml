@@ -19,6 +19,19 @@
 #   dist-assets, with latest.json and SHA256SUMS.txt.
 # Nothing else starts this workflow: never a pull request, so never a fork's.
 #
+# Windows code signing (Authenticode, S20a) is ready and off. `check` sets `signing`: `signpath`
+# for a release or a test run once the repository variable SIGNPATH_ENABLED is `true` (a release
+# with the release signing policy, a test run with the test one), `selfsigned` for a dry run started
+# with sign_test_selfsigned (a throwaway certificate, to prove the steps), else `none`. With `none`
+# no signing step runs and the installers are built exactly as before. Otherwise sign-windows signs
+# every PE the installers ship: Clauseo.exe, each sidecar, the NSIS plug-ins (signed copies, which
+# the template's `signed-plugins` block makes NSIS take) and the uninstaller (captured in a first bundle
+# of each installer, signed, and put in place in the second through the template's
+# `sign-uninstaller` block and .github/scripts/nsis-uninstaller.mjs), then both installers; every
+# updater signature is made after. assemble lists each PE without a signature, in the assets and
+# inside both installers: a notice with `none`, a failure otherwise. The variables and the secret
+# SignPath needs are in decision 0035.
+#
 # - The app's version lives in crates/desktop/Cargo.toml and tauri.conf.json (the desktop test
 #   tests/version.rs keeps them equal); a tag must name it. No version of a tool is written here:
 #   Rust comes from rust-toolchain.toml, pnpm from "packageManager", Node from "engines.node" in
@@ -58,6 +71,10 @@ on:
         description: A dry run builds everything and publishes nothing. A release starts only from a pushed tag, so false is refused.
         type: boolean
         default: true
+      sign_test_selfsigned:
+        description: Authenticode-sign this dry run's Windows files with a throwaway self-signed certificate, to prove the signing steps and the release check. Leave false for a run whose installers are for Defender tests.
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -91,6 +108,7 @@ jobs:
       environment: ${{ steps.mode.outputs.environment }}
       features: ${{ steps.mode.outputs.features }}
       release_date: ${{ steps.mode.outputs.release_date }}
+      signing: ${{ steps.mode.outputs.signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -103,6 +121,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           DRY_RUN: ${{ inputs.dry_run }}
+          SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
+          SIGN_TEST_SELFSIGNED: ${{ inputs.sign_test_selfsigned }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
@@ -182,6 +202,17 @@ jobs:
             fail "crates/desktop/release/updater-test.pub (the test key's public key) is missing"
           fi
 
+          # Authenticode for the Windows files (S20a): SignPath for a tag once SIGNPATH_ENABLED (a
+          # repository variable: check and assemble have no environment) is true, the throwaway
+          # certificate for a dry run that asks for it, else nothing. A dry run never uses SignPath.
+          signing=none
+          if [ "$mode" != dry ] && [ "$SIGNPATH_ENABLED" = true ]; then
+            signing=signpath
+          fi
+          if [ "$mode" = dry ] && [ "$SIGN_TEST_SELFSIGNED" = true ]; then
+            signing=selfsigned
+          fi
+
           {
             echo "mode=$mode"
             echo "version=$version"
@@ -189,6 +220,7 @@ jobs:
             echo "environment=$environment"
             echo "features=$features"
             echo "release_date=$release_date"
+            echo "signing=$signing"
           } | tee -a "$GITHUB_OUTPUT"
 
       # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
@@ -699,18 +731,23 @@ jobs:
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-  # The Windows exe, as built, signed (SignPath, S20a: v* only, once vars.SIGNPATH_ENABLED is
-  # true; until then it passes through), then bundled into both installers without patching the
-  # signed binary, then the currentUser installer's updater signature, last.
+  # The Windows exe, as built, Authenticode-signed when check's signing is not none (S20a: SignPath
+  # for a tag once vars.SIGNPATH_ENABLED is true, the throwaway certificate for a dry run that asks;
+  # until then it passes through), then bundled into both installers without patching the signed
+  # binary, then the installers signed, then the currentUser installer's updater signature, last.
   sign-windows:
     name: sign-windows (${{ matrix.target }})
     needs: [check, build, blocklist]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # Signing adds a bundle to fetch NSIS, a first bundle of each installer and three signing
+    # requests, which a release policy may hold for a person's approval.
+    timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 150 }}
     continue-on-error: ${{ matrix.tier == 2 }}
     environment: ${{ needs.check.outputs.environment }}
     permissions:
       contents: read
+      # SignPath's action reads the artifacts it signs with the job's token.
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -722,6 +759,7 @@ jobs:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
       FEATURES: ${{ needs.check.outputs.features }}
+      SIGNING: ${{ needs.check.outputs.signing }}
       RELEASE_DIR: target/${{ matrix.target }}/release
       OUT: ${{ github.workspace }}/release-out
     defaults:
@@ -767,13 +805,99 @@ jobs:
           name: blocklist-snapshot
           path: crates/desktop/blocklist
 
-      # S20a signs every PE the installers take: Clauseo.exe and each file in
-      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, later S15's tools), before NSIS.
-      - name: SignPath, the exe and the sidecars (S20a)
-        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
+      # ---- Authenticode (S20a): every step to "Put the signed installers back" that has an `if:`
+      # runs only when check's signing is not none ----
+      # SignPath's settings for this mode, checked before anything is built for them: the
+      # organization, the project, the artifact configuration (a zip whose *.exe and *.dll at its
+      # root it signs) and the mode's signing policy, a release's or a test run's. Variables, at
+      # the repository or on the environment; the API token is the environment's secret.
+      - name: SignPath's settings for this mode
+        if: needs.check.outputs.signing == 'signpath'
+        env:
+          ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          RELEASE_POLICY_SLUG: ${{ vars.SIGNPATH_RELEASE_POLICY_SLUG }}
+          TEST_POLICY_SLUG: ${{ vars.SIGNPATH_TEST_POLICY_SLUG }}
+          HAS_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
         run: |
-          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
-          exit 1
+          set -euo pipefail
+          case "$MODE" in
+            release) policy=$RELEASE_POLICY_SLUG name=SIGNPATH_RELEASE_POLICY_SLUG ;;
+            test) policy=$TEST_POLICY_SLUG name=SIGNPATH_TEST_POLICY_SLUG ;;
+            *) echo "::error::SignPath signs a release or a test run, not a $MODE run"; exit 1 ;;
+          esac
+          status=0
+          for pair in "SIGNPATH_ORGANIZATION_ID=$ORGANIZATION_ID" "SIGNPATH_PROJECT_SLUG=$PROJECT_SLUG" \
+            "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG=$ARTIFACT_CONFIGURATION_SLUG" "$name=$policy"; do
+            [ -n "${pair#*=}" ] || { echo "::error::SIGNPATH_ENABLED is true but the variable ${pair%%=*} is not set"; status=1; }
+          done
+          [ "$HAS_TOKEN" = true ] || { echo "::error::SIGNPATH_ENABLED is true but the secret SIGNPATH_API_TOKEN is not set for $MODE"; status=1; }
+          [ "$status" = 0 ] || exit 1
+          echo "SIGNPATH_POLICY_SLUG=$policy" >> "$GITHUB_ENV"
+          echo "SignPath: project $PROJECT_SLUG, policy $policy, artifact configuration $ARTIFACT_CONFIGURATION_SLUG"
+
+      # The dry run's plumbing proof: a certificate made here, trusted by nothing, gone with the runner.
+      - name: Make a throwaway code-signing certificate (dry run, sign_test_selfsigned)
+        if: needs.check.outputs.signing == 'selfsigned'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Clauseo dry run, not trusted' `
+            -CertStoreLocation Cert:\CurrentUser\My -KeyAlgorithm RSA -KeyLength 3072 -NotAfter (Get-Date).AddDays(2)
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CLAUSEO_SELFSIGNED_THUMBPRINT=$($certificate.Thumbprint)" -Encoding ascii
+
+      # The plug-ins NSIS packs into both installers and the uninstaller come from the bundler's
+      # NSIS toolset, which tauri bundle downloads the first time it runs: an uncompressed
+      # installer, thrown away, fetches it quickest. Copies are signed, never the toolset's own
+      # files (the bundler re-downloads a nsis_tauri_utils.dll whose hash changed), and the
+      # template's signed-plugins block adds the copies' folder after the toolset's, so NSIS takes
+      # each plug-in from it. Then the first folder to sign: the exe, each sidecar and the
+      # plug-ins, flat.
+      - name: The NSIS plug-ins, the exe and the sidecars, to sign
+        if: needs.check.outputs.signing != 'none'
+        run: |
+          set -euo pipefail
+          pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+            --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
+            --config release/windows.conf.json --config '{"bundle":{"windows":{"nsis":{"compression":"none"}}}}' \
+            --config release/sidecars.generated.json
+          rm -rf "$RELEASE_DIR/bundle/nsis"
+          toolset=$LOCALAPPDATA/tauri/NSIS
+          [ -f "$toolset/makensis.exe" ] || { echo "::error::no NSIS toolset at $toolset after the bundle"; exit 1; }
+          plugins=$RUNNER_TEMP/nsis-plugins
+          mkdir -p "$plugins"
+          cp "$toolset"/Plugins/x86-unicode/*.dll "$toolset"/Plugins/x86-unicode/additional/*.dll "$plugins/"
+          [ -f "$plugins/nsis_tauri_utils.dll" ] && [ -f "$plugins/System.dll" ] ||
+            { echo "::error::$toolset has no x86-unicode System.dll or nsis_tauri_utils.dll"; exit 1; }
+          stage=$RUNNER_TEMP/authenticode-exe
+          mkdir -p "$stage"
+          cp "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe "$plugins"/*.dll "$stage/"
+          want=$(( 1 + $(ls crates/desktop/binaries/*-"$TARGET".exe | wc -l) + $(ls "$plugins"/*.dll | wc -l) ))
+          [ "$(ls "$stage" | wc -l)" = "$want" ] || { echo "::error::two of the files to sign share a name"; exit 1; }
+
+      - name: Sign the exe, the sidecars and the NSIS plug-ins
+        if: needs.check.outputs.signing != 'none'
+        uses: ./.github/actions/authenticode
+        with:
+          backend: ${{ needs.check.outputs.signing }}
+          path: ${{ runner.temp }}/authenticode-exe
+          artifact-name: authenticode-exe-${{ matrix.target }}
+          signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
+          signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signpath-signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
+          signpath-artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+
+      - name: Put the signed exe, sidecars and plug-ins back
+        if: needs.check.outputs.signing != 'none'
+        run: |
+          set -euo pipefail
+          stage=$RUNNER_TEMP/authenticode-exe
+          cp "$stage/Clauseo.exe" "$RELEASE_DIR/Clauseo.exe"
+          for exe in crates/desktop/binaries/*-"$TARGET".exe; do cp "$stage/$(basename "$exe")" "$exe"; done
+          for dll in "$RUNNER_TEMP"/nsis-plugins/*.dll; do cp "$stage/$(basename "$dll")" "$dll"; done
+          node .github/scripts/latest-json.mjs --unsigned "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries "$RUNNER_TEMP/nsis-plugins"
 
       - name: Make a throwaway updater key (dry run)
         if: env.MODE == 'dry'
@@ -784,8 +908,11 @@ jobs:
             -w "$RUNNER_TEMP/dry-updater.key" > /dev/null
 
       # S15's sandbox tool, with the updater key the currentUser installer is signed with below,
-      # after SignPath (which changes its bytes) and before NSIS: its .sig is over the bytes that
-      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release.
+      # after Authenticode (which changes its bytes) and before NSIS: its .sig is over the bytes
+      # that ship. tauri signer writes <exe>.sig beside it, for both installers and the Release. A
+      # generated bundle.resources overlay puts that .sig beside the exe in both installers: NSIS
+      # installs resources and externalBin alike under $INSTDIR, each at its target name. A merge
+      # patch merges objects, so its entry joins blocklist.conf.json's two rather than replacing them.
       - name: Sign the sandbox tool for the updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
@@ -809,14 +936,61 @@ jobs:
           pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"
           cmp "$exe" "$dir/$SANDBOX_EXE"
           mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"
+          sig=binaries/${SANDBOX_EXE%.exe}-$TARGET.exe.sig
+          [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
+            "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
+
+      # makensis builds the uninstaller inside the installer, so it is signed in two passes. This
+      # first bundle of each installer, with the signed plug-ins, captures its uninstaller (the
+      # template's sign-uninstaller block runs CLAUSEO_UNINSTALLER_COMMAND on it) and throws the
+      # installer away; the next step signs the two captures; the installers' own bundle below,
+      # from the same inputs, puts each signed uninstaller in place of the one it builds.
+      - name: Bundle each installer once, to capture its uninstaller
+        if: needs.check.outputs.signing != 'none'
+        run: |
+          set -euo pipefail
+          nsis=$RELEASE_DIR/bundle/nsis
+          export CLAUSEO_SIGNED_PLUGINS=1 CLAUSEO_SIGNED_PLUGINS_DIR="$RUNNER_TEMP/nsis-plugins" CLAUSEO_SIGN_UNINSTALLER=1
+          script=$GITHUB_WORKSPACE/.github/scripts/nsis-uninstaller.mjs
+          captured=$RUNNER_TEMP/uninstallers
+          bundle() {
+            rm -rf "$nsis"
+            pnpm -C ui tauri bundle --ci --verbose --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+              --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
+              --config release/windows.conf.json "$@" \
+              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
+          }
+          CLAUSEO_UNINSTALLER_COMMAND="node \"$script\" capture \"$captured/currentUser.exe\"" bundle
+          CLAUSEO_UNINSTALLER_COMMAND="node \"$script\" capture \"$captured/perMachine.exe\"" bundle --config release/machine.conf.json
+          rm -rf "$nsis"
+          stage=$RUNNER_TEMP/authenticode-uninstallers
+          mkdir -p "$stage"
+          for mode in currentUser perMachine; do
+            [ -f "$captured/$mode.exe" ] || { echo "::error::the $mode bundle captured no uninstaller"; exit 1; }
+            cp "$captured/$mode.exe" "$stage/uninstall-$mode.exe"
+          done
+
+      - name: Sign the two uninstallers
+        if: needs.check.outputs.signing != 'none'
+        uses: ./.github/actions/authenticode
+        with:
+          backend: ${{ needs.check.outputs.signing }}
+          path: ${{ runner.temp }}/authenticode-uninstallers
+          artifact-name: authenticode-uninstallers-${{ matrix.target }}
+          signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
+          signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signpath-signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
+          signpath-artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
 
       # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
-      # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
-      # step. Both installers ship the same exe, and the sidecars the overlay lists, beside it. A
-      # generated bundle.resources overlay puts the sandbox tool's .sig beside it too: NSIS installs
-      # resources and externalBin alike under $INSTDIR, each at its target name. That exe and .sig
-      # also go on the Release as <name>-<arch>.exe and .exe.sig. A merge patch merges objects, so
-      # its bundle.resources entry joins blocklist.conf.json's two rather than replacing them.
+      # windows-<arch> key of latest.json); --no-sign leaves Authenticode to the steps around this
+      # one and the updater signature to the last step. Both installers ship the same exe, and the
+      # sidecars the overlay lists, beside it, with the sandbox tool's .sig (sandbox-sig.conf.json).
+      # That exe and .sig also go on the Release as <name>-<arch>.exe and .exe.sig. With signing
+      # on, the template takes the signed plug-ins and each installer's signed uninstaller; with it
+      # off none of the CLAUSEO_ variables is set and the template builds as it always has.
       - name: Bundle the currentUser and perMachine installers
         run: |
           set -euo pipefail
@@ -824,8 +998,6 @@ jobs:
           nsis=$RELEASE_DIR/bundle/nsis
           sig=binaries/${SANDBOX_EXE%.exe}-$TARGET.exe.sig
           [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
-          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
-            "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
           # makensis's warnings (an unused LangString, a macro left out, a jump to nowhere) don't fail its
           # compile, and the bundler hides makensis's output unless --verbose. So both bundles run verbose
           # into one log (each call piped to tee; pipefail keeps tauri's own exit code), which must hold
@@ -839,8 +1011,18 @@ jobs:
               --config release/windows.conf.json "$@" \
               --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
           }
+          # uninstaller <mode>: with signing on, the command that puts <mode>'s signed uninstaller in place.
+          uninstaller() { :; }
+          if [ "$SIGNING" != none ]; then
+            export CLAUSEO_SIGNED_PLUGINS=1 CLAUSEO_SIGNED_PLUGINS_DIR="$RUNNER_TEMP/nsis-plugins" CLAUSEO_SIGN_UNINSTALLER=1
+            uninstaller() {
+              export CLAUSEO_UNINSTALLER_COMMAND="node \"$GITHUB_WORKSPACE/.github/scripts/nsis-uninstaller.mjs\" substitute \"$RUNNER_TEMP/authenticode-uninstallers/uninstall-$1.exe\" \"$RUNNER_TEMP/uninstallers/$1.exe\""
+            }
+          fi
+          uninstaller currentUser
           bundle 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
+          uninstaller perMachine
           bundle --config release/machine.conf.json 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
           if ! grep -Eq 'Processing script file|Output: ".*\.exe"' "$log"; then
@@ -853,18 +1035,51 @@ jobs:
             grep -E -A40 '(^|[^0-9])[0-9]+ warnings?:' "$log"
             exit 1
           fi
+          if [ "$SIGNING" != none ]; then
+            for mode in currentUser perMachine; do
+              taken=$RUNNER_TEMP/authenticode-uninstallers/uninstall-$mode.exe.substituted
+              [ -f "$taken" ] || { echo "::error::the $mode installer did not take its signed uninstaller"; exit 1; }
+              [ "$(cat "$taken")" = identical ] ||
+                echo "::warning::the $mode installer's second build made an uninstaller unlike its first; it ships the signed first one"
+            done
+          fi
           asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
           cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
           cp "crates/desktop/$sig" "$OUT/$asset.sig"
           ls -l "$OUT"
 
-      - name: SignPath, the installers (S20a)
-        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
+      # The installers alone: the sandbox tool's asset beside them in $OUT is signed already, and
+      # its .sig is over those bytes.
+      - name: The two installers, to sign
+        if: needs.check.outputs.signing != 'none'
         run: |
-          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
-          exit 1
+          set -euo pipefail
+          stage=$RUNNER_TEMP/authenticode-installers
+          mkdir -p "$stage"
+          cp "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe" "$stage/"
 
-      # Last, over the installer as it ships: the currentUser one, the one that updates itself.
+      - name: Sign the two installers
+        if: needs.check.outputs.signing != 'none'
+        uses: ./.github/actions/authenticode
+        with:
+          backend: ${{ needs.check.outputs.signing }}
+          path: ${{ runner.temp }}/authenticode-installers
+          artifact-name: authenticode-installers-${{ matrix.target }}
+          signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
+          signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signpath-signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
+          signpath-artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+
+      - name: Put the signed installers back
+        if: needs.check.outputs.signing != 'none'
+        run: |
+          set -euo pipefail
+          for installer in "$RUNNER_TEMP"/authenticode-installers/*.exe; do cp "$installer" "$OUT/"; done
+          node .github/scripts/latest-json.mjs --unsigned "$OUT"
+
+      # Last, over the installer as it ships (Authenticode-signed when signing is on): the
+      # currentUser one, the one that updates itself.
       - name: Sign the currentUser installer for the updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
@@ -946,7 +1161,7 @@ jobs:
           pattern: dry-updater-pub-*
           path: ${{ runner.temp }}/pub
 
-      # 7-Zip reads NSIS installers: the next step looks inside them.
+      # 7-Zip reads NSIS installers: the next step looks inside them, and so does the release check.
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends p7zip-full
 
@@ -1072,6 +1287,62 @@ jobs:
           name: dist-assets
           path: dist
           if-no-files-found: error
+
+      # S20a's release check, after the upload so the assets can be looked at when it fails: every
+      # PE file without an Authenticode signature, among the assets and inside both installers of
+      # each architecture (7-Zip unpacks the plug-ins, the files and the uninstaller). With signing
+      # on, any such file, or an installer whose uninstall.exe 7-Zip can't find, fails the run
+      # before the Release is made; with it off the list is a notice.
+      - name: Every Windows PE file is Authenticode-signed (S20a)
+        env:
+          SIGNING: ${{ needs.check.outputs.signing }}
+        run: |
+          set -euo pipefail
+          inside=$RUNNER_TEMP/inside
+          status=0
+          for installer in dist/*-setup.exe; do
+            [ -f "$installer" ] || continue
+            out=$inside/$(basename "$installer" .exe)
+            mkdir -p "$out"
+            # 7-Zip's 1 is a warning (a signed installer has its signature after the NSIS data).
+            7z x -y -aou -o"$out" "$installer" > /dev/null || [ $? -eq 1 ]
+            if [ -z "$(find "$out" -type f -iname uninstall.exe)" ]; then
+              if [ "$SIGNING" = none ]; then
+                echo "7-Zip found no uninstall.exe in $(basename "$installer")"
+              else
+                echo "::error::7-Zip found no uninstall.exe in $(basename "$installer"), so its signature can't be checked"
+                status=1
+              fi
+            fi
+          done
+          mkdir -p "$inside"
+          found=0
+          node .github/scripts/latest-json.mjs --unsigned dist "$inside" > unsigned.txt || found=$?
+          case $found in
+            0 | 1) ;;
+            *) echo "::error::latest-json.mjs --unsigned exited $found"; exit 1 ;;
+          esac
+          sed -i "s|^$inside/||" unsigned.txt
+          {
+            echo "### Authenticode, signing: $SIGNING"
+            if [ -s unsigned.txt ]; then
+              echo "$(wc -l < unsigned.txt) PE files have no Authenticode signature:"
+              echo '```'
+              cat unsigned.txt
+              echo '```'
+            else
+              echo "Every PE file in the assets and inside the installers is signed."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s unsigned.txt ]; then
+            if [ "$SIGNING" = none ]; then
+              echo "::notice::signing is off: $(wc -l < unsigned.txt) PE files in the assets and installers have no Authenticode signature (listed in the log and the job summary)"
+            else
+              echo "::error::signing is $SIGNING, but $(wc -l < unsigned.txt) PE files have no Authenticode signature (listed above)"
+              status=1
+            fi
+          fi
+          exit "$status"
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: env.MODE != 'dry'

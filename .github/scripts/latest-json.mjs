@@ -4,6 +4,7 @@
 //   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>
 //   node .github/scripts/latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]
 //   node .github/scripts/latest-json.mjs --key-id <exe> <mode>
+//   node .github/scripts/latest-json.mjs --unsigned <file-or-folder>...
 //
 // <dir> holds the release's assets with their final names (the Mac archives already renamed to
 // Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
@@ -23,7 +24,14 @@
 // --key-id reads the VERSIONINFO string UpdaterKeyId of the Windows exe <exe> (stage C's sandbox
 // tool carries the updater key ID it was built with) by parsing its resources, and compares it with
 // the key ID <mode> (release, test or dry) builds in: 0 when it matches, 1 when it differs or the
-// exe can't be read, 3 when the exe has no UpdaterKeyId. Plain Node: no package to install.
+// exe can't be read, 3 when the exe has no UpdaterKeyId.
+// --unsigned walks the files and folders given, finds every PE file by its headers (whatever its
+// name) and prints one line per PE file without an Authenticode signature, `<path>: <reason>` (an
+// empty certificate table, or one that is not PKCS#7 SignedData): 0 when every PE file has one, 1
+// when some do not, 3 when there is no PE file at all, 2 on a usage error or a path that does not
+// exist. It checks that a signature is there, not whose it is or whether Windows trusts it.
+// release.yml runs it after each Authenticode step in sign-windows and, in assemble, over the
+// published assets and both installers' contents (S20a). Plain Node: no package to install.
 //
 // The manifest is the plugin's static format: { version, notes, pub_date, platforms }, each
 // platform keyed `<os>-<arch>-<bundle>` (the plugin tries that key, then `<os>-<arch>`). The
@@ -32,7 +40,17 @@
 // updates itself, so .deb and .rpm have no entry and no `.sig`.
 
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -93,41 +111,39 @@ export function expectedKeyId(mode, configPublicKey, testPublicKey) {
   }
 }
 
+/** Throws the error every PE reader below throws on a file it can't read. */
+function notPe(what) {
+  throw new Error(`not a readable PE file: ${what}`);
+}
+
 /**
- * The string <name> in the VERSIONINFO resource of PE file <pe> (a Buffer): the section table maps
- * the resource directory (data directory 2) to the file, its tree goes type RT_VERSION (16), then any
- * name, then any language, to VS_VERSIONINFO, whose StringFileInfo string tables hold the strings.
- * null when the exe has no resources, no version resource or no such string; throws when <pe> is not
- * a PE file or its resources do not parse.
+ * Runs <read> over the headers of PE file <pe> (a Buffer): { directory, offsetOf }, where
+ * directory(i) is data directory <i> as { address, size } ({ 0, 0 } past the ones the optional
+ * header declares) and offsetOf(rva) maps an RVA to a file offset through the section table.
+ * Throws when <pe> is not a PE file, or when <read> reads past its end.
  */
-export function versionString(pe, name) {
-  const fail = (what) => {
-    throw new Error(`not a readable PE file: ${what}`);
-  };
+function readPe(pe, read) {
   try {
     if (pe.toString("latin1", 0, 2) !== "MZ") {
-      fail("no MZ header");
+      notPe("no MZ header");
     }
     const nt = pe.readUInt32LE(0x3c);
     if (pe.toString("latin1", nt, nt + 4) !== "PE\0\0") {
-      fail("no PE signature");
+      notPe("no PE signature");
     }
     const sections = pe.readUInt16LE(nt + 6);
     const optionalSize = pe.readUInt16LE(nt + 20);
     const optional = nt + 24;
     const magic = pe.readUInt16LE(optional);
     if (magic !== 0x10b && magic !== 0x20b) {
-      fail(`optional header magic 0x${magic.toString(16)}`);
+      notPe(`optional header magic 0x${magic.toString(16)}`);
     }
     const rvaCount = pe.readUInt32LE(optional + (magic === 0x20b ? 108 : 92));
-    if (rvaCount < 3) {
-      return null;
-    }
     const directories = optional + (magic === 0x20b ? 112 : 96);
-    const resourceRva = pe.readUInt32LE(directories + 2 * 8);
-    if (resourceRva === 0) {
-      return null;
-    }
+    const directory = (index) =>
+      index < rvaCount
+        ? { address: pe.readUInt32LE(directories + index * 8), size: pe.readUInt32LE(directories + index * 8 + 4) }
+        : { address: 0, size: 0 };
     const table = optional + optionalSize;
     const offsetOf = (rva) => {
       for (let i = 0; i < sections; i += 1) {
@@ -138,8 +154,30 @@ export function versionString(pe, name) {
           return rva - virtualAddress + pe.readUInt32LE(at + 20);
         }
       }
-      return fail(`RVA 0x${rva.toString(16)} is in no section`);
+      return notPe(`RVA 0x${rva.toString(16)} is in no section`);
     };
+    return read({ directory, offsetOf });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return notPe("a structure runs past the end of the file");
+    }
+    throw error;
+  }
+}
+
+/**
+ * The string <name> in the VERSIONINFO resource of PE file <pe> (a Buffer): the section table maps
+ * the resource directory (data directory 2) to the file, its tree goes type RT_VERSION (16), then any
+ * name, then any language, to VS_VERSIONINFO, whose StringFileInfo string tables hold the strings.
+ * null when the exe has no resources, no version resource or no such string; throws when <pe> is not
+ * a PE file or its resources do not parse.
+ */
+export function versionString(pe, name) {
+  return readPe(pe, ({ directory, offsetOf }) => {
+    const resourceRva = directory(2).address;
+    if (resourceRva === 0) {
+      return null;
+    }
     const root = offsetOf(resourceRva);
     // The entries of the resource directory at <dir> (offset from root): { id, offset, subdirectory }.
     const entries = (dir) => {
@@ -165,7 +203,7 @@ export function versionString(pe, name) {
         const start = offsetOf(pe.readUInt32LE(leaf));
         const size = pe.readUInt32LE(leaf + 4);
         if (start + size > pe.length) {
-          fail("the version resource runs past the end of the file");
+          notPe("the version resource runs past the end of the file");
         }
         const found = versionInfoString(pe.subarray(start, start + size), name);
         if (found !== null) {
@@ -174,12 +212,83 @@ export function versionString(pe, name) {
       }
     }
     return null;
-  } catch (error) {
-    if (error instanceof RangeError) {
-      return fail("a structure runs past the end of the file");
+  });
+}
+
+/**
+ * The Authenticode signature of PE file <pe> (a Buffer), from data directory 4, the certificate
+ * table, which holds a file offset (not an RVA) and a size: { offset, size } when the table is
+ * there and its first WIN_CERTIFICATE is PKCS#7 SignedData (wRevision 0x0200, wCertificateType
+ * 0x0002) inside the file, null when the directory's size is 0 (an unsigned file). Throws when
+ * <pe> is not a PE file or the table is not such a certificate. It reads the structure only: whose
+ * signature it is, and whether it holds, is Windows' to say.
+ */
+export function authenticode(pe) {
+  return readPe(pe, ({ directory }) => {
+    const { address: offset, size } = directory(4);
+    if (size === 0) {
+      return null;
     }
-    throw error;
+    if (size < 8 || offset + size > pe.length) {
+      notPe("the certificate table runs past the end of the file");
+    }
+    const length = pe.readUInt32LE(offset);
+    const revision = pe.readUInt16LE(offset + 4);
+    const type = pe.readUInt16LE(offset + 6);
+    if (length < 8 || length > size) {
+      notPe(`the certificate table's first entry is ${length} bytes in a ${size}-byte table`);
+    }
+    if (revision !== 0x0200 || type !== 0x0002) {
+      notPe(`the certificate table holds revision 0x${revision.toString(16)} type 0x${type.toString(16)}, not PKCS#7 SignedData`);
+    }
+    return { offset, size };
+  });
+}
+
+/** Whether the file at <path> starts as a PE file does: MZ, then PE\0\0 where e_lfanew points. */
+export function isPeFile(path) {
+  const fd = openSync(path, "r");
+  try {
+    const head = Buffer.alloc(64);
+    if (readSync(fd, head, 0, 64, 0) < 64 || head.toString("latin1", 0, 2) !== "MZ") {
+      return false;
+    }
+    const signature = Buffer.alloc(4);
+    return readSync(fd, signature, 0, 4, head.readUInt32LE(0x3c)) === 4 && signature.toString("latin1") === "PE\0\0";
+  } finally {
+    closeSync(fd);
   }
+}
+
+/**
+ * Every PE file among <paths> (files, and folders walked in name order, symbolic links left out)
+ * that has no Authenticode signature: { checked, unsigned: [{ path, reason }] }, checked counting
+ * the PE files found. A file is a PE file by its headers, whatever its name.
+ */
+export function unsignedPeFiles(paths) {
+  const unsigned = [];
+  let checked = 0;
+  const visit = (path) => {
+    const stat = lstatSync(path);
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(path).sort()) {
+        visit(join(path, name));
+      }
+    } else if (stat.isFile() && isPeFile(path)) {
+      checked += 1;
+      try {
+        if (authenticode(readFileSync(path)) === null) {
+          unsigned.push({ path, reason: "no Authenticode signature" });
+        }
+      } catch (error) {
+        unsigned.push({ path, reason: error.message });
+      }
+    }
+  };
+  for (const path of paths) {
+    visit(path);
+  }
+  return { checked, unsigned };
 }
 
 /**
@@ -485,6 +594,23 @@ export function buildManifest(dir, version, baseUrl, pubDate, sandboxExe = null)
 }
 
 function main(argv) {
+  if (argv[0] === "--unsigned" && argv.length > 1) {
+    const paths = argv.slice(1);
+    const missing = paths.filter((path) => !existsSync(path));
+    if (missing.length > 0) {
+      process.stderr.write(`--unsigned: no such file or folder: ${missing.join(", ")}\n`);
+      return 2;
+    }
+    const { checked, unsigned } = unsignedPeFiles(paths);
+    for (const { path, reason } of unsigned) {
+      process.stdout.write(`${path}: ${reason}\n`);
+    }
+    process.stderr.write(`${checked} PE files, ${unsigned.length} without an Authenticode signature\n`);
+    if (checked === 0) {
+      return 3;
+    }
+    return unsigned.length === 0 ? 0 : 1;
+  }
   if (argv[0] === "--key-id" && argv.length === 3) {
     const [, exe, mode] = argv;
     let expected;
@@ -527,7 +653,8 @@ function main(argv) {
     process.stderr.write(
       "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
         "       node latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]\n" +
-        "       node latest-json.mjs --key-id <exe> <mode>\n",
+        "       node latest-json.mjs --key-id <exe> <mode>\n" +
+        "       node latest-json.mjs --unsigned <file-or-folder>...\n",
     );
     return 2;
   }

@@ -35,7 +35,7 @@ Developer ID.
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
   `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
-  its `dist` folder before any leg embeds it); `build` (the matrix below); `sign-windows` (SignPath's slot, then both NSIS
+  its `dist` folder before any leg embeds it); `build` (the matrix below); `sign-windows` (Authenticode when it is on, see S20a below, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
   last); `assemble` (names the Mac archives `Clauseo_<v>_<arch>.app.tar.gz`, writes `latest.json` and
   `SHA256SUMS.txt`, attests every asset, creates the Release); `publish`; `measure-builds` (the
@@ -179,7 +179,7 @@ Developer ID.
 - One commit gives every asset, and `sha256sum -c SHA256SUMS.txt` checks a download. Every asset has
   a build provenance attestation.
 - S15's sandbox tool (release.yml's `SANDBOX_EXE`, `clauseo-sandbox-setup.exe`) is signed in `sign-windows` with the mode's updater key, after
-  SignPath and before NSIS, the same key and per-mode handling as the currentUser installer. A
+  Authenticode and before NSIS, the same key and per-mode handling as the currentUser installer. A
   generated `bundle.resources` overlay puts its `.sig` beside it in the install folder of both
   installers (NSIS installs resources and `externalBin` alike under `$INSTDIR`), and both go on the
   Release as `<name>-<arch>.exe` and `.exe.sig`, in `SHA256SUMS.txt` like every asset. `assemble`
@@ -199,8 +199,8 @@ Developer ID.
 - Both Windows installers ship the same exe, so SignPath signs once, and the app tells a per-machine
   install at run time. The NSIS hook removes S15's set-up only on a real uninstall, never during an
   update.
-- S20a fills the two SignPath steps (skipped until `vars.SIGNPATH_ENABLED` is `true` on a `v*` tag,
-  and failing if turned on before they exist), the Apple secrets and notarisation. The crash
+- S20a's Windows signing is built and off ("Windows code signing" below); what is left is SignPath's
+  approval, its settings and the switch, then the Apple secrets and notarisation. The crash
   reports' task adds the `symbols` job, the usage-counts task the release-recording script (its step
   is skipped while `vars.COUNTS_RELEASES_ENABLED` is not `true`), and the updater task the keys and
   `requireSignedVersion`.
@@ -256,8 +256,8 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Windows.** The `build` leg uploads the sidecars and the overlay with `Clauseo.exe` in
   `windows-exe-<target>`, and `sign-windows` downloads them back to the same two folders in
   `crates/desktop/` before `tauri bundle --no-binary-patching`, so both installers take
-  exactly the files that were built. SignPath (S20a) signs every PE there and `Clauseo.exe`, before
-  NSIS and before the updater signature.
+  exactly the files that were built. Once signing is on (S20a) every PE there and `Clauseo.exe` is
+  Authenticode-signed before NSIS and before the updater signature.
 - **Where they land:** beside the app's exe in every bundle: `Clauseo.app/Contents/MacOS/`,
   `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
   both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
@@ -342,6 +342,77 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
+
+## Windows code signing, ready behind a switch (S20a, 2026-11-08)
+
+Windows ships unsigned for the beta (Context). The pipeline to sign it is in place and off, so turning
+it on is settings, not code.
+
+- **The switch.** `check` sets the output `signing`: `signpath` for a `v*` or `test-v*` run once the
+  repository variable `SIGNPATH_ENABLED` is `true`; `selfsigned` for a dry run started with the input
+  `sign_test_selfsigned` (default false); else `none`. A dry run never uses SignPath. With `none`,
+  every new step is skipped and the bundle step sets none of the template's variables, so the
+  installers are built exactly as before. `SIGNPATH_ENABLED` must be a repository variable, not an
+  environment one: `check` and `assemble` have no environment.
+- **What is signed, in `sign-windows`, in this order.** (1) `Clauseo.exe`, every sidecar the build leg placed
+  (clauseo-mcp, clauseo-agent-browser, the sandbox tool) and every NSIS plug-in. The plug-ins come from the bundler's NSIS toolset (`%LOCALAPPDATA%\tauri\NSIS`, fetched by a
+  throwaway uncompressed bundle on the cold runner). The step signs copies of every DLL in
+  `Plugins\x86-unicode` and its `additional` folder: System, nsDialogs, StartMenu, LangDLL, NSISdl,
+  nsis_tauri_utils and the rest. It never signs the toolset's own files: the bundler re-downloads a
+  `nsis_tauri_utils.dll` whose hash changed. The template's `signed-plugins` block adds the copies'
+  folder last when `CLAUSEO_SIGNED_PLUGINS=1` (makensis takes a plug-in from the last folder that has
+  it). (2) The sandbox tool's updater `.sig`. (3) The uninstaller, in two passes: a first bundle of
+  each installer runs the template's `sign-uninstaller` block (`!uninstfinalize`, compiled in only when
+  `CLAUSEO_SIGN_UNINSTALLER=1`), which captures the uninstaller with
+  `.github/scripts/nsis-uninstaller.mjs`. Both captures are signed. The installers' own bundle, from
+  the same inputs, then puts each signed uninstaller in place of the one it builds, and warns if the
+  second build's uninstaller differs from the first. (4) Both installers. (5) The currentUser
+  installer's updater signature, last. Each signing step ends with `latest-json.mjs --unsigned` over
+  what it signed.
+- **Why the two passes go through the action.** SignPath's open-source signing requires origin
+  verification, which only its GitHub connector supplies: the official action
+  (`signpath/github-action-submit-signing-request`, pinned) submitting a workflow artifact. A request
+  from inside makensis through the REST API would carry no origin data. The local action
+  `.github/actions/authenticode` uploads a flat folder, has SignPath sign it, waits (up to an hour, for
+  a policy that needs a person's approval) and puts the signed files back. The cost, per Windows
+  architecture and only with signing on: three signing requests (exe, sidecars and plug-ins; the two
+  uninstallers; the two installers), one uncompressed bundle and two full bundles more than today's two
+  (five makensis runs instead of two). The job's limit rises from 30 to 150 minutes when signing is on.
+- **The release check.** `assemble` unpacks both installers of each architecture with 7-Zip and runs
+  `latest-json.mjs --unsigned` over the assets and the unpacked files. It finds PE files by their
+  headers and treats a file as signed when its certificate table (data directory 4) holds a PKCS#7
+  `WIN_CERTIFICATE`. It checks that a signature is there, not whose it is. With `none` the list is a
+  notice and goes to the job summary. Otherwise any entry fails the run before the Release is created,
+  and so does an installer in which 7-Zip finds no `uninstall.exe`.
+- **The plumbing proof.** `gh workflow run release.yml --ref <branch> -f sign_test_selfsigned=true`
+  runs the same steps with a throwaway self-signed certificate (`New-SelfSignedCertificate` and
+  `Set-AuthenticodeSignature` in Windows PowerShell, trusted by nothing) in place of SignPath. It proves
+  the coverage, the capture and substitute, and the release check without SignPath. Dry runs without
+  the input stay unsigned, as the Defender tests need.
+- **What is left.**
+  1. SignPath's open-source application and approval.
+  2. In SignPath:
+     - a project linked to the GitHub.com trusted build system;
+     - a release signing policy and a test signing policy;
+     - one artifact configuration for a zip whose `*.exe` and `*.dll` at its root are all signed, for
+       example `<zip-file><pe-file path="*.exe" max-matches="unbounded"><authenticode-sign/></pe-file>`
+       and the same for `*.dll` with `min-matches="0"`;
+     - a CI user's API token with submitter rights on both policies.
+  3. In GitHub:
+     - the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
+       `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`, `SIGNPATH_RELEASE_POLICY_SLUG` (used for `v*`) and
+       `SIGNPATH_TEST_POLICY_SLUG` (used for `test-v*`), at the repository or on the environments;
+     - the secret `SIGNPATH_API_TOKEN` on the environments `release` and `release-test`.
+     `sign-windows` fails early, naming what is missing, when the switch is on without them.
+  4. A self-signed dry run, then a `test-v*` run with the test policy, and only then
+     `SIGNPATH_ENABLED` for releases.
+- **Not proven until such a run.** The steps have not yet run on a Windows runner with signing on:
+  - the toolset path;
+  - `Set-AuthenticodeSignature` with an untrusted certificate;
+  - 7-Zip naming the uninstaller `uninstall.exe`, and its exit code on a signed installer (the
+    sandbox check's `7z` pipes treat any non-zero code as a failure);
+  - whether the two builds of an uninstaller come out byte for byte the same.
+  The self-signed dry run is the test of each.
 
 ## Status
 

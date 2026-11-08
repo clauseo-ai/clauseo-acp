@@ -102,11 +102,31 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 # additional plugins
 !addplugindir "${ADDITIONALPLUGINSPATH}"
+; >>> clauseo: signed-plugins
+; Clauseo's addition (decision 0035, S20a): with CLAUSEO_SIGNED_PLUGINS=1 in makensis's environment
+; (release.yml's sign-windows, only when Authenticode signing is on), a folder of Authenticode-signed
+; copies of the toolset's plug-ins, CLAUSEO_SIGNED_PLUGINS_DIR. makensis takes each plug-in from the
+; last folder added that has it, so this goes after the folders above and before any plug-in call.
+; Unset, $%CLAUSEO_SIGNED_PLUGINS% stays as written and nothing is added.
+!if "$%CLAUSEO_SIGNED_PLUGINS%" == "1"
+  !addplugindir "$%CLAUSEO_SIGNED_PLUGINS_DIR%"
+!endif
+; <<< clauseo: signed-plugins
 
 ; Uninstaller signing command
 !if "${UNINSTALLERSIGNCOMMAND}" != ""
   !uninstfinalize '${UNINSTALLERSIGNCOMMAND}'
 !endif
+; >>> clauseo: sign-uninstaller
+; Clauseo's addition (decision 0035, S20a): with CLAUSEO_SIGN_UNINSTALLER=1 (sign-windows, only when
+; Authenticode signing is on), makensis runs CLAUSEO_UNINSTALLER_COMMAND with the uninstaller's
+; path once it has written it and before it packs it, and stops unless it exits 0: a first bundle
+; captures the uninstaller to be signed, the second puts the signed one in its place
+; (.github/scripts/nsis-uninstaller.mjs). Unset, nothing runs and the uninstaller is as before.
+!if "$%CLAUSEO_SIGN_UNINSTALLER%" == "1"
+  !uninstfinalize '$%CLAUSEO_UNINSTALLER_COMMAND% "%1"' = 0
+!endif
+; <<< clauseo: sign-uninstaller
 
 ; Handle install mode, `perUser`, `perMachine` or `both`
 !if "${INSTALLMODE}" == "perMachine"

@@ -16,6 +16,7 @@ mod safe_temp;
 mod sandbox_link;
 mod set_aside;
 mod setup_exe_missing;
+mod signing_blocks;
 mod sources;
 mod template;
 mod uninstall_in_place;

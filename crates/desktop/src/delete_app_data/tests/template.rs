@@ -8,7 +8,8 @@
 //! one the branch looks for. `ui-language`, later in `.onInit`, sets the installer's language
 //! from the app's (`hooks.nsh`, tested in `installer_language.rs`). The per-machine
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
-//! `un-gui-end`) are tested in `uninstall_in_place.rs`.
+//! `un-gui-end`) are tested in `uninstall_in_place.rs`. `signed-plugins` and `sign-uninstaller`
+//! (S20a, Authenticode) are tested in `signing_blocks.rs`.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -36,11 +37,21 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 9] = [
+const BLOCKS: [Block; 11] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
         replaces: Some("  SetCompressor /SOLID \"{{compression}}\""),
+    },
+    Block {
+        name: "signed-plugins",
+        after: "!addplugindir \"${ADDITIONALPLUGINSPATH}\"",
+        replaces: None,
+    },
+    Block {
+        name: "sign-uninstaller",
+        after: "!endif",
+        replaces: None,
     },
     Block {
         name: "finish-show",

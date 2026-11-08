@@ -21,11 +21,16 @@
 // of the published exe and .sig against both installers and the updater key, and the build env
 // its build.rs reads; and every job that passes release.conf.json to passing blocklist.conf.json
 // with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
+// For Windows code signing (S20a) it checks the PE reader's certificate table, `--unsigned`, and
+// that release.yml keeps signing behind check's `signing` (SIGNPATH_ENABLED for a tag, the
+// self-signed input for a dry run), signs every PE before any updater signature, captures and
+// substitutes the uninstaller around its signing, and fails assemble on an unsigned PE only when
+// signing is on; and that the local authenticode action pins its actions.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -33,6 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   PLACEHOLDER_KEY_ID,
   assets,
+  authenticode,
   buildManifest,
   expectedKeyId,
   manifestProblems,
@@ -40,6 +46,7 @@ import {
   sandboxAsset,
   signatureCheck,
   signedVersion,
+  unsignedPeFiles,
   versionString,
 } from "./latest-json.mjs";
 
@@ -497,8 +504,12 @@ function versionNode(key, { text = null, bytes = Buffer.alloc(0), children = [] 
   return body;
 }
 
-/** A PE32+ file with one .rsrc section holding RT_VERSION/1/0x409 with <strings>, or no resources. */
-function fakePe(strings) {
+/**
+ * A PE32+ file with one .rsrc section holding RT_VERSION/1/0x409 with <strings>, or no resources;
+ * with <certificate> (a Buffer) appended as its certificate table, data directory 4, as a signer
+ * appends a WIN_CERTIFICATE.
+ */
+function fakePe(strings, { certificate = null } = {}) {
   const VA = 0x1000;
   const RAW = 0x200;
   let rsrc = Buffer.alloc(0);
@@ -548,7 +559,23 @@ function fakePe(strings) {
   header.writeUInt32LE(VA, section + 12);
   header.writeUInt32LE(rsrc.length, section + 16);
   header.writeUInt32LE(RAW, section + 20);
-  return Buffer.concat([header, rsrc]);
+  const file = Buffer.concat([header, rsrc]);
+  if (certificate === null) {
+    return file;
+  }
+  header.writeUInt32LE(file.length, optional + 112 + 4 * 8);
+  header.writeUInt32LE(certificate.length, optional + 112 + 4 * 8 + 4);
+  return Buffer.concat([header, rsrc, certificate]);
+}
+
+/** A WIN_CERTIFICATE: dwLength, wRevision, wCertificateType, then <body> (a stand-in for the DER). */
+function winCertificate(body = Buffer.from("fake PKCS#7 SignedData"), { revision = 0x0200, type = 0x0002 } = {}) {
+  const head = Buffer.alloc(8);
+  head.writeUInt32LE(8 + body.length, 0);
+  head.writeUInt16LE(revision, 4);
+  head.writeUInt16LE(type, 6);
+  const entry = Buffer.concat([head, body]);
+  return Buffer.concat([entry, Buffer.alloc((8 - (entry.length % 8)) % 8)]);
 }
 
 test("publicKeyId prints a key's ID as minisign does, and expectedKeyId picks each mode's", () => {
@@ -580,6 +607,70 @@ test("versionString reads a VERSIONINFO string through the PE's resources", () =
   assert.equal(versionString(Buffer.concat([fakePe(null), Buffer.from("UpdaterKeyId B142942ACEC5F521", "utf16le")]), "UpdaterKeyId"), null);
   assert.throws(() => versionString(Buffer.from("not a PE file"), "UpdaterKeyId"), /not a readable PE file/);
   assert.throws(() => versionString(pe.subarray(0, pe.length - 40), "UpdaterKeyId"), /not a readable PE file/);
+});
+
+test("authenticode reads the certificate table: a signed PE has a PKCS#7 one, an unsigned PE none", () => {
+  assert.equal(authenticode(fakePe(null)), null);
+  assert.equal(authenticode(fakePe({ ProductName: "Clauseo" })), null);
+  const certificate = winCertificate();
+  const signed = fakePe({ ProductName: "Clauseo" }, { certificate });
+  assert.deepEqual(authenticode(signed), { offset: signed.length - certificate.length, size: certificate.length });
+  // The resources still read through a signed file.
+  assert.equal(versionString(signed, "ProductName"), "Clauseo");
+  assert.deepEqual(authenticode(fakePe(null, { certificate })), { offset: fakePe(null).length, size: certificate.length });
+  // A table past the end of the file, or not PKCS#7 SignedData, is not a signature.
+  assert.throws(() => authenticode(signed.subarray(0, signed.length - 8)), /runs past the end/);
+  assert.throws(() => authenticode(fakePe(null, { certificate: winCertificate(undefined, { type: 0x0001 }) })), /not PKCS#7/);
+  assert.throws(() => authenticode(fakePe(null, { certificate: winCertificate(undefined, { revision: 0x0100 }) })), /not PKCS#7/);
+  const short = Buffer.from(certificate);
+  short.writeUInt32LE(certificate.length + 8, 0);
+  assert.throws(() => authenticode(fakePe(null, { certificate: short })), /first entry/);
+  assert.throws(() => authenticode(Buffer.from("MZ not a PE file at all, just some text here")), /not a readable PE file/);
+});
+
+test("--unsigned lists every PE file without a signature, by its headers, under the paths given", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-json-unsigned-"));
+  const run = (...paths) =>
+    spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--unsigned", ...paths], { encoding: "utf8" });
+  try {
+    const nested = join(dir, "inside", "$PLUGINSDIR");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(dir, "Clauseo.exe"), fakePe({ ProductName: "Clauseo" }, { certificate: winCertificate() }));
+    writeFileSync(join(nested, "System.dll"), fakePe(null));
+    writeFileSync(join(dir, "inside", "uninstall"), fakePe(null));
+    writeFileSync(join(dir, "inside", "bad.exe"), fakePe(null, { certificate: winCertificate(undefined, { type: 1 }) }));
+    writeFileSync(join(dir, "notes.txt"), "MZ, but text");
+    writeFileSync(join(dir, "Clauseo.exe.sig"), "a signature");
+    const { checked, unsigned } = unsignedPeFiles([dir]);
+    assert.equal(checked, 4);
+    assert.deepEqual(
+      unsigned.map(({ path, reason }) => [path.slice(dir.length + 1), reason.replace(/:.*/, "")]),
+      [
+        [join("inside", "$PLUGINSDIR", "System.dll"), "no Authenticode signature"],
+        [join("inside", "bad.exe"), "not a readable PE file"],
+        [join("inside", "uninstall"), "no Authenticode signature"],
+      ],
+    );
+    const some = run(dir);
+    assert.equal(some.status, 1);
+    assert.equal(some.stdout.trim().split("\n").length, 3);
+    assert.match(some.stderr, /^4 PE files, 3 without an Authenticode signature$/m);
+    // A file named on its own, and folders where every PE is signed.
+    assert.equal(run(join(dir, "Clauseo.exe")).status, 0);
+    assert.equal(run(join(nested, "System.dll")).status, 1);
+    writeFileSync(join(nested, "System.dll"), fakePe(null, { certificate: winCertificate() }));
+    rmSync(join(dir, "inside", "uninstall"));
+    rmSync(join(dir, "inside", "bad.exe"));
+    const all = run(dir, nested);
+    assert.equal(all.status, 0, all.stdout);
+    assert.equal(all.stdout, "");
+    // No PE file at all is not "all signed".
+    assert.equal(run(join(dir, "notes.txt")).status, 3);
+    assert.equal(run().status, 2);
+    assert.equal(run(join(dir, "missing")).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("--key-id passes a matching UpdaterKeyId, fails another and exits 3 on none, which assemble fails", () => {
@@ -619,9 +710,15 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"');
   assert.ok(at(sign, 'cp "$exe" "$dir/$SANDBOX_EXE"') < signed);
   assert.ok(signed < at(sign, 'mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"'));
-  const bundled = sign.findIndex((line) => /\btauri bundle\b/.test(line));
-  assert.ok(signed < bundled, "the sandbox tool is signed before NSIS takes it");
-  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
+  // Every bundle that ships the tool takes its .sig, after the tool is signed; the one bundle
+  // before is the throwaway that fetches the NSIS toolset (Authenticode, S20a).
+  const bundles = sign.map((line, i) => [line, i]).filter(([line]) => /\btauri bundle\b/.test(line));
+  const shipped = bundles.filter(([line]) => line.includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
+  assert.ok(shipped.length >= 2);
+  assert.ok(shipped.every(([, i]) => signed < i), "the sandbox tool is signed before NSIS takes it");
+  const others = bundles.filter((bundle) => !shipped.includes(bundle));
+  assert.deepEqual(others.map(([line]) => line.includes('"compression":"none"')), [true]);
+  assert.ok(others.every(([, i]) => i < signed));
   at(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"');
   const assemble = jobCommands(text, "assemble");
   const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
@@ -645,6 +742,177 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
   }
+});
+
+// ---- Windows code signing, Authenticode (S20a) ----
+
+const AUTHENTICODE_ACTION = join(here, "..", "actions", "authenticode", "action.yml");
+
+/** The steps of <job> in <text>, each as its lines (raw, comments kept), split at `      - `. */
+function jobSteps(text, job) {
+  const body = text.split(/^  ([a-z-]+):\s*$/m);
+  const at = body.indexOf(job);
+  assert.notEqual(at, -1, job);
+  const steps = [];
+  for (const line of body[at + 1].split("\n")) {
+    if (line.startsWith("      - ")) {
+      steps.push([]);
+    }
+    steps.at(-1)?.push(line);
+  }
+  return steps.map((lines) => lines.join("\n"));
+}
+
+/** check's choice of `signing`, run in bash with <env>: its lines from `signing=none` to the last `fi`. */
+function checkSigning(text, env) {
+  const commands = jobCommands(text, "check");
+  const from = commands.indexOf("signing=none");
+  const to = commands.indexOf('signing=selfsigned') + 1;
+  assert.ok(from !== -1 && to > from && commands[to] === "fi", "check sets signing in one block");
+  const script = `${commands.slice(from, to + 1).join("\n")}\nprintf %s "$signing"`;
+  const run = spawnSync("bash", ["-euo", "pipefail", "-c", script], { encoding: "utf8", env: { PATH: process.env.PATH, ...env } });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout;
+}
+
+test("release.yml signs with SignPath only for a tag with SIGNPATH_ENABLED, and self-signs only a dry run that asks", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const check = jobCommands(text, "check");
+  assert.ok(check.includes("SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED }}"));
+  assert.ok(check.includes("SIGN_TEST_SELFSIGNED: ${{ inputs.sign_test_selfsigned }}"));
+  assert.ok(check.includes("signing: ${{ steps.mode.outputs.signing }}"));
+  assert.ok(check.includes('echo "signing=$signing"'));
+  const cases = [
+    ["release", "", "", "none"],
+    ["test", "", "", "none"],
+    ["release", "false", "", "none"],
+    ["release", "true", "", "signpath"],
+    ["test", "true", "", "signpath"],
+    ["release", "TRUE", "", "none"],
+    ["dry", "true", "", "none"],
+    ["dry", "true", "false", "none"],
+    ["dry", "", "true", "selfsigned"],
+    ["dry", "true", "true", "selfsigned"],
+    ["release", "", "true", "none"],
+  ];
+  for (const [mode, enabled, selfsigned, want] of cases) {
+    assert.equal(checkSigning(text, { mode, SIGNPATH_ENABLED: enabled, SIGN_TEST_SELFSIGNED: selfsigned }), want, `${mode} ${enabled} ${selfsigned}`);
+  }
+  // The input exists, off by default; the flag is read in check alone (every step goes by its output).
+  assert.match(text, /^ {6}sign_test_selfsigned:\n(?: {8}.*\n)*? {8}type: boolean\n {8}default: false$/m);
+  const code = text.split("\n").map(stripComment).join("\n");
+  assert.equal(code.match(/vars\.SIGNPATH_ENABLED/g)?.length, 1);
+  assert.ok(jobCommands(text, "check").some((line) => line.includes("vars.SIGNPATH_ENABLED")));
+  assert.doesNotMatch(text, /has not added the SignPath step yet/);
+});
+
+test("release.yml's Authenticode steps run only when signing is on, and leave the unsigned build as it was", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const signing = /\bAuthenticode\b|authenticode|SIGNPATH|New-SelfSignedCertificate|nsis-uninstaller|CLAUSEO_SIGN|CLAUSEO_UNINSTALLER/;
+  const guarded = /^ {8}if: needs\.check\.outputs\.signing (!= 'none'|== 'signpath'|== 'selfsigned')$/m;
+  const steps = jobSteps(text, "sign-windows");
+  const touching = steps.filter((step) => signing.test(step.split("\n").map(stripComment).join("\n")));
+  const unguarded = touching.filter((step) => !guarded.test(step));
+  // The installers' own bundle is the one step that runs either way: everything it does for
+  // signing sits inside `if [ "$SIGNING" != none ]`.
+  assert.deepEqual(unguarded.map((step) => step.match(/name: (.*)/)?.[1]), ["Bundle the currentUser and perMachine installers"]);
+  const outside = unguarded[0]
+    .replace(/^( +)if \[ "\$SIGNING" != none \]; then\n[^]*?^\1fi$/gm, "")
+    .split("\n")
+    .map(stripComment)
+    .filter((line) => /CLAUSEO_|nsis-uninstaller|authenticode/.test(line) && !line.trim().startsWith("#"));
+  assert.deepEqual(outside, []);
+  assert.ok(touching.length >= 9, `${touching.length} signing steps`);
+  // Three signing requests per leg, all through the local action.
+  const uses = steps.filter((step) => step.includes("uses: ./.github/actions/authenticode"));
+  assert.equal(uses.length, 3);
+  for (const step of uses) {
+    assert.match(step, /^ {8}if: needs\.check\.outputs\.signing != 'none'$/m);
+    assert.match(step, /^ {10}backend: \$\{\{ needs\.check\.outputs\.signing \}\}$/m);
+    // A dry run never hands over the SignPath token.
+    assert.match(step, /^ {10}signpath-api-token: \$\{\{ needs\.check\.outputs\.signing == 'signpath' && secrets\.SIGNPATH_API_TOKEN \|\| '' \}\}$/m);
+  }
+  const job = jobCommands(text, "sign-windows");
+  assert.ok(job.includes("actions: read"), "SignPath's action reads the artifact with the job's token");
+  assert.ok(job.includes("timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 150 }}"));
+});
+
+test("release.yml Authenticode-signs every PE before any updater signature, the uninstaller between its two bundles", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const sign = jobCommands(text, "sign-windows");
+  const at = (predicate, what) => {
+    const index = sign.findIndex(predicate);
+    assert.notEqual(index, -1, what);
+    return index;
+  };
+  const line = (exact) => at((one) => one === exact, exact);
+  const toolset = at((one) => /\btauri bundle\b/.test(one) && one.includes('"compression":"none"'), "the toolset bundle");
+  const copies = line('cp "$toolset"/Plugins/x86-unicode/*.dll "$toolset"/Plugins/x86-unicode/additional/*.dll "$plugins/"');
+  const staged = line('cp "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe "$plugins"/*.dll "$stage/"');
+  const exe = line("path: ${{ runner.temp }}/authenticode-exe");
+  const back = line('node .github/scripts/latest-json.mjs --unsigned "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries "$RUNNER_TEMP/nsis-plugins"');
+  const sandbox = line('pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"');
+  const captures = sign.map((one, i) => [one, i]).filter(([one]) => one.startsWith('CLAUSEO_UNINSTALLER_COMMAND="node \\"$script\\" capture'));
+  assert.equal(captures.length, 2);
+  assert.ok(captures.every(([one]) => one.endsWith(" bundle") || one.endsWith(" bundle --config release/machine.conf.json")));
+  const uninstallers = line("path: ${{ runner.temp }}/authenticode-uninstallers");
+  const shipped = at((one, i) => i > uninstallers && /\btauri bundle\b/.test(one), "the installers' own bundle");
+  const substitute = at((one) => one.includes("nsis-uninstaller.mjs\\\" substitute"), "the substitute command");
+  const installers = line("path: ${{ runner.temp }}/authenticode-installers");
+  const checked = line('node .github/scripts/latest-json.mjs --unsigned "$OUT"');
+  const updater = line('pnpm -C ui tauri signer sign --app-version "$VERSION" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe"');
+  const order = [toolset, copies, staged, exe, back, sandbox, ...captures.map(([, i]) => i), uninstallers, shipped, substitute, installers, checked, updater];
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+  // The sandbox tool's asset beside the installers is not signed again (its .sig is over its bytes).
+  assert.ok(sign.includes('cp "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe" "$stage/"'));
+  // The template's switches, as the bundles set them.
+  for (const name of ["CLAUSEO_SIGNED_PLUGINS=1", 'CLAUSEO_SIGNED_PLUGINS_DIR="$RUNNER_TEMP/nsis-plugins"', "CLAUSEO_SIGN_UNINSTALLER=1"]) {
+    assert.equal(sign.filter((one) => one.startsWith("export ") && one.includes(name)).length, 2, name);
+  }
+});
+
+test("assemble lists every unsigned PE in the assets and both installers, failing only when signing is on", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const assemble = jobCommands(text, "assemble");
+  const at = (exact) => {
+    const index = assemble.indexOf(exact);
+    assert.notEqual(index, -1, exact);
+    return index;
+  };
+  const upload = at("name: dist-assets");
+  const unpacked = at('7z x -y -aou -o"$out" "$installer" > /dev/null || [ $? -eq 1 ]');
+  const listed = at('node .github/scripts/latest-json.mjs --unsigned dist "$inside" > unsigned.txt || found=$?');
+  const release = assemble.findIndex((one) => one.startsWith('gh release create "$TAG"'));
+  assert.ok(upload < unpacked && unpacked < listed && listed < release);
+  assert.ok(assemble.includes("SIGNING: ${{ needs.check.outputs.signing }}"));
+  const step = jobSteps(text, "assemble").find((one) => one.includes("--unsigned dist"));
+  assert.match(step, /if \[ "\$SIGNING" = none \]; then\n\s+echo "::notice::signing is off: /);
+  assert.match(step, /else\n\s+echo "::error::signing is \$SIGNING, but /);
+  assert.match(step, /echo "::error::7-Zip found no uninstall\.exe in /);
+  assert.match(step, /exit "\$status"$/m);
+});
+
+test("the authenticode action pins its actions, signs with SignPath or the throwaway certificate, and checks the result", () => {
+  const text = readFileSync(AUTHENTICODE_ACTION, "utf8");
+  const uses = [...text.matchAll(/^\s*(?:- )?uses: (\S+)/gm)].map((match) => match[1]);
+  assert.deepEqual(uses, [
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092",
+  ]);
+  // The same upload-artifact as release.yml's.
+  assert.ok(readFileSync(RELEASE_YML, "utf8").includes(`uses: ${uses[0]} # v7.0.2`));
+  const steps = text.split(/^ {4}- /m).slice(1);
+  const step = (name) => steps.find((one) => one.startsWith(`name: ${name}`)) ?? assert.fail(name);
+  assert.match(step("Upload the folder for SignPath"), /if: inputs\.backend == 'signpath'/);
+  assert.match(step("Sign it with SignPath and wait"), /if: inputs\.backend == 'signpath'/);
+  assert.match(step("Sign it with SignPath and wait"), /github-artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+  assert.match(step("Put SignPath's files in place of the folder's"), /if: inputs\.backend == 'signpath'/);
+  assert.match(step("Sign it with the throwaway certificate"), /if: inputs\.backend == 'selfsigned'/);
+  const last = steps.at(-1);
+  assert.ok(last.startsWith("name: Every PE file in the folder is signed"));
+  assert.doesNotMatch(last, /\bif:/);
+  assert.match(last, /latest-json\.mjs" --unsigned "\$FOLDER"/);
+  assert.doesNotMatch(text, /\bsecrets\b/);
 });
 
 test("release.yml's build tells the sandbox's build.rs the mode and, for release and test, the updater key", () => {
