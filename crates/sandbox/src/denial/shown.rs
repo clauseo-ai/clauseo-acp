@@ -44,12 +44,21 @@ pub(crate) fn shown_name(name: &Path) -> String {
 
 /// Whether `c` can change how the text around it reads, or can't be seen: a control (C0, DEL,
 /// C1), a line or paragraph separator (U+2028, U+2029), a bidi embedding, override or isolate
-/// (U+202A to U+202E, U+2066 to U+2069), or a bidi mark (U+200E, U+200F, U+061C).
+/// (U+202A to U+202E, U+2066 to U+2069), a bidi mark (U+200E, U+200F, U+061C), or a character
+/// with no width: a zero-width space, non-joiner or joiner (U+200B to U+200D), a word joiner
+/// or invisible operator (U+2060 to U+2064), a byte order mark (U+FEFF), a soft hyphen
+/// (U+00AD), or a tag character (U+E0000 to U+E007F). Two names that look the same then show
+/// differently.
 pub(crate) fn is_hidden(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
-            '\u{061C}'
+            '\u{00AD}'
+                | '\u{061C}'
+                | '\u{200B}'..='\u{200D}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{FEFF}'
+                | '\u{E0000}'..='\u{E007F}'
                 | '\u{200E}'
                 | '\u{200F}'
                 | '\u{2028}'

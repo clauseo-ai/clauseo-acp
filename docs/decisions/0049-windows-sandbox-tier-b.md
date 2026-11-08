@@ -373,9 +373,11 @@ build 26100):
     that says to move it back. Anyone else's: "Clauseo moved `<name>` to `<set-aside path>`
     because a git repository appeared in the matter while an agent was working. If you made it
     yourself, move it back after the session ends." The agent chose the names, so a notice and a
-    set-aside record show each with its control and bidi characters escaped as `\u{XXXX}` (C0,
-    DEL, C1, U+061C, U+200E, U+200F, U+2028, U+2029, U+202A to U+202E, U+2066 to U+2069), cut
-    to 512 characters with `…` (`denial/shown.rs`). Each item moved goes to the host as two
+    set-aside record show each with its control, bidi and zero-width characters escaped as
+    `\u{XXXX}` (C0, DEL, C1, U+00AD, U+061C, U+200B to U+200F, U+2028, U+2029, U+202A to
+    U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF, U+E0000 to U+E007F), cut to 512
+    characters with `…` (`denial/shown.rs`); so do `Error::ProtectedLink`'s message and
+    `Error::shown_at` (the item `Error::SetAside`, `AclApply` or `ProtectedLink` names). Each item moved goes to the host as two
     records on its denial pipe, the lawyer's notice and the set-aside; the session's end notice
     goes there too. Nothing on the outer's stderr, which carries the agent's stderr too, is read
     back: a valid record line the agent writes there is relayed as plain bytes. The pipe
@@ -441,7 +443,7 @@ build 26100):
     records each deny, and forget hands it back like any other. A link with one of these names
     that leads into the matter is listed too, as a `.git` link is, so the permission write
     refuses the launch there, as at the root, with `Error::ProtectedLink` naming the item
-    relative to the matter (`matter.protected_link`). macOS reads the same list: its profile
+    (escaped) relative to the matter (`matter.protected_link`). macOS reads the same list: its profile
     gains one subpath parameter per item.
   - An owner gets `WRITE_DAC` before any deny is read, so a protected item a pool user owns (one
     the lawyer restored from the set-aside or renamed, or one made before PR4a) is handed to the

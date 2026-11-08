@@ -176,14 +176,39 @@ fn denials_print_as_tagged_json() {
     );
 }
 
-/// Each control and bidi character an agent can put in a name is shown escaped; plain names,
-/// Windows paths and other scripts are left as they are.
+/// Each control, bidi and zero-width character an agent can put in a name is shown escaped;
+/// plain names, Windows paths and other scripts are left as they are.
 #[test]
 fn a_shown_name_escapes_controls_and_bidi_characters() {
     use std::path::Path;
     let hidden = [
-        '\u{0}', '\n', '\r', '\u{1B}', '\u{7F}', '\u{80}', '\u{9F}', '\u{061C}', '\u{200E}',
-        '\u{200F}', '\u{2028}', '\u{2029}', '\u{202A}', '\u{202E}', '\u{2066}', '\u{2069}',
+        '\u{0}',
+        '\n',
+        '\r',
+        '\u{1B}',
+        '\u{7F}',
+        '\u{80}',
+        '\u{9F}',
+        '\u{061C}',
+        '\u{200E}',
+        '\u{200F}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{202A}',
+        '\u{202E}',
+        '\u{2066}',
+        '\u{2069}',
+        // The fixes' review: characters with no width.
+        '\u{200B}',
+        '\u{200C}',
+        '\u{200D}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{FEFF}',
+        '\u{00AD}',
+        '\u{E0000}',
+        '\u{E0041}',
+        '\u{E007F}',
     ];
     for c in hidden {
         let shown = shown_name(Path::new(&format!("a{c}b")));
@@ -193,7 +218,7 @@ fn a_shown_name_escapes_controls_and_bidi_characters() {
         shown_name(Path::new("cod\u{202E}fdp.exe")),
         "cod\\u{202E}fdp.exe"
     );
-    for plain in [r"Precedents\.git", "Матер/דוח.md", "a b\u{200D}c", "…"] {
+    for plain in [r"Precedents\.git", "Матер/דוח.md", "a b\u{2010}c", "…"] {
         assert_eq!(shown_name(Path::new(plain)), plain);
     }
 }
