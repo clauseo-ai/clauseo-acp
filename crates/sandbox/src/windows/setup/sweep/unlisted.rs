@@ -4,11 +4,12 @@
 //! `%SystemRoot%\System32\Tasks` (walked by handle, never through a link) and every task in the
 //! Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`, read only). A task either holds
 //! that the walk didn't list (compared exactly, then as Windows compares names,
-//! [`Sweeper::same_task_path`]) is hidden, 56, unless its task file, under the fallback's trust
-//! rules ([`file_trust::trusted`]), names a principal that isn't the pool's: then it is
-//! skipped, counted with the other tasks skipped by their file. A listing that can't be read is
-//! 56 too. Nothing is deleted through a file or the registry: a hidden task is left, and the
-//! run fails closed.
+//! [`Sweeper::same_task_path`]) is hidden, 56, unless the owner of the descriptor its cache key
+//! holds isn't a pool SID and its task file, under the fallback's trust rules
+//! ([`file_trust::trusted`]), names a principal that isn't the pool's: then it is skipped,
+//! counted with the other tasks skipped by their file. A listing that can't be read is 56 too.
+//! Nothing is deleted through a file or the registry: a hidden task is left, and the run fails
+//! closed.
 
 use std::collections::BTreeSet;
 

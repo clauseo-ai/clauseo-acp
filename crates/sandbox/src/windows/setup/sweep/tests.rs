@@ -67,6 +67,9 @@ struct Fake {
     /// each of those listings (the task files', the cache's) fails.
     hidden: Vec<String>,
     listings_fail: [bool; 2],
+    /// The owners the cache's `SD` values give, by task path, `Err` where one is missing or
+    /// can't be read; one not here is the Administrators'.
+    cache_owners: BTreeMap<String, Result<Sid, Failed>>,
     /// Each task's security descriptor by its name, `Err` where it can't be read; one not
     /// here is the Administrators'.
     owners: BTreeMap<String, Result<String, Failed>>,
@@ -116,6 +119,7 @@ impl Fake {
             stop_refuse: Vec::new(),
             hidden: Vec::new(),
             listings_fail: [false; 2],
+            cache_owners: BTreeMap::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
             securities: BTreeMap::new(),
@@ -361,6 +365,11 @@ impl Sweeper for Fake {
             return Err("a key of the Task Scheduler's cache couldn't be listed (5)".to_owned());
         }
         Ok(self.on_disk())
+    }
+
+    fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
+        let admins = || Ok(Sid::parse("S-1-5-32-544").unwrap());
+        self.cache_owners.get(path).cloned().unwrap_or_else(admins)
     }
 
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {

@@ -282,6 +282,10 @@ impl Sweeper for WindowsSweeper {
         windows_listing::task_cache()
     }
 
+    fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
+        windows_listing::task_cache_owner(path)
+    }
+
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {
         // SAFETY: a live folder and a BSTR that outlives the call; flags 0.
         unsafe { folder.DeleteTask(&BSTR::from(name), 0) }
