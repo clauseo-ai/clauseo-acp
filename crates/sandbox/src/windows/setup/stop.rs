@@ -5,7 +5,8 @@
 //! `SeDebugPrivilege`, opens it regardless.
 //!
 //! [`stop`] holds the order and the refusals, with no Windows call; every effect goes through
-//! [`Stopper`], which `windows_stopper.rs` implements and the tests fake. It:
+//! [`Stopper`], which `windows_stopper.rs` implements and the tests fake. Steps 1 to 3 are the
+//! gate and step 5 the BITS step that `--sweep-tasks` shares (`pool_steps.rs`). It:
 //!
 //! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path;
 //! 2. reads the pool from the machine's record, `HKLM\SOFTWARE\Clauseo\Sandbox`: `PoolSids` and
@@ -93,20 +94,18 @@
 //! It logs counts only, one line, and exits with its own code ([`StopExit`]).
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::windows::refresh::same_path;
+use super::pool_steps::{Bits, Gate, JOBS_CAP, Refused, cancel_pool_jobs, gate};
 use crate::windows::sids::Sid;
 
+pub use super::pool_steps::{Failed, Pool};
 pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
 
 mod pick;
 mod sequence;
 #[cfg(test)]
 mod tests;
-#[cfg(windows)]
-mod windows_bits;
 #[cfg(windows)]
 pub(crate) mod windows_stopper;
 #[cfg(windows)]
@@ -159,18 +158,6 @@ impl StopExit {
     }
 }
 
-/// What the record gives the stop.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pool {
-    /// `OwnerSid`: never stopped, whatever `PoolSids` says.
-    pub owner: Sid,
-    /// `PoolSids`.
-    pub users: Vec<Sid>,
-}
-
-/// A failed effect: what failed, as a line for the log.
-pub type Failed = String;
-
 /// How long the passes go on while each still finds a pool user's process: well inside the
 /// task's 2-minute limit, with [`LAST_WAITS`] and the lock's 30 s wait after it.
 pub const PASS_LIMIT: Duration = Duration::from_secs(60);
@@ -182,23 +169,11 @@ pub const EXIT_WAIT: Duration = Duration::from_secs(1);
 /// so the run ends inside the task's limit.
 pub const LAST_WAITS: Duration = Duration::from_secs(15);
 
-/// The most BITS jobs the stop reads (`Stopper::bits_jobs`). A list that reaches it may have
-/// been cut, so jobs of the pool's may be left past it: the run ends at 48.
-pub(crate) const JOBS_CAP: usize = 10_000;
-
-/// Every effect of the stop. The real one reads the record and the admin copy's path itself, so
-/// no method takes a SID or a path the caller chose, but the pool the record gave.
-pub trait Stopper {
-    /// Whether this process's token user is LOCAL SYSTEM.
-    fn is_system(&mut self) -> Result<bool, Failed>;
-    /// This process's exe, its final path.
-    fn current_exe(&mut self) -> Result<PathBuf, Failed>;
-    /// The admin copy's path: `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe`.
-    fn admin_copy(&mut self) -> Result<PathBuf, Failed>;
-    /// The machine record's `OwnerSid` and `PoolSids`; `None` when there is no record.
-    fn pool(&mut self) -> Result<Option<Pool>, Failed>;
-    /// Whether every SID of `pool.users` passes the pool-user check (`strays::check_pool_sid`).
-    fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed>;
+/// Every effect of the stop: the gate's ([`Gate`]), the BITS step's ([`Bits`]) and its own. The
+/// real one reads the record and the admin copy's path itself, so no method takes a SID or a
+/// path the caller chose, but the pool the record gave. A list of [`JOBS_CAP`] BITS jobs may
+/// have been cut, so jobs of the pool's may be left past it: the run ends at 48.
+pub trait Stopper: Gate + Bits {
     /// Every running process with its user as each source gave it, from a fresh snapshot; the
     /// handles it opened replace the last snapshot's, for [`Stopper::suspend`] and
     /// [`Stopper::terminate`].
@@ -216,12 +191,6 @@ pub trait Stopper {
     /// Waits a moment before the next pass, after a termination failed, so a process that
     /// refuses isn't asked again at once.
     fn pause(&mut self);
-    /// Every BITS job on this machine, all users', each as its owner: `None` when it couldn't
-    /// be read; at most [`JOBS_CAP`]. The list replaces the last one, for
-    /// [`Stopper::cancel_job`].
-    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed>;
-    /// Cancels the job at `at` in the last list, which removes it.
-    fn cancel_job(&mut self, at: usize) -> Result<(), Failed>;
     /// Waits a bounded time for the set-up lock and keeps it until [`Stopper::unlock`]:
     /// `Ok(false)` when another still holds it.
     fn lock(&mut self) -> Result<bool, Failed>;
@@ -299,13 +268,16 @@ type Refusal = (StopExit, String);
 
 /// The steps; `Ok` carries the log line of a run that stopped and marked everything it found.
 fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
-    allowed(fs)?;
-    let pool = match fs.pool().map_err(|why| (StopExit::NoRecord, why))? {
-        Some(pool) if !pool.users.is_empty() => pool,
-        _ => return Ok("the sandbox's stop: no pool users are recorded".to_owned()),
+    // Steps 1 to 3, shared with `--sweep-tasks`.
+    let pool = match gate(fs) {
+        Ok(Some(pool)) => pool,
+        Ok(None) => return Ok("the sandbox's stop: no pool users are recorded".to_owned()),
+        Err((Refused::NotAllowed, why)) => return Err((StopExit::NotAllowed, why)),
+        Err((Refused::NoRecord, why)) => return Err((StopExit::NoRecord, why)),
+        Err((Refused::NotPool, why)) => {
+            return Err((StopExit::NotPool, format!("nothing was stopped: {why}")));
+        }
     };
-    fs.check_pool(&pool)
-        .map_err(|why| (StopExit::NotPool, format!("nothing was stopped: {why}")))?;
     let n = sequence::reserve(fs, &pool.users)?;
     let mut passes = Passes::default();
     let ran = run_passes(fs, &pool.users, &mut passes);
@@ -372,20 +344,6 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     ))
 }
 
-/// Step 1: LOCAL SYSTEM, from the admin copy's path.
-fn allowed(fs: &mut impl Stopper) -> Result<(), Refusal> {
-    let refuse = |why: String| (StopExit::NotAllowed, why);
-    if !fs.is_system().map_err(refuse)? {
-        return Err(refuse("it runs only as LOCAL SYSTEM".to_owned()));
-    }
-    let exe = fs.current_exe().map_err(refuse)?;
-    let admin = fs.admin_copy().map_err(refuse)?;
-    if !same_path(&exe, &admin) {
-        return Err(refuse("it runs only from the admin copy".to_owned()));
-    }
-    Ok(())
-}
-
 /// Step 4: passes until a snapshot finds no pool user's process, or until [`PASS_LIMIT`] has
 /// passed, counted in `passes`. Each pass marks the pool users it found that aren't yet
 /// (step 6), suspends every pool user's process it found, then terminates each, waiting up to
@@ -443,30 +401,19 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
     }
 }
 
-/// Step 5: every BITS job a pool user owns is cancelled, its owner added to `passes.found`;
-/// another user's is left alone. It runs whatever the passes found: a pool user's job outlives
-/// its processes, and the session's end leaves nothing else to stop. A list that can't be read is
-/// the error; a cancel that fails, or an owner that can't be read, is counted; a list of
-/// [`JOBS_CAP`] jobs is marked `jobs_capped` once the pool's jobs in it are cancelled.
+/// Step 5: every BITS job a pool user owns is cancelled ([`cancel_pool_jobs`]), its owner added
+/// to `passes.found`; another user's is left alone. It runs whatever the passes found: a pool
+/// user's job outlives its processes, and the session's end leaves nothing else to stop. A list
+/// that can't be read is the error; a cancel that fails, or an owner that can't be read, is
+/// counted; a list of [`JOBS_CAP`] jobs is marked `jobs_capped` once the pool's jobs in it are
+/// cancelled.
 fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
     passes.jobs_at = Some(fs.now());
-    let owners = fs
-        .bits_jobs()
-        .map_err(|why| format!("the BITS jobs couldn't be listed: {why}"))?;
-    for (at, owner) in owners.iter().enumerate() {
-        match owner {
-            Some(owner) if pool.contains(owner) => {
-                passes.found.insert(owner.clone());
-                match fs.cancel_job(at) {
-                    Ok(()) => passes.jobs_cancelled += 1,
-                    Err(_why) => passes.jobs_failed += 1,
-                }
-            }
-            Some(_) => {}
-            None => passes.jobs_failed += 1,
-        }
-    }
-    passes.jobs_capped = owners.len() >= JOBS_CAP;
+    let jobs = cancel_pool_jobs(fs, pool)?;
+    passes.found.extend(jobs.owners);
+    passes.jobs_cancelled = jobs.cancelled;
+    passes.jobs_failed = jobs.failed;
+    passes.jobs_capped = jobs.capped;
     Ok(())
 }
 

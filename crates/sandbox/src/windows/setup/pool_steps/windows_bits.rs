@@ -1,9 +1,9 @@
-//! The stop's BITS half (`Stopper::bits_jobs`, `Stopper::cancel_job`): every BITS job on the
-//! machine, all users' (`BG_JOB_ENUM_ALL_USERS`, which SYSTEM may ask for), with its owner, and
-//! `Cancel`, which removes a job. COM's default impersonation level is identify, with which BITS
-//! can't act as a job's owner (`Cancel` fails with `ERROR_NOT_LOGGED_ON`), so the manager, the
-//! enumerator and each job get the impersonate level before their first call, as the runner's
-//! end sweeper does: a proxy reached through another starts with the default again.
+//! The pool tasks' BITS half ([`Bits`], [`WindowsBits`]), which `--stop` and `--sweep-tasks`
+//! both use: every BITS job on the machine, all users' (`BG_JOB_ENUM_ALL_USERS`, which SYSTEM may
+//! ask for), with its owner, and `Cancel`, which removes a job. COM's default impersonation level
+//! is identify, with which BITS can't act as a job's owner (`Cancel` fails with
+//! `ERROR_NOT_LOGGED_ON`), so the manager, the enumerator and each job get the impersonate level
+//! before their first call: a proxy reached through another starts with the default again.
 #![expect(unsafe_code, reason = "COM calls to BITS")]
 
 use windows::Win32::Networking::BackgroundIntelligentTransferService::{
@@ -16,18 +16,20 @@ use windows::Win32::System::Com::{
 };
 use windows::core::{IUnknown, Interface, PCWSTR};
 
-use super::{Failed, JOBS_CAP};
+use super::{Bits, Failed, JOBS_CAP};
 use crate::windows::sids::Sid;
+
 /// `RPC_C_AUTHN_WINNT`: NTLM or Kerberos, as for any local COM call.
 const AUTHN_WINNT: u32 = 10;
 /// `RPC_C_AUTHZ_NONE`.
 const AUTHZ_NONE: u32 = 0;
 
 /// COM, initialised for this thread while it lives.
-pub(super) struct Com(bool);
+pub(crate) struct Com(bool);
 
 impl Com {
-    pub(super) fn new() -> Com {
+    /// Initialises COM for this thread, in the multithreaded apartment.
+    pub(crate) fn new() -> Com {
         // SAFETY: no reserved pointer; undone on drop when it took.
         Com(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
     }
@@ -71,10 +73,10 @@ fn impersonating<T: Interface>(proxy: T) -> Result<T, Failed> {
 }
 
 /// Every BITS job, all users', each impersonating this process, with its owner: `None` when it
-/// couldn't be read. At most [`JOBS_CAP`]: a list that long may have been cut, which the stop
-/// ends at 48 (`cancel_jobs`). COM must be initialised on this thread ([`Com`]) while the jobs
-/// live.
-pub(super) fn jobs() -> Result<Vec<(IBackgroundCopyJob, Option<Sid>)>, Failed> {
+/// couldn't be read. At most [`JOBS_CAP`]: a list that long may have been cut, which no run
+/// ends 0 with (`cancel_pool_jobs`). COM must be initialised on this thread ([`Com`]) while the
+/// jobs live.
+pub(crate) fn jobs() -> Result<Vec<(IBackgroundCopyJob, Option<Sid>)>, Failed> {
     // SAFETY: a plain out-of-process creation of BITS's manager.
     let manager: IBackgroundCopyManager =
         unsafe { CoCreateInstance(&BackgroundCopyManager, None, CLSCTX_LOCAL_SERVER) }
@@ -114,7 +116,31 @@ fn owner(job: &IBackgroundCopyJob) -> Option<Sid> {
 }
 
 /// Cancels `job`, which removes it.
-pub(super) fn cancel(job: &IBackgroundCopyJob) -> Result<(), Failed> {
+pub(crate) fn cancel(job: &IBackgroundCopyJob) -> Result<(), Failed> {
     // SAFETY: a live job.
     unsafe { job.Cancel() }.map_err(|error| failed("IBackgroundCopyJob::Cancel", &error))
+}
+
+/// The real [`Bits`]: the last list's jobs, and COM on this thread once they are listed.
+#[derive(Default)]
+pub(crate) struct WindowsBits {
+    /// The last BITS list's jobs, for [`Bits::cancel_job`]; dropped before [`Self::com`].
+    jobs: Vec<IBackgroundCopyJob>,
+    /// COM on this thread, once the BITS jobs are listed.
+    com: Option<Com>,
+}
+
+impl Bits for WindowsBits {
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.jobs.clear();
+        self.com.get_or_insert_with(Com::new);
+        let (jobs, owners) = jobs()?.into_iter().unzip();
+        self.jobs = jobs;
+        Ok(owners)
+    }
+
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        let job = self.jobs.get(at).ok_or_else(|| "no such job".to_owned())?;
+        cancel(job)
+    }
 }

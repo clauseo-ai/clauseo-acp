@@ -4,6 +4,7 @@
 //! `tests/users.rs`.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::*;
 use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE};
@@ -175,7 +176,7 @@ fn seen(pid: u32, user: Option<Sid>) -> Process {
     }
 }
 
-impl Stopper for Fake {
+impl Gate for Fake {
     fn is_system(&mut self) -> Result<bool, Failed> {
         Ok(self.system)
     }
@@ -203,7 +204,9 @@ impl Stopper for Fake {
         }
         Ok(())
     }
+}
 
+impl Stopper for Fake {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.done.push("snapshot".to_owned());
         self.now += Duration::from_secs(1);
@@ -245,19 +248,6 @@ impl Stopper for Fake {
 
     fn pause(&mut self) {
         self.done.push("pause".to_owned());
-    }
-
-    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
-        self.done.push("jobs".to_owned());
-        self.jobs.clone()
-    }
-
-    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
-        if self.jobs_refuse.contains(&at) {
-            return Err("IBackgroundCopyJob::Cancel failed (0x80070005)".to_owned());
-        }
-        self.done.push(format!("cancel {at}"));
-        Ok(())
     }
 
     fn lock(&mut self) -> Result<bool, Failed> {
@@ -316,6 +306,21 @@ impl Stopper for Fake {
 
     fn log(&mut self, error: bool, line: &str) {
         self.logged.push((error, line.to_owned()));
+    }
+}
+
+impl Bits for Fake {
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.done.push("jobs".to_owned());
+        self.jobs.clone()
+    }
+
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        if self.jobs_refuse.contains(&at) {
+            return Err("IBackgroundCopyJob::Cancel failed (0x80070005)".to_owned());
+        }
+        self.done.push(format!("cancel {at}"));
+        Ok(())
     }
 }
 

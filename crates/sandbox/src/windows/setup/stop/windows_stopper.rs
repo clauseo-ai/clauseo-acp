@@ -1,5 +1,5 @@
-//! The stop's real [`Stopper`]: the record in `HKLM\SOFTWARE\Clauseo\Sandbox` (64-bit view), the
-//! admin copy's path under `FOLDERID_ProgramFiles`, a Toolhelp process snapshot with each
+//! The stop's real [`Stopper`]: the gate's reads (`pool_steps::windows_gate`), BITS
+//! (`pool_steps::windows_bits`), a Toolhelp process snapshot with each
 //! process's user from the kernel's process list (`WTSEnumerateProcessesExW`), its token and its
 //! owner, `NtSuspendProcess` and `TerminateProcess` through the handle that user was read
 //! through, the set-up lock, and the Event Log.
@@ -33,18 +33,15 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PWSTR;
 
-use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
-
-use super::windows_bits::{self, Com};
 use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
 use crate::windows::acl::object::Handle;
-use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, SetupMutex};
 use crate::windows::setup::machine::MachineError;
-use crate::windows::setup::owner::this_process;
+use crate::windows::setup::pool_steps::windows_bits::WindowsBits;
+use crate::windows::setup::pool_steps::{Bits, Gate, windows_gate};
 use crate::windows::setup::preflight::sid_text;
-use crate::windows::setup::processes::{DebugPrivilege, check_pool, owner_of, user_of};
+use crate::windows::setup::processes::{DebugPrivilege, owner_of, user_of};
 use crate::windows::setup::record_write::{self, RECORD_KEY};
 use crate::windows::sids::Sid;
 
@@ -77,10 +74,8 @@ pub(crate) struct WindowsStopper {
     held: Option<Held>,
     /// `GetTickCount64` when the stop began.
     began_ms: u64,
-    /// The last BITS list's jobs, for [`Stopper::cancel_job`]; dropped before [`Self::com`].
-    jobs: Vec<IBackgroundCopyJob>,
-    /// COM on this thread, once the BITS jobs are listed.
-    com: Option<Com>,
+    /// BITS, for [`Bits`].
+    bits: WindowsBits,
 }
 
 impl WindowsStopper {
@@ -91,48 +86,44 @@ impl WindowsStopper {
             held: None,
             // SAFETY: GetTickCount64 only reads the tick count.
             began_ms: unsafe { GetTickCount64() },
-            jobs: Vec::new(),
-            com: None,
+            bits: WindowsBits::default(),
         }
     }
 }
 
-impl Stopper for WindowsStopper {
+impl Gate for WindowsStopper {
     fn is_system(&mut self) -> Result<bool, Failed> {
-        this_process()
-            .map(|(_elevated, system)| system)
-            .map_err(|error| error.to_string())
+        windows_gate::is_system()
     }
 
     fn current_exe(&mut self) -> Result<PathBuf, Failed> {
-        os::running_image().map_err(|error| error.to_string())
+        windows_gate::current_exe()
     }
 
     fn admin_copy(&mut self) -> Result<PathBuf, Failed> {
-        let program_files = os::program_files().map_err(|error| error.to_string())?;
-        Ok(admin_copy::admin_exe(&program_files))
+        windows_gate::admin_copy()
     }
 
     fn pool(&mut self) -> Result<Option<Pool>, Failed> {
-        let record = record_write::read(RECORD_KEY).map_err(|error| error.to_string())?;
-        Ok(record.map(|record| Pool {
-            owner: record.owner,
-            users: record.pool,
-        }))
+        windows_gate::pool()
     }
 
     fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed> {
-        // The check's own refusal names the SID; the Application log is readable by every
-        // local user, so the line says only that one failed.
-        check_pool(&pool.users, &pool.owner).map_err(|error| match error {
-            MachineError::Other(_) => "a SID PoolSids lists failed the pool-user check".to_owned(),
-            error @ (MachineError::Os { .. }
-            | MachineError::LockHeld
-            | MachineError::Unsupported(_)
-            | MachineError::ProfileChanged(_)) => error.to_string(),
-        })
+        windows_gate::check_pool(pool)
+    }
+}
+
+impl Bits for WindowsStopper {
+    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
+        self.bits.bits_jobs()
     }
 
+    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
+        self.bits.cancel_job(at)
+    }
+}
+
+impl Stopper for WindowsStopper {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.handles.clear();
         let (seen, handles) = processes()?;
@@ -184,19 +175,6 @@ impl Stopper for WindowsStopper {
     fn pause(&mut self) {
         // SAFETY: a plain wait of this thread.
         unsafe { Sleep(PAUSE_MS) };
-    }
-
-    fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
-        self.jobs.clear();
-        self.com.get_or_insert_with(Com::new);
-        let (jobs, owners) = windows_bits::jobs()?.into_iter().unzip();
-        self.jobs = jobs;
-        Ok(owners)
-    }
-
-    fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
-        let job = self.jobs.get(at).ok_or_else(|| "no such job".to_owned())?;
-        windows_bits::cancel(job)
     }
 
     fn lock(&mut self) -> Result<bool, Failed> {
