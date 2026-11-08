@@ -4,8 +4,8 @@
 //! `Version` is empty or older than the package's own version (major, minor, revision). Any
 //! user may start that upgrade: the package's packaged COM class `WslInstaller` grants launch to
 //! Authenticated Users (`AppxManifest.in:74-78`), and the MSI rewrites WSL's launch permissions,
-//! dropping the deny until the refresh puts it back. So a tier B launch is refused while one is
-//! pending ([`Blocked::WslUpgradePending`]).
+//! dropping the deny until the WSL deny task puts it back. So a tier B launch is refused while
+//! one is pending ([`Blocked::WslUpgradePending`]).
 //!
 //! The package's version is read from its packaged-COM registration,
 //! `HKLM\SOFTWARE\Classes\PackagedCom\Package\<full name>`, which `Users` can read: the full name

@@ -429,3 +429,32 @@ fn stop_takes_no_argument_at_all() {
         assert!(parsed(&[near]).is_err(), "{near:?}");
     }
 }
+
+#[test]
+fn wsl_deny_takes_no_argument_at_all() {
+    assert_eq!(parsed(&["--wsl-deny"]), Ok(Mode::WslDeny));
+    // Nothing from an event or a caller: the run reads only the record and fixed paths.
+    for extra in [
+        "--refresh",
+        "--stop",
+        "--wsl-deny",
+        "$(EventID)",
+        "1040",
+        "--data-dir",
+        "",
+    ] {
+        assert!(parsed(&["--wsl-deny", extra]).is_err(), "{extra:?}");
+    }
+    for other in ["--remove", "--refresh", "--stop", "--set-up", "--adopt"] {
+        assert!(parsed(&[other, "--wsl-deny"]).is_err(), "{other}");
+    }
+    for near in [
+        "--WSL-deny",
+        "--wsl-deny=",
+        "-wsl-deny",
+        "wsl-deny",
+        "--wsl_deny",
+    ] {
+        assert!(parsed(&[near]).is_err(), "{near:?}");
+    }
+}

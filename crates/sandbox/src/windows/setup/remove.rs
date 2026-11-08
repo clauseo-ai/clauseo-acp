@@ -48,8 +48,8 @@
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
-//! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
-//!    key;
+//! 8. on a per-machine install, the stop and WSL deny tasks set-up registered for the owner,
+//!    then the record key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -67,6 +67,8 @@ use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
 use super::record_values::CopyOwner;
 use crate::windows::pool::{MachineRecord, pool_number};
+#[cfg(any(windows, test))]
+use crate::windows::refresh::MACHINE_TASKS;
 use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
 };
@@ -145,7 +147,7 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop task, deleted before the record.
+    /// A per-machine install's stop and WSL deny tasks, deleted before the record.
     StopTask,
     /// Taking WSL's deny for the group off its launch permissions (`windows::wsl::remove`).
     Wsl,
@@ -167,7 +169,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
-            RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::StopTask => "deleting the sandbox's stop and WSL tasks",
             RemoveStep::Wsl => "taking WSL's deny for the sandbox users off",
         })
     }
@@ -407,7 +409,7 @@ fn steps(
         .map_err(|e| (RemoveStep::Wsl, cause_of(&e)))?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
-    remove_stop_task(machine)?;
+    remove_machine_tasks(machine)?;
     machine
         .delete_record()
         .map_err(|e| (RemoveStep::Record, cause_of(&e)))?;
@@ -510,13 +512,20 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
 }
 
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the task `\Clauseo\SandboxStop` set-up registered for the record's owner is deleted, so
-/// the owner keeps no start right once their pool is gone. A per-user install's task stays
-/// (`--adopt` registered it; `--remove --uninstall` deletes it with the admin copy).
-fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
+/// each of [`MACHINE_TASKS`] set-up registered for the record's owner (`\Clauseo\SandboxStop`,
+/// `\Clauseo\SandboxWslDeny`) is deleted, so the owner keeps no start right once their pool is
+/// gone. A per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall`
+/// deletes them with the admin copy).
+fn remove_machine_tasks(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {
-        Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
+        Some(CopyOwner::Machine) => {
+            #[cfg(any(windows, test))]
+            for task in MACHINE_TASKS {
+                machine.unregister_task(task).map_err(failed)?;
+            }
+            Ok(())
+        }
         Some(CopyOwner::User(_)) | None => Ok(()),
     }
 }

@@ -12,6 +12,8 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -204,9 +206,12 @@ pub trait Machine {
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxStop` for the pool owner
-    /// `owner` (`refresh::register_task`, as `--adopt` does per user), as this process.
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Registers, or replaces, the SYSTEM task `task` (one of `refresh::MACHINE_TASKS`:
+    /// `\Clauseo\SandboxStop`, `\Clauseo\SandboxWslDeny`) for the pool owner `owner`
+    /// (`refresh::register_task`, as `--adopt` does per user), as this process.
+    /// The task definitions build on Windows and in the tests only (`windows::refresh`).
+    #[cfg(any(windows, test))]
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

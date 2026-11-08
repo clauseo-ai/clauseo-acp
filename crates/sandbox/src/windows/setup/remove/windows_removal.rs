@@ -216,9 +216,8 @@ impl Removal for WindowsRemoval {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
-    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        refresh::unregister_task(SystemTask::Stop)
-            .map_err(|error| MachineError::Other(error.to_string()))
+    fn unregister_task(&mut self, task: SystemTask) -> Result<(), MachineError> {
+        refresh::unregister_task(task).map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn invoker(&self) -> Option<&Sid> {

@@ -166,6 +166,8 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
+    /// The owner the task `\Clauseo\SandboxWslDeny`'s descriptor names, while it is registered.
+    pub(super) wsl_task: Option<Sid>,
     /// The group WSL's launch permissions deny, while they do.
     pub(super) wsl: Option<Sid>,
 }
@@ -196,6 +198,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             secrets: BTreeMap::new(),
             copy_owner: None,
             stop_task: None,
+            wsl_task: None,
             wsl: None,
         },
         written: Vec::new(),

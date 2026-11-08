@@ -106,8 +106,9 @@ pub enum Blocked {
     ToolMissing,
     /// WSL is on this computer and the deny that keeps the sandbox users out of it
     /// (`windows::wsl`) is missing from one of its classes' COM launch permissions, or comes
-    /// after an allow there: a WSL update or repair rewrote it, say. The SYSTEM task
-    /// `\Clauseo\SandboxRefresh` puts it back, at the next logon or Windows Installer event.
+    /// after an allow there: a WSL update or repair rewrote it, say. The SYSTEM tasks put it
+    /// back: `\Clauseo\SandboxWslDeny` on a Windows Installer event, `\Clauseo\SandboxRefresh`
+    /// at the next logon.
     WslDenyMissing,
     /// WSL (`WSLService` or the inbox `LxssManager`, both of which can run WSL2's VMs) is on
     /// this computer and the deny can't be checked: a launch permission can't be read or parsed,

@@ -1,15 +1,16 @@
-//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh") and
-//! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
-//! API (`ITaskService`), never `schtasks` text:
+//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh"),
+//! `\Clauseo\SandboxStop` ("Stopping the pool's processes") and `\Clauseo\SandboxWslDeny`
+//! ("WSL"), through the Task Scheduler's COM API (`ITaskService`), never `schtasks` text:
 //!
 //! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
-//!   user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`): the task
-//!   runs as LOCAL SYSTEM, starts
-//!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
-//!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
-//!   logon and on Windows Installer's events, `rules::Trigger`, with no value queries), needs no
-//!   network, stops after its limit (5 minutes, 2 minutes), and never runs twice
-//!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
+//!   user, and a per-machine install's set-up for each of
+//!   [`MACHINE_TASKS`](super::MACHINE_TASKS) (`late_steps::machine_tasks`): the task runs as
+//!   LOCAL SYSTEM, starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe`
+//!   with its one argument (`--refresh`, `--stop`, `--wsl-deny`) and nothing else, on demand
+//!   (the refresh also at the record owner's logon; the WSL deny task on Windows Installer's
+//!   events, `rules::Trigger`, with no value queries), needs no network, stops after its limit
+//!   (5 minutes, 2 minutes, 1 minute), and never runs twice at once. Its descriptor
+//!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
@@ -238,8 +239,8 @@ impl Folders for Scheduler<'_> {
 /// Registers (or updates) the task `spec` names as the module says, for the record owner
 /// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
 /// place, before it writes the record's admin-copy values (a refresh before then exits 33,
-/// changing nothing). On a per-machine install, the set-up calls it for the stop task once the
-/// record names `owner_sid`; a task already there is replaced, descriptor included.
+/// changing nothing). On a per-machine install, the set-up calls it for the stop and WSL deny
+/// tasks once the record names `owner_sid`; a task already there is replaced, descriptor included.
 pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     let sddl = task_sddl(owner_sid);
@@ -274,7 +275,8 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
-        // A start while it runs is dropped: the refresh's last WSL phase covers it.
+        // A start while it runs is dropped: the WSL deny task's phase is quick and idempotent,
+        // so a burst of installer events gives one run, and one after it ends another.
         settings
             .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
             .map_err(com("SetMultipleInstances"))?;
@@ -304,7 +306,8 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
                 }
                 // The subscription alone: no value queries, so nothing from the event reaches
                 // the action, whose argument stays the fixed one; and no delay, so the run
-                // starts as soon as the installer's first event is logged.
+                // starts as soon as the installer's first event is logged. Only the WSL deny
+                // task has it: a forged event re-applies the deny and does nothing else.
                 Trigger::MsiEvents => {
                     let trigger = triggers
                         .Create(TASK_TRIGGER_EVENT)
@@ -345,7 +348,7 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
 /// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop task.
+/// per-machine install's `--remove` for the stop and WSL deny tasks.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;

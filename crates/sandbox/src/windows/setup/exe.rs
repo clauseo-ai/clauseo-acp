@@ -39,7 +39,8 @@
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
-//! `--stop` (`stop.rs`), the other SYSTEM task's (`StopExit`, from 45).
+//! `--stop` (`stop.rs`), the stop task's (`StopExit`, from 45), and `--wsl-deny`, the WSL deny
+//! task's (`refresh::WslDenyExit`, from 51).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -69,7 +70,7 @@ use crate::windows::sids::Sid;
 
 /// Runs the exe on `args` (those after its name) and returns its process exit code: a
 /// [`SetupExit`]'s, for `--refresh` a [`refresh::RefreshExit`]'s, for `--stop` a
-/// [`stop::StopExit`]'s.
+/// [`stop::StopExit`]'s, for `--wsl-deny` a [`refresh::WslDenyExit`]'s.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
@@ -94,11 +95,14 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     if mode == Mode::Stop {
         return stop::windows_stopper::run().as_code();
     }
+    if mode == Mode::WslDeny {
+        return refresh::run_wsl_deny().as_code();
+    }
     super::event_trace::install();
     run_mode(mode).as_code()
 }
 
-/// Every mode but `--refresh` and `--stop`, which [`main`] runs.
+/// Every mode but `--refresh`, `--stop` and `--wsl-deny`, which [`main`] runs.
 fn run_mode(mode: Mode) -> SetupExit {
     match mode {
         Mode::SetUp {
@@ -145,7 +149,7 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::WslDeny => SetupExit::Usage,
     }
 }
 

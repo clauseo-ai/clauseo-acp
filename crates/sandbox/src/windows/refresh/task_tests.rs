@@ -1,6 +1,7 @@
-//! The two SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh
-//! task with its own name, argument and limit, the same principal and descriptor, and no logon
-//! start; the uninstaller's removal takes both down before the copy they run.
+//! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop and WSL deny tasks are the
+//! refresh task with their own name, argument, limit and triggers, the same principal and
+//! descriptor; only the WSL deny task starts on Windows Installer's events; the uninstaller's
+//! removal takes every task down before the copy they run.
 
 use super::rules::{MSI_EVENT_IDS, Trigger, msi_event_query};
 use super::*;
@@ -8,7 +9,11 @@ use crate::windows::setup::args::{Mode, parse};
 
 #[test]
 fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
-    assert_eq!(TASKS, [SystemTask::Refresh, SystemTask::Stop]);
+    assert_eq!(
+        TASKS,
+        [SystemTask::Refresh, SystemTask::Stop, SystemTask::WslDeny]
+    );
+    assert_eq!(MACHINE_TASKS, [SystemTask::Stop, SystemTask::WslDeny]);
     let refresh = SystemTask::Refresh;
     let stop = SystemTask::Stop;
     assert_eq!(
@@ -24,6 +29,15 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
         ("SandboxStop", "--stop", "PT2M")
     );
     assert_eq!((STOP_ARG, STOP_EXECUTION_LIMIT), ("--stop", "PT2M"));
+    let wsl = SystemTask::WslDeny;
+    assert_eq!(
+        (wsl.name(), wsl.argument(), wsl.execution_limit()),
+        ("SandboxWslDeny", "--wsl-deny", "PT1M")
+    );
+    assert_eq!(
+        (WSL_DENY_ARG, WSL_DENY_EXECUTION_LIMIT),
+        ("--wsl-deny", "PT1M")
+    );
     // One fixed argument each, with no value and nothing to quote: the action passes nothing
     // a caller chose.
     for task in TASKS {
@@ -32,24 +46,30 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
         assert!(!argument.contains([' ', '=', '"', '\t']), "{argument}");
         assert_ne!(task.description(), "");
     }
-    // The refresh also starts at the owner's logon; the stop only when asked.
+    // The refresh also starts at the owner's logon; the stop only when asked; the WSL deny task
+    // on installer events, not at logon.
     assert!(refresh.at_logon());
     assert!(!stop.at_logon());
+    assert!(!wsl.at_logon());
     // The argument each task passes is the one the exe parses as its mode, and alone.
     let mode = |task: SystemTask| parse([std::ffi::OsString::from(task.argument())]);
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
+    assert_eq!(mode(wsl), Ok(Mode::WslDeny));
 }
 
 #[test]
 fn the_triggers_pass_nothing_but_the_fixed_argument() {
-    // The refresh starts at the owner's logon and on Windows Installer's events (WSL's deny
-    // comes back after a WSL update); the stop only on demand.
-    assert_eq!(
-        SystemTask::Refresh.triggers(),
-        [Trigger::Logon, Trigger::MsiEvents]
-    );
+    // The refresh starts at the owner's logon only: an installer event, which anyone who can
+    // log on may forge, no longer starts it. The WSL deny task starts on Windows Installer's
+    // events alone (WSL's deny comes back after a WSL update); the stop only on demand.
+    assert_eq!(SystemTask::Refresh.triggers(), [Trigger::Logon]);
     assert_eq!(SystemTask::Stop.triggers(), []);
+    assert_eq!(SystemTask::WslDeny.triggers(), [Trigger::MsiEvents]);
+    for task in TASKS {
+        let events = task.triggers().contains(&Trigger::MsiEvents);
+        assert_eq!(events, task == SystemTask::WslDeny, "{task:?}");
+    }
     assert_eq!(
         MSI_EVENT_IDS,
         [1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728]
@@ -72,10 +92,13 @@ fn the_triggers_pass_nothing_but_the_fixed_argument() {
         assert!(!task.argument().contains('$'), "{task:?}");
     }
     assert_eq!(SystemTask::Refresh.argument(), REFRESH_ARG);
+    // The event's task passes its one fixed argument, which re-applies the deny alone.
+    assert_eq!(SystemTask::WslDeny.argument(), WSL_DENY_ARG);
+    assert_eq!(WSL_DENY_ARG, "--wsl-deny");
 }
 
 #[test]
-fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
+fn every_task_takes_the_one_descriptor_the_owner_may_read_and_execute() {
     // `register_task` passes `task_sddl(owner)` to the folder and to every task alike: no task
     // takes a descriptor of its own. The owner reads and executes (FRFX): starting a task needs
     // execute (CI run 42416074600), which also ends one. It can't write, delete or change the
@@ -95,13 +118,14 @@ fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
 }
 
 #[test]
-fn the_removal_takes_both_tasks_down_after_the_values_and_before_the_copy() {
+fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
     assert_eq!(
         TEARDOWN,
         [
             Teardown::AdminValues,
             Teardown::Task(SystemTask::Refresh),
             Teardown::Task(SystemTask::Stop),
+            Teardown::Task(SystemTask::WslDeny),
             Teardown::Staging,
             Teardown::AdminFolder,
         ]

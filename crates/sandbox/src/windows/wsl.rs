@@ -14,9 +14,10 @@
 //!   [`NEEDED_MASK`] already comes before every allow. A missing value is built from
 //!   `DefaultLaunchPermission`, else from COM's built-in default ([`LaunchSd::built_in_default`]),
 //!   and recorded as made by us.
-//! - **Apply** ([`apply`], elevated): the set-up after the group exists, and the SYSTEM task
-//!   `\Clauseo\SandboxRefresh` on every run (at logon, and on Windows Installer's events in the
-//!   Application log, which a WSL update writes). Each new value is checked before it is
+//! - **Apply** ([`apply`], elevated): the set-up after the group exists, the SYSTEM task
+//!   `\Clauseo\SandboxRefresh` on every run (at logon), and the SYSTEM task
+//!   `\Clauseo\SandboxWslDeny`, which does nothing else, on Windows Installer's events in the
+//!   Application log (which a WSL update writes). Each new value is checked before it is
 //!   written, written with `SeRestorePrivilege` through a backup-restore open (the key's owner
 //!   and DACL are never touched), then read back and checked again. The targets are recorded
 //!   first ([`WslRecord`], `WslDenyAppIds` and `WslDenyAbsent` in the machine record).
