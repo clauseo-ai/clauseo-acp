@@ -235,10 +235,11 @@ fn a_repository_whose_owner_cant_be_read_counts_as_the_agents() {
     assert_eq!(moved.entry.owner, None);
 }
 
-/// Final review, item 2: past the budget, a folder whose owner can't be read on the handle the
-/// move renames counts as the agent's and goes whole.
+/// Final review, item 2, then the fixes' review: past the budget, a folder whose owner can't be
+/// read on the handle the move renames isn't proven the agent's, so it stays and the session
+/// ends with the budget notice.
 #[test]
-fn past_its_budget_a_folder_whose_owner_cant_be_read_goes_whole() {
+fn past_its_budget_a_folder_whose_owner_cant_be_read_stays_and_the_session_ends() {
     let (w, root, data) = world("live-owner-unreadable-big");
     let watch = watched(&root, &data);
     for at in 0..40 {
@@ -249,12 +250,8 @@ fn past_its_budget_a_folder_whose_owner_cant_be_read_goes_whole() {
     let hooks = ticking(Duration::from_millis(500));
     let live = watch.changed(&volume, &reported(&["big"]), exit(), &hooks);
     assert_eq!(*hooks.ends.borrow(), [Ending::Slow]);
-    let last = live.moved.last().expect("the folder moved");
-    assert_eq!(
-        (last.entry.from.clone(), last.what, last.by_agent),
-        (root.join("big"), SetAsideWhat::UncheckedFolder, true)
-    );
-    assert!(!root.join("big").exists());
+    assert!(live.moved.is_empty() && live.failed.is_empty());
+    assert!(root.join("big/f0/keep.txt").exists());
 }
 
 /// Final review, item 4: a folder reported made and gone by its check (renamed in with a `.git`

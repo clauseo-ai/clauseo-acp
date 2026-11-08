@@ -95,8 +95,8 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
     /// nothing to scan. Past [`SCAN_BUDGET`] the session has ended and the scan stops: an agent
     /// moving in a vast tree with a repository last would keep it there a long while. The folder
     /// is then set aside whole when a pool user (the agent) owns it, as read from the handle the
-    /// move renames (`Need::Pool`); anyone else's (the lawyer's, dragged in while the agent ran)
-    /// stays, for the check after the session.
+    /// move renames (`Need::Pool`); anyone else's (the lawyer's, dragged in while the agent ran),
+    /// or one whose owner can't be read, stays, for the check after the session.
     pub(super) fn below(&mut self, key: &[OsString]) {
         let (volume, root) = (self.volume, self.watched.root.clone());
         let scanned = scan_part_visiting(volume, &root, key, true, &mut |found| {
@@ -273,7 +273,8 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             });
         match moved {
             Ok(entry) => {
-                // An owner that can't be read counts as the agent's (`Moved::by_agent`).
+                // An owner that can't be read counts as the agent's for the notice
+                // (`Moved::by_agent`); only a `.git` or link moves with one (`Need::Anyone`).
                 let by_agent = entry
                     .owner
                     .as_ref()
