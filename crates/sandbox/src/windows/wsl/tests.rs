@@ -234,6 +234,40 @@ fn what_cant_be_read_is_unverifiable_and_missing_comes_first() {
         both.keys.get_mut(&app(WSLC_APP)).unwrap().value = Some(stock());
         assert_eq!(check(&both), Err(Blocked::WslDenyMissing), "{name}");
     }
+    // The inbox WSL alone refuses the same: it runs WSL 2 too (Windows 10 2004 on, and
+    // Windows 11's inbox WSL).
+    let inbox_cases: Vec<(&str, Change)> = vec![
+        (
+            "no AppID",
+            Box::new(|f| {
+                f.classes.insert(WSLC_SESSION_MANAGER, ClassEntry::NoAppId);
+            }),
+        ),
+        ("packaged", Box::new(|f| f.packaged = true)),
+        (
+            "packaged unreadable",
+            Box::new(|f| f.fail.push("packaged".to_owned())),
+        ),
+        (
+            "the AppIDs' list",
+            Box::new(|f| f.fail.push("services".to_owned())),
+        ),
+        (
+            "the classes",
+            Box::new(|f| f.fail.push("classes".to_owned())),
+        ),
+    ];
+    for (name, change) in &inbox_cases {
+        let mut fake = inbox();
+        apply(&mut fake, &group()).unwrap();
+        assert_eq!(check(&fake), Ok(Found::Denied(1)), "{name}");
+        change(&mut fake);
+        assert_eq!(
+            check(&fake),
+            Err(Blocked::WslDenyUnverifiable),
+            "inbox, {name}"
+        );
+    }
     // A service that can't be read counts as present.
     let mut fake = FakeWsl::lifted();
     fake.services.clear();
