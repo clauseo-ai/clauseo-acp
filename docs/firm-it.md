@@ -1068,7 +1068,7 @@ one fixed argument, and never run twice at once.
 
 | Task | Starts | Does | Time limit |
 |---|---|---|---|
-| `\Clauseo\SandboxRefresh` (`--refresh`) | At the owner's sign-in, and on demand | Keeps the admin copy current after a per-user install updates itself | 5 minutes |
+| `\Clauseo\SandboxRefresh` (`--refresh`) | At the owner's sign-in, and when Clauseo starts and finds its installed set-up program differs from the admin copy (after an update) | Keeps the admin copy current after a per-user install updates itself | 5 minutes |
 | `\Clauseo\SandboxStop` (`--stop`) | On demand only | Stops every process of the sandbox users | 2 minutes |
 
 **Who can do what.** Administrators own the folder `\Clauseo` and both tasks. SYSTEM and
