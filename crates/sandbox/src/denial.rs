@@ -1,7 +1,8 @@
 //! The denial types every stage C task shares, the sink a launch reports them to, and the rate
 //! cap in front of that sink.
 
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -290,6 +291,43 @@ impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
     fn upstream(&self, r: Reachability) {
         self.inner.upstream(r);
     }
+}
+
+/// Whether `c` is one [`display_safe`] escapes: a C0 or C1 control or DEL, or bidi or
+/// invisible formatting (zero-width space to right-to-left mark, the embeddings and overrides,
+/// the isolates, the Arabic letter mark, the byte order mark).
+fn needs_escape(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{061C}'
+                | '\u{FEFF}'
+        )
+}
+
+/// `text` safe to show the lawyer: each control character (C0, C1, DEL) and each bidi or
+/// invisible formatting character becomes a visible escape, `\u{202E}`, so a name can't hide a
+/// part of itself, reorder what is shown, or break a line. Everything else is kept.
+pub fn display_safe(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if needs_escape(c) {
+            // Writing to a String can't fail.
+            write!(out, "\\u{{{:04X}}}", u32::from(c)).unwrap_or_default();
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// [`display_safe`] for a path, for [`Denial::Path`]: classify the path as reported first,
+/// then show this. A name that isn't Unicode keeps its replacement characters.
+pub fn display_safe_path(path: &Path) -> PathBuf {
+    PathBuf::from(display_safe(&path.to_string_lossy()))
 }
 
 #[cfg(test)]

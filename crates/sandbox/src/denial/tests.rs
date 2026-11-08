@@ -175,3 +175,32 @@ fn denials_print_as_tagged_json() {
         r#"{"kind":"dropped","count":2}"#
     );
 }
+
+#[test]
+fn display_safe_escapes_controls_and_bidi_and_invisible_formatting_and_keeps_the_rest() {
+    assert_eq!(display_safe("a b/ü/日本.txt"), "a b/ü/日本.txt");
+    assert_eq!(display_safe("a\nb\tc\u{0}"), r"a\u{000A}b\u{0009}c\u{0000}");
+    assert_eq!(
+        display_safe("\u{7F}\u{85}\u{9F}"),
+        r"\u{007F}\u{0085}\u{009F}"
+    );
+    assert_eq!(
+        display_safe("invoice\u{202E}fdp.exe"),
+        r"invoice\u{202E}fdp.exe"
+    );
+    for c in [
+        '\u{200B}', '\u{200F}', '\u{202A}', '\u{2066}', '\u{2069}', '\u{061C}', '\u{FEFF}',
+    ] {
+        let shown = display_safe(&c.to_string());
+        assert_eq!(shown, format!("\\u{{{:04X}}}", u32::from(c)));
+    }
+    // Just outside the ranges: kept.
+    assert_eq!(
+        display_safe("\u{2010}\u{2065}\u{A0}"),
+        "\u{2010}\u{2065}\u{A0}"
+    );
+    assert_eq!(
+        display_safe_path(Path::new("C:\\x\u{2067}y")),
+        PathBuf::from(r"C:\x\u{2067}y")
+    );
+}
