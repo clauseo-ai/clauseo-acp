@@ -20,10 +20,14 @@
 //! that began after the request has ended while the upgrade is still pending, the deny verified:
 //! "upgrade failed, deny applied" (`WslDenyExit::UpgradeFailed`, [`WslHealed::UpgradeFailed`])
 //! or any other end ([`WslHealed::UpgradeUnfinished`]); or at the end of the wait with the deny
-//! verified ([`WslHealed::UpgradeUnfinished`]). A request that fails launches too, the deny being
-//! verified. It is refused only when the deny can't be verified at the end: missing
-//! (`WslDenyMissing`) or unverifiable (`WslDenyUnverifiable`). So `Blocked::WslUpgradePending`
-//! is never a final refusal here: a pending upgrade costs a wait, no more. What remains is a
+//! verified and no run going on ([`WslHealed::UpgradeUnfinished`]). While the task's run is still
+//! going, the launch never starts, installed or not: msiexec rewrites the launch permissions
+//! mid-install. So the wait goes on past [`UPGRADE_WAIT`] for as long as the run goes on, up to
+//! [`UPGRADE_RUNNING_WAIT`] (msiexec's own limit and 30 s), and a run still going then refuses
+//! the launch (`WslUpgradePending`). A request that fails launches too, the deny being
+//! verified. It is refused when the deny can't be verified at the end: missing
+//! (`WslDenyMissing`) or unverifiable (`WslDenyUnverifiable`); or with the run still going after
+//! [`UPGRADE_RUNNING_WAIT`] (`WslUpgradePending`). What remains is a
 //! residual: a pool user could start the same upgrade through `WslInstaller` during the session
 //! (its launch permission is the package's, `wsl::upgrade`), and the deny is off from the MSI's
 //! rewrite until the WSL deny task's run its events start.
@@ -33,7 +37,7 @@ use std::time::Duration;
 use crate::Blocked;
 use crate::windows::refresh::WslDenyExit;
 use crate::windows::refresh::last_run::{LastRun, SCHED_S_TASK_RUNNING};
-use crate::windows::wsl::Found;
+use crate::windows::wsl::{Found, MSI_WAIT};
 
 /// How often the check is made again while the task runs.
 pub const POLL: Duration = Duration::from_millis(250);
@@ -41,6 +45,10 @@ pub const POLL: Duration = Duration::from_millis(250);
 pub const DENY_WAIT: Duration = Duration::from_secs(10);
 /// How long the launch waits for a pending upgrade: msiexec takes tens of seconds.
 pub const UPGRADE_WAIT: Duration = Duration::from_secs(120);
+/// How long the launch waits for a pending upgrade while the task's run is still going: the
+/// run's wait for msiexec ([`MSI_WAIT`]) and 30 s for the deny after it. The MSI rewrites the
+/// launch permissions mid-install, so no launch starts while the run may still be installing.
+pub const UPGRADE_RUNNING_WAIT: Duration = Duration::from_secs(MSI_WAIT.as_secs() + 30);
 
 pub use super::wsl_healed::{LaunchProgress, WslHealed};
 
@@ -131,9 +139,22 @@ pub(crate) fn heal(
     let start = task.elapsed();
     loop {
         let wait = if upgrading { UPGRADE_WAIT } else { DENY_WAIT };
-        if task.elapsed().saturating_sub(start) >= wait {
-            let why = format!("still so after {} s", wait.as_secs());
-            return settle(now, &why, task);
+        let waited = task.elapsed().saturating_sub(start);
+        if waited >= wait {
+            // A pending upgrade whose run is still going is waited for, up to its own limit.
+            if !upgrading || !running(task) {
+                let why = format!("still so after {} s", wait.as_secs());
+                return settle(now, &why, task);
+            }
+            if waited >= UPGRADE_RUNNING_WAIT {
+                let secs = UPGRADE_RUNNING_WAIT.as_secs();
+                let last = last_run_text(task);
+                let why = format!("the WSL deny task was still running after {secs} s: {last}");
+                return Err(Refused {
+                    blocked: Blocked::WslUpgradePending,
+                    why,
+                });
+            }
         }
         task.sleep(POLL);
         now = check();
@@ -156,7 +177,12 @@ pub(crate) fn heal(
                     }
                 }
             }
-            Ok(found) if upgrading => return Ok((found, WslHealed::Upgraded)),
+            // Installed, the deny in place: launched once no run may still be installing.
+            Ok(found) if upgrading => {
+                if ended_since(task, before).is_some() || !running(task) {
+                    return Ok((found, WslHealed::Upgraded));
+                }
+            }
             Ok(found) => return Ok((found, WslHealed::DenyRestored)),
             Err(_) => {}
         }
@@ -178,6 +204,11 @@ fn ended_since(task: &dyn DenyTask, before: Option<LastRun>) -> Option<i32> {
         Some(LastRun::NeverRun) | None => true,
     };
     (fresh && code != SCHED_S_TASK_RUNNING).then_some(code)
+}
+
+/// Whether the task's last run is still going (`SCHED_S_TASK_RUNNING`).
+fn running(task: &dyn DenyTask) -> bool {
+    matches!(task.last_run(), Ok(LastRun::Ran { code, .. }) if code == SCHED_S_TASK_RUNNING)
 }
 
 /// The end of a wait that didn't heal: an upgrade still pending with every deny in place goes

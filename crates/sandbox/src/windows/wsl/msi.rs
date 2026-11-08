@@ -30,7 +30,6 @@
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Registry::{RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
@@ -43,11 +42,9 @@ use super::msi_files::{HeldMsi, WindowsMsiFiles};
 pub use super::msi_verify::MsiUpgrade;
 use super::msi_verify::upgrade_with;
 use super::upgrade::INSTALLER_SERVICE;
+pub use super::upgrade::MSI_WAIT;
 use crate::windows::record::read_units;
 
-/// How long the run waits for msiexec: an upgrade takes tens of seconds; the task's limit is 5
-/// minutes (`rules::WSL_DENY_EXECUTION_LIMIT`), and the deny is re-applied after the wait.
-pub const MSI_WAIT: Duration = Duration::from_secs(240);
 /// msiexec's arguments after the MSI's path: no UI, then `UpgradeViaMsi`'s properties.
 pub const MSI_ARGS: [&str; 3] = ["/qn", "SKIPMSIX=1", "REBOOT=ReallySuppress"];
 /// `ERROR_SUCCESS_REBOOT_REQUIRED`: installed, some files replaced at the next restart.

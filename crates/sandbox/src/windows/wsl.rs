@@ -61,7 +61,7 @@ pub use record::{AppId, RECORD_ABSENT, RECORD_APP_IDS, WslRecord};
 pub use sd::{DENY_MASK, LaunchSd, NEEDED_MASK, SdError};
 pub use seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
 pub use upgrade::{
-    INSTALLER_SERVICE, PACKAGE_MSI, PACKAGE_NAME, PACKAGE_PUBLISHER, Upgrade, Version,
+    INSTALLER_SERVICE, MSI_WAIT, PACKAGE_MSI, PACKAGE_NAME, PACKAGE_PUBLISHER, Upgrade, Version,
     installer_package, msi_behind, package_folder_version, upgrade, version,
 };
 

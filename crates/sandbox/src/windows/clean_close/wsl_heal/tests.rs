@@ -5,7 +5,9 @@ use std::time::Duration;
 use super::fake::FakeTask;
 use std::cell::Cell;
 
-use super::{DENY_WAIT, LaunchProgress, POLL, Refused, UPGRADE_WAIT, WslHealed, heal};
+use super::{
+    DENY_WAIT, LaunchProgress, POLL, Refused, UPGRADE_RUNNING_WAIT, UPGRADE_WAIT, WslHealed, heal,
+};
 use crate::Blocked;
 use crate::windows::refresh::WslDenyExit;
 use crate::windows::refresh::last_run::{LastRun, SCHED_S_TASK_RUNNING};
@@ -206,4 +208,61 @@ fn a_missing_deny_that_turns_into_a_pending_upgrade_waits_for_the_upgrade() {
     let found = heal(&mut task.checks(script), &task, &counter(&seen));
     assert_eq!(found, Ok((Found::Denied(2), WslHealed::Upgraded)));
     assert_eq!((seen.get(), task.elapsed_now()), (1, secs(50.0)));
+}
+
+#[test]
+fn a_run_still_going_is_waited_for_past_the_upgrade_wait_then_refused_at_its_limit() {
+    assert_eq!(
+        UPGRADE_RUNNING_WAIT,
+        crate::windows::wsl::MSI_WAIT + secs(30.0)
+    );
+    // Still installing at 120 s: the wait goes on; the run ends at 200 s, installed.
+    let mut task = FakeTask::new();
+    let done = LastRun::Ran {
+        code: 0,
+        at: 46_334.6,
+    };
+    task.last = vec![
+        (secs(0.0), Ok(LastRun::NeverRun)),
+        (secs(1.0), Ok(RUNNING)),
+        (secs(200.0), Ok(done)),
+    ];
+    let seen = Cell::new(0);
+    let script = vec![(secs(0.0), PENDING), (secs(199.0), DENIED)];
+    let found = heal(&mut task.checks(script), &task, &counter(&seen));
+    assert_eq!(found, Ok((Found::Denied(2), WslHealed::Upgraded)));
+    assert_eq!((seen.get(), task.elapsed_now()), (1, secs(200.0)));
+    // Still running at the limit: refused, never launched mid-install.
+    let mut task = FakeTask::new();
+    task.last = vec![(secs(0.0), Ok(LastRun::NeverRun)), (secs(1.0), Ok(RUNNING))];
+    let found = heal(&mut task.checks(vec![(secs(0.0), PENDING)]), &task, &none);
+    let Err(Refused { blocked, why }) = found else {
+        panic!("{found:?}");
+    };
+    assert_eq!(blocked, Blocked::WslUpgradePending);
+    assert!(why.contains("still running after 270 s"), "{why}");
+    let at = task.elapsed_now();
+    assert!(
+        at >= UPGRADE_RUNNING_WAIT && at < UPGRADE_RUNNING_WAIT + POLL,
+        "{at:?}"
+    );
+}
+
+#[test]
+fn an_upgrade_installed_while_its_run_still_goes_launches_only_once_the_run_ends() {
+    let mut task = FakeTask::new();
+    let done = LastRun::Ran {
+        code: 0,
+        at: 46_334.6,
+    };
+    task.last = vec![
+        (secs(0.0), Ok(LastRun::NeverRun)),
+        (secs(1.0), Ok(RUNNING)),
+        (secs(45.0), Ok(done)),
+    ];
+    // The MSI's version is current from 30 s, the deny verified, but the run goes on to 45 s.
+    let script = vec![(secs(0.0), PENDING), (secs(30.0), DENIED)];
+    let found = heal(&mut task.checks(script), &task, &none);
+    assert_eq!(found, Ok((Found::Denied(2), WslHealed::Upgraded)));
+    assert_eq!(task.elapsed_now(), secs(45.0));
 }

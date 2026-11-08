@@ -2259,16 +2259,19 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   when the wait begins (the `progress` argument of `clean_close::check_launch`, a
   `&dyn Fn(LaunchProgress)`; the app owns the words, "Updating a Windows component before
   starting…"), then the check is made every 250 ms for up to 120 s, a deny the MSI dropped
-  meanwhile waited for too. It launches once the package is no longer newer and the deny is in
-  place (`WslHealed::Upgraded`); once a run of the task that began after the request has ended
-  while the upgrade is still pending, with 52 (`WslHealed::UpgradeFailed`) or any other code
-  (`WslHealed::UpgradeUnfinished`); at the end of the wait (`UpgradeUnfinished`); and when the
-  request fails (`UpgradeUnfinished`): in each case the check has just verified every deny. A run
-  counts as after the request when its last run time differs from the one read before it, or a
-  run was going on then (the request was dropped for it). It refuses only when the deny can't be
-  verified at the end: `WslDenyMissing` or `WslDenyUnverifiable`, with why and the task's last
-  result. So `WslUpgradePending` stays in `Blocked` (`wsl::check` gives it) but never ends a
-  launch: a pending upgrade costs a wait.
+  meanwhile waited for too. No launch starts while the task's run is still going, since msiexec
+  rewrites the launch permissions mid-install. It launches once the package is no longer newer,
+  the deny is in place and no run is going on (`WslHealed::Upgraded`); once a run of the task
+  that began after the request has ended while the upgrade is still pending, with 52
+  (`WslHealed::UpgradeFailed`) or any other code (`WslHealed::UpgradeUnfinished`); at the end of
+  the wait with no run going on (`UpgradeUnfinished`); and when the request fails
+  (`UpgradeUnfinished`): in each case the check has just verified every deny. A run still going
+  at 120 s is waited for up to 270 s (`wsl_heal::UPGRADE_RUNNING_WAIT`: msiexec's 240 s limit
+  and 30 s for the deny after it), and one still going then refuses the launch with
+  `WslUpgradePending`. A run counts as after the request when its last run time differs from the
+  one read before it, or a run was going on then (the request was dropped for it). It also
+  refuses when the deny can't be verified at the end: `WslDenyMissing` or `WslDenyUnverifiable`,
+  with why and the task's last result.
 - **What the host logs**: `LaunchCheck::wsl_healed()` gives the `WslHealed`, and
   `WslHealed::log_line()` its host.log line, `None` for `Nothing`. The host logs it at info for
   each launch where it isn't `Nothing`: above all `Upgraded` ("WSL's pending update was installed
