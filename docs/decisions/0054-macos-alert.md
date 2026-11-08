@@ -43,6 +43,12 @@ built with `objc2`'s `MainThreadMarker`. All three are already in `Cargo.lock` t
   `runModal` answers which button ended the alert, not how, so Escape counts as a click on
   Don't allow: with the box ticked it refuses for the matter. Windows refuses on Escape whatever
   the box says. Neither ever allows.
+
+  The difference is deliberate, and both stay as they are. On Windows, Escape, Alt+F4 and the
+  close button all end the task dialog the same way, and closing a dialog isn't an answer, so
+  nothing is remembered and the lawyer is asked again. On macOS, Escape *is* the Don't allow
+  button, and ticking Remember before pressing it is a deliberate act. Return never allows on
+  either: on Windows it presses the default button, Don't allow; on macOS it presses nothing.
 - ARCHITECTURE.md's desktop row lists the three crates as macOS only.
 
 ## Consequences

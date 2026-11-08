@@ -2,7 +2,8 @@
 //! with a Remember checkbox (Windows' task dialog, macOS' `NSAlert`), and rfd's three buttons
 //! (Linux). Anything but a press of an allowing button refuses. Escape or the close button
 //! refuses whatever the checkbox says, except on macOS, where Escape presses Don't allow and the
-//! alert can't tell the two apart.
+//! alert can't tell the two apart. Both are deliberate (decision record 0054): closing a dialog
+//! isn't an answer, while ticking Remember and pressing Don't allow's key is.
 
 use clauseo_host::DialogAnswer;
 #[cfg(any(all(unix, not(target_os = "macos")), test))]
