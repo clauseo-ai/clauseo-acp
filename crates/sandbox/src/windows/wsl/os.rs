@@ -263,7 +263,17 @@ impl WslRead for WindowsWsl {
         let mut found = Vec::new();
         // Subkeys that aren't GUIDs (an exe's name, mapping it to its `AppID`) hold no service.
         for app_id in subkeys(&key)?.iter().filter_map(|name| AppId::parse(name)) {
-            let service = text(&app_key(&app_id), "LocalService")?;
+            // One key this user can't read, or whose `LocalService` isn't a `REG_SZ`, is
+            // logged and passed over: any other program's key could be so, and one such key
+            // mustn't refuse every launch. WSL's own `AppID`s are found from [`CLASSES`]
+            // too, and those reads stay strict.
+            let service = match text(&app_key(&app_id), "LocalService") {
+                Ok(service) => service,
+                Err(error) => {
+                    tracing::warn!(%app_id, %error, "an AppID's LocalService, passed over");
+                    continue;
+                }
+            };
             let wanted = service
                 .as_deref()
                 .is_some_and(|s| services.iter().any(|w| w.eq_ignore_ascii_case(s.trim())));

@@ -2006,7 +2006,9 @@ checks activation against a running server too). The owner's WSL kept working (T
 
 **The deny** (`windows::wsl`). The targets are found at each run, never hard-coded: every AppID
 whose `LocalService` is `WSLService` or `LxssManager` (listing `HKLM\SOFTWARE\Classes\AppID`
-finds every class on such an AppID, so a future WSL class is caught), and the AppID of each of
+finds every class on such an AppID, so a future WSL class is caught; a key there that can't be
+read, or whose `LocalService` isn't a `REG_SZ`, is logged and passed over, so another program's
+key can't refuse every launch), and the AppID of each of
 `LxssUserSession` (`{a9b7a1b9-…ce7e}`), `WSLCSessionManager` (`…ce8f`) and the inbox
 `LxssUserSessionInBox` (`{4F476546-…}`) that is registered, read from the class's `AppID` value
 in the 64-bit view. Each target's `LaunchPermission` is parsed strictly (`sd.rs`: revision 1,
