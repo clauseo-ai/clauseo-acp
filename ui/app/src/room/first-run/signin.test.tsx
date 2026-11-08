@@ -55,6 +55,19 @@ test("plan: the composer says Sign in to Claude, and Sign in sends StartSignIn; 
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
+test("checking: while the sign-in status check runs the composer says it is checking, with nothing to press; Sign in once it ends signed out", async () => {
+  const t = await at("checking");
+  expect(gateState()).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(text()).not.toContain("Sign in to Claude to ask about this matter");
+  expect(byId("signin")?.querySelector("button")).toBeNull();
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(gateState()).toBe("signed-out");
+  expect(text()).not.toContain("Checking whether");
+  expect(text()).toContain("Sign in to Claude to ask about this matter");
+  expect(button("Sign in")).not.toBeNull();
+});
+
 test("plan-early, plan-queued: Sign in works before the install is ready, and the queued line says the browser opens when Claude is ready (offline: when you reconnect)", async () => {
   const t = await mountFirstRun({
     first: [

@@ -4914,6 +4914,12 @@ export type SignIn =
 	found?: FoundLogin,
 } }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; switching?: never; waiting?: never } | 
 /**
+ *  The sign-in status check is running and nothing was shown before it (at start, and
+ *  through its retries after a check that timed out): the card says it is checking. Ends
+ *  in the check's state, or `SignedOut` once its retries time out too.
+ */
+"checking" | 
+/**
  *  Waiting for the install to finish or the network to return; the sign-in then starts by
  *  itself.
  */

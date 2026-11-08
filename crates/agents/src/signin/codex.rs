@@ -362,7 +362,7 @@ pub(crate) async fn confirm<T: Timer + Send + Sync>(
 /// [`confirm`]'s second half, once `login status` said signed in: `account/read` must name
 /// a `ChatGPT` account. Any other answer (another kind of account, `account: null`, a JSON-RPC
 /// error) is signed out for this card; only no answer is `Unknown`.
-async fn confirm_account<T: Timer + Send + Sync>(
+pub(crate) async fn confirm_account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
@@ -469,7 +469,8 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
 ) -> StatusSaid {
     let mut args = codex_store_args(kind);
     args.extend([OsString::from("login"), OsString::from("status")]);
-    let mut spec = job.spec(args, job.env(kind, None), STATUS_LIMIT);
+    let limit = job.status_limit(STATUS_LIMIT);
+    let mut spec = job.spec(args, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
     let said_in = AtomicBool::new(false);
     let ran = run(

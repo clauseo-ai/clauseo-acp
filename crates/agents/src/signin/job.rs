@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use clauseo_process::{Launcher, Timer};
@@ -104,6 +104,9 @@ pub(crate) struct SigninJob<T> {
     pub(crate) shared: Arc<Shared>,
     /// Pasted codes, for a sign-in.
     pub(crate) paste: Option<async_channel::Receiver<PasteCode>>,
+    /// The limit every status run of this job takes instead of its vendor's own, while set:
+    /// the status check's retries (10 s, then 20 s) and the quick check before a sign-in (5 s).
+    pub(crate) status_limit: Mutex<Option<Duration>>,
 }
 
 /// The job thread's body: for a task that queues, the wait for the install and the network;
@@ -197,6 +200,13 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         self.note(SigninNote::CliResolved {
             file: cli_file_name(&script),
         });
+        // Sign in pressed: a quick status check first, so a login already there is signed in
+        // with no login run and no browser.
+        if matches!(self.task, Task::SignIn(_))
+            && let Some(state) = found::quick_check(self).await
+        {
+            return Some(state);
+        }
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
                 Some(claude::sign_in(self, method == Method::Console, paste).await)
@@ -207,12 +217,29 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             (Vendor::Codex, Task::SignIn(method)) => Some(codex::sign_in(self, method).await),
             (Vendor::Codex, Task::TryAgain) => Some(codex::try_again(self).await),
             (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
-            (_, Task::Status) => found::check(self).await,
+            (_, Task::Status) => found::start_check(self).await,
             (_, Task::FindLogin) => found::find_login(self).await,
             (_, Task::UseFound) => Some(found::use_found(self).await),
             (_, Task::UseDifferent) => Some(found::use_different(self, paste).await),
             (_, Task::StopUsing(why)) => found::stop_using(self, why).await,
         }
+    }
+
+    /// The limit of a status run whose vendor's own is `base`: the job's override while one is
+    /// set ([`SigninJob::set_status_limit`]), else `base`.
+    pub(crate) fn status_limit(&self, base: Duration) -> Duration {
+        self.status_limit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or(base)
+    }
+
+    /// Sets (or with `None` clears) the limit the job's next status runs take.
+    pub(crate) fn set_status_limit(&self, limit: Option<Duration>) {
+        *self
+            .status_limit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = limit;
     }
 
     /// The clock's now: `since` and `at`.

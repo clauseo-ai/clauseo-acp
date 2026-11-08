@@ -498,6 +498,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         timer: Arc::clone(&worker.timer),
         shared: Arc::clone(&worker.shared),
         paste,
+        status_limit: std::sync::Mutex::new(None),
     };
     let spawned = worker
         .shared
