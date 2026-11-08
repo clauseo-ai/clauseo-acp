@@ -279,9 +279,11 @@ impl Policy {
         self.keychain
     }
 
-    /// Whether nothing the agent writes may run (both OSes): on Windows an inherited deny of
-    /// execute on the files of every place the agent may write; on macOS no
-    /// `file-map-executable` there. Off unless set; see [`PolicyBuilder::native_code_deny`].
+    /// Whether native code the agent writes is refused (both OSes): on Windows an inherited deny
+    /// of execute on the files of every place the agent may write; on macOS no
+    /// `file-map-executable` there, so no library or extension there loads. On macOS exec stays
+    /// allowed, so a Mach-O the agent builds still runs. Off unless set; see
+    /// [`PolicyBuilder::native_code_deny`].
     pub fn native_code_deny(&self) -> bool {
         self.native_code_deny
     }
@@ -507,7 +509,8 @@ impl PolicyBuilder {
         self
     }
 
-    /// Whether nothing the agent writes may run ([`Policy::native_code_deny`]); off unless set.
+    /// Whether native code the agent writes is refused ([`Policy::native_code_deny`]); off
+    /// unless set.
     /// The product alone sets it, from a value pinned per release (0049): never from a
     /// lawyer's setting, an environment variable or anything an agent can reach. This method
     /// is the only way in; nothing in this crate reads it from elsewhere.
