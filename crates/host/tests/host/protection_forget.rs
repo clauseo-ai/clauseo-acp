@@ -1,7 +1,8 @@
 //! R17 PR-E: a forgotten matter's sandbox forget is owed until it succeeds. The host records it
 //! in `<data>/protection/owed_forgets.json` before the walk, drops it once the walk succeeds,
 //! keeps it when the walk fails or the quit's bound passes first, and replays it at the next
-//! start; the walk waits for the matter's agents to be gone.
+//! start; the walk waits for the matter's agents to be gone. A list that does not parse is set
+//! aside before the first write.
 
 use std::path::Path;
 use std::time::Duration;
@@ -224,4 +225,29 @@ fn the_owed_list_lives_in_the_data_folder_s_protection_folder() {
     let path: &Path = &dir.data_dir().join("protection").join("owed_forgets.json");
     let text = std::fs::read_to_string(path).unwrap();
     assert_eq!(text, format!("{{\"v\":1,\"matters\":[\"{matter}\"]}}"));
+}
+
+/// R17 PR-E follow-up: an owed list that does not parse is set aside, never replaced, before the
+/// first write: moved to `owed_forgets.json.rejected-<UTC time>` beside it, unchanged.
+#[test]
+fn an_owed_list_that_does_not_parse_is_set_aside_before_the_first_write() {
+    let dir = dir("protection_forget_rejected");
+    let folder = dir.data_dir().join("protection");
+    crate::write::create_dir_all(&folder);
+    crate::write::write(&folder.join("owed_forgets.json"), b"{not json");
+    let (host, rig) = start(&dir, 0, vec![Err(SetupError::Refused)], Gated::No);
+    let matter = forget_one(&dir, &host);
+    until_forgotten(&rig.setup, 1);
+    host.shutdown();
+    assert_eq!(owed(&dir), vec![matter]);
+    let rejected: Vec<_> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("owed_forgets.json.rejected-"))
+        .collect();
+    assert_eq!(rejected.len(), 1, "{rejected:?}");
+    let stamp = rejected[0].trim_start_matches("owed_forgets.json.rejected-");
+    assert!(stamp.len() == 16 && stamp.ends_with('Z'), "{stamp}");
+    let kept = std::fs::read(folder.join(&rejected[0])).unwrap();
+    assert_eq!(kept, b"{not json");
 }

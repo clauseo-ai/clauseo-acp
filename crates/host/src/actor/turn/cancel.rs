@@ -98,14 +98,23 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId) {
 
 /// A turn that has not started: `TurnEnded { Cancelled, None }`, no `TurnStarted`, then the
 /// detach of an agent that exited while the turn waited; with the command's receipt when a
-/// command asked (`Cancel`, `RemoveQueuedPrompt`).
+/// command asked (`Cancel`, `RemoveQueuedPrompt`). An agent that exited with the sandbox
+/// runner's Escapee code while the computer had tier B (`agents/ended.rs` marks the turn's
+/// workspace `Left`) makes it `LeftSafeWorkspace` instead, as at every other phase.
 pub(super) fn dequeue(
     actor: &mut Actor,
     ctx: Option<CommandCtx>,
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
-    let mut close = TurnClose::new(turn, StopReason::Cancelled);
+    let escaped = current(actor, thread)
+        .is_some_and(|current| current.workspace == super::state::Workspace::Left);
+    let stop = if escaped {
+        StopReason::LeftSafeWorkspace
+    } else {
+        StopReason::Cancelled
+    };
+    let mut close = TurnClose::new(turn, stop);
     close.detach = current(actor, thread).and_then(|current| current.detach.clone());
     let mut out = Out::new(actor, thread, ctx.map(|ctx| ctx.id))?;
     close.push_into(actor, &mut out)?;

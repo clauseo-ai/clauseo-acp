@@ -149,6 +149,33 @@ fn an_escapee_while_queued_ends_the_turn_left_safe_workspace() {
     assert_left(rig, thread, turn, Detached::AfterTheEnd);
 }
 
+/// A queued turn whose agent left the Safe workspace, then cancelled before it starts, ends
+/// `LeftSafeWorkspace`, not `Cancelled`.
+#[test]
+fn a_queued_turn_cancelled_after_an_escapee_ends_left_safe_workspace() {
+    let mut rig = Rig::start("escapee-queued-cancel", EXIT_AFTER_SESSION);
+    tier_b(&mut rig);
+    let thread = rig.thread();
+    let other = rig.thread_by(2);
+    let matter = rig.matter();
+    rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(Holder::Thread(other));
+    let turn = send_prompt(&mut rig, 10, thread);
+    rig.run_holding(
+        "the queued turn",
+        |_, input| is_end(input),
+        |actor| phase(actor, thread) == Some(TurnPhase::Queued) && actor.work.commits == 0,
+    );
+    if rig.held.is_empty() {
+        rig.hold_next("the agent's end", |_, input| is_end(input));
+    }
+    escapee_first(&mut rig);
+    rig.release_held();
+    rig.settle_commits();
+    assert_eq!(phase(&rig.actor, thread), Some(TurnPhase::Queued));
+    rig.dispatch(11, HostCommand::Cancel { thread }).unwrap();
+    assert_left(rig, thread, turn, Detached::AfterTheEnd);
+}
+
 #[test]
 fn an_escapee_during_the_before_turn_checkpoint_ends_the_turn_left_safe_workspace() {
     let mut rig = Rig::start("escapee-checkpointing", EXIT_AFTER_SESSION);

@@ -253,6 +253,7 @@ mod principal;
 mod rate;
 mod search;
 mod sent;
+mod set_aside;
 mod snapshot;
 mod sources;
 mod undo_note;

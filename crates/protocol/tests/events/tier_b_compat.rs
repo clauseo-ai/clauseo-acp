@@ -33,6 +33,39 @@ fn a_newer_cause_reads_as_unknown() {
     }
 }
 
+/// PR-E's follow-up adds `probe_failed`, a plain string like `needs_wsl_rule` above. #712's
+/// reader, whose variants are these, has no such kind, so it reads it as this one reads
+/// `needs_wsl_rule`: `Unknown`, which refuses with `sandbox.blocked`, as `probe_failed` does.
+#[test]
+fn probe_failed_reads_as_unknown_to_a_reader_before_it() {
+    const PR_E: [&str; 10] = [
+        "Unsupported",
+        "NeedsSetUp",
+        "SetUpRefused",
+        "SetUpFailed",
+        "PoolFull",
+        "SwitchedOff",
+        "Blocked",
+        "OtherAccount",
+        "PoolOwned",
+        "Unknown",
+    ];
+    let added: Vec<&str> = NotProtectedCause::VARIANT_NAMES
+        .into_iter()
+        .filter(|name| !PR_E.contains(name))
+        .collect();
+    assert_eq!(added, ["ProbeFailed"]);
+    assert_eq!(
+        serde_json::to_string(&NotProtectedCause::ProbeFailed).unwrap(),
+        r#""probe_failed""#
+    );
+    decodes_in_both(r#""probe_failed""#, &NotProtectedCause::ProbeFailed);
+    decodes_in_both(
+        r#""needs_wsl_rule""#,
+        &unknown_of::<NotProtectedCause>("needs_wsl_rule"),
+    );
+}
+
 /// A newer field inside a known variant is skipped: `Blocked`, `PoolFull` (whose
 /// `needs_reset` a reader before PR-E skips the same way) and `SwitchedOff`.
 #[test]

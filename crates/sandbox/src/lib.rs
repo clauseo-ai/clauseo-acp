@@ -63,7 +63,9 @@
 //!   which also lists every `.git`, the folders `.git` files name, and the other
 //!   [`PROTECTED_AT_ANY_DEPTH`] names.
 //! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
-//!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
+//!   Seatbelt applies a profile (`setup` unused; no `sandbox-exec` is C with
+//!   [`NoSandbox::UnsupportedOs`], one that fails or hangs C with [`NoSandbox::ProbeFailed`],
+//!   never cached); on Windows, C with [`NoSandbox::UnsupportedOs`]
 //!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
 //!   C with the state's reason otherwise ([`NoSandbox::NeedsSetUp`] with no `setup`); C with
 //!   [`NoSandbox::UnsupportedOs`] elsewhere.

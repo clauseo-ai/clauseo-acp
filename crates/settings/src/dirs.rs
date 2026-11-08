@@ -5,6 +5,7 @@ mod tests;
 
 use crate::locations::{KnownFolder, Os, PlatformDirs};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Folders inside home that hold app data and keys, on every OS. `.codex` holds Codex's logins
 /// and settings (R17 PR-E).
@@ -59,8 +60,39 @@ pub fn refused_trees(dirs: &dyn PlatformDirs) -> Vec<PathBuf> {
         .map(|home| home.join(".codex"))
         .into_iter()
         .collect();
-    trees.extend(dirs.codex_home());
+    trees.extend(codex_home(dirs));
     trees
+}
+
+/// The folder `CODEX_HOME` names, unless it is the home folder, a folder above it, or a root
+/// (`/`, a drive's `C:\`): refusing that tree would refuse every matter, so it counts as not
+/// set, with one warning per process that names no path.
+fn codex_home(dirs: &dyn PlatformDirs) -> Option<PathBuf> {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    let codex = dirs.codex_home()?;
+    let root = codex.parent().is_none();
+    let over_home = dirs
+        .home()
+        .is_some_and(|home| folded(&home).starts_with(folded(&codex)));
+    if !root && !over_home {
+        return Some(codex);
+    }
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        tracing::warn!(
+            root,
+            "CODEX_HOME names the home folder, a folder above it or a root; it is ignored"
+        );
+    }
+    None
+}
+
+/// `path` as compared with the home folder: lowercased on Windows, whose paths ignore case.
+fn folded(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(path.as_os_str().to_string_lossy().to_lowercase())
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// The home folder, the folders inside it that hold app data and keys (`~/.codex` too, and the
@@ -79,7 +111,7 @@ pub(crate) fn refused_for(os: Os, dirs: &dyn PlatformDirs) -> Vec<PathBuf> {
         folders.extend(HOME_DOT_FOLDERS.iter().map(|name| home.join(name)));
     }
     // The lawyer's Codex folder where `CODEX_HOME` moved it: refused like `~/.codex`.
-    folders.extend(dirs.codex_home());
+    folders.extend(codex_home(dirs));
     match os {
         Os::Mac => {
             folders.extend(home.iter().map(|home| home.join("Library")));

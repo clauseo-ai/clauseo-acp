@@ -61,6 +61,39 @@ fn the_codex_home_is_refused_where_codex_home_moved_it() {
     }
 }
 
+/// R17 PR-E follow-up: a `CODEX_HOME` naming the home folder, a folder above it, or a root
+/// counts as not set, so it can't make every matter refused; one inside home still counts.
+#[test]
+fn a_codex_home_over_the_home_folder_or_a_root_is_ignored() {
+    let root = if cfg!(windows) { r"C:\" } else { "/" };
+    for ignored in ["/Users/ada", "/Users/ada/", "/Users", root] {
+        let dirs = FakeDirs {
+            codex_home: Some(PathBuf::from(ignored)),
+            ..with_home()
+        };
+        assert_eq!(
+            refused_trees(&dirs),
+            paths(&["/Users/ada/.codex"]),
+            "{ignored}"
+        );
+        for os in [Os::Windows, Os::Mac, Os::Linux] {
+            assert_eq!(
+                refused_for(os, &dirs),
+                refused_for(os, &with_home()),
+                "{ignored}"
+            );
+        }
+    }
+    let inside = FakeDirs {
+        codex_home: Some(PathBuf::from("/Users/ada/work/codex")),
+        ..with_home()
+    };
+    assert_eq!(
+        refused_trees(&inside),
+        paths(&["/Users/ada/.codex", "/Users/ada/work/codex"])
+    );
+}
+
 /// R17 PR-E: `~/.codex` and the folder `CODEX_HOME` names are refused trees too: every folder
 /// inside them is refused, not only the folder itself.
 #[test]

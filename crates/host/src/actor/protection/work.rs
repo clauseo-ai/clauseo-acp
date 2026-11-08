@@ -120,6 +120,32 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
         Asked::Retry => ProtectionWork::Check,
         Asked::Remove => ProtectionWork::Remove,
     };
+    start(actor, sandbox, work, vec![id])
+}
+
+/// A check that no command asked for: the re-probe a launch refused for `ProbeFailed` starts
+/// (`protection::launch_refusal`). Nothing waits on its answer. False when it did not start (no
+/// seam, work already running, or no thread).
+pub(in crate::actor) fn reprobe(actor: &mut Actor) -> bool {
+    let host = &actor.protection;
+    let Some(sandbox) = host.sandbox.clone() else {
+        return false;
+    };
+    if host.running.is_some() {
+        return false;
+    }
+    tracing::info!("a launch refused for a failed sandbox check checks again");
+    start(actor, sandbox, ProtectionWork::Check, Vec::new()).is_ok()
+}
+
+/// Starts `work` on its thread, `waiters` answered at its end.
+fn start(
+    actor: &mut Actor,
+    sandbox: crate::config::Sandbox,
+    work: ProtectionWork,
+    waiters: Vec<CommandId>,
+) -> Result<(), Error> {
+    let host = &mut actor.protection;
     let setup = sandbox.setup.clone();
     if work == ProtectionWork::Remove && setup.is_none() {
         return Err(invalid("this computer's sandbox has no set-up to remove"));
@@ -151,7 +177,7 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
     actor.protection.running = Some(Running {
         id: work_id,
         work,
-        waiters: vec![id],
+        waiters,
     });
     tracing::info!(work = work_name(work), "the sandbox work started");
     super::publish_view(actor);
