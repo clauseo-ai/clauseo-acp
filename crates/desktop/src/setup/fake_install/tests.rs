@@ -58,6 +58,12 @@ impl SetupAgents for Real {
         self.call("sign_in");
         Ok(())
     }
+    fn sign_in_switching(&self, _: &AgentId, _: Method) -> Result<(), SigninError> {
+        Ok(())
+    }
+    fn replaces_own_login(&self, _: &AgentId) -> bool {
+        false
+    }
     fn cancel_sign_in(&self, _: &AgentId) -> Result<(), SigninError> {
         Ok(())
     }
@@ -77,6 +83,9 @@ impl SetupAgents for Real {
         Ok(())
     }
     fn use_different_account(&self, _: &AgentId) -> Result<(), SigninError> {
+        Ok(())
+    }
+    fn use_different_account_switching(&self, _: &AgentId) -> Result<(), SigninError> {
         Ok(())
     }
     fn signin_state(&self, _: &AgentId) -> Option<SigninState> {
