@@ -53,6 +53,39 @@ const START_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_START_MS";
 /// How long a start waits for the claimed debugging port to be free.
 pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
 
+/// Why a start failed: its own kind when Chrome's sandbox could not start, so the agent's call
+/// gets [`chrome::sandbox::REFUSAL`] and the host can tell it apart later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StartError {
+    /// Chrome's sandbox could not start; what Chrome printed (the fixed part, no path), or
+    /// `None` when the guard refused before starting it (Linux, as root).
+    Sandbox(Option<&'static str>),
+    /// Anything else; the reason.
+    Other(String),
+}
+
+impl From<String> for StartError {
+    fn from(reason: String) -> Self {
+        Self::Other(reason)
+    }
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sandbox(Some(said)) => write!(
+                f,
+                "Chrome's sandbox could not start (Chrome said \"{said}\"); the guard never runs \
+                 Chrome without it"
+            ),
+            Self::Sandbox(None) => f.write_str(
+                "Chrome's sandbox cannot start as root; the guard never runs Chrome without it",
+            ),
+            Self::Other(reason) => f.write_str(reason),
+        }
+    }
+}
+
 /// The idle stop: [`IDLE_STOP`], or in a `test-support` build the test's.
 pub(crate) fn idle_stop() -> Duration {
     #[cfg(feature = "test-support")]
@@ -247,7 +280,7 @@ pub(crate) fn start(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), StartError> {
     let started = start_both(shared, state, parent, events);
     if started.is_err() {
         let launcher = &shared.launcher;
@@ -262,7 +295,7 @@ fn start_both(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), String> {
+) -> Result<(), StartError> {
     let launcher = &shared.launcher;
     wait_for_port(launcher.cdp_port, parent)?;
     let spec = Spec {
@@ -319,9 +352,7 @@ fn start_both(
     launcher.reaper.say(&format!("agent {}", agent.id()));
     let (Some(stdin), Some(stdout)) = (agent.stdin.take(), agent.stdout.take()) else {
         drop(end_agent(launcher, &mut agent));
-        return Err(cannot_run(io::Error::other(
-            "its stdin or stdout is not piped",
-        )));
+        return Err(cannot_run(io::Error::other("its stdin or stdout is not piped")).into());
     };
     state.generation += 1;
     let generation = state.generation;

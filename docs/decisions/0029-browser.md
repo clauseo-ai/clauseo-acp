@@ -265,9 +265,10 @@ No Chrome switch makes it write the file for a fixed port, on any OS.
 connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-4436`):
 - Chrome gets agent-browser's own headless flags (`chrome.rs:466-597`, less port 0) with the
   switches of "No background hosts" (below), the session's proxy with the `<-loopback>` bypass, the WebRTC flag, `--user-data-dir=<cwd>/
-  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux, as root or in a
-  container, `--no-sandbox --disable-dev-shm-usage` (agent-browser's rule less its `CI` test,
-  which its child never saw). Its environment is agent-browser's less the `AGENT_BROWSER_*`
+  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux in a
+  container, `--disable-dev-shm-usage`. Never `--no-sandbox`: agent-browser's rule adds it as
+  root or in a container, and the guard dropped that exception ("Chrome's sandbox, never
+  weakened", below). Its environment is agent-browser's less the `AGENT_BROWSER_*`
   names.
 - The profile is the run's own, made fresh at the run's first Chrome start, kept across the
   run's later starts ("Lazy start and the idle stop", below) and deleted on the guard's exit
@@ -597,6 +598,79 @@ the kept profile's `Default/Preferences` again before each start, over whatever 
 back. `real_chrome::idle::a_chrome_restarted_on_the_kept_profile_contacts_no_host_but_the_page`
 holds it for a restart: after the idle stop (15 s there) the next call starts Chrome on the kept
 profile, and in its 10 s idle the proxy sees only `page.test`.
+
+### Chrome's sandbox, never weakened (`browser_guard/chrome/sandbox.rs`)
+
+The rule: the guard never passes `--no-sandbox` or any other switch that turns off or loosens
+Chrome's own sandbox, refuses to start Chrome with one, and refuses the browser when the sandbox
+cannot start. There is no retry without the sandbox. Enforced in the launcher, with tests, not
+by convention.
+
+**The switches** (Chromium main, November 2026), matched as Chrome reads them: after `--`, `-`
+or `/`, ASCII whitespace trimmed, the name compared without case (Windows lowercases it,
+`base/command_line.cc`), any `=value`:
+- `sandbox/policy/switches.cc`: `no-sandbox`, `disable-gpu-sandbox`,
+  `disable-landlock-sandbox`, `disable-namespace-sandbox`, `disable-seccomp-filter-sandbox`,
+  `disable-setuid-sandbox`, `disable-webnn-compiler-sandbox`, `no-zygote-sandbox`,
+  `allow-sandbox-debugging`, `gpu-sandbox-allow-sysv-shm`, `allow-third-party-modules`,
+  `service-sandbox-type`;
+- `content/public/common/content_switches.cc`: `no-zygote`, `single-process`, `in-process-gpu`,
+  and the switches that put a program of the caller's choosing in front of or instead of a
+  sandboxed child: `renderer-cmd-prefix`, `utility-cmd-prefix`, `zygote-cmd-prefix`,
+  `gpu-launcher`, `browser-subprocess-path`;
+- earlier Chromium's `disable-gpu-appcontainer` and `disable-gpu-lpac`;
+- `--disable-features` naming any feature of `sandbox/policy/features.cc`, or any name with
+  `sandbox`, `sbox`, `appcontainer`, `lpac`, `seccomp` or `landlock` in it (feature
+  entries read as `base/feature_list.cc` does: `*` prefix, `<trial` and `:params` off);
+- `--enable-features` naming `NetworkServiceInProcess2` (`content_features.cc`, the network
+  service in the browser's process) or its old name `NetworkServiceInProcess`. agent-browser's
+  own feature list has the old name, which current Chrome ignores; the guard dropped it.
+
+`launch` checks every argument it built and refuses to spawn on a match (a guard bug, not a
+host condition). The guard's own command line refuses (exit 2) agent-browser's arguments, and
+`AGENT_BROWSER_ARGS`, naming any of these anywhere in a value (`--args=...,--no-sandbox`).
+
+**What can reach Chrome's command line.** Only the guard's own constants, the proxy URL (checked
+to be `http://127.0.0.1:<port>`), the profile path and the claimed port. Nothing the agent sends:
+agent-browser only connects to the guard's Chrome (`AGENT_BROWSER_CDP`) and never launches one,
+so its `--args`, `AGENT_BROWSER_ARGS` (fixed to the WebRTC flag) and the config file (`{}`,
+written by the host) never reach Chrome; and the filter refuses every flag-shaped string in a
+tool call and every `extraArgs` token but six output flags (`filter.rs`).
+
+**The refusal.** Chrome's stderr, read up to its endpoint line, is matched against the messages
+Chromium prints when the sandbox cannot start:
+- Linux, `content/browser/zygote_host/zygote_host_impl_linux.cc`: "No usable sandbox!",
+  "Running as root without --no-sandbox is not supported", "Zygote process exited prematurely",
+  "Failed to receive boot message from zygote", "Failed to receive hello message from zygote";
+  `sandbox/linux/suid/sandbox.c`: "Failed to move to new namespace", "The setuid sandbox is not
+  running as root"; `sandbox/linux/suid/client/setuid_sandbox_host.cc`: "The SUID sandbox helper
+  binary" (missing, or not configured correctly); `sandbox/policy/linux/sandbox_linux.cc`:
+  "Failed to instantiate the setuid sandbox client"; `content/app/content_main_runner_impl.cc`:
+  "Zygote cannot be disabled if sandbox is enabled";
+- Windows, `sandbox/policy/win/sandbox_win.cc`: "Sandbox cannot access executable" (the
+  broker's other launch errors are debug-build logs only);
+- macOS, `sandbox/mac/seatbelt_exec.cc`: "SeatbeltExec" (a child cannot receive its profile).
+
+On a match, whether Chrome exits or goes on (Windows' broker leaves the browser running), the
+start fails with its own kind (`session::StartError::Sandbox`): the tool call gets exactly "The
+browser couldn't start its own protection on this computer, so Clauseo won't use it.", Chrome's
+tree is killed, and the guard exits 1, its stderr naming the fixed part Chrome printed (never the
+line, which can hold a path). A failed start ends the guard, so Chrome is never started again.
+On Linux as root the guard refuses the same way without starting Chrome, which refuses its
+sandbox as root itself. In a container Chrome starts with its sandbox, with
+`--disable-dev-shm-usage` (shared memory files in the temp folder, not a small `/dev/shm`: no
+sandbox change); where the sandbox cannot start there, it is refused. Linux is not a tier 1
+platform. The host cannot tell the refusal apart yet: no protocol change.
+
+CI's real-Chrome tests run under `no_new_privs`, where the setuid sandbox cannot start, so a
+wrapper script there adds `--no-sandbox` (`tests/guard/real_chrome.rs`). That is the test
+harness, never production; the guard sees only the wrapper's path.
+
+Tests: `chrome/sandbox/tests.rs` (every switch in every spelling, the feature lists, a failure
+line per message, the host table), `chrome/tests.rs` (`chrome_args` on every OS, as root and in
+a container, has no weakening argument), `tests/guard/sandbox.rs` (a stand-in Chrome printing
+each message, exiting or not: the exact refusal, one launch, no agent-browser; agent-browser
+arguments naming a switch refused).
 
 ### Lazy start and the idle stop (`browser_guard/session.rs`, the S27 release blocker)
 
@@ -1544,6 +1618,10 @@ The download (part 3):
   not survive the idle stop.
 - The first call of a session, and the first after an idle stop, waits for Chrome's start
   (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
+- On Linux as root, and wherever Chrome's sandbox cannot start (a container without user
+  namespaces, a host with them disabled), there is no browser. A Chromium bump re-reads
+  `sandbox/policy/switches.cc`, `sandbox/policy/features.cc` and the failure messages in
+  `chrome/sandbox.rs`.
 - A Chrome crash costs the calls in flight and a restart; a second crash ends the browser server
   for the session (the guard exits 1).
 - The host has two read-only probes for a run folder: `runs_settled` (cleanup finished) and
@@ -1559,6 +1637,11 @@ The download (part 3):
   in a job takes Windows 10 or later.
 
 ## Not verified
+
+- The sandbox refusal ran against a stand-in Chrome printing Chromium's messages, not a real
+  Chrome failing to start its sandbox; the Windows and macOS messages were read from source, never
+  seen. A sandbox error printed after Chrome's endpoint (Windows, at a later child's launch) is
+  not watched for.
 
 - Windows: compiled with `cargo clippy --target x86_64-pc-windows-gnu`, never run.
   `CREATE_NO_WINDOW`, the case-insensitive pass-through on a real environment block, and the

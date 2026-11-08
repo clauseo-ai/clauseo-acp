@@ -20,10 +20,13 @@ pub(crate) const FEATURES: [&str; 2] = [
     // predictions (content-autofill.googleapis.com).
     "--disable-features=Translate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,\
      PreconnectToSearch,MediaRouter,AutofillServerCommunication",
-    // agent-browser's entries, plus SkipListAccountsWithoutGaiaCookies: no accounts.google.com
-    // ListAccounts without a Google cookie (Chrome 155 and later; earlier Chrome ignores it,
-    // and `--gaia-url` below covers them).
-    "--enable-features=NetworkService,NetworkServiceInProcess,WebMCPTesting,\
+    // agent-browser's entries less NetworkServiceInProcess, the network service in the browser's
+    // process and out of its sandbox (`chrome/sandbox.rs`; current Chrome reads it only as
+    // NetworkServiceInProcess2, `content_features.cc`, so it did nothing there), plus
+    // SkipListAccountsWithoutGaiaCookies: no accounts.google.com ListAccounts without a Google
+    // cookie (Chrome 155 and later; earlier Chrome ignores it, and `--gaia-url` below covers
+    // them).
+    "--enable-features=NetworkService,WebMCPTesting,\
      DevToolsWebMCPSupport,SkipListAccountsWithoutGaiaCookies",
 ];
 

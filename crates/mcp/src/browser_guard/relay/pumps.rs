@@ -12,16 +12,18 @@ use std::sync::{Arc, mpsc};
 use serde_json::Value;
 
 use super::super::Child;
+use super::super::chrome::sandbox::REFUSAL;
 use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
-use super::super::session::{self, Shared};
+use super::super::session::{self, Shared, StartError};
 use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
 use super::{CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, ENDED, Event, oneshot, send};
 use crate::browser_guard::note;
 use crate::connector::head;
 
-/// The error a tool call gets when the browser cannot start.
+/// The error a tool call gets when the browser cannot start, but for Chrome's sandbox
+/// ([`REFUSAL`]).
 const NOT_STARTED: &str = "the browser could not start; the guard is ending the browser server";
 
 #[cfg(unix)]
@@ -137,11 +139,11 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
             && let Err(reason) = session::start(shared, &mut state, parent, events)
         {
             drop(state);
-            answer_all(
-                &shared.out,
-                &id.into_iter().collect::<Vec<_>>(),
-                NOT_STARTED,
-            );
+            let message = match reason {
+                StartError::Sandbox(_) => REFUSAL,
+                StartError::Other(_) => NOT_STARTED,
+            };
+            answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), message);
             send(events, Event::StartFailed(reason));
             return false;
         }

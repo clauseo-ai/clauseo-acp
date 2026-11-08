@@ -4,8 +4,11 @@
 //! on Unix, its `--user-data-dir` to `profile-of-<parent pid>` there (the guard that started
 //! it), and waits to be killed. A file `chrome-mode` beside it changes that: `wrong-port` prints
 //! port 47120 instead, `silent` prints nothing, `exit` exits 3 before printing, `listen-exit`
-//! prints the endpoint and exits 3 at once. Tests copy it into their own folder, so each has its
-//! own mode and pid file. Cargo builds it for the tests; it is never shipped.
+//! prints the endpoint and exits 3 at once, `sandbox-exit:<line>` prints `<line>` (one of
+//! Chrome's sandbox failures) and exits 1 before the endpoint, `sandbox-stay:<line>` prints it
+//! and waits. Each start also adds a line to `chrome-launches` beside it. Tests copy it into
+//! their own folder, so each has its own mode and pid file. Cargo builds it for the tests; it is
+//! never shipped.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,17 @@ fn main() -> std::io::Result<()> {
         })
         .unwrap_or_default();
     record(&dir)?;
+    if let Some((kind @ ("sandbox-exit" | "sandbox-stay"), line)) = mode.split_once(':') {
+        let mut err = std::io::stderr().lock();
+        writeln!(err, "[stub] starting")?;
+        writeln!(err, "{}", line.trim_end())?;
+        err.flush()?;
+        drop(err);
+        if kind == "sandbox-exit" {
+            std::process::exit(1);
+        }
+        wait_forever();
+    }
     let port = match mode.trim() {
         "exit" => std::process::exit(3),
         "silent" => None,
@@ -43,13 +57,19 @@ fn main() -> std::io::Result<()> {
     wait_forever();
 }
 
-/// Writes `chrome.pid` and, on Unix, `profile-of-<parent pid>` into `dir`.
+/// Writes `chrome.pid`, a line more in `chrome-launches` and, on Unix,
+/// `profile-of-<parent pid>` into `dir`.
 #[expect(
     clippy::disallowed_methods,
     reason = "the test stub records its pid and profile for the test's checks"
 )]
 fn record(dir: &Path) -> std::io::Result<()> {
     std::fs::write(dir.join("chrome.pid"), std::process::id().to_string())?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("chrome-launches"))?
+        .write_all(b"launched\n")?;
     #[cfg(unix)]
     {
         let profile = std::env::args()

@@ -9,7 +9,9 @@
 //! `/usr/bin/chromium`. Without agent-browser or a Chrome the tests say so on stderr and pass;
 //! with `CLAUSEO_TEST_AGENT_BROWSER` set, a missing Chrome fails them. With `CI` set Chrome runs
 //! with `--no-sandbox` (a wrapper script adds it): CI runs the tests under `no_new_privs`,
-//! where Chrome's setuid sandbox cannot start.
+//! where Chrome's setuid sandbox cannot start. That is this test harness only: the guard never
+//! passes `--no-sandbox` and refuses a Chrome whose sandbox cannot start (`chrome/sandbox.rs`);
+//! it never sees the wrapper's arguments, only the wrapper's path as Chrome's.
 //!
 //! Linux only: the process checks read `/proc`.
 
@@ -73,6 +75,7 @@ fn chrome_for(scratch: &Scratch, chrome: &Path, quiet: bool) -> PathBuf {
     }
     let wrapper = scratch.path().join("chrome-wrapper.sh");
     let quoted = chrome.to_str().unwrap().replace('\'', r"'\''");
+    // Test harness only, never production: the guard itself never passes `--no-sandbox`.
     let sandbox = if ci { " --no-sandbox" } else { "" };
     // Chrome keeps the guard's stderr pipe open on fd 3, so the guard sees no end, only no line.
     let stderr = if quiet { " 3>&2 2>/dev/null" } else { "" };

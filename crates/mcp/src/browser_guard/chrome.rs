@@ -7,9 +7,10 @@
 //! writes only for port 0 (`remote_debugging_server.cc:366-396`), so a pinned port timed out
 //! after 30 s (decision record 0029). The guard therefore runs Chrome headless with
 //! agent-browser's own headless flags (v0.41.1 `cli/src/native/cdp/chrome.rs:466-597`), the
-//! session's proxy, the WebRTC flag and `--remote-debugging-port=<--cdp-port>`; reads Chrome's
-//! stderr until `DevTools listening on ws://127.0.0.1:<port>/devtools/browser/<id>` (at most
-//! [`START_WAIT`]); and refuses unless the port is exactly the claimed one. The start is two
+//! session's proxy, the WebRTC flag and `--remote-debugging-port=<--cdp-port>`, never a switch
+//! that weakens its sandbox (`chrome/sandbox.rs`, refused when that sandbox cannot start); reads
+//! Chrome's stderr until `DevTools listening on ws://127.0.0.1:<port>/devtools/browser/<id>` (at
+//! most [`START_WAIT`]); and refuses unless the port is exactly the claimed one. The start is two
 //! steps, [`launch`] and [`Chrome::endpoint`], so the reaper knows Chrome before the wait.
 //!
 //! The profile is the run's own, `<cwd>/chrome-profile-<run id>` (`runs.rs`), made at the first
@@ -37,6 +38,7 @@ use std::time::Duration;
 use super::downloads::{Held, Mover};
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
+use super::session::StartError;
 use super::{Child, ChildStderr, env, pause, quiet};
 use crate::write;
 
@@ -139,21 +141,36 @@ enum Seen {
     Endpoint(String),
     /// Chrome closed stderr, or said it cannot listen, first; its last lines.
     Failed(Vec<String>),
+    /// Chrome said its sandbox cannot start, first: the fixed part of what it said
+    /// ([`sandbox::failure`]).
+    Sandbox(&'static str),
 }
 
 /// Starts Chrome, with its stderr reader, and returns it at once, before it listens: the
 /// caller hands its pid to the reaper (Unix) before [`Chrome::endpoint`] waits, so a guard
 /// killed during the wait leaves no Chrome. On Windows Chrome is in the job before it runs.
+/// Refuses, starting nothing, on Linux as root (where Chrome's sandbox cannot start) and when an
+/// argument would weaken Chrome's sandbox (`sandbox.rs`).
 pub(crate) fn launch(
     spec: &Spec<'_>,
     #[cfg(windows)] job: &super::job::Job,
-) -> Result<Chrome, String> {
+) -> Result<Chrome, StartError> {
+    let host = sandbox::Host::now();
+    if sandbox::refused_up_front(host) {
+        return Err(StartError::Sandbox(None));
+    }
     let profile = spec.profile.to_owned();
     let staging = profile.join(STAGING);
     let downloads = spec.cwd.join("downloads");
     ready_profile(&profile, &staging, &downloads)
         .map_err(|error| format!("cannot make Chrome's profile: {error}"))?;
-    let args = chrome_args(spec, &profile);
+    let args = chrome_args(spec, &profile, host);
+    if let Some(switch) = args.iter().find_map(|arg| sandbox::weakening(arg)) {
+        return Err(StartError::Other(format!(
+            "Chrome's arguments include {switch}, which weakens its sandbox; the guard never \
+             passes it"
+        )));
+    }
     let mut child = spawn(
         spec,
         &args,
@@ -191,7 +208,7 @@ impl Chrome {
         wait: Duration,
         parent: &Parent,
         held: Arc<Held>,
-    ) -> Result<String, String> {
+    ) -> Result<String, StartError> {
         let inbox = self
             .starting
             .take()
@@ -209,24 +226,25 @@ impl Chrome {
                     break;
                 }
                 Err(RecvTimeoutError::Timeout) if parent.gone() => {
-                    return Err(super::PARENT_GONE.to_owned());
+                    return Err(super::PARENT_GONE.to_owned().into());
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
         }
         let endpoint = match seen {
             Some(Seen::Endpoint(endpoint)) => endpoint,
+            Some(Seen::Sandbox(said)) => return Err(StartError::Sandbox(Some(said))),
             Some(Seen::Failed(tail)) => {
-                return Err(format!(
+                return Err(StartError::Other(format!(
                     "Chrome stopped before it listened on the claimed debugging port{}",
                     quote(&tail)
-                ));
+                )));
             }
             None => {
-                return Err(format!(
+                return Err(StartError::Other(format!(
                     "Chrome did not report its debugging port within {} s",
                     wait.as_secs()
-                ));
+                )));
             }
         };
         check_endpoint(&endpoint, cdp_port)?;
@@ -355,8 +373,9 @@ pub(crate) fn remove_profile(profile: &Path) {
     ));
 }
 
-/// Chrome's arguments, in order.
-pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path) -> Vec<OsString> {
+/// Chrome's arguments, in order, on `host`: never one that weakens Chrome's sandbox
+/// (`sandbox.rs`).
+pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path, host: sandbox::Host) -> Vec<OsString> {
     let mut args: Vec<OsString> = HEADLESS_ARGS.iter().map(OsString::from).collect();
     args.extend(
         quiet::FEATURES
@@ -377,31 +396,9 @@ pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path) -> Vec<OsString> {
         "--remote-debugging-port={}",
         spec.cdp_port
     )));
-    args.extend(sandbox_args().iter().map(OsString::from));
+    args.extend(sandbox::host_args(host).iter().map(OsString::from));
     args.push(OsString::from("about:blank"));
     args
-}
-
-/// agent-browser's rule for Linux (`chrome.rs:1606-1700`): no sandbox and no `/dev/shm` as root
-/// or in a container, where Chrome's sandbox cannot start. Its `CI` test does not apply: the
-/// guard's child never saw `CI`.
-fn sandbox_args() -> &'static [&'static str] {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let root = std::fs::metadata("/proc/self").is_ok_and(|m| m.uid() == 0);
-        let container = Path::new("/.dockerenv").exists()
-            || Path::new("/run/.containerenv").exists()
-            || std::fs::read_to_string("/proc/1/cgroup").is_ok_and(|cgroup| {
-                ["docker", "kubepods", "lxc"]
-                    .iter()
-                    .any(|word| cgroup.contains(word))
-            });
-        if root || container {
-            return &["--no-sandbox", "--disable-dev-shm-usage"];
-        }
-    }
-    &[]
 }
 
 #[cfg(unix)]
@@ -441,7 +438,8 @@ fn spawn(spec: &Spec<'_>, args: &[OsString], job: &super::job::Job) -> io::Resul
     })
 }
 
-/// Reads Chrome's stderr to its end: reports the endpoint line, or the last lines if Chrome
+/// Reads Chrome's stderr to its end: reports the endpoint line, a sandbox failure
+/// ([`sandbox::failure`]; Chrome is refused even if it would go on), or the last lines if Chrome
 /// fails first, then drains the rest so Chrome never blocks on a full pipe.
 fn read_stderr(stderr: ChildStderr, seen: &mpsc::Sender<Seen>) {
     let mut input = BufReader::new(stderr);
@@ -467,7 +465,10 @@ fn read_stderr(stderr: ChildStderr, seen: &mpsc::Sender<Seen>) {
             tail.pop_front();
         }
         tail.push_back(text.trim().to_owned());
-        if text.contains(CANNOT_LISTEN) {
+        if let Some(said) = sandbox::failure(&text) {
+            reported = true;
+            drop(seen.send(Seen::Sandbox(said)));
+        } else if text.contains(CANNOT_LISTEN) {
             reported = true;
             drop(seen.send(Seen::Failed(tail.iter().cloned().collect())));
         }
@@ -509,6 +510,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 mod profile;
+pub(crate) mod sandbox;
 
 pub(super) use profile::ready_profile;
 
