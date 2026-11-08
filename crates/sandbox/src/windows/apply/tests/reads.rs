@@ -54,7 +54,8 @@ fn reads(w: &World, acl: &FakeAcl, rel: &str) -> bool {
     granted(&acl.aces, &w.canonical(rel), &POOL_TOKEN, READ)
 }
 
-/// Matter one's read entries in the ledger, by path relative to matter two's folder.
+/// The paths of matter one's read entries in the ledger, relative to matter two's folder, in
+/// order, each once (a folder has two).
 fn read_entries(w: &World, ledger: &Ledger) -> Vec<String> {
     let root = w.canonical("other/m2");
     let reads = ledger
@@ -68,6 +69,8 @@ fn read_entries(w: &World, ledger: &Ledger) -> Vec<String> {
                 .to_string_lossy()
                 .replace('\\', "/")
         })
+        .collect::<std::collections::BTreeSet<String>>()
+        .into_iter()
         .collect()
 }
 
@@ -136,17 +139,29 @@ fn a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth() {
 }
 
 #[test]
-fn what_is_made_during_the_run_is_readable_only_inside_a_tree_allowed() {
-    let w = World::new("reads-made");
-    w.other_tree();
-    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
-    launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
-    w.dir.file("other/m2/docs/new.txt", "n");
-    w.dir.file("other/m2/new.txt", "n");
-    w.dir.file("other/m2/sub/new/x.txt", "n");
-    assert!(reads(&w, &acl, "other/m2/docs/new.txt"));
-    assert!(!reads(&w, &acl, "other/m2/new.txt"));
-    assert!(!reads(&w, &acl, "other/m2/sub/new/x.txt"));
+fn a_file_made_during_the_run_in_an_allowed_folder_reads_and_a_folder_made_then_doesnt() {
+    for grant in ["other/m2", "other/m2/docs"] {
+        let w = World::new("reads-made");
+        w.other_tree();
+        let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+        launch(&w, &mut ledger, &mut acl, &[(grant, false)]);
+        w.dir.file("other/m2/docs/new.txt", "n");
+        w.dir.file("other/m2/docs/deep/new.txt", "n");
+        w.dir.file("other/m2/new.txt", "n");
+        assert!(reads(&w, &acl, "other/m2/docs/new.txt"), "{grant}");
+        assert!(reads(&w, &acl, "other/m2/docs/deep/new.txt"), "{grant}");
+        // Directly in the root a file inherits the fence's deny first.
+        assert!(!reads(&w, &acl, "other/m2/new.txt"), "{grant}");
+        // A folder made during the run (a `git init`, an agent's folder, a plain one) inherits
+        // nothing from the read, nor does what is in it, until the next launch lists it.
+        for made in ["docs/.git/HEAD", "docs/deep/.claude/x.md", "docs/new/x.txt"] {
+            let file = format!("other/m2/{made}");
+            w.dir.file(&file, "n");
+            let folder = file.rsplit_once('/').unwrap().0.to_owned();
+            assert!(!reads(&w, &acl, &folder), "{grant}: {folder}");
+            assert!(!reads(&w, &acl, &file), "{grant}: {file}");
+        }
+    }
 }
 
 #[test]
@@ -248,7 +263,7 @@ fn a_forgotten_read_goes_at_once_and_a_second_narrowing_takes_nothing() {
     assert_eq!(narrowed.removed, vec![w.canonical("other/m2/a.txt")]);
     assert!(!reads(&w, &acl, "other/m2/a.txt"));
     assert!(reads(&w, &acl, "other/m2/docs/b.txt"));
-    assert_eq!(read_entries(&w, &ledger), vec!["docs".to_owned()]);
+    assert_eq!(read_entries(&w, &ledger), ["docs", "docs/deep"]);
 
     let entries = ledger.entries().count();
     let again = narrow_reads(
@@ -285,7 +300,7 @@ fn a_read_narrowed_to_a_folder_inside_it_keeps_that_folders_allows_only() {
     assert!(narrowed.removed.contains(&w.canonical("other/m2")));
     assert!(narrowed.removed.contains(&w.canonical("other/m2/sub")));
     assert!(!narrowed.removed.contains(&w.canonical("other/m2/docs")));
-    assert_eq!(read_entries(&w, &ledger), vec!["docs".to_owned()]);
+    assert_eq!(read_entries(&w, &ledger), ["docs", "docs/deep"]);
     assert!(reads(&w, &acl, "other/m2/docs/b.txt"));
     assert!(!reads(&w, &acl, "other/m2/sub/e.txt"));
     assert!(!reads(&w, &acl, "other/m2/a.txt"));
@@ -333,7 +348,8 @@ fn reads_a_crashed_run_left_go_at_the_next_launch_or_the_next_end() {
         &mut around(&w),
     )
     .unwrap();
-    assert_eq!(ended.removed, vec![w.canonical("other/m2/docs")]);
+    let docs = ["other/m2/docs", "other/m2/docs/deep"].map(|rel| w.canonical(rel));
+    assert_eq!(ended.removed, docs);
     assert_eq!(read_entries(&w, &ledger), Vec::<String>::new());
     assert_eq!(pool_entries_in_m2(&w, &acl), Vec::<Key>::new());
 }

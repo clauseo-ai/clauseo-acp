@@ -26,16 +26,23 @@ fn this_only(rel: &str) -> (String, Inherit) {
     (rel.to_owned(), Inherit::ThisOnly)
 }
 
-fn tree(rel: &str) -> (String, Inherit) {
-    (rel.to_owned(), Inherit::Tree)
+fn files_in(rel: &str) -> (String, Inherit) {
+    (rel.to_owned(), Inherit::FilesInFolder)
+}
+
+/// A folder's two allows: on itself alone, and for the files directly in it.
+fn folder(rel: &str) -> [(String, Inherit); 2] {
+    [this_only(rel), files_in(rel)]
 }
 
 #[test]
-fn a_folder_with_no_refused_name_in_it_takes_one_allow_for_its_tree() {
+fn each_folder_takes_an_allow_on_itself_and_one_for_its_files_and_none_reaches_a_folder() {
     let w = World::new("reads-clean");
     w.other_tree();
     let policy = w.reading(&[("other/m2/docs", false)]);
-    assert_eq!(listed(&w, &policy), vec![tree("docs")]);
+    // No allow inherits to a folder, so one made during the run (a `.git`) stays closed.
+    let expected = [folder("docs"), folder("docs/deep")].concat();
+    assert_eq!(listed(&w, &policy), expected);
 }
 
 #[test]
@@ -45,19 +52,17 @@ fn a_folder_holding_refused_names_at_any_depth_leaves_each_out() {
     w.dir.file("other/m2/sub/src/.AGENTS/x.md", "x");
     let policy = w.reading(&[("other/m2", false)]);
     // `.git`, `.Claude`, `sub/.git`, `sub/src/.AGENTS` and `wt/.git` (a worktree's file) get
-    // nothing; every folder above one gets an allow for itself alone, and what is beside one
-    // an allow for its tree, or for itself when a file.
-    let expected = vec![
-        this_only(""),
-        tree("docs"),
-        this_only("sub"),
-        this_only("sub/src"),
-        this_only("sub/src/d.rs"),
-        this_only("sub/e.txt"),
-        this_only("wt"),
-        this_only("wt/f.txt"),
-        this_only("a.txt"),
-    ];
+    // nothing; every other folder gets an allow for itself alone and one for its files, but the
+    // root (the fence) and `wt` (a refused file in it) an allow on each file instead.
+    let expected = [
+        vec![this_only(""), this_only("a.txt")],
+        folder("docs").to_vec(),
+        folder("docs/deep").to_vec(),
+        folder("sub").to_vec(),
+        folder("sub/src").to_vec(),
+        vec![this_only("wt"), this_only("wt/f.txt")],
+    ]
+    .concat();
     assert_eq!(listed(&w, &policy), expected);
 }
 
@@ -90,7 +95,12 @@ fn a_granted_file_takes_one_allow_for_itself_and_reads_are_listed_once() {
         ("other/m2/sub/e.txt", true),
     ];
     let policy = w.reading(&reads);
-    let expected = vec![this_only("sub/e.txt"), this_only("sub"), tree("sub/src")];
+    let expected = [
+        vec![this_only("sub/e.txt")],
+        folder("sub").to_vec(),
+        folder("sub/src").to_vec(),
+    ]
+    .concat();
     assert_eq!(listed(&w, &policy), expected);
 }
 
@@ -159,6 +169,10 @@ fn the_whole_folder_takes_allows_on_its_children_even_with_no_refused_name() {
     w.dir.file("other/m2/a.txt", "a");
     w.dir.file("other/m2/docs/b.txt", "b");
     let policy = w.reading(&[("other/m2", false)]);
-    let expected = vec![this_only(""), tree("docs"), this_only("a.txt")];
+    let expected = [
+        vec![this_only(""), this_only("a.txt")],
+        folder("docs").to_vec(),
+    ]
+    .concat();
     assert_eq!(listed(&w, &policy), expected);
 }

@@ -3,17 +3,21 @@
 //! [`REFUSED_IN_OTHER_MATTER`](crate::REFUSED_IN_OTHER_MATTER) is readable at any depth, with
 //! no deny entry and no walk into a refused name.
 //!
-//! A granted folder with no refused name anywhere in it takes one allow for its tree. One that
-//! holds a refused name, at any depth, takes an allow for itself alone (listing it, reading its
-//! attributes), and each of its children is taken the same way: a file gets an allow for itself,
-//! a folder with no refused name in it an allow for its tree, a folder with one is gone into, and
-//! a refused name gets nothing. So an allow reaches a refused name neither on it nor by
-//! inheritance, and nothing is written in it or walked below it. Left out as well: a junction or
-//! symbolic link (the walk never follows one, and an allow on one would refuse the launch), and a
-//! file with another name elsewhere (an allow on it is refused, as at every grant). A granted
-//! file takes an allow for itself alone, unless it is one of those. The other matter's whole
-//! folder always takes the allows on its children, refused names or not: the fence's deny for
-//! what is below it would beat an allow for its tree (`fence.rs`).
+//! Each folder of a granted tree, at any depth, takes an allow for itself alone (listing it,
+//! reading its attributes) and one for the files directly in it (`Inherit::FilesInFolder`:
+//! object inherit, inherit only, no propagation), and each folder in it is taken the same way. No
+//! allow reaches a folder by inheritance, so a folder made during the run (a `git init`'s `.git`,
+//! a `.claude`) inherits nothing and stays closed behind the fence until the next launch lists
+//! it, while a file made in an allowed folder reads at once (R18, MED 2). A folder with a refused
+//! name among its files (a worktree's `.git` file) takes an allow on each of its other files
+//! instead of the one for its files. A refused name gets nothing. So an allow reaches a refused
+//! name neither on it nor by inheritance, and nothing is written in it or walked below it. Left
+//! out as well: a junction or symbolic link (the walk never follows one, and an allow on one
+//! would refuse the launch), and a file with another name elsewhere (an allow on it is refused,
+//! as at every grant, and the walk skips it). A granted file takes an allow for itself alone,
+//! unless it is one of those. The other matter's whole folder takes an allow on each of its
+//! files too: the fence's deny for what is below it would beat an allow for its files, which
+//! sits on the same folder and comes first (`fence.rs`).
 
 #[cfg(any(windows, test, feature = "test-support"))]
 use std::io;
@@ -28,7 +32,7 @@ use crate::windows::acl_plan::in_folder;
 use crate::{Error, OtherMatterRead, Policy};
 
 /// One entry a read of another matter needs: `ReadAndExecute` for the pool user on
-/// [`ReadGrant::path`], for the path alone or for its tree.
+/// [`ReadGrant::path`], for the path alone or for the files directly in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadGrant {
     path: PathBuf,
@@ -41,7 +45,7 @@ impl ReadGrant {
         &self.path
     }
 
-    /// [`Inherit::ThisOnly`] or [`Inherit::Tree`].
+    /// [`Inherit::ThisOnly`] or [`Inherit::FilesInFolder`].
     pub fn inherit(&self) -> Inherit {
         self.inherit
     }
@@ -55,10 +59,10 @@ impl ReadGrant {
     }
 
     #[cfg(any(windows, test, feature = "test-support"))]
-    fn tree(path: PathBuf) -> ReadGrant {
+    fn files_in(path: PathBuf) -> ReadGrant {
         ReadGrant {
             path,
-            inherit: Inherit::Tree,
+            inherit: Inherit::FilesInFolder,
         }
     }
 }
@@ -107,22 +111,18 @@ fn shape(read: &OtherMatterRead) -> io::Result<Vec<ReadGrant>> {
             vec![ReadGrant::this_only(path)]
         });
     }
-    // The other matter's whole folder always takes allows on its children: an allow for its
-    // tree would lose, on every child, to the fence's deny for what is below the folder, which
-    // sits on the same folder and comes first (R18).
+    // The other matter's whole folder takes an allow on each file: one for its files would lose,
+    // on every file, to the fence's deny for what is below the folder, which sits on the same
+    // folder and comes first (R18).
     let whole = in_folder(&path, read.root()) && in_folder(read.root(), &path);
-    Ok(mixed(read, &path, whole)?.unwrap_or_else(|| vec![ReadGrant::tree(path)]))
+    folder(read, &path, whole)
 }
 
-/// The entries for `folder` when a refused name is somewhere in it (or `always`), `None` when
-/// none is. Its children are taken in name order, so a plan is the same from one launch to the
-/// next.
+/// The entries for `folder` and every folder in it, in name order, so a plan is the same from
+/// one launch to the next: an allow on the folder alone, one for its files, or (`each`, or a
+/// refused name among them) one on each file, then the entries of each folder in it.
 #[cfg(any(windows, test, feature = "test-support"))]
-fn mixed(
-    read: &OtherMatterRead,
-    folder: &Path,
-    always: bool,
-) -> io::Result<Option<Vec<ReadGrant>>> {
+fn folder(read: &OtherMatterRead, folder: &Path, each: bool) -> io::Result<Vec<ReadGrant>> {
     let mut children = Vec::new();
     for entry in std::fs::read_dir(folder)? {
         let entry = entry?;
@@ -131,32 +131,32 @@ fn mixed(
         children.push((entry.path(), kind.is_symlink(), kind.is_dir()));
     }
     children.sort();
-    let mut found = false;
+    let mut refused_file = false;
     let mut grants = vec![ReadGrant::this_only(folder.to_owned())];
     let mut files = Vec::new();
+    let mut inner = Vec::new();
     for (path, link, dir) in children {
         if read.refuses(&path) {
-            found = true;
+            refused_file |= !dir;
         } else if link {
             // Left out: see the module's docs.
-        } else if !dir {
-            files.push(path);
-        } else if let Some(inner) = mixed(read, &path, false)? {
-            found = true;
-            grants.extend(inner);
+        } else if dir {
+            inner.extend(self::folder(read, &path, false)?);
         } else {
-            grants.push(ReadGrant::tree(path));
+            files.push(path);
         }
     }
-    if !found && !always {
-        return Ok(None);
-    }
-    for file in files {
-        if !linked(&file)? {
-            grants.push(ReadGrant::this_only(file));
+    if !each && !refused_file {
+        grants.push(ReadGrant::files_in(folder.to_owned()));
+    } else {
+        for file in files {
+            if !linked(&file)? {
+                grants.push(ReadGrant::this_only(file));
+            }
         }
     }
-    Ok(Some(grants))
+    grants.extend(inner);
+    Ok(grants)
 }
 
 #[cfg(any(windows, test, feature = "test-support"))]

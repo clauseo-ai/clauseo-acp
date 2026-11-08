@@ -2220,12 +2220,18 @@ name.
 **The shape.** The gate lists each granted folder (`admit/other_reads.rs`, step 4 of the gate)
 and the plan gives the pool user `ReadAndExecute` (`PathKind::OtherMatterRead`, appended):
 
-- A folder with no refused name anywhere in it: one allow, inherited down its tree.
-- A folder with a refused name at any depth: an allow on the folder alone (list it, read its
-  attributes), and each child taken the same way. A file gets an allow on itself, a clean
-  folder an allow for its tree, a folder with a refused name in it is gone into, and a refused
-  name gets nothing.
+- Each folder of the granted tree, at any depth: an allow on the folder alone (list it, read
+  its attributes) and one for the files directly in it (`Inherit::FilesInFolder`, object
+  inherit, inherit only, no propagation), so no allow reaches a folder by inheritance (MED 2).
+  A folder with a refused name among its files (a worktree's `.git` file), and the other
+  matter's root (see "The fence"), take an allow on each of their other files instead.
+- A refused name gets nothing, and neither does anything in it.
 - A granted file: an allow on itself.
+
+Rejected for MED 2: one allow inherited down a clean folder's tree, as first built. A folder
+made during the run inherited it, so a new `.git` or `.claude` folder was readable at once.
+The cost of the chosen shape: two entries per folder in the tree, each walked over its own
+files, where a clean tree had one.
 
 No allow reaches a refused name, on it or by inheritance, so nothing has to deny it. It stays
 as closed as it was, behind the other matter's fence. No deny entry names the pool user, and no
@@ -2258,13 +2264,14 @@ Edge cases:
 - A file with another name elsewhere (a hard link): left out of the explicit allows (the writer
   refuses an allow on one, `LinkedFile`) and skipped by the walk. A granted file that has
   another name grants nothing.
-- Made during the run: a file or folder made inside a folder with an inherited allow (a clean
-  folder's tree) inherits the read and is readable at once, a new `.git` included: a refused
-  name made during the run (a `git init` in an allowed tree) is readable until the session
-  ends. Directly in a folder above a refused name a new child inherits nothing from the grant
-  and stays closed behind the fence until the next launch lists it. Accepted: the session is
-  short, and nothing of the other matter's existing history opens.
-- A hard link made during the run inside a folder with an inherited allow (by the other
+- Made during the run: a file made in a folder with an allow for its files reads at once. A
+  folder made during the run inherits nothing, nor does anything in it, so a new `.git` or
+  `.claude` folder (a `git init`, an agent's set-up) stays closed behind the fence, and a plain
+  new folder is readable only from the next launch, which lists it. A new file directly in the
+  other matter's root, or in a folder whose files take their own allows, stays closed until the
+  next launch too. A new file with a refused name (a `.git` file) in an allowed folder reads:
+  it holds a path, not history.
+- A hard link made during the run in a folder with an allow for its files (by the other
   matter's agent or the lawyer) gets the inherited read on its file's one DACL, which every name
   of that file shares, so the file reads by its other names too until the session ends.
   Informational: the agent reading can't make one (it writes nothing there), and the file was
@@ -2289,9 +2296,9 @@ every inherited one, and an object's explicit denies before its explicit allows.
 - On the root itself the fence's deny is explicit, on the same object, and comes first. For a
   grant **of the other matter's root**, the session lifts that one entry for its own pool user
   ("Listing the root" below). The entry for what is below the root stays.
-- A grant of the root never takes an allow for the root's tree: on every child, the root's
+- A grant of the root never takes an allow for the root's files: on every file, the root's
   inherit-only deny is copied from the same parent as the allow and comes first. The gate gives
-  the root an allow on itself alone and each child its own, refused names or not.
+  the root an allow on itself alone and each of its files its own.
 - The pool group's sibling denies don't reach a grant: a registered matter is never a sibling,
   a folder holding one is walked down to it and never denied whole (gate step 3), and the gate
   keeps every granted path out of the sibling walk. A group deny inherited from higher up would
