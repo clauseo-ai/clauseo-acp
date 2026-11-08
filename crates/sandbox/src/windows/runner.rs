@@ -51,6 +51,10 @@
 //!   launch on `ctl` only after it checked the client is the inner runner's pid and that pid's
 //!   token user is the pool user; `CreateProcessWithLogonW` caps the command line at 1024
 //!   characters, so nothing but the pipe base goes there.
+//! - The job ends a process at its unhandled exception, before Windows Error Reporting is asked
+//!   (`JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION`), and the inner runner turns WER off in the
+//!   pool user's own `HKCU` before the agent starts (`wer.rs`): no `WerFault` as the lawyer opens
+//!   a crashed sandbox process (decision 0049).
 //! - The inner runner sets `SetErrorMode`, makes the private desktop and the (B) token
 //!   (`token.rs`), makes the profile folders the environment names, and starts the agent with
 //!   only its three pipe handles inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`). It exits with
@@ -100,6 +104,8 @@ mod start;
 mod sweep;
 #[cfg(any(windows, test))]
 pub mod unclean;
+#[cfg(windows)]
+mod wer;
 
 pub use env::agent_env;
 #[cfg(windows)]
