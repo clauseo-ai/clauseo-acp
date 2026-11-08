@@ -281,7 +281,8 @@ pub fn retry_squatted(
 
 /// What `UserSetup::run` (and its extend) return for `asked`, the set-up task's answer: its reply
 /// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task, a disabled
-/// one (whose elevated set-up registers it again, `refresh::ensure_task`), or a refusal (one the gate didn't foresee for a lawyer it should serve), runs `elevated`, the
+/// one (whose elevated set-up registers it again, `refresh::ensure_task`), or a refusal (one the
+/// gate didn't foresee for a lawyer it should serve), runs `elevated`, the
 /// set-up with its prompt, whose declined prompt is still `SetupError::Refused`. The prompt
 /// needs an administrator's credentials, so falling back to it grants no one anything. A task
 /// that couldn't be reached (a squatted pipe, no server or no published name in time) is
