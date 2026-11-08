@@ -4,7 +4,7 @@
 //! pool user run something after its session: a task at its trigger, a job once its owner logs
 //! on again. It replaces the runner's end sweeper, which ran as each pool user. It kills
 //! nothing: stopping a pool user's processes is `--stop`'s (`stop.rs`), and [`Sweeper`] has no
-//! process call at all.
+//! process call at all; a pool task's running instance is stopped through the Task Scheduler.
 //!
 //! [`sweep`] holds the order and the refusals, with no Windows call; every effect goes through
 //! [`Sweeper`], which `windows_sweeper.rs` implements and the tests fake. Steps 1 to 3 are the
@@ -43,9 +43,11 @@
 //!    neither a user nor a group, a task whose principal or owner can't be read, a
 //!    folder whose tasks or subfolders can't be listed, a delete that fails, and more than
 //!    [`FOLDERS_CAP`] folders are 56, and none stops the walk: every other task is still read,
-//!    and every pool task still deleted. A task's running instance is left running: deleting
-//!    the task ends nothing. A task whose definition or principal the Task Scheduler won't give
-//!    (its descriptor shuts SYSTEM out, say) is read from its file instead,
+//!    and every pool task still deleted. Before a pool task is deleted, its running instances
+//!    are stopped ([`running`]: `GetRunningTasks`, each instance whose path is the task's,
+//!    `IRunningTask::Stop`), since deleting a task ends nothing; one not stopped is 56, and the
+//!    task is deleted all the same. A task whose definition or principal the Task Scheduler
+//!    won't give (its descriptor shuts SYSTEM out, say) is read from its file instead,
 //!    `%SystemRoot%\System32\Tasks\<folder>\<name>` ([`task_file`]): each part a plain name,
 //!    opened by handle below `Tasks`, never through a link, with `SeBackupPrivilege` for the
 //!    opens alone, at most [`TASK_FILE_CAP`] bytes, its XML read narrowly. When the file's
@@ -75,6 +77,7 @@ use super::pool_steps::{
 use crate::windows::sids::Sid;
 
 mod resolve;
+mod running;
 pub mod task_file;
 #[cfg(test)]
 mod tests;
@@ -108,8 +111,9 @@ pub enum SweepExit {
     NotPool,
     /// 56: a task's principal or owner couldn't be read, or names no one, or a name that
     /// resolves to no SID and isn't another domain's; a pool user's task couldn't be
-    /// deleted, a folder's tasks or subfolders couldn't be listed, or there were more than
-    /// [`FOLDERS_CAP`] folders. The BITS step still ran.
+    /// deleted, or a running instance of one couldn't be stopped (or its path read), a folder's
+    /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders.
+    /// The BITS step still ran.
     TasksLeft,
     /// 57: every task was read and the pool's deleted, but a pool user's BITS job wasn't
     /// cancelled, a job's owner couldn't be read, or the BITS list couldn't be read or reached
@@ -204,6 +208,13 @@ pub trait Sweeper: Gate + Bits + Record {
     /// name, [`task_file::parts`]), read as the module says, at most [`TASK_FILE_CAP`] bytes;
     /// `Err` when it can't be, or is larger.
     fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed>;
+    /// Every running task instance, hidden ones included
+    /// (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`): each its task's path
+    /// (`IRunningTask::Path`), `Err` where it can't be read; `Err` when the list can't be. It
+    /// replaces the last list, for [`Sweeper::stop_running`].
+    fn running_tasks(&mut self) -> Result<Vec<Result<String, Failed>>, Failed>;
+    /// Stops the instance at `at` in the last list (`IRunningTask::Stop`).
+    fn stop_running(&mut self, at: usize) -> Result<(), Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
@@ -241,6 +252,10 @@ pub struct Swept {
     /// Tasks the Task Scheduler wouldn't give whose task file names a principal that isn't the
     /// pool's: skipped.
     pub file_skipped: usize,
+    /// The pool's tasks' running instances stopped.
+    pub instances_stopped: usize,
+    /// Their instances not stopped, or that may be theirs ([`running`]).
+    pub instances_not_stopped: usize,
 }
 
 impl Swept {
@@ -250,6 +265,7 @@ impl Swept {
             || self.no_principal > 0
             || self.unresolved > 0
             || self.not_deleted > 0
+            || self.instances_not_stopped > 0
             || self.unlisted > 0
             || self.capped
     }
@@ -361,8 +377,9 @@ fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>) -> String 
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, \
-         not another domain's), {} skipped (another domain's, no SID), {} not deleted, \
-         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}",
+         not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
+         running instances stopped, {} not, {cancelled} BITS jobs cancelled, {failed} \
+         not{unlisted}{capped}{listed}",
         swept.folders,
         swept.tasks,
         swept.deleted,
@@ -371,7 +388,9 @@ fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>) -> String 
         swept.no_principal,
         swept.unresolved,
         swept.skipped,
-        swept.not_deleted
+        swept.not_deleted,
+        swept.instances_stopped,
+        swept.instances_not_stopped
     )
 }
 
@@ -508,13 +527,17 @@ fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'
         }
     };
     match found {
-        Found::Pool => match fs.delete_task(folder, &task.name) {
-            Ok(()) => swept.deleted += 1,
-            Err(why) => {
-                swept.not_deleted += 1;
-                swept.note(why);
+        Found::Pool => {
+            // Its instances first: deleting the task ends none.
+            running::stop_instances(fs, folder, &task.name, swept);
+            match fs.delete_task(folder, &task.name) {
+                Ok(()) => swept.deleted += 1,
+                Err(why) => {
+                    swept.not_deleted += 1;
+                    swept.note(why);
+                }
             }
-        },
+        }
         Found::NotPool => {}
         Found::Skipped(why) => {
             swept.skipped += 1;
