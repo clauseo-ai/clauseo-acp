@@ -1,19 +1,81 @@
 //! Where a path the agent wrote really leads, for the data folder fence: `~` and `~user` made
 //! absolute, `..` taken on what is resolved so far, links followed even when their target is
-//! missing, and a Windows path to the local machine's own share put in its drive form.
+//! missing, and a Windows path to the local machine's own share put in its drive form. A network
+//! location is never touched: the path, each name on the way and each link's target are checked
+//! by their text ([`NetEnv::is_network`]) before anything looks at them, and a path that is or
+//! leads to one counts as inside the data folder, so it is refused, unless it lies by its text in
+//! a matter folder the lawyer keeps on a share ([`under_share_matter`]): that one is outside and
+//! untouched.
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
+use crate::network_paths::resolve::{Entry, Fs, RealFs};
+use crate::network_paths::{NetEnv, is_url, under_share_matter};
+
 /// The most links one path may pass through before it counts as a loop (Linux's own limit).
 const MAX_HOPS: usize = 40;
 
+/// How the walk looks at the disk, and what counts as a network location.
+pub(crate) struct Disk<'a> {
+    /// What a name is and where a link points, never following one.
+    pub(crate) fs: &'a dyn Fs,
+    /// The canonical path of a local name that is not a link (its long name and its case as on
+    /// the disk), when it has one.
+    pub(crate) real: &'a dyn Fn(&Path) -> Option<PathBuf>,
+    /// The network rules and this system's remote mounts and drives.
+    pub(crate) net: &'a NetEnv,
+}
+
+impl<'a> Disk<'a> {
+    /// The real disk under `net`.
+    pub(crate) fn real(net: &'a NetEnv) -> Self {
+        Self {
+            fs: &RealFs,
+            real: &canonical,
+            net,
+        }
+    }
+}
+
+/// `path` canonicalised (`dunce`), asked only of a local name that is not a link.
+fn canonical(path: &Path) -> Option<PathBuf> {
+    dunce::canonicalize(path).ok()
+}
+
+/// Where one path leads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// A local path, resolved.
+    Path(PathBuf),
+    /// A link loop, a chain of more than [`MAX_HOPS`] links, or a network location on the way
+    /// (found before touching it): counts as inside the data folder.
+    Refused,
+    /// By its text in the matter folder the lawyer keeps on a network share: outside the data
+    /// folder, and never touched.
+    ShareMatter,
+}
+
 /// Where `path` may lead: one place, or for a `~user` path whose user is not known, one under
-/// each known home (`home` itself and `home`'s parent joined with the name). `None` stands for
-/// a loop or a chain of more than [`MAX_HOPS`] links, which the fence treats as inside the data
-/// folder. A relative path is taken from `cwd`; `~` and `~/…` from `home`. A `~user` path is
-/// never taken from `cwd`; with no known home it leads nowhere (an empty list).
-pub(crate) fn resolve_all(path: &Path, cwd: &Path, home: Option<&Path>) -> Vec<Option<PathBuf>> {
+/// each known home (`home` itself and `home`'s parent joined with the name). A relative path is
+/// taken from `cwd` (the matter folder); `~` and `~/…` from `home`. A `~user` path is never
+/// taken from `cwd`; with no known home it leads nowhere (an empty list).
+pub(crate) fn resolve_all(
+    path: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    disk: &Disk<'_>,
+) -> Vec<Found> {
+    // The agent's text itself, before it is joined to anything: a network form is found as
+    // written (a UNC path is relative on Unix, and would be joined to `cwd`). Not a URL: the
+    // file system reads `https://host/a` as a relative path, joined and walked as any other
+    // (a shell command's URL argument is no path the fence would touch on a server).
+    if under_share_matter(path, cwd, disk.net) {
+        return vec![Found::ShareMatter];
+    }
+    if disk.net.is_network(path) && !is_url(&path.to_string_lossy()) {
+        return vec![Found::Refused];
+    }
     let path = if cfg!(windows) {
         path.to_str()
             .and_then(drive_form)
@@ -39,12 +101,15 @@ pub(crate) fn resolve_all(path: &Path, cwd: &Path, home: Option<&Path>) -> Vec<O
                 .collect()
         }
     };
-    starts.iter().map(|start| walk(start)).collect()
+    starts.iter().map(|start| walk(start, cwd, disk)).collect()
 }
 
-/// The one place `path` leads ([`resolve_all`]'s first), or `None` for a loop.
-pub(crate) fn resolve(path: &Path, cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    resolve_all(path, cwd, home).into_iter().next().flatten()
+/// The one place `path` leads ([`resolve_all`]'s first), [`Found::Refused`] when none.
+pub(crate) fn resolve(path: &Path, cwd: &Path, home: Option<&Path>, disk: &Disk<'_>) -> Found {
+    resolve_all(path, cwd, home, disk)
+        .into_iter()
+        .next()
+        .unwrap_or(Found::Refused)
 }
 
 /// The homes `~user` may name: the lawyer's `home` for `~`; for a named user, the user's home
@@ -91,14 +156,23 @@ fn parts_of(path: &Path) -> Vec<Part> {
     parts
 }
 
-/// The absolute `path` walked part by part: each prefix that exists canonicalised; a link that
-/// does not resolve (its target missing, or a loop) read and its target walked in its place, a
-/// relative target from the link's own folder; a missing name kept as written. `None` past
+/// The absolute `path` walked part by part: a path in the share matter `matter` left untouched;
+/// a network location (the path, a name on the way, a link's target) refused before it is
+/// looked at; each local name that is not a link put in its canonical form; a link read (never
+/// followed by the system) and its target walked in its place, a relative target from the
+/// link's own folder; a name that can't be looked at (missing) kept as written. Refused past
 /// [`MAX_HOPS`] links.
-fn walk(path: &Path) -> Option<PathBuf> {
+fn walk(path: &Path, matter: &Path, disk: &Disk<'_>) -> Found {
+    let net = disk.net;
+    if under_share_matter(path, matter, net) {
+        return Found::ShareMatter;
+    }
+    if net.is_network(path) {
+        return Found::Refused;
+    }
     let mut at = PathBuf::new();
     let mut rest = parts_of(path);
-    let mut hops = 0;
+    let mut hops = 0_usize;
     while let Some(part) = rest.pop() {
         match part {
             Part::Root(root) => at.push(root),
@@ -107,25 +181,40 @@ fn walk(path: &Path) -> Option<PathBuf> {
             }
             Part::Name(name) => {
                 let next = at.join(&name);
-                if let Ok(real) = dunce::canonicalize(&next) {
-                    at = local(real);
-                } else if let Ok(target) = std::fs::read_link(&next) {
-                    hops += 1;
-                    if hops > MAX_HOPS {
-                        return None;
+                if net.is_network(&next) {
+                    return Found::Refused;
+                }
+                match disk.fs.entry(&next) {
+                    Ok(Entry::Link) => {
+                        hops = hops.saturating_add(1);
+                        if hops > MAX_HOPS {
+                            return Found::Refused;
+                        }
+                        let Ok(target) = disk.fs.read_link(&next) else {
+                            at = next;
+                            continue;
+                        };
+                        let target = net.plain(&local(target));
+                        if net.is_network(&target) || net.is_network(&at.join(&target)) {
+                            return Found::Refused;
+                        }
+                        if target.has_root() {
+                            at = PathBuf::new();
+                        }
+                        rest.extend(parts_of(&target));
                     }
-                    let target = local(target);
-                    if target.has_root() {
-                        at = PathBuf::new();
+                    Ok(Entry::Dir | Entry::File) => {
+                        at = (disk.real)(&next).map_or(next, local);
+                        if net.is_network(&at) {
+                            return Found::Refused;
+                        }
                     }
-                    rest.extend(parts_of(&target));
-                } else {
-                    at = next;
+                    Err(_) => at = next,
                 }
             }
         }
     }
-    Some(at)
+    Found::Path(at)
 }
 
 /// `path` in its drive form on Windows when it names the local machine's own share
