@@ -28,9 +28,9 @@ export const HI = {
   "Download failed": "डाउनलोड विफल",
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: no download helps
-  // (provisional Hindi)
-  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.":
-    "आपकी फ़र्म ने इस कंप्यूटर पर ब्राउज़र ऑटोमेशन बंद कर दिया है, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता। आपकी IT टीम ख़ास तौर पर Clauseo को अनुमति दे सकती है।",
+  // (provisional Hindi, app track final)
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you. Your IT team can allow it for Clauseo alone.":
+    "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता। आपकी IT टीम केवल Clauseo के लिए इसकी अनुमति दे सकती है।",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

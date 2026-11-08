@@ -132,8 +132,8 @@ test("sameTools reads two lists the same only when every tool and state match", 
 });
 
 const POLICY =
-  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. " +
-  "Your IT team can allow Clauseo specifically.";
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you. " +
+  "Your IT team can allow it for Clauseo alone.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>

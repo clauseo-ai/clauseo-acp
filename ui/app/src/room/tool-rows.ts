@@ -101,7 +101,7 @@ export function downloadPart(lang: Lang, install: BrowserInstall | null): Downlo
 }
 
 const POLICY: ToolsKey =
-  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.";
+  "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you. Your IT team can allow it for Clauseo alone.";
 
 /** One row, for a tool the line speaks for. */
 export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRowWords {
