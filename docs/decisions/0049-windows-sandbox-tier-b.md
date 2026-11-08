@@ -1936,7 +1936,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
 ```
 
 - **What `launch` does**, in order:
-  1. the launch check (the admin copy, the WSL deny, the clean-close record);
+  1. the launch check (the admin copy, the WSL deny, the clean-close record). WSL's
+     self-healing may wait up to 120 s for a WSL upgrade; `Launchers` passes the check's
+     `LaunchProgress::UpdatingWindowsComponent` on to the host as `Preparing`'s progress is;
   2. marks the session open;
   3. assigns the pool user;
   4. the gate and the plan;
@@ -2070,22 +2072,28 @@ INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
 (`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. Its action
 is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
 queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
-unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
-phase once and does nothing else: no admin-copy step, no record read beyond the phase's own. The
+unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then installs WSL's
+pending MSI upgrade when one is owed (below, "Self-healing"), runs the WSL phase once, and does
+nothing else: no admin-copy step, no record read beyond the phase's own and the removal and group
+values the upgrade step reads first. The
 event trigger is on this task alone because anyone who can log on can fire it: INTERACTIVE may
 write to the Application log, so the lawyer or a pool user can forge an `MsiInstaller` event, and
 on the refresh that started the admin copy's steps as SYSTEM. Here a forged event gains no more
-than a re-applied deny, and a forged burst gives one run at a time, each holding the set-up lock
+than a re-applied deny and WSL's own pending upgrade installed, which any user may start through
+`WslInstaller` anyway, and a forged burst gives one run at a time, each holding the set-up lock
 for a moment (a set-up that meets it then fails at once and can be run again). The task ignores
 a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is quick and idempotent, so an
 installer's burst of events gives one run, and an event after it ends gives another. It shares
 the other tasks' principal, descriptor (owned by Administrators, the owner `FRFX`) and folder,
-stops after 1 minute, and is registered and removed with them: `--adopt` registers it per user
+stops after 5 minutes (`PT5M`: msiexec is waited for up to 4, then the phase), and is registered
+and removed with them: `--adopt` registers it per user
 after `\Clauseo\SandboxStop` (`refresh::TASKS`), a per-machine install's set-up after the stop
 task (`refresh::MACHINE_TASKS`), a per-machine `--remove` deletes it with the stop task, and
 `--remove --uninstall` with the admin copy (`refresh::TEARDOWN`). Its exits (`WslDenyExit`, from
-51, after the stop's 50): 0 when the run was allowed, whatever the phase gave, and 51
-(`NotAllowed`) when it isn't LOCAL SYSTEM from the admin copy. The phase's outcome never changes
+51, after the stop's 50): 0 when the run was allowed, whatever the phase gave, 51
+(`NotAllowed`) when it isn't LOCAL SYSTEM from the admin copy, and 52 (`UpgradeFailed`, "upgrade
+failed, deny applied") when WSL's pending upgrade was owed and failed or couldn't be tried, WSL is
+as it was, and the phase ran after it. The phase's outcome never changes
 an exit, the refresh's or this task's: a failure is one Event Log error line (AppIDs and Windows
 error codes, never a path or a SID), and a run that changed nothing writes no line. The launch
 check enforces the deny, so an exit code would tell no one more.
@@ -2101,7 +2109,8 @@ record naming it, so no deny is left naming a group that is gone (unlike D12's o
 one sits in machine-wide keys whose record would go with the group's).
 
 **The launch check** (`wsl::check`, unelevated, in `clean_close::check_launch` right after the
-admin copy's check, before the clean-close record is read). WSL is present when `WSLService` or
+admin copy's check, before the clean-close record is read; healed first, below, "Self-healing").
+WSL is present when `WSLService` or
 `LxssManager` is installed or any of the three classes is registered; a read that fails counts
 as present. With WSL present, a target whose value (or key) is missing, or whose deny for the
 record's `GroupSid` is missing or comes after an allow, refuses the launch with
@@ -2116,8 +2125,9 @@ overrides the AppID's) refuses with
 (`LxssManager`) runs WSL2's VMs too from Windows 10 2004 on, so an unreadable inbox value refuses
 like a lifted one. With no WSL nothing is refused.
 
-**A pending WSL upgrade refuses the launch** (`wsl/upgrade.rs`, `Blocked::WslUpgradePending`,
-`wsl_upgrade_pending`). The Store package's `WslInstaller` service has a packaged COM class that
+**A pending WSL upgrade** (`wsl/upgrade.rs`, `Blocked::WslUpgradePending`,
+`wsl_upgrade_pending`, transient at launch: "Self-healing" below installs it). The Store package's
+`WslInstaller` service has a packaged COM class that
 grants launch to Authenticated Users (microsoft/WSL @19cd15ea `msixinstaller/AppxManifest.in:74-77`,
 the commit this section cites from here on), and its `Install()` upgrades
 through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
@@ -2143,8 +2153,10 @@ MSI was never run may stay that way for good, so "let the update complete" would
 can't be judged: `WslDenyUnverifiable`. With neither, no WSL VM can run until the MSI is in, and
 its install's `MsiInstaller` events start the WSL deny task, which writes the deny: nothing is refused. A version that can't be
 read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
-shown first. The lawyer's words: "finish or let the WSL update complete, then try again". Not
-verified on the VM: that the packaged-COM key lists the package for a machine where only another
+shown first. `wsl::check` alone gives `WslUpgradePending`; the launch reads `wsl::inspect`,
+which gives `Found::UpgradePending` with every deny in place, and has the upgrade installed
+rather than refuse. Not verified on the VM: that the packaged-COM key lists the package for a
+machine where only another
 user installed it, and its key's readability by `Users` (`HKLM\SOFTWARE\Classes` is). Both are
 `sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
 the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
@@ -2185,7 +2197,70 @@ F6 confirms the target resolution: the `AppID` `{E9B79997-57E3-4201-AECC-6A464E5
 `LocalService` is `WSLService` or `LxssManager`, so that `AppID` is a target by its service
 (and by `WSLCSessionManager`'s class, `package.wix.in:322-323`), and its three classes share its
 deny. F2 confirms that a pool token holds INTERACTIVE, which may write the Application log: the
-reason the `MsiInstaller` trigger is on the WSL deny task alone (below).
+reason the `MsiInstaller` trigger is on the WSL deny task alone (above).
+
+**Self-healing** (`clean_close/wsl_heal.rs`, `wsl/msi.rs`). The product rule, from the project
+owner: a lawyer is never refused the Safe workspace for a state Clauseo can realistically repair;
+a launch is refused only when the repair really failed, and the log says why. So the launch
+check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
+
+- **A missing deny** (`WslDenyMissing`): the check asks `\Clauseo\SandboxWslDeny` to run now, as
+  the lawyer (`refresh::task::request_wsl_deny`, `IRegisteredTask::Run`; the task's descriptor
+  gives the owner `FRFX`, which starts it, CI run 42416074600), then checks again every 250 ms
+  for up to 10 s, and launches once the deny is in place (`WslHealed::DenyRestored`). Still missing
+  then, or a request that failed, refuses with `WslDenyMissing`, and the warning line gives why
+  and the task's last result (`last_wsl_deny_run`, read as `last_refresh_run` reads the refresh's,
+  named through `WslDenyExit`: `NotAllowed (51)`, `running`, `never run`, or the code).
+  `WslDenyUnverifiable` is refused at once, as before: no run makes an unreadable value readable.
+- **A pending upgrade** (`Found::UpgradePending`): the same request, and the run installs it. The
+  `--wsl-deny` SYSTEM run first mirrors `WslInstaller`'s `Install()` (microsoft/WSL @19cd15ea):
+  when the package's version is newer than the MSI's `Version`, compared as the check compares
+  them (`upgrade::msi_behind`, `IsUpdateNeeded` at `WslInstaller.cpp:142-165`), it runs
+  `<System32>\msiexec.exe /i <package folder>\wsl.msi /qn SKIPMSIX=1 REBOOT=ReallySuppress`: the
+  MSI `GetMsiPackagePath` takes from the folder of the service's own image
+  (`WslInstaller.cpp:21-32`), here the folder of the `WslInstaller` service's `ImagePath`
+  (writable by administrators only), accepted only when it is a WSL package's folder directly
+  under `%ProgramFiles%\WindowsApps` (`TrustedInstaller`'s; `upgrade::installer_package`); the
+  properties `UpgradeViaMsi` passes (`SKIPMSIX=1` at `WslInstaller.cpp:97-98`, then
+  `REBOOT=ReallySuppress`, `install.cpp:385-406`); and no UI, as its `MsiSetInternalUI(
+  INSTALLUILEVEL_NONE…)` (`install.cpp:238`). msiexec's exit is `MsiInstallProduct`'s; 0 and
+  3010 are success, as there (`WslInstaller.cpp:100-108`). WSL's verbose MSI log isn't kept. Then
+  the phase re-applies the deny the MSI's rewrite dropped. A failure (an exit code, no service
+  image, an image elsewhere, no `wsl.msi`, msiexec not ended within 240 s, which is left running
+  rather than cut off mid-install) leaves WSL as it was, since Windows Installer rolls a failed
+  install back; the phase still runs, and the run exits 52. The step does nothing while the record
+  says a removal is under way or names no group. An installed upgrade is one information line in
+  the Event Log ("WSL's pending update was installed: <old> to <new>"), a failed one an error line
+  with its code.
+- **The launch's wait for it**: the host hears `LaunchProgress::UpdatingWindowsComponent` once,
+  when the wait begins (the `progress` argument of `clean_close::check_launch`, a
+  `&dyn Fn(LaunchProgress)`; the app owns the words, "Updating a Windows component before
+  starting…"), then the check is made every 250 ms for up to 120 s, a deny the MSI dropped
+  meanwhile waited for too. It launches once the package is no longer newer and the deny is in
+  place (`WslHealed::Upgraded`); once a run of the task that began after the request has ended
+  while the upgrade is still pending, with 52 (`WslHealed::UpgradeFailed`) or any other code
+  (`WslHealed::UpgradeUnfinished`); at the end of the wait (`UpgradeUnfinished`); and when the
+  request fails (`UpgradeUnfinished`): in each case the check has just verified every deny. A run
+  counts as after the request when its last run time differs from the one read before it, or a
+  run was going on then (the request was dropped for it). It refuses only when the deny can't be
+  verified at the end: `WslDenyMissing` or `WslDenyUnverifiable`, with why and the task's last
+  result. So `WslUpgradePending` stays in `Blocked` (`wsl::check` gives it) but never ends a
+  launch: a pending upgrade costs a wait.
+- **What the host logs**: `LaunchCheck::wsl_healed()` gives the `WslHealed`, and
+  `WslHealed::log_line()` its host.log line, `None` for `Nothing`. The host logs it at info for
+  each launch where it isn't `Nothing`: above all `Upgraded` ("WSL's pending update was installed
+  on the lawyer's behalf before the launch, and WSL's deny for the sandbox users re-applied") and
+  `UpgradeFailed`, which say WSL changed (or was tried) on the lawyer's behalf. The SYSTEM run's
+  Event Log line names the versions.
+
+What remains, an accepted residual: after `UpgradeFailed` or `UpgradeUnfinished` the upgrade is
+still pending, and where the package's `WslInstaller` class is registered a pool user could start
+it during the session; its rewrite drops the deny until the run its `MsiInstaller` events start.
+The same upgrade just failed for SYSTEM, so it most likely fails again; and on the VM's WSL 3.0.3.0
+the class isn't registered at all (F1). Not verified on a VM: the upgrade itself (no Store package
+newer than its MSI was at hand), that a packaged service's `ImagePath` names its package's folder
+under `WindowsApps`, and that the owner may run the task from a non-elevated launch (the refresh's
+start was, CI run 42416074600).
 
 **The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
@@ -2274,13 +2349,15 @@ the calls, where HCS is).
 
 **No mid-session watcher yet.** A WSL update during a tier B session can drop the deny until the
 WSL deny task's run re-applies it, which the installer's first event starts; the next launch
-checks it again, and `WslUpgradePending` only blocks new launches. A watcher on the AppID keys
+checks it again (and heals it), and a pending upgrade is installed only before a new launch. A
+watcher on the AppID keys
 (`RegNotifyChangeKeyValue`) that acts on a session while the deny is off follows in the next PR.
 
 **Drift.** A WSL update (Store, WinGet, `wsl --update`, its own updater), an MSI repair or a
 reinstall may rewrite `LaunchPermission` and drop the deny; a reinstall may bring a new AppID,
 which the next run finds from the class. An OS update may reset the inbox AppID. Each is closed
-by the WSL deny task's run or the next logon's refresh, and refused at launch until then. Nothing ever
+by the WSL deny task's run or the next logon's refresh; a launch before then asks for that run
+and waits for it ("Self-healing"), and is refused only if it doesn't come. Nothing ever
 blocks the MSI's writes (an ACL on the AppID key, say): a WSL update that couldn't write its
 keys would fail and roll back for the lawyer.
 

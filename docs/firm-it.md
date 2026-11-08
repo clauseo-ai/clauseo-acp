@@ -893,19 +893,44 @@ COM's default) with the deny on top, and deletes it again on removal. Source:
 Server 2025 with WSL 3.0.3.0, where the deny refused every WSL route for a sandbox user, the
 service running or not, and the owner's WSL kept working.
 
-A WSL update or repair can rewrite these values. Clauseo's task `\Clauseo\SandboxRefresh` puts
-the deny back at each sign-in and within seconds of any Windows Installer event in the
-Application log (`MsiInstaller` 1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728); the task passes
-nothing from the event. A failure is an error in the Application log from the source
-`Clauseo Sandbox`. Don't put permissions on the AppID keys to protect the entry: WSL's own updates
-must be able to write them.
+A WSL update or repair can rewrite these values. Clauseo's tasks put the deny back: the task
+`\Clauseo\SandboxRefresh` at each sign-in, and the task `\Clauseo\SandboxWslDeny` within seconds
+of any Windows Installer event in the Application log (`MsiInstaller` 1022, 1033, 1035, 1040,
+1042, 11707, 11724, 11728); the task passes nothing from the event. A failure is an error in
+the Application log from the source `Clauseo Sandbox`. Don't put permissions on the AppID keys to
+protect the entry: WSL's own updates must be able to write them.
 
-Before each Safe workspace launch, Clauseo checks the deny, and refuses the launch with
-`sandbox.blocked` when:
+Before each Safe workspace launch, Clauseo checks the deny, and repairs what it can before it
+would refuse:
+
+- **The deny missing**: Clauseo runs `\Clauseo\SandboxWslDeny` as the signed-in user (the task
+  lets its owner start it) and waits up to 10 seconds for the deny to be back.
+- **A WSL update pending**: the WSL package from the Store
+  (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the WSL that is installed
+  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`). Any user
+  could start that update through WSL's own installer, which would take the deny off until
+  Clauseo puts it back, so Clauseo installs it first. The app shows that it is updating a
+  Windows component, and the same task, as LOCAL SYSTEM, runs WSL's own MSI from the package's
+  folder the way WSL's installer does: `msiexec.exe /i "<the package's folder under
+  C:\Program Files\WindowsApps>\wsl.msi" /qn SKIPMSIX=1 REBOOT=ReallySuppress` (silent, no
+  restart), then puts the deny back. The launch waits up to 2 minutes. If the update fails,
+  Windows Installer leaves WSL as it was, the deny is put back on that version, and the launch
+  goes on. Clauseo installs the update whatever `AutoUpgradeViaMsix` under that `MSI` key says,
+  as WSL's installer does when a user asks it (that value governs only its service's start); if
+  you hold WSL's updates back, keep the Store package at the installed version.
+
+What is logged: the task writes an information line to the Application log from the source
+`Clauseo Sandbox` ("WSL's pending update was installed: <old version> to <new version>"), or an
+error line with msiexec's exit code when it failed; the app's host.log says when a launch
+repaired the deny or installed (or tried to install) the WSL update on the user's behalf.
+
+Clauseo refuses the launch with `sandbox.blocked` only when that repair fails:
 
 - **`wsl_deny_missing`**: WSL is on the computer and a WSL class's launch permission lacks the
-  deny, or has it after an allow entry. Signing out and in again (or running the task:
-  `schtasks /run /tn \Clauseo\SandboxRefresh` as an administrator) puts it back.
+  deny, or has it after an allow entry, after the task's run (or the task couldn't be started).
+  host.log gives the task's last result. Running the task yourself as an administrator
+  (`schtasks /run /tn \Clauseo\SandboxWslDeny`), or signing out and in again, usually puts it
+  back; check the Application log for its error line.
 - **`wsl_deny_unverifiable`**: WSL is on the computer (the Store or MSI WSL's `WSLService`, or
   Windows' own `LxssManager`, which also runs WSL2 VMs) and Clauseo can't check the deny: a launch
   permission can't be read or isn't a valid descriptor, a WSL class names no AppID, or a WSL class
@@ -913,14 +938,11 @@ Before each Safe workspace launch, Clauseo checks the deny, and refuses the laun
   `{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a WSL from before 2.0). Repairing or updating
   WSL (`wsl --update`) usually fixes it. So does the Store WSL package with no WSL MSI recorded
   (no `Version` under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`) while
-  `WSLService` or `LxssManager` is installed: run `wsl --update` to finish installing it.
-- **`wsl_upgrade_pending`**: the WSL package from the Store
-  (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the WSL that is installed
-  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`): a WSL
-  update is pending, and any user could start it, which would take the deny off until Clauseo
-  puts it back. A package registered for the signed-in user only isn't counted: other users
-  can't start its update. Finish or let the WSL update complete (`wsl --update`, or open WSL once as an
-  administrator), then try again.
+  `WSLService` or `LxssManager` is installed: run `wsl --update` to finish installing it. Clauseo
+  doesn't repair this one itself.
+
+A pending WSL update doesn't refuse a launch: `wsl_upgrade_pending` is a step the launch waits
+through, not a refusal.
 
 With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)
 takes the deny off before it deletes the group. If you clear a leftover sandbox by hand
