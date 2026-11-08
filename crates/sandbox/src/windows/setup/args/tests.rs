@@ -112,6 +112,7 @@ fn each_mode_parses_in_full() {
                 owner_sid: crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap(),
                 data_dir: PathBuf::from(data),
             }),
+            place_only: false,
         })
     );
     let machine = r"C:\Program Files\Clauseo";
@@ -120,6 +121,7 @@ fn each_mode_parses_in_full() {
         Ok(Mode::Adopt {
             user_install_dir: PathBuf::from(machine),
             user: None,
+            place_only: false,
         })
     );
 }
@@ -427,5 +429,114 @@ fn stop_takes_no_argument_at_all() {
     // Only the exact flag.
     for near in ["--Stop", "--stop=", "-stop", "stop", "--stop "] {
         assert!(parsed(&[near]).is_err(), "{near:?}");
+    }
+}
+
+#[test]
+fn place_only_is_a_per_user_adopts_flag_without_a_value() {
+    let dir = r"C:\Users\l\AppData\Local\Clauseo";
+    let data = r"C:\Users\l\AppData\Local\chat.clauseo";
+    let sid = "S-1-5-21-1-2-3-1001";
+    let user = || AdoptUser {
+        owner_sid: crate::windows::sids::Sid::parse(sid).unwrap(),
+        data_dir: PathBuf::from(data),
+    };
+    // Anywhere among --adopt's flags.
+    for args in [
+        [
+            "--adopt",
+            "--place-only",
+            "--owner-sid",
+            sid,
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data,
+        ],
+        [
+            "--adopt",
+            "--owner-sid",
+            sid,
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data,
+            "--place-only",
+        ],
+    ] {
+        assert_eq!(
+            parsed(&args),
+            Ok(Mode::Adopt {
+                user_install_dir: PathBuf::from(dir),
+                user: Some(user()),
+                place_only: true,
+            }),
+            "{args:?}"
+        );
+    }
+    let bad: &[&[&str]] = &[
+        // Twice, or with a value.
+        &[
+            "--adopt",
+            "--place-only",
+            "--place-only",
+            "--owner-sid",
+            sid,
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data,
+        ],
+        &[
+            "--adopt",
+            "--place-only=1",
+            "--owner-sid",
+            sid,
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data,
+        ],
+        // --data-dir stays required: the early failures' result file goes there.
+        &[
+            "--adopt",
+            "--place-only",
+            "--owner-sid",
+            sid,
+            "--user-install-dir",
+            dir,
+        ],
+        &[
+            "--adopt",
+            "--place-only",
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data,
+        ],
+        // Per user only.
+        &[
+            "--adopt",
+            "--place-only",
+            "--per-machine",
+            "--user-install-dir",
+            dir,
+        ],
+        // No other mode takes it.
+        &[
+            "--set-up",
+            "--parent",
+            "1",
+            "--data-dir",
+            data,
+            "--place-only",
+        ],
+        &["--remove", "--place-only"],
+        &["--reclaim", "--parent", "1", "--place-only"],
+        &["--refresh", "--place-only"],
+        &["--stop", "--place-only"],
+    ];
+    for args in bad {
+        assert!(parsed(args).is_err(), "{args:?}");
     }
 }

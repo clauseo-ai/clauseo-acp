@@ -47,6 +47,7 @@ pub(crate) fn run_adopt(names: Names, install_dir: &Path, target: &Target) -> Se
     if let Target::User {
         owner_sid,
         data_dir,
+        ..
     } = target
     {
         machine.target = Some((owner_sid.clone(), data_dir.clone()));

@@ -8,6 +8,7 @@ use crate::windows::admin_copy::fake::{descriptor, locked_dacl};
 use crate::windows::setup::explain::Code;
 use crate::windows::setup::record_values::{AdminValues, CopyOwner};
 
+mod place_only;
 mod reports;
 
 const LAWYER: &str = "S-1-5-21-1-2-3-1001";
@@ -220,6 +221,7 @@ fn user_with(sid: &str, data: &str) -> Target {
     Target::User {
         owner_sid: Sid::parse(sid).unwrap(),
         data_dir: PathBuf::from(data),
+        place_only: false,
     }
 }
 

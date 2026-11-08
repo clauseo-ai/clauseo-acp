@@ -110,6 +110,7 @@ fn the_installers_adopt_arguments_are_the_ones_the_set_up_program_parses() {
                 owner_sid: Sid::parse(SID).unwrap(),
                 data_dir: PathBuf::from(DATA),
             }),
+            place_only: false,
         }
     );
 
@@ -126,6 +127,7 @@ fn the_installers_adopt_arguments_are_the_ones_the_set_up_program_parses() {
         Mode::Adopt {
             user_install_dir: PathBuf::from(install),
             user: None,
+            place_only: false,
         }
     );
 }

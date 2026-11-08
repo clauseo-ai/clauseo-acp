@@ -27,21 +27,30 @@
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
 //!    (`admin_copy::locked`), else `Failed`;
-//! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
-//!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then `\Clauseo\SandboxStop`.
+//! 6. per user, unless `--place-only`, the SYSTEM tasks (`refresh::register_task`, PR 3) are
+//!    registered for the lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then
+//!    `\Clauseo\SandboxStop`.
 //!    Either failing is `Failed` with no value written, so the launcher's check finds the copy
 //!    missing rather than running it with no task to refresh it or to stop the pool's processes
 //!    (a refresh before the values exist exits 33, changing nothing). A per-machine install
-//!    doesn't update itself and has no owner yet, so it gets neither here; its set-up registers
-//!    the stop task for the owner it records (`late_steps::stop_task`);
+//!    has no owner yet, so it gets neither here. Every set-up with an admin copy registers them
+//!    for the owner it records (`late_steps::tasks`): both per user (the first run's after
+//!    `--place-only`, and the one step 8 runs, again), the stop task alone per machine;
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
 //!    `AdminCopyOwner`. `UserInstallDir` is checked as text only, and stays untrusted (0049);
-//! 8. per user, the normal `--set-up` for the lawyer and the data folder runs in this process
-//!    (which also requires the folder to be the lawyer's own), and its exit is `--adopt`'s;
+//! 8. per user, unless `--place-only`, the normal `--set-up` for the lawyer and the data folder
+//!    runs in this process (which also requires the folder to be the lawyer's own), and its exit
+//!    is `--adopt`'s;
 //!    `--per-machine` sets nobody up (each user's set-up runs later through the app) and exits
 //!    `Done`.
+//!
+//! `--place-only` (per user) is steps 1 to 5 and 7 alone, with the same exits: the copy placed
+//! and locked down, `staging` taken back, the record's values written, and `Done`. It registers
+//! no task and sets nobody up (no pool user, group, filters or WSL deny): the app's first run
+//! does both through the admin copy's `--set-up` (`late_steps::tasks`), outside the
+//! installer's process tree, which Microsoft Defender quarantined when it made them (0049).
 //!
 //! Every step goes through [`Adopter`], so the order and the refusals are tested on every OS;
 //! `windows_adopter.rs` is the machine.
@@ -70,6 +79,8 @@ pub enum Target {
         owner_sid: Sid,
         /// `--data-dir`.
         data_dir: PathBuf,
+        /// `--place-only`: no task and no set-up; the app's first run does them.
+        place_only: bool,
     },
     /// A per-machine install (`--per-machine`): no set-up.
     Machine,
@@ -173,7 +184,17 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         return exit;
     }
     match target {
-        Target::User { data_dir, .. } => machine.set_up(data_dir),
+        Target::User {
+            data_dir,
+            place_only: false,
+            ..
+        } => machine.set_up(data_dir),
+        Target::User {
+            place_only: true, ..
+        } => {
+            tracing::info!("--adopt --place-only: placed; the app's first run sets up");
+            SetupExit::Done
+        }
         Target::Machine => SetupExit::Done,
     }
 }
@@ -192,6 +213,7 @@ fn place(
         Target::User {
             owner_sid,
             data_dir,
+            ..
         } => {
             let profile = user_profile(machine, owner_sid)?;
             inside(install_dir, &profile)
@@ -234,7 +256,12 @@ fn place(
         }
         Err(error) => return Err(failed(machine, AdoptStep::Hash, "the admin copy", error)),
     };
-    if let Target::User { owner_sid, .. } = target {
+    if let Target::User {
+        owner_sid,
+        place_only: false,
+        ..
+    } = target
+    {
         for task in TASKS {
             if let Err(error) = machine.register_task(task, owner_sid) {
                 return Err(failed(machine, AdoptStep::Task(task), task.name(), error));

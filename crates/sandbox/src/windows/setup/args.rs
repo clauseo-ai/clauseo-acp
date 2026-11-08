@@ -9,6 +9,11 @@
 //!   lock the admin folder, record the copy's hash and the install folder, then, per user, set
 //!   up. `--owner-sid` and `--data-dir` come from the unelevated installer, the lawyer's own;
 //!   `--adopt` checks the SID against that process's token (`adopt.rs`).
+//! - `--adopt --place-only` (per user only): the per-user installer's form. It places the copy
+//!   and writes the record's admin-copy values, and nothing else: no SYSTEM task and no set-up
+//!   (no pool user, group, filters or denies). The app's first run does those, through the admin
+//!   copy's `--set-up`, so the installer's process tree never creates users, tasks or filters
+//!   (0049, "Admin copy": Microsoft Defender quarantined the installer when it did).
 //! - `--remove [--uninstall] [--per-machine]`: the removal (`PR4j`). The app's in-app removal
 //!   passes `--remove` alone, which keeps the admin copy and its record values, so a later
 //!   set-up runs the verified copy with no installer; the uninstaller's hook adds `--uninstall`,
@@ -20,9 +25,9 @@
 //! - `--stop`: stops every process of the pool's users (`stop.rs`), which the SYSTEM task
 //!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
 //!
-//! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
-//! are the flags without a value. Every other flag takes its value as the next argument (never
-//! `--flag=value`). Each flag comes once.
+//! `--per-machine` (taken by `--remove` and `--adopt`), `--uninstall` (`--remove` only) and
+//! `--place-only` (`--adopt` only) are the flags without a value. Every other flag takes its
+//! value as the next argument (never `--flag=value`). Each flag comes once.
 //! Anything else is a [`Usage`] error, and the exe exits `Usage`. `--parent` names the process
 //! that asked; the exe checks it against the parent Windows recorded (D-B2), so it never decides
 //! the owner alone. `--data-dir` is written as admin into the record's `DataDir`, so it is held
@@ -60,6 +65,9 @@ pub enum Mode {
         /// The lawyer the unelevated installer names, for the set-up that follows; `None` with
         /// `--per-machine`, which sets nobody up.
         user: Option<AdoptUser>,
+        /// `--place-only`: place the copy and write its record values, nothing else (no task,
+        /// no set-up). Per user only.
+        place_only: bool,
     },
     /// `--remove`.
     Remove {
@@ -91,8 +99,8 @@ pub struct AdoptUser {
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
-         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
-         --stop ({0})"
+         --data-dir <path> [--place-only] | --per-machine) | --remove [--uninstall] \
+         [--per-machine] | --refresh | --stop ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -119,15 +127,16 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut owner_sid = None;
     let mut per_machine = false;
     let mut uninstall = false;
+    let mut place_only = false;
     while let Some(flag) = args.next() {
         let flag = flag
             .into_string()
             .map_err(|arg| Usage(format!("{} isn't text", arg.to_string_lossy())))?;
-        if flag == PER_MACHINE || flag == UNINSTALL {
-            let seen = if flag == PER_MACHINE {
-                &mut per_machine
-            } else {
-                &mut uninstall
+        if [PER_MACHINE, UNINSTALL, PLACE_ONLY].contains(&flag.as_str()) {
+            let seen = match flag.as_str() {
+                PER_MACHINE => &mut per_machine,
+                UNINSTALL => &mut uninstall,
+                _ => &mut place_only,
             };
             if *seen {
                 return Err(Usage(format!("{flag} given twice")));
@@ -167,6 +176,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     if uninstall && mode != "--remove" {
         return Err(Usage(format!("{mode} takes no {UNINSTALL}")));
     }
+    if place_only && mode != "--adopt" {
+        return Err(Usage(format!("{mode} takes no {PLACE_ONLY}")));
+    }
     if per_machine && !matches!(mode, "--remove" | "--adopt") {
         return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
     }
@@ -186,21 +198,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
         "--adopt" => {
             refuse("--parent", parent.is_some())?;
             refuse("--add", add.is_some())?;
-            let user = match (per_machine, owner_sid, data_dir) {
-                (true, None, None) => None,
-                (false, Some(sid), Some(dir)) => Some(AdoptUser {
-                    owner_sid: sid_of(&sid)?,
-                    data_dir: data_dir_of(Some(dir))?,
-                }),
-                _ => {
-                    return Err(Usage(format!(
-                        "--adopt takes --owner-sid and --data-dir, or {PER_MACHINE} alone"
-                    )));
-                }
-            };
+            let user = adopt_user(per_machine, place_only, owner_sid, data_dir)?;
             Ok(Mode::Adopt {
                 user_install_dir: path_of("--user-install-dir", install_dir)?,
                 user,
+                place_only,
             })
         }
         "--remove" => {
@@ -219,8 +221,36 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
 /// The flag the uninstaller's hook adds to `--remove`, and the app never does.
 pub const UNINSTALL: &str = "--uninstall";
 
+/// The flag the per-user installer adds to `--adopt`: place the copy, set nothing up.
+pub const PLACE_ONLY: &str = "--place-only";
+
 /// The flag the per-machine installer's hook adds to `--remove`.
 pub const PER_MACHINE: &str = "--per-machine";
+
+/// `--adopt`'s lawyer: `--owner-sid` and `--data-dir` (`--place-only` allowed), or
+/// `--per-machine` alone (`None`).
+fn adopt_user(
+    per_machine: bool,
+    place_only: bool,
+    owner_sid: Option<OsString>,
+    data_dir: Option<OsString>,
+) -> Result<Option<AdoptUser>, Usage> {
+    if place_only && per_machine {
+        return Err(Usage(format!(
+            "{PLACE_ONLY} is per user, not {PER_MACHINE}"
+        )));
+    }
+    match (per_machine, owner_sid, data_dir) {
+        (true, None, None) => Ok(None),
+        (false, Some(sid), Some(dir)) => Ok(Some(AdoptUser {
+            owner_sid: sid_of(&sid)?,
+            data_dir: data_dir_of(Some(dir))?,
+        })),
+        _ => Err(Usage(format!(
+            "--adopt takes --owner-sid and --data-dir, or {PER_MACHINE} alone"
+        ))),
+    }
+}
 
 /// `--parent`: a process ID, in decimal, never 0.
 fn parent_of(value: Option<OsString>) -> Result<u32, Usage> {

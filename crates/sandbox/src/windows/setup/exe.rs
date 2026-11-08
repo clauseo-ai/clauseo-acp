@@ -122,11 +122,13 @@ fn run_mode(mode: Mode) -> SetupExit {
         Mode::Adopt {
             user_install_dir,
             user,
+            place_only,
         } => {
             let target = match user {
                 Some(user) => Target::User {
                     owner_sid: user.owner_sid,
                     data_dir: user.data_dir,
+                    place_only,
                 },
                 None => Target::Machine,
             };
