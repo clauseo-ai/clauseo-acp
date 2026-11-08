@@ -21,16 +21,22 @@
 //! 4. walks every Task Scheduler folder from `\`, each folder's subfolders too, with no depth
 //!    limit but at most [`FOLDERS_CAP`] folders. In each it reads every task, hidden ones
 //!    included, and its definition's principal: `UserId`, or `GroupId` when that is empty. It
-//!    resolves that name to a SID ([`sid_of`]): a SID's text is that SID; the Task Scheduler's
-//!    own names `LocalSystem`, `LocalService` and `NetworkService` (any case) are S-1-5-18, -19
-//!    and -20; any other name is looked up (`LookupAccountNameW`). It deletes the task when that
-//!    SID is exactly one of the pool's: equal SIDs, never a name, a prefix or a domain. A task
-//!    whose principal names neither a user nor a group isn't the pool's. A task whose
-//!    definition or principal can't be read, or whose name resolves to no SID, is unreadable and
-//!    never deleted. Unreadable tasks, a folder whose tasks or subfolders can't be listed, a
-//!    delete that fails, and more than [`FOLDERS_CAP`] folders are 54, and none stops the walk:
-//!    every other task is still read, and every pool task still deleted. A task's running
-//!    instance is left running: deleting the task ends nothing;
+//!    resolves that name ([`resolve`]): a SID's text is that SID, compared as it is; the Task
+//!    Scheduler's own names `LocalSystem`, `LocalService` and `NetworkService` (any case) are
+//!    S-1-5-18, -19 and -20; any other name is looked up (`LookupAccountNameW`, which finds a
+//!    local account on this machine). It deletes the task when that SID is exactly one of the
+//!    pool's: equal SIDs, never a prefix or a domain. A pool principal is always a local account
+//!    (`ClauseoSbNN`) or a SID's text, and both resolve here, so a name that resolves to no SID
+//!    (a domain account with no domain controller reachable, a deleted account) is the pool's
+//!    only when its account part is a pool user's name, without case, with no prefix or one of
+//!    `.\`, this computer's `NetBIOS` name or its DNS host name ([`Names::is_pool_name`]); it is
+//!    then deleted. Any other such name is skipped, counted in the log line (never named), and
+//!    not 54. A task whose principal names neither a user nor a group isn't the pool's. A task
+//!    whose definition or principal can't be read is unreadable and never deleted. Unreadable
+//!    tasks, a folder whose tasks or subfolders can't be listed, a delete that fails, and more
+//!    than [`FOLDERS_CAP`] folders are 54, and none stops the walk: every other task is still
+//!    read, and every pool task still deleted. A task's running instance is left running:
+//!    deleting the task ends nothing;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 55; 54 wins when both;
@@ -69,7 +75,7 @@ pub enum SweepExit {
     NoRecord,
     /// 53: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
     NotPool,
-    /// 54: a task's principal couldn't be read or resolved, a pool user's task couldn't be
+    /// 54: a task's principal couldn't be read, a pool user's task couldn't be
     /// deleted, a folder's tasks or subfolders couldn't be listed, or there were more than
     /// [`FOLDERS_CAP`] folders. The BITS step still ran.
     TasksLeft,
@@ -142,6 +148,11 @@ pub trait Sweeper: Gate + Bits {
     fn tasks(&mut self, folder: &Self::Folder) -> Result<Vec<Task>, Failed>;
     /// The SID of the account or group `name` (`LookupAccountNameW`); `Err` when it names none.
     fn lookup_account(&mut self, name: &str) -> Result<Sid, Failed>;
+    /// The name of this machine's local account `sid`, without a domain (`LookupAccountSidW`);
+    /// `Err` when no local account has it.
+    fn account_name(&mut self, sid: &Sid) -> Result<String, Failed>;
+    /// This computer's names: its `NetBIOS` name and its DNS host name, those that can be read.
+    fn computer_names(&mut self) -> Vec<String>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
@@ -157,8 +168,10 @@ pub struct Swept {
     pub tasks: usize,
     /// The pool's tasks deleted.
     pub deleted: usize,
-    /// Tasks whose principal couldn't be read or resolved to a SID.
+    /// Tasks whose principal couldn't be read.
     pub unreadable: usize,
+    /// Tasks whose principal's name resolves to no SID and isn't a pool user's name: skipped.
+    pub skipped: usize,
     /// Tasks whose principal names neither a user nor a group.
     pub no_principal: usize,
     /// The pool's tasks whose delete failed.
@@ -190,6 +203,65 @@ const ALIASES: [(&str, &str); 3] = [
     ("LocalService", "S-1-5-19"),
     ("NetworkService", "S-1-5-20"),
 ];
+
+/// What a principal's name resolves to ([`resolve`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// The SID it is, or names.
+    Sid(Sid),
+    /// No SID, but its account part is a pool user's name ([`Names::is_pool_name`]).
+    PoolName,
+    /// No SID, and not a pool user's name: skipped. Why the lookup failed.
+    Skipped(Failed),
+}
+
+/// The names an unresolved principal is held to: each pool user's account name, and this
+/// computer's names, its only accepted prefixes besides `.`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Names {
+    /// The pool users' account names (`ClauseoSbNN`), those that could be read.
+    pub users: Vec<String>,
+    /// This computer's `NetBIOS` name and DNS host name.
+    pub computer: Vec<String>,
+}
+
+impl Names {
+    /// The names for `pool`, read once a run; a pool user whose name can't be read is still
+    /// matched by its SID.
+    pub fn of(fs: &mut impl Sweeper, pool: &[Sid]) -> Names {
+        let users = pool
+            .iter()
+            .filter_map(|sid| fs.account_name(sid).ok())
+            .collect();
+        Names {
+            users,
+            computer: fs.computer_names(),
+        }
+    }
+
+    /// Whether `name`'s account part is a pool user's name, without case, and it has no
+    /// prefix, or `.`, or one of this computer's names: `ClauseoSb01`, `.\ClauseoSb01`,
+    /// `PC-7\clauseosb01`, never `CORP\ClauseoSb01`.
+    pub fn is_pool_name(&self, name: &str) -> bool {
+        let (local, account) = match name.rsplit_once('\\') {
+            None => (true, name),
+            Some((prefix, account)) => {
+                let here = prefix == "."
+                    || self
+                        .computer
+                        .iter()
+                        .any(|computer| computer.eq_ignore_ascii_case(prefix));
+                (here, account)
+            }
+        };
+        local
+            && !account.is_empty()
+            && self
+                .users
+                .iter()
+                .any(|user| user.eq_ignore_ascii_case(account))
+    }
+}
 
 /// Runs the sweep as the module says.
 pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
@@ -255,23 +327,26 @@ fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>) -> String 
     };
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read ({} with \
-         no user or group), {} of the pool's tasks deleted, {} unreadable, {} not deleted, \
-         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}",
+         no user or group), {} of the pool's tasks deleted, {} unreadable, {} skipped (no SID, \
+         not a pool name), {} not deleted, {cancelled} BITS jobs cancelled, {failed} \
+         not{unlisted}{capped}{listed}",
         swept.folders,
         swept.tasks,
         swept.no_principal,
         swept.deleted,
         swept.unreadable,
+        swept.skipped,
         swept.not_deleted
     )
 }
 
 /// Step 4: every folder from the root, depth first through a stack, at most [`FOLDERS_CAP`];
-/// each task read, resolved and, when exactly a pool SID's, deleted ([`sweep_task`]). Each name
-/// is resolved once.
+/// each task read, resolved and, when the pool's, deleted ([`sweep_task`]). Each name is
+/// resolved once.
 pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
     let mut swept = Swept::default();
     let mut resolved = BTreeMap::new();
+    let names = Names::of(fs, pool);
     let mut stack = match fs.root() {
         Ok(root) => vec![root],
         Err(why) => {
@@ -289,7 +364,13 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
         match fs.tasks(&folder) {
             Ok(tasks) => {
                 for task in tasks {
-                    sweep_task(fs, &folder, task, pool, &mut resolved, &mut swept);
+                    let at = Walk {
+                        pool,
+                        names: &names,
+                        resolved: &mut resolved,
+                        swept: &mut swept,
+                    };
+                    sweep_task(fs, &folder, task, at);
                 }
             }
             Err(why) => {
@@ -318,16 +399,27 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
     swept
 }
 
-/// One task of `folder`: deleted when its principal resolves to exactly one of `pool`'s SIDs,
-/// counted in `swept` either way. `resolved` keeps each name's SID, or why it has none.
-fn sweep_task<S: Sweeper>(
-    fs: &mut S,
-    folder: &S::Folder,
-    task: Task,
-    pool: &[Sid],
-    resolved: &mut BTreeMap<String, Result<Sid, Failed>>,
-    swept: &mut Swept,
-) {
+/// What one task's sweep works with.
+struct Walk<'w> {
+    /// The pool's SIDs.
+    pool: &'w [Sid],
+    /// The pool's names, for a name that resolves to no SID.
+    names: &'w Names,
+    /// Each name's resolution, once a run.
+    resolved: &'w mut BTreeMap<String, Resolved>,
+    /// The counts.
+    swept: &'w mut Swept,
+}
+
+/// One task of `folder`: deleted when its principal is the pool's (a pool SID, or a pool
+/// user's name that resolves to no SID), counted in `swept` either way.
+fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
+    let Walk {
+        pool,
+        names,
+        resolved,
+        swept,
+    } = at;
     swept.tasks += 1;
     let principal = match task.principal {
         Ok(principal) => principal,
@@ -341,38 +433,48 @@ fn sweep_task<S: Sweeper>(
         swept.no_principal += 1;
         return;
     };
-    let sid = resolved
+    let found = resolved
         .entry(name.to_owned())
-        .or_insert_with(|| sid_of(fs, name))
+        .or_insert_with(|| resolve(fs, names, name))
         .clone();
-    match sid {
-        Ok(sid) if pool.contains(&sid) => match fs.delete_task(folder, &task.name) {
+    let pools = match found {
+        Resolved::Sid(sid) => pool.contains(&sid),
+        Resolved::PoolName => true,
+        Resolved::Skipped(why) => {
+            swept.skipped += 1;
+            swept.note(why);
+            false
+        }
+    };
+    if pools {
+        match fs.delete_task(folder, &task.name) {
             Ok(()) => swept.deleted += 1,
             Err(why) => {
                 swept.not_deleted += 1;
                 swept.note(why);
             }
-        },
-        Ok(_) => {}
-        Err(why) => {
-            swept.unreadable += 1;
-            swept.note(why);
         }
     }
 }
 
-/// The SID a principal's `name` resolves to: a SID's text parses as that SID; the Task
-/// Scheduler's names for the service accounts ([`ALIASES`], any case) are theirs; any other
-/// name is looked up ([`Sweeper::lookup_account`]).
-pub fn sid_of(fs: &mut impl Sweeper, name: &str) -> Result<Sid, Failed> {
+/// What a principal's `name` resolves to: a SID's text parses as that SID; the Task Scheduler's
+/// names for the service accounts ([`ALIASES`], any case) are theirs; any other name is looked
+/// up ([`Sweeper::lookup_account`]). A name the lookup can't resolve is
+/// [`Resolved::PoolName`] when `names` holds it ([`Names::is_pool_name`]), else skipped.
+pub fn resolve(fs: &mut impl Sweeper, names: &Names, name: &str) -> Resolved {
     if let Ok(sid) = Sid::parse(name) {
-        return Ok(sid);
+        return Resolved::Sid(sid);
     }
     let alias = ALIASES
         .iter()
         .find(|(alias, _)| alias.eq_ignore_ascii_case(name));
     if let Some((_, sid)) = alias {
-        return Sid::parse(sid).map_err(|error| error.to_string());
+        return Sid::parse(sid)
+            .map_or_else(|error| Resolved::Skipped(error.to_string()), Resolved::Sid);
     }
-    fs.lookup_account(name)
+    match fs.lookup_account(name) {
+        Ok(sid) => Resolved::Sid(sid),
+        Err(_) if names.is_pool_name(name) => Resolved::PoolName,
+        Err(why) => Resolved::Skipped(why),
+    }
 }

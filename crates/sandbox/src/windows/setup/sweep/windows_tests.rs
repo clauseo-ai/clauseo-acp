@@ -11,7 +11,7 @@
 use std::process::Command;
 
 use super::windows_sweeper::WindowsSweeper;
-use super::{Sweeper as _, Task, sid_of, sweep_tasks};
+use super::{Names, Resolved, Sweeper as _, Task, resolve, sweep_tasks};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -114,12 +114,20 @@ fn elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers() {
     // to another.
     let mut sweeper = WindowsSweeper::new();
     let listed = root_tasks(&mut sweeper);
+    let names = Names::of(&mut sweeper, std::slice::from_ref(&sid));
+    assert_eq!(
+        names.users.len(),
+        1,
+        "the test user's name is read: {names:?}"
+    );
     for (name, pool) in [(&theirs, true), (&mine, false)] {
         let task = listed.iter().find(|task| &task.name == name).unwrap();
         let principal = task.principal.clone().unwrap();
         eprintln!("4. {name}: {principal:?}");
         let named = principal.name().unwrap();
-        let resolved = sid_of(&mut sweeper, named).unwrap();
+        let Resolved::Sid(resolved) = resolve(&mut sweeper, &names, named) else {
+            panic!("{name}: its principal resolves to no SID");
+        };
         assert_eq!(resolved == sid, pool, "{name}: {}", resolved.as_str());
     }
 
@@ -152,8 +160,14 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     let mut sweeper = WindowsSweeper::new();
     let swept = sweep_tasks(&mut sweeper, &[]);
     eprintln!(
-        "{} folders, {} tasks, {} with no user or group, {} unreadable, {} folders unlisted",
-        swept.folders, swept.tasks, swept.no_principal, swept.unreadable, swept.unlisted
+        "{} folders, {} tasks, {} with no user or group, {} unreadable, {} skipped, {} folders \
+         unlisted",
+        swept.folders,
+        swept.tasks,
+        swept.no_principal,
+        swept.unreadable,
+        swept.skipped,
+        swept.unlisted
     );
     for (why, count) in &swept.why {
         eprintln!("{count} x {why}");

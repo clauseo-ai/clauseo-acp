@@ -32,7 +32,9 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE,
     RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW,
 };
-use windows::Win32::System::SystemInformation::{ComputerNameNetBIOS, GetComputerNameExW};
+use windows::Win32::System::SystemInformation::{
+    COMPUTER_NAME_FORMAT, ComputerNameDnsHostname, ComputerNameNetBIOS, GetComputerNameExW,
+};
 use windows::core::{HRESULT, HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
@@ -386,21 +388,35 @@ fn lookup_sid(sid: &Sid) -> Result<Option<(String, String, SID_NAME_USE)>, Machi
 
 /// This computer's `NetBIOS` name, the domain of its local accounts.
 fn computer_name() -> Result<String, MachineError> {
+    computer_name_as(ComputerNameNetBIOS)
+}
+
+/// This computer's names: its `NetBIOS` name and its DNS host name, those that can be read,
+/// each once. The sweep accepts either as a local account's prefix (`sweep::Names`).
+pub(super) fn computer_names() -> Vec<String> {
+    let mut names = Vec::new();
+    for format in [ComputerNameNetBIOS, ComputerNameDnsHostname] {
+        if let Ok(name) = computer_name_as(format)
+            && !name.is_empty()
+            && !names.iter().any(|known: &String| same_name(known, &name))
+        {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// This computer's name in `format`.
+fn computer_name_as(format: COMPUTER_NAME_FORMAT) -> Result<String, MachineError> {
     let mut size = 0u32;
     // SAFETY: no buffer asks only for the size, written to `size`; the expected failure is
     // ERROR_MORE_DATA.
-    drop(unsafe { GetComputerNameExW(ComputerNameNetBIOS, None, &raw mut size) });
+    drop(unsafe { GetComputerNameExW(format, None, &raw mut size) });
     let mut buffer = vec![0u16; usize::try_from(size).unwrap_or(0).max(16)];
     let mut len = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
     // SAFETY: `buffer` is live and writable for `len` units.
-    unsafe {
-        GetComputerNameExW(
-            ComputerNameNetBIOS,
-            Some(PWSTR(buffer.as_mut_ptr())),
-            &raw mut len,
-        )
-    }
-    .map_err(|error| os("GetComputerNameExW", &error))?;
+    unsafe { GetComputerNameExW(format, Some(PWSTR(buffer.as_mut_ptr())), &raw mut len) }
+        .map_err(|error| os("GetComputerNameExW", &error))?;
     Ok(text_of(&buffer))
 }
 
