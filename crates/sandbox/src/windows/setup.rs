@@ -157,6 +157,10 @@ pub use outcome::{
     LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
     Step, TopUp, launch_code, launch_error,
 };
+// The record's WSL targets, for `windows::wsl`'s registry seam.
+#[cfg(windows)]
+pub(crate) use record_write::{delete_wsl, read_wsl, write_wsl};
+
 // `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
 // import of both would make their shared method names ambiguous in the set-up's tests.
 pub use remove::{

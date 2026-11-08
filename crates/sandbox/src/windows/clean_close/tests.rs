@@ -124,7 +124,16 @@ impl Scene {
 
     pub(super) fn launch(&self) -> LaunchCheck {
         let admin = crate::windows::admin_copy::fake::Fake::ready();
-        check_launch_with(&admin, &self.data, &self.ledger, &self.plan, &self.journal).unwrap()
+        let (data, ledger, plan, journal) = (&self.data, &self.ledger, &self.plan, &self.journal);
+        check_launch_with(
+            &admin,
+            &crate::windows::wsl::NoWsl,
+            data,
+            ledger,
+            plan,
+            journal,
+        )
+        .unwrap()
     }
 
     pub(super) fn launch_path(&self) -> LaunchPath {
@@ -215,8 +224,15 @@ fn a_marker_still_awaiting_a_sweep_refuses_the_launch_and_keeps_the_record() {
         asked += 1;
         Err("an earlier session's sandbox sweep didn't finish within 15 s".to_owned())
     };
-    let refused =
-        check_launch_awaiting(&admin, &mut sweeps, &s.data, &s.ledger, &s.plan, &s.journal);
+    let refused = check_launch_awaiting(
+        &admin,
+        &crate::windows::wsl::NoWsl,
+        &mut sweeps,
+        &s.data,
+        &s.ledger,
+        &s.plan,
+        &s.journal,
+    );
     let Err(Error::UncleanSession(why)) = refused else {
         panic!("not refused for the marker: {refused:?}");
     };

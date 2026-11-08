@@ -83,6 +83,7 @@ impl Launched {
     fn check(&self) -> LaunchCheck {
         check_launch_with(
             &crate::windows::admin_copy::fake::Fake::ready(),
+            &crate::windows::wsl::NoWsl,
             &self.w.at("data"),
             &self.ledger,
             &self.plan(),
