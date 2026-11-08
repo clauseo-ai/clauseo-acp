@@ -101,17 +101,19 @@ fn a_deny_already_first_is_left_and_a_weaker_one_is_not_enough() {
     let sd = LaunchSd::parse(&stock_owner_first()).unwrap();
     let merged = sd.with_deny(&group()).unwrap();
     assert_eq!(merged.with_deny(&group()), None, "idempotent");
-    // 0xB is enough: the rights wslservice's own descriptor grants.
+    // All of 0x1F is enough.
     let mut enough = sd.clone();
     enough
         .aces
-        .insert(0, entry(1, 0, 0xB, &sid_bytes(&group())));
+        .insert(0, entry(1, 0, 0x1F, &sid_bytes(&group())));
     assert!(enough.denies_first(&group()));
     assert_eq!(enough.with_deny(&group()), None);
-    // Execute alone, an inherit-only deny, or another group's deny is not.
+    // Execute alone, the local rights alone (0xB, without the remote ones), an inherit-only
+    // deny, or another group's deny is not.
     let other = Sid::parse("S-1-5-21-7-8-9-1010").unwrap();
     for weak in [
         entry(1, 0, 0x1, &sid_bytes(&group())),
+        entry(1, 0, 0xB, &sid_bytes(&group())),
         entry(1, INHERIT_ONLY, 0x1F, &sid_bytes(&group())),
         entry(1, 0, 0x1F, &sid_bytes(&other)),
     ] {
@@ -232,4 +234,17 @@ fn malformed_values_are_refused() {
     for (name, bytes) in cases {
         assert!(LaunchSd::parse(&bytes).is_err(), "{name}");
     }
+}
+
+#[test]
+fn the_resource_managers_control_byte_is_kept() {
+    let mut bytes = stock_owner_first();
+    bytes[1] = 0x5A;
+    // SE_RM_CONTROL_VALID, which says the byte means something.
+    bytes[3] |= 0x40;
+    let sd = LaunchSd::parse(&bytes).unwrap();
+    assert_eq!(sd.to_bytes(), bytes, "the same bytes back");
+    let merged = sd.with_deny(&group()).unwrap();
+    assert_eq!(merged.to_bytes()[1], 0x5A);
+    assert_eq!(merged.without_denies(&group()).0.to_bytes(), bytes);
 }
