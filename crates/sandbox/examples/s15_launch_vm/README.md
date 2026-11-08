@@ -86,12 +86,13 @@ it starts.
 Prepare picks three pool users: matter A's, matter B's and matter A's second (`A2`), which is
 granted matter A's folder too and has a state folder of its own (`matters\A2\state`). The runner
 serves one live session per pool user: its first act ends every process of its user outside its
-job, its tick does so every 30 s, and its end sweeper (`clauseo-sandbox-run --sweep`, as that
-user) for up to about 60 s after the session. So before the harness starts a session, or a process
-of its own as a pool user (the controls' relay, `end-cleanup`'s `probe items`, the benign
-`probe wait` of `sweep-before-logon`, `wts-visibility`'s probe), it waits until the pool
-rows' listing finds no process of that user left, up to 75 s (a wait is noted; what is left after
-it fails the row, named). Two sessions alive at once never share a pool user: `open-process` and
+job, its tick does so every 30 s, and its end ends the job; it starts no process of that user at
+the end, so nothing of that user's runs after a session but what escaped. So before the harness
+starts a session, or a process of its own as a pool user (the controls' relay, `end-cleanup`'s
+`probe items`, the benign `probe wait` of `sweep-before-logon`, `wts-visibility`'s probe), it
+waits until the pool rows' listing finds no process of that user left, up to 20 s: enough for a
+job's teardown, while an escapee never ends by itself (a wait is noted; what is left after it
+fails the row, named). Two sessions alive at once never share a pool user: `open-process` and
 `pipes-5` pair A with B, `pipes-same-matter` A with A2. Only variant (g) runs as A's pool user
 while A's session runs (the agent's station names that user alone), so a tick of that session can
 still end it.
@@ -194,51 +195,54 @@ pool user's, so either listing with one is INFO, naming the count and the images
   trigger in 2099, never run), each running `probe wait`, and a BITS job that could complete:
   a local `file://` source copied to a file beside it in `%TEMP%\ClauseoS15-<tag>`, a notify
   command line (`probe items mark`) that writes the marker `fired` there, resumed. Each is named
-  `ClauseoS15-<tag>`. After the session ends it waits until that user has no process left (the
-  end-of-session sweeper, `clauseo-sandbox-run --sweep`, has ended; up to 75 s), then runs
-  `probe items check` as that user until the four other items are gone or 30 s after the
-  session's end have passed. The check records the BITS job's state (`bitsadmin /getstate`) and
-  whether the marker exists. The sweeper makes no BITS call: only the `SYSTEM` stop task (PR
-  #668) cancels a pool user's BITS job, so the row expects no removal of it and records whether
-  it is still there as information. When it is still there, the row runs a second short session
-  of A and checks again. PASS when the four are gone and BITS refused the job (`AddFile` or
-  `Resume` failed with 0x800704dd, as on the test VMs: no job of the pool user's can run) and
-  the marker is absent; a job BITS accepted passes when it is absent or inert (no marker, never
-  `TRANSFERRED` or `ACKNOWLEDGED`, through both checks). FAIL names the kinds left, or any not
-  planted or not checked, or says the BITS job ran; INFO when only the BITS job couldn't be
-  planted for another reason. At the row's end `probe items remove` deletes whatever is left,
-  and the row notes it.
+  `ClauseoS15-<tag>`. Planted before the session, the items meet that session as the next one:
+  its inner runner's first act removes the `Run` and `RunOnce` values and the Startup entry
+  (and per-user COM classes, which the row doesn't plant), and at its end the outer requests the
+  `SYSTEM` task `\Clauseo\SandboxSweep`, which deletes the pool user's scheduled tasks and
+  cancels its BITS jobs; the outer polls its result for up to 20 s before it exits. After the
+  session ends the row runs `probe items check` as that user (each run first waits until that
+  user has no process left) until every item is gone or 30 s after the session's end have
+  passed. The check records the BITS job's state (`bitsadmin /getstate`) and whether the marker
+  exists. PASS when the four are gone (the verdict names the first act for the HKCU and Startup
+  items, the sweep task for the scheduled task) and the BITS job is gone too, or BITS refused it
+  (`AddFile` or `Resume` failed with 0x800704dd, as on the test VMs: no job of the pool user's
+  can run; a half-made job still there is information), the marker absent either way. FAIL
+  names the kinds left and what should have removed them, or any not planted or not checked, or
+  says the BITS job ran; INFO when only the BITS job couldn't be planted for another reason.
+  The outer's `the sandbox sweep task` warning lines are named as information. At the row's end
+  `probe items remove` deletes whatever is left, and the row notes it.
 
 - `cancel` (`checks_cancel.rs`, verdict in `cancel_verdict.rs`): a cancel as the host does
   it. Once A's pool user has no process left, the harness runs `probe wait` as A (it ignores
   its stdin's end), closes the outer's stdin, waits 2 s and kills the outer. The outer gives the
-  agent 1 s, ends the job, waits up to 400 ms for it to empty, then starts its end sweeper
-  (created suspended, its DACL shut, then resumed) or skips it when less than 500 ms of the 2 s
-  is left (`clauseo-sandbox-run: warning: no end sweeper: ...`). Right after the kill and four
-  more times over 1.5 s, the harness reads every process's threads
-  (`NtQuerySystemInformation(SystemProcessInformation)`, `win_suspend.rs`) and the user of each
-  `clauseo-sandbox-run.exe`. FAIL names each one of A's pool user, or of a user the harness
-  can't read, whose threads all wait suspended: a kill between the sweeper's creation and its
-  resume left it behind. INFO when no look could read the threads' states (the `NTSTATUS` is
-  named) or the session never started. PASS otherwise, naming the running runner processes of
-  that user it saw (an end sweeper) or none. The outer's stderr is printed and the text says
-  whether it skipped the sweeper, and, as information that decides nothing, the sweeper's own
-  logon time: the outer's `clauseo-sandbox-run: end sweeper: logon to resume <n> ms` line, from
-  the logon's start to the resume, or that the outer logged none. A suspended runner found is
-  ended at the row's end.
+  agent 1 s, ends the job, waits up to 400 ms for it to empty, then requests the `SYSTEM` task
+  `\Clauseo\SandboxSweep` from the Task Scheduler (the kill doesn't stop it); it starts no
+  process of the pool user at the end. Right after the kill and four more times over 1.5 s, the
+  harness reads every process's threads (`NtQuerySystemInformation(SystemProcessInformation)`,
+  `win_suspend.rs`) and the user of each `clauseo-sandbox-run.exe`. FAIL names each one of A's
+  pool user, or of a user the harness can't read, whose threads all wait suspended in any look,
+  or that still runs at the last. INFO when no look could read the threads' states (the
+  `NTSTATUS` is named) or the session never started. PASS otherwise, naming the pool user's
+  runner processes still ending in an earlier look, or none. The outer's stderr is printed, and
+  the text names, as information that decides nothing, its lines holding `the sandbox sweep
+  task` (the job didn't empty, the request failed, the task's result), or that it logged none.
+  A suspended runner found is ended at the row's end.
 - `stdin-unread-cancel` (`checks_cancel.rs`, verdict in `cancel_verdict.rs`): the same cancel
   with the agent's stdin write blocked, a real pipe write rather than the unit test's fake. The
   agent is `probe sleep-noread` (it sleeps up to 60 s and never reads its stdin). From a thread,
   the harness writes 4 MiB to the outer's stdin, far past a pipe's buffer, then closes it as the
   host does on a cancel; the outer reads it all (it buffers up to 16 MiB), and its own write to
-  the agent's full pipe stays blocked. The harness then lets the ladder run, killing the outer
-  only if it still runs 3 s after the close, and looks five times over 3 s after the outer
-  ended, as `cancel` does. PASS when the outer exited by itself within 3 s of the close, no
-  `clauseo-sandbox-run.exe` of A's pool user (or of a user the harness can't read) was suspended
-  in any look, and none was running at the last: the job's end released the blocked write. FAIL
-  names what was left: an outer still running at 3 s (killed then), or each runner process
-  suspended or still running. A harness write that fails or doesn't end within 20 s fails the
-  row too, naming it. INFO when the session never started or no look could read the threads.
+  the agent's full pipe stays blocked. The harness then lets the ladder run: 3 s after the close
+  (or at the outer's earlier exit) it looks once, as `cancel` does; then it waits for the outer,
+  which polls the sweep task's result for up to 20 s at its end, killing it only if it still
+  runs 25 s after the close, and looks five times over 3 s after the outer ended. PASS when no
+  `clauseo-sandbox-run.exe` of A's pool user (or of a user the harness can't read) was in the
+  look at 3 s (the job's end released the blocked write), the outer exited by itself within
+  25 s, none was suspended in a later look, and none was running at the last. FAIL names what
+  was left: a runner at 3 s, an outer still running at 25 s (killed then), or each runner
+  process suspended or still running. A harness write that fails or doesn't end within 20 s
+  fails the row too, naming it. INFO when the session never started or a look couldn't read the
+  threads. The outer's `the sandbox sweep task` lines are named as information.
 
 The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are its test. The
 harness ends its benign process if it still runs at the row's end, and notes it.
@@ -293,8 +297,8 @@ variants, closest to the agent first:
 
 - (a) the agent's own token shape: the harness reads matter A's second pool user's (`A2`) password
   from `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
-  `probe ui-relay` as that user (not A's: A's session's tick, or its end sweeper, would end a
-  process of A's user outside the job) with `CreateProcessWithLogonW` (`win_logon.rs`), as the outer
+  `probe ui-relay` as that user (not A's: A's session's tick would end a process of A's user
+  outside the job) with `CreateProcessWithLogonW` (`win_logon.rs`), as the outer
   starts the inner. The relay makes the agent's token from its own as the inner runner's `make` does
   (restricting the pool user, `S-1-5-12`, `S-1-5-32-545`, `S-1-1-0`; the logon SID deny-only; Low;
   `DISABLE_MAX_PRIVILEGE`; the agent's default DACL) and starts `probe ui-control` with
