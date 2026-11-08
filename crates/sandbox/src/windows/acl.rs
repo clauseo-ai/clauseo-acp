@@ -158,6 +158,7 @@ impl AclWriter for NtfsAcl {
         };
         let watched: Vec<Vec<u8>> = strict.watched.iter().map(sid_bytes).collect();
         let pool: Vec<Vec<u8>> = strict.pool.iter().map(sid_bytes).collect();
+        let guarded: Vec<Vec<u8>> = strict.guarded.iter().map(sid_bytes).collect();
         // In a matter's tree, the desktop user another pool user's child is handed to (S15
         // `PR4h`): read once a walk, only there.
         let assigned: Vec<Vec<u8>> = strict.assigned.iter().map(sid_bytes).collect();
@@ -173,6 +174,7 @@ impl AclWriter for NtfsAcl {
                 assigned: &assigned,
                 me: &me,
             }),
+            guarded: &guarded,
         };
         self.run(root, reach, mode)
     }

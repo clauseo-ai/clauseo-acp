@@ -19,6 +19,8 @@ use std::io;
 use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
+#[cfg(any(windows, test))]
+pub(crate) use guarded::{guard_offends, without_guarded};
 pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
 #[cfg(test)]
 pub(crate) use steps::bare;
@@ -572,6 +574,8 @@ fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Er
 
 #[cfg(any(windows, test))]
 mod copies;
+#[cfg(any(windows, test))]
+mod guarded;
 mod repair;
 mod steps;
 #[cfg(test)]

@@ -75,6 +75,12 @@ pub struct Strict {
     /// pool user, and its matter SID when set; the pool owners its children may have. Empty
     /// outside a matter's tree (a sibling, the parent's files, the shared folders).
     pub assigned: Vec<Sid>,
+    /// In a tree the guard on what the pool writes covers (`Policy::native_code_deny`):
+    /// `OWNER RIGHTS` and the guard's subjects. A child one of `pool` owns loses each explicit
+    /// allow for one of them that lets it change permissions, or run what it holds
+    /// ([`without_guarded`](super::acl_bytes::without_guarded)): Python's `tempfile` makes
+    /// its folders `D:P(A;OICI;FA;;;OW)`. Empty elsewhere, and with the switch off.
+    pub guarded: Vec<Sid>,
 }
 
 impl Walked {

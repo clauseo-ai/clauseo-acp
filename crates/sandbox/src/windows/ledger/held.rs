@@ -9,6 +9,7 @@ use clauseo_protocol::MatterId;
 
 use super::file::{Slot, State, Trust, exists, read_state, render};
 use super::{Entry, EntryId, EntryState, LEDGER_LOCK, Take, TakenBack, owed, same_ace};
+use crate::windows::acl_plan::Rights;
 use crate::windows::write;
 
 /// The file under the lock: what was read and changed, and what was last saved.
@@ -228,7 +229,8 @@ pub(super) fn take_back(
         {
             handed.push((to, label));
         }
-        if *take == Take::Drop || shared {
+        // An `OWNER RIGHTS` entry IT wrote before ours was listed stays IT's (`Entry::found`).
+        if *take == Take::Drop || shared || entry.found {
             dropped.push(entry.id);
             done.shared += usize::from(shared);
             continue;
@@ -259,6 +261,34 @@ pub(super) fn take_back(
     }
     held.save()?;
     Ok(done)
+}
+
+/// Sets entry `id`'s [`Entry::found`] to `found`; whether it changed. Found only while it
+/// is pending, an `OWNER RIGHTS` entry, and no other entry of ours (one not found) names the
+/// same permission entry: one of ours there means we wrote it.
+pub(super) fn set_found(state: &mut State, id: EntryId, found: bool) -> bool {
+    let Some(entry) = state.entries().find(|e| e.id == id).cloned() else {
+        return false;
+    };
+    let ours_elsewhere = state
+        .entries()
+        .any(|o| o.id != id && !o.found && same_ace(o, &entry));
+    let may = !found
+        || (entry.state == EntryState::Pending
+            && entry.rights == Rights::OwnerModify
+            && !ours_elsewhere);
+    let mut changed = false;
+    for slot in &mut state.slots {
+        if let Slot::Known(known) = slot
+            && known.entry.id == id
+            && known.entry.found != found
+            && may
+        {
+            known.entry.found = found;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Marks each of `ids` still `pending` `applied`; whether any changed.

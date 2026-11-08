@@ -164,3 +164,39 @@ fn owner_rights_entry_is_not_a_subjects_allow() {
     assert_eq!(Rights::OwnerModify.fixed_subject(), Some(OWNER_RIGHTS_SID));
     assert_eq!(Rights::DenyExecute.fixed_subject(), None);
 }
+
+/// #808's L4: an allow on the path alone is on a folder or a file as its kind says; a folder's
+/// gets the guard below it, a file's the deny on itself.
+#[test]
+fn a_this_folder_only_allow_is_a_folder_by_its_kind() {
+    let w = World::new("guard-place");
+    let pool = Sid::parse(USER_SID).unwrap();
+    let grant = |rights, kind| Grant {
+        path: w.at("x"),
+        sid: pool.clone(),
+        rights,
+        inherit: Inherit::ThisOnly,
+        kind,
+    };
+    let folder = |g: &Grant| super::super::guard::place(g).map(|p| p.folder);
+    assert_eq!(folder(&grant(Rights::Modify, PathKind::Matter)), Some(true));
+    assert_eq!(
+        folder(&grant(Rights::Modify, PathKind::TempFolder)),
+        Some(true)
+    );
+    assert_eq!(
+        folder(&grant(Rights::CreateFiles, PathKind::ClaudeStore)),
+        Some(true)
+    );
+    assert_eq!(
+        folder(&grant(Rights::Modify, PathKind::ClaudeStoreFile)),
+        Some(false)
+    );
+    // No execute right: a file the pool writes but can't run gets nothing.
+    assert_eq!(
+        folder(&grant(Rights::ReadWriteData, PathKind::CredentialLink)),
+        None
+    );
+    // No write right: nothing.
+    assert_eq!(folder(&grant(Rights::ReadAndExecute, PathKind::Read)), None);
+}

@@ -145,6 +145,10 @@ pub struct Entry {
     /// by then (S15 `PR3b` round 4, L5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<RecordedFile>,
+    /// For an `OWNER RIGHTS` entry, that an identical permission entry was there, and none of
+    /// ours, when this one was listed: IT's own. Dropped, never removed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub found: bool,
 }
 
 impl Entry {
@@ -268,6 +272,7 @@ impl Ledger {
                         kind: grant.kind,
                         prior_label: None,
                         file: None,
+                        found: false,
                     },
                     extra: Map::new(),
                 }));
@@ -446,21 +451,17 @@ impl Ledger {
         if !plan.created.contains(&id) {
             return Ok(());
         }
-        self.update(false, |state| {
-            let mut changed = false;
-            for slot in &mut state.slots {
-                if let Slot::Known(known) = slot
-                    && known.entry.id == id
-                    && known.entry.state == EntryState::Pending
-                    && known.entry.prior_label.is_none()
-                    && !is_our_label(&label, known.entry.inherit)
-                {
-                    known.entry.prior_label = Some(label);
-                    changed = true;
-                }
-            }
-            Ok((changed, ()))
-        })
+        self.update(false, |state| Ok((label::set_prior(state, id, label), ())))
+    }
+
+    /// Records that entry `id`'s permission entry was there before this launch listed it
+    /// (`found`), or that this launch wrote it after all (not `found`); see
+    /// [`Entry::found`]. Only an entry `plan` added is found.
+    pub fn set_found(&mut self, plan: &AdmittedPlan, id: EntryId, found: bool) -> io::Result<()> {
+        if found && !plan.created.contains(&id) {
+            return Ok(());
+        }
+        self.update(false, |state| Ok((held::set_found(state, id, found), ())))
     }
 
     /// Records `file` as the file entry `id`'s permission entry is written on, before it is

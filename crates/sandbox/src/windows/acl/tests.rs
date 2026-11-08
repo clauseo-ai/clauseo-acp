@@ -12,6 +12,7 @@ use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::{Label, Strict};
 use walk::race::{HOOK, REFUSE, Stage};
 
+mod guarded;
 mod round2;
 mod round4;
 mod round5;
@@ -47,6 +48,7 @@ fn put_with(acl: &mut NtfsAcl, root: &Path, grants: &[Grant]) -> Result<Walked, 
         watched: vec![other.clone()],
         pool: vec![Sid::parse(USER_SID).unwrap(), other],
         assigned: Vec::new(),
+        guarded: Vec::new(),
     };
     acl.propagate(root, Reach::Tree, Some(&strict))
 }
@@ -415,6 +417,7 @@ fn as_agent(acl: &mut NtfsAcl, root: &Path) -> Result<Walked, ApplyFailure> {
         watched: vec![Sid::parse(OTHER_POOL_SIDS[0]).unwrap()],
         pool: vec![current_user_sid().unwrap()],
         assigned: Vec::new(),
+        guarded: Vec::new(),
     };
     acl.propagate(root, Reach::Tree, Some(&strict))
 }
@@ -450,6 +453,7 @@ fn a_child_the_lawyer_cant_open_refuses_naming_it() {
         watched: vec![other.clone()],
         pool: vec![other],
         assigned: Vec::new(),
+        guarded: Vec::new(),
     };
     let walked = acl.propagate(&place.at("matter"), Reach::Tree, Some(&strict));
     assert_eq!(walked, Err(ApplyFailure::ChildShut));
