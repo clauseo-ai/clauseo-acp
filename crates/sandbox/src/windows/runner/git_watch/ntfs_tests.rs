@@ -27,7 +27,7 @@ impl Guard for TestGuard {
     fn changed(&self, changes: &Changes, hooks: &impl Hooks) -> Live {
         let mut live = self
             .0
-            .changed(&changes.added, &changes.folders, at(), hooks);
+            .changed(&changes.added, &changes.renamed_folders, at(), hooks);
         live.moved
             .extend(self.0.relinked(&changes.relinked, at(), hooks).moved);
         live

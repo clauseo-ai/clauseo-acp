@@ -254,7 +254,7 @@ fn past_its_budget_a_folder_whose_owner_cant_be_read_stays_and_the_session_ends(
     assert!(root.join("big/f0/keep.txt").exists());
 }
 
-/// Final review, item 4: a folder reported made and gone by its check (renamed in with a `.git`
+/// Final review, item 4: a folder reported renamed in and gone by its check (in with a `.git`
 /// inside and back out) counts as gone, as a gone `.git` does; a file reported and gone
 /// doesn't (an editor's temporary file), nor does a folder still there.
 #[test]

@@ -27,7 +27,7 @@
 //! scan stops there, and the folder goes whole only when a pool user owns it, read from the
 //! handle the move renames; one whose owner can't be read stays (`check::Run::below`); a full
 //! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
-//! moved, or a folder reported made and gone before it could be scanned, is listed
+//! moved, or a folder reported renamed in and gone before it could be scanned, is listed
 //! ([`Live::gone`]), so the watch can end a session whose agent keeps renaming one back and
 //! forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
 //! attribute: a junction set on an empty folder, `mklink /J`'s two steps) is checked as a link
@@ -258,7 +258,7 @@ impl Watched {
         self.changed_with_folders(volume, paths, &[], now, hooks)
     }
 
-    /// [`Watched::changed`], told which of `paths` were folders when reported: one gone by its
+    /// [`Watched::changed`], told which of `paths` were folders renamed in: one gone by its
     /// check (nothing at its name, or past a link now) is listed in [`Live::gone`], as a gone
     /// `.git` is, so an agent can't rename a folder holding a `.git` in and back out before it
     /// is scanned, again and again.

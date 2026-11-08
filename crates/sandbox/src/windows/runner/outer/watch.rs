@@ -187,7 +187,7 @@ impl Guard for OsGuard {
     fn changed(&self, changes: &Changes, hooks: &impl Hooks) -> Live {
         let mut live = self
             .0
-            .changed(&changes.added, &changes.folders, now(), hooks);
+            .changed(&changes.added, &changes.renamed_folders, now(), hooks);
         let relinked = self.0.relinked(&changes.relinked, now(), hooks);
         live.moved.extend(relinked.moved);
         live.failed.extend(relinked.failed);

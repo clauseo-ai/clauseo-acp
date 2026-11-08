@@ -34,7 +34,7 @@ fn added(paths: &[&str]) -> Next {
     Next::Changed(Changes {
         added: paths.iter().map(PathBuf::from).collect(),
         relinked: Vec::new(),
-        folders: Vec::new(),
+        renamed_folders: Vec::new(),
     })
 }
 
@@ -472,13 +472,28 @@ fn names_made_and_items_turned_into_reparse_points_are_read_from_the_buffer() {
     let read = changes(&buffer(Layout::Extended, &records), Layout::Extended).unwrap();
     assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
     assert_eq!(read.relinked, [PathBuf::from("junction")]);
-    assert_eq!(read.folders, [".git", "sub/.GIT"].map(PathBuf::from));
+    // Of the folders, only one renamed in: a folder made reports what goes in it.
+    assert_eq!(read.renamed_folders, [PathBuf::from("sub/.GIT")]);
 
     // With no attributes to tell by, every change is checked.
     let read = changes(&buffer(Layout::Plain, &records), Layout::Plain).unwrap();
     assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
     assert_eq!(read.relinked, ["edited", "junction"].map(PathBuf::from));
-    assert_eq!(read.folders, Vec::<PathBuf>::new());
+    assert_eq!(read.renamed_folders, Vec::<PathBuf>::new());
+}
+
+/// The fixes' review: of the folders reported, only one renamed in can count gone by its
+/// check; a folder made (`mkdir tmp`, later `rm -r tmp`) reports what goes in it itself.
+#[test]
+fn only_a_folder_renamed_in_is_listed_to_count_gone_never_one_made() {
+    let made = [(1, "tmp", 0x10), (2, "tmp", 0x10)];
+    let read = changes(&buffer(Layout::Extended, &made), Layout::Extended).unwrap();
+    assert_eq!(read.added, [PathBuf::from("tmp")]);
+    assert_eq!(read.renamed_folders, Vec::<PathBuf>::new());
+
+    let renamed = [(4, "outside", 0x10), (5, "in", 0x10), (5, "note.md", 0x20)];
+    let read = changes(&buffer(Layout::Extended, &renamed), Layout::Extended).unwrap();
+    assert_eq!(read.renamed_folders, [PathBuf::from("in")]);
 }
 
 #[test]

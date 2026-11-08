@@ -338,9 +338,14 @@ build 26100):
     "the session ended before its agent started; the agent never ran".
 
     An agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or 3 items found
-    gone, counted across all paths (short-lived `.git`s renamed in and out, and folders reported
-    made, `FILE_ATTRIBUTE_DIRECTORY` in the extended record, that are gone before their scan),
-    ends the session too. The 2 s budget doesn't depend on the check returning: a watchdog thread
+    gone, counted across all paths (short-lived `.git`s renamed in and out, and folders renamed
+    in, `FILE_ACTION_RENAMED_NEW_NAME` with `FILE_ATTRIBUTE_DIRECTORY` in the extended record,
+    that are gone before their scan), ends the session too. A folder made (`FILE_ACTION_ADDED`)
+    doesn't count: what goes in it is reported on its own, so a script's `mkdir tmp` then
+    `rm -r tmp` ends nothing. Known limit: the plain records (a network share) carry no
+    attributes, so a folder renamed in and back out there isn't counted; counting every name
+    renamed in would end sessions over an editor's backup renames. The 2 s budget doesn't
+    depend on the check returning: a watchdog thread
     (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
     once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
     made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a

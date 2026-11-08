@@ -498,7 +498,7 @@ impl GitGuard {
     }
 
     /// Checks the paths the watch reported made or renamed, relative to the root; `folders`
-    /// are those reported as folders, each counted gone when gone by the check.
+    /// are those reported as folders renamed in, each counted gone when gone by the check.
     pub(in crate::windows) fn changed(
         &self,
         paths: &[PathBuf],
