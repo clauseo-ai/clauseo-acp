@@ -84,7 +84,8 @@ fn a_name_is_published_only_for_a_pipe_this_run_made_and_cleared_on_every_exit_a
         run_named(&mut host, FakePipe::default()),
         (ServeExit::Unpublished, None)
     );
-    assert_eq!(ServeExit::Unpublished.as_code(), 67);
+    // 69: 67 is the WSL upgrade's, 68 the denial watcher's.
+    assert_eq!(ServeExit::Unpublished.as_code(), 69);
     // A name it can't publish: no client is waited for, and what it may have left is cleared.
     let mut host = FakeHost::new();
     host.publish_fails = Some("RegSetValueExW failed (error 5)".to_owned());

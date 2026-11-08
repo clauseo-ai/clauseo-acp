@@ -125,7 +125,8 @@ pub const DATA_SUFFIX: [&str; 3] = ["AppData", "Local", "ai.clauseo.desktop"];
 /// The server's exit codes. They start at 63, after the codes the other `\Clauseo` tasks' runs
 /// of the one exe take (`StopExit` to 50, the WSL deny's 51 and 52, the sweep's 53 to 59, the
 /// WSL upgrade's 60 to 62), so no number has two meanings; codes are appended from here on, never
-/// renumbered. How each client fared is in its reply and the log, not here.
+/// renumbered, skipping those taken since: 67 (the WSL upgrade's) and 68 (the denial watcher's
+/// "provider full"). How each client fared is in its reply and the log, not here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServeExit {
     /// 0: every client that came was answered, and none came within the last wait.
@@ -140,7 +141,8 @@ pub enum ServeExit {
     NoRecord,
     /// 66: the pipe couldn't be made, or waiting for a client failed.
     PipeFailed,
-    /// 67: the pipe's name couldn't be drawn or published; no one was served.
+    /// 69: the pipe's name couldn't be drawn or published; no one was served. (67 and 68 are
+    /// other runs' codes.)
     Unpublished,
 }
 
@@ -153,7 +155,7 @@ impl ServeExit {
             ServeExit::Squatted => 64,
             ServeExit::NoRecord => 65,
             ServeExit::PipeFailed => 66,
-            ServeExit::Unpublished => 67,
+            ServeExit::Unpublished => 69,
         }
     }
 }

@@ -2003,9 +2003,9 @@ registration gave the folder that task's descriptor, so a per-machine set-up reg
 stop task for one owner would have shut every other interactive user out of the folder. An
 elevated CI test starts the set-up task as a standard user beside another owner's stop task.
 
-**The server's run** (`--serve-set-up`; exits `ServeExit`, 63 to 67, after the other
+**The server's run** (`--serve-set-up`; exits `ServeExit`, 63 to 66 and 69, after the other
 `\Clauseo` tasks' codes: the stop's to 50, the WSL deny's 51-52, the sweep's 53-59, the WSL
-upgrade's 60-62):
+upgrade's 60-62 and 67, and the denial watcher's 68, "provider full"):
 
 1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, and the copy passes
    `admin_copy::check`: the folder chain only administrators can change, the folder holding
@@ -2026,7 +2026,7 @@ upgrade's 60-62):
    before each write: `O:SYD:P(A;;KA;;;SY)(A;;SD;;;BA)(A;;KR;;;BU)` (`serve::PUBLISHED_SDDL`),
    owned by LOCAL SYSTEM, the only writer, Users reading, Administrators allowed only to delete
    it, and protected, so the record key's entries aren't inherited. A token that can't be drawn
-   or published is 67, with no one served. On every exit after that the server deletes the
+   or published is 69, with no one served. On every exit after that the server deletes the
    subkey while it still holds its token. A run that was ended (`schtasks /end`, the two-hour
    limit) leaves it, naming a pipe that is gone: a stale name, which `--remove --uninstall`
    deletes with the admin values, so the record's key can go;
