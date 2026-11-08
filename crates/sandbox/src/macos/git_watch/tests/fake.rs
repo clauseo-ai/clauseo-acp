@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use super::super::aside::Aside;
 use super::super::state::{MatterState, Store};
-use super::super::{Asks, Event, Fs, Kind, Launch, Meta, Phase, Session, Watch, flags};
+use super::super::{Asks, Event, Fs, Kind, Launch, Meta, Phase, Session, Stamp, Watch, flags};
 use crate::{Denial, DenialSink, GitItem, GitOutcome};
 
 /// The fake volume: every entry by path, with its kind and inode.
@@ -30,6 +30,21 @@ struct Disk {
     panic_on: Option<PathBuf>,
     /// The last random number given.
     random: u64,
+    /// Each folder's change count, its stamp: an entry made, renamed or removed in it moves it.
+    stamps: BTreeMap<PathBuf, i64>,
+    /// How many times `dated` read an entry.
+    dated: u64,
+    /// The canary's writes, by path.
+    touched: Vec<PathBuf>,
+}
+
+impl Disk {
+    /// Moves the stamp of the folder holding `path`.
+    fn changed(&mut self, path: &Path) {
+        if let Some(dir) = path.parent() {
+            *self.stamps.entry(dir.to_owned()).or_default() += 1;
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -50,6 +65,7 @@ impl FakeFs {
         disk.next += 1;
         let id = disk.next;
         disk.entries.insert(PathBuf::from(path), (kind, id));
+        disk.changed(Path::new(path));
     }
 
     pub(super) fn dir(&self, path: &str) {
@@ -80,6 +96,23 @@ impl FakeFs {
         self.dir(&format!("{path}/objects"));
         self.dir(&format!("{path}/refs"));
         self.file(&format!("{path}/HEAD"));
+    }
+
+    /// How many entries `dated` has read.
+    pub(super) fn dated_reads(&self) -> u64 {
+        self.0.lock().unwrap().dated
+    }
+
+    /// The canary's writes.
+    pub(super) fn touched(&self) -> Vec<PathBuf> {
+        self.0.lock().unwrap().touched.clone()
+    }
+
+    /// Removes the entry at `path` and everything below it.
+    pub(super) fn remove(&self, path: &str) {
+        let mut disk = self.0.lock().unwrap();
+        disk.entries.retain(|p, _| !p.starts_with(path));
+        disk.changed(Path::new(path));
     }
 
     pub(super) fn exists(&self, path: &str) -> bool {
@@ -159,6 +192,19 @@ impl Fs for FakeFs {
         })
     }
 
+    fn dated(&self, path: &Path) -> Option<(Meta, Stamp)> {
+        let meta = self.meta(path)?;
+        let mut disk = self.0.lock().unwrap();
+        disk.dated += 1;
+        let changes = disk.stamps.get(path).copied().unwrap_or_default();
+        Some((meta, [changes, 0, changes, 0]))
+    }
+
+    fn touch(&self, path: &Path) -> io::Result<()> {
+        self.0.lock().unwrap().touched.push(path.to_owned());
+        Ok(())
+    }
+
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
         let disk = self.0.lock().unwrap();
         if disk.panic_on.as_deref() == Some(dir) {
@@ -208,6 +254,7 @@ impl Fs for FakeFs {
         disk.next += 1;
         let id = disk.next;
         disk.entries.insert(dir.to_owned(), (Kind::Dir, id));
+        disk.changed(dir);
         Ok(())
     }
 
@@ -243,6 +290,8 @@ impl Fs for FakeFs {
             };
             disk.entries.insert(new, entry);
         }
+        disk.changed(from);
+        disk.changed(to);
         Ok(())
     }
 
@@ -274,6 +323,7 @@ impl Fs for FakeFs {
             Some((Kind::Link, _)) => {
                 disk.entries.remove(path);
                 disk.targets.remove(path);
+                disk.changed(path);
                 Ok(())
             }
             Some(_) => Err(io::Error::other("not a link")),

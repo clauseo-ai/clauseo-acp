@@ -14,5 +14,7 @@ mod profile;
 mod watch;
 
 #[cfg(target_os = "macos")]
+pub use git_watch::{quit as git_watch_quit, start_up as git_watch_start_up};
+#[cfg(target_os = "macos")]
 pub use launcher::SeatbeltLauncher;
 pub use profile::SeatbeltProfile;

@@ -96,7 +96,11 @@
 //!   which, on the first thing the agent leaves for the lawyer's git to trust, ends every
 //!   process of the session, then sets it aside into [`Policy::git_set_aside`] (or the matter
 //!   volume's [`Policy::volume_set_aside`]) and reports it as [`Denial::GitSetAside`]; a policy
-//!   without that folder is refused at launch.
+//!   without that folder is refused at launch. The host calls [`git_watch_start_up`] once at
+//!   its start, on a thread of its own, with the same git set-aside folder: it kills what a
+//!   quit or crash left running and runs the final scans those sessions missed. At its quit
+//!   it calls [`git_watch_quit`] with how long it can wait, which kills every running session
+//!   and lets the watches run their final scans.
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
 //!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
 //!   once); the handle's ports,
@@ -188,9 +192,9 @@ pub use denial::{
 pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
-#[cfg(target_os = "macos")]
-pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
+#[cfg(target_os = "macos")]
+pub use macos::{SeatbeltLauncher, git_watch_quit, git_watch_start_up};
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
     INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,

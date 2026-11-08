@@ -2,7 +2,9 @@
 //! in, a bare repository moved in, a repository cloned whole by `clonefile(2)`, a folder of
 //! `HEAD` and `config` moved in, `objects` and `refs` added to a launch `HEAD` folder, and
 //! links out of the matter: each ends the session, then is set aside within 2 s with its record;
-//! a link inside the matter stays.
+//! a link inside the matter stays. Also: the canary's write reaches the stream, the host's
+//! start runs a dead session's final scan, and the launch's walk and the watch count the same
+//! dangling `objects` and `refs` links.
 
 #![expect(
     clippy::disallowed_methods,
@@ -15,9 +17,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::aside::Aside;
-use super::run::start_with;
-use super::state::FileStore;
-use super::{Launch, Session, Watch, fsevents, os};
+use super::run::{Msg, start_with};
+use super::state::{self, FileStore, SessionRecord, Store as _};
+use super::{Fs as _, Launch, Session, Watch, fsevents, host, os};
 use crate::{Clock as _, Denial, DenialSink, GitItem, GitOutcome, SystemClock};
 
 #[derive(Default)]
@@ -88,7 +90,7 @@ impl Live {
         );
         let watch = Watch::new(os::Real, live.matter.clone(), aside, &Launch::default());
         let store = FileStore::new(&live.set_aside, &live.matter);
-        let watching = start_with(watch, session, store, fsevents::start).unwrap();
+        let watching = start_with(watch, session, store, None, fsevents::start).unwrap();
         watching.attach(Arc::new(Running(Arc::clone(&live.gone))));
         live
     }
@@ -296,4 +298,113 @@ fn a_link_out_of_the_matter_is_set_aside_and_one_inside_stays() {
             ..
         }]
     ));
+}
+
+/// A temp folder of its own for a test without a running watch; removed on drop.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Scratch {
+        let root = PathBuf::from(format!("/private/tmp/cgw-{}-{name}", std::process::id()));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        std::fs::create_dir_all(root.join("matter")).unwrap();
+        std::fs::create_dir_all(root.join("set-aside")).unwrap();
+        Scratch(root)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        drop(std::fs::remove_dir_all(&self.0));
+    }
+}
+
+#[test]
+fn the_canarys_write_reaches_the_stream() {
+    let dir = Scratch::new("canary");
+    let set_aside = dir.0.join("set-aside");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stream = fsevents::start(&[dir.0.join("matter"), set_aside.clone()], tx).unwrap();
+    let canary = set_aside.join("watch-canary");
+    os::Real.touch(&canary).unwrap();
+    let clock = SystemClock::new();
+    loop {
+        let left = Duration::from_secs(2).saturating_sub(clock.now());
+        match rx.recv_timeout(left) {
+            Ok(Msg::Events(events)) if events.iter().any(|e| e.path == canary) => break,
+            Ok(_) => {}
+            Err(error) => panic!("no event for the canary within 2 s: {error}"),
+        }
+    }
+    println!("the canary's event came {:?} after its write", clock.now());
+    drop(stream);
+}
+
+#[test]
+fn the_hosts_start_runs_a_dead_sessions_final_scan() {
+    let dir = Scratch::new("start-up");
+    let (matter, set_aside) = (dir.0.join("matter"), dir.0.join("set-aside"));
+    let store = FileStore::new(&set_aside, &matter);
+    store
+        .update(|state| state.root = Some(matter.as_path().into()))
+        .unwrap();
+    // A session of a host that is gone (no process has pid u32::MAX), with no process left.
+    let record = SessionRecord {
+        session: "clauseo-dead-1".to_owned(),
+        host_pid: u32::MAX,
+        host_start: Some(1),
+        probe: format!(
+            "chat.clauseo.session.clauseo-test-dead-{}",
+            std::process::id()
+        ),
+        set_aside: set_aside.as_path().into(),
+        baseline: state::Baseline::default(),
+    };
+    state::record(&store, record).unwrap();
+    git_init(&[], &matter.join("foo"));
+    let notices = Arc::new(Notices::default());
+    let sink = Arc::clone(&notices) as Arc<dyn DenialSink>;
+    assert_eq!(host::start_up(&set_aside, &sink).unwrap(), 1);
+    assert!(!matter.join("foo/.git").exists());
+    assert_eq!(notices.0.lock().unwrap().len(), 1);
+    let sessions = store.update(|state| state.sessions.len()).unwrap();
+    assert_eq!(sessions, 0);
+    // A host start with nothing to do.
+    assert_eq!(host::start_up(&set_aside, &sink).unwrap(), 0);
+}
+
+#[test]
+fn the_walk_at_launch_and_the_watch_count_the_same_dangling_links() {
+    let dir = Scratch::new("dangling");
+    let matter = dir.0.join("matter");
+    std::fs::create_dir(matter.join("r")).unwrap();
+    std::fs::write(matter.join("r/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::os::unix::fs::symlink("../nowhere/objects", matter.join("r/objects")).unwrap();
+    std::os::unix::fs::symlink("../nowhere/refs", matter.join("r/refs")).unwrap();
+    let scan = crate::scan_matter(&matter).unwrap();
+    assert_eq!(
+        scan.bare_repos(),
+        [matter.join("r")],
+        "the policy makes it read-only"
+    );
+    let aside = Aside::new(
+        matter.clone(),
+        dir.0.join("set-aside"),
+        "clauseo-dangling".to_owned(),
+        Arc::new(Notices::default()) as Arc<dyn DenialSink>,
+    );
+    let watch = Watch::new(os::Real, matter.clone(), aside, &Launch::default());
+    let repos: Vec<PathBuf> = watch
+        .baseline()
+        .repos
+        .iter()
+        .map(state::Known::path)
+        .collect();
+    assert_eq!(
+        repos,
+        [matter.join("r")],
+        "the watch leaves the same folder alone"
+    );
 }

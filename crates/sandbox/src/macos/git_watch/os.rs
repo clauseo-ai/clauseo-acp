@@ -13,7 +13,7 @@ use std::time::SystemTime;
 
 use rustix::fs::{CWD, FlockOperation, RenameFlags, flock, renameat_with};
 
-use super::{Fs, Kind, Meta};
+use super::{Fs, Kind, Meta, Stamp};
 
 /// `statfs`'s flag for a volume on this Mac (`<sys/mount.h>`).
 const MNT_LOCAL: u32 = 0x0000_1000;
@@ -51,6 +51,36 @@ impl Fs for Real {
             kind: kind(meta.file_type()),
             id: (meta.dev(), meta.ino()),
         })
+    }
+
+    fn dated(&self, path: &Path) -> Option<(Meta, Stamp)> {
+        let meta = fs::symlink_metadata(path).ok()?;
+        let stamp = [
+            meta.mtime(),
+            meta.mtime_nsec(),
+            meta.ctime(),
+            meta.ctime_nsec(),
+        ];
+        let found = Meta {
+            kind: kind(meta.file_type()),
+            id: (meta.dev(), meta.ino()),
+        };
+        Some((found, stamp))
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the git watch's canary, in its set-aside folder outside the jail"
+    )]
+    fn touch(&self, path: &Path) -> io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
+            .open(path)?;
+        file.write_all(b"canary\n")
     }
 
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {

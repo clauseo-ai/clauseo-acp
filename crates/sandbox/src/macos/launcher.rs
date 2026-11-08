@@ -40,7 +40,10 @@ pub(crate) type LaunchSink = CappedSink<Arc<dyn DenialSink>>;
 /// launch's profile gets a probe name of its own, by which the watch finds the session's
 /// processes even after `setsid`. A launch is refused when the policy names no
 /// [`git_set_aside`](crate::PolicyBuilder::git_set_aside) folder, a set-aside folder can't be
-/// made, or the matter's state refuses it (decision record 0038).
+/// made, or the matter's state refuses it (decision record 0038). The host calls
+/// [`git_watch_start_up`](crate::git_watch_start_up) once at its start and
+/// [`git_watch_quit`](crate::git_watch_quit) at its quit, so a session a quit or crash cut off
+/// still gets its final scan.
 pub struct SeatbeltLauncher {
     policy: Arc<Policy>,
     profile: SeatbeltProfile,

@@ -13,6 +13,10 @@ use super::{
 use crate::GitItem;
 use crate::policy::{name_key, path_key, under};
 
+mod sweep;
+
+pub(crate) use sweep::Sweep;
+
 /// One session's watch of one matter.
 pub(crate) struct Watch<F> {
     fs: F,
@@ -37,6 +41,8 @@ pub(crate) struct Watch<F> {
     /// Every folder counts as one that existed at the start: the scan of a session whose watch
     /// stopped early, whose folders were never kept.
     all_old: bool,
+    /// The 30 s pass's folders and where it stopped.
+    sweep: Sweep,
 }
 
 /// A folder's listing.
@@ -72,6 +78,8 @@ impl<F: Fs> Watch<F> {
             ..Baseline::default()
         };
         let mut folders = HashSet::new();
+        let mut sweep = Sweep::default();
+        let mut repo_dirs: HashSet<PathBuf> = HashSet::new();
         let skip: HashSet<PathBuf> = launch.skip.iter().map(|p| path_key(p)).collect();
         walk(
             &fs,
@@ -81,8 +89,13 @@ impl<F: Fs> Watch<F> {
                 folders.insert(meta.id);
                 if repo_head(entries).is_some() {
                     base.repos.push(Known::new(dir, meta.id));
+                    repo_dirs.insert(dir.to_owned());
                 } else if head_of(entries).is_some() {
                     base.heads.push(Known::new(dir, meta.id));
+                }
+                // The 30 s pass, as a scan, never enters a launch repository.
+                if !dir.ancestors().any(|above| repo_dirs.contains(above)) {
+                    sweep.add(dir, Some(meta.id), fs.dated(dir).map(|(_, stamp)| stamp));
                 }
                 true
             },
@@ -90,6 +103,7 @@ impl<F: Fs> Watch<F> {
         let mut watch = Watch::resume(fs, matter, aside, base);
         watch.folders = folders;
         watch.all_old = false;
+        watch.sweep = sweep;
         watch
     }
 
@@ -117,6 +131,7 @@ impl<F: Fs> Watch<F> {
                 .collect(),
             folders: HashSet::new(),
             all_old: true,
+            sweep: Sweep::default(),
             fs,
             matter,
             aside,
@@ -127,6 +142,11 @@ impl<F: Fs> Watch<F> {
     /// The matter.
     pub(crate) fn matter(&self) -> &Path {
         &self.matter
+    }
+
+    /// The file system.
+    pub(crate) fn fs(&self) -> &F {
+        &self.fs
     }
 
     /// What the launch knew, for the matter's state file.
@@ -284,34 +304,56 @@ impl<F: Fs> Watch<F> {
     /// [`Watch::head`] takes, each link out, and each new `commondir` path.
     fn scan(&self, top: &Path) -> Vec<Item> {
         let mut items = Vec::new();
-        let skip = |dir: &Path, _: Meta| {
-            let key = path_key(dir);
-            self.kept(&self.repos, &key, dir) || self.skip.contains(&key)
-        };
+        let skip = |dir: &Path, _: Meta| self.passed(&path_key(dir), dir);
         walk(&self.fs, top, &skip, &mut |dir, meta, entries| {
-            if let Some(item) = self.head(dir, meta, entries) {
-                let whole = item.1 == GitItem::BareRepo;
-                items.push(item);
-                if whole {
-                    return false;
-                }
-            }
-            for (name, kind) in entries {
-                let path = dir.join(name);
-                let key = path_key(&path);
-                if is_git(name) {
-                    if !self.kept(&self.repos, &key, &path) {
-                        items.push((path, GitItem::DotGit, *kind));
-                    }
-                } else if let Some(item) = self.common_at(&key).filter(|item| item.0 == path) {
-                    items.push(item);
-                } else if *kind == Kind::Link {
-                    items.extend(self.link(&path, *kind));
-                }
-            }
-            true
+            self.folder(dir, meta, entries, &mut items)
         });
         items
+    }
+
+    /// The next stretch of the 30 s pass (`check/sweep.rs`), while the agent may run, until
+    /// `out_of_time` says so (asked before each folder) or the pass reaches its end. Returns
+    /// what the finds ask (a find ends the session) and whether the pass reached its end; the
+    /// next call goes on where this one stopped.
+    pub(crate) fn sweep(&mut self, out_of_time: &dyn Fn() -> bool) -> (Asks, bool) {
+        let mut sweep = std::mem::take(&mut self.sweep);
+        let mut items = Vec::new();
+        let done = sweep::stretch(self, &mut sweep, out_of_time, &mut items);
+        self.sweep = sweep;
+        (self.put(items, Phase::Running), done)
+    }
+
+    /// Whether a scan passes folder `dir` (path key `key`) by: a launch repository, or the
+    /// volume set-aside folder.
+    fn passed(&self, key: &Path, dir: &Path) -> bool {
+        self.kept(&self.repos, key, dir) || self.skip.contains(key)
+    }
+
+    /// Adds what folder `dir` holds itself to `items`: its `HEAD` as [`Watch::head`] takes
+    /// it, each `.git` not the launch's, each link out and each new `commondir` path. Returns
+    /// whether to go below it: not when the folder is taken whole.
+    fn folder(&self, dir: &Path, meta: Meta, entries: &Entries, items: &mut Vec<Item>) -> bool {
+        if let Some(item) = self.head(dir, meta, entries) {
+            let whole = item.1 == GitItem::BareRepo;
+            items.push(item);
+            if whole {
+                return false;
+            }
+        }
+        for (name, kind) in entries {
+            let path = dir.join(name);
+            let key = path_key(&path);
+            if is_git(name) {
+                if !self.kept(&self.repos, &key, &path) {
+                    items.push((path, GitItem::DotGit, *kind));
+                }
+            } else if let Some(item) = self.common_at(&key).filter(|item| item.0 == path) {
+                items.push(item);
+            } else if *kind == Kind::Link {
+                items.extend(self.link(&path, *kind));
+            }
+        }
+        true
     }
 }
 

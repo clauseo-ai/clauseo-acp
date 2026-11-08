@@ -1,11 +1,15 @@
 //! The matter's state file, `<git set-aside>/matters/<hash of the matter>.json`, read and
 //! written under an advisory lock (`flock`) on a `.lock` file beside it. It holds:
 //!
+//! - the matter's path, as bytes, so the host's start can scan it;
 //! - each running session's record: its host process (pid and start), its probe name, its
 //!   set-aside folder and its launch baseline. The session's own watch removes it after its
-//!   final scan. One whose host is gone, or whose watch is not running in its host, never ran
-//!   that scan: the matter's next launch kills what is left of it and runs the scan for it,
-//!   from its baseline, before taking anything in the matter for the lawyer's.
+//!   final scan, unless a process of the session outlived the kill. One whose host is gone, or
+//!   whose watch is not running in its host, never ran that scan (or ran it with a process
+//!   left): the host's next start (`host::start_up`), or the matter's next launch, whichever
+//!   comes first, kills what is left of it and runs the scan for it from its baseline. The
+//!   record stays while a process of it is left, or while the matter can't be found (a disk
+//!   not plugged in), so the next start or launch tries again.
 //! - the items a final scan could neither move nor neutralise: while one is still there, the
 //!   matter's launches are refused with a plain reason.
 
@@ -103,6 +107,9 @@ pub(crate) struct MatterState {
     /// The matter, for a person reading the file.
     #[serde(default)]
     pub(crate) matter: String,
+    /// The matter's path as bytes, for the host's start.
+    #[serde(default)]
+    pub(crate) root: Option<Bytes>,
     #[serde(default)]
     pub(crate) sessions: Vec<SessionRecord>,
     #[serde(default)]
@@ -119,8 +126,9 @@ pub(crate) trait Store: Send + 'static {
 pub(crate) struct Host<'a> {
     /// Whether a recorded session never ran its final scan.
     pub(crate) dead: &'a dyn Fn(&SessionRecord) -> bool,
-    /// Ends every process of a dead session by its probe name, waiting a little.
-    pub(crate) kill: &'a dyn Fn(&str),
+    /// Ends every process of a dead session by its probe name, waiting a little; false when
+    /// one is left.
+    pub(crate) kill: &'a dyn Fn(&str) -> bool,
 }
 
 /// At launch, under the matter's lock: refuses while an item a final scan left is still in
@@ -134,6 +142,7 @@ pub(crate) fn begin<F: Fs + Clone, S: Store>(
 ) -> io::Result<()> {
     store.update(|state| {
         state.matter = matter.display().to_string();
+        state.root = Some(matter.into());
         state
             .stuck
             .retain(|stuck| fs.meta(&stuck.path.path()).is_some());
@@ -148,29 +157,81 @@ pub(crate) fn begin<F: Fs + Clone, S: Store>(
                 stuck.reason
             )));
         }
-        let (dead, live): (Vec<_>, Vec<_>) = std::mem::take(&mut state.sessions)
-            .into_iter()
-            .partition(|record| (host.dead)(record));
-        state.sessions = live;
-        for record in dead {
-            tracing::warn!(
-                session = record.session, matter = %matter.display(),
-                "a session of this matter never ran its final git scan; running it now"
-            );
-            (host.kill)(&record.probe);
-            let aside = Aside::new(
-                matter.to_owned(),
-                record.set_aside.path(),
-                record.session.clone(),
-                Arc::clone(notices),
-            );
-            let mut watch = Watch::resume(fs.clone(), matter.to_owned(), aside, record.baseline);
-            let asks = watch.full_scan(Phase::Ended);
-            debug_assert!(!asks.end, "a final scan never asks to end");
-            add_stuck(state, watch.take_stuck());
-        }
+        finish_dead(state, fs, matter, notices, host);
         Ok(())
     })?
+}
+
+/// At the host's start, under the matter's lock: kills what is left of each dead session and
+/// runs its final scan, as a launch would. Returns how many sessions' scans ran.
+pub(crate) fn sweep_dead<F: Fs + Clone, S: Store>(
+    store: &S,
+    fs: &F,
+    notices: &Arc<dyn DenialSink>,
+    host: &Host<'_>,
+) -> io::Result<usize> {
+    store.update(|state| {
+        let Some(matter) = state.root.as_ref().map(Bytes::path) else {
+            // Only a file no launch of this version wrote: kill, keep the records.
+            for record in state.sessions.iter().filter(|record| (host.dead)(record)) {
+                let _ = (host.kill)(&record.probe);
+            }
+            return 0;
+        };
+        finish_dead(state, fs, &matter, notices, host)
+    })
+}
+
+/// Kills what is left of each dead session of `state` and runs its final scan. A record stays
+/// while a process of it is left or the matter can't be found. Returns how many scans ran.
+fn finish_dead<F: Fs + Clone>(
+    state: &mut MatterState,
+    fs: &F,
+    matter: &Path,
+    notices: &Arc<dyn DenialSink>,
+    host: &Host<'_>,
+) -> usize {
+    let (dead, live): (Vec<_>, Vec<_>) = std::mem::take(&mut state.sessions)
+        .into_iter()
+        .partition(|record| (host.dead)(record));
+    state.sessions = live;
+    let mut scanned = 0;
+    for record in dead {
+        let all_gone = (host.kill)(&record.probe);
+        if fs.meta(matter).is_none() {
+            tracing::warn!(
+                session = record.session, matter = %matter.display(),
+                "a dead session's matter can't be found; its final git scan waits"
+            );
+            state.sessions.push(record);
+            continue;
+        }
+        tracing::warn!(
+            session = record.session, matter = %matter.display(),
+            "a session of this matter never ran its final git scan; running it now"
+        );
+        let aside = Aside::new(
+            matter.to_owned(),
+            record.set_aside.path(),
+            record.session.clone(),
+            Arc::clone(notices),
+        );
+        let mut watch = Watch::resume(
+            fs.clone(),
+            matter.to_owned(),
+            aside,
+            record.baseline.clone(),
+        );
+        let asks = watch.full_scan(Phase::Ended);
+        debug_assert!(!asks.end, "a final scan never asks to end");
+        add_stuck(state, watch.take_stuck());
+        scanned += 1;
+        if !all_gone {
+            // The next start or launch kills and scans again.
+            state.sessions.push(record);
+        }
+    }
+    scanned
 }
 
 /// Records session `record` as running.
@@ -178,10 +239,14 @@ pub(crate) fn record<S: Store>(store: &S, record: SessionRecord) -> io::Result<(
     store.update(|state| state.sessions.push(record))
 }
 
-/// After session `session`'s final scan: its record goes, and what it left `stuck` stays.
-pub(crate) fn end<S: Store>(store: &S, session: &str, stuck: Vec<Stuck>) {
+/// After session `session`'s final scan: its record goes unless `keep` (a process of it may
+/// still run, so the next start or launch kills and scans again), and what it left `stuck`
+/// stays.
+pub(crate) fn end<S: Store>(store: &S, session: &str, stuck: Vec<Stuck>, keep: bool) {
     let saved = store.update(|state| {
-        state.sessions.retain(|record| record.session != session);
+        if !keep {
+            state.sessions.retain(|record| record.session != session);
+        }
         add_stuck(state, stuck);
     });
     if let Err(error) = saved {
@@ -213,10 +278,14 @@ impl FileStore {
             name.push(char::from_digit(u32::from(b >> 4), 16).unwrap_or('0'));
             name.push(char::from_digit(u32::from(b & 0xf), 16).unwrap_or('0'));
         }
-        let dir = set_aside.join("matters");
+        FileStore::at(&set_aside.join("matters").join(format!("{name}.json")))
+    }
+
+    /// The state file `file` (`<hash>.json`), with its lock beside it.
+    pub(crate) fn at(file: &Path) -> FileStore {
         FileStore {
-            file: dir.join(format!("{name}.json")),
-            lock: dir.join(format!("{name}.lock")),
+            file: file.to_owned(),
+            lock: file.with_extension("lock"),
         }
     }
 }

@@ -21,6 +21,13 @@
 //!   event re-checks its parent folder; a new or renamed-in folder is scanned whole. A dropped
 //!   or must-scan event, a changed root, or a path outside the matter rescans the matter. A
 //!   stream that cannot start falls back to a full scan every 2 s, logged.
+//! - A canary checks the stream (`run.rs`): every 10 s a file in the set-aside folder, on the
+//!   matter's volume and out of the agent's reach, is rewritten; when its event doesn't come
+//!   within 2 s the stream counts as silent, and the matter is scanned whole every 2 s until
+//!   it comes again.
+//! - Every 30 s a pass lists the folders whose modification or status-change time changed
+//!   since the last pass (`check/sweep.rs`), at most 250 ms of work at a time, going on where
+//!   it stopped. What it finds ends the session as an event's find does.
 //! - What was there at launch is left alone while it keeps its file ID: the `.git`s the
 //!   policy's walk found (the profile denies every write to them), the links it found leading
 //!   out, and the repositories, `HEAD` folders and folders of the watch's own walk.
@@ -37,16 +44,20 @@
 //!   removed once its target is recorded. If that fails too, the matter's next launch is
 //!   refused until the item is gone.
 //! - A small state file per matter (`state.rs`) records each running session's launch
-//!   baseline. A session whose host quit before its final scan gets that scan at the matter's
-//!   next launch, after its surviving processes are killed.
+//!   baseline. A session whose host quit or crashed before its final scan, or whose processes
+//!   outlived the kill, gets that scan at the host's next start ([`start_up`]) or the
+//!   matter's next launch, after its surviving processes are killed by its probe. At the
+//!   host's quit, [`quit`] kills every running session by its probe and waits a little for
+//!   the final scans.
 //! - Each set-aside reaches the launch's sink as [`Denial::GitSetAside`](crate::Denial),
 //!   uncapped.
 //! - Scans never follow a link and never enter a network volume (`os::local`); a matter on
-//!   one is never scanned, which is logged.
+//!   one is never scanned, which is logged. That is a known gap: an agent can leave a
+//!   repository in a matter on a network volume and nothing sets it aside.
 //!
 //! The pieces: [`Watch`] decides (`check.rs`), `aside.rs` moves and records, `run.rs` drives
-//! the watch from the stream and the session, `state.rs` keeps the per-matter record, `os.rs`
-//! is the real file system and `fsevents.rs` the stream.
+//! the watch from the stream and the session, `state.rs` keeps the per-matter record, `host.rs`
+//! has the host's start and quit, `os.rs` is the real file system and `fsevents.rs` the stream.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -59,6 +70,7 @@ use crate::{LinkKind, PathRule, Policy};
 mod aside;
 mod check;
 mod fsevents;
+mod host;
 mod os;
 mod run;
 mod state;
@@ -68,6 +80,7 @@ mod tests;
 mod tests_live;
 
 pub(crate) use check::Watch;
+pub use host::{quit, start_up};
 pub(crate) use run::{Session, start};
 
 /// The `FSEvents` flags the watch reads.
@@ -123,10 +136,18 @@ pub(crate) struct Meta {
     pub(crate) id: (u64, u64),
 }
 
+/// A folder's modification and status-change times, seconds and nanoseconds each: a change
+/// of its entries moves both, and no one can set the second back.
+pub(crate) type Stamp = [i64; 4];
+
 /// The file system the watch reads and changes: `os::Real`, or the tests' fake.
 pub(crate) trait Fs: Send {
     /// The entry at `path`, never through a link; `None` when it is missing or unreadable.
     fn meta(&self, path: &Path) -> Option<Meta>;
+    /// [`Fs::meta`] with the entry's [`Stamp`], from the same read.
+    fn dated(&self, path: &Path) -> Option<(Meta, Stamp)>;
+    /// Writes the file at `path`, made if missing, never through a link: the canary.
+    fn touch(&self, path: &Path) -> io::Result<()>;
     /// The names in folder `dir`, each with its kind.
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>>;
     /// Where `path` leads with every link followed, canonical; `None` when it leads nowhere.

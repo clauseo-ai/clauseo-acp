@@ -1,8 +1,9 @@
 //! The lawyer-side git watch with a real jail (decision record 0038): no repository is made in
 //! the session's temp folder or notes; the first find ends every process of the session, one
 //! that left the group with `setsid` included, before anything moves; and a matter on another
-//! volume sets aside on that volume, in a `.clauseo` folder the agent can't reach; and nothing
-//! git reads is made at a launch repository's `commondir` target.
+//! volume sets aside on that volume, in a `.clauseo` folder the agent can't reach; nothing
+//! git reads is made at a launch repository's `commondir` target; and the session's probe
+//! can't be shed from inside (no nested `sandbox-exec`, no `launchctl submit`).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -191,4 +192,29 @@ fn a_matter_on_another_volume_sets_aside_on_that_volume() {
     );
     assert!(std::fs::symlink_metadata(&to).unwrap().is_symlink());
     assert!(std::fs::symlink_metadata(m1.join("out")).is_err());
+}
+
+/// The probe that finds a session's processes can't be shed from inside the jail: a nested
+/// `sandbox-exec` can't apply a profile of its own, and `launchctl submit` can't hand launchd
+/// a job, which would run outside every jail.
+#[test]
+fn the_session_probe_cant_be_shed_from_inside() {
+    let w = World::new();
+    let (launcher, _) = launcher(w.builder().build().unwrap());
+    let m1 = w.at("m1");
+    let nested = "/usr/bin/sandbox-exec -p '(version 1)(allow default)' /bin/sleep 61";
+    sh(&launcher, &m1, nested, &[]).assert_refused();
+    let label = format!("chat.clauseo.test.submit-{}", std::process::id());
+    let submit = r#"exec /bin/launchctl submit -l "$1" -- /bin/sleep 61"#;
+    let out = sh(&launcher, &m1, submit, &[&label]);
+    let listed = run_outside("/bin/launchctl", &["list", &label], &m1);
+    if listed.code == Some(0) {
+        drop(run_outside("/bin/launchctl", &["remove", &label], &m1));
+    }
+    assert_ne!(
+        listed.code,
+        Some(0),
+        "launchd took a job from the jail: {out:#?}"
+    );
+    assert_ne!(out.code, Some(0), "{out:#?}");
 }

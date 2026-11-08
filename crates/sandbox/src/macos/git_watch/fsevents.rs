@@ -1,6 +1,7 @@
 //! The git watch's `FSEvents` stream: a minimal binding to `CoreServices`' `FSEventStream*`,
 //! run on a serial dispatch queue of its own, with file events
-//! (`kFSEventStreamCreateFlagFileEvents`), no defer, the root watched and a 0.1 s latency. Each
+//! (`kFSEventStreamCreateFlagFileEvents`), no defer, the roots watched and a 0.1 s latency: the
+//! matter, and the canary's folder when that is outside it (`run.rs`). Each
 //! callback's batch goes down the session's channel as [`Msg::Events`]. The workspace has no
 //! `FSEvents` crate; this is the one place the watch calls into `CoreServices`.
 
@@ -11,7 +12,7 @@
 
 use std::ffi::{CStr, c_char, c_void};
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::ptr;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -154,10 +155,14 @@ extern "C" fn callback(
     }
 }
 
-/// Creates and starts the stream on `root`, sending its batches down `tx`.
-pub(crate) fn start(root: &Path, tx: Sender<Msg>) -> Result<Stream, String> {
-    let bytes = root.as_os_str().as_bytes();
-    let len = isize::try_from(bytes.len()).map_err(|error| error.to_string())?;
+/// Creates and starts one stream on `roots`, sending its batches down `tx`.
+pub(crate) fn start(roots: &[PathBuf], tx: Sender<Msg>) -> Result<Stream, String> {
+    let mut lens = Vec::with_capacity(roots.len());
+    for root in roots {
+        let len = root.as_os_str().as_bytes().len();
+        lens.push(isize::try_from(len).map_err(|error| error.to_string())?);
+    }
+    let count = isize::try_from(roots.len()).map_err(|error| error.to_string())?;
     let info = Arc::into_raw(Arc::new(tx));
     let context = Context {
         version: 0,
@@ -170,19 +175,28 @@ pub(crate) fn start(root: &Path, tx: Sender<Msg>) -> Result<Stream, String> {
     // here except the stream and the queue, which `Stream` owns. `start`'s own count of `info`
     // is released at the end: the stream retained it if it was made.
     let made = unsafe {
-        let string = CFStringCreateWithBytes(ptr::null(), bytes.as_ptr(), len, UTF8, 0);
-        if string.is_null() {
-            release(info.cast());
-            return Err("the matter's path is not UTF-8".to_owned());
+        let mut values = Vec::with_capacity(roots.len());
+        for (root, len) in roots.iter().zip(&lens) {
+            let bytes = root.as_os_str().as_bytes();
+            let string = CFStringCreateWithBytes(ptr::null(), bytes.as_ptr(), *len, UTF8, 0);
+            if string.is_null() {
+                for value in &values {
+                    CFRelease(*value);
+                }
+                release(info.cast());
+                return Err(format!("{} is not UTF-8", root.display()));
+            }
+            values.push(string);
         }
-        let values = [string];
         let array = CFArrayCreate(
             ptr::null(),
             values.as_ptr(),
-            1,
+            count,
             (&raw const kCFTypeArrayCallBacks).cast(),
         );
-        CFRelease(string);
+        for value in &values {
+            CFRelease(*value);
+        }
         if array.is_null() {
             release(info.cast());
             return Err("CFArrayCreate failed".to_owned());

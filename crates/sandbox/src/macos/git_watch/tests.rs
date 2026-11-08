@@ -1,7 +1,8 @@
 //! The git watch's decisions against a fake file system, a fake stream and a fake session: no
 //! `FSEvents`, no thread except where [`start_with`]'s own is the point. `shapes.rs` has the
-//! repository and link shapes, `neutral.rs` what happens to an item that can't move, and
-//! `state.rs` the matter's state file.
+//! repository and link shapes, `neutral.rs` what happens to an item that can't move,
+//! `state.rs` the matter's state file, and `backstop.rs` the canary, the 30 s pass and the
+//! host's quit.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use super::run::{Flow, Msg, RESCAN_EVERY, Runner, start_with};
 use super::{Fs as _, Phase, flags};
 use crate::{Clock as _, Denial, GitOutcome};
 
+mod backstop;
 mod fake;
 mod neutral;
 mod shapes;
@@ -203,9 +205,9 @@ fn without_a_stream_the_matter_is_scanned_every_two_seconds() {
 fn a_stream_that_does_not_start_falls_back_to_the_rescan() {
     let fs = FakeFs::new();
     let (watch, notices) = watch(&fs, &[]);
-    let failing = |_: &Path, _: Sender<Msg>| -> Result<(), String> { Err("no".to_owned()) };
+    let failing = |_: &[PathBuf], _: Sender<Msg>| -> Result<(), String> { Err("no".to_owned()) };
     let store = MemStore::default();
-    let watching = start_with(watch, "s".to_owned(), store, failing).unwrap();
+    let watching = start_with(watch, "s".to_owned(), store, None, failing).unwrap();
     let session = FakeSession {
         dies: true,
         ..FakeSession::default()
@@ -314,11 +316,11 @@ fn a_watch_thread_that_panics_ends_the_session() {
     let fs = FakeFs::new();
     let (watch, _notices) = watch(&fs, &[]);
     let (tx, rx) = std::sync::mpsc::channel::<Sender<Msg>>();
-    let source = move |_: &Path, events: Sender<Msg>| -> Result<(), String> {
+    let source = move |_: &[PathBuf], events: Sender<Msg>| -> Result<(), String> {
         tx.send(events).unwrap();
         Ok(())
     };
-    let watching = start_with(watch, "p".to_owned(), MemStore::default(), source).unwrap();
+    let watching = start_with(watch, "p".to_owned(), MemStore::default(), None, source).unwrap();
     let session = FakeSession::default();
     watching.attach(Arc::new(session.clone()));
     let events = rx.recv().unwrap();
