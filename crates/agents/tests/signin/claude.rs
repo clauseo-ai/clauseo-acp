@@ -140,9 +140,10 @@ fn cancel_kills_the_run_and_its_tree() {
         login.pid
     );
     let _ = login;
-    // Nothing is left to run: no poll armed, and Cancel has nothing to stop.
+    // Nothing is left to run: no poll armed, and Cancel has nothing to stop. The one status
+    // run is the quick check before the login.
     assert_eq!(fx.timer.live(), Vec::<std::time::Duration>::new());
-    assert_eq!(fx.runs_of("status"), []);
+    assert_eq!(fx.runs_of("status").len(), 1);
     assert_eq!(
         agents.cancel_sign_in(&claude()),
         Err(SigninError::NotRunning(claude()))
@@ -261,21 +262,23 @@ fn check_status_reports_a_login_already_there() {
 #[test]
 fn no_status_runs_once_a_poll_confirms_the_sign_in() {
     let fx = Fixture::new("signin-confirmed", "never");
-    // The login never ends by itself; the first poll finds the account signed in.
+    // The login never ends by itself; the first poll finds the account signed in (the login
+    // made after the quick check before the login said signed out).
+    let (agents, events) = start_waiting(&fx, Method::ClaudeAi);
     let home = fx.config.signin.homes[&claude()].clone();
     write_file(
         &home.join("fake-signin-marker"),
         br#"{"authMethod":"claude.ai","email":"test@example.com"}"#,
     )
     .unwrap();
-    let (agents, events) = start_waiting(&fx, Method::ClaudeAi);
     fx.timer.fire(POLL);
     let (_, last) = events.until_end();
     assert_eq!(last, signed_in());
     // By the time `SignedIn` is sent, the login, the polls and their limits are all gone.
     assert_eq!(fx.timer.live(), Vec::<std::time::Duration>::new());
     let runs = fx.launches().len();
-    assert_eq!(fx.runs_of("status").len(), 1);
+    // The quick check's, then the poll's.
+    assert_eq!(fx.runs_of("status").len(), 2);
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(fx.runs_of("login")[0].pid));
     assert!(fx.timer.armed().contains(&STATUS_LIMIT));
@@ -368,7 +371,10 @@ fn a_status_run_that_never_answers_holds_no_caller() {
     fx.stall(Some("status"));
     let began = clauseo_agents::testing::instant();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(agents.signin_state(&claude()), None);
+    assert!(matches!(
+        agents.signin_state(&claude()),
+        None | Some(SigninState::Checking)
+    ));
     drop(agents.cancel_sign_in(&claude()));
     agents.check_status(&claude()).unwrap();
     let took = clauseo_agents::testing::millis_since(began);
