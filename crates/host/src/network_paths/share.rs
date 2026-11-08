@@ -4,10 +4,10 @@
 //! strictly: one spelling of the matter folder, no `.` or `..` anywhere, names compared with
 //! ASCII case folding only, so any doubt leaves the path a network path an agent named.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::resolve::{Disk, Walked, walk};
-use super::{NetEnv, refused_windows_name};
+use super::{NetEnv, WalkedPath, refused_windows_name};
 
 /// Where a path an agent named (absolute, or taken from the matter folder `matter`) leads, when
 /// it may be handed to the file system: only when the network-safe walk vouches for it (no
@@ -15,11 +15,11 @@ use super::{NetEnv, refused_windows_name};
 /// [`walk`] on `disk`, fail-closed). `None` for one that lies by its text in `matter` kept on a
 /// share: that one is the lawyer's own, judged by its text alone, untouched.
 ///
-/// The caller touches the walked path it gets back, never the agent's text again: canonicalising
-/// the text a second time would resolve it anew, after the check (a link swapped in since then
-/// would be followed). What remains is the window between the walk and the caller's own open;
-/// closing it needs a no-follow open per name (a follow-up).
-pub(crate) fn touchable(path: &Path, matter: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
+/// The caller touches the walked path it gets back, never the agent's text again (canonicalising
+/// the text a second time would resolve it anew, after the check), and only through
+/// [`super::open_no_follow`]: a link swapped in between the walk and the touch is refused, never
+/// followed.
+pub(crate) fn touchable(path: &Path, matter: &Path, disk: &Disk<'_>) -> Option<WalkedPath> {
     let joined = matter.join(path);
     let net = disk.net;
     if refused_windows_name(path, net)
@@ -30,7 +30,7 @@ pub(crate) fn touchable(path: &Path, matter: &Path, disk: &Disk<'_>) -> Option<P
         return None;
     }
     match walk(&joined, disk) {
-        Walked::Local(walked) => Some(walked),
+        Walked::Local(walked) => Some(WalkedPath::new(walked)),
         Walked::Refused => None,
     }
 }

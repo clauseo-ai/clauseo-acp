@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::codex::{patch_targets, text_has_codex_part};
 use super::words::{Escape, Segments, candidates, shell_segments};
 use super::{Ignored, MAX_WORDS, Reach, Targets, existing_resolved, lexical};
+use crate::network_paths::{Access, Kind, WalkedPath, open_no_follow};
 
 /// The most folders [`Folders`] keeps; past it, the folder is unknown.
 const MAX_FOLDERS: usize = 16;
@@ -128,11 +129,14 @@ pub(super) fn shell_targets(
                 names_codex |= text_has_codex_part(candidate);
                 let candidate = native(candidate, part.escape);
                 for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
-                    for path in walked_resolutions(&path, reach) {
-                        let file = (path, word.clone());
-                        // The walked path, its links already followed: not followed again.
+                    for walked in walked_resolutions(&path, reach) {
+                        let file = (walked.as_path().to_path_buf(), word.clone());
+                        // The walked path, its links already followed: opened with none
+                        // followed.
                         if !files.contains(&file)
-                            && std::fs::symlink_metadata(&file.0).is_ok_and(|m| m.is_file())
+                            && open_no_follow(&walked, Access::Look)
+                                .and_then(|opened| opened.kind())
+                                .is_ok_and(|kind| kind == Kind::File)
                         {
                             files.push(file);
                         }
@@ -159,8 +163,8 @@ pub(super) fn shell_targets(
 /// Unix, as the OS reads it), and, when it has a `.` or `..` part, with those taken by their
 /// text first (`mkdir -p D && echo x > D/../Contract.docx`, or a `D` that never exists). A place
 /// the walk does not vouch for (a network location, one it can't look at) is left out.
-pub(super) fn walked_resolutions(path: &Path, reach: &Reach) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = reach.walked(path).into_iter().collect();
+pub(super) fn walked_resolutions(path: &Path, reach: &Reach) -> Vec<WalkedPath> {
+    let mut found: Vec<WalkedPath> = reach.walked(path).into_iter().collect();
     let normal = lexical(path);
     if normal != path
         && let Some(walked) = reach.walked(&normal)

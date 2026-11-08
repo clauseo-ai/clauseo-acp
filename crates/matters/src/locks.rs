@@ -9,9 +9,12 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 use crate::refuse::{Fold, keys_by};
 
 mod beside;
+mod folder;
 pub(crate) mod stale;
 
 pub use beside::OwnersBeside;
+pub use folder::DocumentFolder;
+pub(crate) use folder::PathFolder;
 
 /// What shows that a file is open in another program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +55,17 @@ pub fn held_open_beside(
     held_open_by(folder, path, Some(owner_files))
 }
 
+/// [`held_open_beside`] for the document `name` in a folder the caller opened
+/// ([`DocumentFolder`]: the host's no-follow open), `owner_files` its `~$` entries: every look
+/// goes through `folder`, never by a path a link swapped in since could redirect.
+pub fn held_open_in(
+    folder: &impl DocumentFolder,
+    name: &str,
+    owner_files: &[String],
+) -> Option<HeldOpen> {
+    held_in(folder, name, Some(owner_files))
+}
+
 /// Windows' `ERROR_ACCESS_DENIED`.
 #[cfg(any(windows, test))]
 const ACCESS_DENIED: i32 = 5;
@@ -67,29 +81,39 @@ const MAX_LISTED: usize = 20_000;
 
 /// [`held_open`], with the parent's owner files given (`Some`) or listed here (`None`).
 fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> Option<HeldOpen> {
+    let (parent, name) = parent_and_name(folder, path)?;
+    held_in(&PathFolder(&parent), name, given)
+}
+
+/// The folder `path` (a matter path under `folder`) sits in, and its last name.
+fn parent_and_name<'a>(folder: &Path, path: &'a MatterPath) -> Option<(PathBuf, &'a str)> {
     let absolute: PathBuf = path
         .as_str()
         .split('/')
         .fold(folder.to_path_buf(), |acc, part| acc.join(part));
-    let (Some(parent), Some(name)) = (absolute.parent(), path.as_str().rsplit('/').next()) else {
-        return None;
-    };
+    let parent = absolute.parent()?.to_path_buf();
+    Some((parent, path.as_str().rsplit('/').next()?))
+}
+
+/// [`held_open`] for the document `name` in `folder`, every look at `folder`'s entries by
+/// name ([`DocumentFolder`]).
+fn held_in(folder: &impl DocumentFolder, name: &str, given: Option<&[String]>) -> Option<HeldOpen> {
     let exact = owner_names(name)
         .into_iter()
-        .filter(|owner| parent.join(owner).symlink_metadata().is_ok());
+        .filter(|owner| folder.has(owner));
     for owner in exact {
-        if !stale::is_stale(parent, &owner, &absolute) {
+        if !stale::is_stale(folder, &owner, name) {
             return Some(HeldOpen::OwnerFile(owner));
         }
     }
-    if let Some(owner) = owner_in_another_form(parent, name, given)
-        && !stale::is_stale(parent, &owner, &absolute)
+    if let Some(owner) = owner_in_another_form(folder, name, given)
+        && !stale::is_stale(folder, &owner, name)
     {
         return Some(HeldOpen::OwnerFile(owner));
     }
     #[cfg(windows)]
     {
-        if let Err(err) = crate::write::open_exclusive(&absolute)
+        if let Err(err) = folder.open(name, true)
             && held_at_read(&err)
         {
             return Some(HeldOpen::SharingViolation);
@@ -176,10 +200,19 @@ pub fn matter_path_in(folder: &Path, path: &Path) -> Option<MatterPath> {
 /// [`held_open_at`] for a path a caller already resolved, absolute, every link in it followed
 /// and every `..` taken (the host's network-safe walk): it is compared as it is with `folder`'s
 /// canonical path, never canonicalised again, so a link swapped in after the caller's check is
-/// not followed by a second resolve. Only `folder` (the lawyer's) is canonicalised.
-pub fn held_open_resolved(folder: &Path, resolved: &Path) -> Option<(MatterPath, HeldOpen)> {
+/// not followed by a second resolve. Only `folder` (the lawyer's) is canonicalised. The
+/// document's folder is then opened by `open_folder` (the host's no-follow open, which refuses
+/// a link anywhere on the path) and every look goes through it ([`DocumentFolder`]); when it
+/// can't be opened (missing, a link swapped in, any error), nothing shows the file held.
+pub fn held_open_resolved<F: DocumentFolder>(
+    folder: &Path,
+    resolved: &Path,
+    open_folder: impl FnOnce(&Path) -> std::io::Result<F>,
+) -> Option<(MatterPath, HeldOpen)> {
     let (root, inside) = resolved_in(folder, resolved, Fold::Safety)?;
-    held_open(&root, &inside).map(|held| (inside, held))
+    let (parent, name) = parent_and_name(&root, &inside)?;
+    let opened = open_folder(&parent).ok()?;
+    held_in(&opened, name, None).map(|held| (inside, held))
 }
 
 /// [`matter_path_in`] for a path a caller already resolved ([`held_open_resolved`]): compared as
@@ -265,10 +298,14 @@ pub(crate) fn locked(folder: &Path, paths: &[MatterPath]) -> Vec<MatterPath> {
 /// (NFD), each composed. Ext4 and NTFS tell the forms apart, so the exact stats miss an owner
 /// file that Word or a sync made in the other form (`क़` as U+0958 or as `क` + U+093C), and a
 /// write would race the program holding it. Compares against `given` (the parent's `~$`
-/// entries, listed by the caller) or else one `read_dir` of `parent` of at most [`MAX_LISTED`]
+/// entries, listed by the caller) or else one listing of `parent` of at most [`MAX_LISTED`]
 /// entries, only when the exact stats found nothing and the name holds a non-ASCII character;
 /// its first match by name. A failed listing finds nothing (fails open).
-fn owner_in_another_form(parent: &Path, name: &str, given: Option<&[String]>) -> Option<String> {
+fn owner_in_another_form(
+    parent: &impl DocumentFolder,
+    name: &str,
+    given: Option<&[String]>,
+) -> Option<String> {
     if name.is_ascii() {
         return None;
     }
@@ -278,11 +315,9 @@ fn owner_in_another_form(parent: &Path, name: &str, given: Option<&[String]>) ->
             .filter(|entry| entry.starts_with("~$"))
             .map(|entry| (fold_name(entry), entry.clone()))
             .collect(),
-        None => std::fs::read_dir(parent)
-            .ok()?
-            .take(MAX_LISTED)
-            .flatten()
-            .filter_map(|entry| entry.file_name().into_string().ok())
+        None => parent
+            .names(MAX_LISTED)?
+            .into_iter()
             .filter(|entry| entry.starts_with("~$"))
             .map(|entry| (fold_name(&entry), entry))
             .collect(),

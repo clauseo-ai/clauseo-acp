@@ -25,6 +25,10 @@
 //! Names a deny matches against an ASCII name (`/net`, `.nofollow`) fold as a case-insensitive
 //! volume does ([`name_folds_to`]); mount names, which are not ASCII, compare NFD-normalised and
 //! folded ([`fold_name`]).
+//!
+//! A path that passes is touched only as the network-safe walk resolved it ([`touchable`] gives
+//! a [`WalkedPath`]) and only through [`open_no_follow`], which refuses a link on it: one an
+//! agent swapped in after the walk is never followed.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -33,6 +37,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization as _;
 
 pub(crate) use ascii_fold::name_folds_to;
+pub(crate) use no_follow::{Access, Kind, WalkedPath, held_open_walked, open_no_follow, open_path};
 pub(crate) use share::{touchable, under_share_matter};
 pub(crate) use windows_names::refused_windows_name;
 
@@ -42,6 +47,7 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 mod macos_rules;
+pub(crate) mod no_follow;
 pub(crate) mod resolve;
 mod share;
 #[cfg(test)]

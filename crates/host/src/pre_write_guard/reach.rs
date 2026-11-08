@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::MAX_RESOLVED;
 use crate::network_paths::resolve::Disk;
-use crate::network_paths::{NetEnv, touchable};
+use crate::network_paths::{NetEnv, WalkedPath, touchable};
 
 /// The network rules and the matter folder a guard run checks paths against.
 pub(super) struct Reach {
@@ -28,15 +28,16 @@ impl Reach {
 
     /// Where `path` (absolute) leads, when the guard may stat, resolve or open it: the walked
     /// path, which the guard uses from then on and never resolves the agent's text again
-    /// ([`touchable`]). `None` for one it may not touch, and for one longer than
+    /// ([`touchable`]), and opens only with no link followed
+    /// ([`crate::network_paths::open_no_follow`]). `None` for one it may not touch, and for one longer than
     /// [`MAX_RESOLVED`] bytes, which is not walked (its time grows with its length) and so is
     /// judged by its text alone.
-    pub(super) fn walked(&self, path: &Path) -> Option<PathBuf> {
+    pub(super) fn walked(&self, path: &Path) -> Option<WalkedPath> {
         self.walked_on(path, &Disk::resolved(&self.net))
     }
 
     /// [`Self::walked`], walking on `disk`.
-    fn walked_on(&self, path: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
+    fn walked_on(&self, path: &Path, disk: &Disk<'_>) -> Option<WalkedPath> {
         if path.as_os_str().len() > MAX_RESOLVED {
             return None;
         }
@@ -129,7 +130,9 @@ mod tests {
             net: &local.net,
         };
         assert_eq!(
-            local.walked_on(Path::new("/home/a/matter/l/../l/spa.docx"), &disk),
+            local
+                .walked_on(Path::new("/home/a/matter/l/../l/spa.docx"), &disk)
+                .map(|walked| walked.as_path().to_path_buf()),
             Some(PathBuf::from("/home/a/matter/Deals/spa.docx"))
         );
         assert_eq!(local.walked_on(Path::new(r"\\evil\s\x"), &disk), None);

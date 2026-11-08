@@ -170,6 +170,8 @@ use codex::{has_codex_part, in_codex_folder, patch_targets};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::Reach;
+
+use crate::network_paths::held_open_walked;
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
 pub(crate) use words::Escape;
@@ -377,7 +379,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         paths
             .iter()
             .flat_map(|path| walked_resolutions(&base.join(path), &reach))
-            .find_map(|path| clauseo_matters::held_open_resolved(&folder, &path))
+            .find_map(|path| held_open_walked(&folder, &path))
             .map(|(path, _)| path)
     };
     match &targets {
@@ -474,7 +476,9 @@ const MAX_RESOLVED: usize = 4096;
 /// for (a network location, or one it can't look at), is only normalised by its text
 /// ([`lexical`]), never touched.
 fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
-    reach.walked(path).unwrap_or_else(|| lexical(path))
+    reach
+        .walked(path)
+        .map_or_else(|| lexical(path), |walked| walked.as_path().to_path_buf())
 }
 
 /// `path` with `.` parts dropped and each `..` taking the part before it off.

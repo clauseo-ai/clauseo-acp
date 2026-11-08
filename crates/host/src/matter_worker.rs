@@ -46,7 +46,7 @@ pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath
         let Some(walked) = network_paths::touchable(Path::new(&path), folder, &disk) else {
             continue;
         };
-        if let Some(found) = matter_path_of_resolved(folder, &walked) {
+        if let Some(found) = matter_path_of_resolved(folder, walked.as_path()) {
             inside.insert(found);
         }
     }
