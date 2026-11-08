@@ -20,6 +20,7 @@ use base64::engine::general_purpose::STANDARD;
 use clauseo_host::UpdaterError;
 use minisign_verify::{PublicKey, Signature};
 
+use super::arch::Target;
 use super::install::LIFECYCLE;
 
 /// The product name in an installer's name: `tauri.conf.json`'s `productName`, which Tauri's
@@ -123,14 +124,12 @@ pub(super) fn update_file_name(
     }
 }
 
-/// [`update_file_name`] for this build, with the macOS name in force ([`MAC_NAME`]).
-pub(super) fn expected_update_file(version: &str) -> Option<String> {
-    update_file_name(
-        MAC_NAME,
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        version,
-    )
+/// [`update_file_name`] for `target`'s platform, the installer the check that found the update
+/// asked for (`arch.rs`): this build's own, or Windows on arm64. The macOS name in force is
+/// [`MAC_NAME`].
+pub(super) fn expected_update_file(version: &str, target: Target) -> Option<String> {
+    let (os, arch) = target.platform();
+    update_file_name(MAC_NAME, os, arch, version)
 }
 
 /// Checks that `signature` (Tauri's form: base64 of minisign's `.sig` text) signs `bytes` under
@@ -187,16 +186,17 @@ pub(super) fn field<'a>(comment: &'a str, name: &str) -> Option<&'a str> {
 
 /// The adapter's gate before a download is saved and before it is installed: refuses `bytes`
 /// unless `signature` signs them under `pubkey` (none: no key is set) as this platform's file of
-/// `version`. A refusal is logged on the lifecycle target with the expected and found names
-/// (never the signature) and is the host's signature failure, so the update fails as any bad
-/// signature does.
+/// `version` for `target`. A refusal is logged on the lifecycle target with the expected and
+/// found names (never the signature) and is the host's signature failure, so the update fails
+/// as any bad signature does.
 pub(super) fn bind(
     pubkey: Option<&str>,
     signature: &str,
     version: &str,
     bytes: &[u8],
+    target: Target,
 ) -> Result<(), UpdaterError> {
-    let expected = expected_update_file(version);
+    let expected = expected_update_file(version, target);
     let checked = match (&expected, pubkey) {
         (None, _) => Err(FileBindingError::NoPlatform),
         (Some(_), None) => Err(FileBindingError::Unreadable),

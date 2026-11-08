@@ -159,6 +159,7 @@ pub(super) fn updater<R: Runtime>(
         Choice::Fake(_) => return None,
     };
     let kind = super::install_kind::detect();
+    super::arch::log_per_machine(kind, super::arch::emulated_on_arm64());
     Some(Arc::new(super::plugin::PluginUpdater::new(
         app.clone(),
         source,

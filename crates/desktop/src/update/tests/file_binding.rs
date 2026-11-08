@@ -9,6 +9,7 @@ use clauseo_settings::Locations;
 use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair as _};
 
+use super::super::arch::Target;
 use super::super::file_binding::{
     self, FileBindingError, MAC_NAME, MacName, check_update_file, expected_update_file, field,
     installer_arch, mac_archive_arch, update_file_name,
@@ -113,7 +114,7 @@ fn each_platform_expects_its_own_installer_name() {
         );
     }
     assert_eq!(
-        expected_update_file(VERSION),
+        expected_update_file(VERSION, Target::Native),
         update_file_name(
             MAC_NAME,
             std::env::consts::OS,
@@ -326,8 +327,14 @@ fn the_gate_refuses_another_file_and_logs_both_names() {
     let key = TestKey::new();
     let bytes = b"an installer";
     let sandbox = key.sign(bytes, &comment("clauseo-sandbox-setup.exe", VERSION));
-    let refused = file_binding::bind(Some(&key.public()), &sandbox, VERSION, bytes);
-    let Some(expected) = expected_update_file(VERSION) else {
+    let refused = file_binding::bind(
+        Some(&key.public()),
+        &sandbox,
+        VERSION,
+        bytes,
+        Target::Native,
+    );
+    let Some(expected) = expected_update_file(VERSION, Target::Native) else {
         // Linux installs no update: every file is refused.
         assert!(
             matches!(refused, Err(UpdaterError::Signature(_))),
@@ -343,11 +350,11 @@ fn the_gate_refuses_another_file_and_logs_both_names() {
     );
     let right = key.sign(bytes, &comment(&expected, VERSION));
     assert_eq!(
-        file_binding::bind(Some(&key.public()), &right, VERSION, bytes),
+        file_binding::bind(Some(&key.public()), &right, VERSION, bytes, Target::Native),
         Ok(())
     );
     assert!(matches!(
-        file_binding::bind(None, &right, VERSION, bytes),
+        file_binding::bind(None, &right, VERSION, bytes, Target::Native),
         Err(UpdaterError::Signature(_))
     ));
     log.flush();
@@ -417,7 +424,7 @@ fn macos_names_its_archive_in_either_form_and_the_bundle_form_is_in_force() {
 /// pre-release these come from). The artifacts are not in the repo, so the file's own signature
 /// cannot be checked here; `minisign-verify` checks the global signature only together with it,
 /// so it is checked with ring over the same bytes minisign signs: the signature, then the comment.
-fn real_trusted_comment(name: &str) -> String {
+pub(super) fn real_trusted_comment(name: &str) -> String {
     let path = crate_dir().join("tests/fixtures/updater").join(name);
     let text = decode(std::fs::read_to_string(path).unwrap().trim());
     let lines: Vec<&str> = text.lines().collect();
