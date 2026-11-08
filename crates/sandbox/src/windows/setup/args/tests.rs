@@ -429,3 +429,46 @@ fn stop_takes_no_argument_at_all() {
         assert!(parsed(&[near]).is_err(), "{near:?}");
     }
 }
+
+#[test]
+fn sweep_tasks_takes_no_argument_at_all() {
+    assert_eq!(parsed(&["--sweep-tasks"]), Ok(Mode::SweepTasks));
+    // No SID, no path, no pid, no flag: the sweep reads the pool from the record alone.
+    for extra in [
+        "S-1-5-21-1-2-3-1001",
+        "--owner-sid",
+        "--data-dir",
+        r"C:\Users\x",
+        "--parent",
+        "1234",
+        "--per-machine",
+        "--uninstall",
+        "--sweep-tasks",
+        "--stop",
+        "--refresh",
+        "",
+    ] {
+        assert!(parsed(&["--sweep-tasks", extra]).is_err(), "{extra:?}");
+        assert!(parsed(&["--sweep-tasks", extra, "x"]).is_err(), "{extra:?}");
+    }
+    for other in [
+        "--remove",
+        "--refresh",
+        "--stop",
+        "--set-up",
+        "--reclaim",
+        "--adopt",
+    ] {
+        assert!(parsed(&[other, "--sweep-tasks"]).is_err(), "{other}");
+    }
+    // Only the exact flag.
+    for near in [
+        "--Sweep-Tasks",
+        "--sweep-tasks=",
+        "-sweep-tasks",
+        "sweep-tasks",
+        "--sweep",
+    ] {
+        assert!(parsed(&[near]).is_err(), "{near:?}");
+    }
+}

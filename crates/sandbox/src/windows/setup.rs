@@ -132,6 +132,8 @@ mod shared;
 pub mod stop;
 pub mod strays;
 #[cfg(any(windows, test))]
+pub mod sweep;
+#[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
 #[cfg(windows)]
