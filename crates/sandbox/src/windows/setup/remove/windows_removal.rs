@@ -7,13 +7,15 @@
 //! The record's `DataDir` is a path the owner can influence. Before any use it is held to the
 //! plain drive path `--data-dir` is held to (`args::data_dir_of`), then resolved one component
 //! at a time with no junction or link (`private_dir::resolve_folder`), and only its final path
-//! is used. Either way the folder and its `sandbox` folder must be owned as the rest of the
-//! sandbox accepts (`sids::owner_allowed`): by the record's owner, Administrators or
-//! SYSTEM, since an elevated process makes Administrators the owner of what it creates (the
-//! built-in Administrator, or UAC off). For an administrator acting for an absent owner, the
-//! ledger is only read, and a matter folder is held to the same rule (`admin_target`): all the
-//! removal does there is take our own pool and group entries, and our Low label, off. Causes
-//! name the kind of a failure, never the path.
+//! is used. Either way the folders are held to `remove::owners`: the folder to set-up's rule
+//! (the owner, or Administrators for an owner in Administrators, read by
+//! `admin_member::in_administrators`), its `sandbox` folder to the rest of the sandbox's (the
+//! owner, Administrators or SYSTEM), since an elevated process makes Administrators the owner
+//! of what it creates (the built-in Administrator, or UAC off). For an administrator acting for
+//! an absent owner, the ledger is only read, and a matter folder is held to the `sandbox`
+//! folder's rule (`admin_target`): all the removal does there is take our own pool and group
+//! entries off, and our Low label (`ledger_work` says when). Causes name the kind of a failure,
+//! never the path.
 //!
 //! The owner is acted as only with a standard user's token (`remove::acting_token`): the
 //! parent's own, or a copy lowered to Administrators deny-only and Medium integrity when the
@@ -133,7 +135,8 @@ fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, Mac
     let Some((folder, folder_owner)) = resolve(&plain, "the record's data folder")? else {
         return Ok(None);
     };
-    owners::data_folder(&folder_owner, owner)?;
+    let in_admins = || admin_member::in_administrators(owner).unwrap_or(false);
+    owners::data_folder(&folder_owner, owner, in_admins)?;
     let sandbox = folder.join(SANDBOX_DIR);
     match resolve(&sandbox, "the data folder's sandbox folder")? {
         None => Ok(None),

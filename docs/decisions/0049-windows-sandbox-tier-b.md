@@ -729,9 +729,11 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   writing there; that is accepted, since the tool keeps its records consistent at every step and
   reinstalling then uninstalling recovers.
 - **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
-- **The data folder's owner.** On both paths `DataDir` and its `sandbox\` must be owned by the
-  record's owner, Administrators or SYSTEM: the rule `sandbox\` is made and repaired by
-  (`sids::owner_allowed`). An elevated process makes Administrators the owner of what it
+- **The data folder's owner.** On both paths `sandbox\` must be owned by the record's owner,
+  Administrators or SYSTEM: the rule `sandbox\` is made and repaired by
+  (`sids::owner_allowed`). `DataDir` itself is held to set-up's rule (below): the owner, or
+  Administrators only when the record's owner is in Administrators (`NetUserGetLocalGroups`),
+  never SYSTEM. An elevated process makes Administrators the owner of what it
   creates (the built-in Administrator, or any admin with UAC off), and requiring the owner alone
   failed those removals with exit 4, the record, the group and the folder left (GitHub run
   42464948955). Any other owner (a pool user, another account, Everyone) still refuses. The

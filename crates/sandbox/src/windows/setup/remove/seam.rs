@@ -82,7 +82,7 @@ pub trait Removal {
         Self: Sized;
     /// As the owner (it takes [`Removal::as_owner`] itself when called outside it): the
     /// record's `data_dir` checked as `--data-dir` is (a plain drive path; resolved with no
-    /// junction or link on the way; a folder the owner owns), then the ledger in its final
+    /// junction or link on the way; owned as `remove::owners` allows), then the ledger in its final
     /// path, trusting `trusted`. `None` when the folder or the ledger is missing: nothing to
     /// take back. Sets [`Removal::surroundings`] to that folder.
     fn owners_ledger(
@@ -100,9 +100,9 @@ pub trait Removal {
     /// deletes nothing in the owner's folders (K1). Nothing checked yet is `Ok`, nothing touched.
     fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError>;
     /// As this process, for a per-machine removal the owner didn't ask for: the record's
-    /// `data_dir` checked as [`Removal::owners_ledger`] checks it, except that the folder and
-    /// its `sandbox` folder must be owned by `owner` (the record's), then the ledger read, and
-    /// never written. `None` when the folder or the ledger is missing.
+    /// `data_dir` checked as [`Removal::owners_ledger`] checks it, with the folder and its
+    /// `sandbox` folder owned as `remove::owners` allows for `owner` (the record's), then the
+    /// ledger read, and never written. `None` when the folder or the ledger is missing.
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
