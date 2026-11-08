@@ -531,12 +531,20 @@ Then set it up again from Clauseo, signed in as the other account.
   `%PROGRAMFILES%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`. If AppLocker or Software
   Restriction Policies block it (`ERROR_ACCESS_DISABLED_BY_POLICY`, 1260), the Safe workspace
   can't be set up: allow that file by path.
-- Do not use **hash** rules: every release changes every hash. **Publisher** rules cannot name
-  Clauseo while it is unsigned (section 2).
+- For Clauseo's own programs, do not use **hash** rules: every release changes every hash.
+  **Publisher** rules cannot name Clauseo while it is unsigned (section 2).
 - Coming (stage D): Clauseo will download Node and the agents into each user's data folder,
-  `%LOCALAPPDATA%\ai.clauseo.desktop\`, which default AppLocker rules block. Allow that path, or
-  use the IT-installed runtime under Program Files once its policy key lands (`install.bundle`,
-  section 6, "Coming").
+  `%LOCALAPPDATA%\ai.clauseo.desktop\`, which default AppLocker rules block. Don't allow that
+  folder by path: the user can write there. Instead, in order of preference:
+  - **publisher** rules for the signed runtime and tools: Node's `node.exe` is signed by the
+    OpenJS Foundation, Codex's `codex.exe` by OpenAI (Check on the laptop pass: both
+    publishers). Use **hash** rules for anything unsigned, such as `rg.exe`; those hashes
+    change each time Clauseo downloads a new version;
+  - or the IT-installed runtime under Program Files once its policy key lands (`install.bundle`,
+    section 6, "Coming");
+  - only as a last resort, a path rule for the user's `agents` folder. Anything the user can
+    write there could then run. Scope it to `agents\runtime\` and `agents\<agent>\install\`
+    in the data folder, never the whole data folder.
 - Coming (stage C): on Windows, Clauseo's sandbox runs each agent as a separate local user
   (task S15). A policy that forbids local accounts leaves agents running without it, shown in the
   app as "Not protected".
