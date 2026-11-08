@@ -2119,16 +2119,20 @@ registration makes the reader close the pipe within 250 ms. The watcher then has
 and exits by itself after its 3 s grace.
 
 **An attempt** (`supervise.rs`, over the `Watch` trait; `os.rs` is the Windows glue):
-1. starts `\Clauseo\SandboxWatch` (`refresh::request_watch`);
-2. polls `HKLM\SOFTWARE\Clauseo\SandboxWatch` every 100 ms, for up to 5 s, and opens only a
+1. reads IT's off switch, `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\DenialReporter` (64-bit
+   view). A `DWORD` 0 means the task is never started: the reporter is `Down(TurnedOff)` ("turned
+   off by policy"), logged once, and the host-side source reports alone. It is read again at
+   each retry, so a change applies within a minute;
+2. starts `\Clauseo\SandboxWatch` (`refresh::request_watch`);
+3. polls `HKLM\SOFTWARE\Clauseo\SandboxWatch` every 100 ms, for up to 5 s, and opens only a
    `PipeName` that `protocol::is_pipe_name` accepts. It reads the name on a key handle whose
    owner it first checks is LOCAL SYSTEM;
-3. asks the task once more after 2 s if no pipe is open yet. The task ignores a run while one is
+4. asks the task once more after 2 s if no pipe is open yet. The task ignores a run while one is
    running (`IGNORE_NEW`), so a request made while an old watcher was exiting is lost, and a
    watcher that exited 74 wants a new one;
-4. opens the pipe with `GENERIC_READ` alone and `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`,
+5. opens the pipe with `GENERIC_READ` alone and `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`,
    so a fake server can't act as the lawyer;
-5. checks the server before reading a byte (`verify::check_server`, the check SandboxSetUp's
+6. checks the server before reading a byte (`verify::check_server`, the check SandboxSetUp's
    client makes in #733; once both are on one branch they become one function):
    - the proof is the pipe's owner, LOCAL SYSTEM (`GetSecurityInfo` on the handle);
    - backing it up: session 0, and `GetNamedPipeServerProcessId`, whose process's user in the
@@ -2155,6 +2159,11 @@ order before the launch (M1) is kept free of anything else. Row C2 measures what
   `display_safe_path` (`denial.rs`), which escapes C0 and C1 controls, DEL, and bidi or
   invisible formatting (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+061C, U+FEFF) as
   `\u{202E}`. The macOS reporter doesn't use it yet.
+- The watcher's breaker sends `{"paused":{"secs":n,"reason":"rate"}}` during heavy disk
+  activity. Every registered launch gets `Denial::ReporterPaused { secs }` once (appended to
+  `Denial`), which says file refusals aren't reported for that long and the host-side source
+  still works. It passes `CappedSink` uncapped, and the host's counting sink counts it as no
+  refusal. A second `paused` changes nothing; `resumed`, or a new connection, clears the state.
 - `{"dropped":n}` carries no SID. It goes to the launch of the last refusal routed, or to every
   launch when none has been routed yet. The sinks are ticked once a second.
 
@@ -2171,6 +2180,7 @@ unelevated:
 - It models the DACL only: not the agent's Low label, nor the token's restricting SIDs.
 
 **The fallback.** The reporter is `Down` and logs each reason once until it is live again when:
+- IT turned it off;
 - the task isn't registered;
 - no name comes within 5 s, naming the watcher's last result: 68 is `ProviderFull`, and 71
   (no record) and 74 are named in the log;
@@ -2197,6 +2207,8 @@ only into `Denial`.
 | C5 | Squatter: a pool user serves the stale name after C4; the client refuses it (owner), logs once, and connects to the next run's name | open |
 | C6 | `would_deny` agrees with a real open by the pool user's Medium token on 20 paths (lawyer profile, another matter, data dir, Program Files write); a mapped network drive and a UNC path give `None` with no SMB traffic | open |
 | C7 | `unknown` resolution: `notepad` saving to a read-only folder (write) and `type` of a refused file (read) come out as such | open |
+| C8 | Off switch: set `DenialReporter` to `DWORD` 0 by GPO; a launch starts no `SandboxWatch` run (Task Scheduler history), logs "turned off by policy" once; removing it brings the reporter back within a minute | open |
+| C9 | Breaker: `npm ci` in the matter until the watcher pauses; each open session's sink gets one `ReporterPaused`, and refusals come again after `resumed` | open |
 
 ### The launcher (PR6 interface)
 
