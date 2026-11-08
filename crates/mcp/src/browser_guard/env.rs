@@ -307,7 +307,7 @@ pub(crate) fn build(
 /// guard's own value when it has one (matched without case, first match wins); otherwise a
 /// default: `SystemRoot` the Windows directory from `dirs`, `windir` the resolved `SystemRoot`,
 /// `ComSpec` `cmd.exe` in the system directory from `dirs` (else `<SystemRoot>\System32`),
-/// `PATHEXT` Windows' own. `PATH` is `<SystemRoot>\System32;<SystemRoot>`. Winsock needs
+/// `PATHEXT` Windows' own. `PATH` is that system directory, then `<SystemRoot>`. Winsock needs
 /// `SystemRoot`; agent-browser, Chrome and the relay need `windir` and `ComSpec` to run a shell,
 /// and `PATHEXT` to find `.cmd` and `.exe` programs.
 fn windows_defaults(source: &Source, dirs: &WindowsDirs) -> Vec<(&'static str, OsString)> {
@@ -333,7 +333,7 @@ fn windows_defaults(source: &Source, dirs: &WindowsDirs) -> Vec<(&'static str, O
     let pathext = source
         .get(os, "PATHEXT")
         .map_or_else(|| OsString::from(DEFAULT_PATHEXT), OsStr::to_owned);
-    let mut path = windows_join(&root, "System32");
+    let mut path = system;
     path.push(";");
     path.push(&root);
     vec![

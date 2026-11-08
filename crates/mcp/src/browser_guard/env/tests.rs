@@ -397,6 +397,23 @@ fn windows_defaults_fall_back_to_c_windows_without_injected_folders() {
 }
 
 #[test]
+fn path_and_comspec_use_the_reported_system_directory_even_when_it_is_elsewhere() {
+    let dirs = WindowsDirs {
+        windows: Some(PathBuf::from(r"D:\Win")),
+        system: Some(PathBuf::from(r"E:\Sys")),
+    };
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        &dirs,
+    )
+    .unwrap();
+    assert_eq!(get(&env, "ComSpec"), r"E:\Sys\cmd.exe");
+    assert_eq!(get(&env, "PATH"), r"E:\Sys;D:\Win");
+}
+
+#[test]
 fn windows_defaults_use_each_injected_folder_and_else_the_system_root() {
     let windows_only = WindowsDirs {
         windows: Some(PathBuf::from(r"D:\Win")),
@@ -445,7 +462,8 @@ fn windows_defaults_keep_the_guards_own_values() {
     assert_eq!(get(&env, "windir"), r"E:\Dir");
     assert_eq!(get(&env, "ComSpec"), r"E:\Shell\cmd.exe");
     assert_eq!(get(&env, "PATHEXT"), ".EXE");
-    assert_eq!(get(&env, "PATH"), r"E:\Root\System32;E:\Root");
+    // PATH starts with the system directory Windows reported, as ComSpec's default would.
+    assert_eq!(get(&env, "PATH"), r"D:\Win\System32;E:\Root");
 }
 
 #[test]
