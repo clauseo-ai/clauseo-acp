@@ -138,7 +138,7 @@ fn build<R: Runtime, M: Manager<R>>(
         .use_https_scheme(true)
         .inner_size(width, height)
         .center();
-    let builder = window_frame::with_frame(builder);
+    let builder = window_size::with_ground(window_frame::with_frame(builder));
     let builder = csp::on_scripts(builder, manager);
     let builder = crate::navigation::guard(builder, manager);
     #[cfg(feature = "e2e")]

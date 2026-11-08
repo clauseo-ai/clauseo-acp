@@ -36,6 +36,8 @@ crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 # The UI language in HKCU for the installer and uninstaller: the registry calls.
 crates/desktop/src/ui_language/windows.rs - unsafe_code
+# One RegGetValueW of HKCU's AppsUseLightTheme before the main window exists (the first frame's colour).
+crates/desktop/src/window_size/windows_theme.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.

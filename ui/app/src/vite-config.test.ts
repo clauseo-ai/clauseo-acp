@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { brotliCompressSync } from "node:zlib";
 import { createBuilder, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
@@ -6,11 +7,22 @@ import {
   BARE_CHUNKS,
   SETTINGS_BARE_CHUNKS,
   devCsp,
+  inlineStyleHashes,
   metaCsp,
   PAGES,
   PRELOADED_CHUNKS,
   unwrapPreloads,
 } from "../vite.config.ts";
+
+/** `text`'s SHA-256, base64: a CSP hash source's value, found apart from vite.config.ts's own. */
+const base64Sha256 = (text: string) =>
+  btoa(
+    String.fromCharCode(
+      ...(
+        createHash("sha256").update(new TextEncoder().encode(text)).digest("hex").match(/../g) ?? []
+      ).map((pair) => Number.parseInt(pair, 16)),
+    ),
+  );
 
 /** A test that runs a whole Vite build: several seconds on a CI runner, past vitest's 5 s default. */
 const BUILD = { timeout: 60_000 };
@@ -390,6 +402,16 @@ test("the meta CSP is the production CSP less frame-ancestors, which a meta tag 
   expect(meta.split("; ").length).toBe(16);
 });
 
+test("the meta CSP adds a page's inline style hashes to style-src, and only there", () => {
+  const production = tauriConf.app.security.csp;
+  const hashes = inlineStyleHashes("<head><style>a{b:c}</style></head><body></body>");
+  expect(hashes).toEqual([`'sha256-${base64Sha256("a{b:c}")}'`]);
+  expect(inlineStyleHashes("<head></head>")).toEqual([]);
+  const meta = metaCsp(production, hashes);
+  expect(meta.replace(` ${hashes[0]}`, "")).toBe(metaCsp(production));
+  expect(meta).toContain(`; style-src 'self' ${hashes[0]}; `);
+});
+
 /** What only the copy review page holds: none of it may reach the release build. */
 const REVIEW_ONLY = ["U1-01", "copy-approvals"];
 
@@ -415,8 +437,14 @@ test(
   BUILD,
   async () => {
     const { html, chunks, files, pages } = await builtWith();
-    expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
-    // the settings window's page under the same policy; no other page is built (gallery, parts, review)
+    // the room's page under the policy plus exactly the hash of its one inline <style>, the first paint as built
+    const firstPaint = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
+    expect(firstPaint).toContain("#first-mark");
+    const hash = `'sha256-${base64Sha256(firstPaint)}'`;
+    expect(inlineStyleHashes(html)).toEqual([hash]);
+    expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp, [hash]));
+    // the settings window's page under the policy as it is (no inline style); no other page is built (gallery, parts,
+    // review)
     expect(unescape(META.exec(pages["settings.html"]?.html ?? "")?.[1] ?? "")).toBe(
       metaCsp(tauriConf.app.security.csp),
     );
@@ -469,7 +497,9 @@ test(
     expect(config.build.outDir).toBe("dist-probe");
     const { html, chunks, pages } = await builtWith("probe");
     expect(Object.keys(pages)).toEqual(["index.html"]);
-    expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
+    expect(unescape(META.exec(html)?.[1] ?? "")).toBe(
+      metaCsp(tauriConf.app.security.csp, inlineStyleHashes(html)),
+    );
     const entry = chunks.find((c) => c.isEntry);
     const modules = entry?.moduleIds ?? [];
     expect(modules.some((id) => id.endsWith("/src/room/probe-main.tsx"))).toBe(true);
