@@ -16,7 +16,7 @@
 //! - [`unregister_task`] and [`remove_staging`], which `--remove --uninstall` calls.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
-//!   (`IRegisteredTask::Run`), which the owner's read entry allows.
+//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -391,8 +391,9 @@ pub fn request_pool_stop() -> bool {
     }
 }
 
-/// Runs `task` now, as whoever calls it, through the owner's read entry: `Run` asks no access
-/// of its own, and the Task Scheduler starts a task for a caller with read access.
+/// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,
+/// `rules::task_sddl`): the Task Scheduler starts a task only for a caller with execute access,
+/// and refused the owner holding `FR` alone (CI run 42416074600).
 fn run_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
