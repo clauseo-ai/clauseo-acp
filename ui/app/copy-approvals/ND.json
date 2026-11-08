@@ -208,5 +208,245 @@
     "status": "provisional",
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-22": {
+    "en": "Allow",
+    "hi": "अनुमति दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-23": {
+    "en": "Don't allow",
+    "hi": "अनुमति न दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-24": {
+    "en": "Remember for this matter",
+    "hi": "इस मामले के लिए याद रखें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-25": {
+    "en": "Allow once",
+    "hi": "एक बार अनुमति दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-26": {
+    "en": "Always allow for this matter",
+    "hi": "इस मामले के लिए हमेशा अनुमति दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-27": {
+    "en": "Let Clauseo read this folder?",
+    "hi": "Clauseo को यह फ़ोल्डर पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-28": {
+    "en": "Let Clauseo read this file?",
+    "hi": "Clauseo को यह फ़ाइल पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-29": {
+    "en": "While working on {matter}, Clauseo was stopped from reading {path}, which is outside the matter's folder.",
+    "hi": "{matter} पर काम करते समय Clauseo को {path} पढ़ने से रोका गया, जो मामले के फ़ोल्डर के बाहर है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-30": {
+    "en": "Let Clauseo read a folder from another matter?",
+    "hi": "Clauseo को किसी दूसरे मामले का फ़ोल्डर पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-31": {
+    "en": "Let Clauseo read a file from another matter?",
+    "hi": "Clauseo को किसी दूसरे मामले की फ़ाइल पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-32": {
+    "en": "This folder belongs to another matter, {other}.",
+    "hi": "यह फ़ोल्डर दूसरे मामले {other} का है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-33": {
+    "en": "This file belongs to another matter, {other}.",
+    "hi": "यह फ़ाइल दूसरे मामले {other} की है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-34": {
+    "en": "While working on {matter}, Clauseo was stopped from reading {path}.",
+    "hi": "{matter} पर काम करते समय Clauseo को {path} पढ़ने से रोका गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-35": {
+    "en": "If you allow it, Clauseo can read it but not change it.",
+    "hi": "अनुमति देने पर Clauseo इसे पढ़ सकता है, पर बदल नहीं सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-36": {
+    "en": "Let Clauseo open this site?",
+    "hi": "Clauseo को यह वेबसाइट खोलने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-37": {
+    "en": "Clauseo was stopped from opening {host}.",
+    "hi": "Clauseo को {host} खोलने से रोका गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-38": {
+    "en": "{host} shares its server with other sites, so allowing it may also let Clauseo open some of them.",
+    "hi": "{host} का सर्वर दूसरी वेबसाइटों के साथ साझा है, इसलिए इसकी अनुमति देने पर Clauseo उनमें से कुछ को भी खोल सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-39": {
+    "en": "Switch off the Safe workspace for {matter}?",
+    "hi": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-40": {
+    "en": "Without the Safe workspace, Clauseo can read and change files anywhere on this computer while it works on {matter}, without asking first. You can switch it back on from the matter at any time.",
+    "hi": "सुरक्षित कार्यक्षेत्र के बिना, {matter} पर काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है। आप इसे कभी भी मामले से फिर से चालू कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-41": {
+    "en": "Let Clauseo read the folder you picked?",
+    "hi": "Clauseo को आपका चुना हुआ फ़ोल्डर पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-42": {
+    "en": "Let Clauseo read the file you picked?",
+    "hi": "Clauseo को आपकी चुनी हुई फ़ाइल पढ़ने दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-43": {
+    "en": "While working on {matter}, Clauseo will be able to read {path}.",
+    "hi": "{matter} पर काम करते समय Clauseo {path} पढ़ सकेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-44": {
+    "en": "Choose a folder for {matter}",
+    "hi": "{matter} के लिए एक फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
+  },
+  "ND-45": {
+    "en": "Choose a file for {matter}",
+    "hi": "{matter} के लिए एक फ़ाइल चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (R18)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (R18)"
   }
 }

@@ -85,6 +85,13 @@ fn hindi_picks_the_hindi_words() {
     assert_eq!(en.cancel, "Cancel");
 }
 
+/// The review id of the key at `index` in [`Key::ALL`]: ND-01 to ND-15, then ND-22 on, since
+/// ND-16 to ND-21 are the dialog shown when `WebView2` is missing (`webview2/words.rs`).
+fn review_id(index: usize) -> String {
+    let n = if index < 15 { index + 1 } else { index + 7 };
+    format!("ND-{n:02}")
+}
+
 /// Every word here, in both languages, appears verbatim in its review home,
 /// `ui/app/src/review/registry-nd.tsx`, under its id, so what the reviewers read is what Rust
 /// draws.
@@ -93,8 +100,20 @@ fn the_words_are_the_reviewed_copy() {
     let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../ui/app/src/review/registry-nd.tsx");
     let registry = std::fs::read_to_string(&registry).unwrap();
-    for (n, key) in (1..).zip(written_in_hindi()) {
-        let id = format!("ND-{n:02}");
+    let approvals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/app/copy-approvals/ND.json");
+    let approvals: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&approvals).unwrap()).unwrap();
+    assert_eq!(review_id(14), "ND-15");
+    assert_eq!(review_id(15), "ND-22");
+    for (index, key) in Key::ALL.into_iter().enumerate() {
+        if PENDING_HINDI.contains(&key) {
+            continue;
+        }
+        let id = review_id(index);
+        let approved = &approvals[&id];
+        assert_eq!(approved["en"], text(Language::En, key), "{id} in ND.json");
+        assert_eq!(approved["hi"], text(Language::Hi, key), "{id} in ND.json");
         assert!(registry.contains(&format!("\"{id}\"")), "no {id}");
         for language in [Language::En, Language::Hi] {
             let quoted = format!("\"{}\"", text(language, key));

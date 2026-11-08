@@ -2,8 +2,9 @@
 //! the chooser's folder, and the setup confirms (the firm's endpoint, the account switch), in
 //! English and Hindi by the app's language (`ui.language`). `{name}` stands for the plan's name
 //! (Claude, Codex) and `{url}` for the endpoint, which the caller fills ([`fill`]). Their
-//! review home is `ui/app/src/review/registry-nd.tsx` (ND-01 to ND-15), where the Hindi is
-//! provisional; a test fails when the two disagree.
+//! review home is `ui/app/src/review/registry-nd.tsx` (ND-01 to ND-15, and R18's widening
+//! questions and picker, `ask/words.rs`, ND-22 to ND-45), where the Hindi is provisional; a test
+//! fails when the two disagree.
 
 use clauseo_protocol::Language;
 
@@ -40,55 +41,55 @@ pub(crate) enum Key {
     SwitchMessage,
     /// ND-15: its accepting button.
     SwitchOk,
-    // R18's widening questions and picker (`ask/words.rs`): provisional English, no review id
-    // yet, and English in the Hindi table until the app thread writes it ([`PENDING_HINDI`]).
-    /// R18, the widening questions' allowing button (macOS `NSAlert` and Windows).
+    // R18's widening questions and picker (`ask/words.rs`), ND-22 to ND-45: ND-16 to ND-21 are
+    // the WebView2 dialog's (`webview2/words.rs`).
+    /// ND-22, R18: the widening questions' allowing button (macOS `NSAlert` and Windows).
     AskAllow,
-    /// R18, their refusing button.
+    /// ND-23, R18: their refusing button.
     AskRefuse,
-    /// R18, their Remember checkbox (macOS `NSAlert` and Windows).
+    /// ND-24, R18: their Remember checkbox (macOS `NSAlert` and Windows).
     AskRemember,
-    /// R18, where there is no checkbox (Linux, and macOS until `NSAlert` lands): allow this time.
+    /// ND-25, R18: with no checkbox (Linux, and macOS until `NSAlert` lands): allow this time.
     AskAllowOnce,
-    /// R18, there: allow and remember.
+    /// ND-26, R18: there: allow and remember.
     AskAllowAlways,
-    /// R18, a refused folder's title.
+    /// ND-27, R18: a refused folder's title.
     AskFolderTitle,
-    /// R18, a refused file's title.
+    /// ND-28, R18: a refused file's title.
     AskFileTitle,
-    /// R18, their message; `{matter}` is the matter's name, `{path}` the folder or file.
+    /// ND-29, R18: their message; `{matter}` is the matter's name, `{path}` the folder or file.
     AskOutsideMessage,
-    /// R18, the title for a folder of another matter.
+    /// ND-30, R18: the title for a folder of another matter.
     AskOtherFolderTitle,
-    /// R18, the title for a file of another matter.
+    /// ND-31, R18: the title for a file of another matter.
     AskOtherFileTitle,
-    /// R18, the first line for a folder of another matter; `{other}` is that matter's name.
+    /// ND-32, R18: the first line for a folder of another matter; `{other}` is that matter's name.
     AskOtherFolderNote,
-    /// R18, the first line for a file of another matter.
+    /// ND-33, R18: the first line for a file of another matter.
     AskOtherFileNote,
-    /// R18, the line after it.
+    /// ND-34, R18: the line after it.
     AskOtherMessage,
-    /// R18, the last line for another matter's folder or file.
+    /// ND-35, R18: the last line for another matter's folder or file.
     AskReadOnlyNote,
-    /// R18, a refused site's title.
+    /// ND-36, R18: a refused site's title.
     AskSiteTitle,
-    /// R18, its message; `{host}` is the site.
+    /// ND-37, R18: its message; `{host}` is the site.
     AskSiteMessage,
-    /// R18, the line added for a site on a shared server.
+    /// ND-38, R18: the line added for a site on a shared server.
     AskSharedHostingNote,
-    /// R18, switching protection off: the title.
+    /// ND-39, R18: switching the Safe workspace off: the title.
     AskSwitchOffTitle,
-    /// R18, its message.
+    /// ND-40, R18: its message.
     AskSwitchOffMessage,
-    /// R18, confirming a picked folder: the title.
+    /// ND-41, R18: confirming a picked folder: the title.
     AskPickFolderTitle,
-    /// R18, confirming a picked file: the title.
+    /// ND-42, R18: confirming a picked file: the title.
     AskPickFileTitle,
-    /// R18, their message (after the other matter's line, when it is another's).
+    /// ND-43, R18: their message (after the other matter's line, when it is another's).
     AskPickMessage,
-    /// R18, the folder picker's title.
+    /// ND-44, R18: the folder picker's title.
     PickFolderTitle,
-    /// R18, the file picker's title.
+    /// ND-45, R18: the file picker's title.
     PickFileTitle,
 }
 
@@ -188,13 +189,14 @@ fn en(key: Key) -> &'static str {
         Key::AskSiteTitle => "Let Clauseo open this site?",
         Key::AskSiteMessage => "Clauseo was stopped from opening {host}.",
         Key::AskSharedHostingNote => {
-            "{host} shares its server with other sites, so allowing it may let Clauseo open them \
-             too."
+            "{host} shares its server with other sites, so allowing it may also let Clauseo open \
+             some of them."
         }
-        Key::AskSwitchOffTitle => "Switch protection off for {matter}?",
+        Key::AskSwitchOffTitle => "Switch off the Safe workspace for {matter}?",
         Key::AskSwitchOffMessage => {
-            "Without protection, Clauseo can read and change files anywhere on this computer and \
-             open any site while it works on {matter}."
+            "Without the Safe workspace, Clauseo can read and change files anywhere on this \
+             computer while it works on {matter}, without asking first. You can switch it back on \
+             from the matter at any time."
         }
         Key::AskPickFolderTitle => "Let Clauseo read the folder you picked?",
         Key::AskPickFileTitle => "Let Clauseo read the file you picked?",
@@ -225,63 +227,47 @@ fn hi(key: Key) -> &'static str {
              उससे साइन इन कर सकते हैं।"
         }
         Key::SwitchOk => "साइन आउट करके आगे बढ़ें",
-        // The app thread writes these (PENDING_HINDI); English until then.
-        Key::AskAllow
-        | Key::AskRefuse
-        | Key::AskRemember
-        | Key::AskAllowOnce
-        | Key::AskAllowAlways
-        | Key::AskFolderTitle
-        | Key::AskFileTitle
-        | Key::AskOutsideMessage
-        | Key::AskOtherFolderTitle
-        | Key::AskOtherFileTitle
-        | Key::AskOtherFolderNote
-        | Key::AskOtherFileNote
-        | Key::AskOtherMessage
-        | Key::AskReadOnlyNote
-        | Key::AskSiteTitle
-        | Key::AskSiteMessage
-        | Key::AskSharedHostingNote
-        | Key::AskSwitchOffTitle
-        | Key::AskSwitchOffMessage
-        | Key::AskPickFolderTitle
-        | Key::AskPickFileTitle
-        | Key::AskPickMessage
-        | Key::PickFolderTitle
-        | Key::PickFileTitle => en(key),
+        Key::AskAllow => "अनुमति दें",
+        Key::AskRefuse => "अनुमति न दें",
+        Key::AskRemember => "इस मामले के लिए याद रखें",
+        Key::AskAllowOnce => "एक बार अनुमति दें",
+        Key::AskAllowAlways => "इस मामले के लिए हमेशा अनुमति दें",
+        Key::AskFolderTitle => "Clauseo को यह फ़ोल्डर पढ़ने दें?",
+        Key::AskFileTitle => "Clauseo को यह फ़ाइल पढ़ने दें?",
+        Key::AskOutsideMessage => {
+            "{matter} पर काम करते समय Clauseo को {path} पढ़ने से रोका गया, जो मामले के फ़ोल्डर \
+             के बाहर है।"
+        }
+        Key::AskOtherFolderTitle => "Clauseo को किसी दूसरे मामले का फ़ोल्डर पढ़ने दें?",
+        Key::AskOtherFileTitle => "Clauseo को किसी दूसरे मामले की फ़ाइल पढ़ने दें?",
+        Key::AskOtherFolderNote => "यह फ़ोल्डर दूसरे मामले {other} का है।",
+        Key::AskOtherFileNote => "यह फ़ाइल दूसरे मामले {other} की है।",
+        Key::AskOtherMessage => "{matter} पर काम करते समय Clauseo को {path} पढ़ने से रोका गया।",
+        Key::AskReadOnlyNote => "अनुमति देने पर Clauseo इसे पढ़ सकता है, पर बदल नहीं सकता।",
+        Key::AskSiteTitle => "Clauseo को यह वेबसाइट खोलने दें?",
+        Key::AskSiteMessage => "Clauseo को {host} खोलने से रोका गया।",
+        Key::AskSharedHostingNote => {
+            "{host} का सर्वर दूसरी वेबसाइटों के साथ साझा है, इसलिए इसकी अनुमति देने पर Clauseo \
+             उनमें से कुछ को भी खोल सकता है।"
+        }
+        Key::AskSwitchOffTitle => "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद करें?",
+        Key::AskSwitchOffMessage => {
+            "सुरक्षित कार्यक्षेत्र के बिना, {matter} पर काम करते समय Clauseo बिना पहले पूछे इस \
+             कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है। आप इसे कभी भी मामले से फिर से चालू \
+             कर सकते हैं।"
+        }
+        Key::AskPickFolderTitle => "Clauseo को आपका चुना हुआ फ़ोल्डर पढ़ने दें?",
+        Key::AskPickFileTitle => "Clauseo को आपकी चुनी हुई फ़ाइल पढ़ने दें?",
+        Key::AskPickMessage => "{matter} पर काम करते समय Clauseo {path} पढ़ सकेगा।",
+        Key::PickFolderTitle => "{matter} के लिए एक फ़ोल्डर चुनें",
+        Key::PickFileTitle => "{matter} के लिए एक फ़ाइल चुनें",
     }
 }
 
-/// The keys whose Hindi the app thread writes: English stands in the Hindi table until then,
-/// and the tests of the Hindi (and of the review page, where they have no id yet) skip them.
+/// The keys whose Hindi is yet to be written: English stands in the Hindi table until then, and
+/// the tests of the Hindi (and of the review page, where they have no id yet) skip them. None now.
 #[cfg(test)]
-pub(crate) const PENDING_HINDI: &[Key] = &[
-    Key::AskAllow,
-    Key::AskRefuse,
-    Key::AskRemember,
-    Key::AskAllowOnce,
-    Key::AskAllowAlways,
-    Key::AskFolderTitle,
-    Key::AskFileTitle,
-    Key::AskOutsideMessage,
-    Key::AskOtherFolderTitle,
-    Key::AskOtherFileTitle,
-    Key::AskOtherFolderNote,
-    Key::AskOtherFileNote,
-    Key::AskOtherMessage,
-    Key::AskReadOnlyNote,
-    Key::AskSiteTitle,
-    Key::AskSiteMessage,
-    Key::AskSharedHostingNote,
-    Key::AskSwitchOffTitle,
-    Key::AskSwitchOffMessage,
-    Key::AskPickFolderTitle,
-    Key::AskPickFileTitle,
-    Key::AskPickMessage,
-    Key::PickFolderTitle,
-    Key::PickFileTitle,
-];
+pub(crate) const PENDING_HINDI: &[Key] = &[];
 
 /// `template` with each `{slot}` that `slots` names replaced by its value, in one pass, so a
 /// value that itself holds a `{slot}` stays as it is. A slot `slots` does not name stays too.
