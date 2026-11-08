@@ -141,6 +141,9 @@ xtask/src/process.rs first_on_path clippy::disallowed_methods
 # never constructed, only described.
 crates/protocol/src/envelope.rs Envelope clippy::partial_pub_fields
 crates/protocol/src/error_code.rs HostError::invalid_command clippy::needless_pass_by_value
+# `ProtectionView` carries four independent flags on a query view (#766 adds
+# `data_fence_names_only`); an enum would merge unrelated settings. Approved by the protocol owner.
+crates/protocol/src/protection.rs ProtectionView clippy::struct_excessive_bools
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/event.rs domain_events dead_code
 crates/protocol/src/raw.rs JsonValue dead_code

@@ -56,6 +56,7 @@ pub(super) fn check(
         paths: candidates(&paths, raw_input, cfg!(windows)),
         roots: candidates_roots(raw_input, cfg!(windows)),
         words: candidates_words(raw_input, cfg!(windows)),
+        health: super::DataFenceHealth::default(),
     }
 }
 
