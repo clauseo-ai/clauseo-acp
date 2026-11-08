@@ -2361,6 +2361,19 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
   run starts under a new random name with `FILE_FLAG_FIRST_PIPE_INSTANCE`. Fake-pipe tests walk
   accept, client-gone, failed-connect, failed-listen and send-drops-all sequences, at the 8-instance
   cap too.
+- **A client that comes and goes is routine.** An owner client that connects and leaves before
+  the watcher services it makes `ConnectNamedPipe` (or its completion) answer `ERROR_NO_DATA`
+  (232) or `ERROR_PIPE_NOT_CONNECTED` (233). That instance is disconnected and listens again in
+  place (`Connect::Left`, `Pipes::relisten`); one that can't is replaced like a failed connect.
+  On a peek or a write the same errors drop only that client. None of them ends the run: exit 74
+  stays for a later instance that can't be made or isn't SYSTEM's. VM row W8 found the old
+  behaviour, where a rapid reconnect made the next listen fail with 232 and exit 74, cutting off
+  a long-lived reader (3 of 4 back to back). Fake-pipe tests cover a client gone before it was
+  serviced while a long-lived client keeps receiving, a 500-round connect-and-leave loop that
+  never ends the run, and a failed later create that still does.
+- **The task's priority** is 5, normal (`<Priority>5</Priority>`, `SystemTask::priority`). The
+  Task Scheduler's default, 7, is below normal, and a real-time consumer that falls behind loses
+  events.
 - **The name** is published as `PipeName` (`REG_SZ`) in `HKLM\SOFTWARE\Clauseo\SandboxWatch`
   (64-bit view). Each run makes the key, volatile, with
   `O:SYD:P(A;;KA;;;SY)(A;;KR;;;BA)(A;;KR;;;BU)`, so only SYSTEM can point a client anywhere. A key
@@ -2421,11 +2434,15 @@ whole machine's file activity, not the pool's.
   core** (SE 1.88), **5.03 %** without the first pair, and about 3–4 % net of Defender. The
   consumer itself is about 0.09 %. npm's wall time is unchanged (21.6 s against 21.7 s), and no
   events were lost.
+- **W11** (the stand-in consumer, ABBA, 10 minutes of the lawyer's work): kernel and consumer
+  together **−0.14 % of one core** (SE 0.61, 95 % range −1.70 to +1.43), the consumer itself
+  0.067 %; idle **+0.48 %** (SE 0.27). About 3,010 events/s during the work and 286 idle; no
+  events lost. Neither is distinguishable from zero, so tracing only during tool calls isn't
+  needed. The lawyer's own work, about 3,000 events/s, is well under the breaker's 8,000.
 - **The decision:** ship with the event-rate breaker below (8,000 events/s for 10 s; the final
-  value comes from W12), an IT off switch, `DenialReporter=0` under
-  `HKLM\SOFTWARE\Policies\Clauseo\Sandbox` (part B's client reads it before it starts the task),
-  and W11 (an idle session plus 10 minutes of Word and Explorer, ABBA). Running the trace only
-  during tool calls is held back unless W11 shows an idle cost.
+  value comes from W12) and an IT off switch, `DenialReporter=0` under
+  `HKLM\SOFTWARE\Policies\Clauseo\Sandbox` (part B's client reads it before it starts the task).
+  The trace runs for the whole session, not only during tool calls (W11).
 
 **The event-rate breaker** (`breaker.rs`, pure, over a fake clock in tests). The callback
 counts every Kernel-File event before the SID check (one relaxed atomic add), and the serving
@@ -2439,6 +2456,16 @@ on average), so it should trip on a long `npm ci` and never on editing. When
 `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\WatchRateLog` (a DWORD) is 1, the watcher logs each
 second's rate, a number a line with no path, so W12 can set the final constant from the
 distribution. A pause that can't disable or re-enable the provider exits 73.
+
+**The breaker and Defender: reports may pause during Defender full scans and right after
+install.** Defender's first scan was measured at 29,000–42,000 Kernel-File events/s on an idle
+desktop, and tripped the breaker. The count stays machine-wide on purpose: what the breaker
+bounds is the kernel's cost of generating events, and that grows with every account's file
+activity, Defender's included. Only the reports pause; enforcement never does.
+
+**During a pause, a cross-matter offer falls back to the picker.** With the trace paused, a
+refusal on Windows may go unreported, and a ToolCall alone isn't evidence of which file was
+refused, so part B offers the matter picker instead of a cross-matter offer.
 
 **Accepted trade-off: a pool user can keep the breaker tripped.** An agent that makes files
 fast enough keeps the reports dark about 60 of every 70 seconds. Only the reports go dark, never
@@ -2458,21 +2485,24 @@ the enforcement: the kernel refuses the same opens, and each pause is announced 
 | 74 | the pipe couldn't be made, its name published, or its clients polled; a later instance couldn't be made or isn't SYSTEM's; or the key is someone else's |
 | 75 | the trace ended while serving |
 
-**Rows to check on the VM** (open):
+**Rows to check on the VM.** W1 and W5 passed on eca43e848. W8's normal-operation run found the
+rapid-reconnect exit, fixed here (above). Squatting and other attempts by a pool user to cross a
+boundary aren't VM rows (no probing): they are covered by design and code, with the reference
+given in the row.
 
 | Row | Check | Result |
 |---|---|---|
-| W1 | Lifetime after a run ends: a client stays connected past 3 polls and receives a probe line (the server end can `PeekNamedPipe`); then the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | open |
+| W1 | Lifetime after a run ends: a client stays connected past 3 polls and receives a probe line (the server end can `PeekNamedPipe`); then the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | passed (eca43e848) |
 | W2 | Lifetime after a crash: kill the watcher with `taskkill /f`; the session is left; the next `--watch` stops it first, and `--remove` stops it | open |
 | W3 | Defender (RTP on, no exclusions) and an EDR if available: no detection, no alert for the session or the task | open |
 | W4 | Windows 10 22H2 Home and Windows 11 Home: the task registers, the session starts, refusals arrive with the SID item, Create is v1 and OperationEnd v0, and no "unknown version" line is logged (the count is 0) | open |
-| W5 | Provider full: hold 8 sessions on Kernel-File, then `--watch` exits 68 and leaves no session | open |
-| W6 | Pipe squatting: a pool user makes `clauseo-sandbox-watch-<hex>` first (stale name after W2); the watcher's first instance is refused, and part B's SYSTEM-owner check refuses the squatter's pipe | open |
+| W5 | Provider full: hold 8 sessions on Kernel-File, then `--watch` exits 68 and leaves no session | passed (eca43e848) |
+| W6 | Squatting a stale name: covered by design and code, not run. The first instance uses `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a name already taken fails `Server::open` (`windows_pipe.rs`) and the run exits 74 (`tests/run.rs`, `a_pipe_that_fails_stops_the_trace_and_exits_74`); the client opens only names `protocol::is_pipe_name` accepts (`tests.rs`) and checks that SYSTEM owns the server before it reads a byte (part B) | by design |
 | W7 | Cost re-measure: 10 `npm ci` on/off pairs in ABBA order, first runs included, as spike pass 2; consumer CPU, kernel-side total and lost events | open |
-| W8 | Squatting after a client-gone: a pool user spins `CreateNamedPipeW` on the published name while the runner connects and disconnects over and over (and while all clients drop at once); the pool user's pipe never receives a line, and the watcher either serves on or exits 74 with the key gone | open |
+| W8 | Rapid owner reconnects: the runner connects and disconnects over and over (back to back, then 300 ms and 1 s apart) while a long-lived client reads; the watcher never exits and the reader keeps receiving lines. Squatting the live name is covered by design and code, not run: the never-zero-instances invariant (`instances.rs`, `tests/instances.rs`), the SYSTEM-owner check on every later instance (`Instances::later`, `a_later_instance_not_owned_by_system_ends_the_run`), and the client re-reading `PipeName` and checking a SYSTEM owner before it trusts a pipe (part B) | fixed here; re-run |
 | W9 | A killed watcher: `taskkill /f` it while serving; the key and session are left; the next start replaces the key, stops the session and serves, and `--remove` deletes both | open |
 | W10 | After W9 with no consumer, `%SystemRoot%\System32\LogFiles\WMI\RtBackup` holds no `ClauseoSandboxWatch` spill, or the next start removes it | open |
-| W11 | Idle cost: an idle session, then 10 minutes of Word and Explorer, ABBA with the watcher on and off; kernel and consumer CPU. An idle cost reopens running the trace only during tool calls | open |
+| W11 | Idle cost: an idle session, then 10 minutes of Word and Explorer, ABBA with the watcher on and off; kernel and consumer CPU. An idle cost reopens running the trace only during tool calls | done (stand-in consumer): no cost distinguishable from zero, above |
 | W12 | The breaker, with `WatchRateLog=1`: `npm ci` logs its per-second rates (the final `PAUSE_RATE` comes from that distribution); a trip pauses after 10 s at the rate, sends `paused`, resumes 60 s later with `resumed`; an editing turn never trips it | open |
 
 ### The launcher (PR6 interface)
