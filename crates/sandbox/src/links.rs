@@ -82,8 +82,8 @@ impl MatterScan {
     }
 
     /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD` name
-    /// inside the matter, and that `.git` links lead to inside it, canonical, sorted. One outside the matter is left out: the jail
-    /// denies it anyway.
+    /// inside the matter, and that `.git` links lead to inside it, canonical, sorted. One outside
+    /// the matter is left out: the jail denies it anyway.
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
     }
