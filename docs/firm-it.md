@@ -851,7 +851,9 @@ Windows protection (tier B), each sandbox user (`ClauseoSb01` to `ClauseoSb32`) 
 small set of loopback ports, and Windows' filtering (WFP) lets no other sandbox user reach or
 listen on them. What IT needs to know:
 - TCP ports 46100-46611 and 65024-65279 are reserved for Clauseo's sandbox users. Don't give them
-  to other software as fixed ports.
+  to other software as fixed ports. The one registered port among them is Inedo's agent, 46336;
+  while anything else listens in 46100-46355, Clauseo refuses to start its protected AI tools and
+  names the program.
 - Windows' dynamic port range must stay at its default start, 49152, so it doesn't overlap
   46100-46611. `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
   If it overlaps, or Hyper-V, WSL or Docker reserves ports in 46100-46611, Clauseo doesn't set up

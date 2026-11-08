@@ -1432,10 +1432,10 @@ browser's claims for a launch that isn't tier B (`claim_browser_port`, `claim_br
 which on Windows avoid block D too. H and P sit below 49152, where Windows' dynamic range starts
 by default, so the OS never hands their ports to another program's port-0 bind. They are clear of
 the listeners known below it (WinRM 47001, the ASP.NET state service 42424, EtherNet/IP 44818,
-BACnet 47808, SQL Server's browser 1434). IANA's registrations were checked for 46100-46199
-only; 46200-46611 is still to be checked. No other port in the repo falls in 46100-46611 or
-65024-65279. Set-up and every launch check the machine against H and P (`wfp::check_ports`) and
-refuse tier B, named, on an overlap:
+BACnet 47808, SQL Server's browser 1434). IANA registers one port in the blocks, `inedo`
+46336/tcp ("Loopback ports per slot", What stays open). No other port in the repo falls in
+46100-46611 or 65024-65279. Set-up and every launch check the machine against H and P
+(`wfp::check_ports`) and refuse tier B, named, on an overlap:
 - **Windows' TCP dynamic range**, read from WMI: `MSFT_NetTCPSetting` in `ROOT\StandardCimv2`,
   `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts`, every setting's (the class
   behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"), on a
@@ -1446,8 +1446,8 @@ refuse tier B, named, on an overlap:
   Windows publishes no call that lists them: `netsh int ipv4 show excludedportrange` reads the
   TCP/IP stack's private store, and the documented calls, `CreatePersistentTcpPortReservation`
   and `LookupPersistentTcpPortReservation`, only make or look up one exact range. So each port of
-  46100-46611 nobody listens on is test-bound on `127.0.0.1` and `::1`; `WSAEACCES` marks it
-  excluded (`ports::refused_ports`).
+  46100-46611 nobody listens on is test-bound on `127.0.0.1` and `::1`, a bind with no listen;
+  `WSAEACCES` marks it excluded (`ports/reserved.rs`, "Loopback ports per slot").
 - **At each launch, the listeners**: every TCP listener in block H, IPv4 and IPv6, any address
   (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's: the proxy
   and the relay run in the host. A program-file match would pass another Windows user's Clauseo,
@@ -1612,7 +1612,8 @@ user's `Slot`. A launch that binds its proxy first calls `check_slot`, binds wit
 `ListenerFor::TierB { slot }`, then calls `check_launch` with the policy naming those ports. The
 browser takes the same slot: `claim_pool_port(slot)` for CDP and the stream server,
 `claim_daemon_port_at(slot, port)` through `search_name` for the daemon, and the gate's two
-checks ("Loopback ports per slot"). That plumbing is in the host crate and not built yet.
+checks ("Loopback ports per slot"). That plumbing is in the host crate and not built yet, and
+the agent connects to none of these ports until PR6's SYSTEM server permits them.
 
 #### Loopback ports per slot
 
@@ -1621,7 +1622,13 @@ run reached every listener there, other matters' included, and the listeners' se
 check. That doesn't work for the browser. Chrome's debugging port (CDP) and agent-browser's
 daemon take no secret, and neither does the proxy's browser listener. With one shared permit,
 any run could drive another run's browser, logged in to another matter's sites. So each pool user
-now has ports of its own, and WFP opens them to that user alone.
+now has ports of its own: set-up's filters decide who may listen on them, and no static filter
+lets anyone connect to them. PR6's SYSTEM server will open each session's exact ports to that
+session's user alone.
+
+**Plumbing only, so far.** This change builds the slots, the listen filters, the claims and the
+browser's gate, but nothing calls the claims or the gate yet: the host's `BrowserSession::claim`
+change and PR6 wire them. None of the VM rows below has run.
 
 **The slots** (`ports/slot.rs`). Pool user `ClauseoSbNN` has slot `s = NN - 1`
 (`Slot::from_account`), 0 to 31. With `s = NN`, `ClauseoSb32`'s H ports would be 46356-46363,
@@ -1631,44 +1638,62 @@ name that isn't `ClauseoSbNN` fails `Step::Network`. Each slot has `SLOT_PORTS` 
 of three blocks:
 - **H** (`HOST_BLOCK`, 46100-46355; slot `s` has `46100 + 8s` to `+7`): the host's listeners,
   that is the proxy's agent and browser listeners and the R24 relay.
-- **P** (`POOL_BLOCK`, 46356-46611; `46356 + 8s` to `+7`): the slot's user's listeners, Chrome's
-  debugging port and agent-browser's stream server.
-- **D** (`DAEMON_BLOCK`, 65024-65279; `65024 + 8s` to `+7`): agent-browser's Windows daemon.
-  It sits inside Windows' dynamic range because the daemon's port is a hash of its session name
-  in 49152-65534.
-
-`POOL_CAP` is 32, so each block is 256 ports, 768 in all.
-
-**The filters.** All are persistent and sit in our sublayer. Blocks clear the action right;
-permits stay soft. They match the local port only, never the remote one, over IPv4 and IPv6.
-Nothing new is at resource assignment, and a test pins that.
+- **P** (`POOL_**The filters.** All are persistent and sit in our sublayer. Blocks clear the action right;
+permits stay soft. The listen filters match the local port only, never the remote one, over IPv4
+and IPv6. Nothing new is at resource assignment, and a test pins that.
 - **F2**, pool-wide listen blocks (`BLOCKS` entries 6 to 11 in `windows/wfp/spec.rs`):
   `block_listen_{host,pool,daemon}_{v4,v6}` at `ALE_AUTH_LISTEN_V4/V6`, weight 1, the pool's
   condition plus `LocalPorts` over the whole of H, P or D. No pool user may listen on any slot's
   port, used or not.
 - **Per slot** (`windows/wfp/slot_filters.rs`): filter `n` of slot `s` has key
-  `filter_key(0x200 + 16s + n)` (`SLOT_BASE`, `SLOT_STRIDE`), so a slot's keys don't depend on
-  who else is in the pool.
-  - n = 0 to 2, **F1** (`connect_host`, `connect_pool`, `connect_daemon`): Connect V4 permits at
-    weight 10, `Users[Us]`, remote `127.0.0.1`, TCP, remote ports H_s, P_s and D_s. Three
-    filters rather than one, so nothing rests on how WFP ORs conditions on one field.
-  - n = 3 and 4, **F3** (`listen_pool`, `listen_daemon`): Listen V4 permits at weight 10,
+  `filter_key(0x200 + 16s + 3 + n)` (`SLOT_BASE`, `SLOT_STRIDE`, `SLOT_FIRST`), so a slot's
+  keys don't depend on who else is in the pool. Offsets 0 to 2 are retired (`RETIRED_OFFSETS`,
+  below).
+  - n = 0 and 1, **F3** (`listen_pool`, `listen_daemon`): Listen V4 permits at weight 10,
     `Users[Us]`, local P_s and D_s. They beat F2 for `Us` alone.
-  - n = 5 and 6, owner-only (`only_listen_pool_v4`, `only_listen_pool_v6`): Listen V4 and V6
+  - n = 2 and 3, owner-only (`only_listen_pool_v4`, `only_listen_pool_v6`): Listen V4 and V6
     blocks at weight 1, `Condition::NotUsers` (`ALE_USER_ID` `NOT_EQUAL` `(A;;CC;;;Us)`), local
     P_s. Only `Us` may listen on P_s, the lawyer and services included.
+  - n = 4 and 5, **F3 over IPv6** (`listen_pool_v6`, `listen_daemon_v6`): the same permits at
+    Listen V6, so `Us`'s daemon or stream server on `[::]` or dual-stack may listen too.
 
-So `Us` connects to `127.0.0.1` on its own 24 ports and nowhere else. On D_s, F2 keeps other pool
-users off, but a program that isn't a pool user's may still listen, because Windows hands such
-programs dynamic ports. No pool user listens on H. The tests model WFP's arbitration
-(`windows/wfp/tests/slots.rs`, `decide`).
+So only `Us` listens on P_s. On D_s, F2 keeps other pool users off, but a program that isn't a
+pool user's may still listen, because Windows hands such programs dynamic ports. No pool user
+listens on H. The tests model WFP's arbitration (`windows/wfp/tests/arbitration.rs`), the user
+conditions evaluated as `AccessCheck` evaluates them: a deny-only SID matches deny entries only,
+a restricted token must pass a second check with its restricting SIDs, and an `AppContainer`
+token a second check with its package SID, capabilities and `ALL APPLICATION PACKAGES`. So a
+deny-only `Us`, a token restricted without `Us`, or `Us` in an `AppContainer` loses F3 and
+falls to the blocks; the agent's own token, whose restricting SIDs include `Us`, keeps it. That
+`ALE_USER_ID` applies the `AppContainer` check as `AccessCheck` does is assumed; the
+`derived:lowbox` VM rows measure it.
 
-**Addresses.** F1 is IPv4 only and nothing permits Connect V6, so `::1` stays blocked for `Us`
-by `block_connect_v6`. Other slots' ports, `127.0.0.2` and the rest of `127.0.0.0/8`, the
-computer's LAN address and UDP all fall to `block_connect_v4`. Windows classifies an IPv4-mapped
-connect (`::ffff:127.0.0.1`) either at V4, where F1 matches `127.0.0.1` only, or at V6, where it
-is blocked. Either way it fails closed; a VM row shows which. F3 is IPv4 only, so `Us` listening
-on `[::]` or `::1` P_s is refused. Clients must dial the literal `127.0.0.1` (`localhost` may
+**No static connect permit.** An earlier build of this branch also wrote three static Connect V4
+permits per slot (F1: `Users[Us]`, remote `127.0.0.1`, TCP, remote H_s, P_s, D_s). They are
+dropped: `block_connect_v4` and `block_connect_v6` now refuse every loopback connect of every
+pool token, its own slot's ports included, and a test pins that no static filter of set-up's
+permits a connect. None of those builds reached the field; if one did, a launch reads its F1
+filters as filters set-up didn't write (`sandbox.setup_required`), and set-up and removal
+delete them, both by sweeping every filter in our sublayer and by key (`removal_keys` names
+every key of every slot, the retired ones included).
+
+**Connect permits, from PR6.** PR6's SYSTEM server adds and removes them per session
+(`PermitPorts`, `RevokePorts`), dynamic rather than persistent, for the ports a session's owner
+has shown it holds (its listeners bound, its claims made), and removes them when the session
+ends. Each is one filter in our sublayer:
+- layer `ALE_AUTH_CONNECT_V4`, action permit (soft), weight 10, above the blocks;
+- `ALE_USER_ID` `EQUAL` `(A;;CC;;;Us)`, the session's pool user;
+- `IP_REMOTE_ADDRESS` `EQUAL` `127.0.0.1`, `IP_PROTOCOL` TCP;
+- `IP_REMOTE_PORT` `EQUAL` one exact port, which must be one of `Us`'s slot's 24
+  (`checked_ports` refuses any other today).
+
+Nothing permits Connect V6: `::1` and `::ffff:127.0.0.1` at V6 stay blocked.
+
+**Addresses.** `::1` stays blocked for `Us` by `block_connect_v6`. Other slots' ports,
+`127.0.0.2` and the rest of `127.0.0.0/8`, the computer's LAN address and UDP all fall to
+`block_connect_v4`, and PR6's permits will match `127.0.0.1` alone. Windows classifies an
+IPv4-mapped connect (`::ffff:127.0.0.1`) either at V4 or at V6; either way it fails closed
+today, and a VM row shows which. Clients must dial the literal `127.0.0.1` (`localhost` may
 resolve to `::1`). Chrome's `--remote-debugging-port` binds `127.0.0.1` by default.
 
 **Migration.** Set-up converts an old install in one transaction (`writes::replace`): the old
@@ -1677,6 +1702,12 @@ adds the slot filters, and a failure leaves what was there. Until then a launch 
 permit refuses with `NetworkGap::OldSetup`, which reads as `sandbox.setup_required`. Removal
 deletes the blocks, the old permit keys and every slot key for all 32 slots
 (`Namespace::removal_keys`).
+
+**The reserved-port check** (`ports/reserved.rs`) tests each port of `TIER_B_PORTS` with a bind
+that never listens, as the lawyer before a launch and as SYSTEM in set-up. Windows' excluded
+port ranges refuse the bind itself, while our filters act at the listen layer; a test that
+listened would hit the owner-only blocks on every P_s, read 256 ports as reserved, and refuse
+every launch and every re-run of set-up.
 
 **The ports API** (`ports.rs`). `check_slot` or `check_launch` gives the launch its `Slot`.
 - `bind_loopback(ListenerFor::TierB { slot })` binds `127.0.0.1` in H_s, starting from a random
@@ -1692,52 +1723,63 @@ deletes the blocks, the old permit keys and every slot key for all 32 slots
   bind, and the browser is off for the run.
 
 **The browser's gate** (`ports/gate.rs`) is a check, not the boundary. The filters are the
-boundary; the gate catches what they allow and a run must not use.
+boundary; the gate catches what they allow and a run must not use. Nothing calls it yet.
 - `check_browser_ports(slot)`, before the claims: any listener on P_s or D_s turns the browser
   off. It would be a browser or daemon an earlier run of the slot left, or a lawyer's program
   that Windows gave a D_s port.
-- `check_browser_job(slot, job)`, after Chrome and the daemon start and again whenever
+- `check_browser_job(slot, job, expected)`, after Chrome and the daemon start and again whenever
   agent-browser's stream server falls back to another port: every listener on P_s or D_s must be
-  a process in the launch's Job Object (`OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`,
-  then `IsProcessInJob`). A process that can't be opened counts as outside.
+  a process in the launch's Job Object, and each expected port (the claimed CDP, stream and
+  daemon ports) must have one. A daemon that fell back to an ephemeral port, its preferred D_s
+  port taken, leaves that port empty, so the run gets a plain "browser off" line rather than a
+  browser its agent can't reach. Each listener's process is asked about through a handle opened
+  first (`listener_in_job`): `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`, the
+  listeners read again (`TCP_TABLE_OWNER_MODULE_LISTENER`) to confirm the port is still that
+  pid's and the process was created no later than its socket was bound (when Windows gives the
+  bind time), then `IsProcessInJob` on the handle. A process that can't be opened, or a row
+  that changed, counts as outside.
 - Both give `BrowserOff`, whose text begins "the browser is off for this run: ".
 
-**Slot reuse.** A slot's next run is the same pool user, so the filters let it reach anything an
-earlier run left listening. The stop task (`windows/setup/stop.rs`, steps 4, 6 and 7) kills every
-process whose user is a pool SID and marks it in `ResetSids`. The runner's unclean-session marker
-(`windows/runner/marker.rs`) holds back the user's next logon until a completed stop has seen
-none of its processes. A clean end needs the runner's Job Object to be empty
-(`windows/runner/end.rs`). So no `Us` process the runner knows of survives into a launch, and one
-that escaped the job is stopped before the user logs on again. The gate's two checks come on top.
+**Slot reuse.** A slot's next run is the same pool user, so PR6's permits for it would reach
+anything an earlier run left listening on the same ports. The stop task
+(`windows/setup/stop.rs`, steps 4, 6 and 7) kills every process whose user is a pool SID and
+marks it in `ResetSids`. The runner's unclean-session marker (`windows/runner/marker.rs`) holds
+back the user's next logon until a completed stop has seen none of its processes. A clean end
+needs the runner's Job Object to be empty (`windows/runner/end.rs`). So no `Us` process the
+runner knows of survives into a launch, and one that escaped the job is stopped before the user
+logs on again. The gate's two checks come on top.
 
 **The shared range's collusion channel closes.** A listener one slot's agent makes is reachable
-by no other slot's agent: F2 keeps every pool user off every slot's ports but its own, and F1
-opens only its own. This replaces the accepted risk "Inside the range, the listeners' secrets are
-the check".
+by no other slot's agent: F2 keeps every pool user off every slot's ports but its own, and no
+filter permits a connect to another slot's port. This replaces the accepted risk "Inside the
+range, the listeners' secrets are the check".
 
 **What stays open.**
 - **Block D collisions turn the browser off for one run.** D is inside the dynamic range, so
   Windows may lend a D_s port to any connection as its source port, and a Hyper-V exclusion may
   cover it. The claim or the gate then turns the browser off. That costs availability, never
   confidentiality. Clauseo reserves nothing with `excludedportrange`.
-- **A lawyer's program that Windows gives a D_s port mid-run** is reachable by that slot's agent
-  until the run ends. Only a port-0 bind landing in that slot's 8 ports can do it, and the next
-  launch's `check_browser_ports` turns the browser off.
-- **A foreign program that binds a fixed port in H after a launch's check** is reachable from that
-  launch's agent if the port is in its slot, until the next launch refuses. H is out of the OS's
-  hands, so only a program asking for that port by number can do it. On P the owner-only blocks
-  refuse it.
+- **A foreign listener on a block port** (a lawyer's program that Windows gives a D_s port, or
+  one that binds a fixed H port by number) is simply unreachable: no static filter permits a
+  connect to it, and PR6's permits name only the exact ports the session holds, which the job
+  gate has checked. On P the owner-only blocks refuse it outright.
 - **F4 and F5 are not built.** They would check the accepting user at `ALE_AUTH_RECV_ACCEPT`. F4:
   block at Recv Accept V4 and V6 with the loopback flag set, local port in H, `ALE_USER_ID`
   `NOT_EQUAL` the owner. F5, per slot: the same over local P_s and D_s, `NOT_EQUAL` `Us`. They
   wait on the VM row that shows whether a loopback accept carries the user; the spike found the
   remote user empty there ("Defence in depth, dropped").
-- **IANA.** The registry check for 46200-46611 is still to be done.
-- **407 log lines.** A program outside the pool, such as a tier-C run, can still reach a proxy's
-  agent listener and send requests with no token. One bucket per proxy caps the 407 lines
-  (`proxy/server/auth_log.rs`): 5, then 1 per 10 s. The next line that gets through is preceded
-  by "egress: N more 407s suppressed". The bucket is per proxy, not per connection or source
-  port, because each new connection gets a new source port.
+- **IANA.** The only registered port in the blocks is `inedo`, 46336/tcp, in slot 29's H block
+  (`ClauseoSb30`, 46332-46339). It is accepted: the H claim skips a busy port. Note that the
+  launch check (`port_check.rs`) refuses tier B, naming the program, while anything that isn't
+  this app's listens anywhere in H, so an Inedo agent listening there stops every tier-B launch
+  on that computer, not only slot 29's. That costs availability, never confidentiality. Block D
+  (65024-65279) has no registration.
+- **407 log lines.** A program that can reach a proxy's agent listener without its token (a
+  lawyer's program, say) can send requests naming hosts of its choosing. One bucket per proxy
+  caps the 407 lines (`proxy/server/auth_log.rs`): 5, then 1 per 10 s. The next 407 record that
+  gets through carries the count dropped before it (`Exchange::suppressed`) into the proxy's
+  log, and the tracing log says "egress: N more 407s suppressed". The bucket is per proxy, not
+  per connection or source port, because each new connection gets a new source port.
 - **Secrets kept.** The proxy still demands its per-launch token, and the relay its token file.
 - **AF_UNIX.** On Windows the browser uses TCP only (`BrowserSocketDir` and agent-browser's
   `.sock` are `cfg(unix)`, `crates/host/src/browser/session.rs`). The one Low-writable folder
@@ -1747,8 +1789,9 @@ the check".
   the accepted D11 collusion channel.
 
 **VM rows** (observe only; none has run):
-1. Slot s's agent reaches its proxy's agent and browser ports, CDP and the daemon.
-2. An unused P_s port gives "connection refused"; a P_t port gives 10013.
+1. Today, with no PR6: slot s's agent reaches none of its own H_s, P_s or D_s ports (10013), and
+   `s15_wfp_vm`'s range rows expect `Filtered`. With PR6, exactly the permitted ports.
+2. An unused P_s port gives 10013 today; a P_t port gives 10013.
 3. Two runs at once: neither reaches the other's CDP or daemon (10013 both ways), nor the
    other's proxy agent port.
 4. Slot t's user listening on P_s or D_s is denied; slot s's user listening on H_s is denied.
@@ -1762,6 +1805,18 @@ the check".
 9. Specific and wildcard binds (`127.0.0.1`, `0.0.0.0`, `::`, dual-stack), with and without
    `SO_EXCLUSIVEADDRUSE`, on P_s by another user.
 10. Binds and connects to `::1`, `127.0.0.2` and `::ffff:127.0.0.1`.
+11. Whether `ALE_USER_ID` is set at a loopback accept (audit events 5156 and 5157). This decides
+    F4 and F5.
+12. With PR6: one full `agent_browser_open` through the proxy's browser listener in H_s.
+13. An old install launches as `sandbox.setup_required`; set-up converts it in one go.
+14. `Us`'s stream server or daemon bound on `[::]` is allowed (F3 over IPv6).
+15. On a set-up machine, the reserved-port check's bind-only test of every P_s port succeeds as
+    the lawyer and as SYSTEM (no 10013), so a launch and a re-run of set-up pass; a real
+    excluded range (`netsh int ipv4 add excludedportrange`) still gives 10013 at the bind.
+16. A deny-only, a restricted (without `Us`) and an `AppContainer` child of `Us` can't listen on
+    P_s or D_s, as the arbitration model predicts.
+
+.2` and `::ffff:127.0.0.1`.
 11. Whether `ALE_USER_ID` is set at a loopback accept (audit events 5156 and 5157). This decides
     F4 and F5.
 12. One full `agent_browser_open` through the proxy's browser listener in H_s.
