@@ -59,6 +59,22 @@ fn no_name_is_no_pipe_and_another_exit_is_named() {
     );
     assert_eq!(status, Status::Down(Down::NoPipe));
     assert!(fake.errors()[0].contains("exited 74"));
+    let requests = fake.requests();
+    let gap = requests[1].saturating_sub(requests[0]);
+    assert!(
+        gap >= RETRIGGER_AFTER && gap < PIPE_WAIT,
+        "one second request, then the fallback"
+    );
+    // 71: the machine has no record (set-up never ran, or was removed).
+    let (fake, status) = down_with(
+        |s| {
+            s.name = Ok(None);
+            s.last_exit = Some(71);
+        },
+        0,
+    );
+    assert_eq!(status, Status::Down(Down::NoPipe));
+    assert!(fake.errors()[0].contains("exited 71"));
 }
 
 #[test]
