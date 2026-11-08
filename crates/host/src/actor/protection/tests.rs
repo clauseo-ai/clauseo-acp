@@ -183,12 +183,13 @@ fn each_cause_refuses_by_its_code_and_the_setting() {
 #[test]
 fn no_seam_is_not_built_with_no_retry() {
     assert_eq!(
-        observe(None),
+        observe(None, std::path::Path::new("data")),
         Observed {
             computer: not(NotProtectedCause::Unsupported {
                 why: UnsupportedWhy::NotBuilt,
             }),
             asks_admin: false,
+            set_up_at: None,
         }
     );
 }
@@ -220,7 +221,7 @@ fn a_retry_asks_for_an_administrator_only_when_a_set_up_can_help() {
 /// gives none.
 #[test]
 fn a_change_of_either_setting_gives_the_new_view_once() {
-    let mut host = ProtectionHost::new(None, observe(None));
+    let mut host = ProtectionHost::new(None, observe(None, std::path::Path::new("data")));
     let first = host.take_changed(false, false).unwrap();
     assert!(!first.required && !first.unprotected_auto_allowed);
     assert!(!host.settings_moved(false, false));

@@ -199,20 +199,43 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         start(actor, thread, after_stop);
     }
     super::super::sign_in::agent_ended(actor, thread, unresponsive);
+    // A turn whose close waited for this exit ends now, with it (`exit_wait.rs`).
+    super::super::exit_wait::agent_ended(actor, thread);
     actor.release(StreamId::Thread(thread));
 }
 
-/// The sandbox runner's (`clauseo-sandbox-run.exe`) exit code when part of the agent ran
-/// outside the Safe workspace: `RunExit::Escapee`, stage C's #649.
-// TODO(#649): decode with `clauseo_sandbox::RunExit::from_code` once it is on main.
-const ESCAPEE_EXIT: u32 = 0xE0C1_500F;
+/// Whether `thread`'s agent's exit is due and not yet reported: its connection closed, or it
+/// is stopping because it had (`StopCause::Closed`). An agent the host asked to stop is not:
+/// its detach is the host's close, whatever its exit.
+pub(in super::super) fn exit_due(actor: &mut Actor, thread: ThreadId) -> bool {
+    state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .is_some_and(|agent| match agent.stage {
+            Stage::Stopping => agent.stop_cause == StopCause::Closed,
+            Stage::Closed => true,
+            Stage::Initializing | Stage::Loading | Stage::Attached => agent.link.closed(),
+        })
+}
 
-/// Whether the agent's process ended with the sandbox runner's Escapee exit, so its session
-/// ends with `StopReason::LeftSafeWorkspace`. Windows reports the runner's 32-bit exit code as
-/// `ExitStatus::code`'s `i32`; elsewhere an exit code is 0 to 255, so it never matches.
+/// Whether the agent's process ended with the sandbox runner's (`clauseo-sandbox-run.exe`) Escapee
+/// exit, so its session ends with `StopReason::LeftSafeWorkspace`.
 fn left_safe_workspace(reason: &DetachReason) -> bool {
-    matches!(reason, DetachReason::Exited { code: Some(code), .. }
-        if code.cast_unsigned() == ESCAPEE_EXIT)
+    matches!(reason, DetachReason::Exited { code: Some(code), .. } if is_escapee(*code))
+}
+
+/// Whether `code`, as `ExitStatus::code` gives it, is `RunExit::Escapee` (`0xE0C1_500F`).
+/// Windows reports the runner's 32-bit exit code as an `i32`: its bytes are the runner's `u32`.
+/// Built for the unit tests everywhere, which rewrite a fake agent's exit to that code.
+#[cfg(any(windows, test))]
+fn is_escapee(code: i32) -> bool {
+    use clauseo_sandbox::windows::runner::RunExit;
+    RunExit::from_code(code.cast_unsigned()) == Some(RunExit::Escapee)
+}
+
+/// Off Windows no sandbox runner starts the agent, and an exit code is 0 to 255: never.
+#[cfg(not(any(windows, test)))]
+const fn is_escapee(_code: i32) -> bool {
+    false
 }
 
 /// A detach reason as the log file may show it: its kind and exit code, never `stderr_tail`,

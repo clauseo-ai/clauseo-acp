@@ -146,14 +146,15 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
     sent
 }
 
-/// `ForgetMatter`'s commit returned: stop the matter's agents, or put the matter back on the
-/// list with its row as it was.
+/// `ForgetMatter`'s commit returned: stop the matter's agents and let the sandbox forget the
+/// matter, or put the matter back on the list with its row as it was.
 pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if durable {
         actor.search.forget(matter);
         actor.folder_states.remove(&matter);
         actor.folder_supports.remove(&matter);
         turn::stop_agents(actor, matter);
+        super::protection::forget::matter_forgotten(actor, matter);
         return;
     }
     if let Some(mut entry) = actor.forgotten.remove(&matter) {

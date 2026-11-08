@@ -292,6 +292,9 @@ mod protection_blocked;
 #[path = "host/protection_edges.rs"]
 mod protection_edges;
 #[cfg(test)]
+#[path = "host/protection_removing.rs"]
+mod protection_removing;
+#[cfg(test)]
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
 #[cfg(test)]

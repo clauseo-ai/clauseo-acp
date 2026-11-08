@@ -265,6 +265,13 @@ pub(super) fn on_after_turn(
         read.held = Some(result);
         return;
     }
+    // An exit that is due joins the end: the close waits for it, bounded (`exit_wait.rs`).
+    let Some(result) = super::exit_wait::hold(actor, thread, turn, result) else {
+        return;
+    };
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     let fallback = current.limit_read.take().is_some();
     let mut end = current
         .end

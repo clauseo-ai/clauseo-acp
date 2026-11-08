@@ -141,8 +141,8 @@ export const HI = {
     "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र का इस्तेमाल नहीं कर सकता: कोई Windows सेटिंग या सुरक्षा सॉफ़्टवेयर इसे रोक रहा है, इसलिए कुछ भी शुरू नहीं हुआ। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
   // provisional (stage E, app thread's words for copy review): the pool's refusal, moved from
   // words-protection.hi.ts
-  "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.":
-    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और इस कंप्यूटर पर उसकी सभी जगहें उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+  "All the Safe workspace's places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
   // provisional placeholder: app thread rewrites
   "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.":
     "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से उसका स्वामित्व आपको वापस देने को कहें।",

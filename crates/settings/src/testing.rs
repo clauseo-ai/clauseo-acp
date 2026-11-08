@@ -63,6 +63,7 @@ impl Files for MemFiles {
 pub(crate) struct FakeDirs {
     pub home: Option<PathBuf>,
     pub known: Vec<(KnownFolder, PathBuf)>,
+    pub codex_home: Option<PathBuf>,
 }
 
 impl PlatformDirs for FakeDirs {
@@ -75,6 +76,10 @@ impl PlatformDirs for FakeDirs {
             .iter()
             .find(|(known, _)| *known == folder)
             .map(|(_, path)| path.clone())
+    }
+
+    fn codex_home(&self) -> Option<PathBuf> {
+        self.codex_home.clone()
     }
 }
 
