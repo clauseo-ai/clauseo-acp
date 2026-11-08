@@ -44,6 +44,9 @@ impl Markers for World {
         }
         self.fake.next_number(name)
     }
+    fn last_sweep(&mut self) -> Option<(u32, u64)> {
+        self.fake.last_sweep()
+    }
     fn pool(&mut self) -> Vec<Sid> {
         self.fake.pool()
     }

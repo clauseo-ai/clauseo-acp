@@ -1,6 +1,7 @@
 //! The markers' effects on Windows (`unclean.rs`), as the lawyer: the run folder's markers, the
-//! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
-//! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
+//! record's sequences, the sweep's last exit and `PoolSids` (the record grants Users read), and
+//! requests for the stop and sweep tasks through the owner's `FRFX` entry.
+//! [`start_up_requests`] is the desktop's call.
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -10,11 +11,13 @@ use super::super::marker::{
     MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
     write_marker_at,
 };
-use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
+use super::{Markers, Refused, StartUp, Unswept, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
-use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
-use crate::windows::setup::{read_record_install_id, read_record_value};
+use crate::windows::setup::record_values::{
+    STOP_SEQUENCE, SWEEP_LAST_EXIT, SWEEP_LAST_SEQUENCE, SWEEP_SEQUENCE,
+};
+use crate::windows::setup::{read_record_dword, read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
 /// The markers of the data folder `data_dir`.
@@ -50,6 +53,12 @@ impl Markers for OsMarkers {
 
     fn next_number(&mut self, name: &'static str) -> Result<u64, String> {
         value(name, 1)
+    }
+
+    fn last_sweep(&mut self) -> Option<(u32, u64)> {
+        let exit = read_record_dword(SWEEP_LAST_EXIT).ok()??;
+        let sequence = read_record_value(SWEEP_LAST_SEQUENCE).ok()??;
+        Some((exit, sequence))
     }
 
     fn pool(&mut self) -> Vec<Sid> {
@@ -103,7 +112,7 @@ pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), Refuse
 }
 
 /// A launch's check, for `clean_close::check_launch` (`unclean::await_sweeps`).
-pub(crate) fn check_sweeps(data_dir: &Path) -> Result<(), String> {
+pub(crate) fn check_sweeps(data_dir: &Path) -> Result<(), Unswept> {
     await_sweeps(&mut OsMarkers::new(data_dir))
 }
 

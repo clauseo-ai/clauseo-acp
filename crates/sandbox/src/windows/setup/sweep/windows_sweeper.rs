@@ -28,7 +28,7 @@ use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFold
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
-    Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
+    Failed, LastRun, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
     windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
@@ -37,6 +37,7 @@ use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
 use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
+use crate::windows::setup::record_values::{SWEEP_LAST_EXIT, SWEEP_LAST_SEQUENCE};
 use crate::windows::sids::Sid;
 
 pub(crate) mod admin_log;
@@ -146,6 +147,16 @@ impl Record for WindowsSweeper {
 
     fn now(&mut self) -> u64 {
         windows_record::now()
+    }
+}
+
+impl LastRun for WindowsSweeper {
+    fn write_last_exit(&mut self, exit: u32) -> Result<(), Failed> {
+        windows_record::write_dword(SWEEP_LAST_EXIT, exit)
+    }
+
+    fn write_last_sequence(&mut self, sequence: u64) -> Result<(), Failed> {
+        windows_record::write_value(SWEEP_LAST_SEQUENCE, sequence)
     }
 }
 

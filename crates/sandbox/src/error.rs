@@ -108,8 +108,10 @@ pub enum Error {
     /// Windows tier B refuses to launch for a cause only whoever looks after the computer can
     /// fix (D-B4): the set-up program's admin copy is missing, changed or in a folder others
     /// can change (`Blocked::AdminCopy*`, from `windows::clean_close::check_launch`), or gone
-    /// after Windows security blocked it (`Blocked::ToolMissing`). Nothing was planned or
-    /// written, and the caller shows the cause rather than run on a weaker tier in silence.
+    /// after Windows security blocked it (`Blocked::ToolMissing`), or a marker awaits a sweep
+    /// that already ended 56 (`Blocked::LeftoverTask`, from `runner::unclean`). Nothing was
+    /// planned or written, and the caller shows the cause rather than run on a weaker tier in
+    /// silence.
     #[error("the sandbox can't run: {0}")]
     Blocked(crate::Blocked),
     /// Windows tier B found an earlier session's unclean-session marker still awaiting a sweep
@@ -194,6 +196,7 @@ mod tests {
                 "admin_copy_unsafe",
                 "other_account",
                 "tool_missing",
+                "leftover_task",
             ]
         );
         for blocked in crate::Blocked::ALL {

@@ -451,10 +451,14 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// F4: as [`RunExit::AwaitingSweep`], but the last sweep had ended 56 at or past the number
+    /// the marker awaits and a fresh run ended 56 too, or none did within the wait
+    /// (`unclean::leftover`): a task it can't remove is left. Only an administrator can delete it.
+    LeftoverTask,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 20] = [
+    const ALL: [RunExit; 21] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -475,6 +479,7 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
+        RunExit::LeftoverTask,
     ];
 
     /// The exit code.
@@ -518,7 +523,10 @@ impl RunExit {
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable
             | RunExit::AwaitingStop
-            | RunExit::AwaitingSweep => None,
+            | RunExit::AwaitingSweep
+            // A pool user can cause it on purpose: never a set-up cause that could move a
+            // launch to another tier. The launch's `Blocked::LeftoverTask` carries the cause.
+            | RunExit::LeftoverTask => None,
         }
     }
 }

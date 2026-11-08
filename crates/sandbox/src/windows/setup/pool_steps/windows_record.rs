@@ -1,5 +1,6 @@
 //! The real [`Record`](super::Record)'s effects, which each pool task's machine calls: the
-//! set-up lock (waited for up to [`LOCK_WAIT_MS`]), the record's `REG_QWORD` values in
+//! set-up lock (waited for up to [`LOCK_WAIT_MS`]), the record's `REG_QWORD` values (and the
+//! sweep's one `REG_DWORD`) in
 //! `HKLM\SOFTWARE\Clauseo\Sandbox` (64-bit view, written without making the key), and the wall
 //! clock.
 #![expect(unsafe_code, reason = "GetSystemTimeAsFileTime")]
@@ -50,6 +51,11 @@ pub(crate) fn read_value(name: &str) -> Result<Option<u64>, Failed> {
 /// Sets the record's `REG_QWORD` value `name` in the key as it is, never making it.
 pub(crate) fn write_value(name: &str, value: u64) -> Result<(), Failed> {
     record_write::write_pool_value(RECORD_KEY, name, value).map_err(|error| error.to_string())
+}
+
+/// Sets the record's `REG_DWORD` value `name` in the key as it is, never making it.
+pub(crate) fn write_dword(name: &str, value: u32) -> Result<(), Failed> {
+    record_write::write_pool_dword(RECORD_KEY, name, value).map_err(|error| error.to_string())
 }
 
 /// The wall clock, as a `FILETIME` (100 ns since 1601, UTC).

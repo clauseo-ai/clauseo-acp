@@ -11,6 +11,7 @@ use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
 mod file_owner;
+mod last_run;
 mod log_path;
 mod principals;
 mod record;
@@ -109,6 +110,8 @@ struct Fake {
     busy: bool,
     /// The value whose write fails.
     write_fails: Option<&'static str>,
+    /// The last run's values as written (`LastRun`), in order, kept apart from `values`.
+    last: Vec<(&'static str, u64)>,
     /// The record's reads, and the read (0 the first) from which the key is gone.
     pool_reads: usize,
     gone_from: Option<usize>,
@@ -162,6 +165,7 @@ impl Fake {
             held: 0,
             busy: false,
             write_fails: None,
+            last: Vec::new(),
             pool_reads: 0,
             gone_from: None,
             done: Vec::new(),

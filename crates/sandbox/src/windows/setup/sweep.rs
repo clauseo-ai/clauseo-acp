@@ -87,8 +87,10 @@
 //!    that stays held is 59. A run that is ended or ends non-zero never writes them. A session's
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
-//! 7. logs one line of counts to the Application log, which every local user can read: no path,
-//!    no SID. The paths of at most five tasks that keep it at 56 go to an admin-only log alone
+//! 7. records its exit as `SweepLastExit` and then `n` as `SweepLastSequence` (none when it
+//!    reserved none), whatever its exit, on every run past the gate ([`LastRun`]); then logs
+//!    one line of counts to the Application log, which every local user can read: no path, no
+//!    SID. The paths of at most five tasks that keep it at 56 go to an admin-only log alone
 //!    (`%ProgramData%\Clauseo\Sandbox\sweep-admin.log`, SYSTEM and Administrators; [`log_path`]).
 //!
 //! It marks no profile for a reset, unlike `--stop`.
@@ -101,6 +103,7 @@ use super::pool_steps::{
 };
 use crate::windows::sids::Sid;
 
+mod exit;
 mod file_trust;
 pub mod log_path;
 mod resolve;
@@ -120,6 +123,7 @@ mod windows_task_file;
 #[cfg(test)]
 mod windows_tests;
 
+pub use exit::{LastRun, SweepExit};
 #[cfg(any(windows, test))]
 pub use file_trust::file_security;
 pub use file_trust::{FileSecurity, TaskFile, WRITE_RIGHTS, may_be_pool, trusted};
@@ -129,62 +133,6 @@ pub use swept::Swept;
 use swept::log_line;
 pub use task_file::TASK_FILE_CAP;
 pub use unlisted::Listing;
-
-/// The sweep's exit codes. They start at 53, after [`StopExit`]'s 50 and the WSL deny task's 51
-/// and 52 (`WslDenyExit`), so the one exe never gives one number two meanings; codes are
-/// appended from here on, never renumbered.
-///
-/// [`StopExit`]: super::stop::StopExit
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SweepExit {
-    /// 0: every pool user's task found was deleted and every pool user's BITS job cancelled,
-    /// every task and folder read (with a pool recorded; with none there is nothing to sweep).
-    Done,
-    /// 53: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was touched.
-    NotAllowed,
-    /// 54: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing was
-    /// touched.
-    NoRecord,
-    /// 55: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
-    NotPool,
-    /// 56: a task's principal or owner couldn't be read, or names no one, or a name that
-    /// resolves to no SID and isn't another domain's (a task file read instead whose owner or
-    /// DACL lets a pool user change it counts as unread); a pool user's task couldn't be
-    /// deleted, or a running instance of one couldn't be stopped (or its path read), a folder's
-    /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders;
-    /// or a task file or the Task Scheduler's cache holds a task the listing didn't give, and
-    /// its file doesn't show it isn't the pool's, or either couldn't be listed ([`unlisted`]).
-    /// The BITS step still ran.
-    TasksLeft,
-    /// 57: every task was read and the pool's deleted, but a pool user's BITS job wasn't
-    /// cancelled, a job's owner couldn't be read, or the BITS list couldn't be read or reached
-    /// `JOBS_CAP`.
-    JobsLeft,
-    /// 58: `SweepNext` couldn't be reserved before the walk: the record was gone or its pool
-    /// changed, or the write failed (nothing was touched), or the set-up lock stayed held (the
-    /// tasks and jobs were still swept, but nothing was recorded). 56 and 57 win over it.
-    NotReserved,
-    /// 59: the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be
-    /// written (the set-up lock stayed held, a write failed, the record was gone or its pool
-    /// changed, or `SweepSequence` was past `n`).
-    NotRecorded,
-}
-
-impl SweepExit {
-    /// The process exit code.
-    pub fn as_code(self) -> u8 {
-        match self {
-            SweepExit::Done => 0,
-            SweepExit::NotAllowed => 53,
-            SweepExit::NoRecord => 54,
-            SweepExit::NotPool => 55,
-            SweepExit::TasksLeft => 56,
-            SweepExit::JobsLeft => 57,
-            SweepExit::NotReserved => 58,
-            SweepExit::NotRecorded => 59,
-        }
-    }
-}
 
 /// The most Task Scheduler folders the walk reads: one more left to read is 56.
 pub const FOLDERS_CAP: usize = 10_000;
@@ -222,8 +170,9 @@ pub struct Task {
 }
 
 /// Every effect of the sweep: the gate's ([`Gate`]), the BITS step's ([`Bits`]), the record's
-/// ([`Record`]) and the Task Scheduler's. No method stops, suspends or opens a process.
-pub trait Sweeper: Gate + Bits + Record {
+/// ([`Record`], [`LastRun`]) and the Task Scheduler's. No method stops, suspends or opens a
+/// process.
+pub trait Sweeper: Gate + Bits + Record + LastRun {
     /// A Task Scheduler folder, as the machine holds it.
     type Folder;
     /// The root folder, `\`.
@@ -335,6 +284,7 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
             return refused(fs, SweepExit::NoRecord, &format!("{UNRESERVED}: {why}"));
         }
     };
+    let n = reserved.as_ref().ok().copied();
     let at = fs.now();
     let mut swept = sweep_tasks(fs, &pool.users);
     let jobs = cancel_pool_jobs(fs, &pool.users);
@@ -367,8 +317,7 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
             line = format!("{line}; nothing was recorded: {why}");
         }
     }
-    fs.log(exit != SweepExit::Done, &line);
-    exit
+    finish(fs, exit, n, &line)
 }
 
 /// What a sweep whose number wasn't reserved says.
@@ -377,7 +326,16 @@ const UNRESERVED: &str = "SweepNext wasn't reserved";
 /// A refusal after the gate: logged as nothing touched, with `exit`.
 fn refused(fs: &mut impl Sweeper, exit: SweepExit, why: &str) -> SweepExit {
     let line = format!("the sandbox's task sweep: nothing was touched: {why}");
-    fs.log(true, &line);
+    finish(fs, exit, None, &line)
+}
+
+/// Every run past the gate ends here: its exit and number recorded (step 7's first half), then
+/// `line` logged, with why the record failed if it did.
+fn finish(fs: &mut impl Sweeper, exit: SweepExit, n: Option<u64>, line: &str) -> SweepExit {
+    match exit::record_last(fs, exit, n) {
+        Ok(()) => fs.log(exit != SweepExit::Done, line),
+        Err(why) => fs.log(true, &format!("{line}; its exit wasn't recorded: {why}")),
+    }
     exit
 }
 

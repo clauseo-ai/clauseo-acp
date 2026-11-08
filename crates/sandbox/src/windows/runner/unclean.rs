@@ -20,8 +20,11 @@
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
-//!   isn't done. `Open` markers are left alone there: they may be live sessions'. So is one
-//!   awaiting a stop, first or final, or whose sweep completed and owes its final stop: F4's.
+//!   isn't done. When the last sweep already served that number and ended 56, the wait also
+//!   ends on a newer run's 56, and a 56 still standing then refuses as a leftover task
+//!   (`leftover`); F4 waits the same way. `Open` markers are
+//!   left alone there: they may be live sessions'. So is one awaiting a stop, first or final,
+//!   or whose sweep completed and owes its final stop: F4's.
 //! - **The desktop's start** ([`start_up`], once, before any launch): every outer of the last run
 //!   is gone, so each `Open` or unreadable marker becomes `AwaitingStop`, and the stop and sweep
 //!   tasks are requested for what is still awaited. It never waits.
@@ -55,7 +58,10 @@ use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
+pub use leftover::Unswept;
+use leftover::Waited;
 
+mod leftover;
 #[cfg(windows)]
 pub(crate) mod os;
 #[cfg(test)]
@@ -108,6 +114,9 @@ pub trait Markers {
     fn sequences(&mut self) -> Result<Sequences, String>;
     /// `name` (`StopNext`, `SweepNext`), 1 when absent.
     fn next_number(&mut self, name: &'static str) -> Result<u64, String>;
+    /// The last sweep's `(SweepLastExit, SweepLastSequence)`; `None` when either is absent or
+    /// can't be read, which changes nothing (`leftover`).
+    fn last_sweep(&mut self) -> Option<(u32, u64)>;
     /// The record's `PoolSids`; empty when there is no record or it can't be read, which
     /// makes no marker stale.
     fn pool(&mut self) -> Vec<Sid>;
@@ -362,7 +371,9 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
 /// F4's wait for this pool user's markers awaiting a sweep: those `SweepSequence` meets go;
 /// otherwise a sweep is requested (unless `requested` already) and `SweepSequence` read every
 /// [`SWEEP_POLL`] for up to [`SWEEP_WAIT`]. `Err` when it is still short, or can't be read:
-/// [`RunExit::AwaitingSweep`], since no stop is awaited. `Ok` gives those whose sweep
+/// [`RunExit::AwaitingSweep`], since no stop is awaited; [`RunExit::LeftoverTask`] when the
+/// last sweep had ended 56 having served it and a fresh 56 ends the wait, or the 56 still
+/// stands at its end (`leftover`). `Ok` gives those whose sweep
 /// completed but which owe their final stop, with the sequences that showed it.
 fn wait_for_sweeps(
     fs: &mut impl Markers,
@@ -378,7 +389,7 @@ fn wait_for_sweeps(
     }
     let unread =
         |e: String| Refused::sweep(format!("the sandbox's sweep sequence can't be read ({e})"));
-    let mut done = fs.sequences().map_err(unread)?;
+    let done = fs.sequences().map_err(unread)?;
     let left = remove_clean(fs, sessions, done);
     let wanted = left
         .iter()
@@ -387,22 +398,18 @@ fn wait_for_sweeps(
     let Some(wanted) = wanted.filter(|wanted| done.sweep < *wanted) else {
         return Ok((left, done));
     };
-    if !requested {
-        drop(fs.request_sweep());
+    match leftover::wait_for(fs, wanted, requested).map_err(unread)? {
+        Waited::Swept(done) => Ok((remove_clean(fs, left, done), done)),
+        Waited::Leftover => Err(Refused {
+            exit: RunExit::LeftoverTask,
+            why: leftover::LEFTOVER.to_owned(),
+        }),
+        Waited::Short => Err(Refused::sweep(format!(
+            "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
+             finish within {} s",
+            SWEEP_WAIT.as_secs()
+        ))),
     }
-    let polls = SWEEP_WAIT.as_millis() / SWEEP_POLL.as_millis().max(1);
-    for _ in 0..polls {
-        fs.pause(SWEEP_POLL);
-        done = fs.sequences().map_err(unread)?;
-        if done.sweep >= wanted {
-            return Ok((remove_clean(fs, left, done), done));
-        }
-    }
-    Err(Refused::sweep(format!(
-        "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
-         finish within {} s",
-        SWEEP_WAIT.as_secs()
-    )))
 }
 
 /// A dead outer's marker: `StopNext` read now; `None` when it can't be.
@@ -413,18 +420,22 @@ fn dead_outer(fs: &mut impl Markers) -> Option<MarkerState> {
 
 /// A launch's check: every marker awaiting a sweep is clean, or becomes clean within
 /// [`SWEEP_WAIT`] of a sweep this asks for; one awaiting the sweep before its final stop is
-/// waited for the same way, and is F4's once that sweep completed. `Err` says why not.
-pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
-    let (sessions, _) =
-        current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
-    let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
-    let mut done = fs.sequences().map_err(unread)?;
+/// waited for the same way, and is F4's once that sweep completed. `Err` says why not:
+/// [`Unswept::LeftoverTask`] when the last sweep had ended 56 having served the number awaited
+/// and the wait ends on a fresh 56, or with that 56 still standing (`leftover`); else
+/// [`Unswept::Waiting`].
+pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), Unswept> {
+    let (sessions, _) = current(fs)
+        .map_err(|e| Unswept::Waiting(format!("the session markers can't be read ({e})")))?;
+    let unread =
+        |e: String| Unswept::Waiting(format!("the sandbox's sweep sequence can't be read ({e})"));
+    let done = fs.sequences().map_err(unread)?;
     let (sessions, requested) = remark(fs, sessions, done);
     if sessions
         .iter()
         .any(|session| session.state.is_some_and(|state| state.stopped(done)))
     {
-        return Err(STUCK.to_owned());
+        return Err(Unswept::Waiting(STUCK.to_owned()));
     }
     let left = remove_clean(fs, sessions, done);
     let wanted = left
@@ -435,22 +446,17 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
         return Ok(());
     };
     // A request that fails may still find a run queued: the wait says. A re-mark asked already.
-    if requested.is_none() {
-        drop(fs.request_sweep());
-    }
-    let polls = SWEEP_WAIT.as_millis() / SWEEP_POLL.as_millis().max(1);
-    for _ in 0..polls {
-        fs.pause(SWEEP_POLL);
-        done = fs.sequences().map_err(unread)?;
-        if done.sweep >= wanted {
+    match leftover::wait_for(fs, wanted, requested.is_some()).map_err(unread)? {
+        Waited::Swept(done) => {
             remove_clean(fs, left, done);
-            return Ok(());
+            Ok(())
         }
+        Waited::Leftover => Err(Unswept::LeftoverTask(leftover::LEFTOVER.to_owned())),
+        Waited::Short => Err(Unswept::Waiting(format!(
+            "an earlier session's sandbox sweep didn't finish within {} s",
+            SWEEP_WAIT.as_secs()
+        ))),
     }
-    Err(format!(
-        "an earlier session's sandbox sweep didn't finish within {} s",
-        SWEEP_WAIT.as_secs()
-    ))
 }
 
 /// What the desktop's start found and asked for.

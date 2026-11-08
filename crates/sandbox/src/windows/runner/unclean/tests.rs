@@ -10,6 +10,7 @@ use super::*;
 mod failures;
 mod final_stop;
 mod install;
+mod leftover;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1010";
 const POOL_B: &str = "S-1-5-21-1-2-3-1011";
@@ -42,6 +43,10 @@ struct Fake {
     unreadable: bool,
     /// `SweepNext` can't be read.
     sweep_next_fails: bool,
+    /// The last sweep's exit and number (`SweepLastExit`, `SweepLastSequence`), and what each
+    /// pause moves it to, in turn.
+    last: Option<(u32, u64)>,
+    lasts: Vec<(u32, u64)>,
     /// Which of the marker writes and removals fail.
     fails: Fails,
     log: Vec<String>,
@@ -59,6 +64,8 @@ impl Fake {
             install: Ok(None),
             unreadable: false,
             sweep_next_fails: false,
+            last: None,
+            lasts: Vec::new(),
             fails: Fails::default(),
             log: Vec::new(),
         }
@@ -119,6 +126,9 @@ impl Markers for Fake {
             self.sweep_next
         })
     }
+    fn last_sweep(&mut self) -> Option<(u32, u64)> {
+        self.last
+    }
     fn pool(&mut self) -> Vec<Sid> {
         self.pool.clone()
     }
@@ -161,6 +171,9 @@ impl Markers for Fake {
         self.log.push("pause".to_owned());
         if !self.sweeps.is_empty() {
             self.done.sweep = self.sweeps.remove(0);
+        }
+        if !self.lasts.is_empty() {
+            self.last = Some(self.lasts.remove(0));
         }
     }
     fn note(&mut self, line: &str) {
@@ -359,7 +372,10 @@ fn a_launch_asks_for_a_sweep_and_waits_for_it_bounded() {
         Some(MarkerState::AwaitingSweep { sweep: 6 }),
     );
     let refused = await_sweeps(&mut stuck).unwrap_err();
-    assert!(refused.contains("didn't finish within 15 s"), "{refused}");
+    assert!(
+        refused.why().contains("didn't finish within 15 s"),
+        "{refused:?}"
+    );
     assert_eq!(stuck.asked("pause"), 150);
     assert_eq!(SWEEP_WAIT, Duration::from_secs(15));
     assert!(
@@ -437,7 +453,7 @@ fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
     fake.done = Sequences { stop: 3, sweep: 99 };
     fake.sweep_next_fails = true;
     let refused = await_sweeps(&mut fake).unwrap_err();
-    assert!(refused.contains("completed stop"), "{refused}");
+    assert!(refused.why().contains("completed stop"), "{refused:?}");
     assert_eq!(fake.state("a1"), Some(STOP));
     // F4 refuses the logon too, without asking for the stop, which has completed.
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();

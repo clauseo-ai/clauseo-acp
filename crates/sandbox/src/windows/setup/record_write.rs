@@ -225,6 +225,20 @@ pub(crate) fn write_pool_value(key: &str, name: &str, value: u64) -> Result<(), 
     set_value(&open_existing(key)?, name, &RegValue::Qword(value))
 }
 
+/// Sets the `REG_DWORD` value `name` (`SweepLastExit`) in `HKLM\<key>` as it is, never making
+/// the key, as [`write_pool_value`] does. The sweep task calls it as SYSTEM.
+pub(crate) fn write_pool_dword(key: &str, name: &str, value: u32) -> Result<(), MachineError> {
+    set_value(&open_existing(key)?, name, &RegValue::Dword(value))
+}
+
+/// The machine record's `REG_DWORD` value `name` (`SweepLastExit`), as the lawyer reads it
+/// for a launch: `None` when it, or the key, is missing.
+pub(crate) fn read_record_dword(name: &str) -> Result<Option<u32>, MachineError> {
+    let subkey = HSTRING::from(RECORD_KEY);
+    let name = HSTRING::from(name);
+    read_dword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
+}
+
 /// Takes `done`, the users a set-up has reset, off the record's `ResetSids`, deleting the value
 /// once it lists none. The set-up calls it under its lock.
 pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineError> {
