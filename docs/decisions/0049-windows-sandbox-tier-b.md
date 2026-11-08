@@ -2206,6 +2206,116 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.
 
+### Read-only grants of another matter (R18)
+
+The lawyer can let a matter's agent read a folder, or one file, in another registered matter
+(`PolicyBuilder::other_matter_read`). The grant is read-only and lasts one session. The other
+matter's history, Clauseo data and agent config stay unreadable: each of
+`REFUSED_IN_OTHER_MATTER` (`.git`, `.clauseo`, `.claude`, `.codex`, `.agents`, in any letter
+case) at any depth of the granted tree. The policy refuses a grant with one in its own path.
+Tier B keeps the ones below the grant closed, by direct path too: pool users hold
+`SeChangeNotifyPrivilege`, so a folder the agent can't list doesn't stop it opening a child by
+name.
+
+**The shape.** The gate lists each granted folder (`admit/other_reads.rs`, step 4 of the gate)
+and the plan gives the pool user `ReadAndExecute` (`PathKind::OtherMatterRead`, appended):
+
+- A folder with no refused name anywhere in it: one allow, inherited down its tree.
+- A folder with a refused name at any depth: an allow on the folder alone (list it, read its
+  attributes), and each child taken the same way. A file gets an allow on itself, a clean
+  folder an allow for its tree, a folder with a refused name in it is gone into, and a refused
+  name gets nothing.
+- A granted file: an allow on itself.
+
+No allow reaches a refused name, on it or by inheritance, so nothing has to deny it. It stays
+as closed as it was, behind the other matter's fence. No deny entry names the pool user, and no
+walk starts in a refused name or passes into one: the walks start at the allows, and no
+inherited allow sits above a refused name.
+
+Rejected: one inherited allow on the granted folder plus an inherited deny for the pool user on
+each refused name. Canonical order makes it correct (a child's explicit deny comes before the
+allow it inherits), but:
+
+- the allow's walk carries the inherited allow through every refused tree, so a `.git` of 100k
+  objects is walked at every launch and again at every take-back;
+- each deny is an entry the ledger keeps `pending` after a crash, for a strict walk (N4);
+- it writes into the other matter's `.git`.
+
+The chosen shape writes nothing in a refused name.
+
+Cost: the gate lists the granted tree at every launch, names only. It doesn't go into refused
+names or links. That is one pass the size of the walk that follows. The allows number the
+children of the folders above refused names, usually tens.
+
+Edge cases:
+
+- A submodule's `.git` folder, and a worktree's or submodule's `.git` file: both refused names,
+  found at any depth. The folders above them get allows on themselves alone. What a `.git` file
+  points at is in the other matter's own `.git` (refused) or outside the grant.
+- A junction or symbolic link: in a folder above a refused name it is left out (the NTFS writer
+  refuses an allow on a name surrogate); inside an allowed tree the walk skips it, as every walk
+  does. The agent reaches the target only if the target's own DACL lets it.
+- A file with another name elsewhere (a hard link): left out of the explicit allows (the writer
+  refuses an allow on one, `LinkedFile`) and skipped by the walk. A granted file that has
+  another name grants nothing.
+- Made during the run: inside an allowed tree, a new child inherits the allow and is readable.
+  Directly in a folder above a refused name it inherits nothing from the grant and stays closed
+  behind the fence until the next launch lists it. A refused name made during the run (a
+  `git init` in an allowed tree) inherits the allow and is readable until the session ends.
+  Accepted: the session is short, and nothing of the other matter's existing history opens.
+- A protected DACL: an explicit allow on the item still applies. Below an allowed tree, a
+  protected item inherits nothing and stays closed, as the lawyer set it.
+- A child the lawyer can't open inside an allowed tree refuses the launch (`ChildShut`). It is
+  outside the launch's own trees, so nothing is set aside.
+- A granted folder (a granted file's folder) must answer `Ok` to the folder check; any other
+  answer refuses the launch, naming `OtherMatterRead`.
+
+**The fence.** The other matter's fence (`fence.rs`) is an explicit, inherited `DenyReadWrite`
+for every pool user but its own, on its root, state and notes folders. Canonical order puts every
+explicit entry before every inherited one, and an object's explicit denies before its explicit
+allows. So:
+
+- On a child of the other matter's root, at any depth, our explicit allow comes before the
+  fence's deny the child inherits, and wins for the read bits. The write bits stay denied. A
+  grant of a folder or file inside the other matter works.
+- On the root itself the fence's deny is explicit, on the same object, and comes first. A grant
+  **of the other matter's root** can't list or read the root folder. Each child is readable by
+  its path, through the allows on the children. The agent needs the names: the host gives them,
+  or grants the folders inside instead.
+- The pool group's sibling denies don't reach a grant: a registered matter is never a sibling,
+  a folder holding one is walked down to it and never denied whole (gate step 3), and the gate
+  keeps every granted path out of the sibling walk. A group deny inherited from higher up would
+  lose to the explicit allow, as the fence's does.
+- Making the root listable would mean swapping our pool user's fence entry on the root for an
+  inherit-only one for the session. The fence is the other matter's ledger entry: a crash or a
+  forget between the swap and the swap back would leave that matter's tree open to a pool user.
+  Not done.
+
+The tests model the access check (`apply/tests/reads/access.rs`):
+`a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth` and
+`a_read_of_a_folder_in_another_matter_beats_the_fence_inside_it` (`apply/tests/reads.rs`).
+
+**Lifetime.** A pool user serves one matter, and another matter after a forget, so a read never
+outlives its session. The host passes remembered grants again in each launch's policy. Every
+allow is a ledger entry of the reading matter, and each removal goes through
+`Ledger::take_back`: entries marked `removing`, allows removed, trees walked again so the
+inherited copies go, entries dropped (`apply/reads.rs`).
+
+- **At the session's end:** `end_reads(ledger, matter, sids, acl, around)`, after
+  `repair_after_session`. `sids` are the session's pool user, and the matter's SID when it is a
+  subject, so a second session of the matter with its own pool user keeps its reads.
+- **When the lawyer forgets a grant mid-session:** `narrow_reads(ledger, matter, sids, policy,
+  acl, around) -> Result<Narrowed, Error>`. It takes back each read entry the new policy no
+  longer holds (an entry is held when it is on or inside one of the policy's reads) and never
+  adds one. Calling it twice takes nothing the second time. A handle the agent opened before
+  stays open until the host's relaunch at the next turn boundary.
+- **After a crash:** the matter's next launch takes back, before it records anything, each read
+  entry naming its subjects that its plan doesn't list (`apply_checked`). `forget_matter` takes
+  them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short.
+  Until then the reuse check (`Ledger::grants_sid`) keeps the pool user from serving another
+  matter. The set-aside, `--reclaim` and the clean-close record don't take part: they cover the
+  launch's own trees.
+
 ### The launcher (PR6 interface)
 
 This section is the single source both sides point to. The host and stage C agreed it, and the
@@ -2236,8 +2346,16 @@ impl Launchers {
         -> Result<(Arc<dyn clauseo_process::Launcher>, Vec<SetAside>), Error>;
 
     /// Once per spawned agent, and only after its process tree is gone (the host's straggler
-    /// wait): the repair, `set_aside::after_session` and the clean-close record.
+    /// wait): the repair, `end_reads` (R18), `set_aside::after_session` and the clean-close
+    /// record.
     pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside>;
+
+    /// When the lawyer forgets a read of another matter mid-session (R18), called by the host
+    /// off the actor with the session's new policy: `narrow_reads` for the session's matter and
+    /// SIDs. The pool user's allows the policy no longer holds go at once; nothing is added
+    /// (the host relaunches at the next turn boundary for that). Idempotent. Handles the agent
+    /// already opened survive until that relaunch.
+    pub fn narrow(&self, session: &str, policy: &Policy) -> io::Result<Narrowed>;
 }
 
 impl Preparing {
@@ -2257,7 +2375,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   3. assigns the pool user;
   4. the gate and the plan;
   5. `wfp::check_launch`;
-  6. `apply` of the session's own items;
+  6. `apply` of the session's own items, which first takes back the matter's reads of other
+     matters a crashed run left (R18);
   7. writes the protected launch file;
   8. returns a launcher that starts `clauseo-sandbox-run.exe --launch <file>` through
      `spawn_in_tree`.
