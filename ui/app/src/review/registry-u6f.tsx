@@ -134,7 +134,7 @@ export const U6F: Entry[] = [
   {
     id: "U6F-16",
     words: errorWords(
-      "Codex was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "Codex was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
     ),
     screen: "room/first-run",
     render: setupFailed({ kind: "codex", name: "Codex" }),
@@ -142,7 +142,7 @@ export const U6F: Entry[] = [
   {
     id: "U6F-17",
     words: errorWords(
-      "{name} was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "{name} was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
     ),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: "Codex" }),
@@ -150,7 +150,7 @@ export const U6F: Entry[] = [
   {
     id: "U6F-18",
     words: errorWords(
-      "The AI was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "The AI was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
     ),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: null }),

@@ -9,17 +9,22 @@
 //!   sharing or lock error in `npm ci` or the rename is first retried in place (`npm`).
 //!
 //! Each try starts by emptying the npm cache ([`empty_npm_cache`]), so tries cut short never
-//! pile up its copies of the tarballs.
+//! pile up its copies of the tarballs; except a try whose set-up is kept from one that failed
+//! only its rename, which renames it alone (`kept`).
 //! - A pause ends the job quietly where it is: `pause` has already sent `Paused`.
 //!
 //! Every wait and every npm run is raced against the job's [`Cancel`], and every event goes
 //! through [`Shared::emit_job`], which drops it once the job is paused.
 
 mod files;
+mod kept;
 mod npm;
 mod try_error;
 
 pub(crate) use files::empty_npm_cache;
+#[cfg(test)]
+pub(crate) use kept::MARKER;
+pub(crate) use kept::marked_for;
 use try_error::Next;
 pub(crate) use try_error::TryError;
 
@@ -267,9 +272,6 @@ impl<T: Timer + Send + Sync> Job<T> {
     ) -> Result<Installed, TryError> {
         let config = &self.config;
         let platform = config.platform;
-        // A try cut short left its npm cache behind; this one starts with none, so a run of
-        // interrupted tries never holds more than one try's cache.
-        empty_npm_cache(&config.data_dir);
         let node = match user {
             Some(found) => NodeChoice::User(found.clone()),
             None if platform.libc == Some(Libc::Musl) => {
@@ -290,6 +292,16 @@ impl<T: Timer + Send + Sync> Job<T> {
                 }
             }
         };
+        // A finished set-up whose rename failed: only the rename runs again.
+        if let Some(installed) = kept::finish_kept(self, &node)
+            .await
+            .map_err(TryError::in_setup)?
+        {
+            return Ok(installed);
+        }
+        // A try cut short left its npm cache behind; this one starts with none, so a run of
+        // interrupted tries never holds more than one try's cache.
+        empty_npm_cache(&config.data_dir);
         let node_needed = matches!(node, NodeChoice::Runtime { fetch: true, .. });
         self.check_disk(node_needed)?;
         let fetched = files::fetch_all(self, &node, run)?;

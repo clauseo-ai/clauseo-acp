@@ -8,8 +8,12 @@ use std::time::Duration;
 
 use clauseo_protocol::AgentId;
 
-use super::{RENAME_WAITS, in_place, npm_code, windows_busy};
-use crate::platform::Os;
+use super::{
+    Ended, RENAME_WAITS, in_place, missing_agent, missing_archive, npm_code, windows_busy,
+};
+use crate::config::AgentsConfig;
+use crate::platform::{Arch, Os, Platform};
+use crate::state::FailureKind;
 
 fn agent() -> AgentId {
     AgentId::new("agent-a").unwrap()
@@ -55,7 +59,7 @@ fn logged(work: impl FnOnce()) -> String {
 fn run_step(
     results: Vec<io::Result<u8>>,
     wait_answers: bool,
-) -> (io::Result<u8>, usize, Vec<Duration>) {
+) -> (Result<u8, Ended<io::Error>>, usize, Vec<Duration>) {
     let results = RefCell::new(results.into_iter());
     let runs = RefCell::new(0);
     let waits = RefCell::new(Vec::new());
@@ -100,22 +104,44 @@ fn a_sharing_violation_is_retried_in_place_and_logged() {
 
 #[test]
 fn the_retries_stop_after_the_last_wait_and_keep_the_error() {
-    let errors = (0..10).map(|_| Err(sharing())).collect();
+    let errors = (0..20).map(|_| Err(sharing())).collect();
     let (out, runs, waits) = run_step(errors, true);
-    assert_eq!(out.unwrap_err().raw_os_error(), Some(32));
+    let Err(Ended::Failed(err)) = out else {
+        panic!("{out:?}");
+    };
+    assert_eq!(err.raw_os_error(), Some(32));
     assert_eq!(runs, RENAME_WAITS.len() + 1);
     assert_eq!(waits, RENAME_WAITS);
 }
 
 #[test]
-fn another_error_or_a_pause_ends_at_once() {
+fn another_error_ends_at_once() {
     let missing = io::Error::from_raw_os_error(2);
     let (out, runs, waits) = run_step(vec![Err(missing)], true);
-    assert_eq!(out.unwrap_err().raw_os_error(), Some(2));
+    let Err(Ended::Failed(err)) = out else {
+        panic!("{out:?}");
+    };
+    assert_eq!(err.raw_os_error(), Some(2));
     assert_eq!((runs, waits), (1, Vec::new()));
+}
+
+/// A pause during a retry's wait ends the step as paused, not with the sharing error (which
+/// for npm is a try to count, and would read as npm's failure).
+#[test]
+fn a_pause_during_a_retry_wait_ends_as_paused_not_with_the_error() {
     let (out, runs, waits) = run_step(vec![Err(sharing()), Ok(1)], false);
-    assert!(out.is_err(), "a pause during the wait ends it");
+    assert!(matches!(out, Err(Ended::Paused)), "{out:?}");
     assert_eq!((runs, waits), (1, RENAME_WAITS[..1].to_vec()));
+}
+
+/// The snapshot not knowing the agent and Node's archive missing are no set-up failures, even
+/// though they are met in the set-up step: they fail as `Failed`.
+#[test]
+fn a_missing_agent_or_archive_is_no_set_up_failure() {
+    let config = AgentsConfig::new("/data".into(), Platform::new(Os::Linux, Arch::X64));
+    for err in [missing_agent(&config), missing_archive(&config)] {
+        assert_eq!(err.in_setup().failed_kind(), FailureKind::Failed);
+    }
 }
 
 #[test]
