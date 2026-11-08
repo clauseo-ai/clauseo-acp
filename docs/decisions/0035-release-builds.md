@@ -35,9 +35,9 @@ Developer ID.
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
   `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
-  its `dist` folder before any leg embeds it); `build` (the matrix below); `sign-windows` (SignPath's slot, then both NSIS
+  its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
-  last); `assemble` (names the Mac archives `Clauseo_<v>_<arch>.app.tar.gz`, writes `latest.json` and
+  last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
   `SHA256SUMS.txt`, attests every asset, creates the Release); `publish`; `measure-builds` (the
   `marks` build on macOS and the `e2e` build on Windows for the laptop pass, never on a Release).
 - **Workflow rules:** every action pinned by commit SHA; `permissions:` on every job (none at the
@@ -60,7 +60,10 @@ Developer ID.
   release notes when missing: the same for Intel Mac (`x64`, cross-built on `macos-15`) and Windows
   ARM64 (`arm64`, `windows-11-arm`), and `Clauseo_<v>_amd64.deb` and `Clauseo-<v>-1.x86_64.rpm`
   (`ubuntu-22.04`, the oldest glibc we support). The `.app.tar.gz` and the `currentUser` installers
-  carry a `.sig`; Linux never updates itself, so its packages have none and its leg holds no secret.
+  carry a `.sig`, each signed under the published name, so the trusted comment's `file:` carries the
+  arch (`file:Clauseo_<v>_aarch64.app.tar.gz`, `file:Clauseo_<v>_x64.app.tar.gz`): the app's updater
+  binds an update to its arch by it (#728), and `latest-json.mjs` refuses a `.sig` signed under any
+  other name; Linux never updates itself, so its packages have none and its leg holds no secret.
   `latest-json.mjs` is the one home of this table.
 - **The base config** (`crates/desktop/tauri.conf.json`) holds what every build shares: the bundle
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
