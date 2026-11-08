@@ -365,16 +365,25 @@ build 26100):
     ends." Each item moved goes to the host as two records on its denial pipe, the lawyer's
     notice and the set-aside; the session's end notice goes there too. Nothing on the outer's
     stderr, which carries the agent's stderr too, is read back. The pipe
-    (`crates/sandbox/src/windows/denial_pipe.rs`) is `\\.\pipe\clauseo-denials-<32 hex>`, a
-    random name the launch message names (`denial_pipe`, checked against that shape). The host
-    makes it before it spawns the runner: one instance, inbound, remote clients refused, DACL
-    `D:P(A;;0x12019b;;;<lawyer>)S:(ML;;NWNR;;;ME)`, read only when the client's pid is the
-    runner's. Each record is one versioned JSON line (`{"v":1,"record":...}`, at most 256 KiB,
-    unknown versions, kinds and fields refused): `SetAside` (path, where it went, what) or
-    `Notice` (text). The outer opens the client end write-only before the inner starts
-    (`SECURITY_IDENTIFICATION`, a pipe by `GetFileType`), and a writer thread sends the
-    records, so a slow host never holds up a kill; the stop drains it for up to 2 s. With no pipe
-    named, one that won't open, or a failed write, records are only logged (the kind, no path).
+    (`crates/sandbox/src/windows/denial_pipe.rs`) is one of the launcher's run pipes,
+    `\\.\pipe\clauseo-run-<32 hex>-denials` (C4's `Role::Denials`), named in the launch message
+    (`denial_pipe`, refused unless it has that shape). The host makes it before it spawns the
+    runner, with C4's lawyer-only `pipe::denial_sddl`, and reads it. The outer connects first,
+    before the watch is armed and before the inner's logon: a write-only client end
+    (`SECURITY_IDENTIFICATION`, checked to be a pipe by `GetFileType`), not inheritable. A named
+    pipe that is taken, gone or can't be reached refuses the launch (`RunExit::Pipe`) in plain
+    words, without the pipe's name. With no name, records are only logged (the kind, no path).
+    The inner gets no handle list, since `CreateProcessWithLogonW` takes no `STARTUPINFOEX`, but
+    `log_on` names no std handles for it and it never holds the pipe; the agent, which the inner
+    starts with a handle list of its three pipes, has no way to it. Each record is one flat
+    JSON line tagged by `kind`, at most 256 KiB: `{"kind":"set_aside","path":...,"to":...,
+    "what":...}` or `{"kind":"notice","text":...}`. The line carries no version: kinds are only
+    added, and a change of shape bumps `LAUNCH_VERSION`, since runner and host ship together. An
+    unknown field, kind or `what`, or trailing data, is an error, and `read_record` stops at
+    the first. C4's stand-in reader (`launch/records.rs`) differs until it uses this module: it
+    knows no `notice`, caps lines at 64 KiB, and skips a bad line and reads on. A writer thread
+    sends the records, so a slow host never holds up a kill; the stop drains it for up to 2 s. A
+    write that fails is only logged.
     The set-aside becomes a `Denial::SetAside` (its path, where it went, and the agent's plain
     words: "an agent can't create a git repository inside a matter. Clone or init in your
     scratch folder instead.") for the session's denial sink, the agent's refusal. The cost is
