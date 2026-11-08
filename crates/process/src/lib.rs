@@ -88,8 +88,9 @@
 //! # Depends on
 //!
 //! `protocol` (`ErrorCode`, `DetachReason`), `async-process`, `async-io` (the real timer),
-//! `futures`, `memchr` (line ends in the stderr pump), `thiserror`; `nix` on Unix (`signal`),
-//! `libc` on macOS (libproc) and `windows` on Windows. Never `tauri` or `tokio`.
+//! `futures`, `memchr` (line ends in the stderr pump), `thiserror`, `tracing` (a stderr tap's
+//! panic); `nix` on Unix (`signal`), `libc` on macOS (libproc) and `windows` on Windows. Never
+//! `tauri` or `tokio`.
 //!
 //! # Start reading
 //!

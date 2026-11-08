@@ -130,6 +130,14 @@ impl SpawnOptions {
     /// comes with U+FFFD for the bad bytes. A line longer than 16 KiB comes in 16 KiB pieces, and
     /// a last line with no `\n` comes at the end, as [`StderrPump::lines`] passes them. Every byte
     /// reaches the ring before its line reaches the tap. A later call replaces the tap.
+    ///
+    /// The tap gets lines only. End of stream and read errors come only as the result of
+    /// [`StderrPump::drain`]. A panic in the tap is caught: the tap is dropped, one warning is
+    /// logged without the line, and `drain` goes on to the end of stderr.
+    ///
+    /// The tap is one closure for every agent started with these options, with no label on a
+    /// line. A launcher reused for several agents sends all their lines to it; a host that must
+    /// tell them apart gives each agent its own options.
     pub fn stderr_tap(mut self, tap: impl Fn(&str) + Send + Sync + 'static) -> SpawnOptions {
         self.stderr_tap = Some(StderrTap::new(tap));
         self

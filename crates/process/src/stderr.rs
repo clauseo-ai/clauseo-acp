@@ -3,6 +3,7 @@
 //! exit report carries.
 
 use std::io;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_process::ChildStderr;
@@ -89,7 +90,8 @@ impl Ring {
 /// The ring an agent's pump fills, shared with its handle and exit reports.
 pub(crate) type SharedRing = Arc<Mutex<Ring>>;
 
-/// The line tap of a launch (`SpawnOptions::stderr_tap`), shared with the launch's options.
+/// The line tap of a launch (`SpawnOptions::stderr_tap`), shared with the launch's options. Its
+/// panics are caught: see [`deliver`].
 #[derive(Clone)]
 pub(crate) struct StderrTap(Arc<dyn Fn(&str) + Send + Sync>);
 
@@ -140,7 +142,7 @@ impl StderrPump {
     }
 
     async fn pump(mut self, mut on_line: Option<impl FnMut(&str)>) -> io::Result<()> {
-        let tap = self.tap.take();
+        let mut tap = self.tap.take();
         // Lines are split only when something takes them, so a pump with neither reads as before.
         let split = tap.is_some() || on_line.is_some();
         let mut buf = vec![0; READ];
@@ -149,7 +151,7 @@ impl StderrPump {
             let n = self.pipe.read(&mut buf).await?;
             let Some(read) = buf.get(..n).filter(|read| !read.is_empty()) else {
                 if split {
-                    lines.finish(&mut |line| deliver(line, tap.as_ref(), on_line.as_mut()));
+                    lines.finish(&mut |line| deliver(line, &mut tap, on_line.as_mut()));
                 }
                 return Ok(());
             };
@@ -159,7 +161,7 @@ impl StderrPump {
                 .push(read);
             if split {
                 lines.feed(read, &mut |line| {
-                    deliver(line, tap.as_ref(), on_line.as_mut());
+                    deliver(line, &mut tap, on_line.as_mut());
                 });
             }
         }
@@ -167,9 +169,19 @@ impl StderrPump {
 }
 
 /// Passes `line` to the launch's tap, then to the caller's `on_line`.
-fn deliver(line: &str, tap: Option<&StderrTap>, on_line: Option<&mut impl FnMut(&str)>) {
-    if let Some(tap) = tap {
-        (tap.0)(line);
+///
+/// A tap that panics must not stop the pump, which would leave the agent's stderr unread and
+/// the agent blocked on a full pipe. So its panic is caught, the tap is dropped (it gets no more
+/// lines), and one warning is logged without the line. The ring already holds the line, and
+/// `drain` still returns every byte. `on_line` is the caller's and is not caught. Under
+/// `panic = "abort"` (the release profile) a panic ends the process, as any panic does there.
+fn deliver(line: &str, tap: &mut Option<StderrTap>, on_line: Option<&mut impl FnMut(&str)>) {
+    let panicked = tap
+        .as_ref()
+        .is_some_and(|tap| panic::catch_unwind(AssertUnwindSafe(|| (tap.0)(line))).is_err());
+    if panicked {
+        *tap = None;
+        tracing::warn!("a stderr line tap panicked; the agent's stderr goes on without it");
     }
     if let Some(on_line) = on_line {
         on_line(line);
