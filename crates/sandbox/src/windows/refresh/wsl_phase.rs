@@ -5,9 +5,12 @@
 //!   (LOCAL SYSTEM, from the admin copy), twice: first, before the admin copy's steps, so the
 //!   deny comes back without waiting for them; and last, whatever they gave;
 //! - `\Clauseo\SandboxWslDeny` (`--wsl-deny`, [`wsl_deny`]), on Windows Installer's events
-//!   in the Application log: once allowed, as the refresh is, it runs the phase once and does
-//!   nothing else, no admin-copy step and never WSL's upgrade. Anyone who can log on can forge
-//!   such an event, so the trigger is on this task alone: a forged one gains a re-applied deny.
+//!   in the Application log: once allowed, as the refresh is, it runs the phase, then again
+//!   every [`WSL_RECHECK_PAUSE`] for [`WSL_RECHECKS`] more passes (an installer may write the
+//!   launch permissions in more than one pass, so each pass re-reads them and re-applies what
+//!   changed), and does nothing else, no admin-copy step and never WSL's upgrade. Anyone who
+//!   can log on can forge such an event, so the trigger is on this task alone: a forged one
+//!   gains a re-applied deny.
 //!   The trigger starts it at once (no delay), and the task ignores a start while it runs: a
 //!   burst of installer events gives one run, and an event after it ends gives another. The
 //!   launch check starts it too, as the lawyer, for a missing deny (`clean_close::wsl_heal`);
@@ -27,7 +30,15 @@
 //! is one Event Log error line, naming `AppID`s and Windows error codes, never a path or a SID.
 //! A run that changed nothing writes no line.
 
+use std::time::Duration;
+
 use super::{Refresher, WSL_LOCK_WAIT, allowed};
+
+/// How many passes `--wsl-deny` makes after its first.
+pub(super) const WSL_RECHECKS: u32 = 4;
+/// The wait before each of them. Each pass may wait [`WSL_LOCK_WAIT`] too: at most 1 + 4 passes
+/// of 10 s and 4 waits of 5 s, 70 s, inside the task's 2-minute limit.
+pub(super) const WSL_RECHECK_PAUSE: Duration = Duration::from_secs(5);
 
 mod upgrade;
 
@@ -75,13 +86,20 @@ impl WslDenyExit {
 }
 
 /// `--wsl-deny`, the task `\Clauseo\SandboxWslDeny`'s run: once allowed (LOCAL SYSTEM, from the
-/// admin copy, as the refresh's step 1), the phase once, and nothing else: never WSL's upgrade.
+/// admin copy, as the refresh's step 1), the phase, then [`WSL_RECHECKS`] more passes each after
+/// [`WSL_RECHECK_PAUSE`], and nothing else: never WSL's upgrade.
 pub fn wsl_deny<F: Refresher>(fs: &mut F) -> WslDenyExit {
     if let Err((_, why)) = allowed(fs) {
         fs.log(true, &format!("WSL's deny wasn't re-applied: {why}"));
         return WslDenyExit::NotAllowed;
     }
     run(fs);
+    // A WSL self-update may write the launch permissions again after the event that started
+    // this run: each pass re-reads them and re-applies what changed, writing nothing otherwise.
+    for _ in 0..WSL_RECHECKS {
+        fs.pause(WSL_RECHECK_PAUSE);
+        run(fs);
+    }
     WslDenyExit::Done
 }
 
@@ -115,7 +133,7 @@ pub(super) fn run(fs: &mut impl Refresher) {
 mod tests {
     use super::super::fake::{Fake, good, key, new, old, run_fake};
     use super::super::{RefreshExit, SourceError};
-    use super::{WslDenyExit, WslUpgraded, wsl_deny};
+    use super::{WSL_RECHECK_PAUSE, WSL_RECHECKS, WslDenyExit, WslUpgraded, wsl_deny};
     use crate::windows::refresh::test_signer::TestKey;
 
     /// The fake machine, ready to refresh, and the key its exe is signed with.
@@ -190,15 +208,17 @@ mod tests {
     }
 
     #[test]
-    fn the_wsl_deny_run_reapplies_once_and_does_nothing_else() {
+    fn the_wsl_deny_run_reapplies_then_rechecks_and_does_nothing_else() {
         let (mut machine, _key) = fake();
         // Even with WSL's upgrade owed: the trigger task never installs it.
         machine.upgrade = WslUpgraded::Installed("installed".to_owned());
         machine.pool_busy = Ok(false);
         assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
-        assert_eq!(phases(&machine), ["lock_waiting", "reapply_wsl", "unlock"]);
+        let pass = ["lock_waiting", "reapply_wsl", "unlock"];
+        let passes = pass.repeat(5);
+        assert_eq!(phases(&machine), passes);
         // No admin-copy step: nothing read beyond the run's own check.
-        let allowed = ["is_system", "current_exe", "admin_copy"];
+        let allowed = ["is_system", "current_exe", "admin_copy", "pause"];
         let rest: Vec<&str> = machine
             .calls
             .iter()
@@ -206,7 +226,7 @@ mod tests {
             .filter(|c| !allowed.contains(c))
             .collect();
         // The event-triggered task never upgrades WSL, nor looks at the pool's processes.
-        assert_eq!(rest, ["lock_waiting", "reapply_wsl", "unlock"]);
+        assert_eq!(rest, passes);
         assert!(machine.logs.is_empty(), "{:?}", machine.logs);
         // Not LOCAL SYSTEM: refused, nothing re-applied, one error line, its own code.
         let (mut machine, _key) = fake();
@@ -214,11 +234,43 @@ mod tests {
         assert_eq!(wsl_deny(&mut machine), WslDenyExit::NotAllowed);
         assert!(!machine.calls.contains(&"reapply_wsl"));
         assert!(!machine.calls.contains(&"upgrade_wsl"));
+        assert!(!machine.calls.contains(&"pause"));
         assert_eq!(machine.logs.len(), 1);
         assert!(machine.logs[0].0, "{:?}", machine.logs);
         assert_eq!(WslDenyExit::ALL.map(WslDenyExit::as_code), [0, 51, 52]);
         for exit in WslDenyExit::ALL {
             assert_eq!(WslDenyExit::from_code(exit.as_code().into()), Some(exit));
         }
+    }
+
+    #[test]
+    fn the_wsl_deny_run_rechecks_after_a_pause_and_reapplies_a_second_pass() {
+        let (mut machine, _key) = fake();
+        // The installer writes again after the first re-apply: the second pass puts it back,
+        // the later ones find it in place and write nothing.
+        let put_back = "WSL's deny was put back on 1 launch permission".to_owned();
+        machine.wsl_passes = vec![Ok(Some(put_back.clone())), Ok(Some(put_back)), Ok(None)];
+        assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
+        assert_eq!(WSL_RECHECKS, 4);
+        assert_eq!(machine.paused, vec![WSL_RECHECK_PAUSE; 4]);
+        assert_eq!(WSL_RECHECK_PAUSE.as_secs(), 5);
+        let wanted = ["pause", "reapply_wsl"];
+        let order: Vec<&str> = machine
+            .calls
+            .iter()
+            .copied()
+            .filter(|c| wanted.contains(c))
+            .collect();
+        let mut expected = vec!["reapply_wsl"];
+        for _ in 0..4 {
+            expected.extend(["pause", "reapply_wsl"]);
+        }
+        assert_eq!(order, expected);
+        // One information line per pass that changed something.
+        assert_eq!(machine.logs.len(), 2, "{:?}", machine.logs);
+        assert!(machine.logs.iter().all(|(error, _)| !error));
+        // Within the task's limit even when every pass waits out the lock.
+        let worst = (1 + WSL_RECHECKS) * 10 + WSL_RECHECKS * 5;
+        assert!(worst < 120, "{worst}");
     }
 }

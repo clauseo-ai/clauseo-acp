@@ -238,6 +238,8 @@ pub trait Refresher {
     fn log(&mut self, error: bool, line: &str);
     /// Re-applies WSL's deny under the set-up lock (`wsl_phase.rs`); a line when it changed any.
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed>;
+    /// Waits `time` (`--wsl-deny`'s re-checks); the fake only notes it.
+    fn pause(&mut self, time: std::time::Duration);
 }
 
 /// Runs the refresh as the module says: once the run is allowed, WSL's deny, then the admin

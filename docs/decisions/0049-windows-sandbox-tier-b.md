@@ -2077,7 +2077,10 @@ INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
 is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
 queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
 unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
-phase once and does nothing else: no admin-copy step, no record read beyond the phase's own, and
+phase, then four more passes 5 s apart (`WSL_RECHECKS`, `WSL_RECHECK_PAUSE`): an installer may
+write the launch permissions in more than one pass, and each pass re-reads them and re-applies
+what changed, writing nothing otherwise (at most 70 s with every lock wait, inside `PT2M`). It
+does nothing else: no admin-copy step, no record read beyond the phase's own, and
 never WSL's upgrade. The event trigger is on this task alone because anyone who can log on can
 fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user can forge an
 `MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM. Here a
@@ -2315,6 +2318,12 @@ the class isn't registered at all (F1). Not verified on a VM: the upgrade itself
 newer than its MSI was at hand), that a packaged service's `ImagePath` names its package's folder
 under `WindowsApps`, and that the owner may run the task from a non-elevated launch (the refresh's
 start was, CI run 42416074600).
+
+Another accepted residual: a WSL self-update not started by our task (Windows' own updater
+starts one within about a second of a pending Store update) rewrites the AppIDs, and the deny is
+off until the `MsiInstaller`-event task re-applies it: about 1.2 s measured on the VM. The task's
+re-checks put back a later pass's rewrite. The mid-session WSL watcher (the next wiring PR) stops
+a session if a pool-owned WSL process or an `LxssUserSession` activation appears.
 
 **The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
