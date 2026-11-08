@@ -14,13 +14,11 @@
 //! walk that couldn't list a folder is 56 already and isn't repeated: the first read is judged.
 //! In it, a task the walk didn't list is:
 //!
-//! - in a task file and the cache: hidden, 56, unless the owner of the descriptor its cache key
-//!   holds is readable and isn't a pool SID, and its task file, under the fallback's trust
-//!   rules ([`file_trust::trusted`]), names a principal that isn't the pool's: then it is
-//!   skipped, counted with the tasks skipped by their file. An owner that can't be read
-//!   (unreadable, ownerless, over its cap) is 56 whatever the file says: [`file_trust::trusted`]
-//!   reads today's DACL, and a registrant with write and `WRITE_DAC` on its file can name SYSTEM
-//!   there, then drop its own write. Security wins; the planned recycle restores availability;
+//! - in a task file and the cache: a task the Task Scheduler holds but SYSTEM's listing hides,
+//!   56, whatever its cache key's `SD` or its file says. Neither is evidence: the `SD`'s owner
+//!   is the registrant's input, and a registrant with `WRITE_DAC` on its file can name SYSTEM
+//!   there, then drop its own write. SYSTEM can read virtually every legitimate task, so this
+//!   costs little; the planned recycle restores availability;
 //! - in a task file alone (no cache key, so the Task Scheduler holds no such task): the file's
 //!   own owner, read through a handle that never follows a link
 //!   ([`Sweeper::task_file_owner`]), decides. A pool SID, or an owner that can't be read, is
@@ -43,7 +41,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{FOLDERS_CAP, Failed, Sweeper, Walk, file_trust, running, sweep_task, task_file};
+use super::{FOLDERS_CAP, Failed, Sweeper, Walk, running, sweep_task, task_file};
 use crate::windows::sids::Sid;
 
 /// One of the cross-check's listings ([`Sweeper::task_file_paths`],
@@ -239,12 +237,7 @@ fn holds<S: Sweeper>(fs: &mut S, list: &[String], path: &str) -> Result<bool, Fa
 
 /// Judges `views`, the second read, as the module says, into `at`'s `swept`.
 fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
-    let Walk {
-        pool,
-        names,
-        resolved,
-        swept,
-    } = at;
+    let Walk { pool, swept, .. } = at;
     for why in views.failed {
         swept.unlisted += 1;
         swept.note(why);
@@ -285,13 +278,7 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
         let judged = match held {
             Held::Both => {
                 swept.unlisted_in_both += 1;
-                match file_trust::not_pool_by_path(fs, &path, pool, names, resolved) {
-                    Ok(()) => {
-                        swept.file_skipped += 1;
-                        Ok(())
-                    }
-                    Err(why) => Err(why),
-                }
+                Err(HIDDEN.to_owned())
             }
             Held::File => {
                 swept.unlisted_files += 1;
@@ -336,6 +323,9 @@ fn key_alone<S: Sweeper>(fs: &mut S, path: &str) -> Result<(), Failed> {
     }
     Ok(())
 }
+
+/// Why a task the Task Scheduler holds but its listing hides is 56.
+const HIDDEN: &str = "the Task Scheduler holds a task its listing hides from SYSTEM";
 
 /// Why a task file with no cache key is 56.
 const POOL_FILE: &str = "a task file with no cache key is owned by a pool user";
