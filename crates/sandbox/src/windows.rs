@@ -66,8 +66,11 @@ pub mod clean_close;
 #[cfg(windows)]
 mod detect;
 pub mod fence;
+// Each pool user's Git tree: its engine builds everywhere for the tests.
 #[cfg(windows)]
 mod folder;
+#[cfg(any(windows, test))]
+pub mod git_tree;
 pub mod ledger;
 pub mod marker;
 pub mod matters;

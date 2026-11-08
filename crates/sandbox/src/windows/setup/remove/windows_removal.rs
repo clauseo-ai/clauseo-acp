@@ -215,6 +215,14 @@ impl Removal for WindowsRemoval {
         record_write::delete(&self.names.record_key)
     }
 
+    fn remove_git_trees(&mut self) -> Result<(), MachineError> {
+        // A test's removal leaves Program Files and the real record alone.
+        if self.names.record_key != record_write::RECORD_KEY {
+            return Ok(());
+        }
+        crate::windows::git_tree::remove_all().map_err(MachineError::Other)
+    }
+
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }

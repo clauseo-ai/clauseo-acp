@@ -17,7 +17,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::{MachineRecord, PoolUser};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, machine::GroupFacts,
@@ -551,6 +551,11 @@ impl Machine for FakeMachine {
         self.call(format!("grow_journal {}", volume.display()))?;
         self.journals.insert(volume.to_owned(), Some(max));
         Ok(())
+    }
+
+    fn git_trees(&mut self, pool: &[PoolUser], _group: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the Git trees are built as admin");
+        self.call(format!("git_trees {}", pool.len()))
     }
 
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {

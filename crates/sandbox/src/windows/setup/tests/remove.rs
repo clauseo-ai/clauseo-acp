@@ -62,6 +62,7 @@ fn full_removal() -> Vec<String> {
             "group",
             "group_members 1000",
             "delete_group 1000",
+            "remove_git_trees",
             "delete_record",
             "unlock",
         ]
@@ -294,6 +295,7 @@ fn the_steps_are_named_by_what_failed() {
         "remove" | "walk" => RemoveStep::LocalLow,
         "owners_ledger" => RemoveStep::Ledger,
         "group" | "group_members" | "delete_group" => RemoveStep::Group,
+        "remove_git_trees" => RemoveStep::GitTrees,
         "delete_record" => RemoveStep::Record,
         other => panic!("no step for {other}"),
     };

@@ -208,8 +208,8 @@ fn group_sid() -> Result<Option<Sid>, MachineError> {
 }
 
 /// The name of the account whose SID is `sid` (`LookupAccountSidW`); `None` when no account
-/// has it (a deleted one).
-pub(super) fn account_name(sid: &Sid) -> Result<Option<String>, MachineError> {
+/// has it (a deleted one). The Git trees name their folders with it (`git_tree::os`).
+pub(crate) fn account_name(sid: &Sid) -> Result<Option<String>, MachineError> {
     let text = wide(sid.as_str());
     let mut parsed = PSID::default();
     // SAFETY: `text` is NUL-terminated and outlives the call; `parsed` is a live out-pointer,

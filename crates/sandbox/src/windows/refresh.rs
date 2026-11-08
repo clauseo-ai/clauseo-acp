@@ -59,6 +59,10 @@
 //! name, so repair can restore it too. The gap is two write-through renames with nothing
 //! between them.
 //!
+//! Whatever the admin copy's outcome, the run then refreshes the pool users' Git trees under
+//! the same lock ([`Refresher::git_trees`], `git_tree`, 0049 "The Git tree"); they never change
+//! its exit.
+//!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
 
@@ -298,6 +302,9 @@ pub trait Refresher {
     fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Builds a Git tree for each pool user the record names whose Git changed, and retires the
+    /// old ones no run uses (`git_tree::ensure_from_record`); logs, never fails.
+    fn git_trees(&mut self);
 }
 
 /// Runs the refresh as the module says, checking the staged exe against `trust`.
@@ -341,6 +348,7 @@ fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refus
         ));
     }
     let locked = locked_steps(fs, trust);
+    fs.git_trees();
     fs.unlock();
     locked
 }

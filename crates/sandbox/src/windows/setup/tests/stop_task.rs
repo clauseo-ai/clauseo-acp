@@ -231,7 +231,7 @@ fn removing_a_per_machine_pool_deletes_the_stop_task_before_the_record() {
     let lines = machine.lines();
     let at = lines.iter().position(|l| l == "unregister_stop_task");
     let at = at.unwrap_or_else(|| panic!("{lines:?}"));
-    assert_eq!(lines[at + 1], "delete_record");
+    assert_eq!(lines[at + 1..at + 3], ["remove_git_trees", "delete_record"]);
     assert_eq!(machine.m.state.stop_task, None);
     assert_eq!(machine.m.state.record, None);
     // A deletion that fails stops the removal there, the record kept for the next run.

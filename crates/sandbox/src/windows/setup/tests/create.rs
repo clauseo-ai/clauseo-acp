@@ -82,6 +82,26 @@ fn a_large_journal_is_left_and_a_failed_one_never_fails_the_set_up() {
 }
 
 #[test]
+fn a_failed_git_tree_step_never_fails_the_set_up() {
+    // The engine records "Git Bash unavailable" per account itself (`git_tree`'s tests); a
+    // step that couldn't even start is logged, and every later step still runs.
+    let mut machine = FakeMachine::new("setup-git-trees");
+    machine.fail("git_trees 8");
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.pool.len(), 8);
+    let calls = machine.calls_since(0);
+    let at = calls.iter().position(|c| *c == "git_trees 8").unwrap();
+    assert_eq!(calls.get(at + 1), Some(&"journal_volumes"));
+    assert_eq!(calls.last(), Some(&"unlock"));
+    assert!(calls.contains(&"write_marker"));
+    assert_eq!(
+        machine.calls,
+        fresh_calls(),
+        "the same calls as a run without the failure"
+    );
+}
+
+#[test]
 fn secondary_logon_disabled_makes_no_account() {
     let mut machine = FakeMachine::new("setup-seclogon");
     machine.seclogon = ServiceStart::Disabled;

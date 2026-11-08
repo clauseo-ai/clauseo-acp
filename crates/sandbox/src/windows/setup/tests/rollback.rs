@@ -45,9 +45,10 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         .position(|c| c.starts_with("write_record"))
         .unwrap();
     for (at, call) in calls.iter().enumerate() {
-        // The lock has its own test; the journal never fails the set-up.
+        // The lock has its own test; the journal and the Git trees never fail the set-up.
         if call == "lock"
             || call == "unlock"
+            || call.starts_with("git_trees")
             || call.starts_with("journal")
             || call.starts_with("grow")
         {
@@ -149,6 +150,7 @@ fn a_record_write_failure_deletes_exactly_that_user() {
             "delete_user ClauseoSb01",
             "group_members 1000",
             "delete_group 1000",
+            "git_trees 0",
             "delete_record",
             "unlock",
         ]
@@ -174,6 +176,7 @@ fn a_failed_logon_takes_off_the_profiles_then_the_accounts() {
             "delete_user ClauseoSb01",
             "group_members 1000",
             "delete_group 1000",
+            "git_trees 0",
             "delete_record",
             "unlock",
         ]

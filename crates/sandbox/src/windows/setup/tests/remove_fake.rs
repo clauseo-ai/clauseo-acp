@@ -209,6 +209,10 @@ impl Removal for Remover {
         Machine::delete_record(&mut self.m)
     }
 
+    fn remove_git_trees(&mut self) -> Result<(), MachineError> {
+        self.call("remove_git_trees")
+    }
+
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {
         Machine::copy_owner(&mut self.m)
     }

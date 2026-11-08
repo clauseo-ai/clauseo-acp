@@ -31,6 +31,10 @@
 //! firewall rules. A WFP failure fails the set-up; a firewall Group Policy ignores is only
 //! reported.
 //!
+//! Step 8b (`git_tree`, 0049 "The Git tree") then builds or keeps each live pool user's Git tree
+//! under `%ProgramFiles%\Clauseo\Sandbox\git\`, elevated; it records a failure as "Git Bash
+//! unavailable" and never fails the set-up.
+//!
 //! A re-run on a pool this owner set up (D-B6) keeps the recorded accounts that exist, resets
 //! their passwords, logs each on again and re-applies the shared writes; it makes again each
 //! user whose account is gone, under a new SID, and drops a dead SID from the record only once no

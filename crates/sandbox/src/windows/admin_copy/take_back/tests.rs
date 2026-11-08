@@ -12,6 +12,7 @@ const DIR: &str = "pf/Clauseo/Sandbox";
 const EXE: &str = "pf/Clauseo/Sandbox/clauseo-sandbox-setup.exe";
 const SIG: &str = "pf/Clauseo/Sandbox/clauseo-sandbox-setup.exe.sig";
 const STAGED: &str = "pf/Clauseo/Sandbox/staging";
+const GIT_TREES: &str = "pf/Clauseo/Sandbox/git";
 
 /// A fake folder tree: each path's kind and whether its DACL shuts Administrators out.
 struct Tree {
@@ -19,6 +20,8 @@ struct Tree {
     /// The token holds the take-back privileges (an elevated one does).
     privileged: bool,
     calls: Vec<String>,
+    /// What each lock and take-back was asked to leave out.
+    skips: Vec<Vec<String>>,
 }
 
 impl Tree {
@@ -28,6 +31,7 @@ impl Tree {
             entries: BTreeMap::new(),
             privileged: true,
             calls: Vec::new(),
+            skips: Vec::new(),
         };
         tree.add(DIR, Found::Folder, false);
         tree.add(EXE, Found::File, false);
@@ -102,30 +106,35 @@ impl LockDownFs for Tree {
         Ok(())
     }
 
-    fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()> {
+    fn lock_tree(&mut self, dir: &Path, skip: &[String]) -> io::Result<()> {
         self.calls.push(format!("lock {}", shown(dir)));
-        let skipped = skip.map(|name| dir.join(name));
+        self.skips.push(skip.to_vec());
+        let skipped: Vec<PathBuf> = skip.iter().map(|name| dir.join(name)).collect();
         let shut = self
             .below(dir)
             .iter()
-            .filter(|at| {
-                skipped
-                    .as_ref()
-                    .is_none_or(|skipped| !at.starts_with(skipped))
-            })
+            .filter(|at| !skipped.iter().any(|skipped| at.starts_with(skipped)))
             .any(|at| self.entries[at].1);
         if shut { Err(refused()) } else { Ok(()) }
     }
 
-    fn take_back(&mut self, path: &Path) -> io::Result<()> {
+    fn take_back(&mut self, path: &Path, skip: &[String]) -> io::Result<()> {
         self.calls.push(format!("take back {}", shown(path)));
+        self.skips.push(skip.to_vec());
         if !self.privileged {
             return Err(io::Error::other("SeRestorePrivilege: not held"));
         }
+        let skipped: Vec<PathBuf> = skip.iter().map(|name| path.join(name)).collect();
         for at in self.below(path) {
-            self.entries.get_mut(&at).unwrap().1 = false;
+            if !skipped.iter().any(|skipped| at.starts_with(skipped)) {
+                self.entries.get_mut(&at).unwrap().1 = false;
+            }
         }
         Ok(())
+    }
+
+    fn check_git(&mut self, git: &Path) {
+        self.calls.push(format!("check git {}", shown(git)));
     }
 }
 
@@ -227,4 +236,69 @@ fn the_removal_takes_back_a_staging_folder_it_cant_open() {
     tree.privileged = false;
     tree.add(STAGED, Found::Folder, true);
     assert!(remove_taking_back(&mut tree, Path::new(STAGED)).is_err());
+}
+
+#[test]
+fn the_git_trees_are_kept_and_left_out_of_the_lock_down() {
+    let mut tree = Tree::new();
+    tree.add(GIT_TREES, Found::Folder, false);
+    tree.add(&format!("{GIT_TREES}/ClauseoSb01"), Found::Folder, false);
+    tree.add(
+        &format!("{GIT_TREES}/ClauseoSb01/2.47.1.1-0123456789ab"),
+        Found::Folder,
+        false,
+    );
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(tree.found(Path::new(GIT_TREES)).unwrap(), Found::Folder);
+    assert_eq!(
+        tree.calls,
+        [format!("check git {GIT_TREES}"), format!("lock {DIR}")],
+        "checked, never removed, locked or taken back"
+    );
+    assert_eq!(tree.skips, [vec!["git".to_owned()]]);
+}
+
+#[test]
+fn the_git_trees_shut_to_administrators_neither_fail_nor_get_taken_back() {
+    // A tree's DACL grants SYSTEM, Administrators and its pool user; one an administrator
+    // can't open still stays out of the lock-down, and the folder's take-back skips it too.
+    let mut tree = Tree::new();
+    tree.add(GIT_TREES, Found::Folder, true);
+    tree.entries.get_mut(Path::new(EXE)).unwrap().1 = true;
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(
+        tree.calls,
+        [
+            format!("check git {GIT_TREES}"),
+            format!("lock {DIR}"),
+            format!("take back {DIR}")
+        ]
+    );
+    assert_eq!(tree.skips, [vec!["git".to_owned()], vec!["git".to_owned()]]);
+    assert!(
+        tree.entries[Path::new(GIT_TREES)].1,
+        "the trees weren't taken back"
+    );
+    assert!(!tree.entries[Path::new(EXE)].1);
+    // In any case.
+    let mut tree = Tree::new();
+    tree.add("pf/Clauseo/Sandbox/GIT", Found::Folder, false);
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(
+        tree.found(Path::new("pf/Clauseo/Sandbox/GIT")).unwrap(),
+        Found::Folder
+    );
+}
+
+#[test]
+fn a_stuck_staging_folder_is_left_out_beside_the_git_trees() {
+    let mut tree = Tree::new();
+    tree.privileged = false;
+    tree.add(STAGED, Found::Folder, true);
+    tree.add(GIT_TREES, Found::Folder, false);
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(
+        tree.skips.last().unwrap(),
+        &["git".to_owned(), "staging".to_owned()]
+    );
 }

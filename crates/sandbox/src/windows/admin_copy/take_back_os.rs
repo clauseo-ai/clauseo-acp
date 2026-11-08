@@ -51,12 +51,16 @@ impl LockDownFs for NtfsLockDown {
         }
     }
 
-    fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()> {
+    fn lock_tree(&mut self, dir: &Path, skip: &[String]) -> io::Result<()> {
         lock_tree(dir, skip)
     }
 
-    fn take_back(&mut self, path: &Path) -> io::Result<()> {
+    fn take_back(&mut self, path: &Path, skip: &[String]) -> io::Result<()> {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
-        lock_tree_os::take_back(path)
+        lock_tree_os::take_back(path, skip)
+    }
+
+    fn check_git(&mut self, git: &Path) {
+        crate::windows::git_tree::check_adopted_here(git);
     }
 }

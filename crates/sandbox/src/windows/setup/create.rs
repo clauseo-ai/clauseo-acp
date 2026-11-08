@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, tasks,
+    fence, git_trees_then_journals, network, own_protected, refuse_pool_owner, registered, tasks,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -303,7 +303,7 @@ fn change(
         None => (None, Vec::new()),
     };
     let network = network(machine, &req.owner, &group, &live)?;
-    let journals = journals(machine, &plan.matters);
+    let journals = git_trees_then_journals(machine, &plan.matters, &group, &users.profiles);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
     })
