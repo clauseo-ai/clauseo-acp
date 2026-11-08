@@ -73,7 +73,7 @@ fn the_running_copy_is_parked_and_scheduled_with_the_folders_in_order() {
 }
 
 #[test]
-fn a_running_copy_that_cant_be_renamed_is_scheduled_under_its_own_name() {
+fn a_running_copy_that_cant_be_renamed_is_left_and_nothing_is_scheduled() {
     let dir = TempDir::new("admin-remove-unrenamed");
     let (sandbox, exe, _outside) = sandbox(&dir);
     let mut scheduled = Vec::new();
@@ -88,11 +88,19 @@ fn a_running_copy_that_cant_be_renamed_is_scheduled_under_its_own_name() {
         schedule: &mut schedule,
     };
     let app = dir.path().join(r"pf\Clauseo");
-    clear(&sandbox, &exe, true, &app, &mut fs).unwrap();
-    assert_eq!(scheduled, [exe.clone(), sandbox.clone(), app]);
+    let error = clear(&sandbox, &exe, true, &app, &mut fs).unwrap_err();
     assert_eq!(
-        os::found(&exe).unwrap(),
-        Found::File,
-        "left for the restart"
+        error.raw_os_error(),
+        Some(5),
+        "the rename's error, for the step's line"
+    );
+    assert!(
+        scheduled.is_empty(),
+        "the canonical name is never scheduled: {scheduled:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&exe).unwrap(),
+        "MZ",
+        "left in place"
     );
 }

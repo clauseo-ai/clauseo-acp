@@ -579,8 +579,10 @@ started elevated, by the app or by the uninstall hook.
   own for theirs), the four values, the refresh and stop tasks (`unregister_task`), staging
   (`remove_staging`, taken back if need be), everything in the folder, then the folder; the key
   goes once empty. The running copy is renamed in place to a name nothing starts and scheduled
-  for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; if the
-  rename fails, the copy itself is scheduled. A reinstall before the restart keeps its new copy.
+  for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it. A reinstall
+  before the restart keeps its new copy. If the rename fails, the copy stays and the step fails
+  (exit 10): the canonical `clauseo-sandbox-setup.exe` is never scheduled, since a reinstall
+  before the restart would lose its new copy at boot.
   A step that fails writes an Event Log line naming it and its error code and exits 10
   (`AdminCopyLeft`); the protection itself is gone, so the hook counts 10 as removed, as 0.
 - **The copy beside the app stays.** A per-user install still ships
