@@ -3,6 +3,9 @@
 //! never follows a symbolic link. A name opened by path (a probe, an ID, an owner, a move's
 //! source) that isn't there exactly is matched ignoring ASCII case, as NTFS would open it, so
 //! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
+//! A test can give a folder a short name, as NTFS's 8.3 names ([`Posix::aliases`]), and read
+//! back what was opened through handles ([`Posix::opened`]) and what was read by path
+//! ([`Posix::by_path`]).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -44,6 +47,15 @@ pub(super) struct Posix {
     /// Owners [`Volume::move_into`] reads on the item it renames instead of the true one, by
     /// path: an item swapped between a read by path and the move.
     pub(super) swapped: RefCell<BTreeMap<PathBuf, String>>,
+    /// Short names, as NTFS's 8.3 ones: a name not there that is a key here opens the name it
+    /// maps to in the same folder.
+    pub(super) aliases: RefCell<BTreeMap<OsString, OsString>>,
+    /// Each path opened through a folder's handle, or as a root or a volume's top, in order: what
+    /// [`Volume::open_root`], [`Volume::open_top`], [`Volume::open_folder`], [`Volume::look`],
+    /// [`Volume::link_target`] and [`Volume::owner_at`] opened.
+    pub(super) opened: RefCell<Vec<PathBuf>>,
+    /// Each path [`Volume::file_id`] or [`Volume::owner`] read by path, in order.
+    pub(super) by_path: RefCell<Vec<PathBuf>>,
 }
 
 /// The lawyer [`Posix::lawyer`] starts as.
@@ -64,6 +76,9 @@ impl Posix {
             reads: RefCell::default(),
             oplocked: RefCell::default(),
             swapped: RefCell::default(),
+            aliases: RefCell::default(),
+            opened: RefCell::default(),
+            by_path: RefCell::default(),
         }
     }
 
@@ -91,6 +106,40 @@ impl Posix {
         } else {
             path.to_owned()
         }
+    }
+
+    /// The owner of `path` itself: [`Posix::foreign`]'s, else its uid's.
+    fn owner_of(&self, path: &Path) -> io::Result<String> {
+        let meta = std::fs::symlink_metadata(path)?;
+        if let Some(owner) = self.foreign.borrow().get(&meta.ino()) {
+            return Ok(owner.clone());
+        }
+        Ok(format!("uid {}", meta.uid()))
+    }
+
+    /// `name` in the folder `folder` as this volume opens it relative to the folder: itself
+    /// when there, else the name its short name ([`Posix::aliases`]) maps to, else as [`Posix::at`]
+    /// opens it; noted in [`Posix::opened`].
+    fn child(&self, folder: &Path, name: &OsStr) -> PathBuf {
+        let path = folder.join(name);
+        let path = match self.aliases.borrow().get(name) {
+            Some(long) if std::fs::symlink_metadata(&path).is_err() => folder.join(long),
+            Some(_) | None => self.at(&path),
+        };
+        self.opened.borrow_mut().push(path.clone());
+        path
+    }
+}
+
+/// The file ID of `path` itself; `None` when nothing is there.
+fn id_of(path: &Path) -> io::Result<Option<FileId>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => Ok(Some(FileId {
+            volume: meta.dev(),
+            id: u128::from(meta.ino()).to_le_bytes(),
+        })),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -131,16 +180,61 @@ impl Volume for Posix {
     type Folder = PathBuf;
 
     fn open_root(&self, root: &Path) -> io::Result<PathBuf> {
+        self.opened.borrow_mut().push(root.to_owned());
         listable(root.to_owned())
     }
 
     fn open_folder(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
-        listable(folder.join(name))
+        listable(self.child(folder, name))
     }
 
     fn folder_id(&self, folder: &PathBuf) -> io::Result<FileId> {
-        self.file_id(folder)?
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+        id_of(folder)?.ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    fn open_top(&self, top: &Path) -> io::Result<PathBuf> {
+        self.opened.borrow_mut().push(top.to_owned());
+        listable(top.to_owned())
+    }
+
+    fn look(&self, folder: &PathBuf, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+        let path = self.child(folder, name);
+        let Some(id) = id_of(&path)? else {
+            return Ok(None);
+        };
+        let meta = std::fs::symlink_metadata(&path)?;
+        let kind = if meta.file_type().is_symlink() {
+            Kind::Link
+        } else if meta.is_dir() {
+            Kind::Folder
+        } else {
+            Kind::Other
+        };
+        Ok(Some((id, kind)))
+    }
+
+    fn link_target(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
+        std::fs::read_link(self.child(folder, name))
+    }
+
+    fn owner_at(&self, folder: &PathBuf, name: &OsStr) -> io::Result<String> {
+        self.owner_of(&self.child(folder, name))
+    }
+
+    /// The name the folder's own parent lists for it, matched by inode, so the case and the
+    /// long name are the volume's.
+    fn folder_name(&self, folder: &PathBuf) -> io::Result<OsString> {
+        let ino = std::fs::symlink_metadata(folder)?.ino();
+        let parent = folder
+            .parent()
+            .ok_or_else(|| io::Error::other("no parent"))?;
+        for entry in std::fs::read_dir(parent)? {
+            let entry = entry?;
+            if entry.metadata().is_ok_and(|meta| meta.ino() == ino) {
+                return Ok(entry.file_name());
+            }
+        }
+        Err(io::Error::from(io::ErrorKind::NotFound))
     }
 
     fn list(&self, folder: &PathBuf) -> io::Result<Vec<Listed>> {
@@ -162,7 +256,7 @@ impl Volume for Posix {
     }
 
     fn probe(&self, folder: &PathBuf, name: &OsStr) -> io::Result<Option<FileId>> {
-        self.file_id(&folder.join(name))
+        id_of(&self.at(&folder.join(name)))
     }
 
     fn read_small(&self, folder: &PathBuf, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
@@ -184,22 +278,13 @@ impl Volume for Posix {
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
-        match std::fs::symlink_metadata(self.at(path)) {
-            Ok(meta) => Ok(Some(FileId {
-                volume: meta.dev(),
-                id: u128::from(meta.ino()).to_le_bytes(),
-            })),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
+        self.by_path.borrow_mut().push(path.to_owned());
+        id_of(&self.at(path))
     }
 
     fn owner(&self, path: &Path) -> io::Result<String> {
-        let meta = std::fs::symlink_metadata(self.at(path))?;
-        if let Some(owner) = self.foreign.borrow().get(&meta.ino()) {
-            return Ok(owner.clone());
-        }
-        Ok(format!("uid {}", meta.uid()))
+        self.by_path.borrow_mut().push(path.to_owned());
+        self.owner_of(&self.at(path))
     }
 
     fn pool(&self) -> io::Result<Vec<String>> {
@@ -278,7 +363,7 @@ impl Volume for Posix {
         // The owner of the item about to be renamed, as NTFS reads it from that handle.
         let at = self.at(from);
         let swapped = self.swapped.borrow().get(&at).cloned();
-        let owner = swapped.or_else(|| self.owner(&at).ok());
+        let owner = swapped.or_else(|| self.owner_of(&at).ok());
         if std::fs::symlink_metadata(&at).is_ok() && !need.allows(owner.as_deref()) {
             return Err(SetAsideFailure::NotTheAgents);
         }

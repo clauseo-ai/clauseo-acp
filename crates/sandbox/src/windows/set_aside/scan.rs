@@ -30,8 +30,14 @@ use super::run::Volume;
 use crate::PROTECTED_NAMES;
 
 mod common;
+mod locate;
+mod reach;
 
 use common::{common_items, common_target};
+#[cfg(test)]
+pub(super) use locate::remote;
+pub(super) use locate::{Last, locate};
+pub(super) use reach::{Missed, open_key, reach};
 
 /// Also probed at the root: hooks in a `.git` the agent made would run in the lawyer's own git.
 const ALSO: [&str; 1] = [".git"];
@@ -454,8 +460,16 @@ fn probe<V: Volume>(volume: &V, folder: &V::Folder, name: &OsStr) -> Now {
     match volume.probe(folder, name) {
         Ok(None) => Now::Absent,
         Ok(Some(id)) => Now::At(id),
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Now::Shut,
-        Err(error) => Now::Failed(io_failure(&error)),
+        Err(error) => unread(&error),
+    }
+}
+
+/// What an item whose read failed with `error` is: [`Now::Shut`] when access was denied.
+fn unread(error: &io::Error) -> Now {
+    if error.kind() == io::ErrorKind::PermissionDenied {
+        Now::Shut
+    } else {
+        Now::Failed(io_failure(error))
     }
 }
 

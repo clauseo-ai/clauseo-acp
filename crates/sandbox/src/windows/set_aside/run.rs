@@ -13,7 +13,6 @@ use clauseo_protocol::MatterId;
 use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{hand_over, load, set_aside};
-use super::repo_names::{is_commondir, is_git, is_head};
 use super::scan::{Kind, Listed, Scan, scan};
 use super::{Checked, Entry, Reason, SetAsideFailure};
 
@@ -50,11 +49,32 @@ pub(super) trait Volume {
     /// error, as unreadable. For a `commondir` an agent may have made and holds an oplock on.
     fn read_small(&self, folder: &Self::Folder, name: &OsStr, max: u64) -> io::Result<Vec<u8>>;
 
+    /// Opens the top of a volume (a drive's root, `C:\`) as itself, to walk a path down from it
+    /// one part at a time. Only the top the watched folder's own path starts with is opened,
+    /// never a network path (`scan/locate.rs`).
+    fn open_top(&self, top: &Path) -> io::Result<Self::Folder>;
+
+    /// What opening `name` relative to `folder` opens, as itself and never what a link names,
+    /// as [`Volume::probe`] opens it: its file ID and what it is; `None` when nothing is there.
+    fn look(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<Option<(FileId, Kind)>>;
+
+    /// The target the link `name` in `folder` names, as the link spells it (relative or not),
+    /// read from the link's own handle, opened relative to `folder` as itself and never followed
+    /// (`FSCTL_GET_REPARSE_POINT` on NTFS). Anything but a junction or symbolic link is an error.
+    fn link_target(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<PathBuf>;
+
+    /// The SID of the owner of `name` in `folder`, opened relative to it as itself, as text.
+    fn owner_at(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<String>;
+
+    /// The name `folder` has in its parent as the volume keeps it (on NTFS its long name, even
+    /// when it was opened by its short one), read from the open folder.
+    fn folder_name(&self, folder: &Self::Folder) -> io::Result<OsString>;
+
     /// The file ID of `path` itself, never what a link at it names; `None` when nothing is
-    /// there.
+    /// there. A read by path: the live watch reads through handles instead (`live.rs`).
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>>;
 
-    /// The SID of the owner of `path` itself, as text.
+    /// The SID of the owner of `path` itself, as text. A read by path, as [`Volume::file_id`].
     fn owner(&self, path: &Path) -> io::Result<String>;
 
     /// The folder where what is set aside out of `folder` (the folder an item is in, or the
@@ -400,7 +420,8 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         return Err(SetAsideFailure::Record.into());
     }
     let common = refusals::common_targets(data_dir, &entry.matter);
-    if holds_git(&found) || holds_repo(volume, &found) || refusals::from_common(&found, &common) {
+    let git = refusals::holds_git(&found) || refusals::holds_repo(volume, &found);
+    if git || refusals::from_common(&found, &common) {
         tracing::info!("a set-aside git folder, or an item inside one, is never put back");
         return Err(SetAsideFailure::GitFolder.into());
     }
@@ -517,58 +538,6 @@ pub(super) fn kept_levels(parts: &[OsString], listed: &[Vec<OsString>], kept: us
             listed.iter().any(|item| same(folder, item))
         })
         .unwrap_or(kept)
-}
-
-/// Whether `entry`'s item is a `.git` or sits inside one: its own name, a folder it was in below
-/// the matter, or any part of the path it would go back to opens as `.git` ([`is_git`]). The
-/// restore's folder is opened by that path and must have it as its final path (`move_back`), so
-/// no short name or link can land it inside a `.git` the words don't name.
-pub(super) fn holds_git(entry: &Entry) -> bool {
-    let in_path = entry.from.components().any(|part| match part {
-        Component::Normal(name) => is_git(name),
-        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
-            false
-        }
-    });
-    in_path || is_git(&entry.name) || entry.within.iter().any(|part| is_git(part))
-}
-
-/// Whether `entry`'s item, where it is now, is or holds at any depth a `HEAD` (a file or a
-/// link), a `commondir` or a `.git`: a bare repository or a worktree's git folder set aside
-/// whole, which put back would be a git folder git trusts. Its folders are opened as the scan
-/// opens them, never through a link; one that can't be opened or listed counts as holding one.
-pub(super) fn holds_repo(volume: &impl Volume, entry: &Entry) -> bool {
-    let named = |name: &OsStr, kind: Kind| {
-        is_git(name) || (kind != Kind::Folder && (is_head(name) || is_commondir(name)))
-    };
-    let own = entry.from.file_name().unwrap_or(&entry.name);
-    let Ok(meta) = std::fs::symlink_metadata(&entry.to) else {
-        return named(own, Kind::Other);
-    };
-    if !meta.is_dir() || meta.file_type().is_symlink() {
-        return named(own, Kind::Other);
-    }
-    let Ok(top) = volume.open_root(&entry.to) else {
-        return true;
-    };
-    let mut stack = vec![top];
-    while let Some(folder) = stack.pop() {
-        let Ok(listed) = volume.list(&folder) else {
-            return true;
-        };
-        for child in listed {
-            if named(&child.name, child.kind) {
-                return true;
-            }
-            if child.kind == Kind::Folder {
-                match volume.open_folder(&folder, &child.name) {
-                    Ok(inner) => stack.push(inner),
-                    Err(_) => return true,
-                }
-            }
-        }
-    }
-    is_git(own)
 }
 
 /// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.

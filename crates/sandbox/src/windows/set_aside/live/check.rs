@@ -11,9 +11,9 @@ use std::ffi::OsString;
 use std::time::{Duration, SystemTime};
 
 use super::super::files::FileId;
-use super::super::moves::set_aside;
+use super::super::moves::set_aside_owned;
 use super::super::run::{Need, Refused, Volume};
-use super::super::scan::{Found, Item, Kept, Now, Step, scan_part_visiting};
+use super::super::scan::{Found, Item, Kept, Missed, Now, Step, reach, scan_part_visiting};
 use super::super::{Reason, SetAsideFailure};
 use super::keys::{below_git, ends_in_git, holds};
 use super::{Ending, Failed, Hooks, Live, Moved, SCAN_BUDGET, Watched};
@@ -157,7 +157,9 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
                     return Step::Go;
                 }
                 let what = match item.kept {
-                    Kept::Link if watched.leads_out(&item.path) => SetAsideWhat::LinkOut,
+                    Kept::Link if watched.leads_out(self.volume, &item.key) => {
+                        SetAsideWhat::LinkOut
+                    }
                     Kept::Head if in_git(item.through.last().copied()) => return Step::Go,
                     Kept::Head | Kept::Common => SetAsideWhat::GitRepository,
                     Kept::Root | Kept::Nested if ends_in_git(&item.key) => {
@@ -194,22 +196,24 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             return false;
         }
         matches!(
-            self.volume.file_id(&self.watched.path(&key)),
-            Ok(Some(id)) if self.watched.knows_as(&key, id, SetAsideWhat::GitRepository)
+            reach(self.volume, &self.watched.root, &key),
+            Ok((_, Some((id, _)))) if self.watched.knows_as(&key, id, SetAsideWhat::GitRepository)
         )
     }
 
-    /// Moves the item at `key` as `what` unless nothing is there or the watch knows it there.
-    /// One the watch was told of and that is gone is listed in [`Live::gone`].
+    /// Moves the item at `key` as `what` unless nothing is there or the watch knows it there,
+    /// read through handles from the watched folder ([`reach`]). One the watch was told of and
+    /// that is gone is listed in [`Live::gone`], as is one past a folder that is a link now: it
+    /// isn't in the watched folder, and the link is never followed.
     pub(super) fn check(&mut self, key: &[OsString], what: SetAsideWhat) {
-        let now_at = match self.volume.file_id(&self.watched.path(key)) {
-            Ok(None) => {
+        let now_at = match reach(self.volume, &self.watched.root, key) {
+            Ok((_, None)) | Err(Missed::Gone | Missed::Link) => {
                 self.live.gone.push(key.iter().collect());
                 return;
             }
-            Ok(Some(id)) if self.watched.knows_as(key, id, what) => return,
-            Ok(Some(id)) => Now::At(id),
-            Err(_) => Now::Shut,
+            Ok((_, Some((id, _)))) if self.watched.knows_as(key, id, what) => return,
+            Ok((_, Some((id, _)))) => Now::At(id),
+            Err(Missed::Failed(_)) => Now::Shut,
         };
         let item = self.watched.item(key, now_at);
         self.move_one(&item, what);
@@ -220,7 +224,9 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
     /// meanwhile is listed in [`Live::gone`]; with the end unconfirmed, it is left
     /// ([`Live::left`]). A folder set aside unchecked must be a pool user's, read from the
     /// handle the move renames; the owner read there also tells the lawyer's notice whose it
-    /// was ([`Moved::by_agent`]).
+    /// was ([`Moved::by_agent`]). The item is first reached through handles from the watched
+    /// folder: one gone, or past a folder that is a link now, is listed gone and never moved
+    /// through the link; the intent's owner is read there, relative to the item's folder.
     fn move_one(&mut self, item: &Item, what: SetAsideWhat) -> bool {
         // Kill first: nothing of the agent's is alive to race the move, or to put another back.
         if !self.end_found() {
@@ -228,6 +234,18 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             return false;
         }
         let watched = self.watched;
+        let owner = match reach(self.volume, &watched.root, &item.key) {
+            Ok((folder, Some(_))) => item
+                .key
+                .last()
+                .and_then(|name| self.volume.owner_at(&folder, name).ok()),
+            Ok((_, None)) | Err(Missed::Gone | Missed::Link) => {
+                tracing::debug!("an item went, or is past a link now, before it could be moved");
+                self.live.gone.push(item.key.iter().collect());
+                return false;
+            }
+            Err(Missed::Failed(_)) => None,
+        };
         let seen = match what {
             SetAsideWhat::LinkOut => holds(&watched.links, &item.key, None),
             SetAsideWhat::GitRepository => holds(&watched.known, &item.key, None),
@@ -248,15 +266,8 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             .lock()
             .map_err(|failure| Refused::at(failure, &item.path))
             .and_then(|held| {
-                let moved = set_aside(
-                    self.volume,
-                    place,
-                    &item.path,
-                    &item.within,
-                    reason,
-                    self.now,
-                    need,
-                );
+                let source = (item.path.as_path(), item.within.as_slice(), owner);
+                let moved = set_aside_owned(self.volume, place, source, reason, self.now, need);
                 drop(held);
                 moved
             });

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use super::{after, before, exit, exit_as, launch, list, none, record, volume, world};
 use crate::windows::set_aside::files::{FileId, Place};
 use crate::windows::set_aside::run::{self, Need, Refused, Volume};
-use crate::windows::set_aside::scan::Listed;
+use crate::windows::set_aside::scan::{Kind, Listed};
 use crate::windows::set_aside::{Reason, SetAsideFailure, under_lock};
 use crate::windows::test_world::matter_one;
 
@@ -57,6 +57,26 @@ impl<V: Volume> Volume for Stopping<V> {
 
     fn read_small(&self, folder: &V::Folder, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
         self.inner.read_small(folder, name, max)
+    }
+
+    fn open_top(&self, top: &Path) -> io::Result<V::Folder> {
+        self.inner.open_top(top)
+    }
+
+    fn look(&self, folder: &V::Folder, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+        self.inner.look(folder, name)
+    }
+
+    fn link_target(&self, folder: &V::Folder, name: &OsStr) -> io::Result<PathBuf> {
+        self.inner.link_target(folder, name)
+    }
+
+    fn owner_at(&self, folder: &V::Folder, name: &OsStr) -> io::Result<String> {
+        self.inner.owner_at(folder, name)
+    }
+
+    fn folder_name(&self, folder: &V::Folder) -> io::Result<OsString> {
+        self.inner.folder_name(folder)
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {

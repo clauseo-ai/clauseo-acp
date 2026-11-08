@@ -213,6 +213,9 @@ crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
 # An item's owner read from the handle its move renames, and a commondir read without waiting on
 # an oplock (src/windows/set_aside/ntfs/read.rs).
 crates/sandbox/src/windows/set_aside/ntfs/read.rs - unsafe_code
+# A link's target read with FSCTL_GET_REPARSE_POINT on the link's own handle, never followed
+# (src/windows/set_aside/ntfs/link.rs).
+crates/sandbox/src/windows/set_aside/ntfs/link.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
 # play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code

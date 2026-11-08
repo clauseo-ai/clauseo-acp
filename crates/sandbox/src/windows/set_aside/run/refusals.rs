@@ -1,18 +1,20 @@
-//! What a restore refuses besides a git folder (`holds_git`, `holds_repo`): an item that was
-//! git's in a folder a launch `commondir` names, and a link that leads out of the folder it
-//! goes back to. Put back, the first would be read by git as the lawyer's (its `config` and
-//! `hooks` run code as the lawyer); the second would lead git, or anything else, outside.
+//! What a restore refuses: a git folder or an item in one ([`holds_git`], [`holds_repo`]),
+//! an item that was git's in a folder a launch `commondir` names, and a link that leads out of
+//! the folder it goes back to. Put back, the first would be read by git as the lawyer's (its
+//! `config` and `hooks` run code as the lawyer); the second would lead git, or anything else,
+//! outside.
 
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
 use super::super::Entry;
 use super::super::files::{Place, Record};
 use super::super::names::Key;
-use super::super::repo_names::{COMMON_NAMES, opens_as};
-use super::super::scan::{COMMON_KEY, plain, same_key};
+use super::super::repo_names::{COMMON_NAMES, is_commondir, is_git, is_head, opens_as};
+use super::super::scan::{COMMON_KEY, Kind, plain, same_key};
+use super::Volume;
 
 /// What git reads from a `commondir`'s folder that runs code as the lawyer: refused by its name
 /// alone, wherever it was, since only a folder a `commondir` names sets one aside as itself.
@@ -103,4 +105,56 @@ fn root_of(entry: &Entry) -> Option<PathBuf> {
 /// Whether `path` itself is a link (a junction or a symbolic link), never what it names.
 fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
+/// Whether `entry`'s item is a `.git` or sits inside one: its own name, a folder it was in below
+/// the matter, or any part of the path it would go back to opens as `.git` ([`is_git`]). The
+/// restore's folder is opened by that path and must have it as its final path (`move_back`), so
+/// no short name or link can land it inside a `.git` the words don't name.
+pub(super) fn holds_git(entry: &Entry) -> bool {
+    let in_path = entry.from.components().any(|part| match part {
+        Component::Normal(name) => is_git(name),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            false
+        }
+    });
+    in_path || is_git(&entry.name) || entry.within.iter().any(|part| is_git(part))
+}
+
+/// Whether `entry`'s item, where it is now, is or holds at any depth a `HEAD` (a file or a
+/// link), a `commondir` or a `.git`: a bare repository or a worktree's git folder set aside
+/// whole, which put back would be a git folder git trusts. Its folders are opened as the scan
+/// opens them, never through a link; one that can't be opened or listed counts as holding one.
+pub(super) fn holds_repo(volume: &impl Volume, entry: &Entry) -> bool {
+    let named = |name: &OsStr, kind: Kind| {
+        is_git(name) || (kind != Kind::Folder && (is_head(name) || is_commondir(name)))
+    };
+    let own = entry.from.file_name().unwrap_or(&entry.name);
+    let Ok(meta) = std::fs::symlink_metadata(&entry.to) else {
+        return named(own, Kind::Other);
+    };
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return named(own, Kind::Other);
+    }
+    let Ok(top) = volume.open_root(&entry.to) else {
+        return true;
+    };
+    let mut stack = vec![top];
+    while let Some(folder) = stack.pop() {
+        let Ok(listed) = volume.list(&folder) else {
+            return true;
+        };
+        for child in listed {
+            if named(&child.name, child.kind) {
+                return true;
+            }
+            if child.kind == Kind::Folder {
+                match volume.open_folder(&folder, &child.name) {
+                    Ok(inner) => stack.push(inner),
+                    Err(_) => return true,
+                }
+            }
+        }
+    }
+    is_git(own)
 }
