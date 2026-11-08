@@ -31,16 +31,19 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_LINK,
-    REG_OPTION_BACKUP_RESTORE, REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK, REG_VALUE_TYPE,
-    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegGetKeySecurity,
-    RegQueryValueExW, RegSetKeySecurity,
+    REG_OPTION_BACKUP_RESTORE, REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK, REG_SZ,
+    REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW,
+    RegGetKeySecurity, RegQueryValueExW, RegSetKeySecurity, RegSetValueExW,
 };
-use windows::core::{HSTRING, PCWSTR, PWSTR};
+use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
-use super::security::take_over_steps;
+use super::security::{Security, take_over_steps};
 use super::{Miss, Tree, VENDOR_SDDL};
+use crate::windows::acl::privilege::Privileges;
+use crate::windows::record::read_string;
 use crate::windows::setup::admin_member::in_administrators;
 use crate::windows::setup::lock::Descriptor;
+use crate::windows::setup::preflight::machine_domain;
 use crate::windows::sids::Sid;
 
 /// Read access, in the 64-bit view.
@@ -51,6 +54,18 @@ const NO_FOLLOW: u32 = REG_OPTION_OPEN_LINK.0;
 
 /// A read: without following a link, with backup intent.
 const READ_OPTIONS: u32 = REG_OPTION_OPEN_LINK.0 | REG_OPTION_BACKUP_RESTORE.0;
+
+/// The installer's uninstall key (`UNINSTKEY` in `installer.nsi`), which only administrators
+/// write; its `InstallLocation` is the trusted install folder.
+const UNINSTALL_KEY: PCWSTR =
+    w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Clauseo");
+
+/// How many times a take-over writes the owner and DACL when the owner it reads back isn't the
+/// one it wrote (a planter with an older `WRITE_OWNER` handle setting it back) before it fails.
+const OWNER_TRIES: usize = 3;
+
+/// The privilege a take-over's restore-intent step needs, enabled around that step alone.
+const RESTORE: &str = "SeRestorePrivilege";
 
 /// The value a registry link holds, of type `REG_LINK`.
 const LINK_VALUE: &str = "SymbolicLinkValue";
@@ -98,7 +113,10 @@ impl Tree for Registry {
     }
 
     fn create_root(&mut self) -> Result<(), Miss> {
-        create(None, &self.path, VENDOR_SDDL).map(|_key| ())
+        // Administrators, which the caller's token holds, own it until the take-over makes
+        // SYSTEM the owner under SeRestorePrivilege.
+        let sddl = VENDOR_SDDL.replacen("O:SY", "O:BA", 1);
+        create(None, &self.path, &sddl).map(|_key| ())
     }
 
     fn take_over_root(&mut self, sddl: &str) -> Result<Key, Miss> {
@@ -155,33 +173,7 @@ impl Tree for Registry {
     }
 
     fn sddl(&mut self, key: &Key) -> Result<String, Miss> {
-        let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
-        let mut size = 0u32;
-        // SAFETY: no buffer asks only for the size, which is written to `size`.
-        let _sized = unsafe { RegGetKeySecurity(key.0, wanted, None, &raw mut size) };
-        // u64 words, so the descriptor is aligned.
-        let mut buffer = vec![0u64; usize::try_from(size).unwrap_or(0).div_ceil(8).max(1)];
-        let descriptor = PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast());
-        // SAFETY: `buffer` is live, writable and at least `size` bytes long for the call.
-        let got = unsafe { RegGetKeySecurity(key.0, wanted, Some(descriptor), &raw mut size) };
-        check("RegGetKeySecurity", got)?;
-        let mut text = PWSTR::null();
-        // SAFETY: the descriptor in `buffer` is valid; `text` is a live out-pointer, freed below.
-        let converted = unsafe {
-            ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor,
-                SDDL_REVISION_1,
-                wanted,
-                &raw mut text,
-                None,
-            )
-        };
-        converted.map_err(|error| Miss::Failed(error.to_string()))?;
-        // SAFETY: the conversion wrote a NUL-terminated string.
-        let sddl = unsafe { text.to_string() }.map_err(|error| Miss::Failed(error.to_string()));
-        // SAFETY: allocated by the conversion with LocalAlloc, freed once.
-        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
-        sddl
+        read_sddl(key)
     }
 
     fn set_sddl(&mut self, key: &Key, sddl: &str) -> Result<(), Miss> {
@@ -224,6 +216,35 @@ impl Tree for Registry {
         // other pointer. `key` closes it after this call, once.
         let status = unsafe { NtDeleteKey(HANDLE(key.0.0)) };
         nt_check("NtDeleteKey", status)
+    }
+
+    fn reset_install_dir(&mut self, key: &Key) -> Result<Option<String>, Miss> {
+        let folder = read_string(UNINSTALL_KEY, w!("InstallLocation"))
+            .map_err(|error| Miss::Failed(format!("the uninstall key's folder: {error}")))?
+            .map(|text| text.trim().trim_matches('"').to_owned())
+            .filter(|folder| !folder.is_empty());
+        let Some(folder) = folder else {
+            // SAFETY: the key is open with full access; the null name is the default value.
+            let deleted = unsafe { RegDeleteValueW(key.0, PCWSTR::null()) };
+            if deleted != ERROR_FILE_NOT_FOUND {
+                check("RegDeleteValueW", deleted)?;
+            }
+            return Ok(None);
+        };
+        let data: Vec<u8> = folder
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        // SAFETY: the key is open with full access; the null name is the default value; `data`
+        // is a live slice of NUL-terminated UTF-16.
+        let set = unsafe { RegSetValueExW(key.0, PCWSTR::null(), None, REG_SZ, Some(&data)) };
+        check("RegSetValueExW", set)?;
+        Ok(Some(folder))
+    }
+
+    fn local_domain(&mut self) -> Result<[u32; 3], String> {
+        machine_domain().map_err(|error| error.to_string())
     }
 
     fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
@@ -367,17 +388,92 @@ fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
     Ok(Key(opened))
 }
 
-/// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing. Each step opens
-/// the key afresh with its access alone and writes its part of the SD.
+/// The key's owner and DACL as SDDL.
+fn read_sddl(key: &Key) -> Result<String, Miss> {
+    let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    let mut size = 0u32;
+    // SAFETY: no buffer asks only for the size, which is written to `size`.
+    let _sized = unsafe { RegGetKeySecurity(key.0, wanted, None, &raw mut size) };
+    // u64 words, so the descriptor is aligned.
+    let mut buffer = vec![0u64; usize::try_from(size).unwrap_or(0).div_ceil(8).max(1)];
+    let descriptor = PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast());
+    // SAFETY: `buffer` is live, writable and at least `size` bytes long for the call.
+    let got = unsafe { RegGetKeySecurity(key.0, wanted, Some(descriptor), &raw mut size) };
+    check("RegGetKeySecurity", got)?;
+    let mut text = PWSTR::null();
+    // SAFETY: the descriptor in `buffer` is valid; `text` is a live out-pointer, freed below.
+    let converted = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            wanted,
+            &raw mut text,
+            None,
+        )
+    };
+    converted.map_err(|error| Miss::Failed(error.to_string()))?;
+    // SAFETY: the conversion wrote a NUL-terminated string.
+    let sddl = unsafe { text.to_string() }.map_err(|error| Miss::Failed(error.to_string()));
+    // SAFETY: allocated by the conversion with LocalAlloc, freed once.
+    unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+    sddl
+}
+
+/// A hook the elevated tests set, called with a key's name.
+#[cfg(test)]
+pub(super) type Hook = Box<dyn FnMut(&str)>;
+
+#[cfg(test)]
+thread_local! {
+    /// Called with the key's name after each owner and DACL write of a take-over, before the
+    /// owner is read back: the elevated tests' planter, setting the owner back.
+    pub(super) static AFTER_OWNER_WRITE: std::cell::RefCell<Option<Hook>> =
+        std::cell::RefCell::new(None);
+}
+
+/// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing. The restore-intent
+/// step runs with `SeRestorePrivilege` enabled around it alone, and writes until the owner read
+/// back is `sddl`'s, at most [`OWNER_TRIES`] times.
 fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
     let mut opened = None;
     for step in take_over_steps(sddl) {
         drop(opened.take());
-        let key = open(parent, name, step.access, NO_FOLLOW, false)?;
-        write(&key, &step.sddl)?;
+        let key = if step.restore {
+            let _restore = Privileges::enable(&[RESTORE])
+                .map_err(|error| Miss::Failed(format!("{RESTORE}: {error}")))?;
+            let options = NO_FOLLOW | REG_OPTION_BACKUP_RESTORE.0;
+            let key = open(parent, name, step.access, options, false)?;
+            if let Some(sddl) = &step.sddl {
+                write_until_owned(&key, name, sddl)?;
+            }
+            key
+        } else {
+            open(parent, name, step.access, NO_FOLLOW, false)?
+        };
         opened = Some(key);
     }
     opened.ok_or_else(|| Miss::Failed("a take-over has no steps".to_owned()))
+}
+
+/// Writes `sddl`'s owner and DACL to `key` in one call, and reads the owner back; again while
+/// it isn't `sddl`'s, up to [`OWNER_TRIES`] writes, then fails closed.
+fn write_until_owned(key: &Key, name: &str, sddl: &str) -> Result<(), Miss> {
+    let wanted = Security::parse(sddl).owner;
+    for _ in 0..OWNER_TRIES {
+        write(key, sddl)?;
+        #[cfg(test)]
+        AFTER_OWNER_WRITE.with_borrow_mut(|hook| {
+            if let Some(hook) = hook {
+                hook(name);
+            }
+        });
+        if Security::parse(&read_sddl(key)?).owner == wanted {
+            return Ok(());
+        }
+    }
+    Err(Miss::Failed(format!(
+        "{name}'s owner was set back {OWNER_TRIES} times during its take-over"
+    )))
 }
 
 /// What `sddl` sets: the owner when it has one, and the DACL with its protection when it has

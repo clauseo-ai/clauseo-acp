@@ -11,6 +11,7 @@ use crate::windows::setup::record_key::VENDOR_KEY;
 use crate::windows::setup::record_values::RECORD_SDDL;
 
 mod access;
+mod owners;
 
 /// A key of a user's, which Users may write subkeys and values into: the weak root.
 const WEAK: &str = "O:S-1-5-21-1-2-3-1001D:P(A;CI;KA;;;BU)(A;CI;KA;;;S-1-5-21-1-2-3-1001)";
@@ -22,7 +23,7 @@ const USER_KEY: &str = "O:S-1-5-21-1-2-3-1001D:P(A;CI;KA;;;BU)";
 const ADMIN_KEY: &str = "O:BAD:P(A;;KA;;;BA)";
 
 /// A key owned by an account in Administrators (UAC off, or the built-in Administrator).
-const ADMIN_USER_KEY: &str = "O:S-1-5-21-1-2-3-500D:P(A;;KA;;;S-1-5-21-1-2-3-500)";
+const ADMIN_USER_KEY: &str = "O:S-1-5-21-1-2-3-500D:P(A;;KA;;;BA)";
 
 /// A key whose owner's membership can't be resolved (a deleted account).
 const GHOST_KEY: &str = "O:S-1-5-21-1-2-3-1999D:P(A;;KA;;;BA)";
@@ -63,6 +64,10 @@ struct FakeTree {
     events: Vec<(String, Event)>,
     /// Membership of Administrators by owner SID; any other is not a member.
     admins: BTreeMap<String, Result<bool, String>>,
+    /// The uninstall key's `InstallLocation`.
+    install_location: Option<String>,
+    /// The keys whose install folder was written again or deleted.
+    install_resets: Vec<String>,
 }
 
 impl FakeTree {
@@ -224,6 +229,21 @@ impl super::Tree for FakeTree {
         self.keys.remove(&key);
         self.deleted.push(key);
         Ok(())
+    }
+
+    fn reset_install_dir(&mut self, key: &String) -> Result<Option<String>, Miss> {
+        let location = self.install_location.clone();
+        let node = self.node(key)?;
+        node.values.retain(|value| value != "(default)");
+        if location.is_some() {
+            node.values.push("(default)".to_owned());
+        }
+        self.install_resets.push(key.clone());
+        Ok(location)
+    }
+
+    fn local_domain(&mut self) -> Result<[u32; 3], String> {
+        Ok([1, 2, 3])
     }
 
     fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
@@ -425,8 +445,8 @@ fn a_sandbox_with_a_link_value_is_deleted_and_recreated() {
 }
 
 #[test]
-fn an_admin_owned_sandbox_keeps_its_values_gets_its_sd_and_is_logged_if_users_could_write() {
-    let drifted = "O:BAD:P(A;CI;KA;;;BU)";
+fn an_admin_owned_sandbox_only_admins_could_write_keeps_its_values_and_gets_its_sd() {
+    let drifted = "O:BAD:P(A;CI;KA;;;BA)(A;CI;KR;;;BU)";
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Sandbox", drifted, false)]);
     tree.values(&under("Sandbox"), &["PoolSids"]);
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
@@ -434,15 +454,19 @@ fn an_admin_owned_sandbox_keeps_its_values_gets_its_sd_and_is_logged_if_users_co
     assert!(report.recreated.is_empty() && tree.deleted.is_empty());
     assert_eq!(tree.keys[&under("Sandbox")].values, ["PoolSids"]);
     assert_eq!(tree.sddl_of(&under("Sandbox")), record_pinned());
-    assert_eq!(report.users_could_write, [under("Sandbox")]);
 }
 
 #[test]
-fn a_kept_key_users_could_write_to_is_logged() {
+fn a_kept_key_others_could_write_to_is_logged() {
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Kept", "O:SYD:P(A;;KW;;;BU)", false)]);
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(tree.sddl_of(&under("Kept")), INHERITED_SDDL);
-    assert_eq!(report.users_could_write, [under("Kept")]);
+    assert_eq!(report.others_could_write, [under("Kept")]);
+    assert_eq!(
+        tree.install_resets,
+        Vec::<String>::new(),
+        "only the installer's key"
+    );
 }
 
 #[test]
@@ -454,7 +478,7 @@ fn a_pinned_sandbox_and_root_in_another_form_are_not_changes() {
     let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.weaker_from, None);
     assert!(report.resecured.is_empty() && report.taken_over.is_empty());
-    assert_eq!(report.users_could_write, Vec::<String>::new());
+    assert_eq!(report.others_could_write, Vec::<String>::new());
 }
 
 #[test]

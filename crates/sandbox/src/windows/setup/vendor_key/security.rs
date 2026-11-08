@@ -28,45 +28,44 @@ pub(super) struct Ace {
 /// `READ_CONTROL`: reads a key's security.
 pub(super) const READ_CONTROL: u32 = 0x0002_0000;
 
-/// `WRITE_DAC`: writes a key's DACL; its owner has it whatever the DACL says.
+/// `WRITE_DAC`: writes a key's DACL.
 pub(super) const WRITE_DAC: u32 = 0x0004_0000;
 
-/// `WRITE_OWNER`: writes a key's owner; `SeTakeOwnershipPrivilege` gives it whatever the DACL
-/// says.
+/// `WRITE_OWNER`: writes a key's owner.
 pub(super) const WRITE_OWNER: u32 = 0x0008_0000;
 
 /// `KEY_ALL_ACCESS`.
 pub(super) const KEY_ALL: u32 = 0x000F_003F;
 
-/// One step of a take-over: the key opened with `access` alone, and `sddl`'s parts written.
+/// One step of a take-over: the key opened with `access` alone, with restore intent when
+/// `restore`, and `sddl` written whole when there is one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Step {
     pub(super) access: u32,
-    pub(super) sddl: String,
+    pub(super) restore: bool,
+    pub(super) sddl: Option<String>,
 }
 
-/// How a key is taken over with `sddl`, whatever its DACL denies. Set-up runs as an elevated
-/// administrator, not as SYSTEM, so:
+/// How a key is taken over with `sddl`, whatever its DACL says. Set-up calls it as an elevated
+/// administrator and the record's refresh as SYSTEM, and neither may be granted anything by the
+/// DACL, nor keep the owner's implicit rights past an OWNER RIGHTS ACE, so:
 ///
-/// 1. `WRITE_OWNER` alone, which `SeTakeOwnershipPrivilege` grants past any DENY ACE: the owner
-///    becomes Administrators, a group in set-up's token;
-/// 2. `READ_CONTROL | WRITE_DAC`, which the owner has past any DENY ACE: `sddl`'s DACL replaces
-///    the old one;
-/// 3. full access, which that DACL grants: `sddl` whole, owner SYSTEM included.
-pub(super) fn take_over_steps(sddl: &str) -> [Step; 3] {
-    let dacl = section(sddl, "D:", &["S:"]);
+/// 1. `READ_CONTROL | WRITE_OWNER | WRITE_DAC` with restore intent, which `SeRestorePrivilege`
+///    (`os.rs` enables it around this step alone) and `SeBackupPrivilege` grant past any DACL:
+///    `sddl`'s owner and DACL are written in one call, and the owner is read back, up to
+///    three times (`os.rs`);
+/// 2. full access, which that DACL grants, for what the walk does next.
+pub(super) fn take_over_steps(sddl: &str) -> [Step; 2] {
     [
         Step {
-            access: WRITE_OWNER,
-            sddl: "O:BA".to_owned(),
-        },
-        Step {
-            access: READ_CONTROL | WRITE_DAC,
-            sddl: format!("D:{dacl}"),
+            access: READ_CONTROL | WRITE_OWNER | WRITE_DAC,
+            restore: true,
+            sddl: Some(sddl.to_owned()),
         },
         Step {
             access: KEY_ALL,
-            sddl: sddl.to_owned(),
+            restore: false,
+            sddl: None,
         },
     ]
 }
@@ -82,7 +81,7 @@ const ALIASES: [(&str, &str); 6] = [
 ];
 
 /// The SIDs whose ownership set-up accepts: SYSTEM and Administrators.
-const TRUSTED_OWNERS: [&str; 2] = ["S-1-5-18", "S-1-5-32-544"];
+pub(super) const TRUSTED_OWNERS: [&str; 2] = ["S-1-5-18", "S-1-5-32-544"];
 
 impl Security {
     /// The security `sddl` describes.
@@ -131,15 +130,20 @@ impl Security {
         self.allowed() == Some(expected)
     }
 
-    /// Whether an allow ACE lets Users, Authenticated Users or Everyone do more than read.
-    pub(super) fn users_may_write(&self) -> bool {
-        let broad = [ALIASES[2].1, ALIASES[3].1, ALIASES[5].1];
-        self.aces
-            .iter()
-            .any(|ace| ace.kind == "A" && broad.contains(&ace.sid.as_str()) && ace.rights != "KR")
+    /// Whether an ACE that applies to the key itself lets anyone but SYSTEM and Administrators
+    /// do more than read it.
+    pub(super) fn others_may_write(&self) -> bool {
+        const READ_ONLY: [&str; 4] = ["KR", "KX", "GR", "RC"];
+        self.aces.iter().any(|ace| {
+            ace.kind == "A"
+                && !ace.flags.as_bytes().chunks(2).any(|pair| pair == b"IO")
+                && !TRUSTED_OWNERS.contains(&ace.sid.as_str())
+                && !READ_ONLY.contains(&ace.rights.as_str())
+        })
     }
 
     /// Whether the owner is SYSTEM or Administrators.
+    #[cfg(test)]
     pub(super) fn trusted_owner(&self) -> bool {
         TRUSTED_OWNERS.contains(&self.owner.as_str())
     }
@@ -158,6 +162,14 @@ impl Ace {
             sid: normalize_sid(field(5)),
         }
     }
+}
+
+/// The account domain of `sid` under `S-1-5-21`, a machine's or a domain's: the three parts
+/// after `21`. `None` for any other SID or an alias.
+pub(super) fn account_domain(sid: &str) -> Option<[u32; 3]> {
+    let mut parts = sid.strip_prefix("S-1-5-21-")?.split('-');
+    let mut part = || parts.next().and_then(|part| part.parse::<u32>().ok());
+    Some([part()?, part()?, part()?])
 }
 
 /// `text` between `tag` and the first of `ends` after it (or the end of the text).

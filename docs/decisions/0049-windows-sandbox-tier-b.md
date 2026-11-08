@@ -294,16 +294,22 @@ build 26100):
     the protected DACL `O:SYD:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)(A;OICI;KR;;;BU)`, so no one else
     can make a subkey there. A root whose `SymbolicLinkValue` leads to another key is refused; a
     value that leads back to the root itself is deleted. Every subkey is taken over before its own
-    subkeys are read (owner first, then the DACL, then full access, so no DENY ACE stops it). A
-    key holding a link value, or owned by anyone but SYSTEM, Administrators or a member of
-    Administrators, is deleted with its subtree. Every other key is kept with
-    `O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)`, written out on its own
-    handle: no write uses `SetSecurityInfo`, whose propagation could reach through a link. A key
-    whose owner can't be resolved is kept and logged, except the keys the SYSTEM side trusts
-    (`Sandbox`), which are deleted; any of those deleted for any reason is made again empty with
-    its own SD. Accepted: a kept key's values stay, including the installer's install folder in
-    `Clauseo\Clauseo`, since only an administrator owned it and the installer checks its own
-    value. A failure stops set-up with `MachineError::VendorKey` (`setup/vendor_key.rs`).
+    subkeys are read: its owner and DACL are written in one call on a handle opened with restore
+    intent (`SeRestorePrivilege`, enabled around that call alone), which no DENY or OWNER RIGHTS
+    ACE can refuse, and the owner is read back so a planter's older handle can't set it back. A
+    key holding a link value, or owned by anyone but SYSTEM, Administrators or a local account in
+    Administrators, is deleted with its subtree. A domain account's membership needs the domain
+    controller, so its keys count as unresolved: kept and logged, except the keys the SYSTEM side
+    trusts (`Sandbox`), which are deleted. Those are deleted too when their DACL let others
+    write, even under an administrator owner, so no handle opened through that DACL outlives
+    them; any of them deleted for any reason is made again empty with its own SD. The rest is kept
+    with `O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)`, written out on its own
+    handle: no write uses `SetSecurityInfo`, whose propagation could reach through a link. A kept
+    key's values stay, since only an administrator owned it, except that `Clauseo\Clauseo`'s
+    install folder (which the installer hands its uninstaller as the folder to delete) is
+    written again from the uninstall key's `InstallLocation`, or deleted when there is none,
+    whenever its DACL let others write. A failure stops set-up with `MachineError::VendorKey`
+    (`setup/vendor_key.rs`).
   - The local group `ClauseoSandboxUsers`, holding every pool user (PR4).
   - `<data_dir>\sandbox\matters.json`, replaced whole and atomically and refused, never
     rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's

@@ -1,15 +1,19 @@
 //! The vendor key on the real registry (Windows, elevated), under `SOFTWARE\ClauseoTest`, never the
 //! real vendor key: a fresh root is pinned; a weak root is taken over with the subkeys under it
-//! (Users' plants, one shutting out Administrators and denying SYSTEM, an admin-owned key denying
-//! both, the installer-shaped key, a planted `Sandbox`, a real link child whose unprotected
-//! target stays byte for byte); a link parent is refused.
+//! (Users' plants, one shutting out Administrators and denying SYSTEM, one cutting down its
+//! owner's rights with OWNER RIGHTS, one whose planter sets its owner back mid-take, an
+//! admin-owned key denying both, the installer-shaped key, a planted `Sandbox`, a real link
+//! child whose unprotected target stays byte for byte); a link parent is refused. The walk runs
+//! with `SeBackupPrivilege` alone, as set-up's does.
 #![expect(
     unsafe_code,
     reason = "FFI to the registry's tree delete and value calls"
 )]
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
-use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION};
+use windows::Win32::Security::{
+    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_LINK,
     REG_OPTION_CREATE_LINK, REG_SAM_FLAGS, REG_SZ, RegCreateKeyExW, RegDeleteKeyExW,
@@ -17,7 +21,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PCWSTR};
 
-use super::os::{Key, Registry};
+use super::os::{AFTER_OWNER_WRITE, Key, Registry};
 use super::security::Security;
 use super::{Report, Tree, VENDOR_SDDL, VendorFault, ensure};
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
@@ -38,6 +42,9 @@ const PLANT: &str = "O:BUD:P(A;;KA;;;BU)(A;;KA;;;BA)";
 /// A plant's DACL with no ACE for Administrators and a DENY one for SYSTEM.
 const SHUT: &str = "D:P(D;;KA;;;SY)(A;;KR;;;BU)";
 
+/// A plant's DACL that cuts its owner down to read, whoever that becomes.
+const OWNER_READS: &str = "D:P(A;;KR;;;OW)(A;;KA;;;BU)";
+
 /// A DACL denying SYSTEM and Administrators everything.
 const DENY_BOTH: &str = "D:P(D;;KA;;;SY)(D;;KA;;;BA)";
 
@@ -46,6 +53,9 @@ const ADMIN_KEY: &str = "O:BAD:P(A;CI;KA;;;BA)";
 
 /// A link's target's own DACL, unprotected, so it would take any ACE propagated through the link.
 const TARGET: &str = "O:BAD:(A;;KA;;;BA)";
+
+/// What set-up's walk holds: `SeBackupPrivilege` alone; a take-over enables restore itself.
+const WALK: [&str; 1] = ["SeBackupPrivilege"];
 
 /// Deletes [`TEST_ROOT`] and everything under it, when cleared and when dropped.
 struct Clear;
@@ -168,6 +178,36 @@ fn delete_key(path: &str) -> u32 {
     deleted.0
 }
 
+/// The key `path` opened with `WRITE_OWNER` while its DACL still lets Administrators in, as a
+/// planter's handle opened before the take-over.
+fn owner_handle(path: &str) -> Result<record_write::Key, String> {
+    /// `WRITE_OWNER`.
+    const WRITE_OWNER: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0008_0000);
+    let subkey = HSTRING::from(path);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `key` is a live out-pointer, owned below.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            WRITE_OWNER | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    check("RegOpenKeyExW", opened).map_err(|error| error.to_string())?;
+    Ok(record_write::Key(key))
+}
+
+/// Sets the owner of the key `key` is open on to Users, through that handle.
+fn set_owner_users(key: HKEY) -> Result<(), String> {
+    let _restore = Privileges::enable(&["SeRestorePrivilege"]).map_err(|e| e.to_string())?;
+    let descriptor = Descriptor::from_sddl("O:BU").map_err(|error| error.to_string())?;
+    // SAFETY: the key is open with WRITE_OWNER; the descriptor is valid for the call.
+    let set = unsafe { RegSetKeySecurity(key, OWNER_SECURITY_INFORMATION, descriptor.0) };
+    check("RegSetKeySecurity", set).map_err(|error| error.to_string())
+}
+
 /// Whether the key `name` under `root` is there, following no link.
 fn present(tree: &mut Registry, root: &Key, name: &str) -> bool {
     tree.open_child(root, name).is_ok()
@@ -181,14 +221,16 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
     }
     let _clear = Clear;
     Clear::run();
-    // Owners other than the token's own, and the take-over, need the privileges.
-    let _held = Privileges::enable(&RECLAIM).unwrap();
     let path = format!("{TEST_ROOT}\\Vendor");
     let target = format!("{TEST_ROOT}\\Target");
     create_key_with(&target, TARGET).unwrap();
 
     // A key made fresh gets the pinned SD, with its effective DACL.
+    let backup = Privileges::enable(&WALK).unwrap();
     let made = ensure(&mut Registry::at(&path), &path).unwrap();
+    drop(backup);
+    // Making the plants with owners other than the token's own needs the privileges.
+    let held = Privileges::enable(&RECLAIM).unwrap();
     assert_eq!(made, Report::default());
     let fresh = Security::parse(&key_sddl(&path).unwrap());
     assert_eq!(fresh, Security::parse(VENDOR_SDDL));
@@ -210,18 +252,39 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
     set_dacl(&format!("{path}\\Shut"), SHUT).unwrap();
     create_key_with(&format!("{path}\\Denied"), ADMIN_KEY).unwrap();
     set_dacl(&format!("{path}\\Denied"), DENY_BOTH).unwrap();
+    // A plant that cuts its owner's rights down, and one whose planter keeps a WRITE_OWNER
+    // handle and sets the owner back after the take-over's first write.
+    create_key_with(&format!("{path}\\Owned"), PLANT).unwrap();
+    set_dacl(&format!("{path}\\Owned"), OWNER_READS).unwrap();
+    create_key_with(&format!("{path}\\Racer"), PLANT).unwrap();
+    let racer = owner_handle(&format!("{path}\\Racer")).unwrap();
+    let raw = racer.0;
+    let mut raced = false;
+    AFTER_OWNER_WRITE.set(Some(Box::new(move |name: &str| {
+        if name == "Racer" && !raced {
+            raced = true;
+            set_owner_users(raw).unwrap();
+        }
+    })));
     // A real link under the root, pointing at Target, whose SD is read as it was.
     make_link(&format!("{path}\\LinkChild"), &nt_path(&target)).unwrap();
     let target_before = key_sddl(&target).unwrap();
+    drop(held);
 
+    let backup = Privileges::enable(&WALK).unwrap();
     let report = ensure(&mut Registry::at(&path), &path).unwrap();
+    drop(backup);
+    AFTER_OWNER_WRITE.set(None);
+    drop(racer);
     assert!(report.weaker_from.is_some(), "{report:?}");
     assert_eq!(report.removed, [format!("{path}\\LinkChild")]);
     assert_eq!(report.recreated, [format!("{path}\\Sandbox")]);
     assert_eq!(
         report.planted,
         [
+            format!("{path}\\Owned"),
             format!("{path}\\Planted"),
+            format!("{path}\\Racer"),
             format!("{path}\\Sandbox"),
             format!("{path}\\Shut")
         ]
@@ -233,7 +296,7 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
 
     let mut tree = Registry::at(&path);
     let root = tree.open_root().unwrap().unwrap();
-    for gone in ["LinkChild", "Planted", "Shut"] {
+    for gone in ["LinkChild", "Owned", "Planted", "Racer", "Shut"] {
         assert!(!present(&mut tree, &root, gone), "{gone} is gone");
     }
     assert_eq!(
@@ -268,7 +331,7 @@ fn elevated_an_installer_shaped_key_still_reads_writes_and_deletes_after_a_takeo
     }
     let _clear = Clear;
     Clear::run();
-    let _held = Privileges::enable(&RECLAIM).unwrap();
+    let _held = Privileges::enable(&WALK).unwrap();
     let path = format!("{TEST_ROOT}\\Vendor\\Clauseo");
     create_key_with(&path, ADMIN_KEY).unwrap();
     let root = format!("{TEST_ROOT}\\Vendor");
@@ -302,7 +365,7 @@ fn elevated_a_link_parent_is_refused_before_anything_is_written() {
     }
     let _clear = Clear;
     Clear::run();
-    let _held = Privileges::enable(&RECLAIM).unwrap();
+    let _held = Privileges::enable(&WALK).unwrap();
     let target = format!("{TEST_ROOT}\\Target");
     create_key_with(&target, "O:BAD:P(A;;KA;;;BA)").unwrap();
     let parent = format!("{TEST_ROOT}\\LinkParent");
