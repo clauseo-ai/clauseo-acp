@@ -40,7 +40,7 @@ use crate::windows::refresh::{self, SystemTask};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
-use crate::windows::wsl::{self, WindowsWsl, WslApplied};
+use crate::windows::wsl::{self, WindowsWsl, WslApplied, WslRemoved};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
@@ -485,6 +485,15 @@ impl Machine for WindowsMachine {
             return Ok(WslApplied::default());
         }
         wsl::apply(&mut WindowsWsl::writer(&self.names.record_key), group)
+            .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))
+    }
+
+    fn wsl_remove(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        // Elevated, never as the owner, as the step that wrote it.
+        if !self.names.wsl {
+            return Ok(WslRemoved::default());
+        }
+        wsl::remove(&mut WindowsWsl::writer(&self.names.record_key), group)
             .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))
     }
 

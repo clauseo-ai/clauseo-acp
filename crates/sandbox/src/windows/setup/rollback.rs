@@ -2,8 +2,9 @@
 //! `LocalLow` deny, their profile, their account. Then the group goes, only if this run made it
 //! and it is empty. Then the record is written to what really remains: every SID it held before,
 //! each made user still there (or gone but named by a ledger entry), and a group this run made
-//! that is still there, so no account or group is left that the record doesn't name. Every other
-//! deny stays (D12). Nothing that existed before the run is removed.
+//! that is still there, so no account or group is left that the record doesn't name. WSL's deny
+//! comes off before that group goes (it names the group in machine-wide keys, and its record
+//! goes with the group's); every other deny stays (D12). Nothing that existed before the run is removed.
 //!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
@@ -53,6 +54,8 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
+    /// WSL's deny was tried (step 8b), so some of it may be written.
+    pub(super) wsl_tried: bool,
 }
 
 impl Run {
@@ -68,6 +71,7 @@ impl Run {
             ledger: None,
             kept: Vec::new(),
             reset: Vec::new(),
+            wsl_tried: false,
         }
     }
 
@@ -171,12 +175,18 @@ fn local_low(profile: &Path) -> PathBuf {
 
 /// Deletes the group this run made when it has no members left; whether it is gone. A group
 /// that still has members (kept users this run put in it) stays and is recorded, which is not a
-/// failure; a failed count or delete keeps it and is.
+/// failure; a failed count or delete keeps it and is. After WSL's deny was tried, it comes off
+/// first (`Machine::wsl_remove`): a removal that fails keeps the group too, so no deny is left
+/// naming a group that is gone.
 fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -> bool {
     let Some(group) = &run.group else {
         return false;
     };
     let result = match machine.group_members(group) {
+        Ok(0) if run.wsl_tried => match machine.wsl_remove(group) {
+            Ok(_removed) => machine.delete_group(group),
+            Err(error) => Err(error),
+        },
         Ok(0) => machine.delete_group(group),
         Ok(_) => return false,
         Err(error) => Err(error),
