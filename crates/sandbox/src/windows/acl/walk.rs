@@ -37,8 +37,9 @@ use super::object::{Handle, Object, os_error, reparse_refused, words};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label, lacking,
-    owner_bytes, rebuild, without_broad, without_inherited, writes,
+    bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, guard_offends,
+    inherited_label, lacking, owner_bytes, rebuild, without_broad, without_guarded,
+    without_inherited, writes,
 };
 use crate::windows::writer::{ApplyFailure, Owned, Reach, Walked};
 
@@ -73,6 +74,7 @@ pub(super) enum Mode<'a> {
         watched: &'a [Vec<u8>],
         pool: &'a [Vec<u8>],
         foreign: Option<Foreign<'a>>,
+        guarded: &'a [Vec<u8>],
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned. `own` (a strict
     /// walk's matter subjects, else none) are the pool SIDs whose allows may stay after it.
@@ -359,9 +361,16 @@ fn settle(
     let mut new_owner = None;
     match mode {
         Mode::Plain | Mode::HandBack { .. } => {}
-        Mode::Strict { watched, .. } => {
+        Mode::Strict {
+            watched, guarded, ..
+        } => {
             let broad = dacl.as_ref().is_some_and(|d| broad_allow(d, watched));
-            if now.dacl_protected() || broad {
+            // The guard's repair touches only a child a pool user owns, never the lawyer's.
+            let guard = owned
+                && dacl
+                    .as_ref()
+                    .is_some_and(|d| guard_offends(d, child.folder, guarded));
+            if now.dacl_protected() || broad || guard {
                 if !owned {
                     return Err(if now.dacl_protected() {
                         ApplyFailure::ProtectedChild
@@ -369,7 +378,11 @@ fn settle(
                         ApplyFailure::BroadAllowChild
                     });
                 }
-                let cleaned = dacl.as_ref().map(|d| without_broad(d, watched));
+                let cleaned = dacl
+                    .as_ref()
+                    .map(|d| without_guarded(&without_broad(d, watched), child.folder, guarded))
+                    .transpose()
+                    .map_err(io)?;
                 base = rebuild(&checked, None, cleaned.as_deref(), DACL_PROTECTED).map_err(io)?;
                 repaired = true;
             }

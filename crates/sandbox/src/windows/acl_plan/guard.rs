@@ -72,23 +72,47 @@ pub(super) fn guard_writes(plan: &mut Plan<'_>) -> Result<(), Error> {
 }
 
 /// One place the pool may write.
-struct Place {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Place {
     path: PathBuf,
     kind: PathKind,
     /// A folder it may add files to, or else a file it may write and run.
-    folder: bool,
+    pub(super) folder: bool,
 }
 
-/// The place `allow` lets the pool write, if it does: a folder it may add files to (an allow
-/// down the tree, or a create-files allow, with `FILE_ADD_FILE`), or a file whose allow gives
-/// both writing and running.
-fn place(allow: &Grant) -> Option<Place> {
+/// The place `allow` lets the pool write, if it does: a folder it may add files to (with
+/// `FILE_ADD_FILE`), or a file whose allow gives both writing and running. An allow down the
+/// tree is on a folder; one on the path alone is on a folder or a file as its kind says.
+pub(super) fn place(allow: &Grant) -> Option<Place> {
     let mask = allow.rights.mask();
-    let folder = allow.inherit != Inherit::ThisOnly || allow.rights == Rights::CreateFiles;
+    let folder = allow.inherit != Inherit::ThisOnly || folder_kind(allow.kind);
     let guarded = mask & FILE_ADD_FILE != 0 && (folder || mask & FILE_EXECUTE != 0);
     guarded.then(|| Place {
         path: allow.path.clone(),
         kind: allow.kind,
         folder,
     })
+}
+
+/// Whether a path of `kind` is a folder: every kind but the credential link and the Claude
+/// store's files, and the read-only names, which may be either and get only denies.
+fn folder_kind(kind: PathKind) -> bool {
+    match kind {
+        PathKind::Matter
+        | PathKind::State
+        | PathKind::Notes
+        | PathKind::TempFolder
+        | PathKind::ClaudeStore
+        | PathKind::Runtime
+        | PathKind::Read
+        | PathKind::AllowedFolder
+        | PathKind::OtherMatter
+        | PathKind::Sibling
+        | PathKind::ParentFiles
+        | PathKind::SharedWrite => true,
+        PathKind::CredentialLink
+        | PathKind::ClaudeStoreFile
+        | PathKind::ReadOnlyInMatter
+        | PathKind::ReadOnlyInState => false,
+    }
 }

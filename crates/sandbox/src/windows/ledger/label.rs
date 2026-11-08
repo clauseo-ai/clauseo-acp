@@ -1,7 +1,8 @@
 //! Whether a label read from a path is our own Low label (N7), never to be recorded as the
 //! lawyer's earlier label.
 
-use super::Label;
+use super::file::{Slot, State};
+use super::{EntryId, EntryState, Label};
 use crate::windows::acl_plan::{Inherit, Rights};
 
 /// Whether `label` is the Low label a [`Rights::LowLabel`] grant reaching `inherit` writes (on
@@ -25,4 +26,22 @@ pub(crate) fn is_our_label(label: &Label, inherit: Inherit) -> bool {
     label.level == LOW
         && label.mask == Rights::LowLabel.mask()
         && ours.contains(&(label.flags & !INHERITED))
+}
+
+/// Records `label` as entry `id`'s prior label when it is still pending with none recorded,
+/// and `label` isn't our own; whether it did.
+pub(super) fn set_prior(state: &mut State, id: EntryId, label: Label) -> bool {
+    let mut changed = false;
+    for slot in &mut state.slots {
+        if let Slot::Known(known) = slot
+            && known.entry.id == id
+            && known.entry.state == EntryState::Pending
+            && known.entry.prior_label.is_none()
+            && !is_our_label(&label, known.entry.inherit)
+        {
+            known.entry.prior_label = Some(label);
+            changed = true;
+        }
+    }
+    changed
 }

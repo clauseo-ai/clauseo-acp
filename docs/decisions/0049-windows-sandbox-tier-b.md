@@ -879,7 +879,21 @@ existing children: the own folders' walk, and for the Claude store a new strict 
 makes it one). So a pool-made child with a protected DACL in the store is repaired, and one the
 lawyer made with a protected DACL is refused. The PR's VM row checks that the store has none.
 Forgetting a matter, and `--remove`, take them off with the rest. The `OWNER RIGHTS` entry on the
-shared store is shared between matters, as the store's label is.
+shared store is shared between matters, as the store's label is. An identical `OWNER RIGHTS`
+entry already there when a launch first lists ours, with none of ours naming it, is IT's
+("subfolders and files only: Modify" is a common hardening entry): the ledger records it as
+found (`Entry::found`), and forget and `--remove` drop the listing without removing it. If IT
+takes its own off and a later launch writes ours, it is ours again.
+
+**The walk's repair in a guarded tree.** Python's `tempfile.mkdtemp` and `TemporaryDirectory`
+(3.12.4 and later, CPython `posixmodule.c`) make each folder with the protected DACL
+`D:P(A;OICI;FA;;;OW)`. The strict walk lifts a pool-made child's protection, and would keep
+that explicit allow, so the files below would inherit execute ahead of the matter's deny. So in
+a tree the guard covers (`Strict::guarded`: `OWNER RIGHTS` and the guard's subjects), a child a
+pool user owns also loses each explicit allow for one of them that holds `WRITE_DAC`,
+`WRITE_OWNER` or `GENERIC_ALL`, or an execute right that reaches files: on a folder one its
+files inherit, on a file one not behind the file's own explicit execute deny (the Claude
+store's files keep the plan's `Modify`). The lawyer's children are never touched for this.
 
 **The runtime paths stay runnable.** Node (`<data_dir>\agents\runtime`), each agent's install
 (`<data_dir>\agents\<agent>\install`), the npm cache Clauseo installs with
@@ -895,11 +909,9 @@ an agent that sets out to get past it:
 - **A descriptor passed at creation.** A creator may give a new file its own DACL with no
   `WRITE_DAC` (`CreateFile` with `SECURITY_ATTRIBUTES`, a few lines of PowerShell or Python):
   protected, the inherited deny never lands; not protected, its explicit allow of `FILE_EXECUTE`
-  for the pool user comes before the inherited deny. The next launch's strict walk clears a
-  pool-made child's protection, but it strips explicit allows only for watched SIDs, never the
-  matter's own pool user, whose explicit allow on the credential link it must keep. So such a file
-  runs, and keeps running across launches. Owner: the orchestrator's follow-up (an image-load
-  mitigation is being weighed).
+  for the pool user comes before the inherited deny. Such a file runs until the next strict walk
+  of its tree (`repair_after_session` when the agent exits, or the next launch), which repairs
+  it as above. Owner: the orchestrator's follow-up (an image-load mitigation is being weighed).
 - **FAT and exFAT drives** keep no ACLs: a program on a USB stick runs.
 - **A handle opened before the walk** keeps the rights it was opened with.
 
