@@ -14,6 +14,7 @@ import type {
   FolderSupportKind,
   LimitsView,
   MatterSummary,
+  SetupEvent,
   SkippedFile,
   ThreadStatus,
   ViewEntry,
@@ -171,6 +172,13 @@ function papersNext(state: ThreadState): FakeNextHost {
   };
 }
 
+/** Both plans installed and signed in, as the setup wire replays them: the header shows a plan's line and card only
+ * while its agent is signed in, so a state that carries limits needs this. */
+const SIGNED_IN: readonly SetupEvent[] = (["claude-acp", "codex-acp"] as const).flatMap((agent) => [
+  { agent_install_progress: { agent, state: { ready: { version: "0.1.0" } } } },
+  { sign_in_changed: { agent, state: { signed_in: { method: "plan", source: "own", at: 0 } } } },
+]);
+
 /** A host with one matter and its one thread, whose view arrives as the room subscribes. */
 export function threadHost(state: ThreadState): FakeTransport {
   const agent = state.agent ?? "claude-acp";
@@ -180,6 +188,7 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.agent = agent;
   const transport: FakeTransport = new FakeTransport({
     ...(state.platform === undefined ? {} : { platform: state.platform }),
+    ...(state.limits === undefined ? {} : { setup: { first: () => SIGNED_IN } }),
     query: (query) => {
       if (query === "list_matters")
         return {

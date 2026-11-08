@@ -36,7 +36,7 @@ reader over in-memory pipes. All are synthetic, written from `crates/codex_appse
 
 | Fixture | Covers | Source | Kind |
 |---|---|---|---|
-| `codex/plus.json` | Plus: `primary` 300 and `secondary` 10080, and `rateLimitsByLimitId` with a `codex` bucket and a `codex_spark` model bucket whose numbers (and `rate_limit_reached`) differ; the rows and `reached` come from `codex` | `GetAccountRateLimitsResponse`, `RateLimitSnapshot` (rate_limits.rs; v2/GetAccountRateLimitsResponse.json) | synthetic |
+| `codex/plus.json` | Plus: `primary` 300 and `secondary` 10080, and `rateLimitsByLimitId` with a `codex` bucket and a `codex_spark` model bucket (`limitName` `Spark`) whose numbers (and `rate_limit_reached`) differ; the main rows and `reached` come from `codex`, and Spark's two windows follow as `Model` rows | `GetAccountRateLimitsResponse`, `RateLimitSnapshot` (rate_limits.rs; v2/GetAccountRateLimitsResponse.json) | synthetic |
 | `codex/free.json` | Free: one `primary` window of 43200 minutes, "Monthly limit" | as above | synthetic |
 | `codex/free-no-duration.json` | Free with no `windowDurationMins` and no `limitId`: the single view, "Monthly limit" by the Free and Go fallback | as above | synthetic |
 | `codex/go.json` | Go: `primary` of 43200 minutes (30 days), as two live G16 reads answered (main be0fd35a and main 80bf0b34, 2026-11-04), `email: null` (ref `plan`) | `ChatgptAccount` (account.rs; v2/GetAccountResponse.json) and as above | synthetic |

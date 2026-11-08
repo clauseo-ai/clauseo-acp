@@ -248,7 +248,8 @@ fn a_late_account_read_gives_the_limits_alone_after_the_grace() {
         limits.plan.as_ref().map(|plan| plan.0.as_str()),
         Some("ChatGPT Plus")
     );
-    assert_eq!(limits.windows.len(), 2);
+    // Codex's own two windows and the Spark bucket's two.
+    assert_eq!(limits.windows.len(), 4);
 }
 
 #[test]
