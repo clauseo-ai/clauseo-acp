@@ -2,17 +2,21 @@
 //! folder's contents as names no call can reach and fails a test that opens anything but a
 //! drive folder itself: a squatted folder is locked down and renamed by its handle, unopened
 //! inside, and the lawyer's made afresh; a link or a file is refused; the lawyer's own folder, a
-//! missing one and another lawyer's are left as they are.
+//! missing one and another lawyer's are left as they are. A squatter can't block or loop it: a
+//! name made first, a rename held up and a folder made again are each tried a bounded number of
+//! times, then given up, logged.
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::super::drive_folder_name;
-use super::super::heal::{Facts, Healed, Healer, heal, heal_all};
+use super::super::heal::{
+    BUSY_PAUSE, BUSY_TRIES, CALL_WAIT, Facts, Healed, Healer, NAME_TRIES, ROUNDS, heal, heal_all,
+};
 use crate::windows::sids::Sid;
 
 /// The lawyer.
@@ -62,6 +66,14 @@ struct Fake {
     logs: RefCell<Vec<(bool, String)>>,
     /// Whether [`Healer::make_fresh`] fails.
     fresh_fails: bool,
+    /// What each [`Healer::rename`] fails with first, in turn, before it renames.
+    rename_errors: RefCell<VecDeque<io::ErrorKind>>,
+    /// The random numbers given, in turn; `0x2a` once none are left.
+    randoms: RefCell<VecDeque<u32>>,
+    /// Every pause asked for.
+    pauses: RefCell<Vec<Duration>>,
+    /// How many more renames are followed by a squatter making the lawyer's name again.
+    resquats: Cell<u32>,
 }
 
 impl Fake {
@@ -119,6 +131,9 @@ impl Healer for Fake {
 
     fn rename(&self, opened: &u64, name: &OsStr) -> io::Result<()> {
         self.calls.borrow_mut().push("rename".to_owned());
+        if let Some(kind) = self.rename_errors.borrow_mut().pop_front() {
+            return Err(io::Error::from(kind));
+        }
         let mut at = self.at.borrow_mut();
         let from = at
             .iter()
@@ -131,12 +146,20 @@ impl Healer for Fake {
         }
         at.remove(&from);
         at.insert(to, *opened);
+        drop(at);
+        if self.resquats.get() > 0 {
+            self.resquats.set(self.resquats.get() - 1);
+            self.put(from, Node::folder(SQUATTER));
+        }
         Ok(())
     }
 
     fn make_fresh(&self, path: &Path, lawyer: &Sid) -> io::Result<()> {
         self.calls.borrow_mut().push("make_fresh".to_owned());
-        if self.fresh_fails || self.at.borrow().contains_key(path) {
+        if self.fresh_fails {
+            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        }
+        if self.at.borrow().contains_key(path) {
             return Err(io::Error::from(io::ErrorKind::AlreadyExists));
         }
         let mut node = Node::folder(lawyer.as_str());
@@ -149,6 +172,22 @@ impl Healer for Fake {
     fn log(&self, error: bool, line: &str) {
         self.logs.borrow_mut().push((error, line.to_owned()));
     }
+
+    fn random(&self) -> io::Result<u32> {
+        Ok(self.randoms.borrow_mut().pop_front().unwrap_or(0x2a))
+    }
+
+    fn pause(&self, wait: Duration) {
+        self.pauses.borrow_mut().push(wait);
+    }
+}
+
+/// The set-aside name at [`now`] with the random number `digits`.
+fn aside_name(digits: u32) -> String {
+    format!(
+        "{}.squatted-20261109T101500Z-{digits:08x}",
+        drive_folder_name(LAWYER)
+    )
 }
 
 /// 2026-11-09 10:15:00 UTC.
@@ -175,7 +214,7 @@ fn a_squatted_drive_folder_is_set_aside_unopened_and_made_afresh() {
 
     let healed = heal(&fake, &root, &sid(LAWYER), now());
 
-    let aside = format!("{}.squatted-20261109T101500Z", drive_folder_name(LAWYER));
+    let aside = aside_name(0x2a);
     assert_eq!(healed, Healed::SetAside(aside.clone()));
     assert_eq!(
         fake.opened.borrow().as_slice(),
@@ -282,4 +321,134 @@ fn a_fresh_folder_that_cant_be_made_leaves_the_squat_set_aside_and_one_line() {
     let logs = fake.logs.borrow();
     assert_eq!(logs.len(), 1);
     assert!(logs[0].0, "logged as an error");
+}
+
+/// A squatter that made the set-aside name first can't block the rename: new random digits
+/// are tried, up to [`NAME_TRIES`] names; with every one taken the folder stays locked down at
+/// the lawyer's name, logged.
+#[test]
+fn a_set_aside_name_made_first_is_tried_again_with_new_digits() {
+    let (root, folder) = drive();
+    let fake = Fake::new(&[&root]);
+    fake.put(folder.clone(), Node::folder(SQUATTER));
+    fake.put(root.join(aside_name(1)), Node::folder(SQUATTER));
+    fake.randoms.borrow_mut().extend([1, 2]);
+
+    let healed = heal(&fake, &root, &sid(LAWYER), now());
+
+    assert_eq!(healed, Healed::SetAside(aside_name(2)));
+    assert_eq!(fake.node(&root.join(aside_name(2))).unwrap().owner, SYSTEM);
+
+    let fake = Fake::new(&[&root]);
+    fake.put(folder.clone(), Node::folder(SQUATTER));
+    let digits: Vec<u32> = (1..=10).collect();
+    for each in &digits {
+        fake.put(root.join(aside_name(*each)), Node::folder(SQUATTER));
+    }
+    fake.randoms.borrow_mut().extend(digits);
+
+    let healed = heal(&fake, &root, &sid(LAWYER), now());
+
+    assert_eq!(healed, Healed::Failed(io::ErrorKind::AlreadyExists));
+    let renames = fake
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| *c == "rename")
+        .count();
+    assert_eq!(renames, NAME_TRIES);
+    let kept = fake.node(&folder).unwrap();
+    assert_eq!((kept.owner.as_str(), kept.dacl.as_str()), (SYSTEM, LOCKED));
+    let logs = fake.logs.borrow();
+    assert!(matches!(logs.as_slice(), [(true, line)] if line.contains("locked down")));
+}
+
+/// A rename a handle or a lease holds up is tried again after a pause, a bounded number of
+/// times (2 s with NTFS's bound on each call); then the heal gives up, logged, and the folder
+/// stays locked down for the next run. A rename that timed out is given up at once.
+#[test]
+fn a_rename_held_up_waits_a_bounded_time_then_gives_up_locked_down() {
+    let (root, folder) = drive();
+    let fake = Fake::new(&[&root]);
+    fake.put(folder.clone(), Node::folder(SQUATTER));
+    let busy = io::ErrorKind::ResourceBusy;
+    fake.rename_errors.borrow_mut().extend([busy, busy]);
+
+    assert_eq!(
+        heal(&fake, &root, &sid(LAWYER), now()),
+        Healed::SetAside(aside_name(0x2a))
+    );
+    assert_eq!(*fake.pauses.borrow(), [BUSY_PAUSE, BUSY_PAUSE]);
+    let tries = u32::try_from(BUSY_TRIES).unwrap();
+    let longest = CALL_WAIT * tries + BUSY_PAUSE * (tries - 1);
+    assert!(longest <= Duration::from_secs(2), "{longest:?}");
+
+    for (kind, tries) in [(busy, BUSY_TRIES), (io::ErrorKind::TimedOut, 1)] {
+        let fake = Fake::new(&[&root]);
+        fake.put(folder.clone(), Node::folder(SQUATTER));
+        fake.rename_errors.borrow_mut().extend([kind; 8]);
+
+        let healed = heal(&fake, &root, &sid(LAWYER), now());
+
+        assert_eq!(healed, Healed::Failed(kind));
+        let renames = fake
+            .calls
+            .borrow()
+            .iter()
+            .filter(|c| *c == "rename")
+            .count();
+        assert_eq!(renames, tries, "{kind}");
+        let paused: Duration = fake.pauses.borrow().iter().sum();
+        assert!(paused < Duration::from_secs(2), "{paused:?}");
+        let kept = fake.node(&folder).unwrap();
+        assert_eq!((kept.owner.as_str(), kept.dacl.as_str()), (SYSTEM, LOCKED));
+        assert_eq!(fake.logs.borrow().len(), 1);
+        assert!(fake.logs.borrow()[0].0, "logged as an error");
+    }
+}
+
+/// A folder made again at the lawyer's name between the rename and the fresh folder is counted
+/// and logged, and healed again; one made again every time stops after [`ROUNDS`] rounds.
+#[test]
+fn a_folder_made_again_before_the_fresh_one_is_counted_and_bounded() {
+    let (root, folder) = drive();
+    let fake = Fake::new(&[&root]);
+    fake.put(folder.clone(), Node::folder(SQUATTER));
+    fake.resquats.set(1);
+    fake.randoms.borrow_mut().extend([1, 2]);
+
+    let healed = heal(&fake, &root, &sid(LAWYER), now());
+
+    assert_eq!(healed, Healed::SetAside(aside_name(2)));
+    assert!(fake.node(&root.join(aside_name(1))).is_some());
+    assert_eq!(fake.node(&folder).unwrap().owner, LAWYER);
+    let logs = fake.logs.borrow();
+    assert!(matches!(logs.as_slice(), [(true, again), (false, _)] if again.contains("1 of")));
+    drop(logs);
+
+    let fake = Fake::new(&[&root]);
+    fake.put(folder.clone(), Node::folder(SQUATTER));
+    fake.resquats.set(u32::MAX);
+    fake.randoms.borrow_mut().extend(1..=10);
+
+    let healed = heal(&fake, &root, &sid(LAWYER), now());
+
+    assert_eq!(healed, Healed::SetAsideOnly(aside_name(3)));
+    let renames = fake
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| *c == "rename")
+        .count();
+    assert_eq!(renames, ROUNDS);
+    assert_eq!(
+        fake.logs.borrow().len(),
+        ROUNDS + 1,
+        "one per round, one at the end"
+    );
+    assert_eq!(
+        fake.node(&folder).unwrap().owner,
+        SQUATTER,
+        "left for the next run"
+    );
 }

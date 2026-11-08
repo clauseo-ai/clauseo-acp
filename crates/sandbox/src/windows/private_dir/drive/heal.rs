@@ -12,15 +12,30 @@
 //!   `SetFileInformationByHandle(FileRenameInfo)`: kernelbase turns a bare name into a path
 //!   below the process's current folder.
 //!
+//! Each open and rename runs on a thread of its own and is waited for at most
+//! [`CALL_WAIT`]: one a squatter's oplock or lease holds up past that is given up as `TimedOut`,
+//! so the task goes on to the next folder. The thread keeps its own reference to the handle, so
+//! the handle is closed only once the call returns, never under it; a rename that completes
+//! after it was given up leaves the folder set aside with no fresh one, which the lawyer's next
+//! launch makes. A rename refused because something holds the folder open (sharing, lock,
+//! access denied, busy) is `ResourceBusy`, which the heal tries again.
+//!
 //! The lawyers are the record's `OwnerSid` and a per-user `AdminCopyOwner`, each checked to be a
 //! SID; the volumes are the local fixed and removable drives (`GetLogicalDriveStringsW`). A
 //! volume mounted on a folder, with no letter, is not healed (a known limit).
 
-use std::ffi::OsStr;
+#![expect(
+    unsafe_code,
+    reason = "the drive folders' handles: privileges, drive types, attributes, rename by handle"
+)]
+
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use windows::Wdk::Storage::FileSystem::{
     FILE_RENAME_INFORMATION, FileRenameInformation, NtSetInformationFile,
@@ -45,7 +60,7 @@ use super::super::{Descriptor, Handle, PROTECTED_DACL, named};
 use super::{drive_sddl, make_new, pool_group};
 use crate::windows::record::{admin_copy_owner, sandbox_owner_sid};
 use crate::windows::refresh::event_log;
-use crate::windows::set_aside::heal::{Facts, Healer, heal_all};
+use crate::windows::set_aside::heal::{CALL_WAIT, Facts, Healer, heal_all};
 use crate::windows::sids::Sid;
 
 /// `SYSTEM`, the owner a squatted folder is given.
@@ -172,18 +187,73 @@ fn enable_privileges() -> io::Result<()> {
 /// The heal's calls on NTFS.
 struct Ntfs;
 
-impl Healer for Ntfs {
-    type Opened = Handle;
+/// A drive folder's handle, shared with the thread a bounded call runs on ([`bounded`]).
+struct Shared(Handle);
 
-    fn open(&self, path: &Path) -> io::Result<Option<Handle>> {
-        match Handle::open_for(path, ACCESS) {
-            Ok(handle) => Ok(Some(handle)),
+// SAFETY: a kernel handle may be used and closed from any thread; `Shared` only reads it and
+// closes it once, in `Handle`'s drop, when the last reference goes.
+unsafe impl Send for Shared {}
+// SAFETY: as for `Send`: the calls made through `&Shared` are kernel calls on the handle.
+unsafe impl Sync for Shared {}
+
+/// `call`'s answer, run on a thread of its own and waited for at most `wait`: one later is
+/// `TimedOut`, and its answer, a handle included, is dropped on that thread when it comes.
+fn bounded<T: Send + 'static>(
+    wait: Duration,
+    call: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
+    let (answer, answered) = mpsc::sync_channel(1);
+    thread::Builder::new()
+        .name("clauseo-heal-call".to_owned())
+        .spawn(move || drop(answer.send(call())))?;
+    match answered.recv_timeout(wait) {
+        Ok(done) => done,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::from(io::ErrorKind::TimedOut)),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(io::Error::other("the heal's call ended with no answer"))
+        }
+    }
+}
+
+/// `error` as `ResourceBusy` when it says something holds the folder open: a sharing or lock
+/// violation, access denied (a folder with an item open inside), or busy.
+fn busy(error: io::Error) -> io::Error {
+    const HELD: [i32; 4] = [5, 32, 33, 170];
+    if error
+        .raw_os_error()
+        .is_some_and(|code| HELD.contains(&code))
+    {
+        return io::Error::new(io::ErrorKind::ResourceBusy, error);
+    }
+    error
+}
+
+/// The pause between two tries of a rename held up (`set_aside::heal::BUSY_PAUSE`).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a bounded pause in the SYSTEM task between two tries of a rename held up; the \
+              tests pass a fake's (`Healer::pause`)"
+)]
+fn pause(wait: Duration) {
+    thread::sleep(wait);
+}
+
+impl Healer for Ntfs {
+    type Opened = Arc<Shared>;
+
+    fn open(&self, path: &Path) -> io::Result<Option<Arc<Shared>>> {
+        let path = path.to_owned();
+        match bounded(CALL_WAIT, move || {
+            Handle::open_for(&path, ACCESS).map(Shared)
+        }) {
+            Ok(handle) => Ok(Some(Arc::new(handle))),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
     }
 
-    fn facts(&self, opened: &Handle) -> io::Result<Facts> {
+    fn facts(&self, opened: &Arc<Shared>) -> io::Result<Facts> {
+        let opened = &opened.0;
         let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
         let size = u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).map_err(io::Error::other)?;
         // SAFETY: the handle is open; `info` is writable for `size` bytes.
@@ -204,14 +274,16 @@ impl Healer for Ntfs {
         })
     }
 
-    fn lock_down(&self, opened: &Handle) -> io::Result<()> {
+    fn lock_down(&self, opened: &Arc<Shared>) -> io::Result<()> {
+        let opened = &opened.0;
         let system = Sid::parse(SYSTEM).map_err(io::Error::other)?;
         opened.set_owner(&system)?;
         opened.set(PROTECTED_DACL, &Descriptor::from_sddl(LOCKED_DOWN)?)
     }
 
-    fn rename(&self, opened: &Handle, name: &OsStr) -> io::Result<()> {
-        rename_in_place(opened, name)
+    fn rename(&self, opened: &Arc<Shared>, name: &OsStr) -> io::Result<()> {
+        let (shared, name): (Arc<Shared>, OsString) = (Arc::clone(opened), name.to_owned());
+        bounded(CALL_WAIT, move || rename_in_place(&shared.0, &name)).map_err(busy)
     }
 
     fn make_fresh(&self, path: &Path, lawyer: &Sid) -> io::Result<()> {
@@ -233,6 +305,16 @@ impl Healer for Ntfs {
 
     fn log(&self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn random(&self) -> io::Result<u32> {
+        let mut bytes = [0_u8; 4];
+        getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn pause(&self, wait: Duration) {
+        pause(wait);
     }
 }
 

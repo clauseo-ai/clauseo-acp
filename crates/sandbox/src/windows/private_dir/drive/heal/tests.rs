@@ -88,8 +88,16 @@ fn elevated_a_squatted_drive_folder_is_set_aside_by_its_handle_and_made_afresh()
 
     let healed = heal(&Ntfs, &root, &me, SystemTime::UNIX_EPOCH);
 
-    let aside = format!("{name}.squatted-19700101T000000Z");
-    assert_eq!(healed, Healed::SetAside(aside.clone()));
+    let Healed::SetAside(aside) = healed else {
+        panic!("set aside: {healed:?}");
+    };
+    let digits = aside
+        .strip_prefix(&format!("{name}.squatted-19700101T000000Z-"))
+        .unwrap();
+    assert!(
+        digits.len() == 8 && digits.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{aside}"
+    );
     let moved = root.join(&aside).join("sub").join("brief.txt");
     assert_eq!(
         descriptor(&moved).unwrap(),
@@ -99,4 +107,39 @@ fn elevated_a_squatted_drive_folder_is_set_aside_by_its_handle_and_made_afresh()
     assert_eq!(owner(&root.join(&aside)).unwrap().as_str(), "S-1-5-18");
     assert_eq!(owner(&folder).unwrap(), me, "the fresh one is the lawyer's");
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+}
+
+/// A squatter holding an item open inside the folder holds its rename up: the heal tries a
+/// bounded number of times, gives up within the 2 s, and leaves the folder locked down at the
+/// lawyer's name for the next run.
+#[test]
+fn elevated_a_rename_held_up_by_an_open_handle_gives_up_locked_down() {
+    if !elevated_tests_enabled() {
+        return;
+    }
+    enable_privileges().unwrap();
+    let place = Place::new("drive-heal-held");
+    let me = current_user_sid().unwrap();
+    let name = drive_folder_name(me.as_str());
+    let child = place.dir.file(&format!("{name}/held.txt"), "a squatter's");
+    let root = place.at("");
+    let folder = root.join(&name);
+    set_owner(&folder, &Sid::parse(ADMINISTRATORS).unwrap()).unwrap();
+    let held = std::fs::File::open(&child).unwrap();
+
+    let healed = heal(&Ntfs, &root, &me, SystemTime::UNIX_EPOCH);
+
+    drop(held);
+    assert!(
+        matches!(
+            healed,
+            Healed::Failed(std::io::ErrorKind::ResourceBusy | std::io::ErrorKind::TimedOut)
+        ),
+        "{healed:?}"
+    );
+    assert_eq!(
+        owner(&folder).unwrap().as_str(),
+        "S-1-5-18",
+        "left locked down"
+    );
 }
