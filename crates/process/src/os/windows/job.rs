@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use windows::Win32::Foundation::{ERROR_MORE_DATA, WAIT_TIMEOUT};
 use windows::Win32::System::JobObjects::{
-    IsProcessInJob, JOBOBJECT_BASIC_PROCESS_ID_LIST, JobObjectBasicProcessIdList,
-    QueryInformationJobObject,
+    IsProcessInJob, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList, QueryInformationJobObject,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     WaitForSingleObject,
 };
 
-use super::raw;
+use super::{each_process, raw};
 
 /// The first job query's room, in pids; a short answer retries with more, up to [`MAX_JOB_PIDS`].
 const FIRST_JOB_PIDS: usize = 64;
@@ -28,8 +28,8 @@ pub(super) type Held = Arc<Mutex<Vec<(u32, OwnedHandle)>>>;
 
 /// Opens every process `job` lists that `held` does not hold yet, and keeps each one that is in
 /// the job (a pid that ended after the list was read may name a process outside it now, which is
-/// never held). Each check reads the list again, so a process started since the last one is held
-/// too. A failed query adds nothing.
+/// never held). The watch reads the list again at each check that finds the job's count at 0, so
+/// a process started since is held too. A failed query adds nothing.
 pub(super) fn hold_listed(job: &OwnedHandle, held: &Held) {
     let Some(pids) = job_pids(job) else {
         return;
@@ -47,6 +47,51 @@ pub(super) fn hold_listed(job: &OwnedHandle, held: &Held) {
             held.push((pid, process));
         }
     }
+}
+
+/// Holds every process the system lists (a Toolhelp snapshot) that is in `job` and `held` does
+/// not hold yet. For the kill, when a process joined the job between the listing and
+/// `TerminateJobObject`: the job's own list may leave out a process the terminate has marked
+/// ended, and the system's still shows each process until it has exited. A failed snapshot adds
+/// nothing.
+pub(super) fn hold_in_job(job: &OwnedHandle, held: &Held) {
+    let mut pids = Vec::new();
+    if !each_process(|entry| pids.push(entry.th32ProcessID)) {
+        return;
+    }
+    let mut held = held.lock().unwrap_or_else(PoisonError::into_inner);
+    for pid in pids {
+        if held.iter().any(|&(known, _)| known == pid) {
+            continue;
+        }
+        let Some(process) = open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)
+        else {
+            continue;
+        };
+        if in_job(&process, job) {
+            held.push((pid, process));
+        }
+    }
+}
+
+/// The job's count of running processes and of every process it has held, from
+/// `JobObjectBasicAccountingInformation`; `None` when the query fails.
+pub(super) fn accounting(job: &OwnedHandle) -> Option<(u32, u32)> {
+    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+    let size = u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>()).ok()?;
+    // SAFETY: `info` is a live JOBOBJECT_BASIC_ACCOUNTING_INFORMATION of `size` bytes, the
+    // struct this information class writes, and `job` is a live job handle.
+    unsafe {
+        QueryInformationJobObject(
+            Some(raw(job)),
+            JobObjectBasicAccountingInformation,
+            (&raw mut info).cast(),
+            size,
+            None,
+        )
+    }
+    .ok()?;
+    Some((info.ActiveProcesses, info.TotalProcesses))
 }
 
 /// Whether `process` is in `job`; `false` when Windows does not say.
