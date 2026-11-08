@@ -8,7 +8,8 @@
 //!    link ([`MsiFiles::open`]).
 //! 3. **The owner**: `wsl.msi`'s, read on its handle, is `TrustedInstaller` or SYSTEM.
 //! 4. **The signature**: `WinVerifyTrust` trusts it, and its signer's chain passes
-//!    `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots.
+//!    `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots; and its leaf
+//!    certificate lists the code-signing EKU.
 //! 5. **The handle**: held, shared for reading only, until msiexec has ended, so the file can't
 //!    be renamed, replaced or written between the checks and the install.
 //!
@@ -65,10 +66,18 @@ pub(super) trait MsiFiles {
     fn open(&self, apps: &str, package: &str) -> Result<Self::Held, String>;
     /// The held file's owner, as a string SID.
     fn owner(&self, msi: &Self::Held) -> Result<String, String>;
-    /// Whether the held file's signature, once `WinVerifyTrust` trusts it, chains to a
-    /// Microsoft root (`CERT_CHAIN_POLICY_MICROSOFT_ROOT`); `path` is the file's path, which the
-    /// call takes alongside the handle.
-    fn microsoft_signed(&self, msi: &Self::Held, path: &str) -> Result<bool, String>;
+    /// The held file's signature, once `WinVerifyTrust` trusts it; `path` is the file's path,
+    /// which the call takes alongside the handle.
+    fn signature(&self, msi: &Self::Held, path: &str) -> Result<Signature, String>;
+}
+
+/// What a trusted signature's chain holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Signature {
+    /// It passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots.
+    pub(super) microsoft_root: bool,
+    /// Its leaf certificate lists the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
+    pub(super) code_signing: bool,
 }
 
 /// Installs WSL's pending MSI upgrade, as `msi.rs` says, from the `WslInstaller` service's
@@ -125,9 +134,15 @@ fn verified<F: MsiFiles>(
             "{PACKAGE_MSI}'s owner is neither TrustedInstaller nor SYSTEM"
         ));
     }
-    if !files.microsoft_signed(&held, path)? {
+    let signature = files.signature(&held, path)?;
+    if !signature.microsoft_root {
         return Err(format!(
             "{PACKAGE_MSI}'s signature doesn't chain to a Microsoft root"
+        ));
+    }
+    if !signature.code_signing {
+        return Err(format!(
+            "{PACKAGE_MSI}'s signer isn't a code-signing certificate"
         ));
     }
     Ok(held)
