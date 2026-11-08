@@ -132,10 +132,6 @@ async-io = "2"
 # S256 challenge. clauseo-sandbox: the admin copy's hash, which the refresh records, and its Windows
 # VM harness's file hashes.
 sha2 = { version = "0.10.9", default-features = false }
-# clauseo-sandbox: the admin copy's refresh checks the staged setup exe's minisign signature
-# against the updater key (0.3.0 is already in the lock through tauri-plugin-updater), and its
-# tests sign with a key they make with ring (0.17, in the lock through rustls).
-minisign-verify = "0.3.0"
 ring = "0.17.14"
 # clauseo-sandbox: the refresh orders signed versions by semver precedence, so a prerelease sorts
 # below its release (1.0.28 is already in the lock through tauri).
@@ -149,7 +145,9 @@ caseless = "0.2.2"
 # The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
 # (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
 flate2 = "1.1.10"
-# clauseo-blocklist: the block list's minisign check. Already in the lock through
+# clauseo-blocklist: the block list's minisign check, and clauseo-sandbox: the admin copy's
+# refresh checks the staged setup exe's signature against the updater key (its tests sign with a
+# key they make with ring, 0.17, in the lock through rustls). Already in the lock through
 # tauri-plugin-updater.
 minisign-verify = "0.3.0"
 quick-xml = "0.42.0"
