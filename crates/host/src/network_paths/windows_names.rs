@@ -3,8 +3,8 @@
 //! a reparse point's kind), so each is tested on every system.
 //!
 //! Refused names (with Windows' rules): a trailing dot or space (the system trims it, so
-//! `x.` opens `x`), a `:` anywhere but a drive letter's (an alternate data stream), `~`
-//! followed by a digit (an 8.3 short name, which opens a long one), and a reserved device name
+//! `x.` opens `x`), a `:` anywhere but a drive letter's (an alternate data stream), and a
+//! reserved device name
 //! (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, with any extension, in any
 //! case). A wildcard (`*`, `?`) is not refused: such a word is walked by its text, and the
 //! system answers that the name is invalid. A URL is not refused either: the file system reads
@@ -48,13 +48,6 @@ fn refused(name: &str) -> bool {
         return false;
     }
     if name.ends_with('.') || name.ends_with(' ') || name.contains(':') {
-        return true;
-    }
-    let bytes = name.as_bytes();
-    if bytes
-        .windows(2)
-        .any(|pair| pair.first() == Some(&b'~') && pair.get(1).is_some_and(u8::is_ascii_digit))
-    {
         return true;
     }
     let base = name
@@ -119,8 +112,6 @@ mod tests {
             r"C:\m\brief.docx ",
             r"C:\m\brief.docx:secret",
             r"C:\m\x:\y",
-            r"C:\PROGRA~1\x",
-            r"C:\m\RUNNER~2",
             r"C:\m\con",
             r"C:\m\CON.txt",
             r"C:\m\nul.tar.gz",
@@ -142,9 +133,11 @@ mod tests {
             r"C:\m\com10",
             r"C:\m\a~b",
             r"C:\m\~1x",
+            r"C:\PROGRA~1\x",
+            r"C:\Users\JONATH~1\AppData\Local\Temp\x",
+            r"C:\m\Draft~2.docx",
         ] {
-            let want = text == r"C:\m\~1x";
-            assert_eq!(refused_windows_name(Path::new(text), &net), want, "{text}");
+            assert!(!refused_windows_name(Path::new(text), &net), "{text}");
         }
         assert!(!refused_windows_name(
             Path::new(r"C:\m\x."),

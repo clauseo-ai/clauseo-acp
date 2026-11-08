@@ -331,9 +331,21 @@ impl FenceCheck {
         }
         if let Found::Path(cwd) = resolve::resolve(&self.cwd, &self.cwd, home, disk) {
             let cwd_key = key(&cwd, insensitive);
-            let linked =
-                matches!(disk.fs.entry(&self.cwd), Ok(Entry::Link)) && cwd_key.starts_with(&data);
-            if !data.starts_with(&cwd_key) && !linked {
+            // A matter folder that holds `<data>` by identity (another spelling of one of its
+            // folders) counts for nothing either.
+            let holds_by_identity = disk.fs.identity(&cwd).is_some_and(|id| {
+                real_data
+                    .ancestors()
+                    .any(|folder| disk.fs.identity(folder) == Some(id))
+            });
+            let data_id = disk.fs.identity(real_data);
+            let in_data_by_identity = data_id.is_some_and(|id| {
+                cwd.ancestors()
+                    .any(|folder| disk.fs.identity(folder) == Some(id))
+            });
+            let linked = matches!(disk.fs.entry(&self.cwd), Ok(Entry::Link))
+                && (cwd_key.starts_with(&data) || in_data_by_identity);
+            if !data.starts_with(&cwd_key) && !holds_by_identity && !linked {
                 own.push(cwd_key);
             }
         }

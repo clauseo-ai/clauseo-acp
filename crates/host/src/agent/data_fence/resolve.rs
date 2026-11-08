@@ -1,10 +1,9 @@
 //! Where a path the agent wrote really leads, for the data folder fence: `~` and `~user` made
 //! absolute, `..` taken on what is resolved so far, links followed even when their target is
-//! missing, and a Windows path to the local machine's own share put in its drive form, walked by
-//! the shared network-safe walk ([`crate::network_paths::resolve::walk`]). A path that is or leads
-//! to a network location, or that the walk cannot vouch for (fail-closed), counts as inside the
-//! data folder, so it is refused, unless it lies by its text in a matter folder the lawyer keeps
-//! on a share ([`under_share_matter`]): that one is outside and untouched.
+//! missing, walked by the shared network-safe walk ([`crate::network_paths::resolve::walk`]). A
+//! path that is or leads to a network location, or that the walk cannot vouch for (fail-closed),
+//! counts as inside the data folder, so it is refused, unless it lies by its text in a matter
+//! folder the lawyer keeps on a share ([`under_share_matter`]): that one is outside and untouched.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -45,13 +44,7 @@ pub(crate) fn resolve_all(
     if disk.net.is_network(path) && !is_url(&path.to_string_lossy()) {
         return vec![Found::Refused];
     }
-    let path = if cfg!(windows) {
-        path.to_str()
-            .and_then(drive_form)
-            .map_or_else(|| path.to_owned(), PathBuf::from)
-    } else {
-        path.to_owned()
-    };
+    let path = path.to_owned();
     let mut parts = path.components();
     let first = parts.clone().next();
     let tilde = match first {
