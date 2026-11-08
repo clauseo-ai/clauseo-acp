@@ -511,6 +511,11 @@ crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_bits.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
+# The denial reporter's SYSTEM side: its pipe and published key, its ETW session and consumer,
+# and its monotonic clock.
+crates/sandbox/src/windows/setup/watch/windows_pipe.rs - unsafe_code
+crates/sandbox/src/windows/setup/watch/windows_trace.rs - unsafe_code
+crates/sandbox/src/windows/setup/watch/windows_watcher.rs - unsafe_code
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code

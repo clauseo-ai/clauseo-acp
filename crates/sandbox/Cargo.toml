@@ -136,6 +136,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # user could leave to start at a logon: its scheduled tasks (System_TaskScheduler, whose
 # collections take a VARIANT index: System_Variant, System_Ole) and BITS jobs
 # (Networking_BackgroundIntelligentTransferService).
+# The denial reporter's SYSTEM side (src/windows/setup/watch): the real-time session and its
+# consumer (System_Diagnostics_Etw, whose EVENT_TRACE_LOGFILEW needs System_Time).
 [target.'cfg(windows)'.dependencies]
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
@@ -164,6 +166,7 @@ windows = { workspace = true, features = [
   "Win32_System_JobObjects",
   "Win32_System_Ioctl",
   "Win32_System_Com",
+  "Win32_System_Diagnostics_Etw",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_EventLog",
   "Win32_System_Diagnostics_Debug",
@@ -180,6 +183,7 @@ windows = { workspace = true, features = [
   "Win32_System_SystemServices",
   "Win32_System_TaskScheduler",
   "Win32_System_Threading",
+  "Win32_System_Time",
   "Win32_System_Variant",
   "Win32_System_WindowsProgramming",
   "Win32_System_Wmi",

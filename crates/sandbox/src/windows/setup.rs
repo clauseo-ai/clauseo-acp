@@ -132,6 +132,8 @@ pub mod strays;
 #[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
+#[cfg(any(windows, test))]
+pub mod watch;
 #[cfg(windows)]
 mod windows_machine;
 
