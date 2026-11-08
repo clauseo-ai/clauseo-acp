@@ -13,6 +13,7 @@ use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, Sid, plan};
 use crate::windows::admit::{PathKind, admit_with};
 use crate::windows::fence::Neighbours;
 use crate::windows::ledger::{ByPath, Ledger, Take, ledger_path};
+use crate::windows::runner::unclean::Unswept;
 use crate::windows::set_aside::{self, Checked};
 use crate::windows::test_world::{FakeFolders, World, matter_one, reserved, sids, trusted};
 use crate::windows::writer::{Reach, Walked};
@@ -213,7 +214,9 @@ fn a_marker_still_awaiting_a_sweep_refuses_the_launch_and_keeps_the_record() {
     let mut asked = 0;
     let mut sweeps = || {
         asked += 1;
-        Err("an earlier session's sandbox sweep didn't finish within 15 s".to_owned())
+        Err(Unswept::Waiting(
+            "an earlier session's sandbox sweep didn't finish within 15 s".to_owned(),
+        ))
     };
     let refused =
         check_launch_awaiting(&admin, &mut sweeps, &s.data, &s.ledger, &s.plan, &s.journal);
@@ -229,6 +232,30 @@ fn a_marker_still_awaiting_a_sweep_refuses_the_launch_and_keeps_the_record() {
     // Nothing else was read or removed: the next launch still finds the clean close.
     assert!(s.record_exists());
     assert_eq!(s.launch_path(), LaunchPath::Skipped);
+}
+
+#[test]
+fn a_sweep_that_already_ended_56_blocks_the_launch_and_keeps_the_record() {
+    let s = Scene::new("clean-leftover");
+    assert_eq!(s.close(), Closed::Written);
+    let admin = crate::windows::admin_copy::fake::Fake::ready();
+    let mut sweeps = || Err(Unswept::LeftoverTask("a task is left".to_owned()));
+    let refused =
+        check_launch_awaiting(&admin, &mut sweeps, &s.data, &s.ledger, &s.plan, &s.journal);
+    let Err(error) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert!(
+        matches!(error, Error::Blocked(crate::Blocked::LeftoverTask)),
+        "{error:?}"
+    );
+    assert_eq!(error.cause(), Some("leftover_task"));
+    assert_eq!(error.code().as_str(), "sandbox.blocked");
+    assert!(
+        !error.code().is_retryable(),
+        "only an administrator can delete the task"
+    );
+    assert!(s.record_exists());
 }
 
 #[test]

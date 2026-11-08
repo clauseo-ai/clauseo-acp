@@ -8,11 +8,12 @@ use super::changes::{Live, most_touched, read_volume, reduce, resolve};
 use super::journal::Journal;
 use super::record::{self, CleanRecord, Unusable};
 use super::{FullReason, LaunchCheck, WalkInputs};
-use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
 use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::ledger::{EntryState, Ledger};
+use crate::windows::runner::unclean::Unswept;
 use crate::windows::set_aside;
+use crate::{Blocked, Error};
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
 /// `apply`. First the pool is this user's and the set-up program's admin copy passes
@@ -23,7 +24,8 @@ use crate::windows::set_aside;
 /// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then every
 /// unclean-session marker awaiting a sweep must be clean, or become clean within 15 s of a sweep
 /// this asks for (`runner::unclean::await_sweeps`), or the launch is refused with
-/// [`Error::UncleanSession`], nothing else read or removed. Then, under the
+/// [`Error::UncleanSession`], nothing else read or removed; at once with [`Error::Blocked`]
+/// (`LeftoverTask`) when the last sweep served that number and ended 56. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
@@ -58,16 +60,20 @@ pub(crate) fn check_launch_with(
 /// `sweeps`: the machine on Windows, fakes in the tests.
 pub(crate) fn check_launch_awaiting(
     admin: &dyn AdminCopyFs,
-    sweeps: &mut dyn FnMut() -> Result<(), String>,
+    sweeps: &mut dyn FnMut() -> Result<(), Unswept>,
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
     admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
-    sweeps().map_err(|why| {
+    sweeps().map_err(|unswept| {
+        let why = unswept.why();
         tracing::warn!(%why, "an earlier session's marker still awaits a sweep");
-        Error::UncleanSession(why)
+        match unswept {
+            Unswept::Waiting(why) => Error::UncleanSession(why),
+            Unswept::LeftoverTask(_) => Error::Blocked(Blocked::LeftoverTask),
+        }
     })?;
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {

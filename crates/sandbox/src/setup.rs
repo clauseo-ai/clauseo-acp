@@ -104,13 +104,19 @@ pub enum Blocked {
     /// started it: `ShellExecuteExW` gave `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED`
     /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
     ToolMissing,
+    /// A launch whose unclean-session marker awaits a sweep that already ran and ended 56
+    /// (`SweepLastExit`, at a `SweepLastSequence` at or past the marker's number): a scheduled
+    /// task the sweep can't read or delete is left, so no wait would help
+    /// (`windows::runner::unclean`). A fresh sweep is still requested, so the next launch goes
+    /// once an administrator deleted the task.
+    LeftoverTask,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, the test of the names lists this, and a
     /// compile-time match below fails the build until a new variant has its place here.
-    pub const ALL: [Blocked; 7] = [
+    pub const ALL: [Blocked; 8] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
@@ -118,6 +124,7 @@ impl Blocked {
         Blocked::AdminCopyUnsafe,
         Blocked::OtherAccount,
         Blocked::ToolMissing,
+        Blocked::LeftoverTask,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -131,6 +138,7 @@ impl Blocked {
             Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
             Blocked::OtherAccount => "other_account",
             Blocked::ToolMissing => "tool_missing",
+            Blocked::LeftoverTask => "leftover_task",
         }
     }
 }
@@ -148,9 +156,10 @@ const _: () = {
             Blocked::AdminCopyUnsafe => 4,
             Blocked::OtherAccount => 5,
             Blocked::ToolMissing => 6,
+            Blocked::LeftoverTask => 7,
         }
     }
-    let [first, second, third, fourth, fifth, sixth, seventh] = Blocked::ALL;
+    let [first, second, third, fourth, fifth, sixth, seventh, eighth] = Blocked::ALL;
     assert!(
         place(first) == 0
             && place(second) == 1
@@ -158,7 +167,8 @@ const _: () = {
             && place(fourth) == 3
             && place(fifth) == 4
             && place(sixth) == 5
-            && place(seventh) == 6,
+            && place(seventh) == 6
+            && place(eighth) == 7,
         "Blocked::ALL is out of order"
     );
 };
@@ -195,6 +205,11 @@ impl std::fmt::Display for Blocked {
                 "Windows security blocked or removed clauseo-sandbox-setup.exe, Clauseo's set-up \
                  program, when Clauseo started it; whoever looks after this computer can allow it \
                  and re-run the Clauseo installer"
+            }
+            Blocked::LeftoverTask => {
+                "a scheduled task one of Clauseo's sandbox users left behind can't be removed by \
+                 Clauseo; whoever looks after this computer can delete it, and the next launch \
+                 then goes ahead"
             }
         })
     }

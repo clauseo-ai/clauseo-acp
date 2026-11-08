@@ -451,10 +451,14 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// F4: as [`RunExit::AwaitingSweep`], but the last sweep ended 56 at or past the number the
+    /// marker awaits (`unclean::leftover`): a task it can't remove is left, so the outer refused
+    /// at once, with a fresh sweep requested. Only an administrator can delete the task.
+    LeftoverTask,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 20] = [
+    const ALL: [RunExit; 21] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -475,6 +479,7 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
+        RunExit::LeftoverTask,
     ];
 
     /// The exit code.
@@ -500,6 +505,7 @@ impl RunExit {
         match self {
             RunExit::SecondaryLogon => Some(NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned())),
             RunExit::LogonRight => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
+            RunExit::LeftoverTask => Some(NoSandbox::SetUpBlocked(crate::Blocked::LeftoverTask)),
             RunExit::NoSecret | RunExit::Password => {
                 Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
             }
