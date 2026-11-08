@@ -87,10 +87,11 @@ pub enum Error {
     /// `CLAUDE.md` or `AGENTS.md` at any depth, or another protected name at the root) that
     /// is a junction or symbolic link, so no entry can protect it (`windows::apply`, S15
     /// `PR4a2`). The launch's new entries were rolled back. The lawyer moves or deletes it.
+    /// The agent may have chosen the name, so it is shown escaped (`denial::shown_name`).
     #[error(
         "{} is a shortcut, and Clauseo can't protect a shortcut. Move or delete it, then open \
          the matter again.",
-        at.display()
+        crate::denial::shown_name(at)
     )]
     ProtectedLink {
         /// The item's path relative to the matter (`sub\AGENTS.md`), never an absolute path:
@@ -123,6 +124,30 @@ pub enum Error {
 }
 
 impl Error {
+    /// The item an error names, as the lawyer is shown it: [`Error::SetAside`]'s,
+    /// [`Error::AclApply`]'s and [`Error::ProtectedLink`]'s `at`, each escaped and capped as a
+    /// notice's names are (`denial::shown_name`), since the agent may have chosen it. `None`
+    /// for every other error, and for one that names no item. For the running page; never
+    /// logged.
+    pub fn shown_at(&self) -> Option<String> {
+        match self {
+            Error::SetAside { at, .. } | Error::AclApply { at, .. } => at.as_deref(),
+            Error::ProtectedLink { at } => Some(at.as_path()),
+            Error::Policy(_)
+            | Error::Probe(_)
+            | Error::Launch(_)
+            | Error::ProxyConfig(_)
+            | Error::ProxyStart(_)
+            | Error::FolderUnsupported { .. }
+            | Error::NeighbourUnfenceable { .. }
+            | Error::CleanClose(_)
+            | Error::NetworkUnfiltered { .. }
+            | Error::Blocked(_)
+            | Error::UncleanSession(_) => None,
+        }
+        .map(crate::denial::shown_name)
+    }
+
     /// The [`Blocked`](crate::Blocked) cause's serde name for [`Error::Blocked`]
     /// (`Blocked::name`), `None` for every other error: path-free and without `Display`'s
     /// words, for the host to put in the protocol's `NotProtectedCause::Blocked`.
@@ -206,6 +231,24 @@ mod tests {
                 "{blocked:?}"
             );
         }
+    }
+
+    /// The fixes' review: an agent-chosen path an error shows the lawyer is escaped, as a
+    /// notice's names are.
+    #[test]
+    fn a_path_an_error_shows_is_escaped() {
+        let at = std::path::PathBuf::from("sub\u{202E}gpj.exe\\AGENTS\u{200B}.md");
+        let shown = "sub\\u{202E}gpj.exe\\AGENTS\\u{200B}.md";
+        let link = Error::ProtectedLink { at: at.clone() };
+        assert!(link.to_string().starts_with(shown), "{link}");
+        assert_eq!(link.shown_at().as_deref(), Some(shown));
+        let set_aside = Error::SetAside {
+            failure: crate::windows::SetAsideFailure::Gone,
+            at: Some(at),
+        };
+        assert_eq!(set_aside.shown_at().as_deref(), Some(shown));
+        assert!(!set_aside.to_string().contains("AGENTS"), "{set_aside}");
+        assert_eq!(Error::Policy("x".to_owned()).shown_at(), None);
     }
 
     #[test]
