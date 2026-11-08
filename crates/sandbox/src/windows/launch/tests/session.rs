@@ -66,7 +66,8 @@ fn the_launch_checks_its_reservation() {
     let error = refused(launch(&launchers, &dir, reserved, (MATTER, "s1", "matter")));
     assert!(matches!(error, Error::NotPrepared), "{error:?}");
     assert_eq!(world.calls(), UNDO);
-    let others = Launchers::with_steps(FakeSteps(Arc::clone(&world))).unwrap();
+    let elsewhere = TempDir::new("launch-checks-folder");
+    let others = Launchers::with_steps(FakeSteps::elsewhere(&world, elsewhere.path())).unwrap();
     for foreign in [
         prepared(&others, &world, &dir, "s1"),
         Reservation::fixed(vec![46100], MATTER, "s1"),
@@ -119,7 +120,7 @@ fn a_relaunch_waits_for_the_end_sweeper() {
     let dir = TempDir::new("launch-end-sweeper");
     let launchers = launchers(&world);
     let reservation = prepared(&launchers, &world, &dir, "s1");
-    launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    let _launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
     // The outer starts its end sweeper as the session ends, before the host's pass.
     world.sweeper(true);
     launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
@@ -162,8 +163,22 @@ fn the_launch_refuses_a_leftover_process() {
     assert!(world.claimed_slots().is_empty());
 }
 
+/// A spec the fake launcher can be given.
+fn spec(dir: &TempDir) -> clauseo_process::LaunchSpec {
+    let program = dir.file("bin/agent.exe", "");
+    clauseo_process::LaunchSpec::new(
+        program,
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        dir.dir("matter"),
+    )
+    .unwrap()
+}
+
 /// A prepared reservation gives the launcher and what the launch pass moved; the launcher
-/// writes the launch file, then starts the outer, once.
+/// writes the launch file, then starts the outer, once. The fake's outer never starts, so the
+/// launcher undoes the session (the run's group, the slot, the mark) before its error returns,
+/// and the matter is free.
 #[test]
 fn the_launch_hands_out_one_agents_launcher() {
     let world = World::new();
@@ -175,26 +190,105 @@ fn the_launch_hands_out_one_agents_launcher() {
     assert_eq!(moved, [fake::moved("CLAUDE.md")]);
     // The leftover check; no release: the reservation is the session's now.
     assert_eq!(world.calls(), ["pool_processes"]);
-    let program = dir.file("bin/agent.exe", "");
-    let spec = clauseo_process::LaunchSpec::new(
-        program,
-        Vec::new(),
-        std::collections::BTreeMap::new(),
-        dir.dir("matter"),
-    )
-    .unwrap();
+    let spec = spec(&dir);
     let error = refused(launcher.launch(&spec));
     assert!(
         matches!(error, clauseo_process::Error::Closing),
         "{error:?}"
     );
-    assert_eq!(world.calls(), ["write_launch", "spawn_outer"]);
+    assert_eq!(
+        world.calls(),
+        ["write_launch", "spawn_outer", "end_run 1", UNDO[0], UNDO[1]]
+    );
+    assert!(world.claimed_slots().is_empty());
+    assert!(world.open_sessions(MATTER).is_empty());
+    let policy = policy_at(&dir, "matter");
+    assert_eq!(
+        launchers.after_session(MATTER, "s1", &policy),
+        Vec::<SetAside>::new()
+    );
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+    world.calls();
     let again = refused(launcher.launch(&spec));
     assert!(
         matches!(again, clauseo_process::Error::InvalidSpec(_)),
         "{again:?}"
     );
     assert_eq!(world.calls(), Vec::<String>::new());
+}
+
+/// A launch file that can't be written fails the start before the outer: the session is undone
+/// and the matter freed.
+#[test]
+fn a_failed_launch_file_undoes_the_session() {
+    let world = World::new();
+    let dir = TempDir::new("launch-file-fails");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let (launcher, _) = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    world.calls();
+    world.fail_at("write_launch");
+    let error = refused(launcher.launch(&spec(&dir)));
+    assert!(
+        matches!(error, clauseo_process::Error::Os { .. }),
+        "{error:?}"
+    );
+    assert_eq!(
+        world.calls(),
+        ["write_launch", "end_run 1", UNDO[0], UNDO[1]]
+    );
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+}
+
+/// A launcher dropped unused undoes the session off the dropping thread; the matter is busy
+/// until that's done, then free, and `after_session` finds nothing left to end.
+#[test]
+fn an_unused_launcher_frees_the_matter() {
+    let world = World::new();
+    let dir = TempDir::new("launch-unused");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    world.calls();
+    let undoing = world.hold("close_session");
+    // Would hang here if the drop waited for the undo.
+    drop(launched);
+    undoing.reached();
+    let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+    assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+    undoing.go();
+    assert!(launchers.registry.wait_free(MATTER, WAIT));
+    assert_eq!(world.calls(), ["end_run 1", UNDO[0], UNDO[1]]);
+    let policy = policy_at(&dir, "matter");
+    assert_eq!(
+        launchers.after_session(MATTER, "s1", &policy),
+        Vec::<SetAside>::new()
+    );
+    assert_eq!(world.calls(), Vec::<String>::new());
+}
+
+/// A panic in a step of the session's end still ends the run's group, gives the slot back and
+/// frees the matter, then goes on up.
+#[test]
+fn after_session_frees_the_matter_on_a_panic() {
+    let world = World::new();
+    let dir = TempDir::new("launch-after-panic");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let _launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    world.calls();
+    world.panic_at("repair");
+    let policy = policy_at(&dir, "matter");
+    let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        launchers.after_session(MATTER, "s1", &policy)
+    }));
+    assert!(ended.is_err(), "the panic goes on up");
+    assert_eq!(
+        world.calls(),
+        ["session_cursor", "repair", "end_run 1", "release_slot"]
+    );
+    assert!(world.claimed_slots().is_empty());
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
 }
 
 /// The session's end, in 0049's order; then the slot goes back and the matter is free.
@@ -204,7 +298,7 @@ fn after_session_runs_in_order_and_frees_the_matter() {
     let dir = TempDir::new("launch-after");
     let launchers = launchers(&world);
     let reservation = prepared(&launchers, &world, &dir, "s1");
-    launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    let launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
     world.calls();
     let moved = launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
     assert_eq!(moved, [fake::moved("AGENTS.md")]);
@@ -222,7 +316,10 @@ fn after_session_runs_in_order_and_frees_the_matter() {
     );
     assert!(world.claimed_slots().is_empty());
     assert!(world.open_sessions(MATTER).is_empty());
+    // The end was `after_session`'s: the launcher's claim, dropped now, undoes nothing.
+    drop(launched);
     assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    assert_eq!(world.calls(), RESERVE);
 }
 
 /// A failed repair or pass is handed to the clean-close record as failed, and the end goes on.
@@ -233,7 +330,7 @@ fn after_session_goes_on_past_failures() {
         let dir = TempDir::new(&format!("launch-after-{step}"));
         let launchers = launchers(&world);
         let reservation = prepared(&launchers, &world, &dir, "s1");
-        launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+        let _launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
         world.fail_at(step);
         let moved = launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
         let calls = world.calls();
@@ -261,7 +358,7 @@ fn the_matter_is_busy_until_its_after_session_pass_finishes() {
     let dir = TempDir::new("launch-busy");
     let launchers = launchers(&world);
     let reservation = prepared(&launchers, &world, &dir, "s1");
-    launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    let _launched = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
     let live = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
     assert!(matches!(live, Error::MatterBusy), "{live:?}");
     let held = world.hold("set_aside_after");

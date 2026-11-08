@@ -95,7 +95,13 @@ impl Reservation {
         self.claim.as_ref().map(|claim| (claim.owner, claim.id))
     }
 
-    /// Keeps what it holds past its drop: its launch now holds them, until the session's end.
+    /// Its claim, armed, for the launcher `launch` hands out: it releases the session if no
+    /// agent ever starts.
+    pub(crate) fn take_claim(mut self) -> Option<Claim> {
+        self.claim.take()
+    }
+
+    /// Lets go of its claim without releasing it: the caller releases it itself.
     pub(crate) fn disarm(mut self) {
         if let Some(mut claim) = self.claim.take() {
             claim.release = None;
@@ -118,7 +124,8 @@ impl std::fmt::Debug for Reservation {
 
 /// What releases a claim: the launchers' session registry.
 pub(crate) trait Release: Send + Sync {
-    /// Releases claim `id` and undoes what was done for its session, unless it was launched.
+    /// Releases claim `id` and undoes what was done for its session, unless its agent started
+    /// or its end began.
     /// Called from a drop, so it never blocks: no file call, no wait, no lock held across
     /// either; work that blocks goes elsewhere.
     fn release(self: Arc<Self>, id: u64);

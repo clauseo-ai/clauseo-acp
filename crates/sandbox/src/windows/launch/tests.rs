@@ -19,7 +19,7 @@ const WAIT: Duration = Duration::from_secs(10);
 
 /// Launchers over `world`, the start-up's calls taken from its log.
 fn launchers(world: &Arc<World>) -> Launchers<FakeSteps> {
-    let launchers = Launchers::with_steps(FakeSteps(Arc::clone(world))).unwrap();
+    let launchers = Launchers::with_steps(FakeSteps::new(world)).unwrap();
     assert_eq!(world.calls(), ["clear_stale"]);
     launchers
 }
@@ -161,8 +161,10 @@ fn assign_finds_another_open_session_busy() {
     let world = World::new();
     let first = launchers(&world);
     let held = first.reserve(MATTER, "s1", &[]).unwrap();
-    // Other launchers over the same records (a second app would be refused anyway).
-    let second = Launchers::with_steps(FakeSteps(Arc::clone(&world))).unwrap();
+    // Other launchers over the same records, with a folder of their own (on the same folder
+    // they'd be refused: `a_second_set_of_launchers_is_refused`).
+    let elsewhere = TempDir::new("launch-assign-busy");
+    let second = Launchers::with_steps(FakeSteps::elsewhere(&world, elsewhere.path())).unwrap();
     world.calls();
     let error = second.reserve(MATTER, "s2", &["s1"]).unwrap_err();
     assert!(matches!(error, Error::MatterBusy), "{error:?}");
@@ -205,6 +207,8 @@ fn a_crash_strands_no_slot() {
         std::mem::ManuallyDrop::new(crashed.reserve(MATTER, "s1", &[]).unwrap()),
         std::mem::ManuallyDrop::new(crashed.reserve(OTHER, "s2", &[]).unwrap()),
     ];
+    // The process ends, and its lock with it.
+    crashed.registry.crash();
     drop(crashed);
     assert_eq!(world.claimed_slots().len(), usize::from(fake::SLOTS));
     world.calls();
@@ -221,5 +225,30 @@ fn a_crash_strands_no_slot() {
 fn a_failed_start_up_makes_no_launchers() {
     let world = World::new();
     world.fail_at("clear_stale");
-    assert!(Launchers::with_steps(FakeSteps(world)).is_err());
+    assert!(Launchers::with_steps(FakeSteps::new(&world)).is_err());
+}
+
+/// One set of launchers per sandbox folder: a second (another Clauseo, or another set in this
+/// one) is refused at once with `LaunchersHeld`, and clears nothing, so the first's slot claims
+/// and session marks stay. Once the first is gone, new launchers start.
+#[test]
+fn a_second_set_of_launchers_is_refused() {
+    let world = World::new();
+    let first = launchers(&world);
+    let reservation = first.reserve(MATTER, "s1", &[]).unwrap();
+    world.calls();
+    let Err(error) = Launchers::with_steps(FakeSteps::new(&world)) else {
+        panic!("a second set of launchers started");
+    };
+    assert!(matches!(error, Error::LaunchersHeld), "{error:?}");
+    assert_eq!(world.calls(), Vec::<String>::new(), "no clear_stale");
+    assert_eq!(world.claimed_slots().len(), 1, "the first's claim stays");
+    assert!(world.open_sessions(MATTER).contains("s1"));
+    assert!(world.dir().join(LAUNCHERS_LOCK).is_file());
+    drop(reservation);
+    drop(first);
+    let world = World::new();
+    drop(launchers(&world));
+    let next = Launchers::with_steps(FakeSteps::new(&world));
+    assert!(next.is_ok(), "the lock went with the first");
 }

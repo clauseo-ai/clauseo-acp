@@ -168,6 +168,12 @@ pub enum Error {
         /// How many there were.
         count: usize,
     },
+    /// Windows tier B's launchers couldn't start: another set of launchers, in this Clauseo or
+    /// another, holds the sandbox folder's lock (`tier-b-launchers.lock`). Refused at once,
+    /// never waited for: two would clear each other's live marks. Fixed by closing the other
+    /// Clauseo.
+    #[error("Another Clauseo is already using the Safe workspace on this computer.")]
+    LaunchersHeld,
 }
 
 impl Error {
@@ -195,7 +201,8 @@ impl Error {
             | Error::Cancelled
             | Error::MatterBusy
             | Error::WrongReservation
-            | Error::LeftoverProcess { .. } => None,
+            | Error::LeftoverProcess { .. }
+            | Error::LaunchersHeld => None,
         }
     }
 
@@ -224,6 +231,7 @@ impl Error {
             Error::MatterBusy => "another agent is still working in this matter",
             Error::WrongReservation => "the launch's reservation didn't match",
             Error::LeftoverProcess { .. } => "a program from an earlier agent run is still running",
+            Error::LaunchersHeld => "another Clauseo is using the Safe workspace",
         }
     }
 
@@ -237,9 +245,9 @@ impl Error {
     /// checks again.
     ///
     /// Tier B's launcher (PR6): a full pool, a matter not prepared yet, a cancelled preparation,
-    /// a busy matter and a leftover process are failed launches (retryable; the host decides
-    /// what follows from the variant, not the code); a reservation that doesn't match is a bug,
-    /// `Internal`. Every one refuses the launch.
+    /// a busy matter, a leftover process and launchers another Clauseo holds are failed launches
+    /// (retryable; the host decides what follows from the variant, not the code); a reservation
+    /// that doesn't match is a bug, `Internal`. Every one refuses the launch.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -258,7 +266,8 @@ impl Error {
             | Error::NotPrepared
             | Error::Cancelled
             | Error::MatterBusy
-            | Error::LeftoverProcess { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::LeftoverProcess { .. }
+            | Error::LaunchersHeld => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
@@ -376,6 +385,11 @@ mod tests {
                 ErrorCode::AgentLaunchFailed,
                 "earlier agent run",
             ),
+            (
+                Error::LaunchersHeld,
+                ErrorCode::AgentLaunchFailed,
+                "another Clauseo",
+            ),
         ];
         let mut kinds = Vec::new();
         for (error, code, kind) in cases {
@@ -386,7 +400,7 @@ mod tests {
             kinds.push(error.kind());
         }
         kinds.dedup();
-        assert_eq!(kinds.len(), 6, "each has a kind of its own");
+        assert_eq!(kinds.len(), 7, "each has a kind of its own");
         assert!(
             Error::NotPrepared.code().is_retryable(),
             "the host prepares again"

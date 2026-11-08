@@ -9,8 +9,19 @@
 //! the map: no step, file call or wait ever runs under it, and no walk holds it across one. So
 //! a reservation's drop ([`Release::release`]) takes it briefly and never waits: it cancels a
 //! walk (an atomic), forgets a failed claim, or hands the undo to a thread of its own.
+//!
+//! **A matter is freed only once nothing more runs for it.** A drop mid-walk marks the entry
+//! releasing and cancels the walk; the walk's own thread undoes and frees it when it stops, so
+//! a new `reserve` is `MatterBusy` until then and never gets the pool user while the old walk
+//! could still stop, prepare or apply. Every undo and every end frees the matter through a
+//! drop guard ([`Finish`]), so a panic in a step never leaves it held.
+//!
+//! **The map is this process's;** the sandbox folder's lock (`tier-b-launchers.lock`, held as
+//! long as the registry lives) keeps any other set of launchers, here or in another Clauseo,
+//! from starting over the same folder and clearing its live marks (`Launchers::with_steps`).
 
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -43,7 +54,8 @@ pub(super) enum State {
     Launched,
     /// `after_session` is running.
     Ending,
-    /// A release is undoing what was done for it: busy until that's done.
+    /// Its reservation (or its unstarted launcher) was dropped: a walk still running for it, or
+    /// a release thread, is undoing what was done, and frees the matter when done. Busy till then.
     Releasing,
 }
 
@@ -65,9 +77,8 @@ pub(super) struct Entry<S: LaunchSteps> {
     /// The matter folder the walk prepared, which `launch`'s policy must name.
     pub(super) prepared: Option<PathBuf>,
     /// The running walk, which a drop of the reservation cancels and a second `prepare` joins.
+    /// Releasing with a walk: the walk undoes and frees the matter when it stops.
     pub(super) walk: Option<Arc<Shared>>,
-    /// The reservation was dropped while its walk ran: the walk undoes and frees the matter.
-    pub(super) dropped: bool,
 }
 
 /// What an undo takes from an entry: the run's group, the slot, the session's mark.
@@ -105,17 +116,45 @@ pub(super) struct Registry<S: LaunchSteps> {
     matters: Mutex<BTreeMap<String, Entry<S>>>,
     /// Signalled whenever a matter is freed.
     freed: Condvar,
+    /// The sandbox folder's lock, held while anything (a reservation, a walk, a release thread)
+    /// can still use the registry. `None` only once a test let go of it as a crash would.
+    data_lock: Mutex<Option<File>>,
+}
+
+/// Frees claim `id`'s matter when dropped: at the end of an undo or a session's end, and on a
+/// panic in one of their steps too.
+pub(super) struct Finish<'a, S: LaunchSteps> {
+    pub(super) registry: &'a Registry<S>,
+    pub(super) matter: &'a str,
+    pub(super) id: u64,
+}
+
+impl<S: LaunchSteps> Drop for Finish<'_, S> {
+    fn drop(&mut self) {
+        self.registry.finish(self.matter, self.id);
+    }
 }
 
 impl<S: LaunchSteps> Registry<S> {
-    pub(super) fn new(steps: Arc<S>) -> Registry<S> {
+    /// The registry over `steps`, holding the sandbox folder's lock `data_lock`.
+    pub(super) fn new(steps: Arc<S>, data_lock: File) -> Registry<S> {
         Registry {
             owner: OWNERS.fetch_add(1, Ordering::Relaxed),
             steps,
             next: AtomicU64::new(1),
             matters: Mutex::new(BTreeMap::new()),
             freed: Condvar::new(),
+            data_lock: Mutex::new(Some(data_lock)),
         }
+    }
+
+    /// Lets go of the sandbox folder's lock, as a crash would.
+    #[cfg(test)]
+    pub(super) fn crash(&self) {
+        self.data_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
     }
 
     fn lock(&self) -> MutexGuard<'_, BTreeMap<String, Entry<S>>> {
@@ -148,7 +187,6 @@ impl<S: LaunchSteps> Registry<S> {
                 moved: Vec::new(),
                 prepared: None,
                 walk: None,
-                dropped: false,
             },
         );
         Ok(id)
@@ -176,7 +214,7 @@ impl<S: LaunchSteps> Registry<S> {
         let mut matters = self.lock();
         let entry = matters
             .get_mut(matter)
-            .filter(|entry| entry.id == id && entry.session == session && !entry.dropped)
+            .filter(|entry| entry.id == id && entry.session == session)
             .ok_or(Error::WrongReservation)?;
         match entry.state {
             State::Reserved => {
@@ -199,9 +237,11 @@ impl<S: LaunchSteps> Registry<S> {
     }
 
     /// The walk of claim `id` ended with `walked`, on the matter folder `folder`. Prepared on
-    /// success; otherwise the undo runs here, on the walk's thread, and the claim is failed, or,
-    /// when the reservation was dropped meanwhile, the matter is freed ([`Error::Cancelled`]).
-    /// What the walk's handles are told.
+    /// success, unless the walk was cancelled meanwhile (looked at once more here, under the
+    /// lock, so a cancel that came after `apply` is never prepared); otherwise the undo runs
+    /// here, on the walk's thread, and the claim is failed, or, when the reservation was dropped
+    /// meanwhile (releasing), the matter is freed ([`Error::Cancelled`]). What the walk's handles
+    /// are told.
     pub(super) fn walk_done(
         &self,
         matter: &str,
@@ -209,14 +249,17 @@ impl<S: LaunchSteps> Registry<S> {
         walked: Result<(), Error>,
         folder: PathBuf,
     ) -> Result<(), Error> {
+        let mut walked = walked;
         let (undo, dropped) = {
             let mut matters = self.lock();
             let Some(entry) = matters.get_mut(matter).filter(|entry| entry.id == id) else {
                 return Err(Error::WrongReservation);
             };
-            entry.walk = None;
-            if entry.dropped {
-                entry.state = State::Releasing;
+            let walk = entry.walk.take();
+            if walked.is_ok() && walk.is_some_and(|walk| walk.is_cancelled()) {
+                walked = Err(Error::Cancelled);
+            }
+            if entry.state == State::Releasing {
                 (Some(take_undo(matter, entry)), true)
             } else if walked.is_ok() {
                 entry.state = State::Prepared;
@@ -227,14 +270,17 @@ impl<S: LaunchSteps> Registry<S> {
                 (Some(take_undo(matter, entry)), false)
             }
         };
-        if let Some(undo) = undo {
-            self.undo(undo);
+        match undo {
+            Some(undo) if dropped => {
+                self.undo_and_finish(id, undo);
+                Err(Error::Cancelled)
+            }
+            Some(undo) => {
+                self.undo(undo);
+                walked
+            }
+            None => walked,
         }
-        if dropped {
-            self.finish(matter, id);
-            return Err(Error::Cancelled);
-        }
-        walked
     }
 
     /// Claim `id`'s account, if `launch` would take it ([`Registry::launch`]'s checks), with
@@ -302,6 +348,18 @@ impl<S: LaunchSteps> Registry<S> {
         }
     }
 
+    /// Runs `undo`'s steps, then frees claim `id`'s matter, even if a step panics. Blocks:
+    /// never under the lock, and never from a drop.
+    fn undo_and_finish(&self, id: u64, undo: Undo<S>) {
+        let matter = undo.matter.clone();
+        let _finish = Finish {
+            registry: self,
+            matter: &matter,
+            id,
+        };
+        self.undo(undo);
+    }
+
     /// Runs `undo`'s steps, newest first: `EndRun`, the slot, the session's mark. Blocks:
     /// never under the lock, and never from a drop.
     fn undo(&self, undo: Undo<S>) {
@@ -316,15 +374,18 @@ impl<S: LaunchSteps> Registry<S> {
         }
     }
 
-    /// Lets go of claim `id`, never blocking: a running walk is cancelled (it undoes and frees
-    /// the matter when it stops), a failed claim is forgotten, and anything else is marked
-    /// releasing, its undo handed back for the caller to run, then [`Registry::finish`].
+    /// Lets go of claim `id`, never blocking: a running walk is cancelled and the entry marked
+    /// releasing (the walk undoes and frees the matter when it stops), a failed claim is
+    /// forgotten, and anything else not yet ended is marked releasing, its undo handed back for
+    /// the caller to run, then [`Registry::finish`]. Launched counts: a launcher's claim is
+    /// armed only until its agent starts (`tier_b.rs`); once `after_session` began (ending), its
+    /// end is that pass's.
     fn detach(&self, id: u64) -> Option<(u64, Undo<S>)> {
         let mut matters = self.lock();
         let (matter, entry) = matters.iter_mut().find(|(_, entry)| entry.id == id)?;
         match entry.state {
             State::Preparing => {
-                entry.dropped = true;
+                entry.state = State::Releasing;
                 if let Some(walk) = &entry.walk {
                     walk.cancel();
                 }
@@ -336,21 +397,19 @@ impl<S: LaunchSteps> Registry<S> {
                 self.freed.notify_all();
                 None
             }
-            State::Reserving | State::Reserved | State::Prepared => {
+            State::Reserving | State::Reserved | State::Prepared | State::Launched => {
                 entry.state = State::Releasing;
                 Some((id, take_undo(&matter.clone(), entry)))
             }
-            State::Launched | State::Ending | State::Releasing => None,
+            State::Ending | State::Releasing => None,
         }
     }
 
-    /// Lets go of claim `id` and runs its undo here: `reserve`'s and `launch`'s refusals,
-    /// which may block.
+    /// Lets go of claim `id` and runs its undo here: `reserve`'s and `launch`'s refusals, and
+    /// a launcher whose agent didn't start, which may block.
     pub(super) fn release_now(&self, id: u64) {
         if let Some((id, undo)) = self.detach(id) {
-            let matter = undo.matter.clone();
-            self.undo(undo);
-            self.finish(&matter, id);
+            self.undo_and_finish(id, undo);
         }
     }
 
@@ -363,6 +422,20 @@ impl<S: LaunchSteps> Registry<S> {
             .wait_timeout_while(matters, timeout, |matters| matters.contains_key(matter))
             .unwrap_or_else(PoisonError::into_inner);
         !matters.contains_key(matter)
+    }
+}
+
+impl<S: LaunchSteps> Drop for Registry<S> {
+    /// The last user is gone (the launchers, every reservation, walk and release thread): the
+    /// sandbox folder's lock goes, so the next launchers may start.
+    fn drop(&mut self) {
+        let lock = self
+            .data_lock
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        if lock.take().is_some() {
+            tracing::debug!("tier B's launchers let go of the sandbox folder's lock");
+        }
     }
 }
 
@@ -403,24 +476,17 @@ impl<S: LaunchSteps> Release for Registry<S> {
             .name("clauseo-tierb-release".to_owned())
             .spawn(move || {
                 if let Ok(undo) = receiver.recv() {
-                    let matter = undo.matter.clone();
-                    registry.undo(undo);
-                    registry.finish(&matter, id);
+                    registry.undo_and_finish(id, undo);
                 }
             });
         if started.is_ok() {
             if let Err(unsent) = sender.send(undo) {
                 // The thread is gone already: the undo runs here after all.
-                let undo = unsent.0;
-                let matter = undo.matter.clone();
-                self.undo(undo);
-                self.finish(&matter, id);
+                self.undo_and_finish(id, unsent.0);
             }
         } else {
             tracing::warn!("tier B's release ran on the dropping thread: no thread started");
-            let matter = undo.matter.clone();
-            self.undo(undo);
-            self.finish(&matter, id);
+            self.undo_and_finish(id, undo);
         }
     }
 }

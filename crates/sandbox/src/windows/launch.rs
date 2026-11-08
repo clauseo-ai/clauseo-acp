@@ -12,9 +12,13 @@
 //! 2. [`Launchers::prepare`] with the reservation, borrowed, and the full policy: the background
 //!    walk ([`Preparing`], `prepare.rs`), keyed by the reservation's claim. A later launch
 //!    takes 20-70 ms here; a first one 17-30 s.
-//! 3. [`Launchers::launch`] with it, by value: the launcher that starts the outer runner.
+//! 3. [`Launchers::launch`] with it, by value: the launcher that starts the outer runner. The
+//!    launcher holds the reservation's claim until its agent starts: if writing the launch file
+//!    or starting the outer fails, or it is dropped unused, it undoes the session and frees the
+//!    matter itself.
 //! 4. [`Launchers::after_session`], once the agent's process tree is gone: the repair, the
-//!    set-aside's pass, the clean-close record, `EndRun`. Only then is the matter free.
+//!    set-aside's pass, the clean-close record, `EndRun`. Only then is the matter free, even if
+//!    a step panics (drop guards end the run and free it).
 //!
 //! The host keeps one owner of the reservation from `reserve` through `launch`. Dropped before
 //! its launch, it undoes what was done for the session, newest first (the run's group, the
@@ -22,8 +26,15 @@
 //! (`registry.rs`). The matter keeps its account (no lease;
 //! `MatterSids::release` gives it back on forget). Every OS effect is a [`LaunchSteps`] call,
 //! so the order is tested on every OS with fakes (`launch/tests`); the real steps are C5's.
+//!
+//! One set of launchers per sandbox folder, across processes: [`Launchers::with_steps`] takes
+//! the folder's lock ([`LAUNCHERS_LOCK`]) before it clears what a crash left, and a second set
+//! (another Clauseo) is refused at once with [`Error::LaunchersHeld`].
 
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clauseo_process::SpawnOptions;
 
@@ -37,12 +48,17 @@ pub use steps::{Ending, LaunchSteps, RunRefusal, Slot, Stopped};
 pub use tier_b::TierBLauncher;
 
 use prepare::Reserved;
-use registry::{Begun, Registry, State};
+use registry::{Begun, Finish, Registry, State};
 
 use crate::reservation::{Claim, Release};
 use crate::windows::pool::assign::Assign;
 use crate::windows::pool::{PoolFullCause, PoolUser};
+use crate::windows::write;
 use crate::{DenialSink, Error, Policy, Reservation, SetAside, SetupError};
+
+/// The lock file in the sandbox's data folder ([`LaunchSteps::data_dir`]) that one set of
+/// launchers holds for as long as it lives.
+pub const LAUNCHERS_LOCK: &str = "tier-b-launchers.lock";
 
 /// Tier B's launchers over `S`'s steps, with the registry of their sessions.
 pub struct Launchers<S: LaunchSteps> {
@@ -50,21 +66,28 @@ pub struct Launchers<S: LaunchSteps> {
 }
 
 impl<S: LaunchSteps> Launchers<S> {
-    /// Launchers over `steps`. First clears what a crashed app left
-    /// ([`LaunchSteps::clear_stale`]): stale launch files, slot claims and session marks.
+    /// Launchers over `steps`. First takes the sandbox folder's lock ([`LAUNCHERS_LOCK`]),
+    /// without waiting: held by other launchers, in this process or another Clauseo, it is
+    /// [`Error::LaunchersHeld`] and nothing is cleared (the stricter choice: a wait would only
+    /// help a Clauseo that is quitting, whose lock goes with its process). Then, with the lock
+    /// held, clears what a crashed app left ([`LaunchSteps::clear_stale`]): stale launch files,
+    /// slot claims and session marks. The lock lasts until the launchers, every reservation and
+    /// every walk and undo of theirs are gone.
     ///
     /// TODO(C5): `Launchers::new(data_dir, runner)`, `#[cfg(windows)]`, is this over `OsSteps`.
     pub fn with_steps(steps: S) -> Result<Launchers<S>, Error> {
+        let data_lock = lock_data(steps.data_dir())?;
         steps.clear_stale()?;
         Ok(Launchers {
-            registry: Arc::new(Registry::new(Arc::new(steps))),
+            registry: Arc::new(Registry::new(Arc::new(steps), data_lock)),
         })
     }
 
     /// Reserves the matter's account and a network slot for `session`; `running` names the
     /// matter's other sessions the host still runs (none, on tier B; a session marked open and
     /// not named crashed). Bookkeeping only: nothing runs as the pool user and nothing is
-    /// granted to it. A refusal undoes what was done before it returns.
+    /// granted to it (the slot's claim adds no firewall permit). A refusal undoes what was done
+    /// before it returns.
     ///
     /// **[`Error::MatterBusy`] means retry** (one live agent per matter): another session holds
     /// the matter, from its reservation until its `after_session` has finished, or a released
@@ -170,6 +193,10 @@ impl<S: LaunchSteps> Launchers<S> {
     /// again within its bound, so a process of the pool user's now started in the gap. The host
     /// doesn't retry; it is a plain launch failure. The seam's `running` went to `reserve`.
     /// `denials` is unused until C4 feeds it the outer's denial lines.
+    ///
+    /// The launcher holds the reservation's claim until its agent starts ([`TierBLauncher`]):
+    /// a failed start, or a launcher dropped unused, undoes the session and frees the matter,
+    /// so the host's `after_session` then finds nothing to do.
     pub fn launch(
         &self,
         reservation: Reservation,
@@ -189,11 +216,15 @@ impl<S: LaunchSteps> Launchers<S> {
                 return Err(error);
             }
         };
-        // The registry holds the session from here until `after_session`.
-        reservation.disarm();
+        // Launched: the launcher holds the claim until its agent starts, then `after_session`
+        // ends the session.
+        let Some(claim) = reservation.take_claim() else {
+            self.registry.release_now(id);
+            return Err(Error::WrongReservation);
+        };
         // TODO(C4): the outer's stderr lines go to `denials` through `denial_from_line`.
         drop(denials);
-        let launcher = TierBLauncher::new(Arc::clone(&self.registry.steps), policy, pool, opts);
+        let launcher = TierBLauncher::new(Arc::clone(&self.registry), claim, policy, pool, opts);
         Ok((Arc::new(launcher), moved))
     }
 
@@ -227,13 +258,27 @@ impl<S: LaunchSteps> Launchers<S> {
     /// the repair, the end of R18's reads, the set-aside's pass, the clean-close record and
     /// `EndRun`; then the slot goes back and the matter is free. What the pass moved. A session
     /// these launchers didn't launch is left alone (the next launch's set-aside pass checks
-    /// it).
+    /// it), and so is one whose launcher already undid it (its agent never started).
+    ///
+    /// `EndRun`, the slot and the matter's release always run: drop guards do them, so a panic
+    /// in a step still ends the run's group and frees the matter before it goes on up.
     pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside> {
         let registry = &self.registry;
         let steps = &*registry.steps;
         let Some(ended) = registry.end(matter, session) else {
             tracing::warn!("tier B's after-session pass for a session it didn't launch");
             return Vec::new();
+        };
+        // Dropped in reverse: the run's group and the slot first, then the matter freed.
+        let _finish = Finish {
+            registry,
+            matter,
+            id: ended.id,
+        };
+        let _end_run = EndRun {
+            steps,
+            run: ended.run,
+            slot: ended.slot,
         };
         let mut moved = Vec::new();
         if let Some(pool) = &ended.pool {
@@ -264,13 +309,6 @@ impl<S: LaunchSteps> Launchers<S> {
             }
             steps.write_clean_close(&end, cursor.as_ref(), &repaired, &passed);
         }
-        if let Some(run) = ended.run {
-            steps.end_run(run);
-        }
-        if let Some(slot) = &ended.slot {
-            steps.release_slot(slot);
-        }
-        registry.finish(matter, ended.id);
         moved
     }
 
@@ -286,6 +324,38 @@ impl<S: LaunchSteps> Launchers<S> {
 impl<S: LaunchSteps> std::fmt::Debug for Launchers<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Launchers").finish_non_exhaustive()
+    }
+}
+
+/// Ends the run's group, then gives the slot back, when dropped: at the end of
+/// `after_session`, or on a panic in one of its steps.
+struct EndRun<'a, S: LaunchSteps> {
+    steps: &'a S,
+    run: Option<S::RunGroup>,
+    slot: Option<Slot>,
+}
+
+impl<S: LaunchSteps> Drop for EndRun<'_, S> {
+    fn drop(&mut self) {
+        if let Some(run) = self.run.take() {
+            self.steps.end_run(run);
+        }
+        if let Some(slot) = self.slot.take() {
+            self.steps.release_slot(&slot);
+        }
+    }
+}
+
+/// Takes the sandbox folder `dir`'s launchers lock, without waiting: [`Error::LaunchersHeld`]
+/// while another holder has it, [`Error::Probe`] when the file can't be opened.
+fn lock_data(dir: &Path) -> Result<File, Error> {
+    match write::lock_exclusive_for(&dir.join(LAUNCHERS_LOCK), Duration::ZERO) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            tracing::warn!("tier B's launchers are held by another Clauseo");
+            Err(Error::LaunchersHeld)
+        }
+        Err(error) => Err(Error::Probe(error)),
     }
 }
 

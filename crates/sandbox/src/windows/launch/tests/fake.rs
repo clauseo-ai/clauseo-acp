@@ -1,20 +1,25 @@
 //! The fake steps: a world that outlives one set of launchers (the "disk": slot claims, open
-//! sessions), a log of every call, a step that fails or waits on demand, and a clock the
-//! retries move.
+//! sessions, the data folder), a log of every call, a step that fails, panics, waits or takes
+//! time on demand, and a clock the retries and slow steps move.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
 
 use super::super::{Ending, LaunchSteps, RunRefusal, Slot, Stopped, Walk};
+use crate::test_support::TempDir;
 use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
 use crate::windows::sids::Sid;
 use crate::{Error, Policy, SetAside};
+
+/// Numbers each world's data folder.
+static WORLDS: AtomicU64 = AtomicU64::new(1);
 
 /// The fake's slots.
 pub(super) const SLOTS: u8 = 2;
@@ -65,11 +70,40 @@ pub(super) struct World {
     leftovers: Mutex<u32>,
     stubborn: Mutex<bool>,
     sweeper: Mutex<bool>,
+    panic_at: Mutex<Option<&'static str>>,
+    slow: Mutex<Option<(&'static str, Duration)>>,
+    apply_ignores_cancel: Mutex<bool>,
+    dir: OnceLock<TempDir>,
 }
 
 impl World {
     pub(super) fn new() -> Arc<World> {
-        Arc::new(World::default())
+        let world = World::default();
+        let number = WORLDS.fetch_add(1, Ordering::Relaxed);
+        let _new = world
+            .dir
+            .set(TempDir::new(&format!("launch-world-{number}")));
+        Arc::new(world)
+    }
+
+    /// The data folder its launchers lock.
+    pub(super) fn dir(&self) -> &Path {
+        self.dir.get().map_or(Path::new(""), TempDir::path)
+    }
+
+    /// Makes `step` panic once reached.
+    pub(super) fn panic_at(&self, step: &'static str) {
+        *self.panic_at.lock().unwrap() = Some(step);
+    }
+
+    /// Makes `step` take `time` on the clock.
+    pub(super) fn slow(&self, step: &'static str, time: Duration) {
+        *self.slow.lock().unwrap() = Some((step, time));
+    }
+
+    /// `apply` finishes its walk even once cancelled, as one past its last folder would.
+    pub(super) fn apply_ignores_cancel(&self) {
+        *self.apply_ignores_cancel.lock().unwrap() = true;
     }
 
     /// Every call so far, taken.
@@ -142,7 +176,7 @@ impl World {
         self.log.lock().unwrap().push(call.into());
     }
 
-    /// Logs `step`, waits at its gate, then fails it if asked to.
+    /// Logs `step`, waits at its gate, takes its time, panics or fails it if asked to.
     fn step(&self, step: &'static str) -> Result<(), Error> {
         self.log(step);
         let gate = {
@@ -157,6 +191,12 @@ impl World {
             gate.reached.send(()).unwrap();
             gate.go.recv().unwrap();
         }
+        let slow = *self.slow.lock().unwrap();
+        if let Some((_, time)) = slow.filter(|(slow, _)| *slow == step) {
+            *self.clock.lock().unwrap() += time;
+        }
+        let panics = *self.panic_at.lock().unwrap() == Some(step);
+        assert!(!panics, "fake {step} panicked");
         if *self.fail_at.lock().unwrap() == Some(step) {
             return Err(Error::Policy(format!("fake {step} failed")));
         }
@@ -180,7 +220,26 @@ pub(super) fn moved(at: &str) -> SetAside {
     }
 }
 
-pub(super) struct FakeSteps(pub(super) Arc<World>);
+pub(super) struct FakeSteps {
+    world: Arc<World>,
+    dir: PathBuf,
+}
+
+impl FakeSteps {
+    /// Steps over `world` and its data folder.
+    pub(super) fn new(world: &Arc<World>) -> FakeSteps {
+        FakeSteps::elsewhere(world, world.dir())
+    }
+
+    /// Steps over `world`'s records with another data folder, `dir`: launchers that don't
+    /// share the folder's lock.
+    pub(super) fn elsewhere(world: &Arc<World>, dir: &Path) -> FakeSteps {
+        FakeSteps {
+            world: Arc::clone(world),
+            dir: dir.to_path_buf(),
+        }
+    }
+}
 
 impl LaunchSteps for FakeSteps {
     type Plan = ();
@@ -190,19 +249,23 @@ impl LaunchSteps for FakeSteps {
     type Repaired = ();
     type Passed = Vec<SetAside>;
 
+    fn data_dir(&self) -> &Path {
+        &self.dir
+    }
+
     fn clear_stale(&self) -> Result<(), Error> {
-        self.0.step("clear_stale")?;
-        self.0.slots.lock().unwrap().clear();
+        self.world.step("clear_stale")?;
+        self.world.slots.lock().unwrap().clear();
         Ok(())
     }
 
     fn setup_ready(&self) -> Result<(), Error> {
-        self.0.step("setup_ready")
+        self.world.step("setup_ready")
     }
 
     fn open_session(&self, matter: &str, session: &str, running: &[&str]) -> Result<(), Error> {
-        self.0.step("open_session")?;
-        let mut open = self.0.open.lock().unwrap();
+        self.world.step("open_session")?;
+        let mut open = self.world.open.lock().unwrap();
         let sessions = open.entry(matter.to_owned()).or_default();
         sessions.retain(|other| running.contains(&other.as_str()));
         sessions.insert(session.to_owned());
@@ -210,19 +273,19 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn close_session(&self, matter: &str, session: &str) {
-        let _never_fails = self.0.step("close_session");
-        if let Some(sessions) = self.0.open.lock().unwrap().get_mut(matter) {
+        let _never_fails = self.world.step("close_session");
+        if let Some(sessions) = self.world.open.lock().unwrap().get_mut(matter) {
             sessions.remove(session);
         }
     }
 
     fn assign(&self, matter: &str, session: &str) -> Result<PoolUser, Assign> {
-        self.0.log("assign");
-        if let Some(refusal) = self.0.assign_refuses.lock().unwrap().take() {
+        self.world.log("assign");
+        if let Some(refusal) = self.world.assign_refuses.lock().unwrap().take() {
             return Err(refusal);
         }
         let busy = self
-            .0
+            .world
             .open_sessions(matter)
             .iter()
             .any(|other| other != session);
@@ -233,13 +296,13 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn end_sweeper_running(&self, _pool: &PoolUser) -> bool {
-        self.0.log("end_sweeper");
-        *self.0.sweeper.lock().unwrap()
+        self.world.log("end_sweeper");
+        *self.world.sweeper.lock().unwrap()
     }
 
     fn claim_slot(&self, _matter: &str, _pool: &PoolUser) -> Result<Slot, Error> {
-        self.0.step("claim_slot")?;
-        let mut slots = self.0.slots.lock().unwrap();
+        self.world.step("claim_slot")?;
+        let mut slots = self.world.slots.lock().unwrap();
         let Some(index) = (0..SLOTS).find(|index| !slots.contains(index)) else {
             return Err(Error::PoolFull {
                 cause: crate::windows::pool::PoolFullCause::default(),
@@ -254,34 +317,34 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn release_slot(&self, slot: &Slot) {
-        self.0.log("release_slot");
-        self.0.slots.lock().unwrap().remove(&slot.index);
+        self.world.log("release_slot");
+        self.world.slots.lock().unwrap().remove(&slot.index);
     }
 
     fn plan(&self, _policy: &Policy, _pool: &PoolUser) -> Result<(), Error> {
-        self.0.step("plan")
+        self.world.step("plan")
     }
 
     fn check_launch(&self, (): &()) -> Result<(), Error> {
-        self.0.step("check_launch")
+        self.world.step("check_launch")
     }
 
     fn check_network(&self, _policy: &Policy, _pool: &PoolUser) -> Result<(), Error> {
-        self.0.step("check_network")
+        self.world.step("check_network")
     }
 
     fn pool_user_processes(&self, _pool: &PoolUser) -> Result<Vec<u32>, Error> {
-        self.0.step("pool_processes")?;
+        self.world.step("pool_processes")?;
         // The end sweeper, pid 9000 here, is known exactly and never listed.
-        let sweeper = (*self.0.sweeper.lock().unwrap()).then_some(9000);
-        let found = (1..=*self.0.leftovers.lock().unwrap()).chain(sweeper);
+        let sweeper = (*self.world.sweeper.lock().unwrap()).then_some(9000);
+        let found = (1..=*self.world.leftovers.lock().unwrap()).chain(sweeper);
         Ok(found.filter(|&pid| Some(pid) != sweeper).collect())
     }
 
     fn stop_pool_user(&self, _pool: &PoolUser) -> Result<Stopped, Error> {
-        self.0.step("stop")?;
-        let mut leftovers = self.0.leftovers.lock().unwrap();
-        if *self.0.stubborn.lock().unwrap() {
+        self.world.step("stop")?;
+        let mut leftovers = self.world.leftovers.lock().unwrap();
+        if *self.world.stubborn.lock().unwrap() {
             return Ok(Stopped::default());
         }
         let ended = std::mem::take(&mut *leftovers);
@@ -289,7 +352,7 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn sweep_pool_user(&self, _pool: &PoolUser) -> Result<(), Error> {
-        self.0.step("sweep")
+        self.world.step("sweep")
     }
 
     fn before_launch(
@@ -299,32 +362,32 @@ impl LaunchSteps for FakeSteps {
         _session: &str,
         _running: &[&str],
     ) -> Result<Vec<SetAside>, Error> {
-        self.0.step("before_launch")?;
+        self.world.step("before_launch")?;
         Ok(vec![moved("CLAUDE.md")])
     }
 
     fn prepare_run(&self, _slot: &Slot, _pool: &PoolUser) -> Result<u32, RunRefusal> {
-        self.0
+        self.world
             .step("prepare_run")
             .map_err(|error| RunRefusal::Failed(error.to_string()))?;
-        if *self.0.setup_always_running.lock().unwrap() {
+        if *self.world.setup_always_running.lock().unwrap() {
             return Err(RunRefusal::SetUpRunning);
         }
-        if let Some(answer) = self.0.run_answers.lock().unwrap().pop_front() {
+        if let Some(answer) = self.world.run_answers.lock().unwrap().pop_front() {
             return Err(answer);
         }
-        let mut groups = self.0.groups.lock().unwrap();
+        let mut groups = self.world.groups.lock().unwrap();
         *groups += 1;
         Ok(*groups)
     }
 
     fn end_run(&self, group: u32) {
-        self.0.log(format!("end_run {group}"));
+        self.world.log(format!("end_run {group}"));
     }
 
     fn apply(&self, (): &(), (): &(), walk: &Walk<'_>) -> Result<(), Error> {
-        self.0.step("apply")?;
-        if walk.cancelled() {
+        self.world.step("apply")?;
+        if walk.cancelled() && !*self.world.apply_ignores_cancel.lock().unwrap() {
             return Err(Error::Cancelled);
         }
         walk.walked(3);
@@ -337,7 +400,7 @@ impl LaunchSteps for FakeSteps {
         _pool: &PoolUser,
         _spec: &LaunchSpec,
     ) -> Result<PathBuf, Error> {
-        self.0.step("write_launch")?;
+        self.world.step("write_launch")?;
         Ok(PathBuf::from("run/0123456789abcdef.json"))
     }
 
@@ -346,26 +409,26 @@ impl LaunchSteps for FakeSteps {
         _launch: &Path,
         _opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error> {
-        self.0.log("spawn_outer");
+        self.world.log("spawn_outer");
         Err(clauseo_process::Error::Closing)
     }
 
     fn session_cursor(&self, _end: &Ending<'_>) -> Option<()> {
-        self.0.log("session_cursor");
+        self.world.log("session_cursor");
         Some(())
     }
 
     fn repair(&self, _end: &Ending<'_>) -> Result<(), Error> {
-        self.0.step("repair")
+        self.world.step("repair")
     }
 
     fn end_reads(&self, _end: &Ending<'_>) {
-        self.0.log("end_reads");
+        self.world.log("end_reads");
     }
 
     fn set_aside_after(&self, end: &Ending<'_>) -> Result<Vec<SetAside>, Error> {
-        self.0.step("set_aside_after")?;
-        if let Some(sessions) = self.0.open.lock().unwrap().get_mut(end.matter) {
+        self.world.step("set_aside_after")?;
+        if let Some(sessions) = self.world.open.lock().unwrap().get_mut(end.matter) {
             sessions.remove(end.session);
         }
         Ok(vec![moved("AGENTS.md")])
@@ -382,7 +445,7 @@ impl LaunchSteps for FakeSteps {
         repaired: &Result<(), Error>,
         passed: &Result<Vec<SetAside>, Error>,
     ) {
-        self.0.log(format!(
+        self.world.log(format!(
             "write_clean_close cursor={} repaired={} passed={}",
             cursor.is_some(),
             repaired.is_ok(),
@@ -391,11 +454,11 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn now(&self) -> Duration {
-        self.0.now()
+        self.world.now()
     }
 
     fn pause(&self, pause: Duration) {
-        *self.0.pauses.lock().unwrap() += 1;
-        *self.0.clock.lock().unwrap() += pause;
+        *self.world.pauses.lock().unwrap() += 1;
+        *self.world.clock.lock().unwrap() += pause;
     }
 }

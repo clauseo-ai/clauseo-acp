@@ -11,20 +11,34 @@
 //! 6. `PrepareRun{slot}` on the SYSTEM side, retried while a set-up holds its lock;
 //! 7. `apply`: the walk, cancellable at each folder.
 //!
-//! Nothing is granted to the pool user or run as it before the launch check passed: the sweep
-//! (which runs as the pool user), `PrepareRun` (which adds it to the run's group) and `apply`
-//! come after it. Steps 4 and 6 share one bound, [`PREPARE_BOUND`] from the walk's start.
+//! Nothing is granted to the pool user or run as it before the launch and network checks
+//! passed: the stop, the sweep (which runs as the pool user), the set-aside's pass, `PrepareRun`
+//! (which adds it to the run's group) and `apply` come after them.
+//!
+//! **One bound covers the whole walk:** [`PREPARE_BOUND`] from its start. The walk looks at the
+//! clock and at its cancel before and after every step (each stop, sweep and `PrepareRun` try
+//! included), and `apply` sees both through [`Walk::cancelled`] at each folder; past the bound
+//! it fails (`LeftoverProcess` while a leftover survives, the set-up's words while one runs,
+//! else a plain timeout). Once `apply` returns, the cancel is looked at again, under the
+//! registry's lock: a cancel that came during or after `apply` undoes and is never prepared.
+//! A step blocked in one OS call can't be interrupted from here, so **the real steps (C5) bound
+//! their own waits**: every wait (a scheduled task, the set-up server's pipe, a process handle,
+//! a file lock) is a timed one, no longer than the bound, and `apply` checks `Walk::cancelled`
+//! at each folder.
 //!
 //! The walk borrows nothing from the host: it is keyed by the reservation's claim and matter in
 //! the registry. A failure, and a cancel, undo what was done for the session on the walk's own
 //! thread (the group, the slot, the session's mark) before the result is posted; the
 //! reservation stays the host's, refused by `launch` ([`Error::NotPrepared`]) until it drops
 //! it. Dropping the reservation mid-walk cancels the walk, which undoes and frees the matter
-//! when it stops. The permission entries `apply` wrote stay in the ledger, so the next
-//! preparation continues from them.
+//! when it stops; so does dropping every [`Preparing`] handle of it (an abandoned walk). The
+//! permission entries `apply` wrote stay in the ledger, so the next preparation continues
+//! from them. TODO(C5): those entries must name the run's group, not the pool user, so a
+//! grant never outlives a failed check (0049's PR6 C5 gate).
 
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -33,8 +47,8 @@ use super::steps::{LaunchSteps, RunRefusal, Slot, Stopped};
 use crate::windows::pool::PoolUser;
 use crate::{Blocked, Error, Policy};
 
-/// How long a preparation stops leftovers and retries `PrepareRun` while a set-up runs, from
-/// the walk's start: the host's launch bound on tier B (0049). Past it, the preparation fails.
+/// How long a whole preparation may take, from the walk's start, its leftover stops and its
+/// `PrepareRun` retries included: the host's launch bound on tier B (0049). Past it, it fails.
 pub const PREPARE_BOUND: Duration = Duration::from_secs(180);
 /// How long it waits between those tries, and before it stops a leftover again.
 pub const RETRY_PAUSE: Duration = Duration::from_secs(1);
@@ -69,9 +83,10 @@ pub struct Progress {
     pub done: bool,
 }
 
-/// A matter's preparation, running in the background. Dropping it doesn't stop the walk (the
-/// lawyer's Stop ends the wait, not the walk); [`Preparing::cancel`] does, and so does dropping
-/// the reservation. Another `prepare` of the same reservation while it runs joins it.
+/// A matter's preparation, running in the background. [`Preparing::cancel`] stops the walk, and
+/// so do dropping the reservation and **dropping its last handle** (an abandoned walk cancels:
+/// the host keeps a handle for as long as it wants the walk). Another `prepare` of the same
+/// reservation while it runs joins it, with a handle of its own.
 pub struct Preparing {
     shared: Arc<Shared>,
 }
@@ -82,6 +97,8 @@ pub(super) struct Shared {
     inner: Mutex<Inner>,
     finished: Condvar,
     cancelled: AtomicBool,
+    /// The [`Preparing`] handles of a running walk: the last one's drop cancels it.
+    handles: AtomicUsize,
     walked: AtomicU64,
     stopped: AtomicU64,
 }
@@ -95,13 +112,16 @@ struct Inner {
 /// What [`LaunchSteps::apply`] is given: whether to stop, and where to count.
 pub struct Walk<'a> {
     shared: &'a Shared,
+    /// Whether the walk's bound has passed.
+    over: &'a (dyn Fn() -> bool + Sync),
 }
 
 impl Walk<'_> {
-    /// Whether the preparation was cancelled: the walk stops at the next folder, with
-    /// [`Error::Cancelled`].
+    /// Whether the preparation was cancelled or its bound ([`PREPARE_BOUND`]) has passed: the
+    /// walk stops at the next folder, with [`Error::Cancelled`] (the preparation then fails with
+    /// the cancel, or with the timeout).
     pub fn cancelled(&self) -> bool {
-        self.shared.cancelled.load(Ordering::Acquire)
+        self.shared.is_cancelled() || (self.over)()
     }
 
     /// Counts `folders` more walked.
@@ -120,6 +140,7 @@ impl Shared {
             }),
             finished: Condvar::new(),
             cancelled: AtomicBool::new(false),
+            handles: AtomicUsize::new(0),
             walked: AtomicU64::new(0),
             stopped: AtomicU64::new(0),
         })
@@ -130,19 +151,18 @@ impl Shared {
         self.cancelled.store(true, Ordering::Release);
     }
 
+    /// Whether it was cancelled.
+    pub(super) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Moves to `stage`, unless cancelled.
-    fn at(&self, stage: Stage) -> Result<(), Error> {
-        self.lock().stage = stage;
-        self.go_on()
-    }
-
     /// [`Error::Cancelled`] once cancelled.
     fn go_on(&self) -> Result<(), Error> {
-        if self.cancelled.load(Ordering::Acquire) {
+        if self.is_cancelled() {
             Err(Error::Cancelled)
         } else {
             Ok(())
@@ -168,16 +188,51 @@ pub(super) struct Reserved {
     pub(super) slot: Slot,
 }
 
+/// The walk's look at its cancel and its bound, before and after each step.
+struct Gate<'a, S: LaunchSteps> {
+    steps: &'a S,
+    shared: &'a Shared,
+    /// When the walk started, on the steps' clock.
+    started: Duration,
+}
+
+impl<S: LaunchSteps> Gate<'_, S> {
+    /// Whether [`PREPARE_BOUND`] has passed since the walk started.
+    fn over(&self) -> bool {
+        self.steps.now().saturating_sub(self.started) >= PREPARE_BOUND
+    }
+
+    /// [`Error::Cancelled`] once cancelled; a timeout once the bound has passed.
+    fn go_on(&self) -> Result<(), Error> {
+        self.shared.go_on()?;
+        if self.over() {
+            tracing::warn!("tier B's preparation passed its bound");
+            return Err(Error::Launch(clauseo_process::Error::Os {
+                what: "the sandbox's preparation took longer than its bound",
+                source: std::io::ErrorKind::TimedOut.into(),
+            }));
+        }
+        Ok(())
+    }
+
+    /// Moves to `stage`, unless cancelled or past the bound.
+    fn at(&self, stage: Stage) -> Result<(), Error> {
+        self.shared.lock().stage = stage;
+        self.go_on()
+    }
+}
+
 impl Preparing {
     /// One finished already, with `result`.
     pub(super) fn finished(result: Result<(), Error>) -> Preparing {
         let shared = Shared::new();
         shared.finish(result);
-        Preparing { shared }
+        Preparing::joined(shared)
     }
 
-    /// A handle on the walk `shared`, running.
+    /// A handle on the walk `shared`, running: counted, so the last handle's drop cancels it.
     pub(super) fn joined(shared: Arc<Shared>) -> Preparing {
+        shared.handles.fetch_add(1, Ordering::AcqRel);
         Preparing { shared }
     }
 
@@ -194,7 +249,17 @@ impl Preparing {
         let started = std::thread::Builder::new()
             .name("clauseo-tierb-prepare".to_owned())
             .spawn(move || {
-                let walked = walk(&thread_registry, &reserved, &policy, &ours);
+                // A panic in a step fails the walk, which then undoes and posts as any failure.
+                let walked = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    walk(&thread_registry, &reserved, &policy, &ours)
+                }))
+                .unwrap_or_else(|_| {
+                    tracing::warn!("tier B's preparation panicked in a step");
+                    Err(Error::Launch(clauseo_process::Error::Os {
+                        what: "the sandbox's preparation failed",
+                        source: std::io::Error::other("a step panicked"),
+                    }))
+                });
                 let folder: PathBuf = policy.matter().to_path_buf();
                 // The undo runs here, before the result is posted.
                 let result =
@@ -209,7 +274,7 @@ impl Preparing {
             let result = registry.walk_done(&matter, id, Err(error), PathBuf::new());
             shared.finish(result);
         }
-        Preparing { shared }
+        Preparing::joined(shared)
     }
 
     /// How far it is.
@@ -262,6 +327,15 @@ impl Preparing {
     }
 }
 
+impl Drop for Preparing {
+    /// The last handle of a walk cancels it: nobody waits for it any more.
+    fn drop(&mut self) {
+        if self.shared.handles.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.shared.cancel();
+        }
+    }
+}
+
 impl std::fmt::Debug for Preparing {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Preparing")
@@ -278,7 +352,11 @@ fn walk<S: LaunchSteps>(
     shared: &Shared,
 ) -> Result<(), Error> {
     let steps = &*registry.steps;
-    let started = steps.now();
+    let gate = Gate {
+        steps,
+        shared,
+        started: steps.now(),
+    };
     let Reserved {
         id,
         matter,
@@ -291,19 +369,19 @@ fn walk<S: LaunchSteps>(
         .update(matter, id, |entry| entry.running.clone())
         .ok_or(Error::WrongReservation)?;
     let running: Vec<&str> = running.iter().map(String::as_str).collect();
-    shared.at(Stage::Checking)?;
+    gate.at(Stage::Checking)?;
     let plan = steps.plan(policy, pool)?;
-    shared.go_on()?;
+    gate.go_on()?;
     let check = steps.check_launch(&plan)?;
-    shared.go_on()?;
+    gate.go_on()?;
     steps.check_network(policy, pool)?;
-    shared.go_on()?;
-    stop_leftovers(steps, pool, started, shared)?;
-    shared.at(Stage::SettingAside)?;
+    gate.go_on()?;
+    stop_leftovers(&gate, pool)?;
+    gate.at(Stage::SettingAside)?;
     let moved = steps.before_launch(&plan, &check, session, &running)?;
     registry.update(matter, id, |entry| entry.moved = moved);
-    shared.at(Stage::PreparingRun)?;
-    let group = prepare_run(steps, slot, pool, started, shared)?;
+    gate.at(Stage::PreparingRun)?;
+    let group = prepare_run(&gate, slot, pool)?;
     // The entry holds the group, so the undo ends it; with no entry, it is ended here.
     let mut group = Some(group);
     registry.update(matter, id, |entry| entry.run = group.take());
@@ -311,29 +389,38 @@ fn walk<S: LaunchSteps>(
         steps.end_run(group);
         return Err(Error::WrongReservation);
     }
-    shared.at(Stage::Walking)?;
-    steps.apply(&plan, &check, &Walk { shared })
+    gate.at(Stage::Walking)?;
+    let over = || gate.over();
+    let applied = steps.apply(
+        &plan,
+        &check,
+        &Walk {
+            shared,
+            over: &over,
+        },
+    );
+    // A cancel or the bound during `apply` is the walk's error, not `apply`'s own stop; the
+    // registry looks at the cancel once more before it marks the claim prepared.
+    gate.go_on()?;
+    applied
 }
 
 /// Stops the pool user's leftover processes: the stop task, then its sweep, then a fresh look;
-/// again every [`RETRY_PAUSE`] while any survives, until [`PREPARE_BOUND`] after `started`,
-/// past which the launch is refused with [`Error::LeftoverProcess`].
-fn stop_leftovers<S: LaunchSteps>(
-    steps: &S,
-    pool: &PoolUser,
-    started: Duration,
-    shared: &Shared,
-) -> Result<(), Error> {
+/// again every [`RETRY_PAUSE`] while any survives, until the walk's bound, past which the
+/// launch is refused with [`Error::LeftoverProcess`].
+fn stop_leftovers<S: LaunchSteps>(gate: &Gate<'_, S>, pool: &PoolUser) -> Result<(), Error> {
+    let (steps, shared) = (gate.steps, gate.shared);
     let mut found = steps.pool_user_processes(pool)?;
     while !found.is_empty() {
-        if steps.now().saturating_sub(started) >= PREPARE_BOUND {
+        shared.go_on()?;
+        if gate.over() {
             tracing::warn!(
                 count = found.len(),
                 "tier B's pool user kept a leftover process"
             );
             return Err(Error::LeftoverProcess { count: found.len() });
         }
-        shared.at(Stage::Stopping)?;
+        gate.at(Stage::Stopping)?;
         let Stopped { ended } = steps.stop_pool_user(pool)?;
         shared
             .stopped
@@ -343,37 +430,39 @@ fn stop_leftovers<S: LaunchSteps>(
             ended,
             "tier B stopped a pool user's leftovers"
         );
+        gate.go_on()?;
         steps.sweep_pool_user(pool)?;
+        gate.go_on()?;
         found = steps.pool_user_processes(pool)?;
         if !found.is_empty() {
-            shared.go_on()?;
+            gate.go_on()?;
             steps.pause(RETRY_PAUSE);
         }
     }
-    Ok(())
+    gate.go_on()
 }
 
-/// `PrepareRun`, tried again every [`RETRY_PAUSE`] while a set-up runs, until
-/// [`PREPARE_BOUND`] after `started`; then a plain failure.
+/// `PrepareRun`, tried again every [`RETRY_PAUSE`] while a set-up runs, until the walk's
+/// bound; then a plain failure. A group it made is the caller's to record before it looks at
+/// the bound again.
 fn prepare_run<S: LaunchSteps>(
-    steps: &S,
+    gate: &Gate<'_, S>,
     slot: &Slot,
     pool: &PoolUser,
-    started: Duration,
-    shared: &Shared,
 ) -> Result<S::RunGroup, Error> {
+    let (steps, shared) = (gate.steps, gate.shared);
     loop {
         match steps.prepare_run(slot, pool) {
             Ok(group) => return Ok(group),
             Err(RunRefusal::SetUpRunning) => {
-                if steps.now().saturating_sub(started) >= PREPARE_BOUND {
+                shared.go_on()?;
+                if gate.over() {
                     tracing::warn!("tier B's preparation gave up waiting for a running set-up");
                     return Err(Error::Launch(clauseo_process::Error::Os {
                         what: "the sandbox's set-up is still running",
                         source: std::io::ErrorKind::TimedOut.into(),
                     }));
                 }
-                shared.go_on()?;
                 steps.pause(RETRY_PAUSE);
                 shared.go_on()?;
             }

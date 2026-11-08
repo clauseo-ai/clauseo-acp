@@ -68,6 +68,12 @@ pub struct Ending<'a> {
 /// passed; so do the stop and the sweep of a leftover's pool user
 /// ([`stop_pool_user`](Self::stop_pool_user), [`sweep_pool_user`](Self::sweep_pool_user)).
 ///
+/// **No step waits unbounded.** The walk looks at its cancel and its 180 s bound between steps
+/// (`prepare.rs`), but can't interrupt a step blocked in an OS call: every wait a real step
+/// makes (a scheduled task, the set-up server's pipe, a process handle, a file lock) is a timed
+/// one, no longer than the bound, and `apply` stops at the next folder once
+/// [`Walk::cancelled`] says so.
+///
 /// **The launching session** is its session id together with its reservation's claim, never
 /// its name or a pid alone. C3's own checks (the registry's) use both. TODO(C5): where the real
 /// steps must not count the launching session (`open_session`'s mark, then `check_launch` and
@@ -87,7 +93,13 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// What `set_aside::after_session` returned (`Checked`).
     type Passed;
 
-    /// At [`Launchers::with_steps`](super::Launchers::with_steps), before any reservation:
+    /// The sandbox's data folder, which [`Launchers::with_steps`](super::Launchers::with_steps)
+    /// locks (`tier-b-launchers.lock`) for as long as the launchers live: one set of launchers
+    /// per folder, across processes. It must exist.
+    fn data_dir(&self) -> &Path;
+
+    /// At [`Launchers::with_steps`](super::Launchers::with_steps), with the folder's lock
+    /// held, before any reservation:
     /// clears what a crashed app left (the stale launch files, `<16 hex>.json`; slot claims and
     /// session marks no live launchers hold), so no crash strands a slot or the matter.
     fn clear_stale(&self) -> Result<(), Error>;
@@ -107,7 +119,9 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// never handed out alongside it. TODO(C5): identified exactly, by the process handle and
     /// creation time recorded when it was started, never by name.
     fn end_sweeper_running(&self, pool: &PoolUser) -> bool;
-    /// A free network slot for the pool user (`wfp::check_slot`).
+    /// A free network slot for the pool user (`wfp::check_slot`): a claim record only. It adds
+    /// no firewall permit and changes no filter: the set-up's static permit per pool user (0049)
+    /// stays the only one, and the slot only names the ports the host's proxy binds.
     fn claim_slot(&self, matter: &str, pool: &PoolUser) -> Result<Slot, Error>;
     /// Gives the slot back.
     fn release_slot(&self, slot: &Slot);
