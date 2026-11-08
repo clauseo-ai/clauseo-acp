@@ -2270,30 +2270,79 @@ Edge cases:
 - A granted folder (a granted file's folder) must answer `Ok` to the folder check; any other
   answer refuses the launch, naming `OtherMatterRead`.
 
-**The fence.** The other matter's fence (`fence.rs`) is an explicit, inherited `DenyReadWrite`
-for every pool user but its own, on its root, state and notes folders. Canonical order puts every
-explicit entry before every inherited one, and an object's explicit denies before its explicit
-allows. So:
+**The fence.** The other matter's fence (`fence.rs`) is an explicit `DenyReadWrite` for each
+pool user but its own: one entry per pool SID, never the pool group. On its state and notes
+folders it is one inherited entry. On its root it is two entries (R18): one for the root alone
+(`Inherit::ThisOnly`) and one for everything below it (`Inherit::Below`, inherit-only), which
+together deny exactly what the one entry did. Canonical order puts every explicit entry before
+every inherited one, and an object's explicit denies before its explicit allows. So:
 
 - On a child of the other matter's root, at any depth, our explicit allow comes before the
   fence's deny the child inherits, and wins for the read bits. The write bits stay denied. A
   grant of a folder or file inside the other matter works.
-- On the root itself the fence's deny is explicit, on the same object, and comes first. A grant
-  **of the other matter's root** can't list or read the root folder. Each child is readable by
-  its path, through the allows on the children. The agent needs the names: the host gives them,
-  or grants the folders inside instead.
+- On the root itself the fence's deny is explicit, on the same object, and comes first. For a
+  grant **of the other matter's root**, the session lifts that one entry for its own pool user
+  ("Listing the root" below). The entry for what is below the root stays.
+- A grant of the root never takes an allow for the root's tree: on every child, the root's
+  inherit-only deny is copied from the same parent as the allow and comes first. The gate gives
+  the root an allow on itself alone and each child its own, refused names or not.
 - The pool group's sibling denies don't reach a grant: a registered matter is never a sibling,
   a folder holding one is walked down to it and never denied whole (gate step 3), and the gate
   keeps every granted path out of the sibling walk. A group deny inherited from higher up would
   lose to the explicit allow, as the fence's does.
-- Making the root listable would mean swapping our pool user's fence entry on the root for an
-  inherit-only one for the session. The fence is the other matter's ledger entry: a crash or a
-  forget between the swap and the swap back would leave that matter's tree open to a pool user.
-  Not done.
+- The strict walk (`acl/walk.rs`) treats an explicit allow on a child, for a pool user a fence
+  denies, as an attack on the fence: it refuses the launch on the lawyer's child
+  (`BroadAllowChild`) and strips the allow on a pool user's. A read's allows are exactly that,
+  so every strict walk excuses the reads the ledger lists (`Strict::excused`,
+  `acl_bytes/excused.rs`): only a plain `ReadAndExecute` allow, for the item alone or its
+  tree, on the listed path, for the listed SID. Any other allow there, or one an agent wrote
+  elsewhere, still refuses or is repaired. Without this, the other matter's own launch, and
+  any launch planning its fence, would be refused while a read was live.
 
 The tests model the access check (`apply/tests/reads/access.rs`):
 `a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth` and
-`a_read_of_a_folder_in_another_matter_beats_the_fence_inside_it` (`apply/tests/reads.rs`).
+`a_read_of_a_folder_in_another_matter_beats_the_fence_inside_it` (`apply/tests/reads.rs`),
+`a_read_of_the_whole_folder_lists_it_and_keeps_every_refused_name_closed`
+(`apply/tests/lifts.rs`), and
+`a_strict_walk_of_the_other_matter_passes_its_listed_reads_and_refuses_any_other_allow`.
+
+**Listing the root.** After a launch applies a grant of another matter's root, `apply` lifts
+that matter's root deny of the session's pool user (`apply/lifts.rs`). The entry stays the
+other matter's. The ledger marks it lifted by the reading matter (`Entry::lifted`, under the
+lock) before the deny is removed. The deny is put back, then the mark cleared:
+
+- at the session's end (`end_reads`), before the allows are taken back;
+- when `narrow_reads` gets a policy without the root grant;
+- at the matter's next launch, when its plan no longer grants the root;
+- in `forget_matter` of the reading matter;
+- at start, in `reconcile`, for every mark (no session runs then).
+
+Exposure: the lift opens the root's names and attributes to that one pool user. Every other pool
+user keeps its own root deny, and the inherit-only deny still closes each child the grant doesn't
+allow (the refused names, and anything made in the root during the run). No group deny sits on a
+registered matter's root: the sibling walk never denies a registered matter or a folder holding
+one, and the walk-down set stops at it.
+
+A crash leaves at most the mark and the lifted deny: this pool user can list the root's names
+until the matter's next launch, its forget, or the next start puts the deny back. The reuse check
+counts a marked deny as a grant (`Ledger::grants_sid`), so the pool user serves no other matter
+meanwhile.
+
+Nothing fights the lift. `fence_applied` reads the ledger, where the entry is still `applied`,
+so no launch replans the fence because of it. A launch that writes the fence anyway (the other
+matter's own, or one that plans its fence) puts the deny back. The session then can't list the
+root until its next launch lifts it again, so it fails closed, and the restore finds the deny
+there and only clears the mark.
+
+**Migrating the fence.** A ledger written before R18 lists one whole-tree deny on each matter
+root. `fence_applied` doesn't count that as the split fence, so the launcher passes the matter as
+unfenced and the next launch (or the pool's growth, `fence_registered`) plans the pair. Once the
+pair is written and walked, `apply` takes the old entry back and walks the root again
+(`apply/split.rs`). The root stays denied throughout: by the old entry until the pair lands, and
+by the pair after. The old entry's inherited copies are the same deny as the pair's. A take-back
+that fails leaves the old entry `removing` for `reconcile`: a deny left over closes more, never
+less, and only delays listing the root. The migration costs one more walk of each matter's tree,
+once.
 
 **Lifetime.** A pool user serves one matter, and another matter after a forget, so a read never
 outlives its session. The host passes remembered grants again in each launch's policy. Every
@@ -2306,9 +2355,10 @@ inherited copies go, entries dropped (`apply/reads.rs`).
   subject, so a second session of the matter with its own pool user keeps its reads.
 - **When the lawyer forgets a grant mid-session:** `narrow_reads(ledger, matter, sids, policy,
   acl, around) -> Result<Narrowed, Error>`. It takes back each read entry the new policy no
-  longer holds (an entry is held when it is on or inside one of the policy's reads) and never
-  adds one. Calling it twice takes nothing the second time. A handle the agent opened before
-  stays open until the host's relaunch at the next turn boundary.
+  longer holds (an entry is held when it is on or inside one of the policy's reads), puts back a
+  root deny it lifted when the root grant is gone (`Narrowed::restored`), and never adds one.
+  Calling it twice takes nothing the second time. A handle the agent opened before stays open
+  until the host's relaunch at the next turn boundary.
 - **After a crash:** the matter's next launch takes back, before it records anything, each read
   entry naming its subjects that its plan doesn't list (`apply_checked`). `forget_matter` takes
   them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short.
