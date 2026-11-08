@@ -10,9 +10,9 @@
 //! The signature: `WinVerifyTrust` with `WINTRUST_ACTION_GENERIC_VERIFY_V2` and no UI, on the
 //! held handle. Revocation isn't checked (`WTD_REVOKE_NONE`, `WTD_REVOCATION_CHECK_NONE`), and
 //! `WTD_CACHE_ONLY_URL_RETRIEVAL` keeps chain building off the network, so an offline machine
-//! verifies as an online one does. The chain must end in a root the machine trusts, which only
-//! administrators can add for SYSTEM; the leaf signer's simple display name must then be
-//! `Microsoft Corporation`.
+//! verifies as an online one does. The signer's chain must then pass
+//! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
+//! Microsoft's own roots, which a root an administrator (or anyone) added can't stand in for.
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, NtCreateFile, GetSecurityInfo and WinVerifyTrust"
@@ -33,12 +33,15 @@ use windows::Win32::Foundation::{
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT,
 };
-use windows::Win32::Security::Cryptography::{CERT_NAME_SIMPLE_DISPLAY_TYPE, CertGetNameStringW};
+use windows::Win32::Security::Cryptography::{
+    CERT_CHAIN_POLICY_MICROSOFT_ROOT, CERT_CHAIN_POLICY_PARA, CERT_CHAIN_POLICY_STATUS,
+    CertVerifyCertificateChainPolicy,
+};
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
     WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_REVOCATION_CHECK_NONE, WTD_REVOKE_NONE,
-    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTHelperGetProvCertFromChain,
-    WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
+    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTHelperGetProvSignerFromChain,
+    WTHelperProvDataFromStateData, WinVerifyTrust,
 };
 use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
 use windows::Win32::Storage::FileSystem::{
@@ -92,8 +95,8 @@ impl MsiFiles for WindowsMsiFiles {
         owner(&msi.file)
     }
 
-    fn signer(&self, msi: &HeldMsi, path: &str) -> Result<String, String> {
-        signer(&msi.file, path)
+    fn microsoft_signed(&self, msi: &HeldMsi, path: &str) -> Result<bool, String> {
+        microsoft_signed(&msi.file, path)
     }
 }
 
@@ -260,8 +263,9 @@ fn owner(file: &OwnedHandle) -> Result<String, String> {
     owner
 }
 
-/// The open file's leaf signer's subject, once `WinVerifyTrust` trusts it, as the module says.
-fn signer(file: &OwnedHandle, path: &str) -> Result<String, String> {
+/// Whether the open file's signature, once `WinVerifyTrust` trusts it, chains to a Microsoft
+/// root, as the module says.
+fn microsoft_signed(file: &OwnedHandle, path: &str) -> Result<bool, String> {
     let wide = HSTRING::from(path);
     let mut info = WINTRUST_FILE_INFO {
         cbStruct: u32::try_from(size_of::<WINTRUST_FILE_INFO>()).unwrap_or(0),
@@ -286,8 +290,8 @@ fn signer(file: &OwnedHandle, path: &str) -> Result<String, String> {
     // SAFETY: `data`, `info`, `wide` and `action` are live across the call; the handle is open.
     let status =
         unsafe { WinVerifyTrust(no_ui, &raw mut action, (&raw mut data).cast::<c_void>()) };
-    let subject = if status == 0 {
-        leaf_subject(data.hWVTStateData)
+    let verdict = if status == 0 {
+        microsoft_root(data.hWVTStateData)
     } else {
         let status = status.cast_unsigned();
         Err(format!(
@@ -297,15 +301,16 @@ fn signer(file: &OwnedHandle, path: &str) -> Result<String, String> {
     data.dwStateAction = WTD_STATEACTION_CLOSE;
     // SAFETY: as above; this frees the state the first call kept.
     unsafe { WinVerifyTrust(no_ui, &raw mut action, (&raw mut data).cast::<c_void>()) };
-    subject
+    verdict
 }
 
-/// The simple display name of the first signer's leaf certificate in `state`.
-fn leaf_subject(state: HANDLE) -> Result<String, String> {
+/// Whether the first signer's chain in `state` passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`
+/// (no flags: Microsoft's product roots, never the test root or an application root).
+fn microsoft_root(state: HANDLE) -> Result<bool, String> {
     let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     // SAFETY: `state` is WinVerifyTrust's live state, closed by the caller after this returns;
     // each pointer is checked for null before it is used and is owned by that state.
-    let context = unsafe {
+    let chain = unsafe {
         let provider = WTHelperProvDataFromStateData(state);
         if provider.is_null() {
             return Err(none());
@@ -314,30 +319,32 @@ fn leaf_subject(state: HANDLE) -> Result<String, String> {
         if signer.is_null() {
             return Err(none());
         }
-        let cert = WTHelperGetProvCertFromChain(signer, 0);
-        if cert.is_null() {
-            return Err(none());
-        }
-        (*cert).pCert
+        (*signer).pChainContext
     };
-    if context.is_null() {
+    if chain.is_null() {
         return Err(none());
     }
-    let mut buffer = [0u16; 256];
-    // SAFETY: `context` is a live certificate in the state; `buffer` is writable for its length.
-    let len = unsafe {
-        CertGetNameStringW(
-            context,
-            CERT_NAME_SIMPLE_DISPLAY_TYPE,
-            0,
-            None,
-            Some(&mut buffer),
+    let para = CERT_CHAIN_POLICY_PARA {
+        cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_PARA>()).unwrap_or(0),
+        ..CERT_CHAIN_POLICY_PARA::default()
+    };
+    let mut status = CERT_CHAIN_POLICY_STATUS {
+        cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_STATUS>()).unwrap_or(0),
+        ..CERT_CHAIN_POLICY_STATUS::default()
+    };
+    // SAFETY: `chain` is a live chain in the state; `para` and `status` are live for the call.
+    let checked = unsafe {
+        CertVerifyCertificateChainPolicy(
+            CERT_CHAIN_POLICY_MICROSOFT_ROOT,
+            chain,
+            &raw const para,
+            &raw mut status,
         )
     };
-    // The length counts the NUL; 1 is an empty name.
-    let len = usize::try_from(len).unwrap_or(0).saturating_sub(1);
-    let units = buffer.get(..len).ok_or_else(none)?;
-    String::from_utf16(units).map_err(|_bad| none())
+    if !checked.as_bool() {
+        return Err(format!("{PACKAGE_MSI}'s chain policy couldn't be checked"));
+    }
+    Ok(status.dwError == 0)
 }
 
 /// An error's Win32 code.
