@@ -53,29 +53,66 @@ fn a_hidden_task_whose_trusted_file_names_another_principal_is_skipped() {
 }
 
 #[test]
-fn a_hidden_task_owned_by_a_pool_user_or_whose_cache_descriptor_cant_be_read_is_56() {
-    let system = || file("<UserId>S-1-5-18</UserId>");
-    let missing = "a task's descriptor in the Task Scheduler's cache couldn't be read (2)";
-    for owner in [Ok(sid(1010)), Err(missing.to_owned())] {
-        // A trusted file naming SYSTEM, which a pool owner may have rewritten the task past.
-        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system())));
-        fake.cache_owners
-            .insert(r"\A\hidden".to_owned(), owner.clone());
-        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{owner:?}");
-        assert!(
-            fake.deleted().is_empty(),
-            "never deleted through the registry"
-        );
-        let line = &fake.logged[0].1;
-        assert!(line.contains("1 not listed"), "{line}");
-        assert!(!line.contains("1 more skipped"), "{line}");
-    }
+fn a_hidden_task_owned_by_a_pool_user_is_56_whatever_its_trusted_file_says() {
+    // A trusted file naming SYSTEM, which a pool owner may have rewritten the task past.
+    let mut fake = hiding(
+        r"\A\hidden",
+        Some((r"A\hidden", file("<UserId>S-1-5-18</UserId>"))),
+    );
+    fake.cache_owners
+        .insert(r"\A\hidden".to_owned(), Ok(sid(1010)));
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    assert!(
+        fake.deleted().is_empty(),
+        "never deleted through the registry"
+    );
+    let line = &fake.logged[0].1;
+    assert!(line.contains("1 not listed"), "{line}");
+    assert!(line.contains("0 more skipped"), "{line}");
     // Another owner, with that file: skipped.
-    let mut other = hiding(r"\A\hidden", Some((r"A\hidden", system())));
+    let mut other = hiding(
+        r"\A\hidden",
+        Some((r"A\hidden", file("<UserId>S-1-5-18</UserId>"))),
+    );
     other
         .cache_owners
         .insert(r"\A\hidden".to_owned(), Ok(sid(1001)));
     assert_eq!(sweep(&mut other), SweepExit::Done);
+}
+
+#[test]
+fn a_hidden_task_with_an_odd_descriptor_is_decided_by_its_trusted_file() {
+    let odd = [
+        "a task's descriptor in the Task Scheduler's cache couldn't be read (2)",
+        "a task's descriptor in the Task Scheduler's cache names no owner",
+        "a task's descriptor in the Task Scheduler's cache is larger than its cap",
+    ];
+    for why in odd {
+        // A trusted file naming SYSTEM: skipped, counted as an odd descriptor's.
+        let system = file("<UserId>S-1-5-18</UserId>");
+        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
+        fake.cache_owners
+            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
+        assert_eq!(sweep(&mut fake), SweepExit::Done, "{why}");
+        let line = &fake.logged[0].1;
+        assert!(line.contains("0 not listed"), "{line}");
+        assert!(line.contains("and 1 with an odd descriptor"), "{line}");
+        // A trusted file naming a pool user: 56.
+        let pool = file("<UserId>S-1-5-21-1-2-3-1010</UserId>");
+        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", pool)));
+        fake.cache_owners
+            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
+        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{why}");
+        // A file a pool user owns, so not trusted: 56.
+        let system = file("<UserId>S-1-5-18</UserId>");
+        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
+        fake.cache_owners
+            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
+        let mut security = clean();
+        security.owner = sid(1010);
+        fake.securities.insert(r"A\hidden".to_owned(), security);
+        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{why}");
+    }
 }
 
 #[test]

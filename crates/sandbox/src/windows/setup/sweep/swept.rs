@@ -78,6 +78,10 @@ pub struct Swept {
     /// Folders or keys gone while listed that were there again when checked once more, or
     /// couldn't be checked: 56.
     pub reappeared: usize,
+    /// Hidden tasks a task file and the cache hold whose trusted task file names a principal
+    /// that isn't the pool's, skipped though the owner their cache key's `SD` names couldn't
+    /// be read (unreadable, ownerless, over its cap).
+    pub odd_sd_skipped: usize,
 }
 
 impl Swept {
@@ -144,7 +148,7 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
-         file), {} with no user or group, {} unresolved (no SID, \
+         file, and {} with an odd descriptor), {} with no user or group, {} unresolved (no SID, \
          not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
          not listed (in a task file or the cache only), {} running instances stopped, {} not, \
          {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
@@ -153,6 +157,7 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         swept.deleted,
         swept.unreadable,
         swept.file_skipped,
+        swept.odd_sd_skipped,
         swept.no_principal,
         swept.unresolved,
         swept.skipped,

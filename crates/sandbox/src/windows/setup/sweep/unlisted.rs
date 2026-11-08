@@ -14,10 +14,14 @@
 //! walk that couldn't list a folder is 56 already and isn't repeated: the first read is judged.
 //! In it, a task the walk didn't list is:
 //!
-//! - in a task file and the cache: hidden, 56, unless the owner of the descriptor its cache key
-//!   holds isn't a pool SID and its task file, under the fallback's trust rules
-//!   ([`file_trust::trusted`]), names a principal that isn't the pool's: then it is skipped,
-//!   counted with the other tasks skipped by their file;
+//! - in a task file and the cache: the trusted task file decides. Hidden, 56, unless its task
+//!   file, under the fallback's trust rules ([`file_trust::trusted`]), names a principal that
+//!   isn't the pool's and the owner of the descriptor its cache key holds isn't readably a pool
+//!   SID: then it is skipped, counted with the tasks skipped by their file, or as an odd
+//!   descriptor's when that owner can't be read (unreadable, ownerless, over its cap). The
+//!   Task Scheduler writes the file, and a standard user can't register a task for another
+//!   principal without that principal's credentials, so a vendor's task with an odd `SD`
+//!   doesn't block every launch. A readable pool owner is 56;
 //! - in a task file alone (no cache key, so the Task Scheduler holds no such task): the file's
 //!   own owner, read through a handle that never follows a link
 //!   ([`Sweeper::task_file_owner`]), decides. A pool SID, or an owner that can't be read, is
@@ -279,8 +283,17 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
         let judged = match held {
             Held::Both => {
                 swept.unlisted_in_both += 1;
-                let skipped = file_trust::not_pool_by_path(fs, &path, pool, names, resolved);
-                skipped.map(|()| swept.file_skipped += 1)
+                match file_trust::not_pool_by_path(fs, &path, pool, names, resolved) {
+                    Ok(odd) => {
+                        if odd {
+                            swept.odd_sd_skipped += 1;
+                        } else {
+                            swept.file_skipped += 1;
+                        }
+                        Ok(())
+                    }
+                    Err(why) => Err(why),
+                }
             }
             Held::File => {
                 swept.unlisted_files += 1;
