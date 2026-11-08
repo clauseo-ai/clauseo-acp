@@ -206,6 +206,9 @@ pub trait Machine {
     /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxStop` for the pool owner
     /// `owner` (`refresh::register_task`, as `--adopt` does per user), as this process.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxWatch` for the pool owner
+    /// `owner` (`refresh::register_task`), as this process. Only set-up registers it.
+    fn register_watch_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

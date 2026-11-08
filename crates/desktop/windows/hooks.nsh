@@ -29,8 +29,8 @@
 ;    The start looks its verb up in HKLM\SOFTWARE\Classes\exefile alone (SEE_MASK_CLASSKEY),
 ;    never in HKCU\Software\Classes, which the uninstalling user can write.
 ;    Both pass `--uninstall`, which the app's in-app removal never does: it also takes the admin
-;    copy, its record values and the refresh and stop tasks away, last, for the install that
-;    placed them.
+;    copy, its record values and the refresh, stop and watch tasks away, last, for the install
+;    that placed them.
 ;    The per-user installer passes `--remove --uninstall`: only the Windows user who set the
 ;    protection up removes it; anyone else's uninstall exits 0 having touched nothing. The
 ;    per-machine installer passes `--remove --uninstall --per-machine` (chosen when it is built,

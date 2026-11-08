@@ -205,6 +205,12 @@ impl Removal for Remover {
         Ok(())
     }
 
+    fn unregister_watch_task(&mut self) -> Result<(), MachineError> {
+        self.call("unregister_watch_task")?;
+        self.m.state.watch_task = None;
+        Ok(())
+    }
+
     fn invoker(&self) -> Option<&Sid> {
         self.invoker.as_ref()
     }

@@ -417,6 +417,11 @@ impl Machine for WindowsMachine {
             .map_err(|error| MachineError::Other(error.to_string()))
     }
 
+    fn register_watch_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Watch, owner)
+            .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
     fn held_users(
         &mut self,
         pool: &[Sid],

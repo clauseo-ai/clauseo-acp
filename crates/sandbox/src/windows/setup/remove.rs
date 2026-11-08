@@ -46,8 +46,9 @@
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
-//! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
-//!    key;
+//! 8. wherever an admin copy is installed, the watch task set-up registered (disabled, a
+//!    running watcher ended and its session stopped, then deleted); on a per-machine install,
+//!    the stop task set-up registered for the owner; then the record key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -142,6 +143,8 @@ pub enum RemoveStep {
     Network,
     /// A per-machine install's stop task, deleted before the record.
     StopTask,
+    /// The watch task set-up registered, deleted before the stop task.
+    WatchTask,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -161,6 +164,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::WatchTask => "deleting the sandbox's watch task",
         })
     }
 }
@@ -396,6 +400,7 @@ fn steps(
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
+    remove_watch_task(machine)?;
     remove_stop_task(machine)?;
     machine
         .delete_record()
@@ -507,6 +512,21 @@ fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     match machine.copy_owner().map_err(failed)? {
         Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
         Some(CopyOwner::User(_)) | None => Ok(()),
+    }
+}
+
+/// Step 8, first: wherever an admin copy is installed, the task `\Clauseo\SandboxWatch` set-up
+/// registered for the record's owner is disabled, a running watcher ended and its session
+/// stopped, then the task deleted (`refresh::unregister_task`), so the owner keeps no start
+/// right once their pool is gone and no session outlives it. With no admin copy set-up
+/// registered none.
+fn remove_watch_task(machine: &mut impl Removal) -> Result<(), Failed> {
+    let failed = |e: MachineError| (RemoveStep::WatchTask, cause_of(&e));
+    match machine.copy_owner().map_err(failed)? {
+        Some(CopyOwner::Machine | CopyOwner::User(_)) => {
+            machine.unregister_watch_task().map_err(failed)
+        }
+        None => Ok(()),
     }
 }
 

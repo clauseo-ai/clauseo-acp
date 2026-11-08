@@ -220,6 +220,11 @@ impl Removal for WindowsRemoval {
             .map_err(|error| MachineError::Other(error.to_string()))
     }
 
+    fn unregister_watch_task(&mut self) -> Result<(), MachineError> {
+        refresh::unregister_task(SystemTask::Watch)
+            .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
     fn invoker(&self) -> Option<&Sid> {
         self.invoker.as_ref()
     }

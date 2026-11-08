@@ -34,6 +34,8 @@ fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
     assert!(last_write.is_some_and(|write| write < at), "{calls:?}");
     let mut expected = fresh_calls();
     expected.insert(at, "register_stop_task 1001".to_owned());
+    // The watch task follows it (`watch_task.rs`).
+    expected.insert(at + 1, "register_watch_task 1001".to_owned());
     assert_eq!(calls, expected);
     // A re-run registers it again, over the one there.
     let from = machine.calls.len();
@@ -76,7 +78,7 @@ fn a_failed_registration_fails_the_set_up_closed() {
 }
 
 #[test]
-fn per_user_and_copyless_set_ups_register_nothing() {
+fn per_user_and_copyless_set_ups_register_no_stop_task() {
     let owner_copy = Some(CopyOwner::User(owner()));
     for (test, copy) in [
         ("setup-stop-task-user", owner_copy),
@@ -85,7 +87,14 @@ fn per_user_and_copyless_set_ups_register_nothing() {
         let mut machine = installed(test, copy);
         let mut acl = FakeAcl::default();
         set_up_fresh(&mut machine, &mut acl);
-        assert_eq!(machine.calls, fresh_calls(), "{test}");
+        // Per user, only the watch task, which set-up registers on any admin copy.
+        let calls: Vec<_> = machine
+            .calls
+            .iter()
+            .filter(|call| !call.starts_with("register_watch_task"))
+            .cloned()
+            .collect();
+        assert_eq!(calls, fresh_calls(), "{test}");
         assert_eq!(machine.state.stop_task, None, "{test}");
     }
 }

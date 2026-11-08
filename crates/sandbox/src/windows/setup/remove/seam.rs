@@ -33,6 +33,9 @@ pub trait Removal {
     /// Deletes the SYSTEM task `\Clauseo\SandboxStop` (`refresh::unregister_task`); one
     /// already gone is `Ok`.
     fn unregister_stop_task(&mut self) -> Result<(), MachineError>;
+    /// Disables the SYSTEM task `\Clauseo\SandboxWatch`, ends a running watcher, stops its
+    /// session, then deletes the task (`refresh::unregister_task`); one already gone is `Ok`.
+    fn unregister_watch_task(&mut self) -> Result<(), MachineError>;
     /// The user who asked: the token user of the parent Windows recorded for this process,
     /// checked against ID reuse (`Owner::of_parent`, D-B2). `None` when it can't be found.
     fn invoker(&self) -> Option<&Sid>;

@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task, watch_task,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -290,6 +290,7 @@ fn change(
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
     // remove; after a re-run's, the pool as before.
     stop_task(machine, &req.owner)?;
+    watch_task(machine, &req.owner);
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
