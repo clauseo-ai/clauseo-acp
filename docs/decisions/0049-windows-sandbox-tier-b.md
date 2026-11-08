@@ -2215,7 +2215,9 @@ installed (either runs WSL 2); a list that fails with neither is logged and pass
 user whose folder couldn't be read (a link on the way, or a read that failed) is marked. The log
 line adds counts only: VMs ended, not, unmapped, and in no profile, never an id, a path or a SID. Not done:
 restarting `WSLService` as a fallback (it would end the lawyer's sessions too). Not verified on a
-VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name as the id, and
+VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name as the id
+(an `Owner` of `WSL` is known for the Store WSL's VMs only; WSL's containers' and the inbox
+WSL's are unconfirmed, a VM row), and
 that a termination from outside the service leaves it consistent (the elevated test checks only
 the calls, where HCS is).
 
