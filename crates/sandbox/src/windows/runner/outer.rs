@@ -3,12 +3,12 @@
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use super::desktop::AgentDesktop;
-use super::end::{EndSignal, EndSweep, GRACE, copy, inner_exited, relay_stdin};
+use super::end::{EndSignal, GRACE, SessionEnd, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::marker::{marked, remove_marker};
 use super::paths::{CodexReuse, WinPath};
@@ -23,14 +23,14 @@ use crate::windows::secrets::{SecretError, secret_for};
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
-use end::OsSweeper;
+use end::OsEnd;
 use steps::Start;
 
 mod end;
 mod steps;
 
-/// The end sweeper's guard, shared with the stdin relay's thread.
-type End = Arc<EndSweep<OsSweeper>>;
+/// The session end's guard, shared with the stdin relay's thread.
+type End = Arc<SessionEnd<OsEnd>>;
 
 /// How long the inner runner has to connect `ctl`: its logon, which makes the pool user's
 /// profile the first time (about 1.7 s on the VM, `s15-spikes-userpool.md`), included.
@@ -96,26 +96,22 @@ fn marked_outer(
     let exe_text = exe
         .to_str()
         .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
-    // The inner runner and the end sweeper start in System32, a folder the Low agent can't
-    // write (no DLL planted in their current folder); the inner gets the agent's folder over
-    // `ctl`.
+    // The inner runner starts in System32, a folder the Low agent can't write (no DLL planted
+    // in its current folder); it gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
     // The desktop user's logon SID, which the runners hold too: their process DACL grants it, so
     // one runner's sweep can end another's (`token::runner_process_sddl`).
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
-    // From here every end path first ends the job, waits for it to empty, and starts the
-    // detached end sweeper (`end.rs`).
-    let end: End = Arc::new(EndSweep::new(OsSweeper {
+    // From here every end path first ends the job, waits for it to empty, and requests the
+    // `SYSTEM` sweep task (`end.rs`).
+    let end: End = Arc::new(SessionEnd::new(OsEnd {
         data_dir,
-        pool_user: message.pool_user.clone(),
-        pool_name: message.pool_name.clone(),
         desktop,
         logon,
         exe: exe_text.to_owned(),
         cwd,
-        kept: Mutex::new(None),
         job: OnceLock::new(),
         marker,
     }));
@@ -125,8 +121,8 @@ fn marked_outer(
         end.wait();
     }
     match result {
-        // An escapee found at a tick, at the end or by the end sweeper is the run's outcome;
-        // the failure is said first.
+        // An escapee found at the first act, a tick or the inner's end is the run's outcome; the
+        // failure is said first.
         Err(Failure(exit, what)) if end.escaped() && exit != RunExit::Escapee => {
             say(&format!("clauseo-sandbox-run: {what}"));
             Err(Failure::new(RunExit::Escapee, ESCAPED))
@@ -138,8 +134,8 @@ fn marked_outer(
 /// The launch once read: the checks, the pipes, the job, the desktop, the start of the inner
 /// runner, and `serve`.
 fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
-    let sweeper = end.steps();
-    let (data_dir, desktop) = (&sweeper.data_dir, sweeper.desktop.clone());
+    let steps = end.steps();
+    let (data_dir, desktop) = (&steps.data_dir, steps.desktop.clone());
     let profile = own_profile().map_err(|e| Failure::new(RunExit::BadLaunch, os("profile", &e)))?;
     refuse_codex_reuse(message, &profile)?;
     let env = agent_env(message, &profile)
@@ -154,10 +150,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         .map(|role| ServerPipe::create(&set.name(*role), *role, &sddl))
         .collect::<io::Result<Vec<_>>>()
         .map_err(|e| Failure::new(RunExit::Pipe, os("CreateNamedPipeW", &e)))?;
-    // Held by the end sweeper's steps, so every end path ends it and waits for it to empty
-    // before the sweeper starts (`end.rs`).
-    let job = sweeper
-        .hold_job(kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?);
+    // Held by the session end's steps, so every end path ends it and waits for it to empty
+    // before the sweep task is requested (`end.rs`).
+    let job =
+        steps.hold_job(kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?);
     // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
     // launch's alone, and a SID the pool doesn't hold is a bad launch.
     let password = secret_for(data_dir, &message.pool_user).map_err(|error| match error {
@@ -199,11 +195,11 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
         desktop: &desktop,
-        logon: &sweeper.logon,
+        logon: &steps.logon,
         password: Some(password),
-        exe: &sweeper.exe,
+        exe: &steps.exe,
         base: set.base(),
-        cwd: &sweeper.cwd,
+        cwd: &steps.cwd,
         job,
     };
     let inner = start(&mut steps)?;
@@ -223,7 +219,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     };
     let result = serve(&inner, pipes, &launch, end);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,
-    // then the end sweeper starts.
+    // then the sweep task is requested.
     end.trigger(EndSignal::Failed);
     result
 }
@@ -354,12 +350,13 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// closes when this process's stdin ends, so the agent reads the end of its input, and it has
 /// [`GRACE`] to finish before the job is ended (`end::relay_stdin`). `ctl`'s `Log` lines (the
 /// inner's sweeps) go to stderr meanwhile. Once the inner exited, the output has [`DRAIN`] per
-/// stream to finish; then the job is ended and emptied and the end sweeper started
+/// stream to finish; then the job is ended and emptied and the sweep task requested
 /// (`end::inner_exited`), which closes what a descendant left in the job held, and the output
 /// gets [`DRAIN`] again. On a cancel the exit code is the one the run would have had
 /// without the job's end (`end::exit_code`). A sweep of the session that found an escapee makes
-/// it [`RunExit::Escapee`] (`EndSweep::outcome`), the code it replaces said on stderr. A clean
-/// end (`EndSweep::clean`) removes the session's unclean-session marker.
+/// it [`RunExit::Escapee`] (`SessionEnd::outcome`), the code it replaces said on stderr. The
+/// outer then waits for the sweep task's result (`SessionEnd::wait`), which never changes the
+/// exit code; a clean end (`SessionEnd::clean`) removes the session's unclean-session marker.
 fn relay(
     inner: &Process,
     ctl: ServerPipe,
