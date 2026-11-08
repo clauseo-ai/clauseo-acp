@@ -133,13 +133,10 @@ their paths under `node_modules`.
    Microsoft Defender for Endpoint, choose **Allow on device** for the detection, or your
    product's equivalent for that file. Scanning stays on for everything else.
 2. **Allow by signer or hash, not by path.** Use Defender for Endpoint file or certificate
-   indicators, or your EDR's certificate allow. The Node runtime's `node.exe` is signed by the
-   OpenJS Foundation and Codex's `codex.exe` by OpenAI. Allow unsigned programs by their hash
-   (`rg.exe` may be one). A hash changes with each new version Clauseo downloads, so a hash allow
-   needs updating after an update; prefer the signer where there is one.
-
-   Check on the laptop pass: the signers of `node.exe`, `codex.exe`, `rg.exe` and the programs
-   in Claude's package.
+   indicators, or your EDR's certificate allow. To see a program's signer, open the file's
+   **Properties**, then **Digital Signatures**, and allow that signer. Allow unsigned programs by
+   their hash (`rg.exe` may be one). A hash changes with each new version Clauseo downloads, so a
+   hash allow needs updating after an update; prefer the signer where there is one.
 
 3. **A path exclusion only as a last resort.** An exclusion is not an allow: it turns scanning off
    for everything in that folder. These folders are user-writable, so files any program writes
