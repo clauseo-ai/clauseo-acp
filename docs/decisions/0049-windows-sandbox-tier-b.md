@@ -2410,9 +2410,11 @@ folder above it is a reparse point (each opened as itself), or when it or a fold
 the volume serial and file ID (`FileIdInfo`) of a per-machine Git install (`GitForWindows`'
 `InstallPath`, `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git`, opened through their links).
 So a short name (`C:\PROGRA~1\Git\cmd`), a quoted entry, `..`, a trailing dot, `\\?\C:\` or a
-junction can't keep the lawyer's `git.exe` there. An entry that isn't there stays. A Git
-elsewhere on a `PATH` the lawyer set (a package manager's shim, say) isn't recognised and stays;
-under the agent's token it fails as the lawyer's Git would.
+junction can't keep the lawyer's `git.exe` there. An entry that isn't there, or can't be opened,
+stays. A Git outside `%ProgramFiles%`, `%ProgramFiles(x86)%` and the `HKLM` `InstallPath` (a
+package manager's shim, say) isn't recognised and stays; under the agent's token it fails as the
+lawyer's Git would. The filter is a convenience, so the agent's `git` is the tree's; the
+boundary is the agent's token, not this list.
 
 **The stub** (`runner/git_bash/off.rs`). Read from Claude Code 2.1.317's bundle (function
 `S()` beside the variable's read): when `CLAUDE_CODE_GIT_BASH_PATH` is unset, or names a file
@@ -2429,10 +2431,11 @@ workspace for this session: <reason>` on stderr and exits 1. The setup exe can't
 its manifest asks for an administrator, so the agent can't start it. The outer picks the stub in
 this order:
 1. **The machine's**, `<admin>\git\_off\bash.exe`. Set-up and each SYSTEM refresh copy it from
-   the runner beside the set-up or in the record's install folder (`git_tree::runner_for_stub`),
+   the runner beside the set-up or in the record's `UserInstallDir` (`git_tree::runner_for_stub`),
    so a silent per-user update that runs no set-up still gets it. A per-user install folder is
-   the lawyer's to write, but the stub runs as the pool user, as the runner beside it does, so
-   nothing gains a right. `git` and `_off` must pass `git_tree::checked_chain` (opened as
+   the lawyer's to write, but SYSTEM only copies the file, never runs it, which the one-owner
+   rule accepts; the stub runs as the pool user, as the runner beside it does, so nothing gains
+   a right. `git` and `_off` must pass `git_tree::checked_chain` (opened as
    themselves, owner SYSTEM, set-up's exact protected DACL), and the file, opened as itself
    relative to `_off` (`checked_file`), `admin_copy::level_safe` (owner SYSTEM, Administrators
    or `TrustedInstaller`; no one else may change it).
@@ -2441,10 +2444,13 @@ this order:
    a local drive, never a network one. `git-off` is made by the desktop user with its protected
    DACL in place: the owner full and the sandbox users' group read and execute, both inherited,
    nothing else (`O:<desktop user>D:P(A;OICI;FA;;;<desktop user>)(A;OICI;0x1200a9;;;<group>)`),
-   and secured again through a handle when already there. At each launch the copy's SHA-256 is
-   compared with the runner's; on any difference the runner is copied to a new file beside it
-   and renamed over it, then hashed again, all before the variable names it. The pool user reaches
-   it by bypassing traverse checks, as it reaches the trees. It runs as the pool user too.
+   and secured again through a handle when already there. At each launch the copy is compared
+   with a SHA-256 of the runner's own exe; on any difference the runner is copied to a new file
+   beside it and renamed over it, then hashed again, all before the variable names it. The pool
+   user has read and execute on it, nothing more, and reaches it by bypassing traverse checks, as
+   it reaches the trees. Residual: the desktop user's own processes could swap the copy between
+   that check and Claude Code starting it. They can already change the runner itself, and the
+   copy runs as the pool user, so that gains them nothing.
 3. **Neither:** the launch is refused before any logon, `RunExit::GitBashUnsafe`
    (`0xE0C15012`), with "Git Bash couldn't be turned off safely, so the agent won't start" and
    both reasons. The agent never runs where Claude Code could find the lawyer's Git Bash.
