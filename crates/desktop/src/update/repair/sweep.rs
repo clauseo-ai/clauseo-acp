@@ -132,12 +132,12 @@ fn remove(path: &Path, delete: impl Fn(&Path) -> io::Result<()>) -> io::Result<(
 }
 
 /// A folder that is neither a link nor a reparse point.
-fn plain_folder(meta: &Metadata) -> bool {
+pub(super) fn plain_folder(meta: &Metadata) -> bool {
     meta.is_dir() && !meta.file_type().is_symlink() && !reparse_point(meta)
 }
 
 /// A file that is neither a link nor a reparse point.
-fn plain_file(meta: &Metadata) -> bool {
+pub(super) fn plain_file(meta: &Metadata) -> bool {
     meta.is_file() && !meta.file_type().is_symlink() && !reparse_point(meta)
 }
 

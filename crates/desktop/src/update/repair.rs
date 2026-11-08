@@ -29,6 +29,8 @@ mod app;
 mod fetch;
 #[cfg(any(test, windows))]
 mod flow;
+#[cfg(windows)]
+mod lockdown;
 #[cfg(any(test, windows))]
 mod marker;
 #[cfg(any(test, windows))]
@@ -328,9 +330,18 @@ pub(crate) async fn start<R: Runtime>(
     let planned = match update {
         Some(state) => {
             let probe = app.clone();
-            tauri::async_runtime::spawn_blocking(move || eligible(&probe, Some(&state)))
-                .await
-                .unwrap_or(Err(plan::NotEligible("the eligibility check stopped")))
+            // The registry and the admin copy's place are read: off the async workers.
+            tauri::async_runtime::spawn_blocking(move || {
+                let planned = eligible(&probe, Some(&state))?;
+                // Only the missing admin copy is the installer's to repair.
+                if lockdown::admin_copy_missing() {
+                    Ok(planned)
+                } else {
+                    Err(plan::NotEligible("the admin copy is not missing"))
+                }
+            })
+            .await
+            .unwrap_or(Err(plan::NotEligible("the eligibility check stopped")))
         }
         None => Err(plan::NotEligible("the updater's state was not read")),
     };

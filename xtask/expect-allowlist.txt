@@ -69,6 +69,7 @@ crates/desktop/src/update/repair/app.rs - clippy::disallowed_methods
 crates/desktop/src/update/repair/marker.rs - clippy::disallowed_methods
 crates/desktop/src/update/repair/sweep.rs - clippy::disallowed_methods
 crates/desktop/src/update/repair/windows.rs - unsafe_code
+crates/desktop/src/update/repair/lockdown.rs - unsafe_code
 crates/desktop/src/update/repair/windows.rs - clippy::disallowed_methods
 crates/desktop/src/update/repair/tests.rs - clippy::disallowed_methods
 crates/desktop/src/update/repair/tests/flow.rs - clippy::disallowed_methods

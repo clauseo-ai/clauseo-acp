@@ -15,6 +15,7 @@ use crate::update::{
     UpdaterError,
 };
 
+mod held;
 mod refusals;
 mod review;
 mod scheduled;

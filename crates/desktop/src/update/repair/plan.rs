@@ -122,3 +122,10 @@ pub(super) fn plan(inputs: Inputs<'_>) -> Result<Plan, NotEligible> {
         pubkey: pubkey.to_owned(),
     })
 }
+
+/// Whether the admin copy is missing, from what was read: whether the record names one (an
+/// error when it can't be read, which the launch check treats as missing too), and whether a
+/// plain file is at its place in Program Files. The repair runs only then.
+pub(super) fn copy_missing(recorded: Result<bool, ()>, present: bool) -> bool {
+    recorded != Ok(true) || !present
+}

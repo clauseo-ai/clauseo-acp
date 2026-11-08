@@ -371,7 +371,10 @@ its own, not a host command, granted to `main` and admitted from `main` alone.
   the installer created new in it and written through a handle that shares reads only. Writing
   ends with two `ReOpenFile`s to a read handle that shares reads only (Windows won't start an
   image a write handle holds); the check reads back through that handle, which stays open until
-  `ShellExecuteExW` returns.
+  `CreateProcessW` returns (the verified path as the application name, no shell, the working
+  folder `System32`). Once sealed, the folder becomes read and execute for the user, `OWNER
+  RIGHTS` too, so nothing can be planted beside the installer. The `.sig` and the installer get
+  10 minutes together, and `repair_cancel` (the card's Cancel) stops the download.
 - **The hand-over:** a `repair-pending.json` marker in the data folder, every window destroyed
   (the installer refuses while `ClauseoMainWindow` exists; `lib.rs` holds the exit that closing
   the last window asks for), the installer started interactively with `/CLAUSEO_REPAIR` (none once a

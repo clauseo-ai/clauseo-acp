@@ -294,3 +294,46 @@ fn restart_to_update_is_unblocked_unless_the_installer_started() {
     assert!(running());
     set_running(false);
 }
+
+/// Only a missing admin copy is the installer's to repair: no hash in the record (or a record
+/// that can't be read, as the launch check reads it), or no file at its place.
+#[test]
+fn the_repair_runs_only_while_the_admin_copy_is_missing() {
+    use super::plan::copy_missing;
+    assert!(!copy_missing(Ok(true), true));
+    assert!(copy_missing(Ok(false), true));
+    assert!(copy_missing(Ok(true), false));
+    assert!(copy_missing(Err(()), true));
+    assert!(copy_missing(Ok(false), false));
+}
+
+/// The installer this branch runs must handle `/CLAUSEO_REPAIR` (stage F's installer change:
+/// wait for Clauseo to be gone, then start it again once at the end). Fails until that change is
+/// in `crates/desktop/windows/`: the repair must merge after stage F's installer PR.
+#[test]
+fn the_installer_handles_the_repair_switch() {
+    let switch = super::flow::ARGS[0];
+    assert_eq!(switch, "/CLAUSEO_REPAIR");
+    let windows = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("windows");
+    let mut found = Vec::new();
+    let mut folders = vec![windows];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == "nsh" || ext == "nsi")
+                && std::fs::read_to_string(&path).is_ok_and(|text| text.contains(switch))
+            {
+                found.push(path);
+            }
+        }
+    }
+    assert!(
+        !found.is_empty(),
+        "no NSIS hook under crates/desktop/windows handles {switch}: stage F's installer change \
+         (installer-repair-switch) must land first"
+    );
+}

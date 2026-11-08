@@ -128,6 +128,48 @@ fn the_installer_starts_while_the_read_only_handle_holds_it() {
     stage.discard();
 }
 
+/// Sealed, the folder is locked down: nothing can be created in it, its owner can't change its
+/// DACL back, the installer still starts through the held handle (the launch test above seals
+/// too), and once the handle closes the start's sweep still deletes it.
+#[test]
+fn the_sealed_folder_is_read_and_run_only_and_the_sweep_still_removes_it() {
+    let scratch = Scratch::new("repair-locked", &[]);
+    let updates = scratch.path().join("updates");
+    let mut stage = Stage::create(&updates, "0.4.1", "Clauseo_0.4.1_x64-setup.exe").unwrap();
+    stage.write(b"the installer's bytes").unwrap();
+    stage.seal().unwrap();
+    let folder = stage.folder().to_path_buf();
+    assert!(std::fs::write(folder.join("version.dll"), b"planted").is_err());
+    assert!(std::fs::create_dir(folder.join("sub")).is_err());
+    // Protected, four entries: the user's two, OWNER RIGHTS', SYSTEM's (the rights may print as
+    // aliases, so only their holders are read).
+    let sddl = dacl_text(&folder);
+    let sid = own_sid().unwrap();
+    assert!(sddl.starts_with("D:P"), "{sddl}");
+    assert_eq!(sddl.matches("(A;").count(), 4, "{sddl}");
+    assert_eq!(sddl.matches(&format!(";;;{sid})")).count(), 2, "{sddl}");
+    assert!(sddl.contains(";;;OW)"), "{sddl}");
+    assert!(sddl.contains("(A;OICI;FA;;;SY)"), "{sddl}");
+    // As the owner, the DACL can't be set again: OWNER RIGHTS gives read and execute only.
+    assert!(super::super::lockdown::lock_down(&folder).is_err());
+    drop(stage);
+    assert_eq!(sweep(&updates), [Swept::Removed]);
+    assert!(!folder.exists());
+}
+
+/// An attempt is never made through a junction at `updates/<version>`.
+#[test]
+fn an_attempt_refuses_a_junction_in_the_updates_folder() {
+    let scratch = Scratch::new("repair-create-junction", &[]);
+    let updates = scratch.path().join("updates");
+    let elsewhere = scratch.path().join("elsewhere");
+    std::fs::create_dir_all(&updates).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    junction(&updates.join("0.4.1"), &elsewhere);
+    assert!(Stage::create(&updates, "0.4.1", "Clauseo_0.4.1_x64-setup.exe").is_err());
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+}
+
 /// `updates/` itself as a junction to a folder elsewhere is never walked.
 #[test]
 fn the_sweep_never_follows_a_junction_for_updates() {

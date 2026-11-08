@@ -17,6 +17,8 @@
 //!   seal. What catches altered bytes is the read-back through this last handle, which the check
 //!   verifies; a change after it is the same-user residual decision 0049 accepts ("What stays
 //!   open"), as is the gap before the installer opens its own image.
+//! - **The lock-down** (`lockdown.rs`), once sealed: the folder becomes read and execute for
+//!   the user, so nothing can be planted beside the installer.
 //! - **The start**: `CreateProcessW` with the sealed path as the application name and
 //!   `"<path>" /CLAUSEO_REPAIR` as the command line: no shell, so no file-type lookup (an
 //!   `HKCU\Software\Classes\exefile` override can't redirect it), no search path, and no handle
@@ -79,7 +81,11 @@ impl Stage {
     /// created new.
     pub(super) fn create(updates: &Path, version: &str, file: &str) -> io::Result<Self> {
         let parent = updates.join(version);
+        // `updates/` and its version's folder: never a link or junction, before and after they
+        // are made, as the sweep reads them.
+        refuse_reparse(&[updates, &parent])?;
         std::fs::create_dir_all(&parent)?;
+        refuse_reparse(&[updates, &parent])?;
         let folder = parent.join(format!("{PREFIX}{}", uuid::Uuid::now_v7().simple()));
         let descriptor = OwnerOnly::new()?;
         let attributes = descriptor.attributes();
@@ -171,7 +177,8 @@ impl Staged for Stage {
         let held = reopen(&shared, FILE_SHARE_READ)?;
         drop(shared);
         self.held = Some(held);
-        Ok(())
+        // Written and sealed: nothing may be added beside it now (`lockdown.rs`).
+        super::lockdown::lock_down(&self.folder)
     }
 
     fn read_back(&mut self) -> io::Result<Vec<u8>> {
@@ -181,6 +188,21 @@ impl Staged for Stage {
         held.read_to_end(&mut bytes)?;
         Ok(bytes)
     }
+}
+
+/// Refuses when any of `folders` that exists is a link or a reparse point (a junction
+/// included) or not a folder.
+fn refuse_reparse(folders: &[&Path]) -> io::Result<()> {
+    for folder in folders {
+        match std::fs::symlink_metadata(folder) {
+            Ok(meta) if !super::sweep::plain_folder(&meta) => {
+                return Err(io::Error::other("a link or junction in the updates folder"));
+            }
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// `path`, created new for reading and writing, sharing reads only; its DACL inherited from the

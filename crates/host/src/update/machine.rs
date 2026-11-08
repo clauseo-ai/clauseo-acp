@@ -88,9 +88,32 @@ pub(crate) struct Machine {
     /// When a background check or download failure last counted.
     failure_counted: Option<Timestamp>,
     jitter: Jitter,
+    /// Whether the updater lets an install begin now (`Updater::install_held`: the desktop's
+    /// repair runs its own installer), set by the actor before each step.
+    installs: Installs,
+}
+
+/// Whether an install may begin now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Installs {
+    /// It may.
+    Allowed,
+    /// The updater holds installs: the desktop's repair runs its own installer.
+    Held,
 }
 
 impl Machine {
+    /// Whether the updater holds installs now; the actor sets it before each step. While held,
+    /// nothing begins an install (`auto`'s cached install at start, a schedule whose turns
+    /// ended, `InstallUpdate`): it stays `ready`.
+    pub(crate) fn hold_install(&mut self, held: bool) {
+        self.installs = if held {
+            Installs::Held
+        } else {
+            Installs::Allowed
+        };
+    }
+
     /// The machine after start-up: the marker read, then `managed`, an immediate check (`auto`
     /// with last run's download), or `idle` with the first check 1 to 10 minutes away.
     pub(crate) fn start(start: Start, now: Timestamp) -> (Self, Vec<Effect>) {
@@ -111,6 +134,7 @@ impl Machine {
             managed_counted: None,
             failure_counted: None,
             jitter: start.jitter,
+            installs: Installs::Allowed,
         };
         let mut fx = Vec::new();
         let mut install_failed = false;
@@ -381,6 +405,15 @@ impl Machine {
     /// The marker first: new sends stay held while it is written, and the install begins only
     /// once it is on disk ([`Self::marker_written`]).
     fn begin_install(&mut self, after_answer: bool, fx: &mut Vec<Effect>) {
+        if self.installs == Installs::Held {
+            // Another installer is running (the desktop's repair): two at once is never right.
+            // Back to `ready`, the gate lifted, to install later.
+            if let Some(downloaded) = self.download.take() {
+                self.ready(downloaded);
+            }
+            self.ungate(fx);
+            return;
+        }
         let Some(downloaded) = self.download.as_ref() else {
             return;
         };
