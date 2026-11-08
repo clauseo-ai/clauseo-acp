@@ -827,8 +827,8 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.pool_owned": {
-    "en": "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.",
-    "hi": "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से उसका स्वामित्व आपको वापस देने को कहें।",
+    "en": "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Your firm manages file ownership on this computer.",
+    "hi": "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर पर फ़ाइलों का स्वामित्व आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -837,8 +837,8 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.cant_label": {
-    "en": "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
-    "hi": "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+    "en": "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. Ask again to try once more.",
+    "hi": "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। एक बार और कोशिश करने के लिए फिर से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

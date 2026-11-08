@@ -200,10 +200,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
   // pool_owned without TurnFailed.at; the {where} version is in words-errors-where.ts (#713)
   "sandbox.pool_owned":
-    "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.",
+    "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Your firm manages file ownership on this computer.",
   // provisional (stage E, app thread's words for copy review)
   "sandbox.cant_label":
-    "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. Ask again to try once more.",
   // provisional (stage E, app thread's words for copy review)
   "sandbox.removing":
     "The Safe workspace is being removed from this computer. Try again once that's finished.",

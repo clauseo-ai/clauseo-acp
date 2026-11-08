@@ -144,11 +144,11 @@ export const HI = {
   "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.":
     "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
   // pool_owned without TurnFailed.at; the {where} version is in words-errors-where.ts (#713)
-  "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.":
-    "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से उसका स्वामित्व आपको वापस देने को कहें।",
+  "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Your firm manages file ownership on this computer.":
+    "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर पर फ़ाइलों का स्वामित्व आपकी फ़र्म प्रबंधित करती है।",
   // provisional (stage E, app thread's words for copy review)
-  "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.":
-    "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+  "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. Ask again to try once more.":
+    "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। एक बार और कोशिश करने के लिए फिर से पूछें।",
   // provisional (stage E, app thread's words for copy review)
   "The Safe workspace is being removed from this computer. Try again once that's finished.":
     "इस कंप्यूटर से सुरक्षित कार्यक्षेत्र हटाया जा रहा है। उसके पूरा होने के बाद फिर से प्रयास करें।",
