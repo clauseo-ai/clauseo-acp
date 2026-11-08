@@ -26,7 +26,8 @@
 //!   `FAKE_SIGNIN=slow-save:<ms>`, which sleeps in the middle of writing Codex's login file.
 //! - `FAKE_CODEX_PORT` makes Codex's browser login listen on `127.0.0.1:<port>` as Codex does,
 //!   answering one request at a time: `GET /cancel` prints `Login cancelled` and exits 1 with
-//!   no write (see [`codex_browser_login`]).
+//!   no write (see [`codex_browser_login`]). `FAKE_CODEX_BIND_GATE` names a file it waits for
+//!   before it binds, so a test can stop it before it listens.
 //! - File changes go through [`crate::write`], as the rest of the crate's do.
 //!
 //! # Depends on

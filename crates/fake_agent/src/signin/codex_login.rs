@@ -3,7 +3,7 @@
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, TcpListener};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::json;
@@ -18,6 +18,12 @@ use crate::{EXIT_OK, write};
 const CODEX_PORT_VAR: &str = "FAKE_CODEX_PORT";
 /// The line Codex's browser login prints when `GET /cancel` ends it.
 const CODEX_CANCELLED: &str = "Login cancelled";
+/// The variable naming a file Codex's browser login waits for before it binds
+/// `FAKE_CODEX_PORT`: a test holds the bind back, as a slow start (Windows' Winsock start) does,
+/// so a stop can come before the login listens.
+const BIND_GATE_VAR: &str = "FAKE_CODEX_BIND_GATE";
+/// How often the login looks for the gate file.
+const GATE_POLL: Duration = Duration::from_millis(10);
 /// The file a login `/cancel` ended leaves in its home: the tests' proof the request came.
 const CANCELLED_FILE: &str = "fake-login-cancelled";
 /// The file a login with `FAKE_CODEX_PORT` leaves in its home once it listens there: the tests
@@ -30,10 +36,11 @@ const SAVE_FINISHED_FILE: &str = "fake-save-finished";
 const CODEX_CALLBACK_RECEIVED: &str = "callback received";
 
 /// Codex's browser login. It prints where its callback listens. With `FAKE_CODEX_PORT` it binds
-/// that port on `127.0.0.1` first and leaves [`LISTENING_FILE`]: under `never` it then answers
-/// requests one at a time until `GET /cancel` ends it (`Login cancelled`, exit 1, nothing
-/// written); under `slow-save` it saves the login file slowly while the port stays bound, and
-/// exits 0 without answering. Without the variable it binds nothing.
+/// that port on `127.0.0.1` first (once `FAKE_CODEX_BIND_GATE`'s file exists, when it names one)
+/// and leaves [`LISTENING_FILE`]: under `never` it then answers requests one at a time until
+/// `GET /cancel` ends it (`Login cancelled`, exit 1, nothing written); under `slow-save` it
+/// saves the login file slowly while the port stays bound, and exits 0 without answering.
+/// Without the variable it binds nothing.
 pub(super) fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<i32> {
     if matches!(script, Script::PortBusy) {
         say(CODEX_PORT_BUSY_LINE)?;
@@ -41,6 +48,7 @@ pub(super) fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<
     }
     let listener = match callback_port() {
         Some(port) => {
+            wait_for_gate();
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
             write::create_dir_all(folder)?;
             write::write(folder.join(LISTENING_FILE), b"")?;
@@ -64,6 +72,17 @@ pub(super) fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<
 /// The port `FAKE_CODEX_PORT` names, if it names one.
 fn callback_port() -> Option<u16> {
     std::env::var(CODEX_PORT_VAR).ok()?.parse().ok()
+}
+
+/// Waits until the file `FAKE_CODEX_BIND_GATE` names exists, when it names one: forever if it
+/// never does (the run is then killed).
+fn wait_for_gate() {
+    let Some(gate) = std::env::var_os(BIND_GATE_VAR).map(PathBuf::from) else {
+        return;
+    };
+    while !gate.exists() {
+        crate::run::effects::pause(GATE_POLL);
+    }
 }
 
 /// Answers each request on `listener` in turn: `GET /cancel` ends the login (`Login cancelled`,
