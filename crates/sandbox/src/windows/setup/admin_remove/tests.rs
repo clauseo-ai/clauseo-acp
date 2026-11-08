@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Restart, clear, parked_name};
+use super::{Restart, clear, clear_old_installer_temp, parked_name};
 use crate::test_support::TempDir;
 use crate::windows::admin_copy::{Found, os};
 
@@ -103,4 +103,30 @@ fn a_running_copy_that_cant_be_renamed_is_left_and_nothing_is_scheduled() {
         "MZ",
         "left in place"
     );
+}
+
+#[test]
+fn an_old_installer_temp_goes_only_when_empty_and_a_link_there_without_its_target() {
+    let dir = TempDir::new("admin-remove-installer-temp");
+    let app = dir.path().join(r"pf\Clauseo");
+    std::fs::create_dir_all(app.join("installer-temp")).unwrap();
+    clear_old_installer_temp(&app);
+    assert_eq!(
+        os::found(&app.join("installer-temp")).unwrap(),
+        Found::Missing
+    );
+    let held = dir.file(r"pf\Clauseo\installer-temp\nsis123\plugin.dll", "in use");
+    clear_old_installer_temp(&app);
+    assert_eq!(
+        std::fs::read_to_string(&held).unwrap(),
+        "in use",
+        "a folder in use stays"
+    );
+    std::fs::remove_dir_all(app.join("installer-temp")).unwrap();
+    let outside = dir.file(r"outside\keep.txt", "the lawyer's");
+    let link = app.join("installer-temp");
+    crate::windows::test_junction::junction(&link, outside.parent().unwrap()).unwrap();
+    clear_old_installer_temp(&app);
+    assert_eq!(os::found(&link).unwrap(), Found::Missing);
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
 }
