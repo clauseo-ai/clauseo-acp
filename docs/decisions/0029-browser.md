@@ -265,8 +265,8 @@ No Chrome switch makes it write the file for a fixed port, on any OS.
 connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-4436`):
 - Chrome gets agent-browser's own headless flags (`chrome.rs:466-597`, less port 0) with the
   switches of "No background hosts" (below), the session's proxy with the `<-loopback>` bypass, the WebRTC flag, `--user-data-dir=<cwd>/
-  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux in a
-  container, `--disable-dev-shm-usage`. Never `--no-sandbox`: agent-browser's rule adds it as
+  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux
+  `--gpu-sandbox-failures-fatal` and, in a container, `--disable-dev-shm-usage`. Never `--no-sandbox`: agent-browser's rule adds it as
   root or in a container, and the guard dropped that exception ("Chrome's sandbox, never
   weakened", below). Its environment is agent-browser's less the `AGENT_BROWSER_*`
   names.
@@ -607,7 +607,8 @@ cannot start. There is no retry without the sandbox. Enforced in the launcher, w
 by convention.
 
 **The switches** (Chromium main, November 2026), matched as Chrome reads them: after `--`, `-`
-or `/`, ASCII whitespace trimmed, the name compared without case (Windows lowercases it,
+or `/`, whitespace trimmed (all Unicode whitespace, as Chrome on Windows trims it,
+`base/command_line.cc:654`), the name compared without case (Windows lowercases it,
 `base/command_line.cc`), any `=value`:
 - `sandbox/policy/switches.cc`: `no-sandbox`, `disable-gpu-sandbox`,
   `disable-landlock-sandbox`, `disable-namespace-sandbox`, `disable-seccomp-filter-sandbox`,
@@ -620,11 +621,29 @@ or `/`, ASCII whitespace trimmed, the name compared without case (Windows lowerc
   `gpu-launcher`, `browser-subprocess-path`;
 - earlier Chromium's `disable-gpu-appcontainer` and `disable-gpu-lpac`;
 - `--disable-features` naming any feature of `sandbox/policy/features.cc`, or any name with
-  `sandbox`, `sbox`, `appcontainer`, `lpac`, `seccomp` or `landlock` in it (feature
-  entries read as `base/feature_list.cc` does: `*` prefix, `<trial` and `:params` off);
+  `sandbox`, `sbox`, `appcontainer`, `lpac`, `seccomp`, `landlock` or `outofprocess` in it
+  (feature entries read as `base/feature_list.cc` does: `*` prefix, `<trial` and `:params`
+  off). `outofprocess` covers `AudioServiceOutOfProcess` (`content_features.cc`: disabled, the
+  audio service runs unsandboxed in the browser's process) and `UseOutOfProcessVideoEncoding`
+  (`media/base/media_switches.cc`);
 - `--enable-features` naming `NetworkServiceInProcess2` (`content_features.cc`, the network
-  service in the browser's process) or its old name `NetworkServiceInProcess`. agent-browser's
-  own feature list has the old name, which current Chrome ignores; the guard dropped it.
+  service in the browser's process) or its old name `NetworkServiceInProcess`, or any name with
+  `inprocess` or `inbrowserprocess` in it (`RunVideoCaptureServiceInBrowserProcess`,
+  `UseUnexportableKeyServiceInBrowserProcess`). agent-browser's own feature list has the old
+  name, which current Chrome ignores; the guard dropped it;
+- `--gpu-sandbox-failures-fatal` with any value (`=no` turns it off); the guard passes it bare.
+
+**The GPU sandbox on Linux.** A GPU process whose seccomp sandbox cannot start (driver threads
+running before it) goes on unsandboxed with only a warning unless `--gpu-sandbox-failures-fatal`
+is passed (`sandbox/policy/linux/sandbox_linux.cc`; the browser forwards the switch to the GPU
+process, `gpu_process_host.cc`). The guard passes it on Linux, the only OS that reads it
+(with Chrome OS); there the GPU process ends instead of running unsandboxed.
+
+**Flags from `chrome://flags`.** The kept profile's `Local State` holds what `chrome://flags`
+turned on (`browser.enabled_labs_experiments` and its `_origin_lists`,
+`components/webui/flags/flags_ui_pref_names.cc`), which Chrome applies as switches at its next
+start, past the check above. Before each start the guard removes both keys; nothing else in
+`Local State` changes (`chrome/profile.rs`, `without_flags`).
 
 `launch` checks every argument it built and refuses to spawn on a match (a guard bug, not a
 host condition). The guard's own command line refuses (exit 2) agent-browser's arguments, and
@@ -656,8 +675,8 @@ start fails with its own kind (`session::StartError::Sandbox`): the tool call ge
 browser couldn't start its own protection on this computer, so Clauseo won't use it.", Chrome's
 tree is killed, and the guard exits 1, its stderr naming the fixed part Chrome printed (never the
 line, which can hold a path). A failed start ends the guard, so Chrome is never started again.
-On Linux as root the guard refuses the same way without starting Chrome, which refuses its
-sandbox as root itself. In a container Chrome starts with its sandbox, with
+On Linux as root (the effective user, `geteuid`) the guard refuses the same way without starting
+Chrome, which refuses its sandbox as root itself. In a container Chrome starts with its sandbox, with
 `--disable-dev-shm-usage` (shared memory files in the temp folder, not a small `/dev/shm`: no
 sandbox change); where the sandbox cannot start there, it is refused. Linux is not a tier 1
 platform. The host cannot tell the refusal apart yet: no protocol change.
@@ -669,8 +688,10 @@ harness, never production; the guard sees only the wrapper's path.
 Tests: `chrome/sandbox/tests.rs` (every switch in every spelling, the feature lists, a failure
 line per message, the host table), `chrome/tests.rs` (`chrome_args` on every OS, as root and in
 a container, has no weakening argument), `tests/guard/sandbox.rs` (a stand-in Chrome printing
-each message, exiting or not: the exact refusal, one launch, no agent-browser; agent-browser
-arguments naming a switch refused).
+each message, exiting or not: the exact refusal, one launch, no agent-browser; an early exit
+with unknown text: the ordinary failed start, one launch; agent-browser arguments naming a switch
+refused), `chrome/tests.rs` also `--gpu-sandbox-failures-fatal` on Linux and the root refusal
+through `launch`, `chrome/profile/tests.rs` the `chrome://flags` reset.
 
 ### Lazy start and the idle stop (`browser_guard/session.rs`, the S27 release blocker)
 

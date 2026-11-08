@@ -49,6 +49,9 @@ fn every_sandbox_switch_is_refused_in_every_spelling_chrome_reads() {
             format!("--{upper}"),
             format!("--{upper}=true"),
             format!("  --{switch}\t"),
+            // Windows trims Unicode whitespace too (`TrimWhitespace`).
+            format!("\u{3000}--{switch}\u{a0}"),
+            format!("\u{2028}--{switch}\u{2003}"),
         ] {
             assert_eq!(
                 weakening(OsStr::new(&spelling)).as_deref(),
@@ -102,14 +105,49 @@ fn a_feature_list_that_loosens_the_sandbox_is_refused() {
         assert!(weakening(OsStr::new(&list)).is_some(), "{list}");
     }
     assert!(weakening(OsStr::new("--enable-features=NetworkServiceInProcess2")).is_some());
+    // A service moved out of its own sandboxed process into the browser's, by name and by the
+    // words of one Chromium adds later.
+    for list in [
+        "--disable-features=AudioServiceOutOfProcess",
+        "--disable-features=Translate,*audioserviceoutofprocess<Study",
+        "--disable-features=SpeechServiceOutOfProcess",
+        "--disable-features=UseOutOfProcessVideoEncoding",
+        "--enable-features=RunVideoCaptureServiceInBrowserProcess",
+        "--enable-features=NetworkService,StorageServiceInProcess:param/1",
+        "--enable-features=UseUnexportableKeyServiceInBrowserProcess",
+    ] {
+        assert!(weakening(OsStr::new(list)).is_some(), "{list}");
+    }
     // Enabling a sandbox feature hardens it; a list with none passes.
     for fine in [
         "--enable-features=NetworkServiceSandbox,RendererAppContainer",
         "--disable-features=Translate,OptimizationHints",
         "--enable-features=NetworkService,WebMCPTesting",
+        // Enabling the out-of-process service is what Chrome does by default.
+        "--enable-features=AudioServiceOutOfProcess",
     ] {
         assert_eq!(weakening(OsStr::new(fine)), None, "{fine}");
     }
+}
+
+/// `--gpu-sandbox-failures-fatal` passes bare; with a value it is refused, since `=no` keeps GPU
+/// sandbox failures non-fatal (`sandbox/policy/linux/sandbox_linux.cc`).
+#[test]
+fn gpu_sandbox_failures_fatal_passes_only_bare() {
+    assert_eq!(weakening(OsStr::new("--gpu-sandbox-failures-fatal")), None);
+    assert_eq!(
+        weakening_in(OsStr::new("--gpu-sandbox-failures-fatal")),
+        None
+    );
+    for refused in [
+        "--gpu-sandbox-failures-fatal=no",
+        "--GPU-Sandbox-Failures-Fatal=no",
+        "--gpu-sandbox-failures-fatal=",
+        "\u{3000}--gpu-sandbox-failures-fatal=yes",
+    ] {
+        assert!(weakening(OsStr::new(refused)).is_some(), "{refused}");
+    }
+    assert!(weakening_in(OsStr::new("--args=--gpu-sandbox-failures-fatal=no")).is_some());
 }
 
 #[test]
@@ -140,6 +178,8 @@ fn a_mention_anywhere_in_a_value_is_refused() {
         "--disable-features=Translate,NetworkServiceSandbox",
         "--disable-features=Translate\n--disable-features=GpuSandboxV2",
         "--enable-features=NetworkServiceInProcess2",
+        "--disable-features=Translate,AudioServiceOutOfProcess",
+        "--enable-features=RunVideoCaptureServiceInBrowserProcess",
     ] {
         assert!(weakening_in(OsStr::new(text)).is_some(), "{text}");
     }
@@ -195,6 +235,8 @@ fn linux_as_root_is_refused_and_no_host_gets_a_weakening_switch() {
                 }
                 let shm = host_args(host).contains(&"--disable-dev-shm-usage");
                 assert_eq!(shm, linux && (root || container), "{host:?}");
+                let fatal = host_args(host).contains(&"--gpu-sandbox-failures-fatal");
+                assert_eq!(fatal, linux, "{host:?}");
             }
         }
     }

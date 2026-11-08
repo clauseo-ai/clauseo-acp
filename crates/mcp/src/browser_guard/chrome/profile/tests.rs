@@ -262,3 +262,38 @@ fn a_kept_profile_is_rewritten_without_temporary_files() {
     assert!(is_plain_file(&profile.join("Local State")));
     write::remove_dir_all(&dir).unwrap();
 }
+
+/// What `chrome://flags` turned on in the kept `Local State` is gone before the next start, and
+/// nothing else changes: Chrome's other keys stay, and a `Local State` without them gets none.
+#[test]
+fn chrome_flags_choices_are_reset_before_each_start() {
+    let (dir, profile, _) = kept("flags");
+    let file = profile.join("Local State");
+    let read = |file: &Path| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap()
+    };
+    let rewritten = serde_json::json!({
+        "browser": {
+            "enabled_labs_experiments": ["enable-features@1", "unsafely-treat-insecure-origin-as-secure"],
+            "enabled_labs_experiments_origin_lists": {"unsafely-treat-insecure-origin-as-secure": "http://a"},
+            "first_run_finished": true,
+        },
+        "chrome_own": 7,
+    });
+    write::write(&file, rewritten.to_string()).unwrap();
+    ready_again(&dir, &profile);
+    let local = read(&file);
+    assert_eq!(
+        local["browser"],
+        serde_json::json!({"first_run_finished": true}),
+        "{local}"
+    );
+    assert_eq!(local["chrome_own"], 7, "{local}");
+    // No `browser` key: none is made.
+    write::write(&file, r#"{"chrome_own": 7}"#).unwrap();
+    ready_again(&dir, &profile);
+    let local = read(&file);
+    assert!(local.get("browser").is_none(), "{local}");
+    assert_eq!(local["chrome_own"], 7, "{local}");
+    write::remove_dir_all(&dir).unwrap();
+}
