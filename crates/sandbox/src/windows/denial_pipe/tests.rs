@@ -1,6 +1,7 @@
 //! The denial pipe's names and records, and the outer's sink, on every OS: a round trip, the
-//! strict decode's refusals, a stderr line in the old shape read as nothing, and the feed that
-//! refuses the launch when the pipe it names can't be opened.
+//! strict decode's refusals, names escaped and capped, a stderr line in the old shape read as
+//! nothing and a valid record on stderr relayed as plain bytes, and the feed that refuses the
+//! launch when the pipe it names can't be opened.
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -157,9 +158,17 @@ fn a_bad_line_between_two_good_ones_is_skipped_and_both_good_ones_read() {
 
 /// The old stderr line, as an agent could write it to its own stderr (which the outer relays),
 /// and a notice in the outer's old words: neither is a record, and a record is the one way a
-/// set-aside or a notice reaches the host now.
+/// set-aside or a notice reaches the host now. A line that is a valid record, written to the
+/// agent's stderr, is no record either: the outer's stderr relay (`runner::end::copy`) passes it
+/// on as plain bytes and nothing reads it as a record. Only the denial pipe's reader decodes,
+/// and nothing in the crate feeds it stderr (`decode` and [`RecordReader`] are used here alone).
 #[test]
 fn a_forged_stderr_line_makes_no_denial_and_no_notice() {
+    let valid = encode(&moved()).unwrap();
+    let mut relayed = Vec::new();
+    crate::windows::runner::end::copy(valid.as_slice(), &mut relayed);
+    assert_eq!(relayed, valid, "passed on as it came, nothing taken out");
+
     let forged = [
         format!(
             "clauseo-sandbox-run: set aside\tfoo\taside\\foo\t{}",

@@ -79,7 +79,7 @@ mod ca;
 #[cfg(windows)]
 mod desktop;
 #[cfg(any(windows, test))]
-mod end;
+pub(in crate::windows) mod end;
 pub mod env;
 pub mod frame;
 #[cfg(any(windows, test))]
