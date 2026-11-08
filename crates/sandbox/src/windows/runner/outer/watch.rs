@@ -91,7 +91,7 @@ fn start(
             let ran = catch_unwind(AssertUnwindSafe(|| {
                 let guard = OsGuard(match folder {
                     Folder::Matter => GitGuard::new(&root, &data_dir, &matter),
-                    Folder::Other => GitGuard::scanned(&root, &data_dir, &matter),
+                    Folder::Other => GitGuard::notes(&root, &data_dir, &matter),
                 });
                 let session = OsSession {
                     end: Arc::clone(&end),

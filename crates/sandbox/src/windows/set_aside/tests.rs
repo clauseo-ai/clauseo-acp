@@ -24,11 +24,13 @@ mod live_ends;
 #[cfg(unix)]
 mod live_hits;
 mod nested;
+mod notes;
 #[cfg(unix)]
 mod pool;
 #[cfg(unix)]
 mod posix;
 mod repo_shapes;
+mod restore_refusals;
 #[cfg(unix)]
 mod round4;
 #[cfg(unix)]

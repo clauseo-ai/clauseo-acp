@@ -142,7 +142,20 @@ impl Watched {
         data_dir: &Path,
         matter: &MatterId,
     ) -> Watched {
-        let place = Place::new(data_dir, matter);
+        Watched::from_place(volume, root, Place::new(data_dir, matter))
+    }
+
+    /// [`Watched::new`] for `matter`'s notes folder `root`, from its record (`Place::notes`).
+    pub(super) fn new_notes(
+        volume: &impl Volume,
+        root: &Path,
+        data_dir: &Path,
+        matter: &MatterId,
+    ) -> Watched {
+        Watched::from_place(volume, root, Place::notes(data_dir, matter))
+    }
+
+    fn from_place(volume: &impl Volume, root: &Path, place: Place) -> Watched {
         let record = place.lock().and_then(|held| {
             let record = place.read_record();
             drop(held);
@@ -159,6 +172,7 @@ impl Watched {
 
     /// The watch's view of a folder the record doesn't cover (the matter's notes folder): what a
     /// scan finds there now, moved into `matter`'s set-aside.
+    #[cfg(test)]
     pub(super) fn new_scanned(
         volume: &impl Volume,
         root: &Path,
