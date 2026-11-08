@@ -315,6 +315,22 @@ impl Sweeper for Fake {
         Ok(())
     }
 
+    fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed> {
+        // As CompareStringOrdinal ignores case: each character upper-cased alone, by its simple
+        // mapping. The Kelvin sign is upper case already and stays itself.
+        let upper = |text: &str| -> String {
+            let one = |c: char| {
+                let mut up = c.to_uppercase();
+                match (up.next(), up.next()) {
+                    (Some(single), None) => single,
+                    _ => c,
+                }
+            };
+            text.chars().map(one).collect()
+        };
+        Ok(upper(a) == upper(b))
+    }
+
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
         if self.delete_refuse.iter().any(|refused| refused == name) {
             return Err("ITaskFolder::DeleteTask failed (0x80070005)".to_owned());

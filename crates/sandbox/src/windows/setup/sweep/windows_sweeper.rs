@@ -5,7 +5,8 @@
 //! (`pool_steps::windows_record`), and the Event Log.
 #![expect(
     unsafe_code,
-    reason = "COM calls to the Task Scheduler, LookupAccountNameW and SHGetKnownFolderPath"
+    reason = "COM calls to the Task Scheduler, LookupAccountNameW, SHGetKnownFolderPath and \
+              CompareStringOrdinal"
 )]
 
 use std::ffi::OsString;
@@ -13,6 +14,7 @@ use std::os::windows::ffi::OsStringExt as _;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED};
+use windows::Win32::Globalization::{COMPARESTRING_RESULT, CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::{
     LookupAccountNameW, OWNER_SECURITY_INFORMATION, PSID, SID_NAME_USE,
 };
@@ -266,6 +268,10 @@ impl Sweeper for WindowsSweeper {
         unsafe { instance.Stop() }.map_err(failed("IRunningTask::Stop"))
     }
 
+    fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed> {
+        same_task_path(a, b)
+    }
+
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {
         // SAFETY: a live folder and a BSTR that outlives the call; flags 0.
         unsafe { folder.DeleteTask(&BSTR::from(name), 0) }
@@ -274,6 +280,20 @@ impl Sweeper for WindowsSweeper {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+}
+
+/// Whether `a` and `b` are one task's path: `CompareStringOrdinal` with case ignored, as
+/// [`Sweeper::same_task_path`] says; `Err` when the call fails (it returns 0).
+pub(super) fn same_task_path(a: &str, b: &str) -> Result<bool, Failed> {
+    let a: Vec<u16> = a.encode_utf16().collect();
+    let b: Vec<u16> = b.encode_utf16().collect();
+    // SAFETY: both slices are valid for their lengths, and the call only reads them.
+    let compared = unsafe { CompareStringOrdinal(&a, &b, true) };
+    match compared {
+        CSTR_EQUAL => Ok(true),
+        COMPARESTRING_RESULT(0) => Err("CompareStringOrdinal failed".to_owned()),
+        _ => Ok(false),
     }
 }
 

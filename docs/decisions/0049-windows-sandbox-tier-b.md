@@ -2052,11 +2052,14 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    left to trigger and no job left to notify, it stops the running instances of the pool's
    tasks the walk found, deleted or not, since deleting a task ends none (`sweep::running`):
    the running instances are listed once (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`)
-   and each whose path (`IRunningTask::Path`, compared without case) is one of theirs is
-   stopped (`IRunningTask::Stop`). Stopping them before the delete, as an earlier version did,
-   left an instance its trigger started in between. A stop that fails, an instance whose path
-   can't be read (it may be theirs), a list that can't be read, or a pool task whose folder's
-   path can't be read is 56. An instance's children may outlive it: the final stop a marker
+   and each whose path (`IRunningTask::Path`) is one of theirs is stopped
+   (`IRunningTask::Stop`). Paths are compared as Windows compares names
+   (`CompareStringOrdinal`, case ignored), never by Unicode's full lowercase: under that the
+   Kelvin sign (U+212A) is `k`, so a pool task named `Tas\u{212A}` would have made SYSTEM stop
+   the instances of `Task` in the same folder, the lawyer's or an updater's. Stopping them
+   before the delete, as an earlier version did, left an instance its trigger started in
+   between. A stop that fails, an instance whose path can't be read or compared (it may be
+   theirs), a list that can't be read, or a pool task whose folder's path can't be read is 56. An instance's children may outlive it: the final stop a marker
    past its first stop waits for ends them ("The unclean-session marker");
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
    and writes `SweepCompleted` (`REG_QWORD`, a `FILETIME`: when the walk began) and then

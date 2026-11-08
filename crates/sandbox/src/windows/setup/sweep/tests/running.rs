@@ -113,3 +113,29 @@ fn a_pool_task_whose_delete_fails_still_has_its_instances_stopped() {
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
     assert!(fake.done.contains(&r"stop \A\pool".to_owned()));
 }
+
+#[test]
+fn a_pool_task_named_with_the_kelvin_sign_doesnt_alias_another_task_in_its_folder() {
+    // U+212A lowercases to `k`, but Windows keeps `\A\tas\u{212A}` and `\A\task` apart: the
+    // lawyer's `\A\task` keeps running, and only the pool task's own instance stops.
+    let mut fake = Fake::new(&[1010]);
+    fake.accounts
+        .insert("lawyer".to_owned(), Sid::parse(OWNER).unwrap());
+    fake.task("\\A", "tas\u{212A}", user("S-1-5-21-1-2-3-1010"));
+    fake.task("\\A", "task", user("lawyer"));
+    fake.running = Ok(vec![
+        Ok(r"\A\task".to_owned()),
+        Ok(r"\A\TASK".to_owned()),
+        Ok("\\a\\TAS\u{212A}".to_owned()),
+    ]);
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.deleted(), ["\\A\\tas\u{212A}"]);
+    let stopped: Vec<&String> = fake
+        .done
+        .iter()
+        .filter(|d| d.starts_with("stop "))
+        .collect();
+    assert_eq!(stopped, ["stop \\a\\TAS\u{212A}"]);
+    // What the earlier comparison did: Rust's lowercase folds the sign to `k`.
+    assert_eq!("tas\u{212A}".to_lowercase(), "task");
+}
