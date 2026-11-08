@@ -20,23 +20,32 @@ const CODEX_PORT_VAR: &str = "FAKE_CODEX_PORT";
 const CODEX_CANCELLED: &str = "Login cancelled";
 /// The file a login `/cancel` ended leaves in its home: the tests' proof the request came.
 const CANCELLED_FILE: &str = "fake-login-cancelled";
+/// The file a login with `FAKE_CODEX_PORT` leaves in its home once it listens there: the tests
+/// wait for it, not for a connection, so no probe of theirs reaches the port before the login
+/// does (a refused connection takes about 2 s on Windows) or takes a turn of its answers.
+const LISTENING_FILE: &str = "fake-login-listening";
 /// The file `slow-save` leaves in its home once the whole login file is written.
 const SAVE_FINISHED_FILE: &str = "fake-save-finished";
 /// The line `slow-save` prints as its callback arrives, before it starts writing.
 const CODEX_CALLBACK_RECEIVED: &str = "callback received";
 
 /// Codex's browser login. It prints where its callback listens. With `FAKE_CODEX_PORT` it binds
-/// that port on `127.0.0.1` first: under `never` it then answers requests one at a time until
-/// `GET /cancel` ends it (`Login cancelled`, exit 1, nothing written); under `slow-save` it saves
-/// the login file slowly while the port stays bound, and exits 0 without answering. Without the
-/// variable it binds nothing.
+/// that port on `127.0.0.1` first and leaves [`LISTENING_FILE`]: under `never` it then answers
+/// requests one at a time until `GET /cancel` ends it (`Login cancelled`, exit 1, nothing
+/// written); under `slow-save` it saves the login file slowly while the port stays bound, and
+/// exits 0 without answering. Without the variable it binds nothing.
 pub(super) fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<i32> {
     if matches!(script, Script::PortBusy) {
         say(CODEX_PORT_BUSY_LINE)?;
         return Ok(FAILED);
     }
     let listener = match callback_port() {
-        Some(port) => Some(TcpListener::bind((Ipv4Addr::LOCALHOST, port))?),
+        Some(port) => {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+            write::create_dir_all(folder)?;
+            write::write(folder.join(LISTENING_FILE), b"")?;
+            Some(listener)
+        }
         None => None,
     };
     say(CODEX_CALLBACK_LINE)?;
