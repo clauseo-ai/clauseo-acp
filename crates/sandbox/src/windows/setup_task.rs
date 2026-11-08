@@ -25,8 +25,9 @@
 //!    check gets nothing ([`SetUpError::NotTheServer`]). A server process no longer listed was
 //!    ending as this connected, and is taken as gone;
 //! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
-//!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server that went away before replying (one that was ending as this
-//!    connected) is asked again, once, after the task is started again;
+//!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server
+//!    that went away before replying (one that was ending as this connected) is asked again,
+//!    once, after the task is started again;
 //! 5. a pipe someone else serves is most likely a pool user's process holding the name: the
 //!    pool's processes are stopped (`request_pool_stop`), and once the stop task is done, steps
 //!    1 to 4 run once more. A pipe still someone else's is [`SetUpError::Squatted`]
