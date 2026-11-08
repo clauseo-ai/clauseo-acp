@@ -2,25 +2,31 @@
 //! `Users` can read every key the launch check reads (the VM's R5c read). The writes open the
 //! `AppID`'s key with `REG_OPTION_BACKUP_RESTORE` and `SeBackupPrivilege` and
 //! `SeRestorePrivilege` enabled (as wslservice writes its P9NP key), so a key `TrustedInstaller`
-//! owns is written without taking its ownership or touching its DACL; the open never makes a
-//! key that isn't there. The record's two values go through the set-up's record writer.
+//! owns is written without taking its ownership or touching its DACL; the open (`NtOpenKeyEx`)
+//! never makes a key that isn't there, and Windows checks each new value just before it is set. The record's two values go through the set-up's record writer.
 //! Errors name the call and its code, never a path or a SID.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry calls")]
 
+use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HANDLE,
+    NTSTATUS, OBJ_CASE_INSENSITIVE, STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND,
+    UNICODE_STRING, WIN32_ERROR,
+};
+use windows::Win32::Security::{
+    GetSecurityDescriptorLength, IsValidSecurityDescriptor, PSECURITY_DESCRIPTOR,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_SET_VALUE,
-    KEY_WOW64_64KEY, REG_BINARY, REG_CREATE_KEY_DISPOSITION, REG_CREATED_NEW_KEY,
-    REG_OPTION_BACKUP_RESTORE, RRF_RT_REG_BINARY, RRF_SUBKEY_WOW6464KEY, RegCloseKey,
-    RegCreateKeyExW, RegDeleteKeyExW, RegDeleteValueW, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW,
-    RegSetValueExW,
+    KEY_WOW64_64KEY, REG_BINARY, REG_OPTION_BACKUP_RESTORE, RRF_RT_REG_BINARY,
+    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegDeleteValueW, RegEnumKeyExW, RegGetValueW,
+    RegOpenKeyExW, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::record::{AppId, WslRecord};
 use super::seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
+use crate::windows::acl::object::words;
 use crate::windows::acl::privilege::{BACKUP_RESTORE, Privileges};
 use crate::windows::record::{read_string, sandbox_group_sid};
 use crate::windows::sids::Sid;
@@ -198,44 +204,73 @@ fn app_key(app_id: &AppId) -> String {
     format!(r"{APPID_KEY}\{app_id}")
 }
 
+windows::core::link!("ntdll.dll" "system" fn NtOpenKeyEx(
+    key: *mut HANDLE,
+    access: u32,
+    attributes: *const OBJECT_ATTRIBUTES,
+    options: u32
+) -> NTSTATUS);
+
 /// `app_id`'s key opened for a backup-restore write, with the privileges that grant it held
-/// for as long as the pair lives. A key the open made (it wasn't there) is deleted again and
-/// is the error.
+/// for as long as the pair lives. `NtOpenKeyEx` with `REG_OPTION_BACKUP_RESTORE` opens only
+/// a key that is there: a missing one is the error and is never made, so nothing here races an
+/// MSI writing it. The path is the native one, `\Registry\Machine\SOFTWARE\...`: this exe is
+/// 64-bit, so it is the 64-bit view. `Privileges` changes this process's token, not a
+/// thread's: the set-up and the refresh call this from one thread, with no other enabling or
+/// dropping privileges meanwhile.
 fn open_to_write(app_id: &AppId) -> Result<(Key, Privileges), WslError> {
     let privileges = Privileges::enable(&BACKUP_RESTORE)
         .map_err(|error| WslError(format!("the backup and restore privileges: {error}")))?;
-    let path = app_key(app_id);
-    let subkey = HSTRING::from(path.as_str());
-    let mut opened = HKEY::default();
-    let mut disposition = REG_CREATE_KEY_DISPOSITION::default();
-    // SAFETY: the subkey is NUL-terminated; `opened` and `disposition` are live out-pointers;
-    // no security attributes. With REG_OPTION_BACKUP_RESTORE the access asked is replaced by
-    // what the enabled privileges grant. The key is closed by `Key`.
-    let code = unsafe {
-        RegCreateKeyExW(
-            HKEY_LOCAL_MACHINE,
-            &subkey,
-            None,
-            PCWSTR::null(),
-            REG_OPTION_BACKUP_RESTORE,
-            KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_WOW64_64KEY,
-            None,
+    let path: Vec<u16> = format!(r"\Registry\Machine\{}", app_key(app_id))
+        .encode_utf16()
+        .collect();
+    let bytes = u16::try_from(path.len() * 2)
+        .map_err(|_error| WslError("an AppID's key path is too long".to_owned()))?;
+    let name = UNICODE_STRING {
+        Length: bytes,
+        MaximumLength: bytes,
+        Buffer: PWSTR(path.as_ptr().cast_mut()),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).unwrap_or(0),
+        ObjectName: &raw const name,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        ..OBJECT_ATTRIBUTES::default()
+    };
+    let mut opened = HANDLE::default();
+    let access = (KEY_SET_VALUE | KEY_QUERY_VALUE).0;
+    // SAFETY: `name` points into `path`, which outlives the call and is never written;
+    // `attributes` and `opened` are live. With REG_OPTION_BACKUP_RESTORE the access asked is
+    // replaced by what the enabled privileges grant. The key is closed by `Key`.
+    let status = unsafe {
+        NtOpenKeyEx(
             &raw mut opened,
-            Some(&raw mut disposition),
+            access,
+            &raw const attributes,
+            REG_OPTION_BACKUP_RESTORE.0,
         )
     };
-    if code != ERROR_SUCCESS {
-        return Err(failed("RegCreateKeyExW", code));
+    if status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND {
+        return Err(WslError("the AppID's key isn't there".to_owned()));
     }
-    let key = Key(opened);
-    if disposition == REG_CREATED_NEW_KEY {
-        drop(key);
-        // SAFETY: the subkey is NUL-terminated; the key was made by this call alone.
-        let _deleted =
-            unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
-        return Err(WslError("the AppID's key wasn't there".to_owned()));
+    if status.is_err() {
+        return Err(WslError(format!("NtOpenKeyEx failed ({:#010x})", status.0)));
     }
-    Ok((key, privileges))
+    Ok((Key(HKEY(opened.0)), privileges))
+}
+
+/// Whether `bytes` is a valid self-relative descriptor of exactly that length, as Windows
+/// itself judges it (`IsValidSecurityDescriptor`, `GetSecurityDescriptorLength`): the last
+/// check before a write, after `sd.rs`'s own.
+fn valid_descriptor(bytes: &[u8]) -> bool {
+    let mut aligned = words(bytes);
+    let descriptor = PSECURITY_DESCRIPTOR(aligned.as_mut_ptr().cast());
+    // SAFETY: `aligned` holds `bytes`, 8-byte aligned, and lives for both calls, which only
+    // read it; the length is asked only of a descriptor the first call found valid.
+    unsafe {
+        IsValidSecurityDescriptor(descriptor).as_bool()
+            && usize::try_from(GetSecurityDescriptorLength(descriptor)).ok() == Some(bytes.len())
+    }
 }
 
 impl WslRead for WindowsWsl {
@@ -311,6 +346,11 @@ impl WslWrite for WindowsWsl {
     }
 
     fn write_launch_permission(&mut self, app_id: &AppId, bytes: &[u8]) -> Result<(), WslError> {
+        if !valid_descriptor(bytes) {
+            return Err(WslError(
+                "Windows doesn't take the new launch permission as a valid descriptor".to_owned(),
+            ));
+        }
         let (key, _privileges) = open_to_write(app_id)?;
         let name = HSTRING::from(LAUNCH_PERMISSION);
         // SAFETY: the key is open for writing; the name is NUL-terminated and `bytes` is a live

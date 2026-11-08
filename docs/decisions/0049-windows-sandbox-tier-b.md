@@ -2406,10 +2406,13 @@ comes before every allow. A missing value is built from
 `HKLM\SOFTWARE\Microsoft\Ole\DefaultLaunchPermission`, or, without one, from COM's built-in
 default (`O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCLCSWRP;;;IU)(A;;CCDCLCSWRP;;;SY)`, which grants
 INTERACTIVE, and a seclogon pool token is INTERACTIVE), then denied. The new bytes are parsed
-again and checked to be the old with the deny added; the write opens the key with
-`REG_OPTION_BACKUP_RESTORE` and `SeBackupPrivilege` and `SeRestorePrivilege` enabled, so a key
-`TrustedInstaller` owns is written without taking its ownership or touching its DACL, and the
-open never makes a key that isn't there; the value is read back and checked. `AccessPermission`
+again and checked to be the old with the deny added, then Windows checks them too
+(`IsValidSecurityDescriptor`, and `GetSecurityDescriptorLength` equal to the byte count); the write
+opens the key with `NtOpenKeyEx` and `REG_OPTION_BACKUP_RESTORE`, `SeBackupPrivilege` and
+`SeRestorePrivilege` enabled, so a key `TrustedInstaller` owns is written without taking its
+ownership or touching its DACL. That open never makes a key: a missing one is a failure, so a
+write can't race an MSI that is making the key (an earlier create-then-delete could); the value
+is read back and checked. `AccessPermission`
 is left alone: the service ignores it.
 
 **When.** The elevated set-up writes it as step 8b, after the network filters, as admin. It never
