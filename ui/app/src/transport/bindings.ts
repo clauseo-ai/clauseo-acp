@@ -4296,6 +4296,13 @@ export type ProtectionView = {
 	 *  user owns it). Missing from an older host: `false`.
 	 */
 	retry_asks_admin?: boolean,
+	/**
+	 *  The data folder's identity can't be read, so the data fence compares by names only
+	 *  (decision record 0030); false from an older host. Also true while one of the folders
+	 *  above the data folder can't be read (a search from it is then compared by name). The
+	 *  host retries at each permission request and sends the view again when this flips.
+	 */
+	data_fence_names_only?: boolean,
 };
 
 /**

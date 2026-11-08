@@ -181,6 +181,10 @@ open_unit_enum! {
 /// host builds it with [`ProtectionView::new`], so `tier` always agrees with `computer`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "four independent flags on a query view; an enum would merge unrelated settings"
+)]
 pub struct ProtectionView {
     /// The best tier this computer can give now: `computer`'s tier when it is `protected`, `c`
     /// when it is not (until a needed set-up is done, say).
@@ -201,11 +205,18 @@ pub struct ProtectionView {
     /// user owns it). Missing from an older host: `false`.
     #[serde(default)]
     pub retry_asks_admin: bool,
+    /// The data folder's identity can't be read, so the data fence compares by names only
+    /// (decision record 0030); false from an older host. Also true while one of the folders
+    /// above the data folder can't be read (a search from it is then compared by name). The
+    /// host retries at each permission request and sends the view again when this flips.
+    #[serde(default)]
+    pub data_fence_names_only: bool,
 }
 
 impl ProtectionView {
     /// The view of `computer`, with `tier` taken from it: its tier when protected, C when not;
-    /// nothing in progress and `retry_asks_admin` false, which the host sets after.
+    /// nothing in progress, `retry_asks_admin` and `data_fence_names_only` false, which the host
+    /// sets after.
     /// `Protected { tier: C }` is a contradiction the host never builds (debug assertion).
     #[must_use]
     pub fn new(computer: Protection, required: bool, unprotected_auto_allowed: bool) -> Self {
@@ -223,6 +234,7 @@ impl ProtectionView {
             unprotected_auto_allowed,
             in_progress: None,
             retry_asks_admin: false,
+            data_fence_names_only: false,
         }
     }
 }
