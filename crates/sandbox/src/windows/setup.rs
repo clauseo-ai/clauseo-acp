@@ -146,6 +146,7 @@ pub use outcome::{
 // import of both would make their shared method names ambiguous in the set-up's tests.
 pub use remove::{
     LedgerWork, REMOVE_LOCK_WAIT_MS, RemoveFailure, RemoveReport, RemoveStep, Removed, remove,
+    remove_then,
 };
 #[cfg(windows)]
 pub use windows_machine::{Names, WindowsMachine};

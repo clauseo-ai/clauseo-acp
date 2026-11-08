@@ -56,7 +56,7 @@ use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
 use super::owner::{Owner, this_process};
 use super::reclaim_run::run_reclaim;
 use super::record_write::RECORD_KEY;
-use super::remove::{WindowsRemoval, per_machine_allowed, remove};
+use super::remove::{Removed, WindowsRemoval, per_machine_allowed, remove_then};
 use super::result_file::{self, SetupResult};
 use super::stop;
 use super::windows_machine::{Names, WindowsMachine};
@@ -261,15 +261,16 @@ pub(crate) fn run_remove(
     let record_key = names.record_key.clone();
     let invoker_sid = invoker.as_ref().map(|owner| owner.sid().clone());
     let mut machine = WindowsRemoval::new(names, invoker);
-    match remove(&mut machine, &mut acl, per_machine) {
+    // The admin copy goes while the set-up lock is still held (`remove_then`), so a refresh
+    // skips. When the teardown doesn't run (a per-user removal by someone else), nothing goes.
+    let mut taken = Ok(());
+    let mut teardown = |_: &Removed| {
+        taken =
+            remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
+    };
+    match remove_then(&mut machine, &mut acl, per_machine, &mut teardown) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
-            let taken = remove_admin_copy_if_theirs(
-                &record_key,
-                uninstall,
-                per_machine,
-                invoker_sid.as_ref(),
-            );
             removal_exit(taken, &mut |line| refresh::event_log(true, line))
         }
         Err(failure) => {
