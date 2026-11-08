@@ -1314,10 +1314,25 @@ admin copy.
    entry, the token's user counts. With neither, the owner (which a standard user can't set to
    another account) may add the process, never clear it: an owner that is a pool SID gets it stopped, and any other owner leaves it unknown, since
    an owner is the creator, not the user (an elevated administrator's processes are owned by
-   Administrators). A process whose user no source gives is never stopped but counts as unknown,
-   unless it also can't be opened with `PROCESS_TERMINATE` while the list was read (a protected
-   process; one a pool user started would still be named by the list). When the list can't be
-   read at all, that exemption goes too: the run ends at 48 unless the token, or a pool owner,
+   Administrators). A process whose user no source gives is never stopped but counts as unknown
+   (48, every pool user marked), with one exemption. It can't be opened with `PROCESS_TERMINATE`,
+   the list puts it in session 0, and its image, read through the query-limited handle (which a
+   protected process grants), is a system one: no image file at all (the kernel's minimal
+   processes: System, Registry, Memory Compression, Secure System; `ProcessImageFileName` is
+   empty), or a Win32 path inside `FOLDERID_Windows`, `FOLDERID_ProgramFiles` or
+   `FOLDERID_ProgramFilesX86` (from `SHGetKnownFolderPath`, never the environment), compared by
+   whole components, ASCII case aside, with nothing trimmed, so `C:\Windows2` or `C:\Windows `
+   isn't `C:\Windows`. Why: a standard user may start a signed binary as a protected process
+   (PPL), which SYSTEM can't open with `READ_CONTROL` even with `SeDebugPrivilege`, so neither
+   its token nor its owner can be read, and the list gives no SID once its token's DACL shuts out
+   SYSTEM. A pool user's processes run in the lawyer's interactive session
+   (`CreateProcessWithLogonW` starts them in the caller's), so outside session 0 such a process
+   may be one of theirs. Session 0's unopenable processes are protected services and the
+   kernel's, but a pool user's own scheduled task (S4U, or "run whether logged on or not") also
+   runs there; its image can't be put under those folders, which only administrators write, so a
+   signed binary copied anywhere else and started protected is unknown. A path that can't be
+   read, or a process the list didn't list, is unknown too. When the list can't be read at all,
+   that exemption goes too: the run ends at 48 unless the token, or a pool owner,
    named every process. Pid 0 and 4 and this process are never looked at. Each pass adds the pool
    users it found to `ResetSids` (step 6) before it stops anything. The pass suspends every pool user's process it found (`NtSuspendProcess`),
    then terminates each through its handle, so a parent can't start another between two
