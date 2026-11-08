@@ -382,9 +382,10 @@ build 26100):
     JSON line tagged by `kind`, at most 256 KiB: `{"kind":"set_aside","path":...,"to":...,
     "what":...}` or `{"kind":"notice","text":...}`. The line carries no version: kinds are only
     added, and a change of shape bumps `LAUNCH_VERSION`, since runner and host ship together. An
-    unknown field, kind or `what`, or trailing data, is an error, and `read_record` stops at
-    the first. C4's stand-in reader (`launch/records.rs`) differs until it uses this module: it
-    knows no `notice`, caps lines at 64 KiB, and skips a bad line and reads on. A writer thread
+    unknown field, kind or `what`, or trailing data, makes a line no record: the host's
+    `RecordReader` skips it and reads on (logged once a session, never its words), so one bad
+    line never drops the denials after it. `windows/denial_pipe.rs` is the format's one source;
+    C4's launcher reads with it (`decode` per line, or `RecordReader`). A writer thread
     sends the records, so a slow host never holds up a kill; the stop drains it for up to 2 s. A
     write that fails is only logged.
     The set-aside becomes a `Denial::SetAside` (its path, where it went, and the agent's plain

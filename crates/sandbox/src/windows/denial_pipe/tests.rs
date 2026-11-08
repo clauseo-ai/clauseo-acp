@@ -2,15 +2,15 @@
 //! strict decode's refusals, a stderr line in the old shape read as nothing, and the feed that
 //! refuses the launch when the pipe it names can't be opened.
 
-use std::io::{self, BufReader, Write};
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::sink::{RecordSink, Sent, open_feed};
 use super::{
-    NotADenialPipe, RECORD_CAP, Record, RecordError, check_pipe_name, decode, denial_pipe_name,
-    encode, read_record,
+    NotADenialPipe, RECORD_CAP, Record, RecordError, RecordReader, check_pipe_name, decode,
+    denial_pipe_name, encode,
 };
 use crate::windows::pipe::PipeSet;
 use crate::{Denial, SetAsideWhat};
@@ -100,24 +100,41 @@ fn the_decode_refuses_unknown_shapes_garbage_and_oversize() {
 fn records_are_read_one_line_at_a_time_up_to_the_cap() {
     let mut stream = encode(&moved()).unwrap();
     stream.extend(encode(&Record::notice("two")).unwrap());
-    let mut reader = BufReader::new(stream.as_slice());
-    assert_eq!(read_record(&mut reader).unwrap(), Some(moved()));
-    assert_eq!(
-        read_record(&mut reader).unwrap(),
-        Some(Record::notice("two"))
-    );
-    assert_eq!(read_record(&mut reader).unwrap(), None);
+    let mut reader = RecordReader::new(stream.as_slice());
+    assert_eq!(reader.read().unwrap(), Some(moved()));
+    assert_eq!(reader.read().unwrap(), Some(Record::notice("two")));
+    assert_eq!(reader.read().unwrap(), None);
+    assert_eq!(reader.skipped(), 0);
 
     let cut = &encode(&moved()).unwrap()[..20];
-    assert_eq!(
-        read_record(&mut BufReader::new(cut)),
-        Err(RecordError::Truncated)
-    );
+    let mut reader = RecordReader::new(cut);
+    assert_eq!((reader.read().unwrap(), reader.skipped()), (None, 1));
     let endless = vec![b'x'; RECORD_CAP * 2];
-    assert_eq!(
-        read_record(&mut BufReader::new(endless.as_slice())),
-        Err(RecordError::TooLong)
-    );
+    let mut reader = RecordReader::new(endless.as_slice());
+    assert_eq!((reader.read().unwrap(), reader.skipped()), (None, 1));
+}
+
+/// One bad line between two good ones (garbage, an unknown kind, a line past the cap) is
+/// skipped, and both good records still arrive.
+#[test]
+fn a_bad_line_between_two_good_ones_is_skipped_and_both_good_ones_read() {
+    let mut long = vec![b'x'; RECORD_CAP + 10];
+    long.push(b'\n');
+    let bads = [
+        b"not json\n".to_vec(),
+        b"{\"kind\":\"later\"}\n".to_vec(),
+        long,
+    ];
+    for bad in bads {
+        let mut stream = encode(&moved()).unwrap();
+        stream.extend(&bad);
+        stream.extend(encode(&Record::notice("after")).unwrap());
+        let mut reader = RecordReader::new(stream.as_slice());
+        assert_eq!(reader.read().unwrap(), Some(moved()));
+        assert_eq!(reader.read().unwrap(), Some(Record::notice("after")));
+        assert_eq!(reader.read().unwrap(), None);
+        assert_eq!(reader.skipped(), 1);
+    }
 }
 
 /// The old stderr line, as an agent could write it to its own stderr (which the outer relays),
@@ -135,7 +152,8 @@ fn a_forged_stderr_line_makes_no_denial_and_no_notice() {
     for line in forged {
         assert!(decode(line.as_bytes()).is_err(), "{line}");
         let stream = format!("{line}\n");
-        assert!(read_record(&mut BufReader::new(stream.as_bytes())).is_err());
+        let mut reader = RecordReader::new(stream.as_bytes());
+        assert_eq!((reader.read().unwrap(), reader.skipped()), (None, 1));
     }
 }
 
@@ -202,13 +220,10 @@ fn the_sink_writes_each_record_as_a_line_and_drains_at_the_end() {
     assert_eq!(sink.send(&moved()), Sent::Queued);
     sink.drain(Duration::from_secs(5));
     let bytes = pipe.bytes.lock().unwrap().clone();
-    let mut reader = BufReader::new(bytes.as_slice());
-    assert_eq!(
-        read_record(&mut reader).unwrap(),
-        Some(Record::notice("one"))
-    );
-    assert_eq!(read_record(&mut reader).unwrap(), Some(moved()));
-    assert_eq!(read_record(&mut reader).unwrap(), None);
+    let mut reader = RecordReader::new(bytes.as_slice());
+    assert_eq!(reader.read().unwrap(), Some(Record::notice("one")));
+    assert_eq!(reader.read().unwrap(), Some(moved()));
+    assert_eq!(reader.read().unwrap(), None);
     // Drained: what comes later is only logged.
     assert_eq!(sink.send(&moved()), Sent::Logged);
 }

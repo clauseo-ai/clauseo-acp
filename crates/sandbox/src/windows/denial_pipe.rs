@@ -18,15 +18,18 @@
 //! - **The records:** one JSON object per line, tagged by `kind` (`{"kind":"set_aside","path":
 //!   …,"to":…,"what":"git_repository"}`, `{"kind":"notice","text":…}`; [`encode`]), at most
 //!   [`RECORD_CAP`] bytes with its newline. Kinds are appended, never renamed; the runner and the
-//!   host ship together, and a change of shape bumps `LAUNCH_VERSION`. [`decode`] is strict: no
-//!   unknown field or kind, nothing longer. A [`Record::SetAside`] becomes the session's
-//!   [`Denial::SetAside`] ([`Record::denial`]); a [`Record::Notice`] is for the lawyer. The
-//!   host reads them with [`read_record`] and stops at the first error.
+//!   host ship together, and a change of shape bumps `LAUNCH_VERSION`. [`decode`] parses one
+//!   line, strictly: no unknown field or kind, nothing longer. A [`Record::SetAside`] becomes the
+//!   session's [`Denial::SetAside`] ([`Record::denial`]); a [`Record::Notice`] is for the lawyer.
+//!   The host reads them with a [`RecordReader`], which skips a line it can't parse and reads
+//!   on, so one bad record never drops the denials after it.
+//!
+//! This module is the format's one source: the launcher (PR6) reads with it, not a copy.
 //!
 //! The names and the records hold no Windows call, so their tests run on every OS.
 
 use std::fmt;
-use std::io::{BufRead, Read as _};
+use std::io::{self, BufRead, Read as _};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -172,29 +175,60 @@ pub fn decode(line: &[u8]) -> Result<Record, RecordError> {
     serde_json::from_slice(line).map_err(|error| RecordError::Malformed(error.column()))
 }
 
-/// The next record on `reader`, or `None` at the end of the stream. It reads at most
-/// [`RECORD_CAP`] bytes and one more for a line; after an error the stream is out of step, so
-/// the host stops reading it.
-pub fn read_record(reader: &mut impl BufRead) -> Result<Option<Record>, RecordError> {
-    let mut line = Vec::new();
-    let cap = u64::try_from(RECORD_CAP)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    reader
-        .take(cap)
-        .read_until(b'\n', &mut line)
-        .map_err(|error| RecordError::Io(error.kind()))?;
-    if line.is_empty() {
-        return Ok(None);
+/// The host's reader of the pipe: each record in turn. A line it can't parse (malformed, an
+/// unknown kind, past [`RECORD_CAP`], or cut short by the stream's end) is skipped and the
+/// next one read, so one bad record never drops the denials after it; the first skip is logged,
+/// once for the reader (one session), and never with the line's words.
+pub struct RecordReader<R> {
+    reader: R,
+    skipped: u64,
+}
+
+impl<R: BufRead> RecordReader<R> {
+    /// A reader of `reader`, the host's end of one session's pipe.
+    pub fn new(reader: R) -> RecordReader<R> {
+        RecordReader { reader, skipped: 0 }
     }
-    if line.last() != Some(&b'\n') {
-        return Err(if line.len() > RECORD_CAP {
-            RecordError::TooLong
-        } else {
-            RecordError::Truncated
-        });
+
+    /// The next record, or `None` at the end of the stream; an error only when the pipe fails.
+    pub fn read(&mut self) -> io::Result<Option<Record>> {
+        let cap = u64::try_from(RECORD_CAP)
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        loop {
+            let mut line = Vec::new();
+            (&mut self.reader).take(cap).read_until(b'\n', &mut line)?;
+            if line.is_empty() {
+                return Ok(None);
+            }
+            let record = if line.last() == Some(&b'\n') {
+                decode(&line)
+            } else if line.len() > RECORD_CAP {
+                // The rest of the over-long line goes too, up to its newline.
+                self.reader.skip_until(b'\n')?;
+                Err(RecordError::TooLong)
+            } else {
+                Err(RecordError::Truncated)
+            };
+            match record {
+                Ok(record) => return Ok(Some(record)),
+                Err(error) => self.skip(&error),
+            }
+        }
     }
-    decode(&line).map(Some)
+
+    /// How many lines were skipped so far.
+    pub fn skipped(&self) -> u64 {
+        self.skipped
+    }
+
+    /// Counts a skipped line, logging the first: the error never quotes it.
+    fn skip(&mut self, error: &RecordError) {
+        if self.skipped == 0 {
+            tracing::warn!(%error, "the denial pipe sent a line that isn't a record; skipped");
+        }
+        self.skipped = self.skipped.saturating_add(1);
+    }
 }
 
 #[cfg(test)]
