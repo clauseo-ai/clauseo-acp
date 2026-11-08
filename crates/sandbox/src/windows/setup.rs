@@ -62,9 +62,9 @@ use crate::windows::writer::AclWriter;
 
 #[cfg(test)]
 #[cfg(windows)]
-mod account_list;
+pub(crate) mod account_list;
 #[cfg(windows)]
-mod accounts;
+pub(crate) mod accounts;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
