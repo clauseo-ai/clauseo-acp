@@ -121,7 +121,7 @@ fn a_principal_that_cant_be_read_is_still_56() {
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
     assert_eq!(fake.deleted(), ["\\pool"]);
     let line = &fake.logged[0].1;
-    assert!(line.contains("1 unreadable, 0 with no user"), "{line}");
+    assert!(line.contains("1 unreadable (0 more skipped"), "{line}");
     assert!(line.contains("1 skipped"), "{line}");
 }
 

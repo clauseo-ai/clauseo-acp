@@ -1,27 +1,30 @@
 //! The sweep's real [`Sweeper`]: the gate's reads (`pool_steps::windows_gate`), BITS
 //! (`pool_steps::windows_bits`), the Task Scheduler's COM API (`ITaskService`, connected as this
-//! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`),
-//! `LookupAccountNameW`, the record's lock and values (`pool_steps::windows_record`), and the
-//! Event Log.
+//! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`), a task's
+//! file (`windows_task_file.rs`), `LookupAccountNameW`, the record's lock and values
+//! (`pool_steps::windows_record`), and the Event Log.
 #![expect(
     unsafe_code,
-    reason = "COM calls to the Task Scheduler, and LookupAccountNameW"
+    reason = "COM calls to the Task Scheduler, LookupAccountNameW and SHGetKnownFolderPath"
 )]
 
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt as _;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED};
 use windows::Win32::Security::{
     LookupAccountNameW, OWNER_SECURITY_INFORMATION, PSID, SID_NAME_USE,
 };
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::TaskScheduler::{
     IRegisteredTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
+use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
-use super::{Failed, Principal, SweepExit, Sweeper, Task, sweep};
+use super::{Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, sweep, windows_task_file};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
 use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
@@ -211,6 +214,16 @@ impl Sweeper for WindowsSweeper {
         accounts::computer_names()
     }
 
+    fn folder_path(&mut self, folder: &ITaskFolder) -> Result<String, Failed> {
+        // SAFETY: a live folder.
+        let path = unsafe { folder.Path() }.map_err(failed("ITaskFolder::Path"))?;
+        Ok(path.to_string())
+    }
+
+    fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed> {
+        windows_task_file::read(&system_folder()?, parts, TASK_FILE_CAP)
+    }
+
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {
         // SAFETY: a live folder and a BSTR that outlives the call; flags 0.
         unsafe { folder.DeleteTask(&BSTR::from(name), 0) }
@@ -305,5 +318,31 @@ fn lookup_account(name: &str) -> Result<Sid, Failed> {
         Ok(Some(sid)) => Ok(sid),
         Ok(None) => Err("LookupAccountNameW gave no SID".to_owned()),
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// `%SystemRoot%\System32` as Windows knows it (`FOLDERID_System`), never from the environment.
+fn system_folder() -> Result<PathBuf, Failed> {
+    let folder = FOLDERID_System;
+    // SAFETY: `folder` is a live GUID for the call; no token is passed (the machine's folder).
+    // The string returned is owned by `Allocated` at once.
+    let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
+        .map_err(failed("SHGetKnownFolderPath"))?;
+    let path = Allocated(path);
+    // SAFETY: on success the call wrote a NUL-terminated string, alive until `path` drops.
+    let units = unsafe { path.0.as_wide() };
+    if units.is_empty() {
+        return Err("Windows gave no system folder".to_owned());
+    }
+    Ok(PathBuf::from(OsString::from_wide(units)))
+}
+
+/// A string `SHGetKnownFolderPath` allocated, freed with `CoTaskMemFree` on drop.
+struct Allocated(PWSTR);
+
+impl Drop for Allocated {
+    fn drop(&mut self) {
+        // SAFETY: the pointer came from SHGetKnownFolderPath and is freed once, here.
+        unsafe { CoTaskMemFree(Some(self.0.0.cast_const().cast())) };
     }
 }

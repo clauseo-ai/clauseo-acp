@@ -1928,8 +1928,20 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    step 2 found it a pool user's name, or when the owner its security descriptor names
    (`IRegisteredTask::GetSecurityDescriptor`, `sweep::sddl_owner`) is a pool SID, whatever
    its principal. A task with neither a user nor a group is 56 unless its owner is the pool's;
-   a task whose definition, principal or owner can't be read is unreadable, never deleted,
-   and 56. No failure stops the walk. Deleting a task ends no running instance of it;
+   a task whose principal or owner can't be read is unreadable, never deleted, and 56. A task
+   whose definition or principal the Task Scheduler won't give (its descriptor shuts SYSTEM
+   out, say) is read from its file instead, `%SystemRoot%\System32\Tasks\<folder>\<name>`
+   (`sweep::task_file`, `sweep/windows_task_file.rs`): every part of the path a plain name (no
+   `..`, `:` or separator; the Task Scheduler's names aren't trusted), the system folder from
+   `SHGetKnownFolderPath`, `Tasks` and each folder below it opened by handle relative to the
+   one above with `OBJ_DONT_REPARSE` and refused if a reparse point, the file refused unless a
+   plain file with one name, `SeBackupPrivilege` enabled for the opens alone and put back
+   after. Its XML is read narrowly: at most 64 KiB, no DTD, no entity but the predefined ones,
+   only `Task/Principals/Principal/UserId` and `GroupId`. When that principal resolves to a
+   SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
+   when it is the pool's, resolves to nothing else, or the file can't be read or is
+   malformed, the task stays unreadable and 56. No failure stops the walk. Deleting a task
+   ends no running instance of it;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found;
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
@@ -1967,10 +1979,15 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 `SweepSequence`, so the marker stays and the next launch asks for another run.
 
 **Risks.**
-- A task whose principal or owner can't be read at all, or that names no one, or a name that
-  resolves to no SID and isn't another domain's, ends every run at 56, and every launch then
-  waits 15 s and is refused, until the task goes: the sweep fails closed rather than leave a
-  task that may be the pool's. Another domain's name that can't be resolved doesn't (step 2).
+- A pool user can keep every sweep at 56: a task of its own the sweep can't read (through the
+  Task Scheduler or its file, step 3), or a flood of Task Scheduler folders (more than 10 000,
+  or one whose descriptor shuts SYSTEM out). Every launch then waits 15 s and is refused with
+  `sandbox.cleaning_up`, until the task or folders go: an administrator's `--remove` (with no pool
+  recorded there is nothing to sweep) or deleting the task clears it. The
+  sweep fails closed rather than leave a task that may be the pool's; a task the file shows
+  isn't the pool's no longer blocks.
+- Any other task whose principal or owner can't be read, that names no one, or whose name
+  resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
