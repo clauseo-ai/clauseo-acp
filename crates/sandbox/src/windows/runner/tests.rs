@@ -57,7 +57,8 @@ fn a_message_round_trips_and_parses() {
     let bytes = message().to_bytes().unwrap();
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), message());
     let mut piped = message();
-    piped.denial_pipe = Some(crate::windows::denial_pipe::random_pipe_name().unwrap());
+    let set = crate::windows::pipe::PipeSet::random().unwrap();
+    piped.denial_pipe = Some(crate::windows::denial_pipe::denial_pipe_name(&set));
     let bytes = piped.to_bytes().unwrap();
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), piped);
 }

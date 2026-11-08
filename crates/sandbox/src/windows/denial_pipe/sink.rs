@@ -1,9 +1,9 @@
-//! The outer runner's end of the denial pipe: records queued by the git watch and written by a
-//! thread of their own, so a host that reads slowly never holds up a watch (whose kill must not
-//! wait). With no pipe, a record is only logged: never written to stderr, where the agent's own
-//! lines go too.
+//! The outer runner's end of the denial pipe: opened before anything runs as the pool user
+//! ([`open_feed`]), then records queued by the git watch and written by a thread of their own,
+//! so a host that reads slowly never holds up a watch (whose kill must not wait). With no pipe
+//! named, a record is only logged: never written to stderr, where the agent's own lines go too.
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -104,4 +104,43 @@ impl RecordSink {
             tracing::warn!("the denial pipe was still busy at the session's end");
         }
     }
+}
+
+/// `ERROR_FILE_NOT_FOUND`: no pipe has the name (the host's end is gone).
+const NOT_FOUND: i32 = 2;
+/// `ERROR_PIPE_BUSY`: the pipe's one instance is taken.
+const BUSY: i32 = 231;
+
+/// The outer's sink for the launch's denial pipe `name`, opened with `open`. No name: a sink
+/// that only logs. A named pipe that can't be opened refuses the launch, with the lawyer's words
+/// for why ([`refusal`]): the session never runs without its feed.
+pub(crate) fn open_feed<W: Write + Send + 'static>(
+    name: Option<&str>,
+    open: impl FnOnce(&str) -> io::Result<W>,
+) -> Result<RecordSink, String> {
+    let Some(name) = name else {
+        tracing::warn!("the launch names no denial pipe: the git watch's records are only logged");
+        return Ok(RecordSink::start(None));
+    };
+    match open(name) {
+        Ok(pipe) => Ok(RecordSink::start(Some(Box::new(pipe)))),
+        Err(error) => {
+            tracing::warn!(%error, "the denial pipe can't be opened: the launch is refused");
+            Err(refusal(&error))
+        }
+    }
+}
+
+/// Why the session didn't start when its denial pipe couldn't be opened, in plain words.
+pub(crate) fn refusal(error: &io::Error) -> String {
+    let why = match error.raw_os_error() {
+        Some(BUSY) => "another program was already connected to it".to_owned(),
+        Some(NOT_FOUND) => "it had already closed".to_owned(),
+        Some(code) => format!("it couldn't be reached (error {code})"),
+        None => format!("it couldn't be reached ({})", error.kind()),
+    };
+    format!(
+        "Clauseo didn't start the session: it couldn't open the channel it uses to tell you what \
+         it moved aside, because {why}. Try again; if this keeps happening, restart Clauseo."
+    )
 }

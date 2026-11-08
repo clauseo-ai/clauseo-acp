@@ -579,8 +579,8 @@ crates/sandbox/src/windows/runner/outer/watch.rs clock clippy::disallowed_method
 crates/sandbox/src/windows/runner/outer/watch.rs now clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/watch.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
-# The denial pipe (src/windows/denial_pipe/os.rs): the outer's write-only client end, checked to be
-# a pipe, and the host's server end over the runner pipes' own.
+# The denial pipe (src/windows/denial_pipe/os.rs): the outer's write-only, non-inheritable client
+# end, checked to be a pipe, and its inherit flag read back for the tests.
 crates/sandbox/src/windows/denial_pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
