@@ -46,7 +46,8 @@
 //! 7. `exe::run_set_up`'s work for that user, whose outcome ([`SetupResult`]) is the reply, and
 //!    is also written to `setup-result.json` as the user.
 //!
-//! The reply is one line of JSON ([`Reply`]), tagged `ran`, `refused` or `unsupported`. Pure apart from its seams: tested on every OS.
+//! The reply is one line of JSON ([`Reply`]), tagged `ran`, `refused` or `unsupported`. Pure
+//! apart from its seams: tested on every OS.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

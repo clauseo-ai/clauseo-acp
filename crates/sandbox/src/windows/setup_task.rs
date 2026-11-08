@@ -20,9 +20,9 @@
 //!    process (`GetNamedPipeServerProcessId`) is LOCAL SYSTEM's in the kernel's process list, and
 //!    its image, as the kernel names it, is the admin copy. A pool user can make the pipe's name
 //!    first; a server that fails the check gets nothing ([`SetUpError::NotTheServer`]);
-//! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads the one-line reply; a server
-//!    that went away before replying (one that was ending as this connected) is asked again,
-//!    once, after the task is started again.
+//! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
+//!    the one-line reply; a server that went away before replying (one that was ending as this
+//!    connected) is asked again, once, after the task is started again.
 #![expect(unsafe_code, reason = "FFI to the named pipe and process list calls")]
 
 use std::path::PathBuf;
