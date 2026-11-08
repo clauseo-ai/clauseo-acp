@@ -41,7 +41,8 @@
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
 //! `--stop` (`stop.rs`), the stop task's (`StopExit`, from 45), `--wsl-deny`, the WSL deny
 //! task's (`refresh::WslDenyExit`, 51 and 52), and `--wsl-upgrade`, the WSL upgrade task's
-//! (`refresh::WslUpgradeExit`, from 60). 53 to 59 are kept for #717's sweep.
+//! (`refresh::WslUpgradeExit`: 60 to 62, and 67, as 63 is `SetupExit`'s). 53 to 59 are kept for
+//! #717's sweep.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

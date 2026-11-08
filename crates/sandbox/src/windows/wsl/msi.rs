@@ -40,7 +40,7 @@ use windows::core::{HSTRING, PCWSTR};
 use super::WindowsWsl;
 use super::msi_files::{HeldMsi, WindowsMsiFiles};
 pub use super::msi_verify::MsiUpgrade;
-use super::msi_verify::upgrade_with;
+use super::msi_verify::{InstallError, upgrade_with};
 use super::upgrade::INSTALLER_SERVICE;
 pub use super::upgrade::MSI_WAIT;
 use crate::windows::record::read_units;
@@ -82,8 +82,8 @@ pub fn upgrade_pending(program_files: &Path) -> MsiUpgrade {
     clippy::disallowed_methods,
     reason = "msiexec, a Windows tool the SYSTEM task runs to install WSL's MSI, not an agent"
 )]
-fn install(msi: &str, _held: &HeldMsi) -> Result<(), String> {
-    let msiexec = Path::new(&system_folder()?).join("msiexec.exe");
+fn install(msi: &str, _held: &HeldMsi) -> Result<(), InstallError> {
+    let msiexec = Path::new(&system_folder().map_err(InstallError::Failed)?).join("msiexec.exe");
     let mut child = Command::new(msiexec)
         .arg("/i")
         .arg(msi)
@@ -92,24 +92,27 @@ fn install(msi: &str, _held: &HeldMsi) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|error| format!("msiexec couldn't start: {error}"))?;
+        .map_err(|error| InstallError::Failed(format!("msiexec couldn't start: {error}")))?;
     let millis = u32::try_from(MSI_WAIT.as_millis()).unwrap_or(u32::MAX);
     // SAFETY: the child's process handle lives as long as `child`, past the call.
     let waited = unsafe { WaitForSingleObject(HANDLE(child.as_raw_handle()), millis) };
     if waited != WAIT_OBJECT_0 {
         let secs = MSI_WAIT.as_secs();
-        return Err(format!(
-            "msiexec didn't end within {secs} s; it was left running"
-        ));
+        let why = format!("msiexec didn't end within {secs} s; it was left running");
+        return Err(InstallError::StillInstalling(why));
     }
     let status = child
         .try_wait()
-        .map_err(|error| format!("msiexec's exit: {error}"))?
-        .ok_or_else(|| "msiexec's exit wasn't there after its end".to_owned())?;
+        .map_err(|error| InstallError::Failed(format!("msiexec's exit: {error}")))?
+        .ok_or_else(|| {
+            InstallError::Failed("msiexec's exit wasn't there after its end".to_owned())
+        })?;
     match status.code() {
         Some(0 | REBOOT_REQUIRED) => Ok(()),
-        Some(code) => Err(format!("msiexec ended with {code}")),
-        None => Err("msiexec ended with no code".to_owned()),
+        Some(code) => Err(InstallError::Failed(format!("msiexec ended with {code}"))),
+        None => Err(InstallError::Failed(
+            "msiexec ended with no code".to_owned(),
+        )),
     }
 }
 
