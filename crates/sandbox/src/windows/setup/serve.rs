@@ -9,8 +9,9 @@
 //! [`Pipe`] and [`Host`], which `windows_pipe.rs` and `windows_host.rs` implement and the tests
 //! fake. It:
 //!
-//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path, as the stop
-//!    task does ([`ServeExit::NotAllowed`]);
+//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path, and the
+//!    copy passes `admin_copy::check` (its folder chain and recorded hash)
+//!    ([`ServeExit::NotAllowed`]);
 //! 2. reads the record: with no admin copy recorded there is no one to serve
 //!    ([`ServeExit::NoRecord`]);
 //! 3. makes the pipe under a name drawn at random for this run ([`pipe_name`], 128 bits
@@ -129,7 +130,8 @@ pub const DATA_SUFFIX: [&str; 3] = ["AppData", "Local", "ai.clauseo.desktop"];
 pub enum ServeExit {
     /// 0: every client that came was answered, and none came within the last wait.
     Done,
-    /// 63: not LOCAL SYSTEM, or not run from the admin copy's path; no pipe was made.
+    /// 63: not LOCAL SYSTEM, not run from the admin copy's path, or the copy failed its check;
+    /// no pipe was made.
     NotAllowed,
     /// 64: someone else made the pipe's name first, or took it while no instance was left; no
     /// one was served from then on.
@@ -189,8 +191,9 @@ pub trait Host {
     fn is_system(&mut self) -> Result<bool, String>;
     /// This process's exe, its final path.
     fn current_exe(&mut self) -> Result<PathBuf, String>;
-    /// The admin copy's path.
-    fn admin_copy(&mut self) -> Result<PathBuf, String>;
+    /// The admin copy's path once it passes `admin_copy::check` (the folder chain only
+    /// administrators can change, and the SHA-256 the installer recorded); `Err` says why not.
+    fn checked_admin_copy(&mut self) -> Result<PathBuf, String>;
     /// The record's admin-copy owner, pool and group, read now ([`Gate`]).
     fn gate(&mut self) -> Result<Gate, String>;
     /// The user signed in to `session` (`WTSQueryUserToken`).
@@ -364,9 +367,11 @@ pub(crate) fn connect_within<E>(
     }
 }
 
-/// Whether this process may serve: LOCAL SYSTEM, running from the admin copy's path.
+/// Whether this process may serve: LOCAL SYSTEM, running from the admin copy's path, the copy
+/// passing `admin_copy::check` (its folder chain and its recorded hash), so a copy someone
+/// changed serves no one.
 fn allowed(host: &mut impl Host) -> Result<bool, String> {
-    Ok(host.is_system()? && same_path(&host.current_exe()?, &host.admin_copy()?))
+    Ok(host.is_system()? && same_path(&host.current_exe()?, &host.checked_admin_copy()?))
 }
 
 /// The reply to one client, as the module says, logged. The log line names the op by its tag

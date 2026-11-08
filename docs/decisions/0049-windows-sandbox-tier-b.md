@@ -2007,8 +2007,10 @@ elevated CI test starts the set-up task as a standard user beside another owner'
 `\Clauseo` tasks' codes: the stop's to 50, the WSL deny's 51-52, the sweep's 53-59, the WSL
 upgrade's 60-62):
 
-1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, as the stop task does
-   (63);
+1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, and the copy passes
+   `admin_copy::check`: the folder chain only administrators can change, the folder holding
+   nothing else, and the SHA-256 the installer recorded (63), so a copy someone changed serves
+   no one;
 2. reads the record; no admin copy recorded is 65;
 3. makes `\\.\pipe\ClauseoSetUp-<token>`, the token 128 random bits drawn for this run
    (32 lowercase hex digits, `serve::pipe_name`): the first instance or nothing

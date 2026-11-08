@@ -79,9 +79,9 @@ impl Host for WindowsHost {
         os::running_image().map_err(|error| error.to_string())
     }
 
-    fn admin_copy(&mut self) -> Result<PathBuf, String> {
-        let program_files = os::program_files().map_err(|error| error.to_string())?;
-        Ok(admin_copy::admin_exe(&program_files))
+    fn checked_admin_copy(&mut self) -> Result<PathBuf, String> {
+        admin_copy::check(&os::WindowsAdminCopy)
+            .map_err(|blocked| format!("the admin copy fails its check ({})", blocked.name()))
     }
 
     fn gate(&mut self) -> Result<Gate, String> {

@@ -128,6 +128,8 @@ pub(crate) struct FakeHost {
     pub(crate) clock: Duration,
     /// How far the clock moves at each look.
     pub(crate) tick: Duration,
+    /// What `admin_copy::check` gives.
+    pub(crate) copy_check: Result<(), String>,
     /// What the random bytes for the pipe's name are.
     pub(crate) random: Result<[u8; TOKEN_BYTES], String>,
     /// The published token, as the subkey holds it.
@@ -158,6 +160,7 @@ impl FakeHost {
             lines: Vec::new(),
             clock: Duration::ZERO,
             tick: Duration::ZERO,
+            copy_check: Ok(()),
             random: Ok([0xa5; TOKEN_BYTES]),
             published: None,
             publish_fails: None,
@@ -190,8 +193,9 @@ impl Host for FakeHost {
         Ok(self.exe.clone())
     }
 
-    fn admin_copy(&mut self) -> Result<PathBuf, String> {
-        Ok(PathBuf::from(ADMIN_EXE))
+    fn checked_admin_copy(&mut self) -> Result<PathBuf, String> {
+        self.calls.push("checked_admin_copy".to_owned());
+        self.copy_check.clone().map(|()| PathBuf::from(ADMIN_EXE))
     }
 
     fn gate(&mut self) -> Result<Gate, String> {

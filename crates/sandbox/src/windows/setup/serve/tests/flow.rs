@@ -270,6 +270,17 @@ fn only_system_from_the_admin_copy_with_a_recorded_copy_makes_the_pipe() {
     let mut host = FakeHost::new();
     host.exe = PathBuf::from(r"C:\Users\lawyer\AppData\Local\Clauseo\clauseo-sandbox-setup.exe");
     assert_eq!(opened(&mut host, Ok(())), (ServeExit::NotAllowed, false));
+    // The copy at the right path, but failing `admin_copy::check` (a changed hash, a folder
+    // someone else may change): no pipe.
+    let mut host = FakeHost::new();
+    host.copy_check = Err("the admin copy fails its check (admin_copy_changed)".to_owned());
+    assert_eq!(opened(&mut host, Ok(())), (ServeExit::NotAllowed, false));
+    assert!(host.calls.contains(&"checked_admin_copy".to_owned()));
+    assert!(
+        host.lines
+            .iter()
+            .any(|(error, line)| *error && line.contains("admin_copy_changed"))
+    );
     let mut host = FakeHost::new();
     host.gate = Ok(Gate::default());
     assert_eq!(opened(&mut host, Ok(())), (ServeExit::NoRecord, false));
