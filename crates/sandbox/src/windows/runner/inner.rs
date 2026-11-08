@@ -12,6 +12,7 @@ use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
 use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
+use super::station::StationDesktop;
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
 use crate::windows::acl::object::Handle;
@@ -126,6 +127,14 @@ impl Inner for Calls {
             .ok_or_else(|| (RunExit::Pipe, "ctl isn't open".to_owned()))?;
         let launch: InnerLaunch =
             read_frame(ctl).map_err(|e| fail(RunExit::Pipe, "ctl read", &e))?;
+        // The desktop must be the outer's own station's `Default`, never `WinSta0` nor empty
+        // (`StationDesktop`): the agent starts on it.
+        if StationDesktop::from_path(&launch.desktop).is_none() {
+            return Err((
+                RunExit::Token,
+                "the launch's desktop isn't a station's Default".to_owned(),
+            ));
+        }
         // Then, before anything else: shut this runner's token (now with the desktop user's
         // query), process, threads and later objects to the agent (`token::os::shut_self`); the
         // outer shut the process and first thread while this runner was still suspended.

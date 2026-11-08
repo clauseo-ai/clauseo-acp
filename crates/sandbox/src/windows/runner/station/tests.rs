@@ -254,6 +254,27 @@ fn a_default_desktop_someone_made_first_refuses() {
 }
 
 #[test]
+fn the_inner_takes_only_a_station_default_as_the_launch_desktop() {
+    let path = r"Service-0x0-1a2b3c$\Default";
+    assert_eq!(StationDesktop::from_path(path).unwrap().as_str(), path);
+    assert!(StationDesktop::from_path(r"Service-0x1-ffff$\Default").is_some());
+    for not in [
+        "",
+        r"\Default",
+        "Default",
+        r"WinSta0\Default",
+        r"WinSta0\Clauseo",
+        r"Service-0x0-1a2b3c\Default",
+        r"ClauseoRun-0123456789abcdef\Default",
+        r"Service-0x0-1a2b3c$\Clauseo",
+        r"Service-0x0-1a2b3c$",
+        r"Service-0x0-1a2b3c$\Default\Default",
+    ] {
+        assert_eq!(StationDesktop::from_path(not), None, "{not}");
+    }
+}
+
+#[test]
 fn a_runner_desktop_is_only_ever_default_on_an_unnamed_station() {
     let desktop = StationDesktop::of(NAME).unwrap();
     assert_eq!(desktop.as_str(), r"Service-0x0-1a2b3c$\Default");

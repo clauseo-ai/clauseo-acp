@@ -86,6 +86,12 @@ impl StationDesktop {
         (hex(high) && hex(low)).then(|| StationDesktop(format!(r"{name}\Default")))
     }
 
+    /// The desktop at `path`, `<station>\Default`, as the outer runner's launch message names
+    /// it; `None` unless [`StationDesktop::of`] takes the station part.
+    pub(crate) fn from_path(path: &str) -> Option<StationDesktop> {
+        Self::of(path.strip_suffix(r"\Default")?)
+    }
+
     /// The path, `<station>\Default`.
     pub(crate) fn as_str(&self) -> &str {
         &self.0

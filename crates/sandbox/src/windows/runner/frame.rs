@@ -35,7 +35,8 @@ pub struct InnerLaunch {
     pub folders: Vec<String>,
     /// The folder they all lie below, which exists: the state folder.
     pub folder_base: String,
-    /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
+    /// The private desktop the outer runner made for the agent: `<station>\Default`, the station
+    /// `Service-0x…$` that Windows named (`station::StationDesktop`).
     pub desktop: String,
 }
 
