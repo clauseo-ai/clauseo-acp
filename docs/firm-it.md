@@ -371,20 +371,20 @@ file (`unknown images: ...`), by file name only. A security product that hides i
 tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
 gives.
 
-### If the SandboxSweep task ends with 55 or 56
+### If the SandboxSweep task ends with 56 or 57
 
 The SYSTEM task `\Clauseo\SandboxSweep` runs at the end of every sandboxed session. It deletes the
-sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 55 means a
+sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 56 means a
 scheduled task on the machine couldn't be read or deleted, or a Task Scheduler folder couldn't be
-listed. Exit 56 means a sandbox user's BITS job couldn't be cancelled. Either way the run isn't
+listed. Exit 57 means a sandbox user's BITS job couldn't be cancelled. Either way the run isn't
 recorded as complete, so the next sandboxed launch asks for another run and waits up to 15 seconds
 for it; if that run fails too, the launch is refused with "the sandbox's clean-up after an earlier
 session isn't finished". The task's Application Event Log line gives counts only, never task names.
 A task whose "run as" account can't be found (a domain account while no domain controller is
-reachable, or a deleted account) no longer causes 55: it is skipped and counted as "skipped" in
-that line. The usual cause of 55 on every run is a task whose definition the SYSTEM account can't
+reachable, or a deleted account) no longer causes 56: it is skipped and counted as "skipped" in
+that line. The usual cause of 56 on every run is a task whose definition the SYSTEM account can't
 read. Look in Task Scheduler for tasks that won't open, and fix or delete them; the next run then
-ends 0. Exit 57 or 58 means the run couldn't record its number, usually because another Clauseo
+ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
 set-up held its lock; the next launch asks again.
 
 ### If Defender quarantines a Clauseo file

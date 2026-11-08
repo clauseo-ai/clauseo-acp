@@ -1876,8 +1876,8 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
 0. reserves its number before it observes anything, as the stop does (`pool_steps::sequence`):
    under the set-up lock it checks the record still holds the pool, reads `SweepNext`
    (`REG_QWORD`, 1 when absent), keeps it as `n` and writes it one higher. A record gone or
-   changed, or a write that fails, is 57 with nothing touched; a read that fails is 53. A lock
-   that stays held still lets it sweep, but it then records nothing and ends 57 at best;
+   changed, or a write that fails, is 58 with nothing touched; a read that fails is 54. A lock
+   that stays held still lets it sweep, but it then records nothing and ends 58 at best;
 1. walks every Task Scheduler folder from `\`, subfolders included, with no depth limit but at
    most 10 000 folders (`FOLDERS_CAP`), and reads every task, hidden ones included
    (`TASK_ENUM_HIDDEN`), with its definition's principal: `UserId`, else `GroupId`;
@@ -1889,7 +1889,7 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    with no domain controller reachable, a deleted account) is the pool's only when its account
    part is a pool user's name, without case, with no prefix or one of `.\`, this computer's
    NetBIOS name or its DNS host name (`sweep::Names::is_pool_name`). Any other such name is
-   skipped: counted in the log line, never named, and not 55;
+   skipped: counted in the log line, never named, and not 56;
 3. deletes the task when that SID equals one of the pool's, never on a prefix or a domain, or
    when step 2 found it a pool user's name. A task with neither a user nor a group isn't the
    pool's. A task whose definition or principal can't be read is unreadable and never deleted.
@@ -1899,7 +1899,7 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
    and writes `SweepCompleted` (`REG_QWORD`, a `FILETIME`: when the walk began) and then
    `SweepSequence = n` (`REG_QWORD`, never lowered). A record gone or changed, a sequence
-   already past `n`, a write that fails or a lock that stays held is 58. A run that is ended or
+   already past `n`, a write that fails or a lock that stays held is 59. A run that is ended or
    ends non-zero never writes them. The three values are set-up values outside the record
    proper (`SETUP_VALUES`, each sequence before its next), deleted with the record by
    `--remove`, and every write opens the key without making it.
@@ -1908,20 +1908,21 @@ It kills nothing: stopping processes is `--stop`'s, and its `Sweeper` trait has 
 call. It logs one Event Log line with counts only (pool users, folders and tasks read, the
 pool's tasks deleted, unreadable, skipped and not deleted, BITS jobs cancelled and not), with
 no path, task name or SID, since every local user can read the Application log. Its
-exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 (`WslDenyExit`):
+exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 and 52
+(`WslDenyExit`):
 
 | Code | Meaning |
 |---|---|
 | 0 | every pool user's task found was deleted and every pool user's BITS job cancelled, or no pool is recorded |
-| 52 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
-| 53 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
-| 54 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 55 | a task was unreadable or not deleted, a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
-| 56 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
-| 57 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 55 and 56 win |
-| 58 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
+| 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
+| 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
+| 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
+| 56 | a task was unreadable or not deleted, a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
+| 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
+| 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
 
-55 wins over 56. Only a run that ends 0 writes `SweepSequence`, and only `SweepSequence` clears
+56 wins over 57. Only a run that ends 0 writes `SweepSequence`, and only `SweepSequence` clears
 a marker awaiting a sweep ("The runner", "The unclean-session marker"): nothing reads the task's
 result.
 
@@ -1930,7 +1931,7 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 `SweepSequence`, so the marker stays and the next launch asks for another run.
 
 **Risks.**
-- A task whose principal can't be read at all still ends every run at 55, and every launch
+- A task whose principal can't be read at all still ends every run at 56, and every launch
   then waits 15 s and is refused, until the task goes. A name that can't be resolved no longer
   does (step 2). `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks
   CI's machine only.

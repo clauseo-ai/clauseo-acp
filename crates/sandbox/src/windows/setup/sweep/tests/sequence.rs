@@ -54,7 +54,7 @@ fn a_held_lock_still_sweeps_but_records_nothing() {
     fake.busy = true;
     fake.task("\\", "pool", user("S-1-5-21-1-2-3-1010"));
     assert_eq!(sweep(&mut fake), SweepExit::NotReserved);
-    assert_eq!(SweepExit::NotReserved.as_code(), 57);
+    assert_eq!(SweepExit::NotReserved.as_code(), 58);
     assert_eq!(fake.deleted(), ["\\pool"]);
     assert!(fake.values.is_empty(), "{:?}", fake.values);
     let (error, line) = &fake.logged[0];
@@ -105,5 +105,5 @@ fn a_completion_that_cant_be_written_is_58() {
             "{case}: {line}"
         );
     }
-    assert_eq!(SweepExit::NotRecorded.as_code(), 58);
+    assert_eq!(SweepExit::NotRecorded.as_code(), 59);
 }
