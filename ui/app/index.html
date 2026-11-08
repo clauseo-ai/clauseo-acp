@@ -21,6 +21,20 @@
       }
       #first-mark svg {
         width: 40px;
+        animation: first-breath 2.4s ease-in-out infinite alternate;
+      }
+      @keyframes first-breath {
+        from {
+          opacity: 0.55;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #first-mark svg {
+          animation: none;
+        }
       }
       @media (prefers-color-scheme: dark) {
         html:not([data-theme]) {
