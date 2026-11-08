@@ -1275,7 +1275,12 @@ leaves that profile, both naming the part.
       number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
       live session per pool user, and this outer hasn't written its own): it becomes
       `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
-      and the logon is refused. One whose stop completed is re-marked, and the logon goes. An
+      and the logon is refused. One whose stop completed is re-marked. A marker of this pool
+      user's awaiting a sweep, re-marked now or earlier, is then waited for as a launch waits
+      (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
+      to 15 s): until that sweep ran, a task the escapee registered is live. One still short
+      refuses the logon (`RunExit::AwaitingStop`) without requesting a stop, which would end
+      every session. An
       unreadable or corrupt marker, or an `Open` one naming no pool user, would otherwise
       refuse every logon for good: it is replaced by `AwaitingStop` with `StopNext` read then,
       naming no pool user (so it counts for all), the stop is requested and the logon refused,

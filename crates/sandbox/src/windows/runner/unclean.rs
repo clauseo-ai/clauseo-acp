@@ -9,7 +9,10 @@
 //!   `AwaitingStop`, with `StopNext` read now, after its session's last launch path closed. An
 //!   unreadable or corrupt marker, or an `Open` one naming no pool user, becomes the same,
 //!   naming none, so it heals once that stop completes instead of refusing every logon for
-//!   good. Each refusal requests the stop task. TODO: once slot groups land (two pool users share a
+//!   good. Each such refusal requests the stop task. Otherwise a marker of this pool user awaiting
+//!   a sweep (a re-mark's, or any other) is waited for, up to [`SWEEP_WAIT`], and refuses the
+//!   logon if the sweep doesn't complete, with no stop requested: a task the escapee registered
+//!   is live until that sweep ran. TODO: once slot groups land (two pool users share a
 //!   slot's grants on a matter), the scope becomes the pool user's slot, since an escapee of one
 //!   user still holds the slot group's grants.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
@@ -165,7 +168,9 @@ fn remark(
     (sessions, Some(queued))
 }
 
-/// F4: whether `pool_user` may log on. `Err` says why not; the stop task was requested then.
+/// F4: whether `pool_user` may log on. `Err` says why not: the stop task was requested when a
+/// marker awaits a stop; a marker awaiting a sweep (a re-mark's, or any other) is waited for
+/// instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every session.
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String> {
     let sessions = current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
     let ours: Vec<UncleanSession> = sessions
@@ -179,6 +184,7 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
         .collect();
     let mut standing = false;
     let mut awaiting = Vec::new();
+    let mut sweeping = Vec::new();
     let mut stop_next = None;
     for session in ours {
         match session.state {
@@ -194,26 +200,30 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
                 }
             }
             Some(MarkerState::AwaitingStop { .. }) => awaiting.push(session),
-            Some(MarkerState::AwaitingSweep { .. }) => {}
+            Some(MarkerState::AwaitingSweep { .. }) => sweeping.push(session),
         }
     }
+    let mut requested = None;
     if !awaiting.is_empty() {
         match fs.sequences() {
-            // One whose stop completed is re-marked: the launch waits for its sweep.
+            // One whose stop completed is re-marked, and its sweep then waited for below.
             Ok(done) => {
-                let (left, _) = remark(fs, awaiting, done);
+                let (left, asked) = remark(fs, awaiting, done);
+                requested = asked;
                 standing |= left.iter().any(|session| {
                     session
                         .state
                         .and_then(MarkerState::stop)
                         .is_some_and(|stop| done.stop < stop)
                 });
+                sweeping.extend(left);
             }
             Err(_) => standing = true,
         }
     }
     if !standing {
-        return Ok(());
+        // A task the escapee registered is live until its sweep ran: wait for it here.
+        return wait_for_sweeps(fs, sweeping, requested.is_some());
     }
     let asked = if fs.request_stop() {
         "the stop was requested"
@@ -222,6 +232,50 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
     };
     Err(format!(
         "an earlier session of this sandbox user awaits the sandbox's stop ({asked})"
+    ))
+}
+
+/// F4's wait for this pool user's markers awaiting a sweep: those `SweepSequence` meets go;
+/// otherwise a sweep is requested (unless `requested` already) and `SweepSequence` read every
+/// [`SWEEP_POLL`] for up to [`SWEEP_WAIT`]. `Err` when it is still short, or can't be read.
+fn wait_for_sweeps(
+    fs: &mut impl Markers,
+    sessions: Vec<UncleanSession>,
+    requested: bool,
+) -> Result<(), String> {
+    let sessions: Vec<UncleanSession> = sessions
+        .into_iter()
+        .filter(|session| session.state.and_then(MarkerState::sweep).is_some())
+        .collect();
+    if sessions.is_empty() {
+        return Ok(());
+    }
+    let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
+    let mut done = fs.sequences().map_err(unread)?;
+    let left = sweep_clean(fs, sessions, done);
+    let wanted = left
+        .iter()
+        .filter_map(|session| session.state.and_then(MarkerState::sweep))
+        .max();
+    let Some(wanted) = wanted.filter(|wanted| done.sweep < *wanted) else {
+        return Ok(());
+    };
+    if !requested {
+        drop(fs.request_sweep());
+    }
+    let polls = SWEEP_WAIT.as_millis() / SWEEP_POLL.as_millis().max(1);
+    for _ in 0..polls {
+        fs.pause(SWEEP_POLL);
+        done = fs.sequences().map_err(unread)?;
+        if done.sweep >= wanted {
+            sweep_clean(fs, left, done);
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
+         finish within {} s",
+        SWEEP_WAIT.as_secs()
     ))
 }
 
