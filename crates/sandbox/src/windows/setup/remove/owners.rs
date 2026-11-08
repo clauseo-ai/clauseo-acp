@@ -23,12 +23,40 @@ pub(in crate::windows::setup) fn sandbox_folder(
     held(owner_allowed(found, owner), "the record's data folder")
 }
 
-/// Whether `found` may own a matter folder an administrator takes entries off for `owner`.
+/// Who owns a matter folder that passed [`matter_folder`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderOwner {
+    /// The record's owner.
+    Owners,
+    /// Administrators or SYSTEM: a folder the owner may not have made, such as `ProgramData`'s.
+    Elevated,
+}
+
+/// Whether `found` may own a matter folder an administrator takes entries off for `owner`,
+/// and which of the allowed owners it is. On an [`FolderOwner::Elevated`] folder only the pool's
+/// entries come off; the Low label too only for an owner in Administrators ([`label_off`]).
 pub(in crate::windows::setup) fn matter_folder(
     found: &Sid,
     owner: &Sid,
-) -> Result<(), MachineError> {
-    held(owner_allowed(found, owner), "a matter's folder")
+) -> Result<FolderOwner, MachineError> {
+    held(owner_allowed(found, owner), "a matter's folder")?;
+    Ok(if found == owner {
+        FolderOwner::Owners
+    } else {
+        FolderOwner::Elevated
+    })
+}
+
+/// Whether an administrator may take the recorded Low label off a matter folder `folder` owns
+/// for an absent owner. The ledger is the owner's to write, so on a folder the owner doesn't
+/// own a crafted one could name another program's folder and strip its Low label, which that
+/// program's Low processes write by. Only for an owner in Administrators (`owner_in_admins`,
+/// asked only then), who could take it off anyway.
+pub(in crate::windows::setup) fn label_off(
+    folder: FolderOwner,
+    owner_in_admins: impl FnOnce() -> bool,
+) -> bool {
+    folder == FolderOwner::Owners || owner_in_admins()
 }
 
 fn held(allowed: bool, what: &str) -> Result<(), MachineError> {
@@ -54,6 +82,22 @@ mod tests {
             sandbox_folder(&found, &owner).is_ok(),
             matter_folder(&found, &owner).is_ok(),
         ]
+    }
+
+    #[test]
+    fn a_matter_folder_is_the_owners_or_elevated() {
+        let owner = Sid::parse(OWNER).unwrap();
+        let of = |found: &str| matter_folder(&Sid::parse(found).unwrap(), &owner).unwrap();
+        assert_eq!(of(OWNER), FolderOwner::Owners);
+        assert_eq!(of("S-1-5-32-544"), FolderOwner::Elevated);
+        assert_eq!(of("S-1-5-18"), FolderOwner::Elevated);
+    }
+
+    #[test]
+    fn the_low_label_comes_off_an_elevated_folder_only_for_an_owner_in_administrators() {
+        assert!(label_off(FolderOwner::Owners, || panic!("not asked")));
+        assert!(label_off(FolderOwner::Elevated, || true));
+        assert!(!label_off(FolderOwner::Elevated, || false));
     }
 
     #[test]

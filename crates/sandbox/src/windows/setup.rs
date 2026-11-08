@@ -66,6 +66,8 @@ mod accounts;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
+#[cfg(windows)]
+mod admin_member;
 #[cfg(test)]
 #[cfg(windows)]
 mod admin_record_tests;

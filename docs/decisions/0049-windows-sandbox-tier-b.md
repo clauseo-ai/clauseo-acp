@@ -714,8 +714,12 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   matter folder the ledger records (not a drive's root), and whose folder, checked right before,
   has no junction or link on the way, is owned as below, and passes the gate's folder check; and
   taking the recorded Low label off each such matter folder's root (removing a label only
-  tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
-  change themselves (K1). No walk, label written, hand-back, add or delete.
+  tightens). A crafted ledger can name a folder the owner doesn't own (Administrators' or
+  SYSTEM's, below), so there it can make an administrator remove only the pool's entries, which
+  name our SIDs alone. The Low label comes off such a folder only when the record's owner is in
+  Administrators (`NetUserGetLocalGroups`, indirect included; unreadable is no), who could take
+  it off anyway. Otherwise it stays, logged, so no other program's Low processes lose a folder
+  they write to (K1). No walk, label written, hand-back, add or delete.
 - **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
   the app delete `sandbox\` when the box is ticked. The hook reads it only after an ended wait
   (`WAIT_OBJECT_0`) and a successful `GetExitCodeProcess`; a timeout, `WAIT_FAILED` or a failed
@@ -734,8 +738,8 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   administrator's path holds each matter folder to the same rule, since such a lawyer's matter
   folders are Administrators' too. On one that passes, it only takes off what we wrote: the
   ledger's allows and denies for a recorded pool SID or the group, and the Low label the ledger
-  records on the matter's root. Removing that label only tightens. Nothing is added and no other
-  entry is touched.
+  records on the matter's root, that label on an Administrators- or SYSTEM-owned folder only for
+  an owner in Administrators (above). Nothing is added and no other entry is touched.
 - **The data folder at set-up** (`exe::owners_data_dir`: `--set-up`, `--adopt`, `--reclaim`,
   the set-up task) is stricter. The requesting user must own it, or Administrators may own it
   when that user is a member of Administrators: enabled or deny-only in the token set-up acts

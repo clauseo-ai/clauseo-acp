@@ -18,7 +18,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
-use crate::windows::setup::remove::owners;
+use crate::windows::setup::remove::{FolderOwner, owners};
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -85,6 +85,8 @@ pub(super) struct Remover {
     /// The owners of the record's data folder and of its `sandbox` folder, held to the real
     /// rules (`remove::owners`).
     pub(super) data_dir_owners: [Sid; 2],
+    /// The accounts in Administrators.
+    pub(super) admins: Vec<Sid>,
     /// The folders with no link on the way, and each one's owner, which an administrator's
     /// path check holds to `owner_allowed`, as the real one does.
     pub(super) admin_owned: Vec<(PathBuf, Sid)>,
@@ -115,6 +117,7 @@ impl Remover {
             lock_held: false,
             data_dir_bad: false,
             data_dir_owners: [Sid::parse(OWNER).unwrap(), Sid::parse(OWNER).unwrap()],
+            admins: Vec::new(),
             admin_owned: Vec::new(),
             acted: false,
             token: ParentToken::Standard,
@@ -356,7 +359,12 @@ impl Removal for Remover {
             .map_err(|error| MachineError::Other(error.to_string()))
     }
 
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError> {
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool {
+        assert_eq!(owner.as_str(), OWNER);
+        self.admins.contains(owner)
+    }
+
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError> {
         assert!(!self.m.acting.get(), "an administrator acts as itself");
         assert_eq!(owner.as_str(), OWNER);
         self.call(format!("admin_target {}", rel(&self.base, path)))?;

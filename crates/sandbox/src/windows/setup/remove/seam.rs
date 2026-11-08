@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
+use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
@@ -109,9 +110,12 @@ pub trait Removal {
         trusted: &[Sid],
     ) -> Result<Option<Ledger>, MachineError>;
     /// As this process: whether the ledger's `path` may have an entry removed by a removal the
-    /// owner didn't ask for. `Ok` only for a folder reached with no junction or link on the
-    /// way whose final path is `path`, owned by `owner` (the record's), and passing the gate's
-    /// folder check (a local volume that keeps permissions). So nothing an administrator does
-    /// for an absent owner lands on an object the owner couldn't change themselves.
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError>;
+    /// owner didn't ask for, and who owns it. `Ok` only for a folder reached with no junction
+    /// or link on the way whose final path is `path`, owned as `owners::matter_folder` allows
+    /// (`owner`, the record's, or Administrators or SYSTEM), and passing the gate's folder check
+    /// (a local volume that keeps permissions).
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError>;
+    /// Whether the record's `owner` is in Administrators, directly or through a group; `false`
+    /// when that can't be read.
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool;
 }
