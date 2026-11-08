@@ -55,7 +55,7 @@ const NAME_MAX: usize = 20;
 
 /// Which kind of account a lookup wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     /// A user account (`SidTypeUser`).
     User,
     /// A local group (`SidTypeAlias`).
@@ -136,7 +136,7 @@ pub(super) fn name_of(sid: &Sid, kind: Kind) -> Result<Option<String>, MachineEr
 /// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`. An account by that name is
 /// `NERR_UserExists` (2224), never adopted (D-B5). Its SID; when the SID can't be read the
 /// account is deleted again, so a failure leaves none behind.
-pub(super) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
+pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
     checked_name(name)?;
     checked_password(password)?;
     let mut name_units = wide(name);
@@ -193,7 +193,7 @@ pub(super) fn set_password(name: &str, password: &str) -> Result<(), MachineErro
 
 /// Deletes the local account `name` (`NetUserDel`) and its sign-in screen value. An account
 /// or value already gone is `Ok`.
-pub(super) fn delete_user(name: &str) -> Result<(), MachineError> {
+pub(crate) fn delete_user(name: &str) -> Result<(), MachineError> {
     checked_name(name)?;
     let account = HSTRING::from(name);
     // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
@@ -257,7 +257,7 @@ pub(super) fn group_members(name: &str) -> Result<usize, MachineError> {
 
 /// Puts the account `member` in the local group `group` (`NetLocalGroupAddMembers` level 0,
 /// by SID). A membership already there (`ERROR_MEMBER_IN_ALIAS`) is `Ok`.
-pub(super) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> {
+pub(crate) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> {
     checked_name(group)?;
     let sid = LocalSid::parse(member)?;
     let info = LOCALGROUP_MEMBERS_INFO_0 { lgrmi0_sid: sid.0 };
@@ -272,7 +272,7 @@ pub(super) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> 
 }
 
 /// The built-in `Users` group's name in this Windows' language.
-pub(super) fn users_group() -> Result<String, MachineError> {
+pub(crate) fn users_group() -> Result<String, MachineError> {
     let users = Sid::parse(USERS).map_err(|error| MachineError::Other(error.to_string()))?;
     lookup_sid(&users)?
         .map(|(name, _, _)| name)
