@@ -2042,6 +2042,19 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
+- **Known gap: a task that deletes itself.** A pool task can start a process (X) and then
+  delete itself (or be deleted by X). The sweep's walk never sees it, and its instance stop only
+  covers instances of the tasks it finds, so X can live on into the next logon gap: it runs as
+  the pool user outside every job, possibly in session 0. The next inner's first-act sweep
+  can't see session-0 processes of another logon, and the unelevated outer can't list another
+  user's processes in session 0, so neither can check for it. The fix belongs in the
+  kernel-process-list PR, next in the order: a `SYSTEM`-side pre-logon check that no process
+  whose user is the pool SID exists between sessions, which refuses the launch with
+  `UncleanSession` and requests `\Clauseo\SandboxStop`. Until then the stop clears X only
+  when an escapee report, an F4 refusal or Clauseo's start asks for it.
+- VM row (not run): does `IRunningTask::Stop` also end the processes the instance started, or
+  only the action's own process? If only the latter, a child of a stopped instance survives
+  like X above, and the pre-logon check is what catches it.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.
