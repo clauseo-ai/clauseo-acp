@@ -75,7 +75,6 @@ fn a_plain_policy_builds_with_canonical_paths() {
     assert_eq!(policy.tmpdir(), canon(&w.at("state")).join("tmp"));
     assert!(policy.proxy_ports().is_empty(), "no port means no network");
     assert_eq!(policy.loopback(), &Loopback::None);
-    assert!(!policy.keychain());
     assert!(!policy.native_code_deny(), "off unless the product sets it");
     #[cfg(target_os = "macos")]
     {
@@ -401,13 +400,11 @@ fn ports_are_sorted_and_deduplicated() {
         .proxy_port(61001)
         .proxy_port(61002)
         .loopback(Loopback::Ports(vec![9300, 9222, 9300]))
-        .keychain(true)
         .native_code_deny(true)
         .build()
         .unwrap();
     assert_eq!(policy.proxy_ports(), [61001, 61002]);
     assert_eq!(policy.loopback(), &Loopback::Ports(vec![9222, 9300]));
-    assert!(policy.keychain());
     assert!(policy.native_code_deny());
 }
 

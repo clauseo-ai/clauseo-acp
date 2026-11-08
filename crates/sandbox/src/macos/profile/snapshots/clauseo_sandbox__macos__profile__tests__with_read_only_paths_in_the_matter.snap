@@ -258,6 +258,23 @@ expression: w.render(&policy)
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "STATE_READ_ONLY_0")))
   (with message "clauseo-4242-7"))
 
+; No keychain: not its folders, not the services that read it (0038).
+(deny file-read* file-write*
+  (subpath (param "KEYCHAINS"))
+  (subpath "/Library/Keychains")
+  (with message "clauseo-4242-7"))
+(deny mach-lookup
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.securityd")
+  (global-name-prefix "com.apple.security")
+  (global-name-prefix "com.apple.secd")
+  (global-name-prefix "com.apple.ctkd.")
+  (global-name-prefix "com.apple.CoreAuthentication")
+  (global-name-prefix "com.apple.authd")
+  (global-name-prefix "com.apple.keychainsharingmessagingd")
+  (with message "clauseo-4242-7"))
+
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
@@ -276,3 +293,4 @@ READ_ONLY_10 = <root>/matter/sub/.git
 LINK_0 = <root>/matter/to-secret
 HIDDEN_0 = <root>/data
 STATE_READ_ONLY_0 = <root>/data/agent-state/m1/codex/config.toml
+KEYCHAINS = <root>/home/Library/Keychains

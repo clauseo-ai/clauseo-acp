@@ -194,7 +194,6 @@ impl Writer {
         self.line("");
         self.text.push_str(BASE);
         self.allows(policy, &p);
-        self.keychain(policy, &p);
         self.denies(policy, &p);
         self.allow_again(&p);
         self.fixed_folders(&p);
@@ -203,6 +202,7 @@ impl Writer {
         self.browser_sockets(policy);
         self.network(policy);
         self.native_code(policy);
+        keychain::write(self, policy);
     }
 
     /// The policy's allows, before any of its denies.
@@ -247,10 +247,6 @@ impl Writer {
         let mut above: Vec<String> = vec![ancestors(&matter), ancestors(&state)];
         above.extend(self.reallowed_ancestors(p));
         above.extend(self.ancestors_of(&p.allowed));
-        if let Some((name, path)) = &p.keychains {
-            let keychains = self.param(name, path);
-            above.push(ancestors(&keychains));
-        }
         self.rule("allow", "file-read-metadata", &above);
     }
 
@@ -506,7 +502,7 @@ impl Writer {
     }
 
     /// With [`Policy::native_code_deny`] on, no file in a place the profile lets the agent
-    /// write maps as code, last of all so no allow wins over it. `(deny default)` does not cover
+    /// write maps as code, after every allow so none wins over it. `(deny default)` does not cover
     /// `file-map-executable` of a readable file (macOS 27.2), so this rule is the control. Exec
     /// stays: a child inherits the jail, and `node_modules/.bin` scripts need it. The base's
     /// write allows are devices, never mapped as code, and have no filter of this shape.
@@ -514,30 +510,10 @@ impl Writer {
         if !policy.native_code_deny() {
             return;
         }
-        self.note("\n; Native code: nothing in a place the agent may write maps as code. Last, so");
-        self.note("; it wins; (deny default) does not cover file-map-executable on its own.");
+        self.note("\n; Native code: nothing in a place the agent may write maps as code. After");
+        self.note("; every allow, so it wins; (deny default) does not cover file-map-executable.");
         let roots = std::mem::take(&mut self.writable);
         self.rule("deny", "file-map-executable", &roots);
-    }
-
-    fn keychain(&mut self, policy: &Policy, p: &Params) {
-        if !policy.keychain() {
-            return;
-        }
-        self.note("\n; Claude's Keychain. Broad: narrow it after G7 row 17.");
-        self.rule(
-            "allow",
-            "mach-lookup",
-            &[
-                "(global-name \"com.apple.SecurityServer\")".to_owned(),
-                "(global-name \"com.apple.securityd.xpc\")".to_owned(),
-                "(global-name \"com.apple.trustd.agent\")".to_owned(),
-            ],
-        );
-        if let Some((name, path)) = &p.keychains {
-            let keychains = self.param(name, path);
-            self.rule("allow", "file-read*", &[subpath(&keychains)]);
-        }
     }
 
     fn subpaths(&mut self, list: &[(String, PathBuf)]) -> Vec<String> {
@@ -578,6 +554,7 @@ fn directory_ancestors(param: &str) -> String {
     format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
+mod keychain;
 mod params;
 #[cfg(test)]
 mod tests;

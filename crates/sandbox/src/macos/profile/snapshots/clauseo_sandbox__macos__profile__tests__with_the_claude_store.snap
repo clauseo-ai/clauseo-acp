@@ -205,16 +205,7 @@ expression: w.render(&policy)
   (path-ancestors (param "CLAUDE_FILE_1"))
   (path-ancestors (param "CLAUDE_LOCK_0"))
   (path-ancestors (param "CLAUDE_LOCK_1"))
-  (path-ancestors (param "CLAUDE_LOCK_2"))
-  (path-ancestors (param "KEYCHAINS")))
-
-; Claude's Keychain. Broad: narrow it after G7 row 17.
-(allow mach-lookup
-  (global-name "com.apple.SecurityServer")
-  (global-name "com.apple.securityd.xpc")
-  (global-name "com.apple.trustd.agent"))
-(allow file-read*
-  (subpath (param "KEYCHAINS")))
+  (path-ancestors (param "CLAUDE_LOCK_2")))
 
 ; Read-only in the matter: protected names, every .git, over-cap files.
 (deny file-write*
@@ -278,6 +269,23 @@ expression: w.render(&policy)
 (allow network-bind network-inbound
   (local ip "localhost:*"))
 
+; No keychain: not its folders, not the services that read it (0038).
+(deny file-read* file-write*
+  (subpath (param "KEYCHAINS"))
+  (subpath "/Library/Keychains")
+  (with message "clauseo-4242-7"))
+(deny mach-lookup
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.securityd")
+  (global-name-prefix "com.apple.security")
+  (global-name-prefix "com.apple.secd")
+  (global-name-prefix "com.apple.ctkd.")
+  (global-name-prefix "com.apple.CoreAuthentication")
+  (global-name-prefix "com.apple.authd")
+  (global-name-prefix "com.apple.keychainsharingmessagingd")
+  (with message "clauseo-4242-7"))
+
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
@@ -287,7 +295,6 @@ CLAUDE_FILE_1 = <root>/home/.claude/.storage-write
 CLAUDE_LOCK_0 = <root>/home/.claude/.storage-write.lock
 CLAUDE_LOCK_1 = <root>/home/.claude/.oauth_refresh.lock
 CLAUDE_LOCK_2 = <root>/home/.claude.lock
-KEYCHAINS = <root>/home/Library/Keychains
 READ_ONLY_0 = <root>/matter/.agents
 READ_ONLY_1 = <root>/matter/.claude
 READ_ONLY_2 = <root>/matter/.clauseo
@@ -297,3 +304,4 @@ READ_ONLY_5 = <root>/matter/AGENTS.md
 READ_ONLY_6 = <root>/matter/CLAUDE.local.md
 READ_ONLY_7 = <root>/matter/CLAUDE.md
 HIDDEN_0 = <root>/data
+KEYCHAINS = <root>/home/Library/Keychains

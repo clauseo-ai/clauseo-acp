@@ -5,8 +5,8 @@
 //!
 //! - The policy ([`Policy`], built by [`Policy::builder`]): the matter and state folders, the
 //!   runtime, read-only and allowed paths, the notes folder, the credential link, Claude's login
-//!   store, hidden paths, loopback ports, the Keychain switch, and what is write-denied in the
-//!   matter ([`PROTECTED_NAMES`], every [`PROTECTED_AT_ANY_DEPTH`] name, over-cap files).
+//!   store, hidden paths, loopback ports, and what is write-denied in the matter
+//!   ([`PROTECTED_NAMES`], every [`PROTECTED_AT_ANY_DEPTH`] name, over-cap files).
 //!   Every path in it is canonical and every refusal of [`PolicyBuilder::build`] holds. R17
 //!   decides which paths go in.
 //! - The walk of the matter ([`scan_matter`], [`scan_links`]): links that lead outside it and
@@ -47,7 +47,7 @@
 //! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `tmpdir`, `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
 //!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
-//!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
+//!   `browser_socket_dir` (Unix; without it no Unix socket anywhere),
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
 //!   session's temp folder the host set, `<data_dir>/run/<session>/tmp`, read-write without

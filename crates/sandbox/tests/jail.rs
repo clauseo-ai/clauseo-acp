@@ -48,6 +48,11 @@ mod watcher;
 
 #[cfg(test)]
 #[cfg(target_os = "macos")]
+#[path = "jail/keychain.rs"]
+mod keychain;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 #[path = "jail/links.rs"]
 mod links;
 
