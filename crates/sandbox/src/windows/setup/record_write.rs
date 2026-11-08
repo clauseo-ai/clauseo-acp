@@ -163,6 +163,13 @@ pub(crate) fn read_pool_value(key: &str, name: &str) -> Result<Option<u64>, Mach
     read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
 }
 
+/// [`read_pool_value`] of the machine's record, `HKLM\SOFTWARE\Clauseo\Sandbox`: what the
+/// outer runner and the desktop read, as the lawyer and without the set-up lock, for the
+/// unclean-session markers (`StopNext`, `SweepSequence`, …).
+pub(crate) fn read_record_value(name: &str) -> Result<Option<u64>, MachineError> {
+    read_pool_value(RECORD_KEY, name)
+}
+
 /// Sets a pool task's `REG_QWORD` value `name` (`StopNext`, `SweepCompleted`, …) in
 /// `HKLM\<key>` as it is: never made, so a task still running after `--remove` can't bring
 /// the key back ([`open_existing`]). The tasks call it as SYSTEM, under the set-up lock.

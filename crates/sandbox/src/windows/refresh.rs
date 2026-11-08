@@ -112,8 +112,8 @@ pub use rules::{
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    SweepRun, TASK_FOLDER, TaskError, last_refresh_run, pool_sweep_result, register_task,
-    request_admin_refresh, request_pool_stop, request_pool_sweep, unregister_task,
+    TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
+    request_pool_stop, request_pool_sweep, unregister_task,
 };
 pub use version::version_not_older;
 #[cfg(windows)]

@@ -54,7 +54,7 @@ fn the_marker_is_named_for_the_launch_id_in_the_run_folder() {
 }
 
 #[test]
-fn a_marker_is_left_by_every_end_but_a_clean_one() {
+fn a_marker_is_left_until_it_is_removed() {
     let data = TempDir::new("marker-ends");
     run_folder(&data);
     // Three sessions start: each writes its marker first.
@@ -67,8 +67,8 @@ fn a_marker_is_left_by_every_end_but_a_clean_one() {
         assert!(path.is_file(), "{}", path.display());
         owner_only(path);
     }
-    // The first ends clean and removes its marker; the second was cancelled and the third
-    // crashed, and neither removes it.
+    // The first is found clean and removed; the second is still running and the third's outer
+    // died, and neither is removed.
     remove_marker(&paths[0]).unwrap();
     assert!(!paths[0].exists());
     // A second removal is fine.
@@ -80,10 +80,12 @@ fn a_marker_is_left_by_every_end_but_a_clean_one() {
             UncleanSession {
                 id: ids[1].to_owned(),
                 pool_user: Some(sid(POOL)),
+                state: Some(MarkerState::Open),
             },
             UncleanSession {
                 id: ids[2].to_owned(),
                 pool_user: Some(sid(POOL)),
+                state: Some(MarkerState::Open),
             },
         ]
     );
@@ -116,10 +118,16 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
             UncleanSession {
                 id: "00000000000000dd".to_owned(),
                 pool_user: None,
+                state: None,
             },
             UncleanSession {
                 id: "00000000000000ee".to_owned(),
                 pool_user: if cfg!(unix) { None } else { Some(sid(POOL)) },
+                state: if cfg!(unix) {
+                    None
+                } else {
+                    Some(MarkerState::Open)
+                },
             },
         ]
     );
@@ -168,4 +176,80 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
     });
     assert!(logged_on);
     assert_eq!(ran.unwrap(), Some(marker_path(data.path(), ID)));
+}
+
+#[test]
+fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
+    let data = TempDir::new("marker-states");
+    run_folder(&data);
+    let path = write_marker(data.path(), ID, &sid(POOL)).unwrap();
+    owner_only(&path);
+    let states = [
+        MarkerState::AwaitingSweep { sweep: 7 },
+        MarkerState::AwaitingStop { stop: 3, sweep: 8 },
+    ];
+    for state in states {
+        write_marker_at(&path, Some(&sid(POOL)), state).unwrap();
+        owner_only(&path);
+        let left = unclean_sessions(data.path()).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].state, Some(state));
+        assert_eq!(left[0].pool_user, Some(sid(POOL)));
+    }
+    // One the desktop's start wrote for a marker it couldn't read names no pool user.
+    write_marker_at(&path, None, states[1]).unwrap();
+    owner_only(&path);
+    let left = unclean_sessions(data.path()).unwrap();
+    assert_eq!(
+        (left[0].pool_user.clone(), left[0].state),
+        (None, Some(states[1]))
+    );
+    // Only a marker's own name is written.
+    let other = data
+        .path()
+        .join("sandbox")
+        .join("run")
+        .join("notes.session");
+    let refused = write_marker_at(&other, Some(&sid(POOL)), states[0]);
+    assert_eq!(
+        refused.map_err(|e| e.kind()),
+        Err(io::ErrorKind::InvalidInput)
+    );
+}
+
+#[test]
+fn a_marker_from_before_the_states_reads_as_open() {
+    let data = TempDir::new("marker-old");
+    run_folder(&data);
+    let old = format!("{{\"pool_user\":\"{POOL}\"}}");
+    let path = data.file(&format!("sandbox/run/{ID}.session"), &old);
+    owner_only(&path);
+    let left = unclean_sessions(data.path()).unwrap();
+    assert_eq!(left[0].state, Some(MarkerState::Open));
+    // An unknown state isn't a marker's content.
+    let odd = format!("{{\"pool_user\":\"{POOL}\",\"state\":{{\"kind\":\"done\"}}}}");
+    let path = data.file(&format!("sandbox/run/{ID}.session"), &odd);
+    owner_only(&path);
+    assert_eq!(unclean_sessions(data.path()).unwrap()[0].state, None);
+}
+
+#[test]
+fn a_marker_is_clean_once_every_number_it_waits_for_is_met() {
+    let done = |stop, sweep| Sequences { stop, sweep };
+    // Open is never clean; absent sequences read as 0.
+    assert!(!MarkerState::Open.clean(done(u64::MAX, u64::MAX)));
+    let sweep = MarkerState::AwaitingSweep { sweep: 5 };
+    assert!(!sweep.clean(done(9, 4)));
+    assert!(sweep.clean(done(0, 5)));
+    assert!(sweep.clean(done(0, 6)));
+    let stop = MarkerState::AwaitingStop { stop: 2, sweep: 5 };
+    assert!(!stop.clean(done(1, 9)));
+    assert!(!stop.clean(done(2, 4)));
+    assert!(stop.clean(done(2, 5)));
+    assert_eq!((stop.stop(), stop.sweep()), (Some(2), Some(5)));
+    assert_eq!((sweep.stop(), sweep.sweep()), (None, Some(5)));
+    assert_eq!(
+        (MarkerState::Open.stop(), MarkerState::Open.sweep()),
+        (None, None)
+    );
 }

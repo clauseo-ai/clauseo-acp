@@ -2,22 +2,32 @@
 //!
 //! The outer ends every session once: when the inner runner exited, once the agent's output had
 //! its time ([`inner_exited`]); when the host's stdin ended (the host's cancel ladder closes it,
-//! then gives the outer 2 s before it ends the outer's job), once the agent, whose stdin is closed
-//! first, had [`GRACE`] to finish and the inner didn't exit in it ([`relay_stdin`]); or at once
-//! on any failure once the launch is read. [`SessionEnd::trigger`] ends it once a session,
-//! whichever path comes first; a path that comes while the end is still going waits for it.
+//! then gives the outer its `stdin_grace`, 5 s on tier B, before it ends the outer's job), once
+//! the agent, whose stdin is closed first, had [`GRACE`] to finish and the inner didn't exit in it
+//! ([`relay_stdin`]); or at once on any failure once the launch is read.
+//! [`SessionEnd::trigger`] ends it once a session, whichever path comes first; a path that comes
+//! while the end is still going waits for it.
 //!
 //! First the launch's kill-on-close job is ended and the outer waits, up to [`EMPTY_WAIT`], until
-//! no process is left in it. Then it asks the Task Scheduler to run the `SYSTEM` task
+//! no process is left in it. The session can launch nothing more from here. It reads
+//! `SweepNext` (`M`), then asks the Task Scheduler to run the `SYSTEM` task
 //! `\Clauseo\SandboxSweep` ([`EndSteps::request_sweep`]), which deletes the pool users' scheduled
 //! tasks and cancels their BITS jobs, and kills nothing; it does so even when the job didn't empty,
-//! which is logged and leaves the session unclean. The run is queued as the outer returns from the
-//! request, so the host ending the outer later doesn't stop it. The outer starts no process of the
-//! pool user's at the end: a process of the pool user's outside the job is killed by the next
-//! inner's first act, and its per-user COM classes, `Run` and `RunOnce` values and Startup entries
-//! are removed there too (`inner_flow.rs`). A request that fails is logged and changes no exit
-//! code. At its own end, if it lives that long, the outer waits up to [`SWEEP_WAIT`] for the run's
-//! result ([`SessionEnd::wait`]): only 0 is a clean sweep.
+//! which is logged. The run is queued as the outer returns from the request, so the host ending
+//! the outer later doesn't stop it, and the run takes `M` or a later number. The outer starts no
+//! process of the pool user's at the end: a process of the pool user's outside the job is killed
+//! by the next inner's first act, and its per-user COM classes, `Run` and `RunOnce` values and
+//! Startup entries are removed there too (`inner_flow.rs`). A request that fails is logged and
+//! changes no exit code.
+//!
+//! The outer never waits for the run: the host gives it 5 s after a cancel (`stdin_grace` on
+//! tier B), and its end fits in 3 s. At its end ([`SessionEnd::finish`]) it writes the session's
+//! marker as awaiting a sweep `>= M`, whatever the end was (a failure, a cancel past its grace or
+//! a job that didn't empty too: the next inner's first act kills what is left and reports an
+//! escapee). When a sweep found an escapee it also reads `StopNext`, requests
+//! `\Clauseo\SandboxStop` and writes the marker as awaiting that stop too. The next launch
+//! (`clean_close::check_launch`) and the pool user's next logon (`outer/unclean.rs`) check it
+//! (`marker.rs`).
 //!
 //! The guard keeps the signal that began the end, so a cancel exits as it would have without the
 //! job's end ([`exit_code`]). It also keeps whether any sweep of the session found an escapee (the
@@ -30,26 +40,28 @@ use std::sync::{Condvar, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use super::marker::MarkerState;
 use super::sweep::SWEPT;
 use super::{RunExit, agent_code};
+use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 
 /// The exit code the host's own job end gives the outer, `TERMINATED` in
 /// `crates/process/src/os/windows.rs:54` (private there): what a cancel whose agent didn't exit
-/// within the host's 2 s gives without the outer's own job end.
+/// within the host's `stdin_grace` gives without the outer's own job end.
 pub(crate) const HOST_ENDED: u32 = 0xC1A0;
 /// How long the agent has, once the host's stdin ended and the agent's was closed, to finish
-/// before the outer ends the job: half of the 2 s the host gives the outer once it closed the
-/// outer's stdin, before it ends the outer's job (`STDIN_GRACE` in `crates/process/src/handle.rs`,
-/// private there), so the job's end and the sweep task's request fit in the rest.
+/// before the outer ends the job. The host gives the outer 5 s once it closed the outer's stdin
+/// (`SpawnOptions::stdin_grace` on tier B), before it ends the outer's job; the outer's end, this
+/// grace, the job's end, the reads, the request and the marker, fits in 3 s (`OUTER_END`).
 pub(crate) const GRACE: Duration = Duration::from_millis(1000);
+/// What the outer's end after a cancel fits in, from the host's stdin end: well inside the host's
+/// 5 s. The cancel tests pin it.
+#[cfg(test)]
+pub(crate) const OUTER_END: Duration = Duration::from_secs(3);
 /// How long the outer waits for its ended job to empty before it requests the sweep task.
 pub(crate) const EMPTY_WAIT: Duration = Duration::from_millis(400);
 /// How often it looks meanwhile.
 pub(crate) const EMPTY_POLL: Duration = Duration::from_millis(25);
-/// How long the outer, still alive at its end, waits for the sweep task's result.
-pub(crate) const SWEEP_WAIT: Duration = Duration::from_secs(20);
-/// How often it reads the result meanwhile.
-pub(crate) const SWEEP_POLL: Duration = Duration::from_millis(100);
 /// How many pieces of the host's stdin (each up to [`PIECE`]) wait for the agent's stdin: up to
 /// 16 MiB the agent hasn't read yet, past which the read waits too ([`relay_stdin`]).
 const STDIN_PIECES: usize = 256;
@@ -58,38 +70,32 @@ const PIECE: usize = 64 * 1024;
 
 /// The calls that end a session; Windows' are `outer/end.rs`'s.
 pub(crate) trait EndSteps {
-    /// A run of the sweep task, once requested.
-    type Run;
     /// Ends this launch's kill-on-close job (its processes end with [`SWEPT`]) and waits, up to
     /// [`EMPTY_WAIT`], until no process is left in it ([`wait_empty`]); nothing to do before the
     /// job is made. An error says what is left.
     fn empty_job(&self) -> Result<(), String>;
+    /// The record's `REG_QWORD` value `name` (`SweepNext`, `StopNext`) as the lawyer reads it,
+    /// 1 when absent: the number the task's next run takes. Read without the set-up lock, which
+    /// only an administrator can take, once the session can launch nothing more
+    /// (`pool_steps::sequence` says why that is sound).
+    fn next_number(&self, name: &'static str) -> Result<u64, String>;
     /// Asks the Task Scheduler to run `\Clauseo\SandboxSweep` now, and returns once the run is
     /// queued. An error names the failed call and its code, never a path or a SID.
-    fn request_sweep(&self) -> Result<Self::Run, String>;
-    /// How `run` ended: `None` while it is queued or running, else the task's last result.
-    fn sweep_result(&self, run: &Self::Run) -> Result<Option<u32>, String>;
-    /// Waits `pause` before the next read of the result.
-    fn pause(&self, pause: Duration);
+    fn request_sweep(&self) -> Result<(), String>;
+    /// Asks the Task Scheduler to run `\Clauseo\SandboxStop` now: whether the run was queued.
+    fn request_stop(&self) -> bool;
+    /// Writes the session's marker as `state`, in place of the open one.
+    fn settle(&self, state: &MarkerState) -> Result<(), String>;
     /// A line on the outer's stderr.
     fn log(&self, line: &str);
     /// The time on a monotonic clock, from any fixed origin: how long ago the host's stdin ended.
     fn now(&self) -> Duration;
 }
 
-/// How the session's sweep task ended, as far as the outer saw.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Swept {
-    /// Its run's result was 0: every task and BITS job of the pool users' it found went.
-    Clean,
-    /// Its result wasn't 0, it was still queued or running when the outer's wait ran out, its
-    /// request or its result's read failed, or no run was requested.
-    Unclean,
-}
-
-/// Ends the session's job and requests the sweep task, even when the job didn't empty; each
-/// failure is logged as a warning. Whether the job emptied, and the run once requested.
-pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<S::Run>) {
+/// Ends the session's job, reads `SweepNext`, then requests the sweep task, even when the job
+/// didn't empty; each failure is logged as a warning. Whether the job emptied, and the
+/// `SweepNext` read (`None` when it couldn't be).
+pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<u64>) {
     let emptied = match steps.empty_job() {
         Ok(()) => true,
         Err(what) => {
@@ -100,60 +106,29 @@ pub(crate) fn end_session<S: EndSteps>(steps: &S) -> (bool, Option<S::Run>) {
             false
         }
     };
-    let run = match steps.request_sweep() {
-        Ok(run) => Some(run),
-        Err(what) => {
-            steps.log(&format!(
-                "clauseo-sandbox-run: warning: the sandbox sweep task couldn't be requested \
-                 ({what})"
-            ));
-            None
-        }
-    };
-    (emptied, run)
+    // The session can launch nothing more now. Read before the request, so the run it queues
+    // takes this number or a later one.
+    let sweep = next_number(steps, SWEEP_NEXT);
+    if let Err(what) = steps.request_sweep() {
+        steps.log(&format!(
+            "clauseo-sandbox-run: warning: the sandbox sweep task couldn't be requested \
+             ({what})"
+        ));
+    }
+    (emptied, sweep)
 }
 
-/// Reads `run`'s result every [`SWEEP_POLL`] (through [`EndSteps::pause`]) for up to
-/// [`SWEEP_WAIT`]: [`Swept::Clean`] for 0 alone. Anything else is logged as a warning: a
-/// non-zero result (in hex), a run still queued or running at the deadline, a read that failed,
-/// or no run (`None`: its request failed or none was made).
-pub(crate) fn wait_swept<S: EndSteps>(steps: &S, run: Option<&S::Run>) -> Swept {
-    let Some(run) = run else {
-        steps.log("clauseo-sandbox-run: warning: no sandbox sweep task was requested");
-        return Swept::Unclean;
-    };
-    let polls = SWEEP_WAIT.as_millis() / SWEEP_POLL.as_millis().max(1);
-    let mut polled = 0;
-    loop {
-        match steps.sweep_result(run) {
-            Ok(Some(0)) => return Swept::Clean,
-            Ok(Some(code)) => {
-                steps.log(&format!(
-                    "clauseo-sandbox-run: warning: the sandbox sweep task ended 0x{code:08X}"
-                ));
-                return Swept::Unclean;
-            }
-            Ok(None) if polled < polls => {
-                steps.pause(SWEEP_POLL);
-                polled += 1;
-            }
-            Ok(None) => {
-                steps.log(&format!(
-                    "clauseo-sandbox-run: warning: the sandbox sweep task was still running after \
-                     {} s",
-                    SWEEP_WAIT.as_secs()
-                ));
-                return Swept::Unclean;
-            }
-            Err(what) => {
-                steps.log(&format!(
-                    "clauseo-sandbox-run: warning: the sandbox sweep task's result can't be read \
-                     ({what})"
-                ));
-                return Swept::Unclean;
-            }
-        }
-    }
+/// [`EndSteps::next_number`], a failure logged: `None`, and the marker stays open.
+fn next_number<S: EndSteps>(steps: &S, name: &'static str) -> Option<u64> {
+    steps
+        .next_number(name)
+        .inspect_err(|what| {
+            steps.log(&format!(
+                "clauseo-sandbox-run: warning: {name} can't be read ({what}); the session marker \
+                 stays open"
+            ));
+        })
+        .ok()
 }
 
 /// Asks `active` for the job's process count until it is 0, every `poll` (through `pause`)
@@ -199,24 +174,22 @@ pub(crate) enum EndSignal {
     Failed,
 }
 
-/// How the session's end began: the signal, whether the job emptied, and the sweep task's run
-/// once requested.
-struct Began<R> {
+/// How the session's end began: the signal and the `SweepNext` read. Whether the job emptied
+/// is only logged: the marker awaits a sweep either way.
+struct Began {
     /// The signal.
     why: EndSignal,
-    /// Whether the job emptied within [`EMPTY_WAIT`].
-    emptied: bool,
-    /// The sweep task's run; `None` when its request failed.
-    run: Option<R>,
+    /// `SweepNext` as read once the job ended; `None` when it couldn't be.
+    sweep: Option<u64>,
 }
 
 /// The guard that ends the session once.
 pub(crate) struct SessionEnd<S: EndSteps> {
     steps: S,
     /// How the end began, once a path began it.
-    began: OnceLock<Began<S::Run>>,
-    /// How the sweep task ended, once the outer waited for it.
-    swept: OnceLock<Swept>,
+    began: OnceLock<Began>,
+    /// Whether the marker was settled ([`SessionEnd::finish`]).
+    finished: OnceLock<()>,
     /// When the host's stdin ended, on [`EndSteps::now`]'s clock.
     stdin_ended: OnceLock<Duration>,
     /// Whether a sweep of the session found a process of the pool user's it couldn't end.
@@ -231,7 +204,7 @@ impl<S: EndSteps> SessionEnd<S> {
         SessionEnd {
             steps,
             began: OnceLock::new(),
-            swept: OnceLock::new(),
+            finished: OnceLock::new(),
             stdin_ended: OnceLock::new(),
             escaped: AtomicBool::new(false),
             begun: Mutex::new(false),
@@ -251,14 +224,14 @@ impl<S: EndSteps> SessionEnd<S> {
                 *begun = true;
             }
             self.begun_changed.notify_all();
-            let (emptied, run) = end_session(&self.steps);
-            Began { why, emptied, run }
+            let (_emptied, sweep) = end_session(&self.steps);
+            Began { why, sweep }
         });
         first
     }
 
-    /// The host's stdin ended now: from here the host gives the outer 2 s, and the agent what is
-    /// left of its grace. The first call counts.
+    /// The host's stdin ended now: from here the host gives the outer its `stdin_grace`, and the
+    /// agent what is left of its grace. The first call counts.
     pub(crate) fn stdin_ended(&self) {
         self.stdin_ended.get_or_init(|| self.steps.now());
     }
@@ -301,35 +274,54 @@ impl<S: EndSteps> SessionEnd<S> {
         self.escaped.load(Ordering::SeqCst)
     }
 
-    /// At the outer's end: waits up to [`SWEEP_WAIT`] for the sweep task's run ([`wait_swept`]),
-    /// once; a later call gives the first one's answer. [`Swept::Unclean`] when no path began
-    /// the end or its request failed.
-    pub(crate) fn wait(&self) -> Swept {
-        *self.swept.get_or_init(|| {
-            let run = self.began.get().and_then(|began| began.run.as_ref());
-            wait_swept(&self.steps, run)
-        })
+    /// At the outer's end, once: the session's marker settled (`marker.rs`); it never waits for a
+    /// run. With no end begun it stays open. With no escapee it awaits a sweep `>= M`, the
+    /// `SweepNext` read at the end: whatever the end was, since the next inner's first act kills
+    /// what is left of the pool user's and reports an escapee. When a sweep found an escapee,
+    /// `StopNext` is read, the stop task requested, and it awaits that stop as well. A number that
+    /// couldn't be read leaves it open, which the pool user's next logon, or the desktop's start,
+    /// makes one awaiting a stop (`outer/unclean.rs`).
+    pub(crate) fn finish(&self) {
+        self.finished.get_or_init(|| {
+            let Some(began) = self.began.get() else {
+                return;
+            };
+            let state = if self.escaped() {
+                self.awaiting_stop(began.sweep)
+            } else {
+                began
+                    .sweep
+                    .map(|sweep| MarkerState::AwaitingSweep { sweep })
+            };
+            let Some(state) = state else {
+                return;
+            };
+            if let Err(what) = self.steps.settle(&state) {
+                self.steps.log(&format!(
+                    "clauseo-sandbox-run: warning: the session marker couldn't be written \
+                     ({what}); it stays open"
+                ));
+            }
+        });
     }
 
-    /// Whether the session ended clean, so the outer removes its unclean-session marker
-    /// (`marker.rs`): its end began at the inner's exit (no failure, and no cancel whose agent
-    /// outlived [`GRACE`]: an agent that finished after the host's stdin ended, its output
-    /// drained before the grace ran out, ends clean), the inner reported the agent's exit
-    /// (`reported`), the job emptied, the sweep task's run ended 0 (`swept`), and no sweep found
-    /// an escapee. A sweep task that couldn't read or delete a task ends non-zero, so the marker
-    /// stays.
-    pub(crate) fn clean(&self, swept: Swept, reported: bool) -> bool {
-        self.began
-            .get()
-            .is_some_and(|began| began.why == EndSignal::InnerExited && began.emptied)
-            && reported
-            && swept == Swept::Clean
-            && !self.escaped()
+    /// An escapee's marker: `StopNext` read before the stop task is requested, so the run it
+    /// queues takes that number or a later one; `None` when a number couldn't be read.
+    fn awaiting_stop(&self, sweep: Option<u64>) -> Option<MarkerState> {
+        let stop = next_number(&self.steps, STOP_NEXT);
+        if !self.steps.request_stop() {
+            self.steps
+                .log("clauseo-sandbox-run: warning: the sandbox stop task couldn't be requested");
+        }
+        Some(MarkerState::AwaitingStop {
+            stop: stop?,
+            sweep: sweep?,
+        })
     }
 
     /// The outer's exit code for a run that would exit `code`: [`RunExit::Escapee`] when a sweep
     /// of the session found an escapee, whatever `code` is (the agent's own, even 0, which the
-    /// outer then says on stderr); else `code`. The sweep task's result never changes it.
+    /// outer then says on stderr); else `code`. The sweep and stop tasks never change it.
     pub(crate) fn outcome(&self, code: u32) -> u32 {
         if self.escaped() {
             RunExit::Escapee.code()
@@ -395,10 +387,11 @@ pub(crate) fn copy(mut from: impl Read, mut to: impl Write) -> CopyEnd {
 /// the agent has what is left of `grace` ([`GRACE`]), counted from the stdin end, to finish:
 /// the inner's exit begins the end meanwhile ([`inner_exited`]), its output and code kept. When
 /// no path began it by then, this one does ([`EndSignal::Stdin`]): the job ends, and the agent
-/// with it, inside the host's 2 s; a writer still blocked then fails, its pipe's other end gone
-/// with the job, and closes. An agent that closed its own stdin ends nothing: the writer stops,
-/// and the host's stdin is still read, its end still kept and acted on. Past [`STDIN_PIECES`]
-/// pieces the agent hasn't read, the read waits for the writer, so the end is seen late.
+/// with it, inside the host's `stdin_grace`; a writer still blocked then fails, its pipe's other
+/// end gone with the job, and closes. An agent that closed its own stdin ends nothing: the writer
+/// stops, and the host's stdin is still read, its end still kept and acted on. Past
+/// [`STDIN_PIECES`] pieces the agent hasn't read, the read waits for the writer, so the end is
+/// seen late.
 pub(crate) fn relay_stdin<S: EndSteps, W: Write + Send>(
     mut from: impl Read,
     to: W,
