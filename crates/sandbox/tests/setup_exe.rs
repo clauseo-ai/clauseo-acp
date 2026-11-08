@@ -286,7 +286,12 @@ fn the_exe_names_no_pdb() {
 /// The setup exe's imports that load after `main` has kept the DLL search to System32
 /// (`build.rs`).
 #[cfg(all(windows, target_env = "msvc"))]
-const DELAYED: [&str; 3] = ["netapi32.dll", "userenv.dll", "wtsapi32.dll"];
+const DELAYED: [&str; 4] = [
+    "netapi32.dll",
+    "userenv.dll",
+    "wtsapi32.dll",
+    "wintrust.dll",
+];
 
 /// The runner exe's: it makes no `Net*` call, so it doesn't import `netapi32.dll`; the sweep
 /// lists processes with `wtsapi32.dll`.
