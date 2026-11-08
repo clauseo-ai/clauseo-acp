@@ -478,7 +478,7 @@ fn names_made_and_items_turned_into_reparse_points_are_read_from_the_buffer() {
     let read = changes(&buffer(Layout::Plain, &records), Layout::Plain).unwrap();
     assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
     assert_eq!(read.relinked, ["edited", "junction"].map(PathBuf::from));
-    assert!(read.folders.is_empty());
+    assert_eq!(read.folders, Vec::<PathBuf>::new());
 }
 
 #[test]
