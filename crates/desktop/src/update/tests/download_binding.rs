@@ -10,6 +10,7 @@ use clauseo_host::{InstallKind, Offer, Opaque, ProgressSink, Updater as _, Updat
 use serde_json::json;
 use tauri_plugin_updater::UpdaterExt as _;
 
+use super::super::arch::Target;
 use super::super::file_binding::expected_update_file;
 use super::super::plugin::{self, Pending, PluginUpdater, Source};
 use super::file_binding::{TestKey, comment};
@@ -91,7 +92,12 @@ fn download_signed_as(test: &str, signed_as: &str) -> Ran {
     );
     let offer = Offer {
         version: update.version.clone(),
-        handle: Opaque::new(Pending { update, source }),
+        handle: Opaque::new(Pending {
+            update,
+            source,
+            target: Target::Native,
+        }),
+        refetch: false,
     };
     let (sink, _progress) = ProgressSink::channel(64);
     let result = block_on(adapter.download(offer, sink));
@@ -138,14 +144,17 @@ const OTHER_ARCH_INSTALLER: &str = if cfg!(target_arch = "aarch64") {
 #[test]
 fn a_download_signed_as_another_file_is_refused_and_never_written() {
     for other in ["clauseo-sandbox-setup.exe", OTHER_ARCH_INSTALLER] {
-        assert_ne!(expected_update_file(VERSION).as_deref(), Some(other));
+        assert_ne!(
+            expected_update_file(VERSION, Target::Native).as_deref(),
+            Some(other)
+        );
         let ran = download_signed_as("update-binding-refused", other);
         assert!(
             fetched(&ran),
             "the artifact was never fetched: {:?}",
             ran.requests
         );
-        let line = if expected_update_file(VERSION).is_some() {
+        let line = if expected_update_file(VERSION, Target::Native).is_some() {
             "the signature is for another file than this platform's installer"
         } else {
             "this platform installs no update"
@@ -164,7 +173,7 @@ fn a_download_signed_as_another_file_is_refused_and_never_written() {
 /// like any other.
 #[test]
 fn a_download_signed_as_this_platforms_installer_is_saved() {
-    let Some(expected) = expected_update_file(VERSION) else {
+    let Some(expected) = expected_update_file(VERSION, Target::Native) else {
         let ran = download_signed_as("update-binding-linux", "Clauseo_0.4.1_x64-setup.exe");
         assert!(matches!(ran.result, Err(UpdaterError::Signature(_))));
         assert_eq!(entries(&ran.updates()), Vec::<String>::new());

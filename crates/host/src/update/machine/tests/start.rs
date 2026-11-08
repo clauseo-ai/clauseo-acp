@@ -287,3 +287,36 @@ fn update_a_cached_download_of_the_running_version_is_ignored() {
     assert!(!checks(&fx), "{fx:?}");
     assert_eq!(m.view().state, UpdateState::Idle);
 }
+
+/// The updater found last run's file is not this offer's (another architecture's installer):
+/// the same version is downloaded again, never made `ready` from the file, and nothing installs
+/// at start, in `auto` and `notify`.
+#[test]
+fn update_an_offer_that_refetches_downloads_again_and_never_installs_the_cached_file() {
+    for update_mode in [UpdateMode::Auto, UpdateMode::Notify] {
+        let start = Start {
+            cached: Some(cached(NEXT)),
+            ..begin(InstallKind::CurrentUser, mode(update_mode))
+        };
+        let mut m = Machine::start(start, t0()).0;
+        let mut now = t0();
+        if update_mode == UpdateMode::Notify {
+            now = m.timer().unwrap();
+            m = go(&m, Input::TimerFired, now).0;
+        }
+        let o = Offer {
+            refetch: true,
+            ..offer(NEXT)
+        };
+        let (m, fx) = go(&m, Input::CheckDone(Ok(Some(o.clone()))), now);
+        assert_eq!(fx, [Effect::StartDownload(o.clone()), Effect::Publish]);
+        assert!(!installs(&fx), "{fx:?}");
+        let fresh = downloaded(&o);
+        let (m, fx) = go(&m, Input::DownloadDone(Ok(fresh)), now);
+        assert!(!installs(&fx), "{fx:?}");
+        let ready = UpdateState::Ready {
+            version: NEXT.to_owned(),
+        };
+        assert_eq!(m.view().state, ready, "{update_mode:?}");
+    }
+}

@@ -105,6 +105,10 @@ pub struct Offer {
     pub version: String,
     /// What the [`Updater`] needs to download it, and later to install it.
     pub handle: Opaque,
+    /// The updater found that last run's download of this version is not the file this offer
+    /// installs (desktop: another architecture's installer), so it is downloaded again rather
+    /// than made `ready` from the file. False when there is none, or it is this offer's.
+    pub refetch: bool,
 }
 
 /// A version downloaded and its signature checked, ready for desktop to install once the host

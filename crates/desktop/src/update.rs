@@ -23,6 +23,10 @@
 //! Nothing here logs a URL or a path (0047): a failure is logged by its kind.
 
 #[cfg(any(test, not(target_os = "linux")))]
+mod arch;
+#[cfg(any(test, not(target_os = "linux")))]
+mod cached;
+#[cfg(any(test, not(target_os = "linux")))]
 mod choice;
 #[cfg(all(feature = "e2e", any(test, not(target_os = "linux"))))]
 mod fake;

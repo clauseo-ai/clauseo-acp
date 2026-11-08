@@ -98,8 +98,9 @@
 //! - The TypeScript bindings in `ui/app/src/transport/bindings.ts` are written by a unit test
 //!   (`src/commands/bindings.rs`); tauri-specta and specta are dev-dependencies only.
 
-// The admin copy's refresh at start-up runs on Windows; its decision is tested everywhere.
-#[cfg(any(windows, test))]
+// The admin copy's refresh at start-up runs on Windows; its decision is tested everywhere, and
+// the updater's arm64 gate (update/arch.rs) reads it wherever the updater is built.
+#[cfg(any(test, not(target_os = "linux")))]
 mod admin_refresh;
 #[cfg(test)]
 mod agent_browser_pin;
