@@ -167,10 +167,10 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
     if let Err(exit) = placed {
         return exit;
     }
-    match target {
-        Target::User { data_dir, .. } => machine.set_up(data_dir),
-        Target::Machine => SetupExit::Done,
-    }
+    // EXPERIMENT (branch exp-installer-tasksonly, NOT FOR MERGE): Defender control C6 stops
+    // after the tasks and the record, so the installer's tree makes no users, group or network
+    // rules; nobody is set up.
+    SetupExit::Done
 }
 
 /// Steps 3 (the records) to 7, with the set-up lock held.
