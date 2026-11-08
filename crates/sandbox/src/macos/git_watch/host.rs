@@ -89,9 +89,13 @@ impl Register {
     }
 }
 
-/// Whether recorded session `record` never ran its final scan: its host is gone (no process
-/// with its pid and start), or it is this host and its watch isn't running.
+/// Whether recorded session `record` never ran a final scan that moves: a process of it
+/// outlived its kill, its host is gone (no process with its pid and start), or it is this host
+/// and its watch isn't running.
 pub(crate) fn dead(record: &SessionRecord) -> bool {
+    if record.outlived {
+        return true;
+    }
     let this = jail_procs::this_process();
     if (record.host_pid, record.host_start) == this {
         !LIVE.has(&record.session)
@@ -101,12 +105,16 @@ pub(crate) fn dead(record: &SessionRecord) -> bool {
 }
 
 /// Ends every process a dead session left, by its probe name, waiting up to 3 s for them.
-/// Returns whether none is left.
-pub(crate) fn kill_dead(name: &str) -> bool {
+/// Only a process started at or after the session's launch is killed: the probe's random part
+/// already keeps another host run's sessions out, and its start keeps out whatever else
+/// carries the name. Returns whether none is left.
+pub(crate) fn kill_dead(record: &SessionRecord) -> bool {
+    let name = record.probe.as_str();
     let Some(probe) = Probe::from_name(name) else {
         tracing::error!(name, "a recorded probe name Clauseo never makes");
         return true;
     };
+    let probe = probe.since(record.launched);
     let clock = SystemClock::new();
     let until = clock.now() + DEAD_KILL_WAIT;
     while !probe.gone() && clock.now() < until {
@@ -117,7 +125,7 @@ pub(crate) fn kill_dead(name: &str) -> bool {
     if !gone {
         tracing::error!(
             name,
-            "a dead session's processes did not go; scanning anyway"
+            "a dead session's processes did not go; nothing moves while one is left"
         );
     }
     gone
@@ -136,10 +144,12 @@ pub(crate) fn host() -> Host<'static> {
 /// every matter whose state file is in `git_set_aside` (the folder the host passes
 /// [`PolicyBuilder::git_set_aside`](crate::PolicyBuilder::git_set_aside)), it finds the sessions
 /// whose host quit or crashed before their final scan, kills what is left of each by its
-/// probe (waiting up to 3 s), and runs that final scan, setting aside what the agent left and
-/// reporting each to `notices` as [`Denial::GitSetAside`](crate::Denial). A launch of a matter
-/// does the same for that matter first, so a launch racing this is safe. A record stays while
-/// a process of it is left or its matter is missing (a disk not plugged in), for the next try.
+/// probe (waiting up to 3 s), and once none is left runs that final scan, setting aside what
+/// the agent left and reporting each to `notices` as [`Denial::GitSetAside`](crate::Denial).
+/// A launch of a matter does the same for that matter first, so a launch racing this is safe.
+/// A record stays while a process of it is left (nothing of it moves then, and the matter's
+/// launches are refused) or its matter is missing (a disk not plugged in), for the next try.
+/// The notes folders of sessions have state files of their own here, and get the same.
 /// Returns how many sessions' scans ran; an error only when the state folder can't be listed
 /// (a missing one is none). One matter's error is logged and the rest go on.
 pub fn start_up(git_set_aside: &Path, notices: &Arc<dyn DenialSink>) -> io::Result<usize> {

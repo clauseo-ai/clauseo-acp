@@ -92,13 +92,16 @@
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
-//!   Each launch also starts the git watch on the matter before the agent (`src/macos/git_watch`),
-//!   which, on the first thing the agent leaves for the lawyer's git to trust, ends every
-//!   process of the session, then sets it aside into [`Policy::git_set_aside`] (or the matter
-//!   volume's [`Policy::volume_set_aside`]) and reports it as [`Denial::GitSetAside`]; a policy
-//!   without that folder is refused at launch. The host calls [`git_watch_start_up`] once at
+//!   Each launch also starts the git watch on the matter and the notes folder before the agent
+//!   (`src/macos/git_watch`), which, on the first thing the agent leaves for the lawyer's git
+//!   to trust, ends every process of the session, then sets it aside into
+//!   [`Policy::git_set_aside`] (or the matter volume's [`Policy::volume_set_aside`]) and
+//!   reports it as [`Denial::GitSetAside`]; a policy without that folder, a folder whose
+//!   `FSEvents` stream can't start, and a matter where an earlier session's process outlived
+//!   its kill are refused at launch. The host calls [`git_watch_start_up`] once at
 //!   its start, on a thread of its own, with the same git set-aside folder: it kills what a
-//!   quit or crash left running and runs the final scans those sessions missed. At its quit
+//!   quit or crash left running and, once none of it is left, runs the final scans those
+//!   sessions missed. At its quit
 //!   it calls [`git_watch_quit`] with how long it can wait, which kills every running session
 //!   and lets the watches run their final scans.
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's

@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::aside::Aside;
-use super::run::{Msg, start_with};
+use super::run::{Mode, Msg, start_with};
 use super::state::{self, FileStore, SessionRecord, Store as _};
 use super::{Fs as _, Launch, Session, Watch, fsevents, host, os};
 use crate::{Clock as _, Denial, DenialSink, GitItem, GitOutcome, SystemClock};
@@ -90,8 +90,9 @@ impl Live {
         );
         let watch = Watch::new(os::Real, live.matter.clone(), aside, &Launch::default());
         let store = FileStore::new(&live.set_aside, &live.matter);
-        let watching = start_with(watch, session, store, None, fsevents::start).unwrap();
-        watching.attach(Arc::new(Running(Arc::clone(&live.gone))));
+        let watching =
+            start_with(watch, session, store, None, Mode::Live, fsevents::start).unwrap();
+        watching.attach(Running(Arc::clone(&live.gone)));
         live
     }
 
@@ -361,6 +362,9 @@ fn the_hosts_start_runs_a_dead_sessions_final_scan() {
         ),
         set_aside: set_aside.as_path().into(),
         baseline: state::Baseline::default(),
+        launched: None,
+        outlived: false,
+        finds: Vec::new(),
     };
     state::record(&store, record).unwrap();
     git_init(&[], &matter.join("foo"));

@@ -460,6 +460,14 @@ impl<F: Fs> Watch<F> {
         }
         true
     }
+
+    /// What the final scan would set aside, moving nothing: for a session a process of which
+    /// outlived its kill.
+    pub(crate) fn finds(&self) -> Vec<PathBuf> {
+        let items = self.scan(&self.matter);
+        let here = |path: &PathBuf| self.fs.meta(path).is_some();
+        items.into_iter().map(|item| item.0).filter(here).collect()
+    }
 }
 
 /// Visits folder `top` and every folder below it with its file ID and listing, never through

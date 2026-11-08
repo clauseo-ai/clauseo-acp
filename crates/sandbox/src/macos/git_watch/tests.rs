@@ -1,8 +1,9 @@
 //! The git watch's decisions against a fake file system, a fake stream and a fake session: no
 //! `FSEvents`, no thread except where [`start_with`]'s own is the point. `shapes.rs` has the
 //! repository and link shapes, `neutral.rs` what happens to an item that can't move,
-//! `state.rs` the matter's state file, and `backstop.rs` the canary, the 30 s pass and the
-//! host's quit.
+//! `state.rs` the matter's state file, `backstop.rs` the canary, the 30 s pass and the
+//! host's quit, and `runner.rs` the kill's order, the watchdog, a stream that can't start, the
+//! notes folder's watch and a session that outlives its kill.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use fake::{
     FakeFs, FakeSession, MOVED_IN, MemStore, assert_moved, event, found, none, quiet, watch,
 };
 
-use super::run::{Flow, Msg, RESCAN_EVERY, Runner, start_with};
+use super::run::{Flow, Mode, Msg, Runner, start_with};
 use super::{Fs as _, Phase, flags};
 use crate::{Clock as _, Denial, GitOutcome};
 
@@ -22,6 +23,7 @@ mod backstop;
 mod fake;
 mod finds;
 mod neutral;
+mod runner;
 mod shapes;
 mod state;
 
@@ -155,7 +157,7 @@ fn incomplete_events_and_paths_outside_the_matter_rescan_it() {
     ] {
         let fs = FakeFs::new();
         let (watch, notices) = watch(&fs, &[]);
-        let mut runner = Runner::new(watch, false, Duration::ZERO);
+        let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
         let session = FakeSession {
             dies: true,
             ..FakeSession::default()
@@ -172,70 +174,68 @@ fn incomplete_events_and_paths_outside_the_matter_rescan_it() {
         );
         assert_eq!(session.ends.load(Ordering::SeqCst), 1, "{flag:#x}");
         assert!(fs.exists("/m/deep/er/.git"), "nothing moves before the end");
-        assert_eq!(runner.finish().len(), 0);
+        assert_eq!(runner.finish().stuck().len(), 0);
         assert!(!fs.exists("/m/deep/er/.git"), "{flag:#x}");
         assert_moved(&notices, "deep/er/.git");
     }
 }
 
 #[test]
-fn without_a_stream_the_matter_is_scanned_every_two_seconds() {
-    let fs = FakeFs::new();
-    let (watch, notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, true, Duration::ZERO);
-    let session = FakeSession {
-        dies: true,
-        ..FakeSession::default()
-    };
-    let attach = Msg::Attach(Arc::new(session.clone()));
-    assert_eq!(runner.input(Some(attach), Duration::ZERO), Flow::Go);
-    fs.repo("/m/.git");
-    let before = RESCAN_EVERY
-        .checked_sub(Duration::from_millis(100))
-        .unwrap();
-    assert_eq!(runner.input(None, before), Flow::Go, "not before 2 s");
-    assert_eq!(session.ends.load(Ordering::SeqCst), 0);
-    assert_eq!(runner.input(None, RESCAN_EVERY), Flow::Done);
-    assert_eq!(session.ends.load(Ordering::SeqCst), 1);
-    let _ = runner.finish();
-    assert!(!fs.exists("/m/.git"));
-    assert_moved(&notices, ".git");
-}
-
-#[test]
-fn a_stream_that_does_not_start_falls_back_to_the_rescan() {
+fn without_a_stream_the_launch_is_refused_and_nothing_runs() {
     let fs = FakeFs::new();
     let (watch, notices) = watch(&fs, &[]);
     let failing = |_: &[PathBuf], _: Sender<Msg>| -> Result<(), String> { Err("no".to_owned()) };
     let store = MemStore::default();
-    let watching = start_with(watch, "s".to_owned(), store, None, failing).unwrap();
-    let session = FakeSession {
-        dies: true,
-        ..FakeSession::default()
-    };
-    watching.attach(Arc::new(session.clone()));
+    store.0.lock().unwrap().sessions.push(state::record_of("s"));
+    let error = start_with(
+        watch,
+        "s".to_owned(),
+        store.clone(),
+        None,
+        Mode::Live,
+        failing,
+    )
+    .unwrap_err()
+    .to_string();
+    assert_eq!(
+        error,
+        "Clauseo won't start the AI tool: it can't watch /m for changes (no)."
+    );
+    assert!(
+        store.0.lock().unwrap().sessions.is_empty(),
+        "the session's record goes with it"
+    );
+    // No thread runs: a repository is never checked, nothing is ever touched or set aside.
     fs.repo("/m/.git");
-    // The first scan runs at once: it finds the .git, ends the session, then sets it aside.
-    let clock = crate::SystemClock::new();
-    while fs.exists("/m/.git") {
-        assert!(
-            clock.now() < Duration::from_secs(5),
-            "not set aside within 5 s"
-        );
-        async_io::block_on(async_io::Timer::after(Duration::from_millis(20)));
+    async_io::block_on(async_io::Timer::after(Duration::from_millis(300)));
+    assert!(fs.exists("/m/.git"));
+    assert_eq!(fs.touched(), Vec::<PathBuf>::new());
+    none(&notices);
+}
+
+#[test]
+fn a_runner_never_scans_on_a_timer() {
+    // The old fallback scanned the matter every 2 s; with a stream nothing is listed until an
+    // event, the canary or the 30 s pass asks.
+    let fs = FakeFs::new();
+    let (watch, _notices) = watch(&fs, &[]);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
+    let session = FakeSession::default();
+    let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), Duration::ZERO);
+    fs.repo("/m/.git");
+    let lists = fs.lists();
+    for n in 1..=50 {
+        assert_eq!(runner.input(None, Duration::from_millis(100 * n)), Flow::Go);
     }
-    assert_eq!(session.ends.load(Ordering::SeqCst), 1);
-    while notices.count() == 0 {
-        async_io::block_on(async_io::Timer::after(Duration::from_millis(20)));
-    }
-    assert_moved(&notices, ".git");
+    assert_eq!(fs.lists(), lists, "nothing was listed");
+    assert_eq!(session.ends.load(Ordering::SeqCst), 0);
 }
 
 #[test]
 fn a_find_ends_the_session_before_anything_moves() {
     let fs = FakeFs::new();
     let (watch, notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     let session = FakeSession::default();
     let t = Duration::from_millis(100);
     let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), t);
@@ -251,7 +251,7 @@ fn a_find_ends_the_session_before_anything_moves() {
     none(&notices);
     session.gone.store(true, Ordering::SeqCst);
     assert_eq!(runner.input(None, t * 3), Flow::Done);
-    assert_eq!(runner.finish().len(), 0);
+    assert_eq!(runner.finish().stuck().len(), 0);
     assert!(!fs.exists("/m/foo/.git"));
     let notices = notices.taken();
     let [
@@ -270,7 +270,7 @@ fn a_find_ends_the_session_before_anything_moves() {
 fn a_kill_is_sent_again_until_the_session_goes_and_capped() {
     let fs = FakeFs::new();
     let (watch, _notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     fs.repo("/m/.git");
     // The find comes before the agent is attached: the kill goes once it is.
     let msg = Msg::Events(vec![event("/m/.git", MOVED_IN)]);
@@ -290,7 +290,7 @@ fn a_kill_is_sent_again_until_the_session_goes_and_capped() {
 fn the_final_scan_catches_what_the_events_missed() {
     let fs = FakeFs::new();
     let (watch, notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     let session = FakeSession::default();
     let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), Duration::ZERO);
     fs.dir("/m/a");
@@ -299,7 +299,7 @@ fn the_final_scan_catches_what_the_events_missed() {
     session.gone.store(true, Ordering::SeqCst);
     assert_eq!(runner.input(None, Duration::from_millis(200)), Flow::Done);
     assert!(fs.exists("/m/a/.git"));
-    let _ = runner.finish();
+    runner.finish().stuck();
     assert!(!fs.exists("/m/a/.git"));
     assert_moved(&notices, "a/.git");
 }
@@ -308,7 +308,7 @@ fn the_final_scan_catches_what_the_events_missed() {
 fn an_agent_that_did_not_start_ends_the_watch() {
     let fs = FakeFs::new();
     let (watch, _notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     assert_eq!(runner.input(Some(Msg::Abandon), Duration::ZERO), Flow::Done);
 }
 
@@ -321,9 +321,17 @@ fn a_watch_thread_that_panics_ends_the_session() {
         tx.send(events).unwrap();
         Ok(())
     };
-    let watching = start_with(watch, "p".to_owned(), MemStore::default(), None, source).unwrap();
+    let watching = start_with(
+        watch,
+        "p".to_owned(),
+        MemStore::default(),
+        None,
+        Mode::Live,
+        source,
+    )
+    .unwrap();
     let session = FakeSession::default();
-    watching.attach(Arc::new(session.clone()));
+    watching.attach(session.clone());
     let events = rx.recv().unwrap();
     fs.dir("/m/boom");
     fs.panic_on("/m/boom");

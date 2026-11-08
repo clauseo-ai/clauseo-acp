@@ -1,6 +1,6 @@
 //! The backstops behind the stream: the canary whose miss ends the run, a must-scan or
 //! dropped flag that rescans and carries on, the 30 s pass over changed folders and its cap, a
-//! kill that runs out keeping the session's record, and the host's quit.
+//! kill that runs out moving nothing, and the host's quit.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::super::flags;
 use super::super::host::Register;
 use super::super::run::{
-    CANARY_EVERY, CANARY_WAIT, Flow, Msg, Runner, SWEEP_CAP, SWEEP_EVERY, start_with,
+    CANARY_EVERY, CANARY_WAIT, End, Flow, Mode, Msg, Runner, SWEEP_CAP, SWEEP_EVERY, start_with,
 };
 use super::fake::{FakeFs, FakeSession, MemStore, Notices, SET_ASIDE, event, none, quiet, watch};
 use crate::{Clock, Denial, SystemClock};
@@ -25,7 +25,7 @@ fn ms(n: u64) -> Duration {
 /// A runner of `/m` with the canary, its session attached and dying when ended.
 fn runner(fs: &FakeFs) -> (Runner<FakeFs>, FakeSession, Arc<Notices>) {
     let (watch, notices) = watch(fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO)
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO)
         .with_canary(PathBuf::from(CANARY), Duration::ZERO);
     let session = FakeSession {
         dies: true,
@@ -60,7 +60,7 @@ fn a_canary_miss_ends_the_run_kill_first_then_the_final_scan() {
     assert_eq!(ends(&session), 1, "the session was killed");
     assert!(fs.exists("/m/.git"), "nothing moved before the kill");
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
-    assert_eq!(runner.finish().len(), 0);
+    assert_eq!(runner.finish().stuck().len(), 0);
     assert!(!fs.exists("/m/.git"), "the final scan set it aside");
     let after = notices.taken();
     assert!(
@@ -130,7 +130,7 @@ fn the_thirty_second_pass_finds_what_the_events_missed() {
     assert_eq!(ends(&session), 0, "nothing before the pass");
     assert_eq!(runner.input(Some(echo()), SWEEP_EVERY), Flow::Done);
     assert_eq!(ends(&session), 1);
-    let _ = runner.finish();
+    runner.finish().stuck();
     assert!(!fs.exists("/m/a/b/new/HEAD"));
 }
 
@@ -180,8 +180,8 @@ fn one_pass_takes_at_most_its_cap() {
         fs.dir(&format!("/m/d{n}"));
     }
     let (watch, _notices) = watch(&fs, &[]);
-    let mut runner =
-        Runner::new(watch, false, Duration::ZERO).with_clock(Arc::new(Ticking(AtomicU64::new(0))));
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO)
+        .with_clock(Arc::new(Ticking(AtomicU64::new(0))));
     let reads = fs.dated_reads();
     assert_eq!(runner.input(None, SWEEP_EVERY), Flow::Go);
     let first = fs.dated_reads() - reads;
@@ -196,10 +196,10 @@ fn one_pass_takes_at_most_its_cap() {
 }
 
 #[test]
-fn a_kill_that_runs_out_marks_the_session_lingering() {
+fn a_kill_that_runs_out_moves_nothing_and_lists_the_finds() {
     let fs = FakeFs::new();
-    let (watch, _notices) = watch(&fs, &[]);
-    let mut runner = Runner::new(watch, false, Duration::ZERO);
+    let (watch, notices) = watch(&fs, &[]);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     let session = FakeSession::default();
     let _ = runner.input(Some(Msg::Attach(Arc::new(session))), Duration::ZERO);
     fs.repo("/m/.git");
@@ -211,6 +211,13 @@ fn a_kill_that_runs_out_marks_the_session_lingering() {
         runner.lingering(),
         "its record stays for the next start or launch"
     );
+    let End::Outlived(finds) = runner.finish() else {
+        panic!("the final scan moved with a process left");
+    };
+    assert_eq!(finds, [PathBuf::from("/m/.git")]);
+    assert!(fs.exists("/m/.git"), "nothing moved");
+    assert_eq!(fs.set_aside(), Vec::<PathBuf>::new());
+    none(&notices);
 }
 
 #[test]
@@ -228,6 +235,7 @@ fn the_stream_watches_the_canarys_folder_too() {
         "c".to_owned(),
         MemStore::default(),
         Some(PathBuf::from(CANARY)),
+        Mode::Live,
         source,
     )
     .unwrap();

@@ -6,7 +6,9 @@ use std::process::Stdio;
 use async_process::{Child, Command};
 use std::time::Duration;
 
-use super::{Probe, Verdict, kill_with, running, running_of, start_of, this_process, verdict};
+use super::{
+    Probe, Verdict, kill_with, run_part, running, running_of, start_of, this_process, verdict,
+};
 use crate::{Clock as _, SystemClock};
 
 /// A jail allowing the probe's name, as the launcher's profile does.
@@ -79,8 +81,14 @@ fn the_probe_finds_a_setsid_child_and_kills_the_whole_session() {
 #[test]
 fn a_probe_name_from_a_record_must_be_one_clauseo_makes() {
     let probe = Probe::new("clauseo-12-3", 4);
-    assert_eq!(probe.name(), "chat.clauseo.session.clauseo-12-3-4");
-    assert_eq!(Probe::from_name(probe.name()), Some(probe));
+    let part = format!("{:016x}", run_part());
+    assert_eq!(
+        probe.name(),
+        format!("chat.clauseo.session.clauseo-12-3-4-{part}")
+    );
+    assert_eq!(Probe::from_name(probe.name()), Some(probe.clone()));
+    // The random part is made once per host process: every launch of it carries the same one.
+    assert_eq!(Probe::new("clauseo-12-3", 4), probe);
     for bad in [
         "",
         "chat.clauseo.session.",
@@ -149,7 +157,7 @@ fn a_failed_check_keeps_the_session_running_but_never_kills() {
         true
     };
     let start = |pid| u64::try_from(pid).ok();
-    assert_eq!(kill_with(&[1, 2, 3], of, start, send), 1);
+    assert_eq!(kill_with(&[1, 2, 3], of, start, 0, send), 1);
     assert_eq!(*sent.borrow(), [1], "the erring pid is never killed");
 }
 
@@ -170,11 +178,11 @@ fn a_pid_reused_before_its_signal_is_not_signalled() {
         sent.borrow_mut().push(pid);
         true
     };
-    assert_eq!(kill_with(&[7], |_| Verdict::In, start, send), 0);
+    assert_eq!(kill_with(&[7], |_| Verdict::In, start, 0, send), 0);
     assert!(sent.borrow().is_empty(), "the reused pid was not signalled");
     // A pid whose start can't be read is not signalled either; an unchanged one is.
     let start = |pid: i32| (pid == 8).then_some(5);
-    assert_eq!(kill_with(&[8, 9], |_| Verdict::In, start, send), 1);
+    assert_eq!(kill_with(&[8, 9], |_| Verdict::In, start, 0, send), 1);
     assert_eq!(*sent.borrow(), [8]);
 }
 
@@ -187,4 +195,32 @@ fn fail_closed_still_leaves_out_every_process_outside_the_jail() {
     assert!(probe.gone());
     assert!(running(i32::try_from(std::process::id()).unwrap()));
     assert!(!running(i32::MAX), "a pid no process has");
+}
+
+#[test]
+fn a_dead_records_kill_skips_a_process_started_before_its_launch() {
+    // Pids 1 and 2 carry the probe; 1 started at 100, before the launch at 200, 2 at 300.
+    let start = |pid: i32| Some(if pid == 1 { 100 } else { 300 });
+    let sent = std::cell::RefCell::new(Vec::new());
+    let send = |pid| {
+        sent.borrow_mut().push(pid);
+        true
+    };
+    assert_eq!(kill_with(&[1, 2], |_| Verdict::In, start, 200, send), 1);
+    assert_eq!(*sent.borrow(), [2]);
+    // Started at the launch's own microsecond counts as the session's.
+    assert_eq!(kill_with(&[2], |_| Verdict::In, start, 300, send), 1);
+}
+
+#[test]
+fn a_probe_names_a_part_no_earlier_host_process_had() {
+    // An earlier host with this pid and the same launcher counter made this name.
+    let earlier = Probe::from_name("chat.clauseo.session.clauseo-12-3-4").unwrap();
+    let now = Probe::new("clauseo-12-3", 4);
+    assert_ne!(now.name(), earlier.name());
+    assert!(now.name().starts_with(earlier.name()));
+    assert_eq!(now.name().len(), earlier.name().len() + 17);
+    // A record's probe keeps its launch time for the kill.
+    let dead = Probe::from_name(now.name()).unwrap().since(Some(7));
+    assert_ne!(dead, now, "the kill of a dead record skips older processes");
 }

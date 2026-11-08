@@ -12,7 +12,7 @@ use clauseo_process::{
     LaunchSpec, Launched, Launcher, SpawnOptions, TreeKill, TreeWatch, spawn_in_tree,
 };
 
-use super::git_watch::{self, Session};
+use super::git_watch::{self, Mode, Session};
 use super::jail_procs::Probe;
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
@@ -35,12 +35,14 @@ pub(crate) type LaunchSink = CappedSink<Arc<dyn DenialSink>>;
 /// unregisters it, and the last one stops the watcher. So the host keeps the launcher alive
 /// while its agent runs: denials of an agent whose launcher is gone are not reported.
 ///
-/// Each launch starts the git watch on the matter before the agent, and it runs until every
-/// process of the session is gone, whatever happens to the launcher (decision record 0038). Each
-/// launch's profile gets a probe name of its own, by which the watch finds the session's
-/// processes even after `setsid`. A launch is refused when the policy names no
+/// Each launch starts the git watch on the matter and on the session's notes folder before the
+/// agent, and it runs until every process of the session is gone, whatever happens to the
+/// launcher (decision record 0038). Each launch's profile gets a probe name of its own, with a
+/// random part made once per host process, by which the watch finds the session's processes
+/// even after `setsid`. A launch is refused when the policy names no
 /// [`git_set_aside`](crate::PolicyBuilder::git_set_aside) folder, a set-aside folder can't be
-/// made, or the matter's state refuses it (decision record 0038). The host calls
+/// made, a folder's `FSEvents` stream can't start, or the matter's state refuses it (an item
+/// left in place, or a process of an earlier session that outlived its kill). The host calls
 /// [`git_watch_start_up`](crate::git_watch_start_up) once at its start and
 /// [`git_watch_quit`](crate::git_watch_quit) at its quit, so a session a quit or crash cut off
 /// still gets its final scan.
@@ -163,19 +165,17 @@ impl Launcher for SeatbeltLauncher {
         self.register();
         let notices = Arc::clone(self.sink.inner());
         let session = format!("{}-{n}", self.tag);
-        let watching =
-            git_watch::start(&self.policy, &session, &probe, notices).map_err(|source| {
-                clauseo_process::Error::Os {
-                    what: "the git watch could not start",
-                    source,
-                }
+        let watching = git_watch::start(&self.policy, &session, &probe, &notices, Mode::Live)
+            .map_err(|source| clauseo_process::Error::Os {
+                what: "the git watch could not start",
+                source,
             })?;
         let launched = spawn_in_tree(&jailed, &self.opts)?;
-        watching.attach(Arc::new(Tree {
+        watching.attach(Tree {
             watch: launched.handle.tree_watch(),
             kill: launched.handle.tree_kill(),
             probe,
-        }));
+        });
         Ok(launched)
     }
 }

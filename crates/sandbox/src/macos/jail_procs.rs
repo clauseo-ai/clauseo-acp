@@ -13,7 +13,10 @@
 //! keeps the session running (fail-closed: only a plain "not sandboxed", "may not look up the
 //! session's name" or "may look up the control name" rules a process out), but is never
 //! grounds to kill it: only a process every check plainly puts in the session is killed, after
-//! its start time is checked again. One pass over every process (`proc_listallpids`) takes
+//! its start time is checked again, and, for a dead session's record, only one started at or
+//! after that session's launch. Each name carries a random part made once per host process, so
+//! a dead session's name never matches a live session's after the host restarts with its pid
+//! reused. One pass over every process (`proc_listallpids`) takes
 //! about 2 ms for 700 processes on an M-series Mac.
 //!
 //! Each libproc and libsandbox call has one wrapper here, with its `unsafe` block.
@@ -23,6 +26,7 @@
 )]
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::sync::OnceLock;
 
 use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 
@@ -87,12 +91,15 @@ struct BsdInfo {
 pub(crate) struct Probe {
     name: String,
     c_name: CString,
+    /// Only processes started at or after this (microseconds since the epoch) are killed.
+    since: Option<u64>,
 }
 
 impl Probe {
-    /// The probe of launch `n` of the launcher tagged `tag` (`clauseo-<pid>-<counter>`).
+    /// The probe of launch `n` of the launcher tagged `tag` (`clauseo-<pid>-<counter>`):
+    /// `<prefix><tag>-<n>-<this host run's random part, 16 hex>`.
     pub(crate) fn new(tag: &str, n: u64) -> Probe {
-        Probe::named(format!("{PREFIX}{tag}-{n}"))
+        Probe::named(format!("{PREFIX}{tag}-{n}-{:016x}", run_part()))
     }
 
     /// A probe by its full name, as a record holds it; `None` for one Clauseo never made.
@@ -105,7 +112,18 @@ impl Probe {
     fn named(name: String) -> Probe {
         // The name is ASCII letters, digits, `.` and `-`: never a NUL.
         let c_name = CString::new(name.clone()).unwrap_or_default();
-        Probe { name, c_name }
+        Probe {
+            name,
+            c_name,
+            since: None,
+        }
+    }
+
+    /// The probe whose kill skips every process started before `start` (microseconds since
+    /// the epoch): a dead session's, whose launch time its record holds.
+    pub(crate) fn since(mut self, start: Option<u64>) -> Probe {
+        self.since = start;
+        self
     }
 
     /// The name, for the profile's parameter and the records.
@@ -126,9 +144,9 @@ impl Probe {
     }
 
     /// Sends SIGKILL to every process plainly of the session; a process whose checks failed
-    /// is never sent one. Right before each signal the process is checked again and its
-    /// identity (pid and start time) compared with the listing's, so a pid reused since is
-    /// left alone. Returns how many were sent.
+    /// is never sent one, nor one started before [`Probe::since`]. Right before each signal
+    /// the process is checked again and its identity (pid and start time) compared with the
+    /// listing's, so a pid reused since is left alone. Returns how many were sent.
     pub(crate) fn kill_all(&self) -> usize {
         let Some(pids) = all_pids() else {
             tracing::error!(probe = %self.name, "the jailed processes could not be listed");
@@ -137,7 +155,8 @@ impl Probe {
         let send =
             |pid| Pid::from_raw(pid).is_some_and(|pid| kill_process(pid, Signal::KILL).is_ok());
         let identity = |pid| u32::try_from(pid).ok().and_then(start_of);
-        kill_with(&pids, |pid| self.verdict(pid), identity, send)
+        let since = self.since.unwrap_or(0);
+        kill_with(&pids, |pid| self.verdict(pid), identity, since, send)
     }
 
     /// Whether `pid` is a running process of this session.
@@ -187,14 +206,15 @@ fn running_of(pids: &[i32], verdict: impl Fn(i32) -> Verdict) -> Vec<i32> {
         .collect()
 }
 
-/// `send`s each pid among `pids` plainly in the session (`verdict`), noting its `identity`
-/// (its start); right before each send the verdict is read again and the identity compared,
-/// and a pid whose start changed (reused) or can't be read is skipped. Returns how many sends
-/// went.
+/// `send`s each pid among `pids` plainly in the session (`verdict`) that started at or after
+/// `since`, noting its `identity` (its start); right before each send the verdict is read
+/// again and the identity compared, and a pid whose start changed (reused) or can't be read is
+/// skipped. Returns how many sends went.
 fn kill_with(
     pids: &[i32],
     verdict: impl Fn(i32) -> Verdict,
     identity: impl Fn(i32) -> Option<u64>,
+    since: u64,
     send: impl Fn(i32) -> bool,
 ) -> usize {
     let targets: Vec<(i32, u64)> = pids
@@ -202,6 +222,7 @@ fn kill_with(
         .copied()
         .filter(|&pid| verdict(pid) == Verdict::In)
         .filter_map(|pid| Some((pid, identity(pid)?)))
+        .filter(|&(_, start)| start >= since)
         .collect();
     targets
         .into_iter()
@@ -293,6 +314,20 @@ pub(crate) fn start_of(pid: u32) -> Option<u64> {
     info.start_sec
         .checked_mul(1_000_000)?
         .checked_add(info.start_usec)
+}
+
+/// This host process's random part of every probe name, made once: a probe name of an earlier
+/// host process, even one with the same pid, never matches one of this process's. When no
+/// random number can be had, this process's start stands in, which differs as well.
+fn run_part() -> u64 {
+    static PART: OnceLock<u64> = OnceLock::new();
+    *PART.get_or_init(|| {
+        let mut bytes = [0_u8; 8];
+        match getrandom::fill(&mut bytes) {
+            Ok(()) => u64::from_ne_bytes(bytes),
+            Err(_) => this_process().1.unwrap_or_default(),
+        }
+    })
 }
 
 /// This process's pid and start, for the records of its sessions.

@@ -1,37 +1,48 @@
-//! The git watch's driver: one thread per session that feeds the [`Watch`] the stream's
-//! events, checks the stream with a canary, scans every 2 s when the stream could not start,
-//! runs the 30 s pass over changed folders, ends every process of the session on the first
-//! find, and once none is left runs the final scan, which sets aside.
+//! The git watch's driver: one thread per watched folder of a session (the matter, and the
+//! session's notes folder) that feeds the [`Watch`] the stream's events, checks the stream with
+//! a canary, runs the 30 s pass over changed folders, ends every process of the session on the
+//! first find, and once none is left runs the final scan, which sets aside.
 //!
-//! The canary: every 10 s the thread rewrites a file in the set-aside folder it uses, which is
-//! on the matter's volume, out of the agent's reach, and watched by the same stream. When no
-//! event for it comes within 2 s, or it can't be written, the stream is lost: the session ends
-//! as for a find (kill first, then the final scan) and the lawyer gets
+//! A launch whose stream can't start is refused: the agent never runs on a weaker watch. The
+//! canary: every 10 s the thread rewrites a file in the set-aside folder it uses, which is on
+//! the watched folder's volume, out of the agent's reach, and watched by the same stream. When
+//! no event for it comes within 2 s, or it can't be written, the stream is lost: the session
+//! ends as for a find (kill first, then the final scan) and the lawyer gets
 //! [`Denial::GitWatchLost`](crate::Denial). An event that says events were dropped or must be
-//! rescanned only rescans the matter at once, and the watch carries on.
+//! rescanned only rescans the folder at once, and the watch carries on. A check that runs past
+//! the watchdog's budget (`run/watchdog.rs`) ends the session the same way.
+//!
+//! The kill comes first: the first find of an input returns at once, before any rescan or
+//! 30 s pass, and once the session is ending nothing more is checked until it has gone.
+//! Nothing moves while a process of the session is left: when one outlives the kill's 10 s,
+//! the final scan only lists what it would set aside, and the session's record stays marked
+//! for the matter's next launch, which is refused until a kill finds none left.
 
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use super::aside::{Aside, Stuck};
-use super::host::{self, LIVE};
-use super::state::{self, FileStore, SessionRecord, Store};
-use super::{Asks, Event, Fs, Launch, Phase, Watch, fsevents, os};
-use crate::macos::jail_procs::{self, Probe};
-use crate::{Clock, DenialSink, Policy, SystemClock};
+use super::aside::Stuck;
+use super::{Event, Fs, Phase, Watch};
+use crate::{Clock, SystemClock};
+
+mod start;
+mod watchdog;
+
+pub(crate) use start::start;
+#[cfg(test)]
+pub(crate) use start::start_with;
+#[cfg(test)]
+pub(crate) use watchdog::{BUDGET, Busy};
 
 /// How often the thread looks at the session when no event comes.
 const TICK: Duration = Duration::from_millis(100);
 
-/// How often the matter is scanned whole when the stream could not start.
-pub(crate) const RESCAN_EVERY: Duration = Duration::from_secs(2);
-
 /// How often the session's kill is sent again while a process of it is left.
 const KILL_AGAIN: Duration = Duration::from_millis(100);
 
-/// How long the watch waits for a killed session to go before the final scan runs anyway.
+/// How long the watch waits for a killed session to go before it gives up: nothing moves, and
+/// the session's record stays for the next start or launch.
 const KILL_CAP: Duration = Duration::from_secs(10);
 
 /// How often the canary file is rewritten.
@@ -58,8 +69,14 @@ pub(crate) trait Session: Send + Sync {
     fn end(&self);
 }
 
-/// The session a thread's guard ends if the thread dies.
-type Slot = Arc<Mutex<Option<Arc<dyn Session>>>>;
+/// How a session's folder is watched while the agent runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// The stream, its canary and the 30 s pass, with the scans before and after.
+    Live,
+    /// No stream: only the launch's state check and walk before, and the final scan after.
+    AfterOnly,
+}
 
 /// What reaches the watch's thread.
 pub(crate) enum Msg {
@@ -80,23 +97,23 @@ struct Canary {
 }
 
 /// The decisions of one session's watch, driven by [`Runner::input`]: no thread, and only the
-/// 30 s pass's cap reads a clock of its own, so the tests drive it step by step.
+/// 30 s pass's cap and the watchdog's [`watchdog::Busy`] read a clock of their own, so the
+/// tests drive it step by step.
 pub(crate) struct Runner<F> {
     watch: Watch<F>,
-    /// The stream could not start: scan whole every [`RESCAN_EVERY`].
-    no_stream: bool,
+    mode: Mode,
     /// When the canary's event did not come, or the canary could not be written: the session
     /// ends.
     lost: Option<Duration>,
-    next_scan: Duration,
     canary: Option<Canary>,
     next_sweep: Duration,
     /// The clock the 30 s pass's cap reads.
     clock: Arc<dyn Clock>,
+    /// When each check begins and ends, for the watchdog, with the session.
+    busy: Arc<watchdog::Busy>,
     /// The kill's cap ran out with a process of the session left.
     lingering: bool,
     session: Option<Arc<dyn Session>>,
-    slot: Slot,
     abandoned: bool,
     /// When a find first asked for the session's end.
     ending: Option<Duration>,
@@ -112,19 +129,38 @@ pub(crate) enum Flow {
     Done,
 }
 
+/// How the final scan went.
+#[must_use]
+pub(crate) enum End {
+    /// Every process gone, each find set aside: what could neither move nor be neutralised.
+    Scanned(Vec<Stuck>),
+    /// A process outlived the kill: nothing moved, and these are what the scan found.
+    Outlived(Vec<PathBuf>),
+}
+
+impl End {
+    /// What could neither move nor be neutralised; panics when the session outlived the kill.
+    #[cfg(test)]
+    pub(crate) fn stuck(self) -> Vec<Stuck> {
+        match self {
+            End::Scanned(stuck) => stuck,
+            End::Outlived(finds) => panic!("the session outlived its kill: {finds:?}"),
+        }
+    }
+}
+
 impl<F: Fs> Runner<F> {
-    pub(crate) fn new(watch: Watch<F>, no_stream: bool, now: Duration) -> Runner<F> {
+    pub(crate) fn new(watch: Watch<F>, mode: Mode, now: Duration) -> Runner<F> {
         Runner {
             watch,
-            no_stream,
+            mode,
             lost: None,
-            next_scan: now,
             canary: None,
             next_sweep: now + SWEEP_EVERY,
             clock: Arc::new(SystemClock::new()),
+            busy: watchdog::Busy::new(watchdog::clock()),
             lingering: false,
             session: None,
-            slot: Slot::default(),
             abandoned: false,
             ending: None,
             killed: None,
@@ -134,7 +170,7 @@ impl<F: Fs> Runner<F> {
     /// The runner with the canary file `path`, first written at `now`; without a stream it is
     /// never written.
     pub(crate) fn with_canary(mut self, path: PathBuf, now: Duration) -> Runner<F> {
-        if !self.no_stream {
+        if self.mode == Mode::Live {
             self.canary = Some(Canary {
                 path,
                 next_touch: now,
@@ -151,6 +187,18 @@ impl<F: Fs> Runner<F> {
         self
     }
 
+    /// The runner reporting its checks to `busy`, for a watchdog the tests drive.
+    #[cfg(test)]
+    pub(crate) fn with_busy(mut self, busy: Arc<watchdog::Busy>) -> Runner<F> {
+        self.busy = busy;
+        self
+    }
+
+    /// When each check begins and ends, for the watchdog.
+    pub(crate) fn busy(&self) -> &Arc<watchdog::Busy> {
+        &self.busy
+    }
+
     /// Whether the stream was lost.
     #[cfg(test)]
     pub(crate) fn lost(&self) -> bool {
@@ -158,42 +206,72 @@ impl<F: Fs> Runner<F> {
     }
 
     /// Whether a process of the session may still run: the kill's cap ran out first.
+    #[cfg(test)]
     pub(crate) fn lingering(&self) -> bool {
         self.lingering
     }
 
     /// One input (`None` for a tick) at `now`.
     pub(crate) fn input(&mut self, msg: Option<Msg>, now: Duration) -> Flow {
-        let mut asks = Asks::default();
+        self.busy.start();
+        let found = self.check(msg, now);
+        let overran = self.busy.stop();
+        if (found || overran) && self.ending.is_none() {
+            if overran && !found {
+                self.watch.lost_stream();
+            }
+            self.watch.ended_session();
+            self.ending = Some(now);
+        }
+        self.settle(now)
+    }
+
+    /// The checks of one input: true on the first find, the canary's miss included, at once,
+    /// so the kill goes before any rescan or 30 s pass. Nothing is checked while the session
+    /// is ending, nor live without a stream.
+    fn check(&mut self, msg: Option<Msg>, now: Duration) -> bool {
+        let mut rescan = false;
         match msg {
             Some(Msg::Events(events)) => {
                 let events = self.echoes(events);
-                asks = self.watch.events(&events);
+                if self.ending.is_none() {
+                    for event in events {
+                        let asks = self.watch.events(std::slice::from_ref(&event));
+                        if asks.end {
+                            return true;
+                        }
+                        rescan |= asks.rescan;
+                    }
+                }
             }
             Some(Msg::Attach(session)) => {
-                *self.slot.lock().unwrap_or_else(PoisonError::into_inner) =
-                    Some(Arc::clone(&session));
+                self.busy.attach(&session);
                 self.session = Some(session);
             }
             Some(Msg::Abandon) => self.abandoned = true,
             None => {}
         }
-        asks.end |= self.canary(now);
-        if asks.rescan || (self.no_stream && now >= self.next_scan) {
-            asks = asks.and(self.watch.full_scan(Phase::Running));
-            self.next_scan = now + RESCAN_EVERY;
+        if self.ending.is_some() || self.mode == Mode::AfterOnly {
+            return false;
         }
-        if self.ending.is_none() && now >= self.next_sweep {
+        if self.canary(now) {
+            return true;
+        }
+        if rescan && self.watch.full_scan(Phase::Running).end {
+            return true;
+        }
+        if now >= self.next_sweep {
             let clock = Arc::clone(&self.clock);
             let until = clock.now() + SWEEP_CAP;
             let (found, _) = self.watch.sweep(&|| clock.now() >= until);
-            asks = asks.and(found);
             self.next_sweep = now + SWEEP_EVERY;
+            return found.end;
         }
-        if asks.end && self.ending.is_none() {
-            self.watch.ended_session();
-            self.ending = Some(now);
-        }
+        false
+    }
+
+    /// Whether the session is over, sending its kill again while it is ending.
+    fn settle(&mut self, now: Duration) -> Flow {
         if self.abandoned {
             return Flow::Done;
         }
@@ -215,8 +293,8 @@ impl<F: Fs> Runner<F> {
             Flow::Done
         } else if now.saturating_sub(since) >= KILL_CAP {
             tracing::error!(
-                "the session's processes did not go after its kill; checking anyway, and keeping \
-                 its record for the next start or launch"
+                "the session's processes did not go after its kill; moving nothing, and \
+                 keeping its record so the matter's launches wait until none is left"
             );
             self.lingering = true;
             Flow::Done
@@ -226,7 +304,7 @@ impl<F: Fs> Runner<F> {
     }
 
     /// `events` without the canary's, which mark the stream as working, and without the rest
-    /// of the set-aside folder's, which are not the matter's.
+    /// of the set-aside folder's, which are not the watched folder's.
     fn echoes(&mut self, events: Vec<Event>) -> Vec<Event> {
         let Some(canary) = &mut self.canary else {
             return events;
@@ -286,191 +364,19 @@ impl<F: Fs> Runner<F> {
         lost
     }
 
-    /// The final scan, every process gone: each find is set aside. Returns what could neither
-    /// move nor be neutralised.
-    pub(crate) fn finish(mut self) -> Vec<Stuck> {
+    /// The final scan. With every process gone each find is set aside; with one left after the
+    /// kill nothing moves, and the finds are only listed.
+    pub(crate) fn finish(mut self) -> End {
+        if self.lingering {
+            let finds = self.watch.finds();
+            tracing::error!(
+                matter = %self.watch.matter().display(), finds = finds.len(),
+                "a process of the session outlived its kill; the final git scan moved nothing"
+            );
+            return End::Outlived(finds);
+        }
         let asks = self.watch.full_scan(Phase::Ended);
         debug_assert!(!asks.end, "the final scan never asks to end");
-        self.watch.take_stuck()
-    }
-}
-
-/// A session's watch, started before its agent. [`Watching::attach`] hands it the agent once
-/// it runs; dropped without that, it says the agent did not start, and the watch scans once
-/// and stops.
-#[derive(Debug)]
-pub(crate) struct Watching {
-    tx: Option<Sender<Msg>>,
-}
-
-impl Watching {
-    /// The agent runs: the watch now ends with its session. A watch whose thread is gone
-    /// ends the session at once (fail-closed).
-    pub(crate) fn attach(mut self, session: Arc<dyn Session>) {
-        if let Some(tx) = self.tx.take()
-            && let Err(mpsc::SendError(Msg::Attach(session))) = tx.send(Msg::Attach(session))
-        {
-            tracing::error!("the git watch's thread is gone; ending the session");
-            session.end();
-        }
-    }
-}
-
-impl Drop for Watching {
-    fn drop(&mut self) {
-        if let Some(tx) = self.tx.take()
-            && tx.send(Msg::Abandon).is_err()
-        {
-            tracing::error!("the git watch's thread is gone");
-        }
-    }
-}
-
-/// Starts the watch of `policy`'s matter for `session` (an id for the records) with `probe`,
-/// before the agent: the set-aside folders are made, the matter's state is checked (refused
-/// while an item an earlier scan could not handle is there; a dead session's final scan run),
-/// the launch's items noted and the session recorded, and the stream started (or, failing
-/// that, the 2 s rescan, logged). Refused without a set-aside folder or when one can't be
-/// made: the agent never runs without the backstop.
-pub(crate) fn start(
-    policy: &Policy,
-    session: &str,
-    probe: &Probe,
-    notices: Arc<dyn DenialSink>,
-) -> std::io::Result<Watching> {
-    let data = policy
-        .git_set_aside()
-        .ok_or_else(|| std::io::Error::other("the policy names no git set-aside folder"))?;
-    os::Real.make_dirs(data)?;
-    let folder = match policy.volume_set_aside() {
-        Some(dir) => os::volume_folder(dir)?,
-        None => data.to_owned(),
-    };
-    let matter = policy.matter().to_owned();
-    let store = FileStore::new(data, &matter);
-    let this = jail_procs::this_process();
-    state::begin(&store, &os::Real, &matter, &notices, &host::host())?;
-    let session = session.to_owned();
-    let canary = os::Real
-        .resolve(&folder)
-        .unwrap_or_else(|| folder.clone())
-        .join(CANARY);
-    let aside = Aside::new(matter.clone(), folder.clone(), session.clone(), notices);
-    let watch = Watch::new(os::Real, matter, aside, &Launch::of(policy));
-    let kill = probe.clone();
-    LIVE.add(
-        &session,
-        Arc::new(move || {
-            kill.kill_all();
-        }),
-    )?;
-    let record = SessionRecord {
-        session: session.clone(),
-        host_pid: this.0,
-        host_start: this.1,
-        probe: probe.name().to_owned(),
-        set_aside: folder.as_path().into(),
-        baseline: watch.baseline().clone(),
-    };
-    let started = state::record(&store, record)
-        .and_then(|()| start_with(watch, session.clone(), store, Some(canary), fsevents::start));
-    if started.is_err() {
-        LIVE.remove(&session);
-    }
-    started
-}
-
-/// Ends the session if the thread dies (fail-closed), and takes it off the host's register
-/// whatever way the thread ends.
-struct Guard {
-    slot: Slot,
-    session: String,
-}
-
-impl Drop for Guard {
-    fn drop(&mut self) {
-        LIVE.remove(&self.session);
-        if std::thread::panicking() {
-            tracing::error!("the git watch's thread panicked; ending the session");
-            if let Some(session) = &*self.slot.lock().unwrap_or_else(PoisonError::into_inner) {
-                session.end();
-            }
-        }
-    }
-}
-
-/// [`start`] with the watch made and the stream's source given: the tests pass a fake one and
-/// a store in memory. The source watches the matter, and the canary's folder when it is
-/// outside the matter.
-pub(crate) fn start_with<F, S, T>(
-    watch: Watch<F>,
-    session: String,
-    store: T,
-    canary: Option<PathBuf>,
-    source: impl FnOnce(&[PathBuf], Sender<Msg>) -> Result<S, String>,
-) -> std::io::Result<Watching>
-where
-    F: Fs + 'static,
-    S: Send + 'static,
-    T: Store,
-{
-    let (tx, rx) = mpsc::channel();
-    let matter = watch.matter().to_owned();
-    let mut roots = vec![matter.clone()];
-    roots.extend(
-        canary
-            .as_deref()
-            .and_then(Path::parent)
-            .filter(|folder| !folder.starts_with(&matter))
-            .map(Path::to_owned),
-    );
-    let stream = match source(&roots, tx.clone()) {
-        Ok(stream) => Some(stream),
-        Err(error) => {
-            tracing::error!(
-                matter = %matter.display(), %error,
-                "the git watch's FSEvents stream did not start; scanning the matter every 2 s"
-            );
-            None
-        }
-    };
-    // The thread holds a sender of its own: without a stream, the launch's is the only other
-    // one, and `Watching::attach` drops it. The end comes from the session, or an abandon.
-    let own = tx.clone();
-    std::thread::Builder::new()
-        .name("clauseo-git-watch".to_owned())
-        .spawn(move || {
-            let _own = own;
-            let clock = SystemClock::new();
-            let now = clock.now();
-            let mut runner = Runner::new(watch, stream.is_none(), now);
-            if let Some(canary) = canary {
-                runner = runner.with_canary(canary, now);
-            }
-            let _guard = Guard {
-                slot: Arc::clone(&runner.slot),
-                session: session.clone(),
-            };
-            drive(&mut runner, &rx, &clock);
-            drop(stream);
-            let keep = runner.lingering();
-            let stuck = runner.finish();
-            state::end(&store, &session, stuck, keep);
-            tracing::debug!(matter = %matter.display(), "the git watch stopped");
-        })?;
-    Ok(Watching { tx: Some(tx) })
-}
-
-/// Feeds `runner` until it is done. Every sender gone counts as an abandon.
-fn drive<F: Fs>(runner: &mut Runner<F>, rx: &Receiver<Msg>, clock: &dyn Clock) {
-    loop {
-        let msg = match rx.recv_timeout(TICK) {
-            Ok(msg) => Some(msg),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => Some(Msg::Abandon),
-        };
-        if runner.input(msg, clock.now()) == Flow::Done {
-            return;
-        }
+        End::Scanned(self.watch.take_stuck())
     }
 }

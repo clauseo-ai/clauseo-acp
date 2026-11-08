@@ -3,13 +3,15 @@
 //!
 //! - the matter's path, as bytes, so the host's start can scan it;
 //! - each running session's record: its host process (pid and start), its probe name, its
-//!   set-aside folder and its launch baseline. The session's own watch removes it after its
-//!   final scan, unless a process of the session outlived the kill. One whose host is gone, or
-//!   whose watch is not running in its host, never ran that scan (or ran it with a process
-//!   left): the host's next start (`host::start_up`), or the matter's next launch, whichever
-//!   comes first, kills what is left of it and runs the scan for it from its baseline. The
-//!   record stays while a process of it is left, or while the matter can't be found (a disk
-//!   not plugged in), so the next start or launch tries again.
+//!   launch time, its set-aside folder and its launch baseline. The session's own watch
+//!   removes it after its final scan; when a process of the session outlived the kill, the
+//!   scan moved nothing and the watch marks the record instead, with what it found. One whose
+//!   host is gone, whose watch is not running in its host, or that is marked never ran a final
+//!   scan that moves: the host's next start (`host::start_up`), or the matter's next launch,
+//!   whichever comes first, kills what is left of it (only processes started since its
+//!   launch) and, once none is left, runs the scan for it from its baseline. While a process
+//!   of it is left nothing moves, the record stays, and the matter's launches are refused; it
+//!   stays too while the matter can't be found (a disk not plugged in).
 //! - the items a final scan could neither move nor neutralise: while one is still there, the
 //!   matter's launches are refused with a plain reason.
 
@@ -92,6 +94,16 @@ pub(crate) struct SessionRecord {
     pub(crate) probe: String,
     pub(crate) set_aside: Bytes,
     pub(crate) baseline: Baseline,
+    /// When the session launched, in microseconds since the epoch: a dead session's kill skips
+    /// every process started before it.
+    #[serde(default)]
+    pub(crate) launched: Option<u64>,
+    /// A process of the session outlived its kill, so its final scan moved nothing.
+    #[serde(default)]
+    pub(crate) outlived: bool,
+    /// What that scan found, to be set aside once no process of the session is left.
+    #[serde(default)]
+    pub(crate) finds: Vec<Bytes>,
 }
 
 /// An item left in the matter that blocks its launches.
@@ -126,13 +138,14 @@ pub(crate) trait Store: Send + 'static {
 pub(crate) struct Host<'a> {
     /// Whether a recorded session never ran its final scan.
     pub(crate) dead: &'a dyn Fn(&SessionRecord) -> bool,
-    /// Ends every process of a dead session by its probe name, waiting a little; false when
-    /// one is left.
-    pub(crate) kill: &'a dyn Fn(&str) -> bool,
+    /// Ends every process of a dead session by its probe name, started since its launch,
+    /// waiting a little; false when one is left.
+    pub(crate) kill: &'a dyn Fn(&SessionRecord) -> bool,
 }
 
 /// At launch, under the matter's lock: refuses while an item a final scan left is still in
-/// the matter; then kills what is left of each dead session and runs its final scan.
+/// the matter; then kills what is left of each dead session and runs its final scan, and
+/// refuses while a process of one is left.
 pub(crate) fn begin<F: Fs + Clone, S: Store>(
     store: &S,
     fs: &F,
@@ -157,8 +170,24 @@ pub(crate) fn begin<F: Fs + Clone, S: Store>(
                 stuck.reason
             )));
         }
-        finish_dead(state, fs, matter, notices, host);
-        Ok(())
+        let done = finish_dead(state, fs, matter, notices, host);
+        if done.left == 0 {
+            return Ok(());
+        }
+        let left = if done.finds > 0 {
+            format!(
+                " That session left {} item(s) in the matter for Clauseo to set aside once it \
+                 has stopped.",
+                done.finds
+            )
+        } else {
+            String::new()
+        };
+        Err(io::Error::other(format!(
+            "Clauseo won't start an AI tool in this matter yet: a process of an earlier AI \
+             tool session is still running after Clauseo tried to stop it. Restart the Mac, \
+             then try again.{left}"
+        )))
     })?
 }
 
@@ -174,30 +203,55 @@ pub(crate) fn sweep_dead<F: Fs + Clone, S: Store>(
         let Some(matter) = state.root.as_ref().map(Bytes::path) else {
             // Only a file no launch of this version wrote: kill, keep the records.
             for record in state.sessions.iter().filter(|record| (host.dead)(record)) {
-                let _ = (host.kill)(&record.probe);
+                let _ = (host.kill)(record);
             }
             return 0;
         };
-        finish_dead(state, fs, &matter, notices, host)
+        finish_dead(state, fs, &matter, notices, host).scanned
     })
 }
 
-/// Kills what is left of each dead session of `state` and runs its final scan. A record stays
-/// while a process of it is left or the matter can't be found. Returns how many scans ran.
+/// What [`finish_dead`] did.
+struct Finished {
+    /// How many dead sessions' final scans ran.
+    scanned: usize,
+    /// How many dead sessions still have a process left: nothing of theirs moved.
+    left: usize,
+    /// How many items those sessions' marked records list.
+    finds: usize,
+}
+
+/// Kills what is left of each dead session of `state` and, once none of its processes is
+/// left, runs its final scan. A record stays while a process of it is left (and nothing moves)
+/// or the matter can't be found.
 fn finish_dead<F: Fs + Clone>(
     state: &mut MatterState,
     fs: &F,
     matter: &Path,
     notices: &Arc<dyn DenialSink>,
     host: &Host<'_>,
-) -> usize {
+) -> Finished {
     let (dead, live): (Vec<_>, Vec<_>) = std::mem::take(&mut state.sessions)
         .into_iter()
         .partition(|record| (host.dead)(record));
     state.sessions = live;
-    let mut scanned = 0;
+    let mut done = Finished {
+        scanned: 0,
+        left: 0,
+        finds: 0,
+    };
     for record in dead {
-        let all_gone = (host.kill)(&record.probe);
+        if !(host.kill)(&record) {
+            tracing::error!(
+                session = record.session, matter = %matter.display(),
+                "a dead session's processes did not go after its kill; nothing moves, and the \
+                 matter's launches wait"
+            );
+            done.left += 1;
+            done.finds += record.finds.len();
+            state.sessions.push(record);
+            continue;
+        }
         if fs.meta(matter).is_none() {
             tracing::warn!(
                 session = record.session, matter = %matter.display(),
@@ -225,13 +279,9 @@ fn finish_dead<F: Fs + Clone>(
         let asks = watch.full_scan(Phase::Ended);
         debug_assert!(!asks.end, "a final scan never asks to end");
         add_stuck(state, watch.take_stuck());
-        scanned += 1;
-        if !all_gone {
-            // The next start or launch kills and scans again.
-            state.sessions.push(record);
-        }
+        done.scanned += 1;
     }
-    scanned
+    done
 }
 
 /// Records session `record` as running.
@@ -239,15 +289,28 @@ pub(crate) fn record<S: Store>(store: &S, record: SessionRecord) -> io::Result<(
     store.update(|state| state.sessions.push(record))
 }
 
-/// After session `session`'s final scan: its record goes unless `keep` (a process of it may
-/// still run, so the next start or launch kills and scans again), and what it left `stuck`
-/// stays.
-pub(crate) fn end<S: Store>(store: &S, session: &str, stuck: Vec<Stuck>, keep: bool) {
+/// After session `session`'s final scan: its record goes, and what it left `stuck` stays.
+pub(crate) fn end<S: Store>(store: &S, session: &str, stuck: Vec<Stuck>) {
     let saved = store.update(|state| {
-        if !keep {
-            state.sessions.retain(|record| record.session != session);
-        }
+        state.sessions.retain(|record| record.session != session);
         add_stuck(state, stuck);
+    });
+    if let Err(error) = saved {
+        tracing::error!(%error, session, "the git watch could not update the matter's state");
+    }
+}
+
+/// A process of session `session` outlived its kill, so its final scan moved nothing: its
+/// record stays, marked, with what the scan found (`finds`), for the next start or launch,
+/// which kills again and scans once none is left.
+pub(crate) fn outlived<S: Store>(store: &S, session: &str, finds: &[PathBuf]) {
+    let saved = store.update(|state| {
+        for record in &mut state.sessions {
+            if record.session == session {
+                record.outlived = true;
+                record.finds = finds.iter().map(Bytes::from).collect();
+            }
+        }
     });
     if let Err(error) = saved {
         tracing::error!(%error, session, "the git watch could not update the matter's state");

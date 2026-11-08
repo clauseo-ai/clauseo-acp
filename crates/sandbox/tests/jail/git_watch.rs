@@ -1,9 +1,10 @@
 //! The lawyer-side git watch with a real jail (decision record 0038): no repository is made in
-//! the session's temp folder or notes; the first find ends every process of the session, one
-//! that left the group with `setsid` included, before anything moves; and a matter on another
-//! volume sets aside on that volume, in a `.clauseo` folder the agent can't reach; nothing
-//! git reads is made at a launch repository's `commondir` target; and the session's probe
-//! can't be shed from inside (no nested `sandbox-exec`, no `launchctl submit`).
+//! the session's temp folder or notes, and one renamed into notes is set aside; the first find
+//! ends every process of the session, one that left the group with `setsid` included, before
+//! anything moves; and a matter on another volume sets aside on that volume, in a `.clauseo`
+//! folder the agent can't reach; nothing git reads is made at a launch repository's
+//! `commondir` target; and the session's probe can't be shed from inside (no nested
+//! `sandbox-exec`, no `launchctl submit`).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -53,6 +54,34 @@ fn no_repository_is_made_in_the_session_temp_folder_or_notes() {
         &[notes],
     )
     .assert_ok();
+}
+
+/// The notes folder is watched as the matter is: a repository made in the state folder and
+/// renamed into notes under another name (which the profile's name rules can't see) is set
+/// aside after the run.
+#[test]
+fn a_repository_renamed_into_notes_is_set_aside() {
+    let w = World::new();
+    let policy = w.builder().build().unwrap();
+    let state = policy.state().to_string_lossy().into_owned();
+    let notes = policy.notes().unwrap().to_owned();
+    let (launcher, denials) = launcher(policy);
+    let script = r#"
+        mkdir -p "$1/foo/.git" && echo "ref: refs/heads/main" > "$1/foo/.git/HEAD" || exit 4
+        mv "$1/foo" "$2/foo" || exit 5
+    "#;
+    let out = sh(
+        &launcher,
+        &w.at("m1"),
+        script,
+        &[&state, notes.to_str().unwrap()],
+    );
+    assert!(!matches!(out.code, Some(4 | 5)), "{out:#?}");
+    let (path, what, outcome) = notice(&denials);
+    assert_eq!((path, what), (PathBuf::from("foo/.git"), GitItem::DotGit));
+    assert!(matches!(outcome, GitOutcome::Moved(_)), "{outcome:?}");
+    assert!(!notes.join("foo/.git").exists());
+    assert!(notes.join("foo").is_dir());
 }
 
 /// A repository moved in while a helper that called `setsid` sleeps: the watch ends the shell

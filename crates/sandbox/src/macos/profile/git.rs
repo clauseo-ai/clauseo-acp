@@ -14,7 +14,8 @@ use crate::Policy;
 /// (`jail_procs.rs`).
 pub(crate) const SESSION_PROBE: &str = "SESSION_PROBE";
 
-/// What every probe name starts with; the launcher tag follows.
+/// What every probe name starts with; the launcher tag, the launch's number and the host
+/// process's random part follow (`jail_procs::Probe::new`).
 pub(crate) const PROBE_PREFIX: &str = "chat.clauseo.session.";
 
 /// [`SeatbeltProfile::args`] with `probe` for the [`SESSION_PROBE`] parameter: one name for

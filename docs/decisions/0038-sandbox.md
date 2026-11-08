@@ -129,10 +129,17 @@ later is caught; a created, renamed-in or cloned folder is scanned, within 20,00
 entries for the whole batch: past that the scan stops and the session ends, so a huge folder
 can't hold up the watch while the agent runs (the final scan after the kill has no cap). Any
 find while the agent may run ends the session, gone or not. A dropped or must-scan event, a
-changed root or a path outside the matter rescans it; a stream that can't start falls back to
-a full scan every 2 s, logged. Scans never follow a link, never enter a `.git`, and skip any
-folder whose `statfs` lacks `MNT_LOCAL`. A matter on a volume the stream can't watch is
-handled at build time (below).
+changed root or a path outside the matter rescans it; a stream that can't start refuses the
+launch ("Clauseo won't start the AI tool: it can't watch <folder> for changes (...)"), as there
+is no fallback to timed rescans. The session's **notes folder** (`Policy::notes`) gets the
+same: a watch of its own rooted there, with its own stream, canary, 30 s pass and state file
+(keyed by the notes path), an empty launch (nothing in notes is the lawyer's to keep), its items
+set aside into the data dir's folder, and the same session: a find there ends the session as
+one in the matter does, and the host's start and each launch finish its dead sessions as they
+do the matter's. `start` takes a mode, `Live` or `AfterOnly` (no stream, canary or 30 s pass:
+only the launch's check before and the final scan after), for a matter no stream can watch
+(below). Scans never follow a link, never enter a `.git`, and skip any folder whose `statfs`
+lacks `MNT_LOCAL`, apart from an `AfterOnly` matter's own volume.
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
@@ -155,7 +162,9 @@ process of the session and moves nothing until none is left: a loop moving ready
 would otherwise keep one present most of the time. A process group or tree misses a child that
 calls `setsid` and outlives its parent (re-parented to launchd), which keeps write access to the
 matter. So each launch passes its profile a probe name of its own (`-D
-SESSION_PROBE=chat.clauseo.session.<tag>-<n>`), and the profile allows a `mach-lookup` of that
+SESSION_PROBE=chat.clauseo.session.<tag>-<n>-<random>`, the random part made once per host
+process, so a name of an earlier host run, even one with the same pid, never matches a live
+session's), and the profile allows a `mach-lookup` of that
 one name, which no service registers. A process belongs to the session when `sandbox_check`
 says it is sandboxed, may look up the session's name, and may not look up a control name no
 profile allows (`SANDBOX_CHECK_NO_REPORT`, so the checks log no denial). No process can shed
@@ -165,15 +174,31 @@ PID (a process can spawn with the "disclaim" attribute and be its own), and a pa
 (`sandbox_check` answers "denied" for every process on a path that doesn't exist). The session
 counts as over only when its group is empty and no process carries the probe; its kill is
 `TreeKill` plus SIGKILL to each probed process, checked again just before its signal, sent again
-every 0.1 s; after 10 s the final scan runs anyway, logged, and the session's record stays (below).
+every 0.1 s. The kill goes first: the first find of a batch returns at once, before the batch's
+other events, a rescan or the 30 s pass, and nothing more is checked while the session ends.
+Nothing moves while a process of the session is left: when one outlives the kill's 10 s, the
+final scan only lists what it finds (renames by path could be redirected by a live process
+swapping a folder), and the session's record stays, marked, with those paths (below).
 The probe fails closed: a `sandbox_check` that errs on a running process keeps the session
 running, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
 the control name" rules a process out. Such a process is never killed, though: only one every
 check plainly puts in the session is, and right before each signal it is checked again and its
 start time (`proc_pidinfo`) compared with the listing's, so a reused pid is skipped. A process
-whose checks keep failing keeps the session alive past the kill's cap, so its record stays. A process can't shed the probe from inside: a nested
+whose checks keep failing keeps the session alive past the kill's cap, so its record stays.
+A dead session's kill (below) also skips every process that started before the session's
+launch time, which its record holds. A process can't shed the probe from inside: a nested
 `sandbox-exec` can't apply a profile, and `launchctl submit` hands launchd no job (jail tests).
 A watch thread that panics ends the session; an attach to a thread already gone ends it too.
+**The watchdog:** a check reads what the agent made while it runs (a link's target is resolved,
+which for a link into `/net` makes autofs mount a server; a folder moved in is walked whole), and
+while one check holds the watch's thread nothing else is checked. So each runner publishes when
+its check began, and one watchdog thread per host looks every 0.1 s: a check (one batch of
+events, a rescan, a 30 s pass) past 2 s ends the session by its tree and probe, logged; the
+runner, once its check returns, tells the lawyer (`Denial::GitWatchLost`) and goes to the final
+scan. 2 s is the canary's wait: a check held longer leaves the agent as unwatched as a lost
+stream. The cost: a check that is slow without being stuck, such as the walk of a folder of
+some hundred thousand entries moved in at once, ends the session too. A session attached after
+the watchdog gave up on a check is ended at once.
 
 Then the final scan sets each item aside by one `rename(2)` that never replaces into
 `<set-aside>/<UTC time>-<session>-<random>/item`, beside a `record.json` (the original path,
@@ -197,20 +222,26 @@ as well, the matter's state file (below) keeps the item, and the matter's launch
 is gone. Nothing else is ever deleted; macOS has no restore of these items.
 
 **The matter's state file**, `<git set-aside>/matters/<hash of the matter>.json` under a
-`flock`, records each running session: its host process (pid and start), its probe name, its
-set-aside folder and its launch baseline, and the matter's path. The session's own watch removes
-it after its final scan, unless the kill's 10 s ran out with a process left. A session whose
+`flock`, records each running session: its host process (pid and start), its probe name, its launch
+time, its set-aside folder and its launch baseline, and the matter's path. The session's own watch removes
+it after its final scan; when the kill's 10 s ran out with a process left, it marks it instead,
+with what that scan found. A session whose
 host is gone (or, in this host, whose watch is not running) never ran its final scan, or ran it
-with a process left: its surviving processes are killed by its probe (up to 3 s) and its scan
-runs from its baseline, every folder counted as old. It moves repository shapes only, never a
-folder of the lawyer's around them: each `.git` not the launch's, the `HEAD` of each folder
-that was not a launch repository (a repository-shaped one keeps its `objects` and `refs`),
-each link out and each new `commondir` path. A repository the lawyer made after the crash loses
-its `.git` or `HEAD` the same way, and the notice says where it went. That happens at the **host's start**, for every matter (`git_watch_start_up`, which
+with a process left: its surviving processes are killed by its probe (up to 3 s, only those
+started since its launch) and, once none is left, its scan runs from its baseline, every folder
+counted as old. It moves repository shapes only, never a folder of the lawyer's around them:
+each `.git` not the launch's, the `HEAD` of each folder that was not a launch repository (a
+repository-shaped one keeps its `objects` and `refs`), each link out and each new `commondir`
+path. A repository the lawyer made after the crash loses its `.git` or `HEAD` the same way, and
+the notice says where it went. That happens at the **host's start**, for every matter
+(`git_watch_start_up`, which
 the host calls once on a thread of its own with its git set-aside folder), and at each launch of
-the matter, before the watch takes anything in it for the lawyer's. The record stays while a
-process of it is left, or while the matter can't be found (a disk not plugged in), for the next
-try. At the **host's quit**, `git_watch_quit(within)` refuses further launches, kills every
+the matter, before the watch takes anything in it for the lawyer's. While a process of it is
+left nothing of it moves, its record stays, and the matter's launches are refused ("Clauseo
+won't start an AI tool in this matter yet: a process of an earlier AI tool session is still
+running after Clauseo tried to stop it. Restart the Mac, then try again.", with how many items
+it left when the record lists some), until a start or launch finds none left; the record also
+stays while the matter can't be found (a disk not plugged in), for the next try. At the **host's quit**, `git_watch_quit(within)` refuses further launches, kills every
 running session by its probe (again every 50 ms) and waits up to `within` for the watches to
 run their final scans; a watch that doesn't finish keeps its record for the next start.
 

@@ -38,6 +38,8 @@ struct Disk {
     touched: Vec<PathBuf>,
     /// How many folders were listed.
     lists: u64,
+    /// Listing this folder waits until the flag is set.
+    block: Option<(PathBuf, Arc<AtomicBool>)>,
 }
 
 impl Disk {
@@ -146,6 +148,18 @@ impl FakeFs {
         self.0.lock().unwrap().panic_on = Some(PathBuf::from(dir));
     }
 
+    /// How many folders have been listed.
+    pub(super) fn lists(&self) -> u64 {
+        self.0.lock().unwrap().lists
+    }
+
+    /// Makes a listing of `dir` wait until the flag returned is set.
+    pub(super) fn block_listing(&self, dir: &str) -> Arc<AtomicBool> {
+        let open = Arc::new(AtomicBool::new(false));
+        self.0.lock().unwrap().block = Some((PathBuf::from(dir), Arc::clone(&open)));
+        open
+    }
+
     /// The paths in folder `dir` whose name starts with `prefix`.
     pub(super) fn named(&self, dir: &str, prefix: &str) -> Vec<PathBuf> {
         let disk = self.0.lock().unwrap();
@@ -215,6 +229,13 @@ impl Fs for FakeFs {
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
         let mut disk = self.0.lock().unwrap();
         disk.lists += 1;
+        if let Some((_, open)) = disk.block.clone().filter(|(at, _)| at == dir) {
+            drop(disk);
+            while !open.load(Ordering::SeqCst) {
+                async_io::block_on(async_io::Timer::after(Duration::from_millis(10)));
+            }
+            disk = self.0.lock().unwrap();
+        }
         if disk.panic_on.as_deref() == Some(dir) {
             drop(disk);
             panic!("the fake's listing of {} panics", dir.display());

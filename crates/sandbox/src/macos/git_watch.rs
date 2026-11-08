@@ -20,7 +20,9 @@
 //! - `FSEvents` watches the matter (`fsevents.rs`: file events, no defer, 0.1 s latency). Any
 //!   event re-checks its parent folder; a new or renamed-in folder is scanned whole. A dropped
 //!   or must-scan event, a changed root, or a path outside the matter rescans the matter. A
-//!   stream that cannot start falls back to a full scan every 2 s, logged.
+//!   stream that cannot start refuses the launch. The session's notes folder gets a watch of
+//!   its own, the same in every way (its stream, its state file, its scans before and after),
+//!   ended with the same session.
 //! - A canary checks the stream (`run.rs`): every 10 s a file in the set-aside folder, on the
 //!   matter's volume and out of the agent's reach, is rewritten; when its event doesn't come
 //!   within 2 s, or it can't be written, the stream is lost: the session ends as for a find,
@@ -33,8 +35,11 @@
 //!   out, and the repositories, `HEAD` folders and folders of the watch's own walk.
 //! - On the first find while the agent may run, the watch ends every process of the session:
 //!   the process group, the tree, and every process carrying the launch's Seatbelt probe
-//!   (`jail_procs.rs`), which finds a `setsid` child re-parented to launchd. Only once none
-//!   is left does it scan the matter and set aside, so nothing races the moves.
+//!   (`jail_procs.rs`), which finds a `setsid` child re-parented to launchd. The kill goes
+//!   before any rescan or 30 s pass. Only once none is left does it scan the matter and set
+//!   aside, so nothing races the moves; when one outlives the kill's 10 s, nothing moves.
+//! - A watchdog thread (`run/watchdog.rs`) ends the session when one check runs past 2 s,
+//!   such as a link's target that makes autofs mount a slow server.
 //! - Setting aside is one `rename(2)`, never replacing, into
 //!   `<set-aside>/<UTC time>-<session>-<random>/item` beside a `record.json` (`aside.rs`),
 //!   with the item's own `HEAD` and `config` renamed. The folder is the data dir's, or a
@@ -46,7 +51,9 @@
 //! - A small state file per matter (`state.rs`) records each running session's launch
 //!   baseline. A session whose host quit or crashed before its final scan, or whose processes
 //!   outlived the kill, gets that scan at the host's next start ([`start_up`]) or the
-//!   matter's next launch, after its surviving processes are killed by its probe. At the
+//!   matter's next launch, once its surviving processes are killed by its probe (only those
+//!   started since its launch); while one is left nothing moves and the matter's launches are
+//!   refused. At the
 //!   host's quit, [`quit`] kills every running session by its probe and waits a little for
 //!   the final scans.
 //! - Each set-aside reaches the launch's sink as [`Denial::GitSetAside`](crate::Denial),
@@ -81,7 +88,7 @@ mod tests_live;
 
 pub(crate) use check::Watch;
 pub use host::{quit, start_up};
-pub(crate) use run::{Session, start};
+pub(crate) use run::{Mode, Session, start};
 
 /// The `FSEvents` flags the watch reads.
 pub(crate) mod flags {
