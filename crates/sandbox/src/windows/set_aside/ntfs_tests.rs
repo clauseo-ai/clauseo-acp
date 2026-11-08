@@ -222,8 +222,13 @@ fn a_lawyer_folder_renamed_to_a_nested_git_is_set_aside_by_its_file_id() {
     assert!(moved[0].to.join("hooks/pre-commit").is_file());
     assert!(root.join("sub/old-git/HEAD").is_file());
     assert!(root.join("other/.mcp.json").is_file(), "unchanged");
-    restore_set_aside(&data, &moved[0]).unwrap();
-    assert!(root.join("sub/.git/hooks/pre-commit").is_file());
+    // Put back it would be the lawyer's, which git trusts: the restore refuses it.
+    assert_eq!(
+        restore_set_aside(&data, &moved[0]),
+        Err(SetAsideFailure::GitFolder)
+    );
+    assert!(!root.join("sub/.git").exists());
+    assert!(moved[0].to.join("hooks/pre-commit").is_file());
 }
 
 /// S15 `PR4a` on NTFS: a nested `claude.md` the agent makes is what the `CLAUDE.md` probe opens

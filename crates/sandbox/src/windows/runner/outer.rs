@@ -28,6 +28,7 @@ use steps::Start;
 
 mod end;
 mod steps;
+mod watch;
 
 /// The end sweeper's guard, shared with the stdin relay's thread.
 type End = Arc<EndSweep<OsSweeper>>;
@@ -118,10 +119,12 @@ fn marked_outer(
         kept: Mutex::new(None),
         job: OnceLock::new(),
         marker,
+        watch: Mutex::new(None),
     }));
     let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
+        end.steps().stop_watch();
         end.wait();
     }
     match result {
@@ -206,6 +209,8 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: &sweeper.cwd,
         job,
     };
+    // The git watch on the matter's folder, armed before the agent runs (`outer/watch.rs`).
+    watch::keep(message, end)?;
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {
         pool_user: message.pool_user.clone(),
@@ -420,6 +425,7 @@ fn relay(
             left -= 1;
         }
     });
+    end.steps().stop_watch();
     tell_status(last.as_ref(), code);
     let swept = end.wait();
     if end.clean(swept, reported.is_some())

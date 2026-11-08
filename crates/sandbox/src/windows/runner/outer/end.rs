@@ -43,6 +43,8 @@ pub(super) struct OsSweeper {
     pub(super) job: OnceLock<Job>,
     /// The session's unclean-session marker (`marker.rs`).
     pub(super) marker: PathBuf,
+    /// The git watch, once `session` started it (`watch.rs`).
+    pub(super) watch: Mutex<Option<super::watch::Running>>,
 }
 
 impl OsSweeper {
@@ -50,6 +52,21 @@ impl OsSweeper {
     /// session uses. It closes when this process exits.
     pub(super) fn hold_job(&self, job: Handle) -> &Handle {
         &self.job.get_or_init(move || Job(job)).0
+    }
+
+    /// Keeps the git watch `session` started, for [`OsSweeper::stop_watch`].
+    pub(super) fn keep_watch(&self, watch: super::watch::Running) {
+        if let Ok(mut kept) = self.watch.lock() {
+            *kept = Some(watch);
+        }
+    }
+
+    /// Stops the git watch, once the job is ended: nothing of the agent's is left to watch.
+    pub(super) fn stop_watch(&self) {
+        let running = self.watch.lock().ok().and_then(|mut kept| kept.take());
+        if let Some(running) = running {
+            running.stop();
+        }
     }
 }
 

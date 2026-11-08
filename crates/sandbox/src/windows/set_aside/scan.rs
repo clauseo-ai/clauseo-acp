@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
 use super::names::Key;
+use super::repo_names::{bare_layout, git_lookalike, is_git, is_head};
 use super::run::Volume;
 use crate::PROTECTED_NAMES;
 
@@ -85,6 +86,11 @@ pub(super) enum Kept {
     Root,
     /// A protected name below the root.
     Nested,
+    /// A `HEAD` (a file or a link) outside every `.git`, from its folder's listing: with
+    /// `objects` and `refs`, or `commondir`, beside it, a git folder git would trust in a
+    /// lawyer's folder. Checked only
+    /// against a record that holds them ([`HEADS_RECORDED`](super::files::HEADS_RECORDED)).
+    Head,
     /// A link, in [`Record::links`](super::files::Record::links).
     Link,
 }
@@ -115,6 +121,9 @@ pub(super) struct Scan {
     /// The key of each folder (not a link) the listings it read gave, entered or not: what a
     /// re-probe of one folder's own names knows of the folders in it.
     pub(super) folders: Vec<Key>,
+    /// Each folder below the root whose listing is a git folder's (`HEAD` with `objects` and
+    /// `refs`, or with `commondir`: `repo_names::bare_layout`), and its file ID.
+    pub(super) bare: Vec<(Key, Option<FileId>)>,
 }
 
 /// Scans the matter tree below `root` through `volume`; see the module's docs.
@@ -221,7 +230,27 @@ fn scan_from<V: Volume>(
                 continue;
             }
         };
+        let shapes = listed
+            .iter()
+            .map(|c| (c.name.as_os_str(), c.kind == Kind::Folder));
+        if !at_root && bare_layout(shapes) {
+            scan.bare.push((parts.clone(), through.last().copied()));
+        }
+        let in_git = parts.iter().any(|part| is_git(part));
         for child in listed {
+            // From the listing: a `HEAD` file, and a name only stripping makes `.git`, which
+            // the probes above don't open.
+            let named = match child.kind {
+                Kind::Other | Kind::Link if !in_git && is_head(&child.name) => Some(Kept::Head),
+                Kind::Other | Kind::Folder if git_lookalike(&child.name) => Some(Kept::Nested),
+                Kind::Other | Kind::Folder | Kind::Link => None,
+            };
+            if let Some(kept) = named {
+                let now = probe(volume, &folder, &child.name);
+                if now != Now::Absent {
+                    scan.items.push(at.item(&child.name, now, kept));
+                }
+            }
             if child.kind == Kind::Folder {
                 let mut key = parts.clone();
                 key.push(child.name.clone());

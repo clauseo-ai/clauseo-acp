@@ -10,6 +10,7 @@ use super::{LAUNCH_VERSION, LaunchError, LaunchMessage};
 /// [`LaunchMessage::from_policy`]'s work.
 pub(super) fn message_from_policy(
     policy: &crate::Policy,
+    matter: clauseo_protocol::MatterId,
     pool: &crate::windows::pool::PoolUser,
     spec: &clauseo_process::LaunchSpec,
     ca_bundle: Option<&Path>,
@@ -40,6 +41,8 @@ pub(super) fn message_from_policy(
         pool_user: pool.sid.clone(),
         pool_name: pool.name.clone(),
         matter_sid: None,
+        matter,
+        matter_root: path("matter_root", policy.matter())?,
         program: path("program", spec.program())?,
         args: spec
             .args()

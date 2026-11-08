@@ -16,11 +16,13 @@ mod bookkeeping;
 mod crash;
 mod fast;
 mod links;
+mod live;
 mod nested;
 #[cfg(unix)]
 mod pool;
 #[cfg(unix)]
 mod posix;
+mod repo_shapes;
 #[cfg(unix)]
 mod round4;
 #[cfg(unix)]

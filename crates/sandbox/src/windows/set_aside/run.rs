@@ -13,6 +13,7 @@ use clauseo_protocol::MatterId;
 use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{hand_over, load, set_aside};
+use super::repo_names::is_git;
 use super::scan::{Listed, scan};
 use super::{Checked, Entry, Reason, SetAsideFailure};
 
@@ -252,6 +253,10 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     if !plain || !found.from.is_absolute() {
         return Err(SetAsideFailure::Record.into());
     }
+    if holds_git(&found) {
+        tracing::info!("a set-aside .git, or an item inside one, is never put back");
+        return Err(SetAsideFailure::GitFolder.into());
+    }
     volume.move_back(
         &place.sandbox,
         &place.parts(&found.folder, &found.within),
@@ -300,6 +305,20 @@ pub(super) fn kept_levels(parts: &[OsString], listed: &[Vec<OsString>], kept: us
             listed.iter().any(|item| same(folder, item))
         })
         .unwrap_or(kept)
+}
+
+/// Whether `entry`'s item is a `.git` or sits inside one: its own name, a folder it was in below
+/// the matter, or any part of the path it would go back to opens as `.git` ([`is_git`]). The
+/// restore's folder is opened by that path and must have it as its final path (`move_back`), so
+/// no short name or link can land it inside a `.git` the words don't name.
+pub(super) fn holds_git(entry: &Entry) -> bool {
+    let in_path = entry.from.components().any(|part| match part {
+        Component::Normal(name) => is_git(name),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            false
+        }
+    });
+    in_path || is_git(&entry.name) || entry.within.iter().any(|part| is_git(part))
 }
 
 /// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.

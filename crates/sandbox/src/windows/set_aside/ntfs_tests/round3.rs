@@ -72,8 +72,9 @@ fn a_dotless_i_git_is_set_aside_exactly_when_ntfs_opens_it_as_git() {
     if opened.is_some() {
         assert_eq!(from, [root.join("sub").join(".git")]);
     } else {
-        assert_eq!(from, Vec::<PathBuf>::new());
-        assert!(root.join("sub/.g\u{131}t/HEAD").is_file());
+        // Not a `.git` to NTFS, but a `HEAD` made outside every `.git`: that file goes.
+        assert_eq!(from, [root.join("sub/.g\u{131}t/HEAD")]);
+        assert!(root.join("sub/.g\u{131}t").is_dir());
     }
 }
 

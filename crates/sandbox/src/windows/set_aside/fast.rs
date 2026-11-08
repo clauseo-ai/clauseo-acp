@@ -102,6 +102,8 @@ pub(super) fn before_launch_fast(
     if !record.sessions.is_empty() {
         return Ok(None);
     }
+    // A record an older version wrote holds no `HEAD`; one re-probed folder doesn't change that.
+    let heads = record.holds_heads();
     let mut seen = super::files::Snapshot {
         names: record.names,
         links: record.links,
@@ -132,6 +134,10 @@ pub(super) fn before_launch_fast(
             seen.links.extend(fresh.links);
             unscanned.extend(scan.unscanned.iter().cloned());
         }
+    }
+    if !heads {
+        seen.names
+            .remove(&vec![OsString::from(super::files::HEADS_RECORDED)]);
     }
     let sessions = BTreeSet::from([session.to_owned()]);
     place.write_record(&Record::new(*matter, sessions, seen))?;
