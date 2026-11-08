@@ -61,3 +61,7 @@ mod node_env;
 #[cfg(test)]
 #[path = "install/resume.rs"]
 mod resume;
+
+#[cfg(test)]
+#[path = "install/sac.rs"]
+mod sac;

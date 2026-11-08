@@ -213,6 +213,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             let detail = format!("npm left a link in the install folder: {}", link.display());
             return Err(TryError::retry(&detail, config));
         }
+        // Codex's unsigned rg.exe moves off PATH under Smart App Control (Windows; never fails),
+        // before the marker, so a kept tree's manifest is the settled tree.
+        crate::sac::settle(config, &tmp, agent);
         // From here the tree is finished: a failed rename keeps it for the next try (`kept`).
         kept::mark(&tmp, agent, pins.version(), &hash).map_err(io("marking the set-up done"))?;
         marked.set(true);

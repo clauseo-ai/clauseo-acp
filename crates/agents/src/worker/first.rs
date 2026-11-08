@@ -67,6 +67,9 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
                 install::ready_install(config, &*worker.launcher, &*worker.timer, &agent, &search)
                     .await
         {
+            // Codex's unsigned rg.exe moves off PATH under Smart App Control, or back once it
+            // is off (Windows; never fails). The receipt vouches for the folder either way.
+            crate::sac::settle(config, &installed.folder, &agent);
             let version = installed.version.clone();
             worker
                 .shared
