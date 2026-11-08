@@ -68,8 +68,10 @@ sits in a hidden path other than the matter's own folder (a grant of `m2/secret/
 hides `m2/secret`); one that holds the home folder or this matter; one in a matter that sits inside another hidden path
 (the data dir); and a file granted as a tree or the other way round. `check_allowed_folder` runs
 the same rules for a path in another matter (its cross-matter branch) and the old ones elsewhere.
-`classify` answers `PathClass::OtherMatter { matter }` for a refused path in another matter's
-folder that nothing allows again: outside the grant, a write, or a refused name.
+`classify` answers `PathClass::OtherMatter { matter, refused }` for a refused path in another
+matter's folder that nothing allows again: outside the grant, a write, or a refused name;
+`refused` is set when the path is or sits in one of the five names below that folder, which no
+grant reads, so the host need not offer a card for it.
 
 The five names stay refused because each carries more than the documents the lawyer chose: `.git`
 the whole history, deleted text included; `.clauseo` that matter's Clauseo data (`matter.json`

@@ -322,9 +322,11 @@ impl Policy {
             return PathClass::LinkTarget;
         }
         if !self.allowed_again(path) {
-            if let Some(matter) = self.hidden_matter_of(path) {
-                let matter = matter.to_owned();
-                return PathClass::OtherMatter { matter };
+            if let Some(other) = other_matter::matter_of(path, &self.hidden_matters) {
+                return PathClass::OtherMatter {
+                    matter: other.matter.clone(),
+                    refused: other_matter::in_refused_name(path, &other.path),
+                };
             }
             if self.hidden.iter().any(|h| under(path, h)) {
                 return PathClass::Hidden;

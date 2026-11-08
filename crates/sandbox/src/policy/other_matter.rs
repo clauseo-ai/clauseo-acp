@@ -59,11 +59,7 @@ impl OtherMatterRead {
     /// Whether `path` is under the grant with one of its names below the grant one of
     /// [`REFUSED_IN_OTHER_MATTER`], at any depth: refused although the grant holds it.
     pub fn refuses(&self, path: &Path) -> bool {
-        under(path, &self.path)
-            && path
-                .components()
-                .skip(self.path.components().count())
-                .any(|c| refused_name(c.as_os_str()))
+        in_refused_name(path, &self.path)
     }
 }
 
@@ -72,6 +68,16 @@ pub(crate) fn refused_name(name: &std::ffi::OsStr) -> bool {
     REFUSED_IN_OTHER_MATTER
         .iter()
         .any(|refused| name.eq_ignore_ascii_case(refused))
+}
+
+/// Whether `path` is under `root` with one of its names below `root` one of
+/// [`REFUSED_IN_OTHER_MATTER`].
+pub(super) fn in_refused_name(path: &Path, root: &Path) -> bool {
+    under(path, root)
+        && path
+            .components()
+            .skip(root.components().count())
+            .any(|c| refused_name(c.as_os_str()))
 }
 
 /// The innermost of `matters` that is or holds `path`.

@@ -202,16 +202,23 @@ fn refused_paths_in_another_matter_classify_as_that_matter() {
         .build()
         .unwrap();
     let m2 = canon(&w.at("m2"));
-    let other = PathClass::OtherMatter {
+    let other = |refused| PathClass::OtherMatter {
         matter: "m2-id".to_owned(),
+        refused,
     };
-    for (rel, access) in [
-        ("docs/brief.txt", Access::Write),
-        ("docs/sub/.git/HEAD", Access::Read),
-        (".clauseo/matter.json", Access::Read),
-        ("elsewhere.txt", Access::Read),
+    for (rel, access, refused) in [
+        ("docs/brief.txt", Access::Write, false),
+        ("docs/sub/.git/HEAD", Access::Read, true),
+        (".clauseo/matter.json", Access::Read, true),
+        (".clauseo", Access::Read, true),
+        (".Claude/settings.json", Access::Read, true),
+        (".codex/x", Access::Write, true),
+        (".agents/x", Access::Read, true),
+        ("docs/.github/x", Access::Read, false),
+        ("elsewhere.txt", Access::Read, false),
     ] {
-        assert_eq!(policy.classify(&m2.join(rel), access), other, "{rel}");
+        let class = policy.classify(&m2.join(rel), access);
+        assert_eq!(class, other(refused), "{rel}");
     }
     assert_eq!(policy.hidden_matter_of(&m2.join("docs")), Some("m2-id"));
     let data = canon(&w.at("data")).join("x");

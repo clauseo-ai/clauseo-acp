@@ -100,6 +100,10 @@ pub enum PathClass {
     OtherMatter {
         /// The other matter, as the host named it.
         matter: String,
+        /// Whether the path is in or is one of
+        /// [`REFUSED_IN_OTHER_MATTER`](crate::REFUSED_IN_OTHER_MATTER) below the other matter's
+        /// folder, which no grant reads.
+        refused: bool,
     },
 }
 
