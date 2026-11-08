@@ -296,8 +296,7 @@ fn one(ctx: &Ctx<'_>, variant: &Variant, lawyer: &str, on: Station<'_>) -> Resul
 
 /// The pool user a [`Source::Pool`] variant runs as: on the agent's own station (g), matter A's,
 /// whose user the station's DACL names; elsewhere (a), matter A's second (`A2`), since the
-/// runner's sweep ends any process of A's user outside the job while A's session runs, and its
-/// end sweeper after it.
+/// runner's sweep ends any process of A's user outside the job while A's session runs.
 fn control_pool<'m>(ctx: &Ctx<'m>, on: Station<'_>) -> Option<&'m Pool> {
     match on {
         Station::Agent(_) => ctx.manifest.pools.first(),
