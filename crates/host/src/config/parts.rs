@@ -97,3 +97,17 @@ pub(crate) struct UpdateSeams {
     #[cfg(feature = "test-support")]
     pub(crate) fail_close: bool,
 }
+
+impl Default for UpdateSeams {
+    /// No updater, a clock seed, and this crate's version: only a caller that knows the app's
+    /// version (desktop) can do better.
+    fn default() -> Self {
+        Self {
+            updater: Arc::new(crate::update::NoUpdater),
+            jitter_seed: None,
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            #[cfg(feature = "test-support")]
+            fail_close: false,
+        }
+    }
+}
