@@ -99,7 +99,8 @@ fn read(ace: &[u8], inherit: u8) -> Option<(u8, String, u32)> {
 /// the self-relative descriptor `bytes` holds a deny entry for `group` that applies to the
 /// object itself (not inherit-only) and denies all of [`FULL_ACCESS`] (or `GENERIC_ALL`), and
 /// no allow entry comes before it, so Windows reads it first. Anything else reads as not locked
-/// (`Blocked::AdminCopyUnsafe`), whose repair, the installer's `--adopt`, locks it again.
+/// (`Blocked::AdminCopyUnsafe`), but a copy locked exactly with no deny is healed first
+/// (`heal.rs`); other drift goes to the installer's `--adopt`, which locks it again.
 pub fn group_denied(bytes: &[u8], group: &Sid) -> bool {
     let Ok(Descriptor {
         dacl: Some(dacl), ..

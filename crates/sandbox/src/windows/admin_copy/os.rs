@@ -104,6 +104,45 @@ impl AdminCopyFs for WindowsAdminCopy {
             .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
             .collect()
     }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        crate::windows::refresh::request_admin_refresh().map_err(io::Error::other)
+    }
+
+    fn pause(&self, pause: std::time::Duration) {
+        wait(pause);
+    }
+}
+
+/// Sleeps `pause`: the heal's wait (`heal.rs`), off the actor's thread.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the heal's bounded wait, which the tests' fake replaces (AdminCopyFs::pause)"
+)]
+fn wait(pause: std::time::Duration) {
+    std::thread::sleep(pause);
+}
+
+/// The refresh's heal (`refresh/deny.rs`), as SYSTEM: when the admin folder `dir` and the copy
+/// `exe` are each locked exactly, with or without `group`'s deny, and either lacks it
+/// (`heal::owed`), each that lacks it is locked again with the deny ([`lock_down`]); whether
+/// anything was. Anything else is left as it is.
+pub(crate) fn heal_deny(dir: &Path, exe: &Path, group: &Sid) -> io::Result<bool> {
+    if found(dir)? != Found::Folder || found(exe)? != Found::File {
+        return Ok(false);
+    }
+    let super::Owed::Lacking { folder, copy } =
+        super::owed(&security(dir)?, &security(exe)?, group)
+    else {
+        return Ok(false);
+    };
+    if folder {
+        lock_down(dir, true, Some(group))?;
+    }
+    if copy {
+        lock_down(exe, false, Some(group))?;
+    }
+    Ok(true)
 }
 
 /// The record's `GroupSid` (`HKLM`, written by the elevated set-up), checked as a SID.
@@ -174,6 +213,14 @@ impl AdminCopyFs for StateAdminCopy {
 
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
         WindowsAdminCopy.set_security_blocked(blocked)
+    }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        WindowsAdminCopy.request_refresh()
+    }
+
+    fn pause(&self, pause: std::time::Duration) {
+        wait(pause);
     }
 }
 
@@ -304,9 +351,9 @@ fn hash_file(file: &mut File) -> io::Result<String> {
 /// Gives `path` (a folder when `folder`, else the admin copy) [`locked_folder_sddl`]'s or
 /// [`locked_file_sddl`]'s owner and protected DACL for `group`, then reads it back and refuses
 /// unless it is exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
-/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down: the
-/// set-up's walks lock through handles of their own (`lock_tree_os`).
-#[cfg(test)]
+/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down and
+/// the refresh's heal ([`heal_deny`]): the set-up's walks lock through handles of their own
+/// (`lock_tree_os`).
 pub(crate) fn lock_down(path: &Path, folder: bool, group: Option<&Sid>) -> io::Result<()> {
     use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
     let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;

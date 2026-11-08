@@ -208,7 +208,8 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
 
 /// The lock with the pool's group denied, as Windows writes and reads it: the set-up's tree
 /// lock reads back exactly ([`locked`] with the group), the check passes with that group
-/// recorded, and a lock with no deny, read against the recorded group, is unsafe.
+/// recorded, and a lock with no deny, read against the recorded group, is unsafe until the
+/// refresh's heal (`os::heal_deny`) gives it the deny; drift it leaves.
 #[test]
 #[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
 fn elevated_the_lock_denies_the_recorded_group_and_the_check_requires_it() {
@@ -236,11 +237,19 @@ fn elevated_the_lock_denies_the_recorded_group_and_the_check_requires_it() {
     let fs = Rooted {
         root,
         recorded,
-        group: Some(group),
+        group: Some(group.clone()),
     };
     assert!(check(&fs).is_ok_and(|path| same_path(&path, &exe)));
     lock_down_tree(&sandbox, &exe, None).unwrap();
     assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
+    // The refresh's heal: the old lock gets the deny and passes; a second heal changes nothing.
+    assert!(os::heal_deny(&sandbox, &exe, &group).unwrap());
+    assert!(check(&fs).is_ok());
+    assert!(!os::heal_deny(&sandbox, &exe, &group).unwrap());
+    // Drift is left as it is.
+    protect_with(&exe, OWN_FILE).unwrap();
+    assert!(!os::heal_deny(&sandbox, &exe, &group).unwrap());
+    assert!(!locked(&os::security(&exe).unwrap(), false, Some(&group)));
 }
 
 /// A protected DACL no lock-down writes, so a descriptor left alone reads back as it was: the

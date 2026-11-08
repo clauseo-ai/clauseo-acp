@@ -17,7 +17,9 @@
 //!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test),
 //!    `AdminCopyVersion` and `GroupSid` (the pool's group, which step 9's DACL denies; text that
 //!    isn't a SID refuses); nothing else comes from outside: no argument, no environment. Not
-//!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays;
+//!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays.
+//!    With a `GroupSid`, it then gives the admin folder and copy that group's deny if they lack
+//!    only that (`deny.rs`), whatever the run does next;
 //! 4. clears what an earlier refresh left in staging;
 //! 5. reads the exe and its `.sig` from the install folder, which the lawyer controls and may
 //!    re-point at any time: every folder of its path is opened relative to its parent's handle
@@ -68,6 +70,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+mod deny;
+#[cfg(test)]
+mod deny_tests;
 #[cfg(test)]
 mod fake;
 #[cfg(windows)]
@@ -275,6 +280,9 @@ pub trait Refresher {
     /// Gives the staged file the admin copy's owner and protected DACL, denying `group` when
     /// the record names one (`admin_copy::locked_file_sddl`).
     fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed>;
+    /// Gives the admin folder and copy `group`'s deny when both are locked exactly and either
+    /// lacks only that (`admin_copy::owed`): whether it did. Anything else is left.
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed>;
     /// Opens the admin folder for adding a file, sharing read, write and delete, and keeps the
     /// handle until [`Refresher::release_admin_folder`]: while it is open, no one can open the
     /// folder in a way that fails the renames into it.
@@ -350,6 +358,7 @@ fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refus
 /// Steps 3 to 9, with the set-up lock held.
 fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
     let record = fs.record().map_err(|why| (RefreshExit::NoRecord, why))?;
+    deny::heal(fs, &record);
     let checked = checked(fs, record)?;
     if let Err(why) = fs.clear_leftovers() {
         fs.log(true, &format!("an earlier refresh's leftovers stay: {why}"));

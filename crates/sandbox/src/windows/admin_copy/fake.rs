@@ -147,6 +147,24 @@ pub(crate) struct Fake {
     /// What a launch did, in order: `held` when the copy is hashed through a held handle,
     /// `released` when that handle closes (the tests add what they start).
     pub(crate) events: Rc<RefCell<Vec<&'static str>>>,
+    /// The refresh task: what asking it does, how often it was asked, and whether its run has
+    /// given the folder and the copy the group's deny (`heal.rs`).
+    pub(crate) task: Task,
+    pub(crate) refreshes: std::cell::Cell<u32>,
+    pub(crate) healed: std::cell::Cell<bool>,
+    /// How many pauses the heal's wait took.
+    pub(crate) pauses: std::cell::Cell<u32>,
+}
+
+/// What asking the fake's refresh task does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Task {
+    /// It can't be started (not registered, say).
+    Fails,
+    /// It runs, and never heals.
+    NeverHeals,
+    /// The run this ask starts (counting from 1) heals; earlier ones don't.
+    HealsAt(u32),
 }
 
 /// A held handle: says `released` when it drops.
@@ -174,6 +192,10 @@ impl Fake {
             security_mark: std::cell::Cell::new(false),
             asked: RefCell::new(Vec::new()),
             events: Rc::new(RefCell::new(Vec::new())),
+            task: Task::NeverHeals,
+            refreshes: std::cell::Cell::new(0),
+            healed: std::cell::Cell::new(false),
+            pauses: std::cell::Cell::new(0),
         };
         fake.set(Path::new(r"C:\"), Found::Folder, volume_root_dacl());
         fake.set(&program_files, Found::Folder, program_files_dacl());
@@ -212,6 +234,13 @@ impl AdminCopyFs for Fake {
     }
 
     fn security(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let dir = super::admin_dir(&self.program_files);
+        let healed = self.group.as_ref().filter(|_| self.healed.get());
+        if let Some(group) = healed
+            && (key(path) == key(&dir) || key(path) == key(&dir.join(SETUP_EXE)))
+        {
+            return Ok(locked_dacl_denying(key(path) == key(&dir), group.as_str()));
+        }
         self.get(path)
             .map(|(_, security)| security.clone())
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
@@ -255,6 +284,21 @@ impl AdminCopyFs for Fake {
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
         self.security_mark.set(blocked);
         Ok(())
+    }
+
+    fn request_refresh(&self) -> io::Result<()> {
+        if self.task == Task::Fails {
+            return Err(io::Error::other("the task isn't registered"));
+        }
+        self.refreshes.set(self.refreshes.get() + 1);
+        if self.task == Task::HealsAt(self.refreshes.get()) {
+            self.healed.set(true);
+        }
+        Ok(())
+    }
+
+    fn pause(&self, _pause: std::time::Duration) {
+        self.pauses.set(self.pauses.get() + 1);
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {

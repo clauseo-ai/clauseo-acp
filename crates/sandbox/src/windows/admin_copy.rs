@@ -18,7 +18,8 @@
 //!    every account may add a folder, is held only to the rights that could replace what is in
 //!    it ([`root_safe`]): else [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter to
 //!    that: they only take rights away. Once the record names the pool's group, `Sandbox` and
-//!    the copy must deny it everything, first ([`group_denied`], `locked.rs` says why). The
+//!    the copy must deny it everything, first ([`group_denied`], `locked.rs` says why; a copy
+//!    lacking only that is healed first, `heal.rs`). The
 //!    admin folder holds nothing but the copy, its signature and the staging folder
 //!    ([`expected_entry`]): a DLL planted beside the copy is refused too;
 //! 3. the copy's SHA-256 is the recorded one: else [`Blocked::AdminCopyChanged`].
@@ -46,6 +47,9 @@ mod chain_tests;
 mod deny_tests;
 #[cfg(test)]
 pub(crate) mod fake;
+mod heal;
+#[cfg(test)]
+mod heal_tests;
 #[cfg(test)]
 mod launch_tests;
 #[cfg(windows)]
@@ -66,6 +70,7 @@ pub(crate) mod take_back_os;
 mod tests;
 mod version;
 
+pub use heal::{Owed, owed};
 pub use locked::{group_denied, locked, locked_file_sddl, locked_folder_sddl};
 pub use security_block::launch_recorded;
 pub use version::{compare_versions, parse_version, version_not_older};
@@ -179,6 +184,12 @@ pub trait AdminCopyFs {
     fn security_blocked(&self) -> io::Result<bool>;
     /// Records the mark (`true`, at the time now) or deletes it (`false`).
     fn set_security_blocked(&self, blocked: bool) -> io::Result<()>;
+    /// Asks the SYSTEM refresh task to run now, which gives the copy a missing deny (`heal.rs`).
+    fn request_refresh(&self) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    /// Waits `pause` between looks at a copy being healed.
+    fn pause(&self, _pause: std::time::Duration) {}
 }
 
 /// What keeps a hashed admin copy unchanged ([`AdminCopyFs::sha256_held`]): on Windows the
@@ -202,6 +213,7 @@ impl Held {
 /// be read does: [`Blocked::AdminCopyMissing`], never "no other owner".
 pub fn check_launchable(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
     owner_check(fs)?;
+    heal::heal_owed(fs);
     check(fs)
 }
 
@@ -214,7 +226,8 @@ pub fn launch_checked<T>(
     start: impl FnOnce(&Path) -> T,
 ) -> Result<T, Blocked> {
     owner_check(fs)?;
-    let (exe, held) = checked(fs, |exe| fs.sha256_held(exe))?;
+    heal::heal_owed(fs);
+    let (exe, held) = checked(fs, true, |exe| fs.sha256_held(exe))?;
     let started = start(&exe);
     drop(held);
     Ok(started)
@@ -259,12 +272,13 @@ pub fn admin_exe(program_files: &Path) -> PathBuf {
 /// The admin copy's path once it passes the module's three rules, else the first rule it
 /// breaks. The path is the one to start: nothing else is ever started elevated.
 pub fn check(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
-    checked(fs, |exe| fs.sha256(exe).map(|hash| (hash, ()))).map(|(exe, ())| exe)
+    checked(fs, true, |exe| fs.sha256(exe).map(|hash| (hash, ()))).map(|(exe, ())| exe)
 }
 
-/// [`check`], the copy hashed by `hash`, which also gives what it holds for the caller.
+/// [`check`], the copy hashed by `hash`, which gives what it holds too; the deny only if `deny`.
 fn checked<H>(
     fs: &dyn AdminCopyFs,
+    deny: bool,
     hash: impl FnOnce(&Path) -> io::Result<(String, H)>,
 ) -> Result<(PathBuf, H), Blocked> {
     let program_files = fs.program_files().map_err(|error| {
@@ -288,7 +302,9 @@ fn checked<H>(
         }
     };
     check_chain(fs, &program_files, &exe)?;
-    check_denied(fs, &program_files, &exe)?;
+    if deny {
+        check_denied(fs, &program_files, &exe)?;
+    }
     match fs.entries(&admin_dir(&program_files)) {
         Ok(names) if names.iter().all(|name| expected_entry(name)) => {}
         Ok(_) => {
@@ -527,6 +543,7 @@ pub fn protection_state(
     marker: SetupState,
     combined: SetupState,
 ) -> SetupState {
+    heal::heal_owed(fs);
     if let Err(blocked) = check(fs) {
         return SetupState::Blocked(blocked);
     }
