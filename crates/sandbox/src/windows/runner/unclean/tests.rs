@@ -503,3 +503,27 @@ fn with_no_install_id_or_one_that_cant_be_read_no_marker_is_stale_by_it() {
     assert!(logon_check(&mut unread, &sid(POOL_A)).is_err());
     assert!(unread.has("a3"));
 }
+
+#[test]
+fn an_unreadable_marker_isnt_written_again_while_the_install_id_cant_be_read() {
+    let mut fake = Fake::new();
+    fake.install = Err("RegGetValueW failed (5)".to_owned());
+    fake.marker("x1", None, None);
+    // Refused, the stop requested, but the marker left unreadable: written id-less, the next
+    // read would take it for another install's and remove it.
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    assert_eq!(fake.markers["x1"], (None, None, None));
+    assert_eq!(fake.asked("stop"), 1);
+    assert!(start_up(&mut fake).is_ok());
+    assert_eq!(fake.markers["x1"], (None, None, None));
+    // Once the id reads, it is replaced under it, and isn't stale.
+    fake.install = Ok(Some(INSTALL.to_owned()));
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    let read = MarkerState::AwaitingStop { stop: 5 };
+    assert_eq!(
+        fake.markers["x1"],
+        (None, Some(read), Some(INSTALL.to_owned()))
+    );
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    assert!(fake.has("x1"), "not removed as another install's");
+}
