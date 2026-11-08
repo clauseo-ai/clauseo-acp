@@ -166,6 +166,11 @@ libc = { workspace = true }
 # tests only, through the dev-dependency below.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tauri-plugin-updater.workspace = true
+# The updater's file binding (src/update/file_binding.rs): the update's signature verified again,
+# global signature included, to read the file and version its trusted comment names. Both are
+# already in the tree through tauri-plugin-updater, at these versions.
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 # The NSIS template's pin (delete_app_data/tests/template.rs): SHA-256 of upstream's text.
@@ -198,8 +203,12 @@ tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The canary test (tests/canary.rs) unzips each counts body it captured to search it.
 flate2 = { workspace = true }
 # The updater's adapter and its latest.json fixtures (src/update/tests.rs) on every OS, Linux
-# included, where the app itself leaves the plugin out.
+# included, where the app itself leaves the plugin out; the file binding's checks, which sign with
+# an Ed25519 key they make (ring, already in the tree through rustls).
 tauri-plugin-updater.workspace = true
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
+ring = { workspace = true }
 
 # The quit-on-signal test (tests/quit_on_signal.rs) sends the signals, drives the ladder with
 # clauseo-process's ManualTimer, and keeps its scratch folder in a tempfile folder (already in the

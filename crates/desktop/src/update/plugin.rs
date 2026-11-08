@@ -11,6 +11,9 @@
 //!   ([`save_download`]), so the folder never holds a half-written file.
 //! - [`install`] rebuilds the update from its `raw_json` (`restore_update`, which always requires
 //!   a signed version) and hands the plugin's `install` the file's bytes, which it verifies again.
+//! - Between them, before the download is saved and again before its bytes go to `install`, the
+//!   file binding (`file_binding.rs`, [`Source::pubkey`]) refuses a file whose verified
+//!   signature names another file than this platform's installer, or another version.
 //!
 //! An error reaches the host as a fixed line by its kind ([`failure`]), never the plugin's text,
 //! which can hold the endpoint's URL or a path (0047).
@@ -27,6 +30,8 @@ use futures::future::BoxFuture;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_updater::{Error as PluginError, Update, UpdaterExt as _};
 use url::Url;
+
+use super::file_binding;
 
 /// How long a request may take to connect, and to go without a byte, before it fails as a
 /// network error: the host waits on a check or a download with no deadline of its own.
@@ -73,6 +78,23 @@ impl Source {
             }
         };
         builder.build()
+    }
+
+    /// The key this source's updater checks signatures with, for the file binding:
+    /// `config`'s `plugins.updater.pubkey` (the plugin's own), or the key set in code. None
+    /// while the config sets none, so the binding refuses.
+    pub(super) fn pubkey(&self, config: &tauri::Config) -> Option<String> {
+        match self {
+            Source::Config => config
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|updater| updater.get("pubkey"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|key| !key.trim().is_empty())
+                .map(str::to_owned),
+            Source::Endpoint { pubkey, .. } => Some(pubkey.clone()),
+        }
     }
 }
 
@@ -158,6 +180,7 @@ impl<R: Runtime> Updater for PluginUpdater<R> {
             ))));
         };
         let update = pending.update.clone();
+        let pubkey = pending.source.pubkey(self.app.config());
         let updates_dir = self.updates_dir.clone();
         on_runtime(async move {
             let mut received = 0u64;
@@ -172,6 +195,12 @@ impl<R: Runtime> Updater for PluginUpdater<R> {
                 )
                 .await
                 .map_err(|error| failure(&error))?;
+            file_binding::bind(
+                pubkey.as_deref(),
+                &update.signature,
+                &update.version,
+                &bytes,
+            )?;
             let version = offer.version.clone();
             let path = tauri::async_runtime::spawn_blocking(move || {
                 save_download(&updates_dir, &version, &bytes)
@@ -309,9 +338,11 @@ fn is_plain_version(version: &str) -> bool {
 
 /// Installs `downloaded`, a download this updater made: rebuilds its update from the
 /// `raw_json` the endpoint sent (`restore_update`, which requires a signed version), checks it
-/// is still the same version, reads the file and hands its bytes to the plugin's `install`,
-/// which verifies them again. On Windows it never returns: the plugin starts the installer
-/// (`installMode: passive`) and exits. On macOS it returns once the `.app` is swapped.
+/// is still the same version, reads the file, refuses it unless its signature names this
+/// platform's installer at that version (`file_binding::bind`), and hands its bytes to the
+/// plugin's `install`, which verifies them again. On Windows it never returns: the plugin starts
+/// the installer (`installMode: passive`) and exits. On macOS it returns once the `.app` is
+/// swapped.
 pub(super) fn install<R: Runtime>(
     app: &AppHandle<R>,
     downloaded: &Downloaded,
@@ -335,6 +366,13 @@ pub(super) fn install<R: Runtime>(
     let bytes = fs::read(&downloaded.path).map_err(|error| {
         UpdaterError::Io(format!("the download was not read: {}", error.kind()))
     })?;
+    let pubkey = pending.source.pubkey(app.config());
+    file_binding::bind(
+        pubkey.as_deref(),
+        &update.signature,
+        &update.version,
+        &bytes,
+    )?;
     update.install(bytes).map_err(|error| failure(&error))
 }
 

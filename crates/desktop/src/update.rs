@@ -27,6 +27,8 @@ mod choice;
 #[cfg(all(feature = "e2e", any(test, not(target_os = "linux"))))]
 mod fake;
 #[cfg(any(test, not(target_os = "linux")))]
+mod file_binding;
+#[cfg(any(test, not(target_os = "linux")))]
 pub(crate) mod install;
 #[cfg(any(test, not(target_os = "linux")))]
 mod install_kind;
