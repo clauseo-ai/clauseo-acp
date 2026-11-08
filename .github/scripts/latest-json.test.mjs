@@ -364,9 +364,27 @@ test("release.yml keeps the workflow rules", () => {
   }
 });
 
+test("release.yml's arm64 install smoke runs after sign-windows on windows-11-arm, and blocks nothing yet", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const smoke = jobCommands(text, "arm64-install-smoke");
+  assert.ok(smoke.includes("needs: [check, sign-windows]"), smoke.join("\n"));
+  assert.ok(smoke.includes("runs-on: windows-11-arm"));
+  // Non-blocking until three passing runs (the orchestrator's call): it may fail, and no job,
+  // assemble included, needs it.
+  assert.ok(smoke.includes("continue-on-error: true"));
+  assert.ok(jobCommands(text, "assemble").includes("needs: [check, build, sign-windows]"));
+  const needers = text.split("\n").filter((line) => /^\s+needs:.*\barm64-install-smoke\b/.test(stripComment(line)));
+  assert.deepEqual(needers, []);
+  // x64 first, then arm64 over it, then the registered silent uninstall; ARM64 is checked.
+  const script = smoke.join("\n");
+  const order = ["_x64-machine-setup.exe", "_arm64-machine-setup.exe", "0xAA64", "QuietUninstallString"];
+  const at = order.map((part) => script.indexOf(part));
+  assert.ok(at.every((i, n) => i !== -1 && (n === 0 || at[n - 1] < i)), JSON.stringify(at));
+});
+
 /** A job's lines without comments, each `\`-continued command joined into one line. */
 function jobCommands(text, job) {
-  const body = text.split(/^  ([a-z-]+):\s*$/m);
+  const body = text.split(/^  ([a-z0-9-]+):\s*$/m);
   const at = body.indexOf(job);
   assert.notEqual(at, -1, job);
   return body[at + 1]
