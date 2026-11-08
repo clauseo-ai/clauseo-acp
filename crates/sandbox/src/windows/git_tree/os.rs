@@ -41,6 +41,8 @@ mod put;
 mod stub;
 mod walk;
 
+pub(crate) use level::{checked_chain, checked_file};
+
 /// The record key under `HKLM`, as `setup/record_write.rs` names it.
 const RECORD_KEY: &str = r"SOFTWARE\Clauseo\Sandbox";
 /// `HKLM\...\ProfileList`, which names the profiles folder.
@@ -122,8 +124,9 @@ pub fn ensure_from_record() {
             }
         }
     }
-    // The refresh has no runner beside the admin copy: the stub there stays.
-    ensure_for(&accounts, &group, None);
+    // The stub from the record's install folder, as the set-up places it: a silent per-user
+    // update runs no set-up, and a run with Git Bash off must still find it.
+    ensure_for(&accounts, &group, runner_for_stub().as_deref());
 }
 
 /// Deletes every tree and the record ([`retire::remove`]), on this machine.
@@ -233,14 +236,23 @@ impl TreeFs for WindowsTrees {
         delete::delete_at_reboot(path)
     }
 
-    fn place_file(
+    fn read_signed(&mut self, from: &Path) -> Result<(Vec<u8>, Vec<u8>), Refused> {
+        stub::read_signed(from)
+    }
+
+    fn place_bytes(
         &mut self,
-        from: &Path,
+        bytes: &[u8],
         dir: &Path,
         temp: &str,
         name: &str,
+        aside: &str,
     ) -> Result<(), Refused> {
-        stub::place_file(from, dir, temp, name)
+        stub::place_bytes(bytes, dir, temp, name, aside)
+    }
+
+    fn updater_key(&self) -> String {
+        crate::windows::refresh::UPDATER_KEY.to_owned()
     }
 
     fn unique(&mut self) -> String {

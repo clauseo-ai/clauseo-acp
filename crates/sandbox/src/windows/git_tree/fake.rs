@@ -90,6 +90,10 @@ pub(super) struct FakeTrees {
     pub(super) logs: Vec<(bool, String)>,
     /// A file the installer replaces as the first file is copied, as an update during a build.
     pub(super) replace_on_copy: Option<String>,
+    /// Files' bytes, by path, for `read_signed`; a file with none reads as empty.
+    pub(super) bytes: BTreeMap<String, Vec<u8>>,
+    /// The updater key `updater_key` gives.
+    pub(super) key: String,
     /// The next inode and creation time.
     next: u64,
 }
@@ -125,6 +129,8 @@ impl FakeTrees {
             fail: Vec::new(),
             logs: Vec::new(),
             replace_on_copy: None,
+            bytes: BTreeMap::new(),
+            key: String::new(),
             next: 1,
         };
         fake.folders(ADMIN);
@@ -485,32 +491,54 @@ impl TreeFs for FakeTrees {
         Ok(())
     }
 
-    fn place_file(
+    fn read_signed(&mut self, from: &Path) -> Result<(Vec<u8>, Vec<u8>), Refused> {
+        self.call(format!("read_signed {}", key(from)))
+            .map_err(Refused::Other)?;
+        let sig = PathBuf::from(format!("{}.sig", from.display()));
+        for file in [from, sig.as_path()] {
+            match self.node(file) {
+                Some(Node::File(_)) => {}
+                Some(Node::Link) => return Err(Refused::Reparse),
+                _ => return Err(Refused::Other(format!("{} isn't a file", key(file)))),
+            }
+        }
+        let read = |file: &Path| self.bytes.get(&key(file)).cloned().unwrap_or_default();
+        Ok((read(from), read(&sig)))
+    }
+
+    fn place_bytes(
         &mut self,
-        from: &Path,
+        bytes: &[u8],
         dir: &Path,
         temp: &str,
         name: &str,
+        aside: &str,
     ) -> Result<(), Refused> {
         let (temp, to) = (dir.join(temp), dir.join(name));
-        self.call(format!("place_file {} -> {}", key(from), key(&to)))
+        self.call(format!("place_file -> {}", key(&to)))
             .map_err(Refused::Other)?;
-        match self.node(from) {
-            Some(Node::File(_)) => {}
-            Some(Node::Link) => return Err(Refused::Reparse),
-            _ => return Err(Refused::Other(format!("{} isn't a file", key(from)))),
-        }
         self.parent_folder(&to).map_err(Refused::Other)?;
-        if matches!(self.node(&to), Some(Node::Folder(_) | Node::Link))
-            || self.in_use.contains(&key(&to))
-        {
+        if matches!(self.node(&to), Some(Node::Folder(_) | Node::Link)) {
             return Err(Refused::Other(format!("{} can't be replaced", key(&to))));
+        }
+        // A running stub can't be replaced, but it can be renamed aside.
+        if let Some(old) = self.nodes.remove(&key(&to)) {
+            let aside = dir.join(format!("{name}.{aside}.old"));
+            self.nodes.insert(key(&aside), old);
+            if self.in_use.remove(&key(&to)) {
+                self.in_use.insert(key(&aside));
+            }
         }
         self.new_file(&key(&temp));
         let made = self.nodes.remove(&key(&temp));
         self.nodes.insert(key(&to), made.unwrap_or(Node::File(0)));
         self.meta.remove(&key(&to));
+        self.bytes.insert(key(&to), bytes.to_vec());
         Ok(())
+    }
+
+    fn updater_key(&self) -> String {
+        self.key.clone()
     }
 
     fn unique(&mut self) -> String {

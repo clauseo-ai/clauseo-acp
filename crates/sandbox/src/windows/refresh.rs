@@ -103,7 +103,7 @@ mod task_scheduler;
 #[cfg(test)]
 mod task_tests;
 #[cfg(test)]
-mod test_signer;
+pub(crate) mod test_signer;
 pub mod version;
 #[cfg(windows)]
 mod walk;

@@ -5,6 +5,8 @@
 //! starts it once more as the pool user with `--sweep` (the end sweeper). It shows no window; its
 //! stdio is the agent's, and its exit code the agent's, or one of `RunExit`'s on a failure.
 //!
+//! A copy of it named `bash.exe` is the Git Bash stub (`runner::stub`).
+//!
 //! The work is in `clauseo_sandbox::windows::runner`. On macOS and Linux it exits 2.
 #![windows_subsystem = "windows"]
 
@@ -12,8 +14,13 @@ use std::process::ExitCode;
 
 #[cfg(windows)]
 fn main() -> ExitCode {
+    use clauseo_sandbox::windows::runner::stub::{is_stub, run_stub};
     use clauseo_sandbox::windows::runner::{Mode, RunExit, mode, run_inner, run_outer, run_sweep};
 
+    // A copy named `bash.exe` is the Git Bash stub, whatever its arguments (`runner/stub.rs`).
+    if std::env::current_exe().is_ok_and(|exe| is_stub(&exe)) {
+        return exit_with(run_stub());
+    }
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let code = match mode(&args) {
         Some(Mode::Launch(file)) => match std::env::current_exe() {

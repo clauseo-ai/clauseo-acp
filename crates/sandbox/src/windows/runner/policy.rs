@@ -12,6 +12,7 @@ pub(super) fn message_from_policy(
     policy: &crate::Policy,
     pool: &crate::windows::pool::PoolUser,
     spec: &clauseo_process::LaunchSpec,
+    agent_env: &[(std::ffi::OsString, std::ffi::OsString)],
     ca_bundle: Option<&Path>,
 ) -> Result<LaunchMessage, LaunchError> {
     let path = |field: &'static str, path: &Path| {
@@ -51,6 +52,12 @@ pub(super) fn message_from_policy(
             .env()
             .iter()
             .map(|(name, value)| Ok((text("env", name)?, text("env", value)?)))
+            .collect::<Result<_, LaunchError>>()?,
+        // What the host set itself: the spec's one map can't tell it from what the lawyer's
+        // environment gave.
+        agent_env: agent_env
+            .iter()
+            .map(|(name, value)| Ok((text("agent_env", name)?, text("agent_env", value)?)))
             .collect::<Result<_, LaunchError>>()?,
         state: path("state", policy.state())?,
         tmpdir: policy

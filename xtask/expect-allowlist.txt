@@ -574,6 +574,10 @@ crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
+crates/sandbox/src/windows/runner/git_bash/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/git_bash/os.rs open_plain clippy::disallowed_methods
+crates/sandbox/src/windows/runner/git_bash/os/ids.rs - unsafe_code
+crates/sandbox/src/windows/runner/git_bash/os/ids.rs open_folder clippy::disallowed_methods
 crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer/end.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods

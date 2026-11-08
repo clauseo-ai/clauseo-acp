@@ -81,8 +81,13 @@ pub(crate) use super::sids::owner_allowed;
 /// inside gets entries not marked inherited. `Ok(false)` when something is there already,
 /// which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
-    let user = current_user_sid()?;
-    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
+    create_with(path, &sddl(current_user_sid()?.as_str()))
+}
+
+/// [`create`] with the protected DACL `dacl` (`D:P…`) for [`sddl`]'s; [`secure_existing`] secures
+/// a folder already there with it.
+pub(crate) fn create_with(path: &Path, dacl: &str) -> io::Result<bool> {
+    let descriptor = Descriptor::protected(dacl)?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
         lpSecurityDescriptor: descriptor.0.0,
@@ -92,7 +97,7 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
     // SAFETY: `target` is NUL-terminated and outlives the call; `attributes` and the descriptor
     // it points to live until this function returns.
     match unsafe { CreateDirectoryW(PCWSTR(target.as_ptr()), Some(&raw const attributes)) } {
-        Ok(()) => secure_existing(path).map(|()| true),
+        Ok(()) => secure_existing(path, dacl).map(|()| true),
         Err(error) if error.code() == ERROR_ALREADY_EXISTS.to_hresult() => Ok(false),
         Err(error) => Err(os_error(&error)),
     }
@@ -105,12 +110,12 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
 /// included). Nothing inside needs them: each record file gets its own protected DACL
 /// (`check_file`), each folder its own here, and what a session set aside is handed back item
 /// by item (`acl::own`); what is made inside later inherits them as it is made.
-fn secure_existing(path: &Path) -> io::Result<()> {
+pub(crate) fn secure_existing(path: &Path, dacl: &str) -> io::Result<()> {
     let user = current_user_sid()?;
     let handle =
         Handle::open(path).map_err(|error| named(path, "can't be opened to secure", &error))?;
     let handle = repair(path, handle, &user, true)?;
-    let descriptor = Descriptor::protected(&sddl(user.as_str()))?;
+    let descriptor = Descriptor::protected(dacl)?;
     handle
         .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))
@@ -119,7 +124,7 @@ fn secure_existing(path: &Path) -> io::Result<()> {
 /// Gives the folder `path` the protected DACL of [`sddl`], through a handle opened without
 /// following a link; the same checks as [`secure_existing`].
 pub(crate) fn protect(path: &Path) -> io::Result<()> {
-    secure_existing(path)
+    secure_existing(path, &sddl(current_user_sid()?.as_str()))
 }
 
 /// Checks the record file `path` through one handle: missing is fine; refused if it is a link,

@@ -75,6 +75,8 @@ pub use os::{
     WindowsTrees, check_adopted_here, ensure_for, ensure_from_record, remove_all,
     remove_folder_here, runner_for_stub,
 };
+#[cfg(windows)]
+pub(crate) use os::{checked_chain, checked_file};
 pub use retire::{check_adopted, remove};
 pub use stub::{OFF_DIR, STUB_NAME, off_sddl};
 
@@ -349,18 +351,24 @@ pub trait TreeFs {
     /// Schedules `path` and everything below it for deletion at the next restart
     /// (`MOVEFILE_DELAY_UNTIL_REBOOT`), the deepest first.
     fn delete_at_reboot(&mut self, path: &Path) -> Result<(), Failed>;
-    /// Copies the regular file `from` (its folder's chain opened plainly, the file opened as
-    /// itself relative to its folder's handle, no reparse point) into the folder `dir` as
-    /// `temp`, made relative to its handle, owner SYSTEM, its DACL inherited, written through;
-    /// then renames it to `name` relative to the same handle, replacing a file there. A failure
-    /// deletes `temp`.
-    fn place_file(
+    /// The regular file `from` and its `<from>.sig` (its folder's chain opened plainly, each
+    /// opened as itself relative to its folder's handle, no reparse point), each read whole
+    /// through that one handle: what is checked is what is then written.
+    fn read_signed(&mut self, from: &Path) -> Result<(Vec<u8>, Vec<u8>), Refused>;
+    /// Writes `bytes` into the folder `dir` as `temp`, made relative to its handle, owner
+    /// SYSTEM, its DACL inherited, written through; renames what is at `name` aside as
+    /// `<name>.<aside>.old` (a running stub can be renamed, never replaced), then `temp` to
+    /// `name`, relative to the same handle. A failure deletes `temp`.
+    fn place_bytes(
         &mut self,
-        from: &Path,
+        bytes: &[u8],
         dir: &Path,
         temp: &str,
         name: &str,
+        aside: &str,
     ) -> Result<(), Refused>;
+    /// The updater key the stub's source must be signed with (`refresh::UPDATER_KEY`).
+    fn updater_key(&self) -> String;
     /// A random name for the trash: 16 lower-case hex digits.
     fn unique(&mut self) -> String;
     /// Whether any process runs as `account`.

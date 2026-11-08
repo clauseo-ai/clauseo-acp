@@ -24,7 +24,7 @@ pub fn ensure(fs: &mut impl TreeFs, accounts: &[Account], group: &Sid) -> Vec<(S
 }
 
 /// [`ensure`], and the Git Bash stub copied from `runner` (the set-up's;
-/// `stub::place_stub`) once `git\` is checked; `None` (the refresh) keeps the stub there.
+/// `stub::place_stub`) once `git\` is checked; `None` (no runner found) keeps the stub there.
 pub fn ensure_with(
     fs: &mut impl TreeFs,
     accounts: &[Account],

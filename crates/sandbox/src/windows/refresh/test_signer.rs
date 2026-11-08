@@ -8,14 +8,14 @@ use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair as _};
 
 /// A minisign key made for one test.
-pub(super) struct TestKey {
+pub(crate) struct TestKey {
     pair: Ed25519KeyPair,
     id: [u8; 8],
 }
 
 impl TestKey {
     /// A fresh key whose id prints as `id` (minisign's little-endian hex).
-    pub(super) fn new(id: u64) -> TestKey {
+    pub(crate) fn new(id: u64) -> TestKey {
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).expect("a new key");
         let pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("the new key");
         TestKey {
@@ -25,7 +25,7 @@ impl TestKey {
     }
 
     /// The public key in Tauri's form: base64 of the minisign `.pub` file.
-    pub(super) fn public(&self) -> String {
+    pub(crate) fn public(&self) -> String {
         let mut line = b"Ed".to_vec();
         line.extend_from_slice(&self.id);
         line.extend_from_slice(self.pair.public_key().as_ref());
@@ -39,7 +39,7 @@ impl TestKey {
 
     /// A prehashed (`ED`) signature of `data` with the trusted comment `comment`, in Tauri's
     /// form: base64 of the minisign `.sig` file.
-    pub(super) fn sign(&self, data: &[u8], comment: &str) -> Vec<u8> {
+    pub(crate) fn sign(&self, data: &[u8], comment: &str) -> Vec<u8> {
         self.sign_as(*b"ED", &blake2b512(data), comment)
     }
 
@@ -68,7 +68,7 @@ impl TestKey {
 }
 
 /// The trusted comment `tauri signer` writes, for `file` at `version`.
-pub(super) fn comment(file: &str, version: &str) -> String {
+pub(crate) fn comment(file: &str, version: &str) -> String {
     format!("timestamp:1762500000\tfile:{file}\tversion:{version}")
 }
 

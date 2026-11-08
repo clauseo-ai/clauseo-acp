@@ -4,9 +4,14 @@
 //! under that name, the runner prints one line and exits 1. Claude Code takes the variable only
 //! for a file that exists and is named `bash.exe`, so the stub needs nothing but its name.
 //!
-//! The set-up places it ([`place_stub`], given the runner it found); the refresh has no runner
-//! beside the admin copy and keeps whatever stub is there. Placing it never fails the set-up:
-//! a failure is logged. Pure: tested on every OS with the fake.
+//! The set-up and the SYSTEM refresh place it ([`place_stub`], given the runner `runner_for_stub`
+//! found: beside the set-up, else in the record's `UserInstallDir`); with none found the stub
+//! there stays. Those folders are the lawyer's to write, and `_off\bash.exe` is one file the
+//! whole machine shares: every pool account's runs with Git Bash off start it. So the runner is
+//! copied only when its `clauseo-sandbox-run.exe.sig` verifies with the updater key built in
+//! (`refresh::signature::verify_file`, as the refresh checks the set-up exe), over the bytes
+//! read through the one handle that are then written; anything else is logged and not copied,
+//! and the stub there stays. Placing it never fails the set-up. Pure: tested with the fake.
 
 use std::path::Path;
 
@@ -14,6 +19,8 @@ use super::build::{fresh_level, level};
 use super::discard::{Discarded, discard};
 use super::{GIT_DIR, Owner, READ_SECURITY, TreeFs, git_dir_sddl, source_sddl};
 use crate::windows::admin_copy::Found;
+use crate::windows::refresh::signature::verify_file;
+use crate::windows::runner::RUNNER_EXE;
 use crate::windows::sids::Sid;
 
 /// The stub's folder in [`GIT_DIR`].
@@ -29,7 +36,7 @@ pub fn off_sddl(group: &Sid) -> String {
 }
 
 /// Copies `runner` to `git\_off\bash.exe` under a temporary name, then renames it into place;
-/// `None` (the refresh) leaves what is there. `git` is the trees' folder when this run checked
+/// `None` (no runner found) leaves what is there. `git` is the trees' folder when this run checked
 /// it; else it is found, made when missing, and left alone when it isn't SYSTEM's (the next
 /// run with a Git clears it). Anything else in `_off` is deleted. Logs, never fails.
 pub(super) fn place_stub(
@@ -68,11 +75,27 @@ fn place(fs: &mut impl TreeFs, git: Option<&Path>, runner: &Path, group: &Sid) -
         let path = off.join(&name);
         let stub = name.eq_ignore_ascii_case(STUB_NAME)
             && matches!(fs.inspect(&path), Ok(Some(found)) if found.kind == Found::File);
-        if !stub && discard(fs, &git, &path) == Discarded::Left {
+        // A stub set aside while it ran may still run: it goes at a later placing.
+        let aside = Path::new(&name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("old"));
+        if !stub && discard(fs, &git, &path) == Discarded::Left && !aside {
             return Err(());
         }
     }
+    let (exe, sig) = fs
+        .read_signed(runner)
+        .map_err(|refused| tracing::warn!(?refused, "the Git Bash stub's source can't be read"))?;
+    if let Err(error) = verify_file(&exe, &sig, &fs.updater_key(), RUNNER_EXE) {
+        tracing::warn!(%error, "the Git Bash stub's source isn't signed with the updater key");
+        fs.log(
+            true,
+            "the Git Bash stub's source isn't signed with the updater key; it isn't copied",
+        );
+        return Err(());
+    }
     let temp = format!("{STUB_NAME}.{}.tmp", fs.unique());
-    fs.place_file(runner, &off, &temp, STUB_NAME)
+    let aside = fs.unique();
+    fs.place_bytes(&exe, &off, &temp, STUB_NAME, &aside)
         .map_err(|refused| tracing::warn!(?refused, "the Git Bash stub couldn't be placed"))
 }
