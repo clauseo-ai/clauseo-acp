@@ -9,7 +9,7 @@ use std::time::Duration;
 use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
-use super::checks_ctl::is_agent_station;
+use super::checks_ctl::is_logon_station;
 use super::launch::{Running, Spec, deadline, launch, pool_of, run_command, summary};
 use super::manifest::SECOND_A;
 use super::pool_verdict;
@@ -480,7 +480,7 @@ pub(crate) fn desktop(ctx: &Ctx<'_>) -> Result<String, String> {
 /// `SetProcessWindowStation`.
 fn winsta0(ctx: &Ctx<'_>, first: &dyn Fn(&str) -> Option<String>, bad: &mut Vec<String>) {
     let station = first("desktop station").unwrap_or_default();
-    if is_agent_station(&station) {
+    if is_logon_station(&station) {
         ctx.note(&format!("the agent's window station is {station}"));
     } else {
         bad.push(format!(

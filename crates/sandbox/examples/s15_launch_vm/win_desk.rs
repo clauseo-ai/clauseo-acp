@@ -1,10 +1,9 @@
 //! The Win32 calls of the `desktop` row: the harness's dump of `WinSta0`'s and
 //! `WinSta0\Default`'s DACLs as SDDL, and the probe's tries (its own station's name, opening
 //! `WinSta0` and then `Default` on it, `SwitchDesktop` on its own desktop, a GDI capture of the
-//! screen it can reach), `CreateDesktopW` on the caller's own station (`job-ui`'s effect), and
-//! the harness's control station: a fresh window station with a `Default` desktop, made the way
-//! the outer runner makes the agent's, kept open while the control process runs on it. Each
-//! gives a plain value or the Win32 code, never a panic.
+//! screen it can reach), `CreateDesktopW` on the caller's own station (`job-ui`'s effect). The
+//! harness's control station is `win_station.rs`'s. Each gives a plain value or the Win32 code,
+//! never a panic.
 #![expect(
     unsafe_code,
     reason = "FFI to the window station, desktop, security descriptor and GDI calls"
@@ -27,10 +26,9 @@ use windows::Win32::Security::{
 };
 use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::StationsAndDesktops::{
-    CloseDesktop, CloseWindowStation, CreateWindowStationW, DESKTOP_CONTROL_FLAGS,
-    DESKTOP_READOBJECTS, DESKTOP_SWITCHDESKTOP, GetProcessWindowStation, GetThreadDesktop,
-    GetUserObjectInformationW, HDESK, HWINSTA, OpenDesktopW, OpenWindowStationW,
-    SetProcessWindowStation, SwitchDesktop, UOI_NAME,
+    CloseDesktop, CloseWindowStation, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
+    DESKTOP_SWITCHDESKTOP, GetProcessWindowStation, GetThreadDesktop, GetUserObjectInformationW,
+    HDESK, OpenDesktopW, OpenWindowStationW, SetProcessWindowStation, SwitchDesktop, UOI_NAME,
 };
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::core::{HSTRING, PWSTR};
@@ -39,8 +37,6 @@ use super::win::code_of;
 
 /// `WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES | WINSTA_ACCESSCLIPBOARD`.
 const WINSTA_ASK: u32 = 0x0001 | 0x0002 | 0x0004;
-/// `GENERIC_ALL`, the access the outer runner asks for on the station and desktop it makes.
-const GENERIC_ALL: u32 = 0x1000_0000;
 /// The most of the screen the capture copies, each way: enough to tell pixels from none.
 const CAPTURE_CAP: i32 = 256;
 
@@ -340,126 +336,6 @@ fn create_desktop_sized(attributes: *const std::ffi::c_void, heap_kb: Option<u32
     // SAFETY: made above, closed once.
     drop(unsafe { CloseDesktop(HDESK(desktop)) });
     0
-}
-
-/// The control station: the window station `name`, made as `runner/desktop.rs` once made its
-/// named station (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `SYSTEM`
-/// and `sids`, labelled Low), and its desktop `Default` (`GENERIC_ALL`, the same descriptor),
-/// made with this process switched to it for the call only. Both stay open while it lives, so the
-/// control process can start on `<name>\Default`; closed on drop.
-pub(crate) struct ControlStation {
-    station: HWINSTA,
-    desktop: HDESK,
-}
-
-impl ControlStation {
-    /// Makes the station and its desktop; the call that failed and its code otherwise.
-    pub(crate) fn open(name: &str, sids: &[&str]) -> Result<ControlStation, (&'static str, u32)> {
-        let aces = sids.iter().fold(String::new(), |mut aces, sid| {
-            for part in ["(A;;GA;;;", sid, ")"] {
-                aces.push_str(part);
-            }
-            aces
-        });
-        let sddl = format!("D:(A;;GA;;;SY){aces}S:(ML;;NW;;;LW)");
-        let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        // SAFETY: the text is a live HSTRING; `descriptor` is a live out-pointer, freed below.
-        unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                &HSTRING::from(sddl),
-                SDDL_REVISION_1,
-                &raw mut descriptor,
-                None,
-            )
-        }
-        .map_err(|e| {
-            (
-                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-                code_of(&e),
-            )
-        })?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(0),
-            lpSecurityDescriptor: descriptor.0,
-            bInheritHandle: false.into(),
-        };
-        // SAFETY: the name is a live HSTRING; the attributes and their descriptor outlive the
-        // call; the station is closed on failure below, or by the guard's drop.
-        let made = unsafe {
-            CreateWindowStationW(
-                &HSTRING::from(name),
-                0,
-                GENERIC_ALL,
-                Some(&raw const attributes),
-            )
-        };
-        let result = match made {
-            Ok(station) => match desktop_on(station, &attributes) {
-                Ok(desktop) => Ok(ControlStation { station, desktop }),
-                Err(failed) => {
-                    // SAFETY: made above and not the process's station; closed once.
-                    drop(unsafe { CloseWindowStation(station) });
-                    Err(failed)
-                }
-            },
-            Err(error) => Err(("CreateWindowStationW", code_of(&error))),
-        };
-        // SAFETY: allocated by the conversion with LocalAlloc, freed once, after its last use
-        // (the objects keep their own copies).
-        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
-        result
-    }
-}
-
-impl Drop for ControlStation {
-    fn drop(&mut self) {
-        // SAFETY: both made in `open`, the station not the process's; each closed once, here.
-        unsafe {
-            drop(CloseDesktop(self.desktop));
-            drop(CloseWindowStation(self.station));
-        }
-    }
-}
-
-/// Makes the desktop `Default` on `station` with `attributes`, this process switched to it for
-/// the call only; its handle, open.
-fn desktop_on(
-    station: HWINSTA,
-    attributes: &SECURITY_ATTRIBUTES,
-) -> Result<HDESK, (&'static str, u32)> {
-    // SAFETY: plain call; the process's own station isn't ours to close.
-    let own = unsafe { GetProcessWindowStation() }
-        .map_err(|e| ("GetProcessWindowStation", code_of(&e)))?;
-    // SAFETY: `station` is a live window station this process made with every right.
-    unsafe { SetProcessWindowStation(station) }
-        .map_err(|e| ("SetProcessWindowStation", code_of(&e)))?;
-    let name: Vec<u16> = "Default".encode_utf16().chain(std::iter::once(0)).collect();
-    // SAFETY: the name is NUL-terminated and outlives the call; `attributes` and its descriptor
-    // outlive it too; no device or mode.
-    let desktop = unsafe {
-        CreateDesktopW(
-            name.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            GENERIC_ALL,
-            std::ptr::from_ref(attributes).cast(),
-        )
-    };
-    // Read before any other call can overwrite it.
-    let code = u32::try_from(last()).unwrap_or(u32::MAX);
-    // SAFETY: `own` is this process's own station, still open.
-    let back = unsafe { SetProcessWindowStation(own) };
-    if desktop.is_null() {
-        return Err(("CreateDesktopW", code));
-    }
-    let desktop = HDESK(desktop);
-    if let Err(error) = back {
-        // SAFETY: made above, closed once.
-        drop(unsafe { CloseDesktop(desktop) });
-        return Err(("SetProcessWindowStation (back)", code_of(&error)));
-    }
-    Ok(desktop)
 }
 
 /// The code `SwitchDesktop` on this thread's own desktop gives; 0 when it switched.

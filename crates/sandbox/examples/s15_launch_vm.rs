@@ -124,6 +124,9 @@ mod win_pool;
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
 #[cfg(windows)]
+#[path = "s15_launch_vm/win_station.rs"]
+mod win_station;
+#[cfg(windows)]
 #[path = "s15_launch_vm/win_suspend.rs"]
 mod win_suspend;
 #[cfg(windows)]
