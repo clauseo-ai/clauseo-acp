@@ -26,7 +26,7 @@ export type WorkspaceStepState = "repair" | "ask" | "waiting" | "wait";
 
 /** The step's words, in the page's language. */
 export type WorkspaceWords = {
-  /** "Windows asks once for permission to set up the Safe workspace." */
+  /** "Windows asks once more for permission, to finish setting up the Safe workspace." */
   ask: string;
   /** The "Unknown publisher" line. */
   unknown: string;

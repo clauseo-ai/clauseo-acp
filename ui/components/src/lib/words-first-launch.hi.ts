@@ -142,8 +142,9 @@ export const HI = {
 
   // UC: the Safe workspace step, the design's own words with its Hindi (UC-10, UC-13, UC-16); under
   // design B the Windows screen stands only for a set-up after an in-app Remove
-  "Windows asks once for permission to set up the Safe workspace.":
-    "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
+  // the first run's step (UC-10): the installer only adds the program, so the app finishes the set-up
+  "Windows asks once more for permission, to finish setting up the Safe workspace.":
+    "सुरक्षित कार्यक्षेत्र की तैयारी पूरी करने के लिए Windows एक बार और अनुमति माँगता है।",
   "Not now": "अभी नहीं",
   Settings: "सेटिंग्स",
 } satisfies Hindi<string>;
