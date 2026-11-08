@@ -27,8 +27,9 @@
 //! scan stops there, and the folder goes whole when a pool user owns it, read from the handle
 //! the move renames, or its owner can't be read (`check::Run::below`); a full
 //! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
-//! moved is listed ([`Live::gone`]), so the watch can end a session whose agent keeps renaming
-//! one back and forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
+//! moved, or a folder reported made and gone before it could be scanned, is listed
+//! ([`Live::gone`]), so the watch can end a session whose agent keeps renaming one back and
+//! forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
 //! attribute: a junction set on an empty folder, `mklink /J`'s two steps) is checked as a link
 //! made ([`Watched::relinked`]). What git reads from a folder a launch `commondir` names
 //! (`scan::Kept::Common`) is moved when made, as a `.git` is.
@@ -63,7 +64,7 @@ use super::files::{FileId, Place, Record};
 use super::names::Key;
 use super::repo_names::{COMMON_NAMES, is_git, is_head, opens_as};
 use super::run::Volume;
-use super::scan::{COMMON_KEY, Item, Kept, Kind, Last, Now, locate, reach, same_key};
+use super::scan::{COMMON_KEY, Item, Kept, Kind, Last, Missed, Now, locate, reach, same_key};
 use super::scan::{scan, scan_visiting};
 use super::{Entry, SetAsideFailure};
 use crate::SetAsideWhat;
@@ -246,6 +247,7 @@ impl Watched {
     /// name hit ([`Watched::named`]): one ends the session at once, gone or not, and each is
     /// moved; then each `.git` part, link and `HEAD` below a launch git folder; only then the
     /// folders reported, scanned below.
+    #[cfg(test)]
     pub(super) fn changed(
         &self,
         volume: &impl Volume,
@@ -253,6 +255,22 @@ impl Watched {
         now: SystemTime,
         hooks: &impl Hooks,
     ) -> Live {
+        self.changed_with_folders(volume, paths, &[], now, hooks)
+    }
+
+    /// [`Watched::changed`], told which of `paths` were folders when reported: one gone by its
+    /// check (nothing at its name, or past a link now) is listed in [`Live::gone`], as a gone
+    /// `.git` is, so an agent can't rename a folder holding a `.git` in and back out before it
+    /// is scanned, again and again.
+    pub(super) fn changed_with_folders(
+        &self,
+        volume: &impl Volume,
+        paths: &[PathBuf],
+        folders: &[PathBuf],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        let folders: Vec<Key> = folders.iter().filter_map(|p| key_of(p)).collect();
         let mut live = Live::default();
         let mut run = Run::new(self, volume, now, hooks, &mut live);
         let (mut hits, mut rest) = (Vec::new(), Vec::new());
@@ -273,7 +291,7 @@ impl Watched {
         for key in &hits {
             run.check(key, SetAsideWhat::GitRepository);
         }
-        let mut folders = Vec::new();
+        let (mut scanned, mut gone) = (Vec::new(), Vec::<PathBuf>::new());
         for key in rest {
             let repo = key.iter().position(|part| is_git(part)).map(|at| at + 1);
             if let Some(end) = repo.or_else(|| self.common_at(&key)) {
@@ -289,13 +307,18 @@ impl Watched {
                         run.check(&key, SetAsideWhat::LinkOut);
                     }
                 }
-                Ok((_, Some((_, Kind::Folder)))) => folders.push(key),
+                Ok((_, Some((_, Kind::Folder)))) => scanned.push(key),
+                Ok((_, None)) | Err(Missed::Gone | Missed::Link) if folders.contains(&key) => {
+                    tracing::debug!("a folder reported went before it could be scanned");
+                    gone.push(key.iter().collect());
+                }
                 Ok((_, Some((_, Kind::Other)) | None)) | Err(_) => {}
             }
         }
-        for key in &folders {
+        for key in &scanned {
             run.below(key);
         }
+        live.gone.extend(gone);
         live
     }
 
