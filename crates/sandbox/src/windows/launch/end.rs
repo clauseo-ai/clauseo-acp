@@ -17,12 +17,13 @@
 //! [`EXIT_WAIT`] gets the stop task and a second wait; then the pass goes on, and the next
 //! preparation's leftover check meets what is left.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::prepare::Walk;
-use super::registry::{FinishEnd, Registry};
+use super::registry::{FinishEnd, Registry, State};
 use super::steps::{Ending, LaunchSteps, Slot};
 use crate::windows::pool::PoolUser;
 use crate::windows::runner::outcome::Meaning;
@@ -112,6 +113,9 @@ pub(super) fn end_session<S: LaunchSteps>(
         run: ended.run,
         slot: ended.slot,
     };
+    if let Some(file) = &ended.launch_file {
+        steps.remove_launch(file);
+    }
     let mut moved = Vec::new();
     if let Some(pool) = &ended.pool {
         if ended.spawned {
@@ -203,6 +207,11 @@ fn wait_exited<S: LaunchSteps>(steps: &S, pool: &PoolUser) {
     match steps.wait_exited(pool, EXIT_WAIT) {
         Ok(left) if left.is_empty() => {}
         Ok(left) => {
+            // TODO(C5, launch-blocking; 0049's C5 list): don't free the slot or the matter
+            // while the pool user still runs processes. Quarantine the slot (a registry state
+            // between ending and free, `reserve` still MatterBusy), end the processes by stop
+            // and sweep again, and free it only once it is truly empty by #697's semantics
+            // (`wait_exited` empty). Today the pass goes on and frees both.
             tracing::warn!(
                 left = left.len(),
                 "the pool user still runs processes after the session"
@@ -235,26 +244,68 @@ pub(super) struct SessionGuard<S: LaunchSteps> {
 
 impl<S: LaunchSteps> SessionGuard<S> {
     /// The outer has started: the session's end is the pass from now on, and it waits for the
-    /// pool user's processes.
-    pub(super) fn started(&self) {
+    /// pool user's processes. `false` when the session's end began first: the launch must fail
+    /// and the outer be ended.
+    pub(super) fn started(&self) -> bool {
+        let noted = self
+            .registry
+            .update(&self.matter, self.id, |entry| {
+                let launched = entry.state == State::Launched;
+                entry.spawned |= launched;
+                launched
+            })
+            .unwrap_or(false);
+        self.armed.store(noted, Ordering::Release);
+        noted
+    }
+
+    /// Notes the session's launch file, which its end or undo deletes if nothing has.
+    pub(super) fn launch_file(&self, file: &Path) {
+        self.registry.update(&self.matter, self.id, |entry| {
+            entry.launch_file = Some(file.to_path_buf());
+        });
+    }
+
+    /// The session's note of its launch file, taken.
+    pub(super) fn take_launch_file(&self) -> Option<PathBuf> {
         self.registry
-            .update(&self.matter, self.id, |entry| entry.spawned = true);
-        self.armed.store(true, Ordering::Release);
+            .update(&self.matter, self.id, |entry| entry.launch_file.take())
+            .flatten()
+    }
+
+    /// [`take_launch_file`](Self::take_launch_file), for another thread.
+    pub(super) fn file_taker(&self) -> impl Fn() -> Option<PathBuf> + Send + 'static {
+        let registry = Arc::clone(&self.registry);
+        let (matter, id) = (self.matter.clone(), self.id);
+        move || {
+            registry
+                .update(&matter, id, |entry| entry.launch_file.take())
+                .flatten()
+        }
+    }
+}
+
+/// Counts an end on a thread of its own done when dropped, even if the pass panicked.
+struct EndDone<'a, S: LaunchSteps>(&'a Registry<S>);
+
+impl<S: LaunchSteps> Drop for EndDone<'_, S> {
+    fn drop(&mut self) {
+        self.0.ends.done();
     }
 }
 
 impl<S: LaunchSteps> Drop for SessionGuard<S> {
     fn drop(&mut self) {
-        if !self.armed.load(Ordering::Acquire) || !self.registry.launched(&self.matter, self.id) {
+        if !self.armed.load(Ordering::Acquire) || !self.registry.is_launched(self.id) {
             return;
         }
         let registry = Arc::clone(&self.registry);
         let (matter, session) = (self.matter.clone(), self.session.clone());
         let (id, policy) = (self.id, self.policy.clone());
-        registry.end_started();
+        registry.ends.started();
         let run = move || {
+            let _done = EndDone(&registry);
             end_session(&registry, (&matter, &session, Some(id)), &policy);
-            registry.end_done();
         };
         // A thread that won't start can't take the closure back: the end runs here instead.
         let once = Arc::new(std::sync::Mutex::new(Some(run)));
@@ -276,4 +327,42 @@ fn take<T>(slot: &std::sync::Mutex<Option<T>>) -> Option<T> {
     slot.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take()
+}
+
+/// How many ends dropped launchers started on threads of their own are still running.
+#[derive(Default)]
+pub(super) struct Ends {
+    running: std::sync::Mutex<usize>,
+    done: std::sync::Condvar,
+}
+
+impl Ends {
+    /// Counts one started.
+    fn started(&self) {
+        *self.count() += 1;
+    }
+
+    /// Counts one done.
+    fn done(&self) {
+        let mut running = self.count();
+        *running = running.saturating_sub(1);
+        drop(running);
+        self.done.notify_all();
+    }
+
+    /// Waits up to `timeout` for them: whether none is left.
+    pub(super) fn wait(&self, timeout: Duration) -> bool {
+        let running = self.count();
+        let (running, _) = self
+            .done
+            .wait_timeout_while(running, timeout, |running| *running > 0)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *running == 0
+    }
+
+    fn count(&self) -> std::sync::MutexGuard<'_, usize> {
+        self.running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }

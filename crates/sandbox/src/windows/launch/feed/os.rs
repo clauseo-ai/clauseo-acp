@@ -1,8 +1,10 @@
 //! The denial pipe on Windows: a runner pipe's server end ([`Role::Denials`], inbound) under
 //! [`denial_sddl`] for the desktop user, named in a fresh random set; the outer opened by its
-//! pid for its creation time, and so the wait for a client ends when it exits; the client's pid
-//! from the pipe, and its creation time read the same way (`pipe::os::open_process`). Each
-//! read also waits on the outer's handle (`ServerPipe::read_until`): its exit ends the feed.
+//! pid for its creation time, and so the wait for a client ends when it exits. That open runs
+//! on the launching thread while the host's `Launched` holds the outer's process handle, so the
+//! pid can't have been reused (async-process exposes no handle to duplicate). The client's pid
+//! comes from the pipe, and its creation time is read the same way (`pipe::os::open_process`).
+//! Each read also waits on the outer's handle (`ServerPipe::read_until`): its exit ends the feed.
 
 use std::io;
 use std::time::Duration;

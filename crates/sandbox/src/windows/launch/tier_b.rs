@@ -38,7 +38,7 @@ use std::time::Duration;
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions};
 
 use super::end::SessionGuard;
-use super::feed::{DenialPipe, feed};
+use super::feed::{self, DenialPipe, Peer};
 use super::registry::Registry;
 use super::steps::LaunchSteps;
 use crate::reservation::Claim;
@@ -141,22 +141,53 @@ impl<S: LaunchSteps> TierBLauncher<S> {
     }
 
     /// Makes the pipe, writes the launch file and starts the outer; the feed starts with it.
+    ///
+    /// A session whose end began during the spawn (the host's `after_session` raced the start)
+    /// gets no agent: the outer is ended (its handle dropped, which ends its job) and the launch
+    /// fails. One whose end began before is refused by `launch`.
     fn start(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let (pipe, pipe_name) = self.steps.create_pipe().map_err(launch_error)?;
+        let (mut pipe, pipe_name) = self.steps.create_pipe().map_err(launch_error)?;
         let file = self
             .steps
             .write_launch(self.policy(), &self.pool, spec, &pipe_name)
             .map_err(launch_error)?;
+        // The session's end and undo delete it too, if nothing has by then.
+        self.guard.launch_file(&file);
         let outer = outer_spec(self.steps.runner(), &file, |name| self.steps.host_var(name));
         let started = outer.and_then(|outer| self.steps.spawn_outer(&outer, &self.opts));
-        match &started {
-            Ok(launched) => {
-                self.guard.started();
-                start_feed(pipe, launched.handle.pid(), Arc::clone(&self.denials));
+        let launched = match started {
+            Ok(launched) => launched,
+            Err(error) => {
+                self.remove_launch(&file);
+                return Err(error);
             }
-            Err(_) => self.steps.remove_launch(&file),
+        };
+        // First, before anything that could drop `launched` (an early return, a `?`, a
+        // panic unwinding): open the outer by its pid while `launched` holds its process
+        // handle, so the pid is still its own. Nothing between the spawn and here can fail.
+        let outer = feed::watch(&mut pipe, launched.handle.pid());
+        if !self.guard.started() {
+            drop(launched);
+            self.remove_launch(&file);
+            tracing::warn!("tier B's session ended while its outer started: the outer is ended");
+            return Err(ended_early());
         }
-        started
+        if let Some(outer) = outer {
+            let (steps, take_file) = (Arc::clone(&self.steps), self.guard.file_taker());
+            let connected = move || {
+                if let Some(file) = take_file() {
+                    steps.remove_launch(&file);
+                }
+            };
+            start_feed(pipe, outer, Arc::clone(&self.denials), connected);
+        }
+        Ok(launched)
+    }
+
+    /// Deletes the launch file `file`, and forgets the session's note of it.
+    fn remove_launch(&self, file: &Path) {
+        let _noted = self.guard.take_launch_file();
+        self.steps.remove_launch(file);
     }
 }
 
@@ -221,13 +252,26 @@ pub(super) fn hand_over<S: LaunchSteps>(
     }
 }
 
-/// Starts the denial pipe's feed for the outer `pid` on a thread of its own, which ends when
-/// the outer closes the pipe or exits. A thread that won't start leaves the pipe closed: the
-/// session runs, with no set-aside reaching the sink.
-fn start_feed<P: DenialPipe>(pipe: P, pid: u32, denials: Arc<dyn DenialSink>) {
+/// The launch's error for a session whose end began before its outer started.
+fn ended_early() -> clauseo_process::Error {
+    clauseo_process::Error::Os {
+        what: "the session ended before its agent started",
+        source: std::io::ErrorKind::Interrupted.into(),
+    }
+}
+
+/// Starts the denial pipe's feed for `outer` on a thread of its own, which ends when the outer
+/// closes the pipe or exits; `connected` runs once the outer has connected. A thread that won't
+/// start leaves the pipe closed: the session runs, with no set-aside reaching the sink.
+fn start_feed<P: DenialPipe>(
+    pipe: P,
+    outer: Peer,
+    denials: Arc<dyn DenialSink>,
+    connected: impl FnOnce() + Send + 'static,
+) {
     let started = std::thread::Builder::new()
         .name("clauseo-tierb-denials".to_owned())
-        .spawn(move || feed(pipe, pid, &*denials));
+        .spawn(move || feed::feed(pipe, outer, &*denials, connected));
     if started.is_err() {
         tracing::warn!("tier B's denial pipe thread didn't start");
     }

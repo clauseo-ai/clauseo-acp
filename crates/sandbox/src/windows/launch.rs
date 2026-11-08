@@ -319,7 +319,7 @@ impl<S: LaunchSteps> Launchers<S> {
     /// Waits up to `timeout` for the after-session passes dropped launchers started: whether
     /// none is left. Desktop calls it at quit, so a pass isn't cut short.
     pub fn wait_ends(&self, timeout: Duration) -> bool {
-        self.registry.wait_ends(timeout)
+        self.registry.ends.wait(timeout)
     }
 
     /// The id of `reservation` in these launchers' registry, if they handed it out.

@@ -2435,11 +2435,18 @@ The orchestrator's rulings change the interface above in these ways:
   - give claim ids a per-run random prefix (or the process start time), so a slot record's
     claim can't collide across restarts, and keep `clear_stale` before the first claim;
   - keep the pool users out of the sandbox data folder (no access at all), where
-    `tier-b-launchers.lock` and the records live.
+    `tier-b-launchers.lock` and the records live;
+  - never free a slot or a matter while the pool user still runs processes after the end's
+    two 10 s waits (C4, a TODO in `launch/end.rs`): quarantine the slot, keep the matter held
+    (`reserve` answers `MatterBusy`), end the processes by the stop task and the sweep again,
+    and free both only once the pool user is truly empty (#697). Until then a reused slot has
+    only the proxy's auth between the old processes and the new session.
 - **Accepted: the launcher's check-to-spawn window.** `TierBLauncher` checks the session is
   still launched (`is_launched`) and then starts the outer; an `after_session` that begins in
   between isn't seen. This is accepted: the pass and the undo are decided by the registry's
   lock, and an outer started in the gap is the next launch's leftover, stopped or refused.
+  C4 narrows it: once the outer has started, the launcher looks again under the registry's
+  lock, and an end that began meanwhile ends the outer and fails the launch.
 - **A gate for C5: `apply`'s grants name the run's group.** A failed or cancelled walk undoes
   the session's work, but not the permission entries `apply` wrote (by design: the next walk
   continues from them). C5 must confirm that those entries name the run's group
@@ -2451,8 +2458,12 @@ The orchestrator's rulings change the interface above in these ways:
 - **The outer:** `TierBLauncher` makes the denial pipe, writes the launch file, which names
   the pipe, then starts `clauseo-sandbox-run.exe --launch <file>` from the runner's folder. It
   runs with `clear_env` and only `SystemRoot`, `SystemDrive`, `windir`, `TEMP` and `TMP`. Its
-  stdin grace is 5 s unless the host set one. A launch file whose outer didn't start is
-  removed.
+  stdin grace is 5 s unless the host set one. The launch file is lawyer-only while it exists
+  (its own protected DACL: the desktop user, `SYSTEM` and `Administrators`). It is deleted
+  once the outer connects to the denial pipe, which it does after reading the file, and
+  otherwise by the session's end, its undo, or a failed start.
+- **A session whose end began before its outer started gets no agent:** the start is refused,
+  or, if the end came during the spawn, the outer is ended and the launch fails.
 - **Denials come on the denial pipe, never from stderr.** The outer's stderr carries the
   agent's, so the agent could forge any line there. The pipe has a random name
   (`clauseo-run-<32 hex>-denials`), the desktop user alone in its DACL, the Medium label, one

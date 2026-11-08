@@ -1,33 +1,13 @@
-//! The outer runner's start (its spec, options and denial feed), what its exit means to the
+//! The outer runner's start (its spec, options and denial pipe), what its exit means to the
 //! host, and the session's end: once, whoever asks first, after the pool user's processes have
 //! truly exited.
 
-use std::sync::Mutex;
-
-use super::fake::{World, install};
-use super::pipe::{FakePipe, PIPE};
+use super::fake::World;
+use super::feeding::Denials;
+use super::pipe::{PIPE, install};
 use super::*;
+use crate::NoSandbox;
 use crate::windows::runner::{HOST_ENDED, RUN_EXIT_BASE, RunExit};
-use crate::{Denial, DenialSink, NoSandbox, SetAsideWhat};
-
-/// Records the denials it gets, in order.
-#[derive(Default)]
-struct Denials(Mutex<Vec<Denial>>);
-
-impl DenialSink for Denials {
-    fn denied(&self, d: Denial) {
-        self.0.lock().unwrap().push(d);
-    }
-}
-
-/// A sink that panics on every denial.
-struct Panics;
-
-impl DenialSink for Panics {
-    fn denied(&self, _denial: Denial) {
-        panic!("a bad sink");
-    }
-}
 
 /// The calls of the after-session pass once the pool user's processes are gone.
 const PASS: [&str; 7] = [
@@ -67,7 +47,7 @@ fn launched(
 /// and the outer's two processes run as the pool user until a wait for them. Its handle is
 /// dropped (the host's, once the tree is gone).
 fn start(launcher: &dyn clauseo_process::Launcher, world: &World, dir: &TempDir) {
-    world.spawn_starts();
+    world.outer.spawn_starts();
     drop(launcher.launch(&spec(dir)).unwrap());
 }
 
@@ -79,152 +59,6 @@ fn spec(dir: &TempDir) -> clauseo_process::LaunchSpec {
         dir.dir("matter"),
     )
     .unwrap()
-}
-
-/// One record of the stand-in format.
-fn record(path: &str, to: &str, what: &str) -> Vec<u8> {
-    format!(r#"{{"kind":"set_aside","path":"{path}","to":"{to}","what":"{what}"}}"#).into_bytes()
-}
-
-/// The outer, as the fake pipe opens it.
-const OUTER: Peer = Peer {
-    pid: 4242,
-    started: 133_000_000_000_000_000,
-};
-
-/// A pipe the outer opened, holding `chunks`.
-fn from_outer(chunks: Vec<Vec<u8>>) -> FakePipe {
-    FakePipe {
-        outer: Some(OUTER),
-        client: Some(OUTER),
-        chunks: chunks.into(),
-        read_fails: false,
-        exits_after: None,
-    }
-}
-
-/// The outer's records reach the sink in order, however the reads split them; a line that
-/// isn't a record (another kind, bad JSON, the old stderr line, one over the cap, one cut off
-/// at the end) is dropped, and a sink that panics doesn't end the feed.
-#[test]
-fn denial_records_reach_the_sink_in_order_and_others_dont() {
-    let git = record(".git", r"set-aside\\1\\.git", "git_repository");
-    let link = record("link", r"set-aside\\2\\link", "link_out");
-    let mut stream = Vec::new();
-    for line in [
-        git.clone(),
-        br#"{"kind":"notice","words":"hello"}"#.to_vec(),
-        b"not json".to_vec(),
-        format!(
-            "clauseo-sandbox-run: set aside\tfoo\tbar\t{}",
-            SetAsideWhat::LinkOut.why()
-        )
-        .into_bytes(),
-        record(&"x".repeat(70 * 1024), "y", "link_out"),
-        link,
-    ] {
-        stream.extend_from_slice(&line);
-        stream.push(b'\n');
-    }
-    stream.extend_from_slice(&git[..10]);
-    // Reads of 7 bytes, so records and the line over the cap come in pieces.
-    let chunks = stream.chunks(7).map(<[u8]>::to_vec).collect();
-    let sink = Denials::default();
-    let fed = feed::feed(from_outer(chunks), OUTER.pid, &sink);
-    assert_eq!(
-        fed,
-        feed::Fed::Ended {
-            passed: 2,
-            dropped: 5
-        }
-    );
-    let set_aside = |path: &str, to: &str, what| Denial::SetAside {
-        path: path.into(),
-        to: to.into(),
-        what,
-    };
-    assert_eq!(
-        *sink.0.lock().unwrap(),
-        [
-            set_aside(".git", r"set-aside\1\.git", SetAsideWhat::GitRepository),
-            set_aside("link", r"set-aside\2\link", SetAsideWhat::LinkOut),
-        ]
-    );
-    let mut ends_badly = from_outer(vec![git.clone(), b"\n".to_vec()]);
-    ends_badly.read_fails = true;
-    assert_eq!(
-        feed::feed(ends_badly, OUTER.pid, &Panics),
-        feed::Fed::Ended {
-            passed: 1,
-            dropped: 0
-        }
-    );
-}
-
-/// Only the outer is read: a client with another pid, or the outer's pid with another
-/// creation time (a reused id), is refused before a byte is read. No client, or an outer that
-/// can't be opened, feeds nothing either.
-#[test]
-fn the_pipe_reads_the_outer_alone() {
-    let lines = vec![[record("a", "b", "link_out"), b"\n".to_vec()].concat()];
-    for client in [
-        Peer { pid: 7, ..OUTER },
-        Peer {
-            started: OUTER.started + 1,
-            ..OUTER
-        },
-    ] {
-        let sink = Denials::default();
-        let pipe = FakePipe {
-            client: Some(client),
-            ..from_outer(lines.clone())
-        };
-        assert_eq!(feed::feed(pipe, OUTER.pid, &sink), feed::Fed::Refused);
-        assert_eq!(*sink.0.lock().unwrap(), []);
-    }
-    let sink = Denials::default();
-    let nobody = FakePipe {
-        client: None,
-        ..from_outer(lines.clone())
-    };
-    assert_eq!(feed::feed(nobody, OUTER.pid, &sink), feed::Fed::NoClient);
-    let gone = from_outer(lines);
-    assert_eq!(feed::feed(gone, OUTER.pid + 1, &sink), feed::Fed::Failed);
-    assert_eq!(*sink.0.lock().unwrap(), []);
-}
-
-/// The outer's exit ends the feed: a record that comes after it, and one it cut off, is never
-/// delivered, though the pipe still holds them.
-#[test]
-fn records_after_the_outers_exit_are_dropped() {
-    let line = |path: &str| [record(path, "aside", "link_out"), b"\n".to_vec()].concat();
-    let cut = record("cut", "aside", "link_out");
-    let chunks = vec![
-        line("before"),
-        cut[..8].to_vec(),
-        cut[8..].to_vec(),
-        line("after"),
-    ];
-    let sink = Denials::default();
-    let pipe = FakePipe {
-        exits_after: Some(2),
-        ..from_outer(chunks)
-    };
-    assert_eq!(
-        feed::feed(pipe, OUTER.pid, &sink),
-        feed::Fed::Exited {
-            passed: 1,
-            dropped: 1
-        }
-    );
-    assert_eq!(
-        *sink.0.lock().unwrap(),
-        [Denial::SetAside {
-            path: "before".into(),
-            to: "aside".into(),
-            what: SetAsideWhat::LinkOut,
-        }]
-    );
 }
 
 /// The outer: the runner with `--launch <file>` in its folder, only `OUTER_ENV`'s variables
@@ -250,8 +84,8 @@ fn the_outer_starts_minimal_with_its_pipe_and_a_5s_grace() {
             world.calls(),
             ["create_pipe", "write_launch", "spawn_outer"]
         );
-        assert_eq!(world.denial_pipe().as_deref(), Some(PIPE));
-        let outer = world.spawned().unwrap();
+        assert_eq!(world.outer.denial_pipe().as_deref(), Some(PIPE));
+        let outer = world.outer.spawned().unwrap();
         assert_eq!(outer.program, install().join("clauseo-sandbox-run.exe"));
         assert_eq!(outer.args, ["--launch", "run/0123456789abcdef.json"]);
         assert_eq!(outer.cwd, install());
@@ -280,7 +114,7 @@ fn a_pipe_that_cant_be_made_fails_the_launch() {
         world.calls(),
         ["create_pipe", "end_run 1", UNDO[0], UNDO[1]]
     );
-    assert!(world.spawned().is_none());
+    assert!(world.outer.spawned().is_none());
     drop(launcher);
     assert!(launchers.wait_ends(WAIT));
     assert_eq!(world.calls(), Vec::<String>::new());
@@ -358,7 +192,10 @@ fn a_normal_end_runs_the_pass_once() {
         launchers.after_session(MATTER, "s1", &policy),
         [fake::moved("AGENTS.md")]
     );
-    assert_eq!(world.calls(), [&["wait_exited 2"][..], &PASS].concat());
+    assert_eq!(
+        world.calls(),
+        [&["remove_launch", "wait_exited 2"][..], &PASS].concat()
+    );
     assert_eq!(
         launchers.after_session(MATTER, "s1", &policy),
         Vec::<SetAside>::new()
@@ -413,10 +250,14 @@ fn a_cancel_during_the_run_ends_once_after_the_processes_exit() {
     let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
     start(&*launcher, &world, &dir);
     world.calls();
-    world.linger(1);
+    world.outer.linger(1);
     let before = world.now();
     launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
-    let want = [&["wait_exited 2", "stop", "wait_exited 0"][..], &PASS].concat();
+    let want = [
+        &["remove_launch", "wait_exited 2", "stop", "wait_exited 0"][..],
+        &PASS,
+    ]
+    .concat();
     assert_eq!(world.calls(), want);
     assert_eq!(
         world.now().saturating_sub(before),
@@ -450,7 +291,10 @@ fn a_dropped_launcher_runs_the_pass_once() {
     assert!(!launchers.wait_ends(Duration::ZERO));
     held.go();
     assert!(launchers.wait_ends(WAIT));
-    assert_eq!(world.calls(), [&["wait_exited 2"][..], &PASS].concat());
+    assert_eq!(
+        world.calls(),
+        [&["remove_launch", "wait_exited 2"][..], &PASS].concat()
+    );
     assert_eq!(
         launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter")),
         Vec::<SetAside>::new()
@@ -488,10 +332,14 @@ fn the_end_waits_for_processes_to_truly_exit() {
     start(&*launcher, &world, &dir);
     world.calls();
     world.leftovers(2, true);
-    world.linger(2);
+    world.outer.linger(2);
     let before = world.now();
     launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
-    let want = [&["wait_exited 2", "stop", "wait_exited 2"][..], &PASS].concat();
+    let want = [
+        &["remove_launch", "wait_exited 2", "stop", "wait_exited 2"][..],
+        &PASS,
+    ]
+    .concat();
     assert_eq!(world.calls(), want);
     assert_eq!(world.now().saturating_sub(before), EXIT_WAIT * 2);
     let other = World::new();
@@ -501,5 +349,105 @@ fn the_end_waits_for_processes_to_truly_exit() {
     other.calls();
     other.fail_at("wait_exited");
     launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
-    assert_eq!(other.calls(), [&["wait_exited 2"][..], &PASS].concat());
+    assert_eq!(
+        other.calls(),
+        [&["remove_launch", "wait_exited 2"][..], &PASS].concat()
+    );
+}
+
+/// The launch file goes once the outer has connected to the denial pipe (it has read the file
+/// by then), from the feed's thread; the session's end then has none left to delete. With no
+/// connection, the end deletes it (the tests above).
+#[test]
+fn the_launch_file_goes_once_the_outer_connects() {
+    let world = World::new();
+    let dir = TempDir::new("launch-file-connect");
+    let launchers = launchers(&world);
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    world.outer.pipe_connects();
+    start(&*launcher, &world, &dir);
+    world.wait_for("remove_launch");
+    assert_eq!(
+        world.calls(),
+        [
+            "create_pipe",
+            "write_launch",
+            "spawn_outer",
+            "remove_launch"
+        ]
+    );
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    assert_eq!(world.calls(), [&["wait_exited 2"][..], &PASS].concat());
+}
+
+/// A session whose end began before its outer started gets no agent: refused before the
+/// spawn, and, when the end came during the spawn, the outer is ended and the launch fails.
+/// Either way the pass ran once, from `after_session`, and the launch file is gone.
+#[test]
+fn an_end_before_the_start_fails_the_launch() {
+    let world = World::new();
+    let dir = TempDir::new("launch-end-first");
+    let launchers = launchers(&world);
+    let policy = policy_at(&dir, "matter");
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    launchers.after_session(MATTER, "s1", &policy);
+    assert_eq!(world.calls(), PASS);
+    world.outer.spawn_starts();
+    assert!(launcher.launch(&spec(&dir)).is_err());
+    assert_eq!(
+        world.calls(),
+        Vec::<String>::new(),
+        "nothing written or started"
+    );
+    let world = World::new();
+    let launchers = super::launchers(&world);
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    world.outer.spawn_starts();
+    let held = world.hold("spawn_outer");
+    std::thread::scope(|scope| {
+        let starting = scope.spawn(|| launcher.launch(&spec(&dir)).is_err());
+        held.reached();
+        launchers.after_session(MATTER, "s1", &policy);
+        held.go();
+        assert!(starting.join().unwrap(), "the launch failed");
+    });
+    let calls = world.calls();
+    let pass_at = calls
+        .iter()
+        .position(|call| call == "session_cursor")
+        .unwrap();
+    assert_eq!(
+        calls[..pass_at],
+        [
+            "create_pipe",
+            "write_launch",
+            "spawn_outer",
+            "remove_launch"
+        ]
+    );
+    assert_eq!(calls.last().map(String::as_str), Some("remove_launch"));
+    // The outer was opened by its pid before the failed launch dropped its handle.
+    assert_eq!(
+        world.outer.watched().len(),
+        1,
+        "opened first, on the error path too"
+    );
+    drop(launcher);
+    assert!(launchers.wait_ends(WAIT));
+    assert_eq!(world.calls(), Vec::<String>::new());
+}
+
+/// A pass that panics on the dropped launcher's thread still counts as done: `wait_ends`
+/// doesn't wait out its timeout, and the matter is freed by the pass's own guards.
+#[test]
+fn a_panicking_end_still_counts_as_done() {
+    let world = World::new();
+    let dir = TempDir::new("launch-end-panics");
+    let launchers = launchers(&world);
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    start(&*launcher, &world, &dir);
+    world.panic_at("repair");
+    drop(launcher);
+    assert!(launchers.wait_ends(WAIT));
+    assert!(launchers.registry.wait_free(MATTER, WAIT));
 }

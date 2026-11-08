@@ -15,7 +15,7 @@ use std::time::Duration;
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
 
 use super::super::{Ending, LaunchSteps, RunRefusal, Slot, Stopped, Walk};
-use super::pipe::{FakePipe, PIPE};
+use super::pipe::{FakePipe, Outer, PIPE, Spawned, host_var, install, quick_outer};
 use crate::test_support::TempDir;
 use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
@@ -61,6 +61,7 @@ impl Held {
 #[derive(Default)]
 pub(super) struct World {
     log: Mutex<Vec<String>>,
+    logged: std::sync::Condvar,
     /// The slot records: each slot's number and the claim it names.
     slots: Mutex<BTreeMap<u8, u64>>,
     open: Mutex<BTreeMap<String, BTreeSet<String>>>,
@@ -81,26 +82,8 @@ pub(super) struct World {
     progressing: Mutex<Option<(&'static str, Duration)>>,
     end_run_fails: Mutex<u32>,
     dir: OnceLock<TempDir>,
-    lingering: Mutex<u32>,
-    spawned: Mutex<Option<Spawned>>,
-    denial_pipe: Mutex<Option<String>>,
-    spawn_starts: Mutex<bool>,
-}
-
-/// What `spawn_outer` was given.
-#[derive(Debug, Clone)]
-pub(super) struct Spawned {
-    pub(super) program: PathBuf,
-    pub(super) args: Vec<OsString>,
-    pub(super) env: BTreeMap<OsString, OsString>,
-    pub(super) cwd: PathBuf,
-    pub(super) grace: Option<Duration>,
-    pub(super) clears_env: bool,
-}
-
-/// The fake's install folder: one that exists, as a spec's working folder must.
-pub(super) fn install() -> PathBuf {
-    std::env::temp_dir()
+    /// The outer's side of the world (`pipe.rs`).
+    pub(super) outer: Outer,
 }
 
 impl World {
@@ -198,27 +181,6 @@ impl World {
         *self.sweeper.lock().unwrap() = running;
     }
 
-    /// The pool user's processes outlive `waits` waits for their exit (they tear down).
-    pub(super) fn linger(&self, waits: u32) {
-        *self.lingering.lock().unwrap() = waits;
-    }
-
-    /// `spawn_outer` starts a real process (this test binary, running no test), so the launch
-    /// succeeds: the outer's two processes then run as the pool user until a wait for them.
-    pub(super) fn spawn_starts(&self) {
-        *self.spawn_starts.lock().unwrap() = true;
-    }
-
-    /// The denial pipe the last launch file named.
-    pub(super) fn denial_pipe(&self) -> Option<String> {
-        self.denial_pipe.lock().unwrap().clone()
-    }
-
-    /// What the last `spawn_outer` was given.
-    pub(super) fn spawned(&self) -> Option<Spawned> {
-        self.spawned.lock().unwrap().clone()
-    }
-
     pub(super) fn claimed_slots(&self) -> BTreeSet<u8> {
         self.slots.lock().unwrap().keys().copied().collect()
     }
@@ -242,6 +204,19 @@ impl World {
 
     fn log(&self, call: impl Into<String>) {
         self.log.lock().unwrap().push(call.into());
+        self.logged.notify_all();
+    }
+
+    /// Waits until `call` is in the log (not taken), from any thread.
+    pub(super) fn wait_for(&self, call: &str) {
+        let log = self.log.lock().unwrap();
+        let (_log, waited) = self
+            .logged
+            .wait_timeout_while(log, Duration::from_secs(10), |log| {
+                !log.iter().any(|each| each == call)
+            })
+            .unwrap();
+        assert!(!waited.timed_out(), "{call} never came");
     }
 
     /// A work step: [`World::step`], then the time it takes, its items counted.
@@ -491,7 +466,7 @@ impl LaunchSteps for FakeSteps {
 
     fn create_pipe(&self) -> Result<(FakePipe, String), Error> {
         self.world.step("create_pipe")?;
-        Ok((FakePipe::default(), PIPE.to_owned()))
+        Ok((self.world.outer.pipe(), PIPE.to_owned()))
     }
 
     fn write_launch(
@@ -502,7 +477,7 @@ impl LaunchSteps for FakeSteps {
         denial_pipe: &str,
     ) -> Result<PathBuf, Error> {
         self.world.step("write_launch")?;
-        *self.world.denial_pipe.lock().unwrap() = Some(denial_pipe.to_owned());
+        *self.world.outer.denial_pipe.lock().unwrap() = Some(denial_pipe.to_owned());
         Ok(PathBuf::from("run/0123456789abcdef.json"))
     }
 
@@ -515,12 +490,7 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn host_var(&self, name: &str) -> Option<OsString> {
-        match name {
-            "SystemRoot" | "windir" => Some(r"C:\Windows".into()),
-            "TEMP" => Some(r"C:\Users\lawyer\AppData\Local\Temp".into()),
-            "PATH" | "USERPROFILE" => Some("not for the outer".into()),
-            _ => None,
-        }
+        host_var(name)
     }
 
     /// Records what it was given, then fails, or with [`World::spawn_starts`] starts a real
@@ -530,23 +500,15 @@ impl LaunchSteps for FakeSteps {
         spec: &LaunchSpec,
         opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error> {
-        self.world.log("spawn_outer");
-        *self.world.spawned.lock().unwrap() = Some(Spawned {
-            program: spec.program().to_path_buf(),
-            args: spec.args().to_vec(),
-            env: spec.env().clone(),
-            cwd: spec.cwd().to_path_buf(),
-            grace: opts.stdin_grace_set(),
-            clears_env: opts.clears_env(),
-        });
-        if !*self.world.spawn_starts.lock().unwrap() {
+        self.world
+            .step("spawn_outer")
+            .map_err(|_failed| clauseo_process::Error::Closing)?;
+        *self.world.outer.spawned.lock().unwrap() = Some(Spawned::of(spec, opts));
+        if !*self.world.outer.spawn_starts.lock().unwrap() {
             return Err(clauseo_process::Error::Closing);
         }
         *self.world.leftovers.lock().unwrap() = 2;
-        let exe = std::env::current_exe().unwrap();
-        let args = vec!["--exact".into(), "clauseo-no-such-test".into()];
-        let quick = LaunchSpec::new(exe, args, BTreeMap::new(), install()).unwrap();
-        clauseo_process::spawn_in_tree(&quick, &SpawnOptions::new())
+        quick_outer()
     }
 
     /// Logs the processes running when it starts: they exit within the wait, unless they
@@ -557,7 +519,7 @@ impl LaunchSteps for FakeSteps {
         if *self.world.fail_at.lock().unwrap() == Some("wait_exited") {
             return Err(Error::Policy("fake wait_exited failed".to_owned()));
         }
-        let mut lingering = self.world.lingering.lock().unwrap();
+        let mut lingering = self.world.outer.lingering.lock().unwrap();
         if *lingering > 0 && *leftovers > 0 {
             *lingering -= 1;
             *self.world.clock.lock().unwrap() += within;

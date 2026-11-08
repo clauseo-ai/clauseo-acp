@@ -1,8 +1,13 @@
 //! The denial pipe: the one way the outer runner's set-aside records reach the launch's denial
-//! sink. The launcher makes the pipe before the launch file, which names it (`denial_pipe`);
-//! once the outer has started, a thread of its own ([`feed`]) waits for the pipe's one client,
-//! checks it is the outer (its pid and its creation time), and passes each record to the sink
-//! in order until the outer closes it or exits.
+//! sink. The launcher makes the pipe before the launch file, which names it (`denial_pipe`).
+//! Once the outer has started, the launcher opens it ([`watch`]) on the launching thread,
+//! while the host's handle on it is still held, so its pid is its own; then a thread of its own
+//! ([`feed`]) waits for the pipe's one client, checks it is the outer (its pid and its creation
+//! time), and passes each record to the sink in order until the outer closes it or exits.
+//!
+//! **The launch file goes once the outer has read it.** The outer connects only after it has
+//! read the launch file (#789), so the feed's `connected` call, made once the client is known
+//! to be the outer, deletes it: it holds the agent's environment.
 //!
 //! **The outer's exit ends the feed.** Each read also waits on the outer's process handle, and
 //! once it is signalled the feed stops: what is still unread then, and a record cut off by it,
@@ -65,7 +70,7 @@ pub trait DenialPipe: Send + 'static {
 /// How a feed ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Fed {
-    /// The outer couldn't be opened, or the pipe failed before a client connected.
+    /// The pipe failed before a client connected.
     Failed,
     /// Nobody connected before the outer exited or [`CONNECT_WAIT`] passed.
     NoClient,
@@ -78,17 +83,28 @@ pub(super) enum Fed {
     Exited { passed: usize, dropped: usize },
 }
 
-/// Feeds `sink` from `pipe` for the outer runner `outer` (its pid): see the module's docs.
-pub(super) fn feed<P: DenialPipe>(mut pipe: P, outer: u32, sink: &dyn DenialSink) -> Fed {
-    let want = match pipe.watch(outer) {
-        Ok(want) => want,
+/// Opens the outer runner `pid` for `pipe`'s feed: call it on the launching thread, while the
+/// host's handle on the outer is held. Who it is, or `None` (logged) when it can't be opened.
+pub(super) fn watch<P: DenialPipe>(pipe: &mut P, pid: u32) -> Option<Peer> {
+    match pipe.watch(pid) {
+        Ok(outer) => Some(outer),
         Err(error) => {
             tracing::warn!(%error, "tier B couldn't open the outer runner for its denial pipe");
-            return Fed::Failed;
+            None
         }
-    };
+    }
+}
+
+/// Feeds `sink` from `pipe` for the outer runner `outer` ([`watch`]'s), calling `connected`
+/// once its client is known to be the outer: see the module's docs.
+pub(super) fn feed<P: DenialPipe>(
+    mut pipe: P,
+    outer: Peer,
+    sink: &dyn DenialSink,
+    connected: impl FnOnce(),
+) -> Fed {
     match pipe.accept(CONNECT_WAIT) {
-        Ok(Some(peer)) if peer == want => {}
+        Ok(Some(peer)) if peer == outer => connected(),
         Ok(Some(_)) => {
             tracing::warn!("a process other than the outer runner opened the denial pipe");
             return Fed::Refused;

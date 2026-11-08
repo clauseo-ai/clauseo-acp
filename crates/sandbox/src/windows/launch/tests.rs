@@ -13,6 +13,7 @@ use crate::windows::sids::Sid;
 
 mod end;
 mod fake;
+mod feeding;
 mod held;
 mod limits;
 mod pipe;
