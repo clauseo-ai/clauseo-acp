@@ -70,6 +70,8 @@
 ; context to all around its work (NSIS has no COMMONAPPDATA; the old name was taken as text).
 ; A folder that is already there is left as it is.
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
+; On an ARM64 computer the x64 per-machine installer also names the arm64 one in a details line
+; (CLAUSEO_NATIVE_ARM64_NOTICE).
 ; Windows security can remove clauseo-sandbox-setup.exe as it is written. Launches run only the
 ; admin copy, so only a run that wrote that copy says it was removed (setupExeRemoved, exit code
 ; CLAUSEO_EXIT_SETUP_EXE_REMOVED): when --adopt couldn't be started and the file is gone
@@ -831,6 +833,38 @@ Var ClauseoRepair
   ${EndIf}
 !macroend
 
+; The x64 per-machine installer on a computer whose processor is ARM64 (Windows on ARM runs it, and
+; the x64 Clauseo it installs, under emulation): one details line naming the arm64 per-machine
+; installer as the computer's native one, so IT can deploy that one next time. It installs as
+; always: no prompt, no box, no exit code (a non-zero code reads as a failure in Intune and SCCM),
+; and the same under /S. The per-user installer says nothing: the app's updater moves an x64
+; per-user install to the arm64 build at its next update. The native machine is
+; IsWow64Process2's (kernel32, Windows 10 1709 and later), as crates/sandbox/src/windows/detect.rs
+; reads it; where the call is missing or fails the line is left out. IMAGE_FILE_MACHINE_ARM64 is
+; 0xAA64. The line is English only, like the other plain details lines here.
+!macro CLAUSEO_NATIVE_ARM64_NOTICE
+  !ifndef ARCH
+    !error "hooks.nsh needs the template's ARCH define"
+  !endif
+  !if "${ARCH}" == "x64"
+    Push $R1
+    Push $R2
+    Push $R3
+    StrCpy $R1 0
+    StrCpy $R3 0
+    System::Call 'kernel32::GetCurrentProcess() p .R2'
+    ; Both USHORTs written into 4-byte buffers that start at 0; a missing export leaves $R1 "error".
+    System::Call 'kernel32::IsWow64Process2(p R2, *i 0 .R2, *i 0 .R3) i .R1'
+    ${If} $R1 <> 0
+    ${AndIf} $R3 = 0xAA64
+      DetailPrint "This computer has an ARM64 processor: Clauseo_${VERSION}_arm64-machine-setup.exe is its native per-machine installer."
+    ${EndIf}
+    Pop $R3
+    Pop $R2
+    Pop $R1
+  !endif
+!macroend
+
 ; The firm-policy folder and the admin copy, per-machine installs; the per-user installer asks for
 ; the admin section. The test is inside the macro: the template (installer.nsi) includes this file
 ; at line 36, before `!define INSTALLMODE` at line 46, so a test at file scope would see none.
@@ -908,6 +942,8 @@ Var ClauseoRepair
     ${If} $R9 = 1
       SetShellVarContext current
     ${EndIf}
+    ; The x64 installer on an ARM64 computer names the native one (a details line only).
+    !insertmacro CLAUSEO_NATIVE_ARM64_NOTICE
     ; The admin copy, every run (admin_copy.nsh).
     !insertmacro CLAUSEO_ADMIN_COPY_MACHINE
     Pop $R9

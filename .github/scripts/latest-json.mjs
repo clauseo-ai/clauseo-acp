@@ -266,7 +266,7 @@ export function assets(version, sandboxExe = null) {
       ? []
       : [
           { name: sandboxAsset(sandboxExe, "x64"), tier: 1, signed: true },
-          { name: sandboxAsset(sandboxExe, "arm64"), tier: 2, signed: true },
+          { name: sandboxAsset(sandboxExe, "arm64"), tier: 1, signed: true },
         ];
   return [
     { name: `Clauseo_${v}_aarch64.dmg`, tier: 1 },
@@ -275,8 +275,8 @@ export function assets(version, sandboxExe = null) {
     { name: `Clauseo_${v}_x64.app.tar.gz`, tier: 2, platforms: ["darwin-x86_64-app"] },
     { name: `Clauseo_${v}_x64-setup.exe`, tier: 1, platforms: ["windows-x86_64-nsis", "windows-x86_64"] },
     { name: `Clauseo_${v}_x64-machine-setup.exe`, tier: 1 },
-    { name: `Clauseo_${v}_arm64-setup.exe`, tier: 2, platforms: ["windows-aarch64-nsis", "windows-aarch64"] },
-    { name: `Clauseo_${v}_arm64-machine-setup.exe`, tier: 2 },
+    { name: `Clauseo_${v}_arm64-setup.exe`, tier: 1, platforms: ["windows-aarch64-nsis", "windows-aarch64"] },
+    { name: `Clauseo_${v}_arm64-machine-setup.exe`, tier: 1 },
     { name: `Clauseo_${v}_amd64.deb`, tier: 2 },
     { name: `Clauseo-${v}-1.x86_64.rpm`, tier: 2 },
     ...sandbox,
