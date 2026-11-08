@@ -11,9 +11,9 @@
 //!   outside. Windows children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
 //! - The shutdown ladder: close stdin, the stdin grace (2 s, or [`SpawnOptions::stdin_grace`]),
 //!   SIGTERM to the group, 3 s, SIGKILL to the group, and 2 s more for the exit. On Windows: close
-//!   stdin, the stdin grace, end the job, 2 s. On Unix the tree kill
-//!   then kills every descendant in the listing the caller passed to the shutdown, because a
-//!   command an agent starts in a session of its own (Codex does) has left the group.
+//!   stdin, the stdin grace, end the job, 2 s. On Unix the tree kill then kills every descendant
+//!   in the listing the caller passed to the shutdown, because a command an agent starts in a
+//!   session of its own (Codex does) has left the group.
 //! - The agent's descendants: listed by parent pid on Unix (`/proc` on Linux, libproc on macOS)
 //!   and from the job's process list on Windows (parents from Toolhelp), each with its start
 //!   time so a reused pid is never signalled; and the sweep that ends those new since an earlier
@@ -21,9 +21,7 @@
 //! - The processes running under a name, with their starts (macOS and Windows), for `matters`'
 //!   stale owner-file rule: every process from libproc's `proc_listallpids` on macOS, from a
 //!   Toolhelp snapshot on Windows.
-//! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB,
-//!   and the optional line tap a launch sets ([`SpawnOptions::stderr_tap`]), which sees each line
-//!   the pump reads and changes nothing the ring or the tail holds.
+//! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
 //!
 //! # Interface
 //!
@@ -33,8 +31,7 @@
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
 //!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, and on
 //!   Windows extra creation flags). By default the child inherits this process's environment.
-//!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default), and
-//!   [`SpawnOptions::stderr_tap`] calls a closure with each stderr line, from the pump's thread.
+//!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default).
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
 //!   [`StderrPump`] the caller must drive, and the [`Handle`].
 //! - [`Handle::exited`] (the agent exited on its own; its tree is then killed),
@@ -88,17 +85,15 @@
 //! # Depends on
 //!
 //! `protocol` (`ErrorCode`, `DetachReason`), `async-process`, `async-io` (the real timer),
-//! `futures`, `memchr` (line ends in the stderr pump), `thiserror`, `tracing` (a stderr tap's
-//! panic); `nix` on Unix (`signal`), `libc` on macOS (libproc) and `windows` on Windows. Never
-//! `tauri` or `tokio`.
+//! `futures`, `memchr` (line ends in the stderr pump), `thiserror`; `nix` on Unix (`signal`),
+//! `libc` on macOS (libproc) and `windows` on Windows. Never `tauri` or `tokio`.
 //!
 //! # Start reading
 //!
 //! `launch.rs` (the spawn), then `handle.rs` (exit and the ladder), `os/unix.rs` and
 //! `os/windows.rs` (the trees), `descendants.rs` with `os/linux.rs` and `os/macos.rs` (the
 //! listings and the sweep), `stderr.rs` (the pump, the ring and the tail) and `stdin.rs`.
-//! Tests: unit tests in `src/*/tests.rs`; the pipe tests against `fake_agent` in `tests/pipes/`;
-//! the stderr tests (the tail, the tap) against this test binary as the agent, `tests/*.rs`.
+//! Tests: unit tests in `src/*/tests.rs`; the pipe tests against `fake_agent` in `tests/pipes/`.
 
 mod descendants;
 mod error;

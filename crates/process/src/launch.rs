@@ -11,7 +11,7 @@ use async_process::ChildStdout;
 
 use crate::handle::{Handle, STDIN_GRACE};
 use crate::live::Live;
-use crate::stderr::{Redactor, Ring, StderrPump, StderrTap};
+use crate::stderr::{Redactor, Ring, StderrPump};
 use crate::stdin::{AgentStdin, StdinSlot};
 use crate::{Error, LaunchSpec, os};
 
@@ -66,7 +66,6 @@ pub struct SpawnOptions {
     #[cfg(target_os = "linux")]
     pub(crate) end_with_parent: bool,
     pub(crate) stdin_grace: Option<Duration>,
-    pub(crate) stderr_tap: Option<StderrTap>,
 }
 
 impl SpawnOptions {
@@ -118,28 +117,6 @@ impl SpawnOptions {
     /// exit on stdin close sets its own.
     pub fn stdin_grace(mut self, grace: Duration) -> SpawnOptions {
         self.stdin_grace = Some(grace);
-        self
-    }
-
-    /// Calls `tap` with each line the child writes to stderr, as it arrives, in order, without
-    /// the `\n` or a `\r` before it. The tap sees what [`StderrPump::drain`] keeps: it changes
-    /// nothing the pump returns or the exit report's tail shows.
-    ///
-    /// It runs on the thread that drives the pump, so it must return quickly: while it runs
-    /// the pump reads no more stderr, and a full pipe stalls the child. A line that is not UTF-8
-    /// comes with U+FFFD for the bad bytes. A line longer than 16 KiB comes in 16 KiB pieces, and
-    /// a last line with no `\n` comes at the end, as [`StderrPump::lines`] passes them. Every byte
-    /// reaches the ring before its line reaches the tap. A later call replaces the tap.
-    ///
-    /// The tap gets lines only. End of stream and read errors come only as the result of
-    /// [`StderrPump::drain`]. A panic in the tap is caught: the tap is dropped, one warning is
-    /// logged without the line, and `drain` goes on to the end of stderr.
-    ///
-    /// The tap is one closure for every agent started with these options, with no label on a
-    /// line. A launcher reused for several agents sends all their lines to it; a host that must
-    /// tell them apart gives each agent its own options.
-    pub fn stderr_tap(mut self, tap: impl Fn(&str) + Send + Sync + 'static) -> SpawnOptions {
-        self.stderr_tap = Some(StderrTap::new(tap));
         self
     }
 }
@@ -214,7 +191,7 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     Ok(Launched {
         stdin: AgentStdin::new(stdin.clone()),
         stdout,
-        stderr: StderrPump::new(stderr, Arc::clone(&ring), opts.stderr_tap.clone()),
+        stderr: StderrPump::new(stderr, Arc::clone(&ring)),
         handle: Handle::new(child, tree, root, stdin, ring, redactor, stdin_grace, live),
     })
 }
