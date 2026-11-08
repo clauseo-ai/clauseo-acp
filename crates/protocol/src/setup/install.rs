@@ -26,7 +26,8 @@ pub enum InstallProgress {
     },
     /// Offline: the install waits and tries again by itself.
     Waiting {
-        /// Why it waits: `agent.install_offline`.
+        /// Why it waits: `agent.install_offline`, or `agent.install_unreachable` once three
+        /// tries in a row met no network while the computer reports one.
         code: ErrorCode,
         /// The hosts the install contacts, for "Ask your IT team".
         hosts: Vec<String>,

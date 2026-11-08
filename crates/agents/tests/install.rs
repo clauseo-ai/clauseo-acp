@@ -42,3 +42,11 @@ mod quit;
 #[cfg(test)]
 #[path = "install/node_env.rs"]
 mod node_env;
+
+#[cfg(test)]
+#[path = "install/setup_retry.rs"]
+mod setup_retry;
+
+#[cfg(test)]
+#[path = "install/unreachable.rs"]
+mod unreachable;

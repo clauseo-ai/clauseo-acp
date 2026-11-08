@@ -101,6 +101,38 @@ fn offline_waits_30_seconds_with_no_try_counted_and_resumes_by_itself() {
     assert_eq!(fx.timer.install_waits(), [secs(30)]);
 }
 
+/// The network going away mid-download (the Windows VM pass of #664): the body's reset is a cut
+/// (one try, 2 s), and the next try's request meets a reset connection (Windows' WSAECONNRESET or
+/// WSAECONNABORTED), which is offline: `Waiting`, not `Failed`. Back online, the try after 30 s
+/// finishes.
+#[test]
+fn a_connection_lost_mid_download_waits_offline_and_resumes() {
+    let fx = Fixture::new("reset");
+    let cut = fx.tarballs["adapter-a"].len() / 2;
+    let path = tarball_path("adapter-a");
+    fx.registry.then(&path, Behaviour::ResetAfter(cut));
+    fx.registry.then(&path, Behaviour::Reset);
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    fx.timer.fire_next(secs(2));
+    let seen = events.until(&agent_a(), |s| {
+        matches!(s, InstallState::Waiting { .. } | InstallState::Failed(_))
+    });
+    let Some((_, InstallState::Waiting { reason, log })) = seen.last() else {
+        panic!("not waiting: {seen:?}")
+    };
+    assert_eq!(*reason, FailureKind::Offline);
+    let log = log.to_string();
+    assert!(log.ends_with("result: offline after 1 tries"), "{log}");
+    fx.timer.fire_next(secs(30));
+    let (_, last) = events.until_end(&agent_a());
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    assert_eq!(fx.timer.install_waits(), [secs(2), secs(30)]);
+    // The cut, the reset request, and the finishing one (by range from what the cut kept).
+    assert_eq!(fx.requests_for("adapter-a").len(), 3);
+}
+
 /// A job waiting offline takes a proxy set meanwhile (`Agents::set_network`, S17): its next
 /// try goes through it, and never to the registry direct.
 #[test]

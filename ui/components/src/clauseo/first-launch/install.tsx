@@ -6,7 +6,7 @@
 // each say what happened and give the one or two things to do, in concrete, never in red.
 import type { ReactNode } from "react";
 import type { Lang } from "../../lib/display.ts";
-import { errorWords } from "../../lib/words-errors.ts";
+import { errorWords, errorWordsWith } from "../../lib/words-errors.ts";
 import { fl } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
 import type { WorkingState } from "../working-line.tsx";
@@ -28,6 +28,8 @@ export type InstallView =
     }
   | { kind: "installing" }
   | { kind: "offline" }
+  /** Offline for three tries in a row while the computer has a network: the hosts out of reach, for IT. */
+  | { kind: "unreachable"; hosts: readonly string[] }
   | { kind: "blocked"; hosts: readonly string[] }
   | { kind: "disk"; need: number; free: number }
   | { kind: "failed"; log: readonly string[] };
@@ -125,6 +127,19 @@ export function installLine(
         words: errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
+        actions: wrap(
+          <>
+            {retry}
+            {proxyButton("quiet")}
+          </>,
+        ),
+      };
+    case "unreachable":
+      return {
+        kind: "wait",
+        words: errorWordsWith(lang, "agent.install_unreachable", { hosts: view.hosts.join(", ") }),
+        pill: null,
+        code: "agent.install_unreachable",
         actions: wrap(
           <>
             {retry}

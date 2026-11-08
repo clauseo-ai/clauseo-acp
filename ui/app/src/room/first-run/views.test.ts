@@ -2,7 +2,8 @@
 // nearest 10 MB from 100 MB up, whole MB below), and a download's done MB never above its total.
 import { expect, test } from "vitest";
 import type { AgentSetup } from "../../store/setup.ts";
-import { aboutMb, installView } from "./views.ts";
+import { aboutMb, gateView, installView } from "./views.ts";
+import type { SetupState } from "../../store/setup.ts";
 
 const setup = (install: NonNullable<AgentSetup["install"]>, mb?: number): AgentSetup =>
   mb === undefined ? { install } : { install, mb };
@@ -50,4 +51,32 @@ test("downloading's done never runs above its total", () => {
 test("installing has no bytes; paused says the size it had, about", () => {
   expect(installView(setup("installing"))).toEqual({ kind: "installing" });
   expect(installView(setup("paused", 182))).toEqual({ kind: "missing", mb: 180 });
+});
+
+const HOSTS = ["registry.npmjs.org", "nodejs.org"];
+
+test("waiting: unreachable carries the hosts, offline stays offline", () => {
+  expect(
+    installView(setup({ waiting: { code: "agent.install_unreachable", hosts: HOSTS, log: [] } })),
+  ).toEqual({ kind: "unreachable", hosts: HOSTS });
+  expect(
+    installView(setup({ waiting: { code: "agent.install_offline", hosts: HOSTS, log: [] } })),
+  ).toEqual({ kind: "offline" });
+});
+
+test("a queued sign-in waits on a reconnect only while offline: unreachable is a network that is up", () => {
+  const state = { keyOpen: false, pasting: false } as unknown as SetupState;
+  const queued = (code: "agent.install_offline" | "agent.install_unreachable"): AgentSetup => ({
+    install: { waiting: { code, hosts: HOSTS, log: [] } },
+    signIn: "queued",
+  });
+  const clock = () => "";
+  expect(gateView(queued("agent.install_offline"), state, clock)).toEqual({
+    kind: "queued",
+    offline: true,
+  });
+  expect(gateView(queued("agent.install_unreachable"), state, clock)).toEqual({
+    kind: "queued",
+    offline: false,
+  });
 });

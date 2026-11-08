@@ -116,6 +116,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `sandbox.blocked` | A Windows setting or security tool blocks the sandbox (its set-up program is missing or was blocked, say), so no agent was started; whoever looks after this computer can fix it. | no | sandbox (`Error::Blocked`: tier B's launch check refused the set-up program's admin copy, `Blocked::AdminCopyMissing`, `AdminCopyChanged` or `AdminCopyUnsafe`, or Windows security blocked or removed it, `ToolMissing`; decision record 0049) |
 | `blocklist.override_off` | Allowing a site on Clauseo's unsafe-site list is turned off (network.allow_unsafe_site_override is false, usually by the firm's policy), so nothing was allowed. | no | host (`AllowBlockedSite`, decision record 0053); new area |
 | `blocklist.notice_expired` | The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. | no | host (`AllowBlockedSite` naming a `block_id` it no longer keeps, decision record 0053); not retryable because the same `block_id` stays unknown, and only a new notice can be allowed |
+| `agent.install_unreachable` | The agent's install has not reached its hosts for three tries in a row while the computer reports a network: a firm proxy or firewall may be dropping the connections. The install goes on waiting and trying again by itself. | yes | agents (`FailureKind::Unreachable` on `Waiting`), desktop (0048) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -136,6 +137,12 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+`agent.install_unreachable` was added on 2026-11-07, at the orchestrator's request (#683, the
+Windows VM pass of #664). A connection reset, aborted or timed out waits as offline, but a firm proxy
+or firewall that drops every connection looks the same to the client, so an install offline for three
+tries in a row, while the OS does not report the network gone, waits under this code instead and
+keeps trying every 30 s. `agent.install_offline` keeps its meaning.
 
 ## Consequences
 

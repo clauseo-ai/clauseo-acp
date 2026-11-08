@@ -30,7 +30,12 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
       totalMb,
     };
   }
-  if ("waiting" in install && install.waiting !== undefined) return { kind: "offline" };
+  if ("waiting" in install && install.waiting !== undefined) {
+    // offline for three tries while the computer has a network: the hosts, for IT
+    if (install.waiting.code === "agent.install_unreachable")
+      return { kind: "unreachable", hosts: install.waiting.hosts };
+    return { kind: "offline" };
+  }
   if ("failed" in install && install.failed !== undefined) {
     const f = install.failed;
     if (f.code === "agent.install_blocked") return { kind: "blocked", hosts: f.hosts };
@@ -52,8 +57,12 @@ export function gateView(
   if (state.keyOpen) return { kind: "key" };
   if (signIn === "queued") {
     const install = setup?.install;
+    // unreachable is a network that is up: the browser opens when the plan is ready, not on a reconnect
     const offline =
-      typeof install === "object" && "waiting" in install && install.waiting !== undefined;
+      typeof install === "object" &&
+      "waiting" in install &&
+      install.waiting !== undefined &&
+      install.waiting.code !== "agent.install_unreachable";
     return { kind: "queued", offline };
   }
   if ("signed_out" in signIn && signIn.signed_out !== undefined) {

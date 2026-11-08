@@ -10,8 +10,9 @@ publish.workspace = true
 [features]
 # Tests only: `InstallConfig::resolver`, a host-name resolver standing in for the OS's. Only this
 # crate's own dev-dependency below turns it on. It also brings rcgen, which `testing`'s
-# TLS-inspecting proxy uses to make its CA and leaf certificates at test time.
-test-support = ["dep:rcgen"]
+# TLS-inspecting proxy uses to make its CA and leaf certificates at test time, and socket2, which
+# its registry uses to close a connection with a reset.
+test-support = ["dep:rcgen", "dep:socket2"]
 
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
@@ -54,6 +55,9 @@ rcgen = { version = "0.14.10", optional = true, default-features = false, featur
   "ring",
 ] }
 
+# Test support only: the registry's reset (`SO_LINGER` 0). MIT OR Apache-2.0.
+socket2 = { workspace = true, optional = true }
+
 # `keys`: keyring 4's `v1` feature picks the store per OS: Keychain Services on macOS, Credential
 # Manager on Windows (and the Secret Service on Linux, which is why keyring is not a Linux
 # dependency at all: Linux is not a product target, and `keys` there has no keychain).
@@ -68,6 +72,9 @@ windows = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
   "Win32_System_Registry",
+  # osnet: the Network List Manager's connectivity, through COM.
+  "Win32_Networking_NetworkListManager",
+  "Win32_System_Com",
 ] }
 
 [dev-dependencies]
@@ -78,6 +85,8 @@ clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-settings = { path = "../settings" }
 # The sign-in tests run its Claude and Codex CLI modes as the adapters.
 clauseo-fake_agent = { path = "../fake_agent" }
+# The set-up retry test reads the app log's failed-try line.
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
 [lints]
 workspace = true

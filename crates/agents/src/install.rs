@@ -13,9 +13,9 @@
 
 mod files;
 mod npm;
+mod tries;
 
 use std::fs::File;
-use std::io;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -28,14 +28,14 @@ use futures::future::{Either, select};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::disk;
-use crate::download::{FetchError, FetchKind, write_kind};
-use crate::log::{InstallLog, redact};
+use crate::log::InstallLog;
 use crate::node::{self, FoundNode, NotUsed, UserSearch};
 use crate::platform::Libc;
 use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
 use crate::worker::{Shared, Ticket};
-use crate::write::ExtractError;
+
+pub(crate) use self::tries::{Next, Step, TryError, log_failed_try, push_error};
 
 /// The most tries one install makes.
 const TRIES: u32 = 3;
@@ -43,6 +43,9 @@ const TRIES: u32 = 3;
 const BACKOFF: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(8)];
 /// The wait between tries while offline.
 const OFFLINE_WAIT: Duration = Duration::from_secs(30);
+/// Offline tries in a row after which `Waiting` says unreachable (`agent.install_unreachable`)
+/// rather than offline, unless the OS reports no network at all: about 90 s of tries.
+const UNREACHABLE_AFTER: u32 = 3;
 /// Bytes in the log's and the failure's MB.
 const MB: u64 = 1_000_000;
 
@@ -74,103 +77,6 @@ pub(crate) fn run<T: Timer + Send + Sync>(job: &Job<T>) {
     job.release_lock();
 }
 
-/// How a try ended badly, and what the job does next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Next {
-    /// Wait 30 s and try again, no try counted.
-    Offline,
-    /// Stop now as `Blocked`.
-    Blocked,
-    /// Stop now as `DiskFull`.
-    DiskFull,
-    /// Count a try; the third is `Failed`.
-    Retry,
-    /// Stop now as `Failed`: a retry cannot help.
-    Stop,
-    /// Paused: end quietly.
-    Cancelled,
-}
-
-/// A try that did not finish: what comes next, and the log's lines for it.
-#[derive(Debug)]
-pub(crate) struct TryError {
-    next: Next,
-    host: Option<String>,
-    status: Option<u16>,
-    /// Redacted.
-    detail: String,
-}
-
-impl TryError {
-    /// A failure no retry can help: the job stops now as `Failed`, with `detail` redacted.
-    pub(crate) fn stop(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Stop, detail, config)
-    }
-
-    /// A try to count, with `detail` redacted.
-    pub(crate) fn retry(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Retry, detail, config)
-    }
-
-    fn new(next: Next, detail: &str, config: &AgentsConfig) -> TryError {
-        TryError {
-            next,
-            host: None,
-            status: None,
-            detail: redact(detail, &config.data_dir),
-        }
-    }
-
-    pub(crate) fn cancelled() -> TryError {
-        TryError {
-            next: Next::Cancelled,
-            host: None,
-            status: None,
-            detail: String::new(),
-        }
-    }
-
-    /// A local file error: a full disk, else a try to count.
-    pub(crate) fn io(what: &str, err: &io::Error, config: &AgentsConfig) -> TryError {
-        let next = match write_kind(err) {
-            FetchKind::DiskFull => Next::DiskFull,
-            _ => Next::Retry,
-        };
-        TryError::new(next, &format!("{what}: {err}"), config)
-    }
-
-    pub(crate) fn extract(err: &ExtractError, config: &AgentsConfig) -> TryError {
-        match err {
-            ExtractError::Io(err) => TryError::io("unpacking Node failed", err, config),
-            other => TryError::retry(&other.to_string(), config),
-        }
-    }
-
-    /// npm's `ENOSPC` is a full disk; any other npm failure is a try to count.
-    pub(crate) fn npm(detail: &str, enospc: bool, config: &AgentsConfig) -> TryError {
-        let next = if enospc { Next::DiskFull } else { Next::Retry };
-        TryError::new(next, detail, config)
-    }
-}
-
-impl From<FetchError> for TryError {
-    fn from(err: FetchError) -> TryError {
-        let next = match err.kind {
-            FetchKind::Offline => Next::Offline,
-            FetchKind::Blocked => Next::Blocked,
-            FetchKind::DiskFull => Next::DiskFull,
-            FetchKind::Cancelled => Next::Cancelled,
-            FetchKind::Integrity | FetchKind::Failed => Next::Retry,
-        };
-        TryError {
-            next,
-            host: err.host,
-            status: err.status,
-            detail: err.detail,
-        }
-    }
-}
-
 /// The Node a try uses.
 #[derive(Debug, Clone)]
 pub(crate) enum NodeChoice {
@@ -188,6 +94,8 @@ pub(crate) struct Run {
     tries: u32,
     /// Tries made so far, offline ones included: the temp folder's number.
     pub(crate) attempts: u32,
+    /// Offline tries in a row, the last included; 0 after any other end of a try.
+    offline_streak: u32,
     /// The last progress, for the log's `received:` line.
     pub(crate) received: u64,
     pub(crate) total: u64,
@@ -199,6 +107,7 @@ impl Run {
             log: InstallLog::new(agent),
             tries: 0,
             attempts: 0,
+            offline_streak: 0,
             received: 0,
             total: 0,
         }
@@ -220,11 +129,20 @@ impl<T> Job<T> {
                     .unwrap_or_else(PoisonError::into_inner) = Some(file);
                 Ok(())
             }
-            Ok(None) => Err(TryError::new(
-                Next::Stop,
-                "another Clauseo is installing an agent now; try again once it is done",
-                config,
-            )),
+            Ok(None) => {
+                tracing::info!(
+                    agent = %self.ticket.agent,
+                    attempt = 0,
+                    "install: job stopped: another Clauseo owns the agents lock"
+                );
+                Err(TryError::new(
+                    Next::Stop,
+                    "another Clauseo is installing an agent now; try again once it is done",
+                    config,
+                )
+                .at(Step::Prepare)
+                .because("another Clauseo owns the agents lock"))
+            }
             Err(err) => Err(TryError::io("locking the agents folder", &err, config)),
         }
     }
@@ -309,21 +227,22 @@ impl<T: Timer + Send + Sync> Job<T> {
                 }
                 Err(err) => err,
             };
+            log_failed_try(agent, &run, &err, TRIES);
             match err.next {
                 Next::Cancelled => return,
                 Next::Offline => {
+                    run.offline_streak += 1;
+                    let reason = self.waiting_reason(run.offline_streak);
                     let mut log = run.log.clone();
                     push_error(&mut log, &err);
-                    finish_log(&mut log, &run, FailureKind::Offline);
-                    let state = InstallState::Waiting {
-                        reason: FailureKind::Offline,
-                        log,
-                    };
+                    finish_log(&mut log, &run, reason);
+                    let state = InstallState::Waiting { reason, log };
                     if !self.emit(state, false) || !self.wait(OFFLINE_WAIT).await {
                         return;
                     }
                 }
                 Next::Blocked | Next::DiskFull | Next::Stop => {
+                    run.offline_streak = 0;
                     run.tries += 1;
                     let kind = match err.next {
                         Next::Blocked => FailureKind::Blocked,
@@ -333,6 +252,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                     return self.fail(kind, &err, &run, user.as_ref());
                 }
                 Next::Retry => {
+                    run.offline_streak = 0;
                     run.tries += 1;
                     let backoff = usize::try_from(run.tries - 1)
                         .ok()
@@ -370,20 +290,43 @@ impl<T: Timer + Send + Sync> Job<T> {
             }
             None => {
                 let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), platform);
+                let check = runtime_check(config, &*self.launcher, &*self.timer).await;
+                if check == RuntimeCheck::Bad {
+                    tracing::info!(
+                        agent = %self.ticket.agent,
+                        attempt = run.attempts,
+                        "install: set-up discarded: the downloaded Node failed its check, \
+                         unpacked again"
+                    );
+                }
                 NodeChoice::Runtime {
-                    fetch: !runtime_check(config, &*self.launcher, &*self.timer)
-                        .await
-                        .usable(),
+                    fetch: !check.usable(),
                     dir,
                 }
             }
         };
         let node_needed = matches!(node, NodeChoice::Runtime { fetch: true, .. });
-        self.check_disk(node_needed)?;
-        let fetched = files::fetch_all(self, &node, run)?;
-        let installed = npm::install(self, &node, &fetched, run).await?;
+        self.check_disk(node_needed)
+            .map_err(|err| err.at(Step::Prepare).because("not enough free space"))?;
+        let fetched = files::fetch_all(self, &node, run).map_err(|err| err.at(Step::Fetch))?;
+        let installed = npm::install(self, &node, &fetched, run)
+            .await
+            .map_err(|err| err.at(Step::Prepare))?;
         files::clean_up(config, &fetched);
         Ok(installed)
+    }
+
+    /// Why a job waits after `streak` offline tries in a row: `Offline`, or `Unreachable` from
+    /// the [`UNREACHABLE_AFTER`]th on, when the hosts stay out of reach though the OS does not
+    /// report the network gone (a firm proxy or firewall dropping every connection, say). While
+    /// the OS reports no network at all it stays `Offline`, so a lawyer on a train is not sent
+    /// to IT.
+    fn waiting_reason(&self, streak: u32) -> FailureKind {
+        if streak >= UNREACHABLE_AFTER && !self.config.os_network.disconnected() {
+            FailureKind::Unreachable
+        } else {
+            FailureKind::Offline
+        }
     }
 
     /// `DiskFull` when the free space at the data folder is below the need. A free space that
@@ -465,19 +408,6 @@ impl<T: Timer + Send + Sync> Job<T> {
     }
 }
 
-/// Adds a failed try's host, status and detail to `log`.
-fn push_error(log: &mut InstallLog, err: &TryError) {
-    if let Some(host) = &err.host {
-        log.push(format!("host: {host}"));
-    }
-    if let Some(status) = err.status {
-        log.push(format!("status: {status}"));
-    }
-    if !err.detail.is_empty() {
-        log.push(err.detail.clone());
-    }
-}
-
 /// Adds the `received:` and `result:` lines.
 fn finish_log(log: &mut InstallLog, run: &Run, kind: FailureKind) {
     log.push(format!(
@@ -555,7 +485,17 @@ pub(crate) async fn ready_install<T: Timer>(
     let entry = config.snapshot.agent(agent)?;
     let hash = config.snapshot.install_hash(agent, config.platform)?;
     let folder = install_folder(&config.data_dir, agent, &hash);
-    let mut receipt = read_receipt(&folder, agent, &hash, config.platform)?;
+    let Some(mut receipt) = read_receipt(&folder, agent, &hash, config.platform) else {
+        if std::fs::symlink_metadata(&folder).is_ok() {
+            tracing::info!(
+                %agent,
+                attempt = 0,
+                "install: set-up discarded: receipt missing, unreadable or for another install; \
+                 redone"
+            );
+        }
+        return None;
+    };
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let runtime = node::runtime_program(&runtime, config.platform.os);
     let mut runtime_usable = None;
@@ -578,6 +518,12 @@ pub(crate) async fn ready_install<T: Timer>(
                 None => runtime_check(config, launcher, timer).await.usable(),
             };
             if !usable {
+                tracing::info!(
+                    %agent,
+                    attempt = 0,
+                    "install: set-up discarded: the receipt's Node is gone and no other Node \
+                     is usable; redone"
+                );
                 return None;
             }
             (
@@ -588,6 +534,7 @@ pub(crate) async fn ready_install<T: Timer>(
         receipt.node = program;
         receipt.node_version = version;
         // A receipt that will not be rewritten now is rewritten at the next start.
+        tracing::info!(%agent, attempt = 0, "install: receipt rewritten: its Node changed");
         drop(write_receipt(&folder, &receipt));
     }
     tracing::info!(%agent, "agent start: {}", receipt.node_line(&runtime));

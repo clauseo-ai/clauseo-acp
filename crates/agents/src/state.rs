@@ -63,8 +63,9 @@ pub enum InstallState {
         /// Bytes an install would download.
         download_bytes: u64,
     },
-    /// Waiting to try again by itself; no try is counted. `reason` is
-    /// [`FailureKind::Offline`] today: name resolution or connect failed with no route.
+    /// Waiting to try again by itself; no try is counted. `reason` is [`FailureKind::Offline`]
+    /// (no network, or a connection lost), or [`FailureKind::Unreachable`] once three tries in a
+    /// row met no network while the OS reports one.
     Waiting {
         /// Why it waits.
         reason: FailureKind,
@@ -102,6 +103,10 @@ pub enum FailureKind {
     /// Name resolution or connect failed and the OS reports no route. Never a failure state:
     /// the install waits and retries every 30 s by itself.
     Offline,
+    /// Three offline tries in a row while the OS does not report the network gone: the hosts
+    /// are out of reach (a proxy or firewall dropping every connection, or offline in a way the
+    /// OS cannot see). Never a failure state either: the install goes on trying every 30 s.
+    Unreachable,
     /// A 403 or 407 from a proxy, a TLS failure, or an HTML page where a file should be.
     Blocked,
     /// Too little free space for the snapshot's need, or `ENOSPC` while writing.
@@ -111,10 +116,12 @@ pub enum FailureKind {
 }
 
 impl FailureKind {
-    /// The error code: `agent.install_offline`, `_blocked`, `_disk_full` or `_failed`.
+    /// The error code: `agent.install_offline`, `_unreachable`, `_blocked`, `_disk_full` or
+    /// `_failed`.
     pub fn code(self) -> &'static str {
         match self {
             FailureKind::Offline => "agent.install_offline",
+            FailureKind::Unreachable => "agent.install_unreachable",
             FailureKind::Blocked => "agent.install_blocked",
             FailureKind::DiskFull => "agent.install_disk_full",
             FailureKind::Failed => "agent.install_failed",
@@ -125,6 +132,7 @@ impl FailureKind {
     pub fn word(self) -> &'static str {
         match self {
             FailureKind::Offline => "offline",
+            FailureKind::Unreachable => "unreachable",
             FailureKind::Blocked => "blocked",
             FailureKind::DiskFull => "disk_full",
             FailureKind::Failed => "failed",

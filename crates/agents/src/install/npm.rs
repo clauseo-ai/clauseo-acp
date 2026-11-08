@@ -32,11 +32,12 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Timer};
+use clauseo_protocol::AgentId;
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join3, select};
 
 use super::files::{Fetched, npm_cache};
-use super::{Job, NodeChoice, Run, TryError};
+use super::{Job, NodeChoice, Run, Step, TryError};
 use crate::config::AgentsConfig;
 use crate::node::{self, NodeSource, node_line};
 use crate::receipt::{Receipt, install_folder, install_root, script_path, write_receipt};
@@ -91,7 +92,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
                     return Err(TryError::retry("Node's archive is missing", config));
                 };
                 node::install_runtime(path, snapshot.node(), archive, dir, platform.os)
-                    .map_err(|err| TryError::extract(&err, config))?;
+                    .map_err(|err| TryError::extract(&err, config).at(Step::UnpackNode))?;
             }
             (
                 node::runtime_program(dir, platform.os),
@@ -109,6 +110,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         return Err(TryError::cancelled());
     }
     let io = |what: &'static str| io_error(what, config);
+    let attempt = run.attempts;
     let cache = npm_cache(&config.data_dir);
     // Made through no link below the data folder, as `install/` is below, so the removals in
     // them never reach a folder a link points at.
@@ -122,8 +124,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     write::create_private_dirs_under(&config.data_dir, &root)
         .map_err(io("making the install folder"))?;
     let tmp = root.join(format!(".tmp-{hash}-{}", run.attempts));
-    write::remove_dir_all(&tmp).map_err(io("clearing the temp folder"))?;
-    write::create_dir_all(&tmp).map_err(io("making the temp folder"))?;
+    fresh_tmp(&tmp, agent, attempt).map_err(io("making the temp folder"))?;
     let npm = Npm {
         job,
         program: &program,
@@ -144,14 +145,19 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             .map_err(io("writing package-lock.json"))?;
         let mut args: Vec<OsString> = vec!["ci".into()];
         args.extend(CI_FLAGS.iter().map(OsString::from));
-        npm.run("ci", args, &tmp).await?;
+        npm.run("ci", args, &tmp)
+            .await
+            .map_err(|err| err.at(Step::NpmInstall))?;
         if let Some(link) = first_link(&tmp) {
             let detail = format!("npm left a link in the install folder: {}", link.display());
-            return Err(TryError::retry(&detail, config));
+            return Err(TryError::retry(&detail, config)
+                .at(Step::NpmInstall)
+                .because("npm left a link"));
         }
         let folder = install_folder(&config.data_dir, agent, &hash);
-        write::remove_dir_all(&folder).map_err(io("clearing the install folder"))?;
-        write::rename(&tmp, &folder).map_err(io("renaming the install folder"))?;
+        into_place(&tmp, &folder, agent, attempt)
+            .map_err(io("renaming the install folder"))
+            .map_err(|err| err.at(Step::Rename))?;
         let receipt = Receipt::new(
             agent,
             pins.version(),
@@ -161,7 +167,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             platform,
             config.clock.now(),
         );
-        write_receipt(&folder, &receipt).map_err(io("writing the receipt"))?;
+        write_receipt(&folder, &receipt)
+            .map_err(io("writing the receipt"))
+            .map_err(|err| err.at(Step::Receipt))?;
         Ok(Installed {
             node: program.clone(),
             script: script_path(&folder, entry),
@@ -171,9 +179,49 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     }
     .await;
     if done.is_err() {
-        drop(write::remove_dir_all(&tmp));
+        discard_tmp(&tmp, agent, attempt);
     }
-    done
+    done.map_err(|err| err.at(Step::Prepare))
+}
+
+/// Renames `tmp` to `folder`, replacing (logged) one with no valid receipt left there.
+fn into_place(tmp: &Path, folder: &Path, agent: &AgentId, attempt: u32) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(folder).is_ok() {
+        tracing::info!(
+            %agent,
+            attempt,
+            "install: set-up discarded: an install folder with no valid receipt is replaced"
+        );
+    }
+    write::remove_dir_all(folder)?;
+    write::rename(tmp, folder)
+}
+
+/// Removes a temp folder of the same number left by an earlier run (logged), then makes it.
+fn fresh_tmp(tmp: &Path, agent: &AgentId, attempt: u32) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(tmp).is_ok() {
+        tracing::info!(
+            %agent,
+            attempt,
+            "install: set-up discarded: temp folder stale at start of the try"
+        );
+    }
+    write::remove_dir_all(tmp)?;
+    write::create_dir_all(tmp)
+}
+
+/// Removes a failed try's temp folder (logged). The checked downloads stay in `downloads/` for
+/// the next try, which reuses them with no request; only a `Ready` install removes them.
+fn discard_tmp(tmp: &Path, agent: &AgentId, attempt: u32) {
+    if std::fs::symlink_metadata(tmp).is_ok() {
+        tracing::info!(
+            %agent,
+            attempt,
+            "install: set-up discarded: temp folder removed after the try failed; the checked \
+             downloads are kept for the next try"
+        );
+        drop(write::remove_dir_all(tmp));
+    }
 }
 
 /// Maps a file error of `what` to a try's error.
@@ -237,6 +285,11 @@ impl<T> Npm<'_, T> {
     /// Removes the runtime npm ran from, if it did, and says so in `detail`.
     fn drop_runtime(&self, detail: &mut String) {
         if let Some(dir) = self.runtime {
+            tracing::info!(
+                agent = %self.job.ticket.agent,
+                "install: set-up discarded: the downloaded Node is removed, npm could not run \
+                 from it; unpacked again from the kept archive"
+            );
             drop(write::remove_dir_all(dir));
             detail.push_str("; the downloaded Node is removed and will be fetched again");
         }
@@ -256,7 +309,7 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         let refused = |err: clauseo_process::Error| {
             let mut detail = format!("npm {what} could not start: {err}");
             self.drop_runtime(&mut detail);
-            TryError::retry(&detail, config)
+            TryError::retry(&detail, config).because("npm could not start")
         };
         let spec = LaunchSpec::new(
             self.program.to_owned(),
@@ -309,9 +362,9 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         match ran {
             Ok(Some(0)) => Ok(()),
             Ok(code) => {
-                let code =
+                let said =
                     code.map_or_else(|| "a signal".to_owned(), |code| format!("code {code}"));
-                let mut detail = format!("npm {what} exited with {code}");
+                let mut detail = format!("npm {what} exited with {said}");
                 if let Some(line) = &code_line {
                     detail.push_str(": ");
                     detail.push_str(line);
@@ -319,14 +372,20 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                 if module_missing && code_line.is_none() {
                     self.drop_runtime(&mut detail);
                 }
-                let enospc = code_line.as_deref().is_some_and(|l| l.ends_with("ENOSPC"));
-                Err(TryError::npm(&detail, enospc, config))
+                Err(TryError::npm(
+                    &detail,
+                    code,
+                    code_line.as_deref(),
+                    module_missing,
+                    config,
+                ))
             }
             Err(None) => Err(TryError::cancelled()),
             Err(Some(())) => Err(TryError::retry(
                 &format!("npm {what} did not finish in 10 minutes"),
                 config,
-            )),
+            )
+            .because("npm did not finish in 10 minutes")),
         }
     }
 }

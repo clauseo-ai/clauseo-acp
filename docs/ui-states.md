@@ -330,6 +330,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked`, `ErrorCode::SettingsRefused`, `ErrorCode::SettingsKeyStored` | no |
 | Agent install (0048) | `ErrorCode::AgentInstallOffline`, `ErrorCode::AgentInstallDiskFull`, `ErrorCode::AgentInstallFailed` | yes |
+| Agent install waiting: hosts out of reach for three tries while the computer has a network (#683) | `ErrorCode::AgentInstallUnreachable` | yes |
 | Agent install (0048) | `ErrorCode::AgentInstallBlocked` | no |
 | Sign-in (0048) | `ErrorCode::SigninLinkExpired`, `ErrorCode::SigninPortBusy`, `ErrorCode::SigninFailed` | yes |
 | Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable`, `ErrorCode::SigninLoginShared`, `ErrorCode::SigninFirmManaged`, `ErrorCode::SigninKeyInUse`, `ErrorCode::SigninEndpointInUse` | no |

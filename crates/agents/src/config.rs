@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::AgentId;
 
+use crate::osnet::{OsNetwork, SystemNetwork};
 use crate::platform::{Os, Platform};
 use crate::snapshot::Snapshot;
 
@@ -35,6 +36,9 @@ pub struct AgentsConfig {
     pub signin: SigninConfig,
     /// The receipt's install time and the progress throttle's clock; sign-in's `since` and `at`.
     pub clock: Arc<dyn Clock>,
+    /// Whether the OS reports no network at all: an install offline for three tries in a row
+    /// says unreachable only while it does not.
+    pub os_network: Arc<dyn OsNetwork>,
     /// Tests only: agents taken as `Ready` at start with this install, with no receipt or Node
     /// check, so the sign-in tests can run a fake CLI as the adapter. Outside `test-support`
     /// the field does not exist.
@@ -45,7 +49,8 @@ pub struct AgentsConfig {
 impl AgentsConfig {
     /// The embedded snapshot for `platform`, with no firm settings, nothing managed, the user's
     /// Node searched for as [`NodeSearch::from_env`] finds it, sign-in as
-    /// [`SigninConfig::from_env`] (no agent homes yet: R20 sets them), and the system clock.
+    /// [`SigninConfig::from_env`] (no agent homes yet: R20 sets them), the system clock and the
+    /// OS's view of the network.
     pub fn new(data_dir: PathBuf, platform: Platform) -> AgentsConfig {
         AgentsConfig {
             data_dir,
@@ -56,6 +61,7 @@ impl AgentsConfig {
             node_search: NodeSearch::from_env(),
             signin: SigninConfig::from_env(),
             clock: Arc::new(SystemClock),
+            os_network: Arc::new(SystemNetwork),
             #[cfg(feature = "test-support")]
             ready_for_tests: BTreeMap::new(),
         }

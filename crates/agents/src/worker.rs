@@ -446,6 +446,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 && let Some(hash) = config.snapshot.install_hash(&agent, config.platform)
             {
                 let scan = receipt::scan(&config.data_dir, &agent, &hash, config.platform);
+                if let Ok(scan) = &scan {
+                    receipt::log_stale(&agent, scan);
+                }
                 // A folder that will not go now goes at the next start, or under the install's
                 // own rename.
                 drop(scan.and_then(|scan| receipt::remove_stale(&scan)));

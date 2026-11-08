@@ -837,5 +837,16 @@
     "at": "2026-11-07",
     "by": "stage E (provisional; Rohan batch review)",
     "note": "The \"Allow this site\" refusal for a blocked-site notice the host no longer keeps (too old, or from before a restart) (ADR 0053)"
+  },
+  "U3-err-agent.install_unreachable": {
+    "en": "Clauseo can't reach its download server ({hosts}). If your internet is working, ask your IT team to allow these addresses. Clauseo keeps trying.",
+    "hi": "Clauseo अपने डाउनलोड सर्वर ({hosts}) तक नहीं पहुँच पा रहा है। अगर आपका इंटरनेट चल रहा है, तो अपनी IT टीम से इन पतों को अनुमति देने के लिए कहें। Clauseo कोशिश करता रहेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Waiting after three offline tries in a row while the OS reports a network (#683); the install line fills {hosts}"
   }
 }
