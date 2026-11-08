@@ -12,6 +12,7 @@ mod names;
 mod store;
 
 pub use links::LINK_RULES_MAX;
+pub use names::{hfs_ignorable, strip_hfs_ignorables};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
 };
