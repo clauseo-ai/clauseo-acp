@@ -2,7 +2,7 @@
 //! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
 //! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
 
-use std::io;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -89,6 +89,11 @@ impl Markers for OsMarkers {
     )]
     fn pause(&mut self, pause: Duration) {
         std::thread::sleep(pause);
+    }
+
+    fn note(&mut self, line: &str) {
+        let mut stderr = io::stderr().lock();
+        drop(writeln!(stderr, "{line}").and_then(|()| stderr.flush()));
     }
 }
 

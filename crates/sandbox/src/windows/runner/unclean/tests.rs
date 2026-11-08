@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+mod failures;
 mod final_stop;
+mod install;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1010";
 const POOL_B: &str = "S-1-5-21-1-2-3-1011";
@@ -18,6 +20,13 @@ fn sid(text: &str) -> Sid {
 
 /// A marker as the fake holds it: its pool user, its state (`None`: unreadable) and its install.
 type Held = (Option<Sid>, Option<MarkerState>, Option<String>);
+
+/// Which of the fake's marker effects fail, every time.
+#[derive(Default)]
+struct Fails {
+    settle: bool,
+    remove: bool,
+}
 
 /// The fake: the markers by id, the record's numbers, and everything done.
 struct Fake {
@@ -33,6 +42,8 @@ struct Fake {
     unreadable: bool,
     /// `SweepNext` can't be read.
     sweep_next_fails: bool,
+    /// Which of the marker writes and removals fail.
+    fails: Fails,
     log: Vec<String>,
 }
 
@@ -48,6 +59,7 @@ impl Fake {
             install: Ok(None),
             unreadable: false,
             sweep_next_fails: false,
+            fails: Fails::default(),
             log: Vec::new(),
         }
     }
@@ -120,11 +132,18 @@ impl Markers for Fake {
         install: Option<&str>,
         state: MarkerState,
     ) -> io::Result<()> {
+        if self.fails.settle {
+            return Err(io::Error::from_raw_os_error(32));
+        }
         let held = (pool_user.cloned(), Some(state), install.map(str::to_owned));
         self.markers.insert(id.to_owned(), held);
         Ok(())
     }
     fn remove(&mut self, id: &str) -> io::Result<()> {
+        if self.fails.remove {
+            self.log.push(format!("can't remove {id}"));
+            return Err(io::Error::from_raw_os_error(32));
+        }
         self.markers.remove(id);
         self.log.push(format!("remove {id}"));
         Ok(())
@@ -144,7 +163,13 @@ impl Markers for Fake {
             self.done.sweep = self.sweeps.remove(0);
         }
     }
+    fn note(&mut self, line: &str) {
+        self.log.push(format!("note {line}"));
+    }
 }
+
+const INSTALL: &str = "0123456789abcdef0123456789abcdef";
+const OLD_INSTALL: &str = "ffffffffffffffffffffffffffffffff";
 
 const STOP: MarkerState = MarkerState::AwaitingStop { stop: 3 };
 /// What [`STOP`] becomes once its stop completed: the fake's `SweepNext`, read then.
@@ -524,69 +549,4 @@ fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
     fake.done.stop = 6;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(fake.markers.is_empty(), "{:?}", fake.markers);
-}
-
-const INSTALL: &str = "0123456789abcdef0123456789abcdef";
-const OLD_INSTALL: &str = "ffffffffffffffffffffffffffffffff";
-
-#[test]
-fn a_marker_of_another_install_is_stale_and_removed() {
-    let mut fake = Fake::new();
-    fake.install = Ok(Some(INSTALL.to_owned()));
-    // A removed install's escapee marker, a reinstall's counters starting again: it would
-    // refuse every logon until the new StopSequence reached its number.
-    let stuck = MarkerState::AwaitingStop { stop: 900 };
-    fake.installed("old", Some(stuck), Some(OLD_INSTALL));
-    // One from before the ids, after the reinstall wrote one.
-    fake.installed("none", Some(stuck), None);
-    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert!(!fake.has("old") && !fake.has("none"), "{:?}", fake.markers);
-    assert_eq!(fake.asked("stop"), 0);
-    // A marker the current install wrote isn't stale: it still refuses.
-    fake.installed("now", Some(stuck), Some(INSTALL));
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-}
-
-#[test]
-fn with_no_install_id_or_one_that_cant_be_read_no_marker_is_stale_by_it() {
-    let stuck = MarkerState::AwaitingStop { stop: 900 };
-    // An install from before the ids: its markers have none, and keep today's rule.
-    let mut old = Fake::new();
-    old.installed("a1", Some(stuck), None);
-    assert!(logon_check(&mut old, &sid(POOL_A)).is_err());
-    assert_eq!(old.state("a1"), Some(stuck));
-    // A marker with an id while the record has none: its install was removed.
-    old.installed("a2", Some(stuck), Some(OLD_INSTALL));
-    drop(logon_check(&mut old, &sid(POOL_A)));
-    assert!(!old.has("a2"));
-    // An id that can't be read makes nothing stale.
-    let mut unread = Fake::new();
-    unread.install = Err("RegGetValueW failed (5)".to_owned());
-    unread.installed("a3", Some(stuck), Some(OLD_INSTALL));
-    assert!(logon_check(&mut unread, &sid(POOL_A)).is_err());
-    assert!(unread.has("a3"));
-}
-
-#[test]
-fn an_unreadable_marker_isnt_written_again_while_the_install_id_cant_be_read() {
-    let mut fake = Fake::new();
-    fake.install = Err("RegGetValueW failed (5)".to_owned());
-    fake.marker("x1", None, None);
-    // Refused, the stop requested, but the marker left unreadable: written id-less, the next
-    // read would take it for another install's and remove it.
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    assert_eq!(fake.markers["x1"], (None, None, None));
-    assert_eq!(fake.asked("stop"), 1);
-    assert!(start_up(&mut fake).is_ok());
-    assert_eq!(fake.markers["x1"], (None, None, None));
-    // Once the id reads, it is replaced under it, and isn't stale.
-    fake.install = Ok(Some(INSTALL.to_owned()));
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    let read = MarkerState::AwaitingStop { stop: 5 };
-    assert_eq!(
-        fake.markers["x1"],
-        (None, Some(read), Some(INSTALL.to_owned()))
-    );
-    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    assert!(fake.has("x1"), "not removed as another install's");
 }
