@@ -444,6 +444,8 @@ mod bypass_tests;
 mod command;
 #[cfg(test)]
 mod command_tests;
+#[cfg(test)]
+mod drive_word_tests;
 mod health;
 mod identity;
 mod input;
