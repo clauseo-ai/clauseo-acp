@@ -1,9 +1,10 @@
 //! Quit and Cancel stop Codex's sign-in runs gracefully (`signin/stopping.rs`): the browser
 //! login gets `GET /cancel` on its callback port and ends writing nothing; a login in the middle
 //! of saving Codex's login file finishes the save, so the file is whole; a status is awaited; a
-//! run still going at the quit's bound is killed; and a 0-byte login file in Clauseo's home is
-//! removed before a status reads it; the quit's kill and a second stop end the check after a
-//! Cancel without a logout. No test fires the lawyer's 2 s grace: every run ends by itself.
+//! run still going at the quit's bound is killed, as is a login the quit finds not yet listening;
+//! and a 0-byte login file in Clauseo's home is removed before a status reads it; the quit's kill
+//! and a second stop end the check after a Cancel without a logout. No test fires the lawyer's
+//! 2 s grace: every run ends by itself.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -82,6 +83,34 @@ fn quit_sends_cancel_and_ends_inside_its_bound() {
     assert!(!login_file(&fx).exists());
     assert_eq!(fx.codex_runs(&["login", "status"]), []);
     assert_eq!(fx.codex_runs(&["logout"]), []);
+    #[cfg(target_os = "linux")]
+    assert!(crate::support::gone(login.pid), "pid {} runs", login.pid);
+    let _ = login;
+}
+
+/// The quit before the login listens (its bind held back, as a slow start holds it: Windows'
+/// Winsock start): no listener is the login's, so no `/cancel` goes, and the login is killed
+/// inside the bound, never waited on past it.
+#[test]
+fn a_quit_before_the_login_listens_kills_it_inside_its_bound() {
+    let mut fx = Fixture::new("graceful-quit-early", "never");
+    fx.listen_for_cancel();
+    // The gate is never opened: the login never binds.
+    let gate = fx.data.path().join("bind-gate");
+    fx.set_env("FAKE_CODEX_BIND_GATE", gate.to_str().unwrap());
+    let (agents, _events) = start(&fx);
+    agents.sign_in(&codex(), Method::Browser).unwrap();
+    eventually("the login started", || {
+        !fx.codex_runs(&["login"]).is_empty()
+    });
+    let login = fx.codex_runs(&["login"]).remove(0);
+    assert!(
+        agents.shutdown(Duration::from_millis(900)),
+        "the kill came late"
+    );
+    assert!(!home(&fx).join("fake-login-listening").exists());
+    assert!(!home(&fx).join("fake-login-cancelled").exists());
+    assert!(!login_file(&fx).exists());
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(login.pid), "pid {} runs", login.pid);
     let _ = login;

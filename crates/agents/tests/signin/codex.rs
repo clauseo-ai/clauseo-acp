@@ -297,10 +297,17 @@ fn codex_runs_get_their_home_the_file_store_and_ssl_cert_file() {
     );
 }
 
+/// The lawyer's Cancel before Codex's browser login listens on its callback port (on Windows the
+/// bind can come well after the start, behind Winsock's): no listener is the login's, so no
+/// `/cancel` goes, not even once the login binds a moment later, and the run and its tree are
+/// killed when the grace passes. The fake holds its bind until the test opens its gate, so the
+/// order is the same on every OS. The `/cancel` to a login that listens is in `graceful`.
 #[test]
 fn cancel_kills_the_codex_run_and_its_tree() {
     let mut fx = Fixture::new("codex-cancel", "never");
     fx.listen_for_cancel();
+    let gate = fx.data.path().join("bind-gate");
+    fx.set_env("FAKE_CODEX_BIND_GATE", gate.to_str().unwrap());
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
@@ -312,7 +319,22 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     });
     let login = fx.codex_runs(&["login"]).remove(0);
     agents.cancel_sign_in(&codex()).unwrap();
+    // The grace is armed once the owner check is done: it found no listener.
+    eventually("the grace is armed", || {
+        fx.timer.live().contains(&CANCEL_GRACE)
+    });
+    // The login binds only now, after the check.
+    write_file(&gate, b"").unwrap();
+    let home = crate::codex_cli::home(&fx);
+    eventually("the login listens", || {
+        home.join("fake-login-listening").is_file()
+    });
+    fx.timer.fire(CANCEL_GRACE);
     assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));
+    assert!(
+        !home.join("fake-login-cancelled").exists(),
+        "a /cancel came"
+    );
     #[cfg(target_os = "linux")]
     assert!(
         crate::support::gone(login.pid),
@@ -322,7 +344,7 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     let _ = login;
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
     // Two status runs: the quick check before the login, which said signed out; and, the
-    // login having ended on its `/cancel`, one check after it, which said signed out again.
+    // login having been killed, one check after it, which said signed out again.
     assert_eq!(fx.codex_runs(&["login", "status"]).len(), 2);
     assert_eq!(fx.codex_runs(&["app-server"]), []);
 }
