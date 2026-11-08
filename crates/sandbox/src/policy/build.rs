@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
+use super::other_matter::{HiddenMatter, all_reads};
 use super::{
     ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
     PolicyBuilder, same, under,
@@ -24,7 +25,14 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .as_deref()
         .map(|home| beneath_existing(home, "home folder"))
         .transpose()?;
-    let hidden = all_beneath(&b.hidden, "hidden path")?;
+    let mut hidden = all_beneath(&b.hidden, "hidden path")?;
+    let mut hidden_matters = Vec::new();
+    for (path, id) in &b.hidden_matters {
+        let path = beneath_existing(path, "matter's hidden folder")?;
+        hidden.push(path.clone());
+        let matter = id.clone();
+        hidden_matters.push(HiddenMatter { path, matter });
+    }
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
     let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
@@ -76,6 +84,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         check_allowed(&folder, &matter, home_ref, &hidden)?;
         allowed_folders.push(folder);
     }
+    let reads = &b.other_matter_reads;
+    let other_matter_reads = all_reads(reads, &matter, home_ref, &hidden, &hidden_matters)?;
 
     let mut scan = match b.scan {
         Some(scan) => scan,
@@ -140,6 +150,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_targets,
         link_folders,
         read_only_in_matter,
+        hidden_matters,
+        other_matter_reads,
     })
 }
 

@@ -46,7 +46,8 @@
 //!
 //! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `tmpdir`, `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
-//!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
+//!   `hidden`, `hidden_matter`, `other_matter_read` ([`OtherMatterRead`], R18), `proxy_port`
+//!   (once per loopback listener), `loopback` ([`Loopback`]),
 //!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
@@ -58,7 +59,8 @@
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
 //!   [`CLAUDE_STORE_LOCK_FOLDERS`], [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]).
 //! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
-//!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
+//!   allowed folder; its cross-matter branch refuses [`REFUSED_IN_OTHER_MATTER`] anywhere in
+//!   the path. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
 //!   which also lists every `.git`, the folders `.git` files name, and the other
 //!   [`PROTECTED_AT_ANY_DEPTH`] names.
@@ -186,8 +188,9 @@ pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
-    PathRule, Policy, PolicyBuilder, hfs_ignorable, strip_hfs_ignorables,
+    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, OtherMatterRead, PROTECTED_AT_ANY_DEPTH,
+    PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, REFUSED_IN_OTHER_MATTER, hfs_ignorable,
+    strip_hfs_ignorables,
 };
 pub use proxy::{
     Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route,
