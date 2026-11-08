@@ -4,6 +4,7 @@
 //! if a reparse point, locked and listed through that handle (`FileIdBothDirectoryInfo`); each
 //! entry is opened relative to it (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and
 //! `FILE_OPEN_REPARSE_POINT`), and a link below is deleted as itself, through its own handle.
+//! A file with more than one name is refused, not locked (`os::lock_handle`).
 #![expect(unsafe_code, reason = "FFI to SetFileInformationByHandle")]
 
 use std::ffi::OsString;
