@@ -392,12 +392,26 @@ fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrato
             "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
             sid.as_str()
         );
+        // Anything before the call that fails (PowerShell, the COM connect, the task's lookup)
+        // ends it 1 and fails the test; the call itself ends it 0 when it worked, 3 when refused,
+        // each saying so (what it printed holds stderr too).
         let script = format!(
             "$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; \
-             $s.Connect(); $s.GetFolder('\\').GetTask('{name}').SetSecurityDescriptor('{sddl}', 0)"
+             $s.Connect(); $t=$s.GetFolder('\\').GetTask('{name}'); \
+             try {{ $t.SetSecurityDescriptor('{sddl}', 0); 'SET-OK'; exit 0 }} \
+             catch {{ 'SET-REFUSED: ' + $_.Exception.Message; exit 3 }}"
         );
         let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
         eprintln!("4. SetSecurityDescriptor O:{alias} as the test user: exit {code:?}\n{printed}");
+        let ran = match code {
+            Some(0) => printed.contains("SET-OK"),
+            Some(3) => printed.contains("SET-REFUSED"),
+            _ => false,
+        };
+        assert!(
+            ran,
+            "O:{alias}: PowerShell didn't reach the call: exit {code:?}\n{printed}"
+        );
         let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
         eprintln!("   its cache key's owner: {cached:?}");
         assert_eq!(
