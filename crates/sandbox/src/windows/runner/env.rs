@@ -89,6 +89,9 @@ pub struct GitEnv {
     pub tree: Option<WinPath>,
     /// The lawyer's per-machine Git installs, which no `PATH` entry of the agent's may lie in.
     pub lawyer_git: Vec<WinPath>,
+    /// `PATH` entries with their long forms (`GetLongPathNameW`), where they differ: an entry
+    /// is in a Git install when either form is.
+    pub long_names: Vec<(String, String)>,
 }
 
 /// The agent's environment from `message`, for a lawyer whose profile folder is `profile`,
@@ -123,8 +126,7 @@ pub fn agent_env(
             continue;
         }
         let kept = if name.eq_ignore_ascii_case("PATH") {
-            filter_list(value, profile, &runtime)
-                .and_then(|value| without_roots(&value, &git.lawyer_git))
+            filter_list(value, profile, &runtime).and_then(|value| without_git(&value, git))
         } else if LISTS.iter().any(|list| list.eq_ignore_ascii_case(name)) {
             filter_list(value, profile, &runtime)
         } else if lies_outside(value, profile, &granted) {
@@ -254,13 +256,21 @@ fn lies_outside(value: &str, profile: &WinPath, granted: &[WinPath]) -> bool {
         .any(|part| text_within(part, profile) && !granted.iter().any(|g| text_within(part, g)))
 }
 
-/// `value` (a `;` list) without its entries that lie in any of `roots`; `None` when nothing
-/// is left.
-fn without_roots(value: &str, roots: &[WinPath]) -> Option<String> {
-    let kept: Vec<&str> = value
-        .split(';')
-        .filter(|entry| !roots.iter().any(|root| text_within(entry, root)))
-        .collect();
+/// `value` (a `;` list) without its entries that lie, as written or in their long form, in
+/// any of `git`'s lawyer's Git installs; `None` when nothing is left.
+fn without_git(value: &str, git: &GitEnv) -> Option<String> {
+    let in_git = |entry: &str| {
+        let long = git
+            .long_names
+            .iter()
+            .find(|(short, _)| short == entry)
+            .map(|(_, long)| long.as_str());
+        [Some(entry), long]
+            .into_iter()
+            .flatten()
+            .any(|form| git.lawyer_git.iter().any(|root| text_within(form, root)))
+    };
+    let kept: Vec<&str> = value.split(';').filter(|entry| !in_git(entry)).collect();
     (!kept.is_empty()).then(|| kept.join(";"))
 }
 

@@ -13,10 +13,14 @@
 //!    `<admin>\git\<pool account>\<tree id>` ([`tree_parts`]);
 //! 3. each of `git`, `<account>` and `<tree id>` opened relative to the one above, never
 //!    through a link, owner SYSTEM and exactly `git_tree`'s protected DACL;
-//! 4. the tree's completion marker, `.clauseo-tree`: its tree id and SID ([`marker_ok`]);
-//! 5. `usr\bin\msys-2.0.dll`: its final path must be the tree's own, and gives the key
+//! 4. the files the agent starts from ([`HELD`]) opened without `FILE_SHARE_DELETE` and held for
+//!    the run, so a refresh can't retire the tree between this check and the agent's first Git;
+//!    a handle on a folder would hold nothing (the desktop user gets no right on the tree's
+//!    folders that takes a share), and a file that can't be deleted keeps its folders;
+//! 5. the tree's completion marker, `.clauseo-tree`: its tree id and SID ([`marker_ok`]);
+//! 6. `usr\bin\msys-2.0.dll`: its final path must be the tree's own, and gives the key
 //!    ([`msys_key`]); the file gives the shared id ([`shared_id`]);
-//! 6. both folders made, never opened: one already there is squatted ([`Off::Squatted`]).
+//! 7. both folders made, never opened: one already there is squatted ([`Off::Squatted`]).
 //!
 //! Each failure is one plain line on stderr and no Git Bash for the run: the agent then gets
 //! neither `CLAUDE_CODE_GIT_BASH_PATH` nor any Git a PATH entry of the lawyer's Git names
@@ -40,6 +44,9 @@ pub(crate) const SHARED_ID_TAG: &[u8] = b"%%% MSYS shared id: ";
 pub(crate) const MARKER: &str = ".clauseo-tree";
 /// The msys runtime, from a tree's root.
 pub(crate) const MSYS_DLL: [&str; 3] = ["usr", "bin", "msys-2.0.dll"];
+/// The files held open for the run, from a tree's root: the runtime, Claude Code's
+/// `bash.exe`, and the `git.exe` first in the agent's `PATH`.
+pub(crate) const HELD: [&[&str]; 3] = [&MSYS_DLL, &["bin", "bash.exe"], &["cmd", "git.exe"]];
 
 /// Why Git Bash is off for a run; [`fmt::Display`] is its plain line. Appended only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +75,8 @@ pub(crate) enum Off {
     Squatted,
     /// One of msys's two folders couldn't be made.
     ObjectDir(String),
+    /// A file of the tree couldn't be held open for the run.
+    Unheld(String),
 }
 
 impl fmt::Display for Off {
@@ -105,6 +114,10 @@ impl fmt::Display for Off {
                 "msys's shared folder for this Git tree already exists: something made it first"
             ),
             Off::ObjectDir(why) => write!(f, "msys's shared folder couldn't be made ({why})"),
+            Off::Unheld(why) => write!(
+                f,
+                "the Git tree's files couldn't be held open for the run ({why})"
+            ),
         }
     }
 }
@@ -147,18 +160,22 @@ pub(crate) trait GitBashOs {
     fn marker(&mut self, path: &WinPath) -> Result<String, String>;
     /// The regular file `dll`, opened as itself.
     fn runtime(&mut self, dll: &WinPath) -> Result<Runtime, String>;
+    /// The regular file `file`, opened as itself to read, sharing read alone (no
+    /// `FILE_SHARE_DELETE`): no one can delete, rename or write it while the handle lives.
+    fn hold(&mut self, file: &WinPath) -> Result<Self::Held, String>;
     /// This process's session.
     fn session(&mut self) -> Result<u32, String>;
     /// Makes the object folder `path` with the descriptor `sddl`, never opening one there.
     fn make_dir(&mut self, path: &str, sddl: &str) -> Result<Self::Held, Made>;
 }
 
-/// A run's Git Bash, ready: its tree, and msys's folders held open for the run.
+/// A run's Git Bash, ready: its tree, with its [`HELD`] files and msys's folders open for the
+/// run.
 #[derive(Debug)]
 pub(crate) struct Ready<H> {
     /// The tree's root.
     pub(crate) tree: WinPath,
-    /// The folders' handles.
+    /// The files' handles, then the folders'.
     pub(crate) held: Vec<H>,
 }
 
@@ -190,6 +207,13 @@ pub(crate) fn prepare<O: GitBashOs>(
         (id.clone(), account_sddl(pool_user)),
     ];
     os.check_levels(&admin, &levels).map_err(Off::Unverified)?;
+    let mut held = Vec::new();
+    for parts in HELD {
+        let file = parts
+            .iter()
+            .fold(tree.clone(), |path, part| path.join(part));
+        held.push(os.hold(&file).map_err(Off::Unheld)?);
+    }
     let marker = os.marker(&tree.join(MARKER)).map_err(Off::Unverified)?;
     if !marker_ok(&marker, &id, pool_user) {
         return Err(Off::Unverified(
@@ -207,7 +231,6 @@ pub(crate) fn prepare<O: GitBashOs>(
     );
     let session = os.session().map_err(Off::ObjectDir)?;
     let sddl = object_dir_sddl(desktop, pool_user);
-    let mut held = Vec::new();
     for path in object_dirs(session, &name) {
         match os.make_dir(&path, &sddl) {
             Ok(dir) => held.push(dir),

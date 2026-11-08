@@ -34,7 +34,9 @@ use windows::Win32::Storage::FileSystem::{
     GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
-use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows::Win32::UI::Shell::{
+    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
 use super::{AdminCopyFs, Found, Held, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
@@ -203,7 +205,16 @@ fn identity(file: &File) -> io::Result<Identity> {
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment,
 /// which whoever started this process could have set.
 pub(crate) fn program_files() -> io::Result<PathBuf> {
-    let folder = FOLDERID_ProgramFiles;
+    known_folder(FOLDERID_ProgramFiles)
+}
+
+/// `%ProgramFiles(x86)%` (`FOLDERID_ProgramFilesX86`), as [`program_files`] reads its folder.
+pub(crate) fn program_files_x86() -> io::Result<PathBuf> {
+    known_folder(FOLDERID_ProgramFilesX86)
+}
+
+/// The machine's known folder `folder`.
+fn known_folder(folder: windows::core::GUID) -> io::Result<PathBuf> {
     // SAFETY: `folder` is a live GUID for the call; no token is passed (Program Files is the
     // machine's). The string returned is freed by `TaskString`.
     let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }

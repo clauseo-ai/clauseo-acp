@@ -35,6 +35,7 @@ struct Fake {
     session: u32,
     existing: Vec<String>,
     fail_make: bool,
+    fail_hold: bool,
     checked: Vec<(String, String)>,
     made: HashMap<String, String>,
 }
@@ -53,6 +54,7 @@ impl Fake {
             session: 2,
             existing: Vec::new(),
             fail_make: false,
+            fail_hold: false,
             checked: Vec::new(),
             made: HashMap::new(),
         }
@@ -99,6 +101,14 @@ impl GitBashOs for Fake {
                 .eq_ignore_ascii_case(&format!(r"{}\usr\bin\msys-2.0.dll", tree()))
         );
         self.runtime.clone()
+    }
+
+    fn hold(&mut self, file: &WinPath) -> Result<String, String> {
+        assert!(file.within(&WinPath::parse(&tree()).unwrap()));
+        if self.fail_hold {
+            return Err("holding bash.exe failed (32)".to_owned());
+        }
+        Ok(file.display())
     }
 
     fn session(&mut self) -> Result<u32, String> {
@@ -199,7 +209,10 @@ fn a_checked_tree_makes_both_folders_with_the_run_s_descriptor() {
     .unwrap();
     let session = format!(r"\Sessions\2\BaseNamedObjects\msys-2.0S5-{key}");
     let global = format!(r"\BaseNamedObjects\msys-2.0S5-{key}");
-    assert_eq!(ready.held, vec![session.clone(), global.clone()]);
+    let files = [r"usr\bin\msys-2.0.dll", r"bin\bash.exe", r"cmd\git.exe"]
+        .map(|file| format!(r"{}\{file}", tree()));
+    assert_eq!(ready.held[..3], files, "the tree's files held for the run");
+    assert_eq!(ready.held[3..], [session.clone(), global.clone()]);
     let sddl = object_dir_sddl(&sid(LAWYER), &sid(POOL));
     assert_eq!(fake.made.get(&session), Some(&sddl));
     assert_eq!(fake.made.get(&global), Some(&sddl));
@@ -326,7 +339,7 @@ fn an_existing_folder_is_squatted_and_turns_git_bash_off() {
     let key = {
         let mut fake = Fake::new();
         let ready = fake.run().unwrap();
-        ready.held[1].clone()
+        ready.held[4].clone()
     };
     let mut global = Fake::new();
     global.existing = vec![key];
@@ -348,6 +361,14 @@ fn an_existing_folder_is_squatted_and_turns_git_bash_off() {
 }
 
 #[test]
+fn a_tree_file_that_can_t_be_held_turns_git_bash_off() {
+    let mut fake = Fake::new();
+    fake.fail_hold = true;
+    assert!(matches!(fake.run(), Err(Off::Unheld(_))));
+    assert!(fake.made.is_empty(), "no folder for a tree that isn't held");
+}
+
+#[test]
 fn each_off_reason_is_one_plain_line_naming_no_path() {
     let reasons = [
         Off::NotRecorded,
@@ -362,6 +383,7 @@ fn each_off_reason_is_one_plain_line_naming_no_path() {
         Off::NoSharedId,
         Off::Squatted,
         Off::ObjectDir("x".to_owned()),
+        Off::Unheld("x".to_owned()),
     ];
     for reason in reasons {
         let line = reason.to_string();
@@ -409,6 +431,7 @@ fn env_with(tree: Option<&str>) -> Vec<(String, String)> {
     let git = GitEnv {
         tree: tree.map(|t| WinPath::parse(t).unwrap()),
         lawyer_git: vec![WinPath::parse(r"C:\Program Files\Git").unwrap()],
+        long_names: Vec::new(),
     };
     let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
     agent_env(&launch(SPEC_PATH), &profile, &git).unwrap()
@@ -447,11 +470,44 @@ fn with_no_tree_the_agent_gets_no_git_bash_and_never_the_lawyer_s() {
     let git = GitEnv {
         tree: None,
         lawyer_git: vec![WinPath::parse(r"C:\Program Files\Git").unwrap()],
+        long_names: Vec::new(),
     };
     let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
     let only_git = launch(r"C:\Program Files\Git\cmd");
     assert_eq!(
         get(&agent_env(&only_git, &profile, &git).unwrap(), "PATH"),
         None
+    );
+}
+
+#[test]
+fn a_short_name_of_the_lawyer_s_git_is_caught_by_its_long_form() {
+    let git = GitEnv {
+        tree: None,
+        lawyer_git: vec![
+            WinPath::parse(r"C:\Program Files\Git").unwrap(),
+            WinPath::parse(r"C:\Program Files (x86)\Git").unwrap(),
+        ],
+        long_names: vec![
+            (
+                r"C:\PROGRA~1\Git\cmd".to_owned(),
+                r"C:\Program Files\Git\cmd".to_owned(),
+            ),
+            (
+                r"C:\PROGRA~2\Git\bin".to_owned(),
+                r"C:\Program Files (x86)\Git\bin".to_owned(),
+            ),
+            (r"D:\TOOLS~1".to_owned(), r"D:\Tools Two".to_owned()),
+        ],
+    };
+    let profile = WinPath::parse(r"C:\Users\Lawyer").unwrap();
+    let spec = launch(
+        r"C:\PROGRA~1\Git\cmd;D:\TOOLS~1;C:\PROGRA~2\Git\bin;C:\Program Files (x86)\Git\cmd",
+    );
+    let env = agent_env(&spec, &profile, &git).unwrap();
+    assert_eq!(
+        get(&env, "PATH"),
+        Some(r"D:\TOOLS~1"),
+        "other entries stay as written"
     );
 }

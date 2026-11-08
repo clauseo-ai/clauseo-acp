@@ -3,13 +3,14 @@
 //! `NtCreateDirectoryObject`.
 #![expect(
     unsafe_code,
-    reason = "FFI to GetFinalPathNameByHandleW, ProcessIdToSessionId and NtCreateDirectoryObject"
+    reason = "FFI to GetFinalPathNameByHandleW, GetLongPathNameW, ProcessIdToSessionId and \
+              NtCreateDirectoryObject"
 )]
 
 use std::fs::File;
 use std::io::{self, Read as _};
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
-use std::os::windows::io::AsRawHandle as _;
+use std::os::windows::io::{AsRawHandle as _, IntoRawHandle as _};
 use std::path::Path;
 
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
@@ -19,7 +20,7 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW, VOLUME_NAME_DOS,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW, GetLongPathNameW, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::GetCurrentProcessId;
@@ -44,21 +45,25 @@ const REPARSE_POINT: u32 = 0x400;
 const RUNTIME_CAP: u64 = 64 * 1024 * 1024;
 /// The most of a tree's marker read.
 const MARKER_CAP: u64 = 4096;
+/// What a file opened only to read shares: reading and deleting.
+const SHARE_ALL: u32 = FILE_SHARE_READ.0 | FILE_SHARE_DELETE.0;
 /// `DIRECTORY_QUERY`: all a held folder needs.
 const DIRECTORY_QUERY: u32 = 0x0001;
 
-/// The run's Git Bash: its tree and msys's folders, held until this drops.
+/// The run's Git Bash: its tree, with its held files and msys's folders, held until this drops.
 pub(crate) struct GitBash {
     /// What the agent's environment is made with.
     pub(crate) env: GitEnv,
-    /// msys's folders, open for the run: they go with their last handle.
+    /// The tree's held files and msys's folders, open for the run.
     _held: Vec<Handle>,
 }
 
 /// The run's Git Bash, or none with its reason said on one line through `say`. The lawyer's
-/// Git roots, which the agent's `PATH` never names, are found either way.
+/// Git roots, which the agent's `PATH` never names, are found either way, with each `PATH`
+/// entry's long form.
 pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> GitBash {
     let lawyer_git = lawyer_git_roots();
+    let long_names = long_names(message);
     match prepare(
         &mut WindowsGitBash,
         &message.pool_user,
@@ -69,6 +74,7 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
             env: GitEnv {
                 tree: Some(tree),
                 lawyer_git,
+                long_names,
             },
             _held: held,
         },
@@ -80,6 +86,7 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
                 env: GitEnv {
                     tree: None,
                     lawyer_git,
+                    long_names,
                 },
                 _held: Vec::new(),
             }
@@ -88,22 +95,60 @@ pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> 
 }
 
 /// The per-machine Git installs the lawyer's `PATH` may name: `HKLM\SOFTWARE\GitForWindows`'s
-/// `InstallPath`, and `%ProgramFiles%\Git`. A per-user one lies in the lawyer's profile, which
-/// `env::agent_env` already keeps out.
+/// `InstallPath`, `%ProgramFiles%\Git` and `%ProgramFiles(x86)%\Git`, each also in its long
+/// form. A per-user one lies in the lawyer's profile, which `env::agent_env` already keeps out.
 fn lawyer_git_roots() -> Vec<WinPath> {
     let mut roots = Vec::new();
     if let Ok(Some(path)) = record::read_string(w!(r"SOFTWARE\GitForWindows"), w!("InstallPath")) {
-        roots.extend(WinPath::parse(&path));
+        roots.push(path);
     }
-    if let Ok(folder) = admin_os::program_files() {
-        roots.extend(
-            folder
-                .to_str()
-                .and_then(WinPath::parse)
-                .map(|p| p.join("Git")),
-        );
+    for folder in [admin_os::program_files(), admin_os::program_files_x86()]
+        .into_iter()
+        .flatten()
+    {
+        roots.extend(folder.to_str().map(|folder| format!(r"{folder}\Git")));
     }
+    let long: Vec<String> = roots.iter().filter_map(|root| long_path(root)).collect();
+    roots.extend(long);
     roots
+        .iter()
+        .filter_map(|root| WinPath::parse(root))
+        .collect()
+}
+
+/// Each entry of the launch's `PATH` whose long form (`GetLongPathNameW`, where it exists)
+/// differs, with that form: so `C:\PROGRA~1\Git\cmd` is seen in `C:\Program Files\Git`.
+fn long_names(message: &LaunchMessage) -> Vec<(String, String)> {
+    message
+        .env
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .flat_map(|(_, value)| value.split(';'))
+        .filter_map(|entry| {
+            let long = long_path(entry.trim())?;
+            (long != entry).then(|| (entry.to_owned(), long))
+        })
+        .collect()
+}
+
+/// `path`'s long form, when it exists; `None` otherwise or when it is the same.
+fn long_path(path: &str) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let wide = HSTRING::from(path);
+    let mut buffer = vec![0_u16; 512];
+    for _ in 0..3 {
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `buffer` is live and writable.
+        let len = unsafe { GetLongPathNameW(PCWSTR(wide.as_ptr()), Some(&mut buffer)) };
+        let len = usize::try_from(len).ok().filter(|len| *len > 0)?;
+        if len < buffer.len() {
+            let long = String::from_utf16(buffer.get(..len)?).ok()?;
+            return (long != path).then_some(long);
+        }
+        buffer.resize(len + 1, 0);
+    }
+    None
 }
 
 /// The machine, as the desktop user.
@@ -139,7 +184,8 @@ impl GitBashOs for WindowsGitBash {
     }
 
     fn marker(&mut self, path: &WinPath) -> Result<String, String> {
-        let mut file = open_plain(&path.display()).map_err(|e| said("its marker", &e))?;
+        let mut file =
+            open_plain(&path.display(), SHARE_ALL).map_err(|e| said("its marker", &e))?;
         let mut text = String::new();
         (&mut file)
             .take(MARKER_CAP)
@@ -149,7 +195,7 @@ impl GitBashOs for WindowsGitBash {
     }
 
     fn runtime(&mut self, dll: &WinPath) -> Result<Runtime, String> {
-        let mut file = open_plain(&dll.display()).map_err(|e| said("opening it", &e))?;
+        let mut file = open_plain(&dll.display(), SHARE_ALL).map_err(|e| said("opening it", &e))?;
         let final_path = final_path(&file).map_err(|e| said("its final path", &e))?;
         let mut image = Vec::new();
         (&mut file)
@@ -157,6 +203,13 @@ impl GitBashOs for WindowsGitBash {
             .read_to_end(&mut image)
             .map_err(|e| said("reading it", &e))?;
         Ok(Runtime { final_path, image })
+    }
+
+    fn hold(&mut self, file: &WinPath) -> Result<Handle, String> {
+        let name = file.parts().last().map_or_else(String::new, String::clone);
+        let opened = open_plain(&file.display(), FILE_SHARE_READ.0)
+            .map_err(|e| said(&format!("holding {name}"), &e))?;
+        Ok(Handle(HANDLE(opened.into_raw_handle())))
     }
 
     fn session(&mut self) -> Result<u32, String> {
@@ -207,15 +260,16 @@ impl GitBashOs for WindowsGitBash {
     }
 }
 
-/// The regular file `path`, opened as itself to read; a reparse point or a folder is refused.
+/// The regular file `path`, opened as itself to read, sharing `share`; a reparse point or a
+/// folder is refused.
 #[expect(
     clippy::disallowed_methods,
     reason = "opens a tree's file to read it, never to write; std's open is the one with flags"
 )]
-fn open_plain(path: &str) -> io::Result<File> {
+fn open_plain(path: &str, share: u32) -> io::Result<File> {
     let file = File::options()
         .read(true)
-        .share_mode((FILE_SHARE_READ | FILE_SHARE_DELETE).0)
+        .share_mode(share)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
         .open(path)?;
     let meta = file.metadata()?;
