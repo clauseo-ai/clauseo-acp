@@ -344,10 +344,10 @@ build 26100):
     repository last would keep it there for tens of seconds). The folder is then set aside whole
     only if a pool user owns it, read from the handle the move opens (`MOVE | READ_CONTROL`,
     `GetKernelObjectSecurity`) against the pool's exact SIDs, so a folder swapped in after the
-    check can't pass; an owner that can't be read counts as the agent's, so the folder goes (the
-    agent can deny the lawyer `READ_CONTROL` on what it made); anyone else's (a lawyer dragging
-    a big client folder in) is refused before the rename (`SetAsideFailure::NotTheAgents`) and
-    stays for the after-session pass. Full rescans walk on, with the job already ended. Each
+    check can't pass. Anyone else's (a lawyer dragging a big client folder in), or one whose
+    owner can't be read (a FAT or exFAT volume, a third party's folder that denies the lawyer
+    `READ_CONTROL`), is refused before the rename (`SetAsideFailure::NotTheAgents`) and stays for
+    the after-session pass; the session still ends with the budget notice. Full rescans walk on, with the job already ended. Each
     cause gives the lawyer its own plain line, e.g. "Clauseo stopped this session because the
     matter changed faster than Clauseo could check it (very many files at once). Nothing was
     lost." or "Clauseo stopped this session because checking the matter got stuck. Nothing was

@@ -24,8 +24,8 @@
 //! the session before anything in it is read (`check.rs`). Each
 //! scan moves what it finds as it finds it (`scan::Found`), never after the whole tree, and a
 //! scan that runs past [`SCAN_BUDGET`] ends the session too. In a folder made or moved in, that
-//! scan stops there, and the folder goes whole when a pool user owns it, read from the handle
-//! the move renames, or its owner can't be read (`check::Run::below`); a full
+//! scan stops there, and the folder goes whole only when a pool user owns it, read from the
+//! handle the move renames; one whose owner can't be read stays (`check::Run::below`); a full
 //! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
 //! moved, or a folder reported made and gone before it could be scanned, is listed
 //! ([`Live::gone`]), so the watch can end a session whose agent keeps renaming one back and
