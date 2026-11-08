@@ -39,8 +39,14 @@
 //!    sets the running admin copy aside in staging
 //!    (a rename, which a running exe allows) and moves the staged file into place, back to back
 //!    and write-through, and only then writes the new `AdminCopyVersion` (the signed version,
-//!    as signed), then the new `AdminCopySha256`. The set-aside copy stays in staging until the
-//!    next run, which starts from the new copy and so proves it runs, deletes it.
+//!    as signed), then the new `AdminCopySha256`. The set-aside copy is the running exe, which
+//!    Windows won't delete while it runs: it and the staging folder are scheduled for deletion
+//!    at the next restart, and the next run, which starts from the new copy and so proves it
+//!    runs, deletes them sooner;
+//! 10. once step 4 has run, every run ends by leaving no staging folder: the staged file is
+//!     deleted and the folder removed, or, after a swap, both scheduled as step 9 says. A
+//!     staging folder an older refresh left, or one killed midway, is taken back by `--adopt`
+//!     and `--remove --uninstall` (`admin_copy::take_back`).
 //!
 //! The record never names a hash the admin path doesn't hold: until the hash write it holds the
 //! old hash. A crash after both renames leaves the new file under the old hash, which the
@@ -321,6 +327,10 @@ pub trait Refresher {
     fn write_sha256(&mut self, hex: &str) -> Result<(), Failed>;
     /// Deletes the staged file, if any; a failure is only logged by the next run.
     fn discard_staged(&mut self);
+    /// Step 10: removes the staging folder, empty once the staged file is gone; after a swap
+    /// (`swapped`), when it holds the running set-aside copy, schedules the copy and the folder
+    /// for deletion at restart instead. A failure is logged; the next run clears it.
+    fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -377,6 +387,22 @@ fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Re
     if let Err(why) = fs.clear_leftovers() {
         fs.log(true, &format!("an earlier refresh's leftovers stay: {why}"));
     }
+    let outcome = staged_steps(fs, trust, &checked);
+    let swapped = matches!(outcome, Ok(Replaced::Swapped));
+    if !swapped {
+        fs.discard_staged();
+    }
+    fs.leave_staging(swapped);
+    outcome.map(|replaced| replaced.line().to_owned())
+}
+
+/// Steps 5 to 9, after step 4 cleared staging: whatever they end with, [`locked_steps`] leaves
+/// no staging folder behind (step 10).
+fn staged_steps(
+    fs: &mut impl Refresher,
+    trust: &Trust<'_>,
+    checked: &Checked,
+) -> Result<Replaced, Refusal> {
     let sources = fs.read_sources(&checked.dir).map_err(|(which, error)| {
         let name = match which {
             SourceFile::Folder => "the folder",
@@ -389,11 +415,7 @@ fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Re
     let staged = fs
         .stage(&sources.exe)
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
-    let outcome = replace(fs, &staged, &sources.sig, &checked, trust);
-    if !matches!(outcome, Ok(Replaced::Swapped)) {
-        fs.discard_staged();
-    }
-    outcome.map(|replaced| replaced.line().to_owned())
+    replace(fs, &staged, &sources.sig, checked, trust)
 }
 
 /// What [`replace`] did.

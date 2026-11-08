@@ -30,8 +30,8 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_FLAG_WRITE_THROUGH, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_MODE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_DATA, FileAttributeTagInfo, FlushFileBuffers,
-    GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
-    RemoveDirectoryW, WriteFile,
+    GetFileInformationByHandleEx, MOVEFILE_DELAY_UNTIL_REBOOT, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    OPEN_EXISTING, RemoveDirectoryW, WriteFile,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
@@ -369,6 +369,17 @@ pub(super) fn remove_dir(path: &Path) -> Result<(), Failed> {
         Err(error) if gone(&error) => Ok(()),
         Err(error) => Err(failed("RemoveDirectoryW", &error)),
     }
+}
+
+/// Schedules `path` for deletion at the next restart (`MOVEFILE_DELAY_UNTIL_REBOOT`, no new
+/// name): the running set-aside copy, and the staging folder, which Windows deletes then only
+/// if it is empty.
+pub(super) fn delete_at_restart(path: &Path) -> Result<(), Failed> {
+    let name = HSTRING::from(path.as_os_str());
+    // SAFETY: the name is NUL-terminated and outlives the call; a null new name asks for a
+    // delete.
+    unsafe { MoveFileExW(&name, PCWSTR::null(), MOVEFILE_DELAY_UNTIL_REBOOT) }
+        .map_err(|error| failed("MoveFileExW", &error))
 }
 
 /// Whether `error` says the file or its folder isn't there.

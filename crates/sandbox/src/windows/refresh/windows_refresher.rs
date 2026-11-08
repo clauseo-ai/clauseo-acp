@@ -243,6 +243,27 @@ impl Refresher for WindowsRefresher {
         }
     }
 
+    /// After a swap the set-aside copy is this running image: deleted if Windows allows it,
+    /// else scheduled for deletion at restart, and the folder after it the same way.
+    fn leave_staging(&mut self, swapped: bool) {
+        let Ok(dir) = self.staging() else {
+            return;
+        };
+        let left = if swapped {
+            let old = dir.join(SET_ASIDE_NAME);
+            staging::delete(&old)
+                .or_else(|_running| staging::delete_at_restart(&old))
+                .and_then(|()| {
+                    staging::remove_dir(&dir).or_else(|_held| staging::delete_at_restart(&dir))
+                })
+        } else {
+            staging::remove_dir(&dir)
+        };
+        if let Err(why) = left {
+            event_log(true, &format!("the refresh's staging folder stays: {why}"));
+        }
+    }
+
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
     }
