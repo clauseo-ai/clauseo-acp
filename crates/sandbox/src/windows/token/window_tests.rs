@@ -55,7 +55,7 @@ fn all_four() -> [String; 4] {
 fn the_station_is_made_shut_to_its_owner_with_the_lawyer_able_to_take_it_over() {
     assert_eq!(
         station_creation_sddl(&sid(LAWYER)),
-        format!("D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;{LAWYER})(A;;0x2007F;;;OW)")
+        format!("D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;{LAWYER})(A;;0x20000;;;OW)")
     );
 }
 
@@ -63,7 +63,7 @@ fn the_station_is_made_shut_to_its_owner_with_the_lawyer_able_to_take_it_over() 
 fn the_desktop_is_made_with_the_lawyer_holding_what_create_desktop_asks_for() {
     assert_eq!(
         desktop_creation_sddl(&sid(LAWYER)),
-        format!("D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;{LAWYER})(A;;0xC7;;;OW)")
+        format!("D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;{LAWYER})(A;;0x20000;;;OW)")
     );
 }
 
@@ -72,17 +72,11 @@ fn the_last_descriptors_are_the_verified_ones() {
     let (lawyer, pool) = (sid(LAWYER), sid(POOL));
     assert_eq!(
         station_sddl(&lawyer, &pool, None),
-        format!(
-            "D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0x2007F;;;{POOL})\
-             (A;;0x2007F;;;OW)S:(ML;;NW;;;LW)"
-        )
+        format!("D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0x2007F;;;{POOL})S:(ML;;NW;;;LW)")
     );
     assert_eq!(
         desktop_sddl(&lawyer, &pool, None),
-        format!(
-            "D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0xC7;;;{POOL})(A;;0xC7;;;OW)\
-             S:(ML;;NW;;;LW)"
-        )
+        format!("D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0xC7;;;{POOL})S:(ML;;NW;;;LW)")
     );
 }
 
@@ -93,14 +87,14 @@ fn the_matter_sid_gets_the_pool_users_rights_after_the_pool_user() {
         station_sddl(&lawyer, &pool, Some(&matter)),
         format!(
             "D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0x2007F;;;{POOL})\
-             (A;;0x2007F;;;{MATTER})(A;;0x2007F;;;OW)S:(ML;;NW;;;LW)"
+             (A;;0x2007F;;;{MATTER})S:(ML;;NW;;;LW)"
         )
     );
     assert_eq!(
         desktop_sddl(&lawyer, &pool, Some(&matter)),
         format!(
             "D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0xC7;;;{POOL})(A;;0xC7;;;{MATTER})\
-             (A;;0xC7;;;OW)S:(ML;;NW;;;LW)"
+             S:(ML;;NW;;;LW)"
         )
     );
 }
@@ -118,12 +112,30 @@ fn both_last_descriptors_are_labelled_low_and_protected() {
 }
 
 #[test]
-fn every_descriptor_holds_owner_rights_to_use_rights() {
-    for sddl in all_four() {
-        let owner = mask_of(&sddl, "OW");
-        assert_eq!(owner & TAKE_OVER, 0, "{sddl}");
-        assert_eq!(owner & 0xF000_0000, 0, "no generic right: {sddl}");
+fn the_creation_descriptors_hold_the_owner_to_read_control() {
+    // The pool user owns the station until the lawyer takes it: no WRITE_DAC, and no use right
+    // (WINSTA_CREATEDESKTOP among them), so no pool process makes `Default` first.
+    let lawyer = sid(LAWYER);
+    for sddl in [
+        station_creation_sddl(&lawyer),
+        desktop_creation_sddl(&lawyer),
+    ] {
+        assert_eq!(mask_of(&sddl, "OW"), 0x20000, "{sddl}");
         assert!(sddl.starts_with("D:P("), "{sddl}");
+    }
+}
+
+#[test]
+fn the_last_descriptors_have_no_owner_rights_entry() {
+    // The lawyer owns both by then: an OWNER RIGHTS entry would give its processes, Low ones
+    // included, the pool's use rights.
+    let (lawyer, pool, matter) = (sid(LAWYER), sid(POOL), sid(MATTER));
+    for sddl in [
+        station_sddl(&lawyer, &pool, Some(&matter)),
+        desktop_sddl(&lawyer, &pool, Some(&matter)),
+    ] {
+        assert!(!sddl.contains(";;;OW)"), "{sddl}");
+        assert!(entries(&sddl).iter().all(|(_, who)| who != "OW"), "{sddl}");
     }
 }
 

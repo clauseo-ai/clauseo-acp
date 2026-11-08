@@ -260,18 +260,22 @@ pub const STATION_SYSTEM_RIGHTS: u32 = 0x000F_037F;
 /// `SYSTEM`'s rights on the agent's desktop: `DESKTOP`'s every right (`0x1FF`) and the
 /// standard rights.
 pub const DESKTOP_SYSTEM_RIGHTS: u32 = 0x000F_01FF;
-/// The pool user's rights on the agent's window station, and `OWNER RIGHTS`': `READ_CONTROL`
-/// (`0x20000`) and the station's use rights `0x7F` (enumerate and make desktops, read and write
-/// attributes, the clipboard, global atoms, exit Windows). Less makes user32 fail to start the
-/// agent's GUI DLLs (`0x45A`, `ERROR_DLL_INIT_FAILED`); no `WRITE_DAC`, `WRITE_OWNER` or
-/// `DELETE`.
+/// The pool user's rights on the agent's window station: `READ_CONTROL` (`0x20000`) and the
+/// station's use rights `0x7F` (enumerate and make desktops, read and write attributes, the
+/// clipboard, global atoms, exit Windows). Less makes user32 fail to start the agent's GUI DLLs
+/// (`0x45A`, `ERROR_DLL_INIT_FAILED`); no `WRITE_DAC`, `WRITE_OWNER` or `DELETE`.
 pub const STATION_POOL_RIGHTS: u32 = 0x0002_007F;
-/// The pool user's rights on the agent's desktop, and `OWNER RIGHTS`': read objects, make
-/// windows and menus, enumerate, write objects (`0xC7`); no hooks, no journal, no switch.
+/// The pool user's rights on the agent's desktop: read objects, make windows and menus,
+/// enumerate, write objects (`0xC7`); no hooks, no journal, no switch.
 pub const DESKTOP_POOL_RIGHTS: u32 = 0x0000_00C7;
 /// The desktop user's rights on both once set up: `READ_CONTROL | WRITE_DAC | WRITE_OWNER`
 /// (`0xE0000`), for the owner's own descriptor work and nothing of their use.
 pub const CREATOR_RIGHTS: u32 = 0x000E_0000;
+/// `OWNER RIGHTS`' rights in both creation descriptors: `READ_CONTROL` alone. The pool user
+/// owns the station until the desktop user takes it over, and this entry takes away the owner's
+/// implied `WRITE_DAC` and grants it no use right: no process of the pool user's rewrites the
+/// DACL, or makes `Default` before the desktop user does, in that window.
+pub const CREATION_OWNER_RIGHTS: u32 = 0x0002_0000;
 /// `WINSTA_CREATEDESKTOP`.
 const WINSTA_CREATEDESKTOP: u32 = 0x8;
 /// What the desktop user asks for when it opens the station the pool user's logon made, and what
@@ -282,38 +286,41 @@ pub const STATION_OPEN_RIGHTS: u32 = CREATOR_RIGHTS | WINSTA_CREATEDESKTOP;
 /// DACL grants it: [`CREATOR_RIGHTS`] and [`DESKTOP_POOL_RIGHTS`] (`CreateDesktopW` asked for
 /// `READ_CONTROL | WRITE_DAC | WRITE_OWNER` alone fails with 8).
 pub const DESKTOP_MAKE_RIGHTS: u32 = CREATOR_RIGHTS | DESKTOP_POOL_RIGHTS;
-/// What the pool user's logon asks for when it makes the station: the [`STATION_POOL_RIGHTS`]
-/// its creation DACL grants `OWNER RIGHTS`, the pool user being its owner then.
-pub const STATION_MAKE_RIGHTS: u32 = STATION_POOL_RIGHTS;
+/// What the pool user's logon asks for when it makes the station: the
+/// [`CREATION_OWNER_RIGHTS`] its creation DACL grants `OWNER RIGHTS`, the pool user being its
+/// owner then.
+pub const STATION_MAKE_RIGHTS: u32 = CREATION_OWNER_RIGHTS;
 
-/// The agent's window station's descriptor as the pool user's logon makes it (`runner/station.rs`):
-/// `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<desktop user>)(A;;0x2007F;;;OW)`. The pool user owns it
-/// then; `OWNER RIGHTS` held to its use rights takes away the owner's implied `READ_CONTROL` and
-/// `WRITE_DAC`, so no process of the pool user's rewrites the DACL before the desktop user takes
-/// the station over. The desktop user gets [`STATION_OPEN_RIGHTS`]. Never the default DACL, which
-/// grants `Everyone` and `RESTRICTED` `0xF037F`.
+/// The agent's window station's descriptor as the pool user's logon makes it
+/// (`runner/station.rs`): `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<desktop user>)(A;;0x20000;;;OW)`.
+/// The desktop user gets [`STATION_OPEN_RIGHTS`], the owner (the pool user then)
+/// [`CREATION_OWNER_RIGHTS`]. Never the default DACL, which grants `Everyone` and `RESTRICTED`
+/// `0xF037F`.
 pub fn station_creation_sddl(creator: &Sid) -> String {
     format!(
         "D:P(A;;0x{STATION_SYSTEM_RIGHTS:X};;;SY)(A;;0x{STATION_OPEN_RIGHTS:X};;;{creator})\
-         (A;;0x{STATION_POOL_RIGHTS:X};;;OW)"
+         (A;;0x{CREATION_OWNER_RIGHTS:X};;;OW)"
     )
 }
 
 /// The agent's desktop's descriptor as the desktop user makes it:
-/// `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<desktop user>)(A;;0xC7;;;OW)`.
+/// `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<desktop user>)(A;;0x20000;;;OW)`.
 pub fn desktop_creation_sddl(creator: &Sid) -> String {
     format!(
         "D:P(A;;0x{DESKTOP_SYSTEM_RIGHTS:X};;;SY)(A;;0x{DESKTOP_MAKE_RIGHTS:X};;;{creator})\
-         (A;;0x{DESKTOP_POOL_RIGHTS:X};;;OW)"
+         (A;;0x{CREATION_OWNER_RIGHTS:X};;;OW)"
     )
 }
 
 /// The agent's window station's last descriptor, set by the desktop user once it owns it:
-/// `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<desktop user>)(A;;0x2007F;;;<pool user>)(A;;0x2007F;;;OW)
-/// S:(ML;;NW;;;LW)`, the matter SID given the pool user's rights after the pool user's when the
-/// launch restricts with one. Protected, labelled Low: without the label a Low agent hangs in
-/// conhost's start (PowerShell and `whoami` hang). No logon SID, so neither the lawyer's
-/// processes nor another runner's agent opens it.
+/// `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<desktop user>)(A;;0x2007F;;;<pool user>)S:(ML;;NW;;;LW)`,
+/// the matter SID given the pool user's rights after the pool user's when the launch restricts
+/// with one. Protected, labelled Low: without the label a Low agent hangs in conhost's start
+/// (PowerShell and `whoami` hang). No `OWNER RIGHTS` entry: the owner is the desktop user by
+/// then, and one would give the lawyer's processes, Low ones included, the pool's use rights; the
+/// owner keeps its implied `READ_CONTROL | WRITE_DAC` and the explicit [`CREATOR_RIGHTS`], enough
+/// to clean up. No logon SID, so neither the lawyer's processes nor another runner's agent opens
+/// it.
 pub fn station_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> String {
     final_sddl(
         STATION_SYSTEM_RIGHTS,
@@ -325,7 +332,7 @@ pub fn station_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> Str
 }
 
 /// The agent's desktop's last descriptor: `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<desktop user>)
-/// (A;;0xC7;;;<pool user>)(A;;0xC7;;;OW)S:(ML;;NW;;;LW)`, the matter SID as in [`station_sddl`].
+/// (A;;0xC7;;;<pool user>)S:(ML;;NW;;;LW)`, the matter SID and the owner as in [`station_sddl`].
 pub fn desktop_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> String {
     final_sddl(
         DESKTOP_SYSTEM_RIGHTS,
@@ -349,7 +356,7 @@ fn final_sddl(
         .unwrap_or_default();
     format!(
         "D:P(A;;0x{system:X};;;SY)(A;;0x{CREATOR_RIGHTS:X};;;{creator})\
-         (A;;0x{pool:X};;;{pool_user}){matter}(A;;0x{pool:X};;;OW)S:(ML;;NW;;;LW)"
+         (A;;0x{pool:X};;;{pool_user}){matter}S:(ML;;NW;;;LW)"
     )
 }
 
