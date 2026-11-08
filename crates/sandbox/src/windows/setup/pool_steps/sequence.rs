@@ -15,7 +15,9 @@
 use std::collections::BTreeSet;
 
 use super::{Failed, Record};
-use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE};
+use crate::windows::setup::record_values::{
+    STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE, SWEEP_COMPLETED, SWEEP_NEXT, SWEEP_SEQUENCE,
+};
 use crate::windows::sids::Sid;
 
 /// One task's three record values.
@@ -34,6 +36,13 @@ pub const STOP: Values = Values {
     next: STOP_NEXT,
     sequence: STOP_SEQUENCE,
     completed: STOP_COMPLETED,
+};
+
+/// The sweep's values.
+pub const SWEEP: Values = Values {
+    next: SWEEP_NEXT,
+    sequence: SWEEP_SEQUENCE,
+    completed: SWEEP_COMPLETED,
 };
 
 /// Why a reservation failed; nothing was observed yet.

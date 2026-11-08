@@ -1,6 +1,7 @@
 //! The sweep's real [`Sweeper`]: the gate's reads (`pool_steps::windows_gate`), BITS
 //! (`pool_steps::windows_bits`), the Task Scheduler's COM API (`ITaskService`, connected as this
-//! process, LOCAL SYSTEM under the task), `LookupAccountNameW`, and the Event Log.
+//! process, LOCAL SYSTEM under the task), `LookupAccountNameW`, the record's lock and values
+//! (`pool_steps::windows_record`), and the Event Log.
 #![expect(
     unsafe_code,
     reason = "COM calls to the Task Scheduler, and LookupAccountNameW"
@@ -21,7 +22,8 @@ use super::{Failed, Principal, SweepExit, Sweeper, Task, sweep};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
 use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
-use crate::windows::setup::pool_steps::{Bits, Gate, Pool, windows_gate};
+use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
+use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
 use crate::windows::sids::Sid;
 
@@ -32,6 +34,8 @@ pub(crate) fn run() -> SweepExit {
 
 /// The machine the sweep acts on.
 pub(crate) struct WindowsSweeper {
+    /// The set-up lock, while held.
+    lock: RecordLock,
     /// BITS, for [`Bits`].
     bits: WindowsBits,
     /// The Task Scheduler, once connected.
@@ -44,6 +48,7 @@ impl WindowsSweeper {
     /// The machine, with COM on this thread and nothing connected yet.
     pub(super) fn new() -> WindowsSweeper {
         WindowsSweeper {
+            lock: RecordLock::default(),
             bits: WindowsBits::default(),
             service: None,
             _com: Com::new(),
@@ -102,6 +107,28 @@ impl Bits for WindowsSweeper {
 
     fn cancel_job(&mut self, at: usize) -> Result<(), Failed> {
         self.bits.cancel_job(at)
+    }
+}
+
+impl Record for WindowsSweeper {
+    fn lock(&mut self) -> Result<bool, Failed> {
+        self.lock.lock()
+    }
+
+    fn unlock(&mut self) {
+        self.lock.unlock();
+    }
+
+    fn read_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
+        windows_record::read_value(name)
+    }
+
+    fn write_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
+        windows_record::write_value(name, value)
+    }
+
+    fn now(&mut self) -> u64 {
+        windows_record::now()
     }
 }
 
