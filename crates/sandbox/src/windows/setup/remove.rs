@@ -48,10 +48,16 @@
 //! 7. the group, when it is the record's and has no members left, its "Deny log on through
 //!    Remote Desktop Services" right taken off first (a right is keyed by SID and would be left
 //!    on a SID nothing has);
-//! 8. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
-//!    the record key;
-//! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
-//!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
+//! 8. as the owner only, the unclean-session markers in the checked data folder
+//!    (`<data_dir>\sandbox\run\*.session`), so none outlives its set-up; an administrator's
+//!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
+//!    readers drop each as stale, since it names a pool SID the record no longer lists
+//!    (`runner::unclean`);
+//! 9. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
+//!    the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's and
+//!    the sweep's `…Next`, `…Sequence` and `…Completed` among them);
+//! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
+//!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
 //! The first failure stops the run there: [`SetupExit::RemovedPartly`], the record kept with
 //! `Removing = 1` and every pool SID (so a later run still trusts the ledger's entries), and the
@@ -148,6 +154,8 @@ pub enum RemoveStep {
     StopTask,
     /// Taking the group's "Deny log on through Remote Desktop Services" off, before the group.
     RemoteLogon,
+    /// Removing the owner's unclean-session markers, as the owner, before the record.
+    Markers,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -168,6 +176,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
+            RemoveStep::Markers => "removing the sandbox's unclean-session markers",
         })
     }
 }
@@ -349,7 +358,7 @@ fn decide(
     }
 }
 
-/// Steps 2 to 8.
+/// Steps 2 to 9.
 fn steps(
     machine: &mut impl Removal,
     acl: &mut impl AclWriter,
@@ -403,6 +412,9 @@ fn steps(
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
+    if acting == Acting::Owner {
+        clear_markers(machine)?;
+    }
     remove_stop_task(machine)?;
     machine
         .delete_record()
@@ -517,6 +529,14 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
 /// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
 /// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
 /// them with the admin copy).
+/// Step 8, as the owner: the unclean-session markers in the data folder `owners_ledger` checked.
+fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
+    match machine.as_owner(Removal::clear_markers) {
+        Ok(Ok(_cleared)) => Ok(()),
+        Ok(Err(error)) | Err(error) => Err((RemoveStep::Markers, cause_of(&error))),
+    }
+}
+
 fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {
