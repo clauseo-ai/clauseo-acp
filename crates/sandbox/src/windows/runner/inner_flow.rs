@@ -1,6 +1,10 @@
-//! The inner runner's order (M1), apart from its calls so the tests hold it on every OS. Once the
-//! outer resumes it, and before it reads the launch or makes anything:
+//! The inner runner's order (M1), apart from its calls so the tests hold it on every OS. Its token
+//! is already shut, with the desktop user's `TOKEN_QUERY` (`inner.rs`). Once the outer resumes
+//! it, and before it reads the launch or makes anything:
 //!
+//! 0. it opens `ctl`, says it is ready ([`super::frame::InnerReady`]) and waits for the outer's
+//!    go ([`super::frame::InnerGo`]), which comes once the outer's full check of its token
+//!    passed (`outer/steps.rs`); it does nothing else before, and a failed check kills it;
 //! 1. it sweeps its own user's processes ([`Point::Start`]), keeping only itself: a process of
 //!    the pool user's that opened this runner's process, thread or token between the logon and
 //!    the outer's shut, or one this logon set off (a task, a BITS job), is killed before any code
@@ -11,7 +15,7 @@
 //!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes, `Run` values and Startup
 //!    entries, the end sweeper's removal but for the two kinds reached over COM, which this runner
 //!    never starts. The backstop for an end sweeper that never ran. Its failure is logged;
-//! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
+//! 3. it sends on `ctl` what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping its own job's processes, which it
 //!    asks for by pid list with no handle to the job (`sweep.rs`); a failure there
@@ -19,9 +23,9 @@
 //!    ([`InnerReport::Escapee`]), which makes the outer exit [`RunExit::Escapee`]; the run goes
 //!    on.
 //!
-//! No code of this runner's runs before 1 but the DLL search's limit, the error mode and the shut
-//! of its own token, and the only token anyone could have opened before then is this runner's
-//! own, as the pool user it already is.
+//! No code of this runner's runs before 0 but the DLL search's limit, the error mode and the shut
+//! of its own token, none before 1 but 0, and the only token anyone could have opened before then
+//! is this runner's own, as the pool user it already is.
 
 use std::time::Duration;
 
@@ -47,7 +51,10 @@ pub(crate) trait Inner {
     /// A report for the outer that may come before `ctl` is open (`Escapee`): held until then,
     /// in order with the lines, then sent on it.
     fn tell(&mut self, report: InnerReport);
-    /// Opens `ctl` and sends the lines held so far.
+    /// Opens `ctl`, sends [`super::frame::InnerReady`] and waits for the outer's
+    /// [`super::frame::InnerGo`].
+    fn handshake(&mut self) -> Result<(), RunExit>;
+    /// Sends on `ctl` the lines held so far.
     fn connect(&mut self) -> Result<(), RunExit>;
     /// Reads the launch and shuts this runner to the agent.
     fn read_launch(&mut self) -> Result<(), Failure>;
@@ -66,6 +73,9 @@ pub(crate) trait Inner {
 /// The inner runner's run after its token is shut; its exit code: the agent's, or a
 /// [`RunExit`] code.
 pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
+    if let Err(exit) = inner.handshake() {
+        return exit.code();
+    }
     let swept = inner.sweep(Point::Start);
     match &swept {
         Ok(()) => inner.clean(),

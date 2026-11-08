@@ -343,8 +343,9 @@ pub fn is_launch_name(name: &str) -> bool {
 pub enum Mode {
     /// `--launch <file>`: the outer runner.
     Launch(PathBuf),
-    /// `--inner <pipe base>`: the inner runner.
-    Inner(String),
+    /// `--inner <pipe base> <desktop user's SID>`: the inner runner, which grants that user
+    /// `TOKEN_QUERY` on its token first (`token::runner_token_first_sddl`).
+    Inner(String, Sid),
     /// `--sweep`: the end sweeper, which takes nothing else.
     Sweep,
 }
@@ -353,7 +354,10 @@ pub enum Mode {
 pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
     match args {
         [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
-        [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
+        [flag, base, user] if flag == "--inner" => {
+            let user = Sid::parse(user.to_str()?).ok()?;
+            base.to_str().map(|base| Mode::Inner(base.to_owned(), user))
+        }
         [flag] if flag == "--sweep" => Some(Mode::Sweep),
         _ => None,
     }
@@ -449,10 +453,14 @@ pub enum RunExit {
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// The inner runner couldn't grant the desktop user `TOKEN_QUERY` on its own token, its
+    /// first act (`token::runner_token_first_sddl`), so the outer can't make its full check: the
+    /// launch is refused before the inner does anything else.
+    TokenGrant,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 19] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -471,6 +479,7 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::TokenGrant,
     ];
 
     /// The exit code.
@@ -512,7 +521,8 @@ impl RunExit {
             | RunExit::DllSearch
             | RunExit::Escapee
             | RunExit::PoolStop
-            | RunExit::MarkerUnwritable => None,
+            | RunExit::MarkerUnwritable
+            | RunExit::TokenGrant => None,
         }
     }
 }

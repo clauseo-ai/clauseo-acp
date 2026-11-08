@@ -26,9 +26,6 @@ use std::io;
 use super::RunExit;
 use crate::windows::sids::Sid;
 
-#[cfg(windows)]
-pub(super) mod os;
-
 /// `ERROR_ACCESS_DENIED`.
 const ACCESS_DENIED: i32 = 5;
 
@@ -73,6 +70,56 @@ fn compare(pool_user: &Sid, user: &Sid, how: &str) -> Result<(), (RunExit, Strin
             format!("the inner runner isn't the pool user (by {how})"),
         ))
     }
+}
+
+/// The inner runner's token as the outer reads it after the inner's grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TokenSeen {
+    /// The pid the inner said it has (`InnerReady`).
+    pub(super) ready_pid: u32,
+    /// The token's user.
+    pub(super) user: Sid,
+    /// The token's logon SID.
+    pub(super) logon: Sid,
+}
+
+/// The full check, after the resume and before the go (`start.rs`): the ready came from the
+/// process the outer started (`inner_pid`), the token's user is `pool_user` (as before the
+/// resume, now from the token itself), and its logon SID is the run's own: not
+/// `desktop_logon`, the desktop user's, which a token started on the desktop user's own station
+/// would hold. Any failure is [`RunExit::Logon`], naming the step.
+pub(super) fn check_full(
+    seen: &TokenSeen,
+    inner_pid: u32,
+    pool_user: &Sid,
+    desktop_logon: &Sid,
+) -> Result<(), (RunExit, String)> {
+    let failed = |what: &str| {
+        Err((
+            RunExit::Logon,
+            format!("the inner runner's full check: {what}"),
+        ))
+    };
+    if seen.ready_pid != inner_pid {
+        return failed("another process said ready");
+    }
+    if seen.user != *pool_user {
+        return failed("its token's user isn't the pool user");
+    }
+    if seen.logon == *desktop_logon {
+        return failed("its token holds the desktop user's logon SID, not one of its own");
+    }
+    if !is_logon_sid(&seen.logon) {
+        return failed("its token's logon SID isn't one");
+    }
+    Ok(())
+}
+
+/// A logon SID's form: `S-1-5-5-X-Y`.
+fn is_logon_sid(sid: &Sid) -> bool {
+    sid.as_str()
+        .strip_prefix("S-1-5-5-")
+        .is_some_and(|rest| rest.split('-').count() == 2)
 }
 
 // `PROCESS_TELEMETRY_ID_INFORMATION`'s fields read here, as phnt declares the struct
@@ -293,5 +340,61 @@ mod tests {
                     .to_owned()
             ))
         );
+    }
+
+    fn seen() -> TokenSeen {
+        TokenSeen {
+            ready_pid: 41,
+            user: sid(POOL),
+            logon: sid("S-1-5-5-0-777"),
+        }
+    }
+
+    const DESKTOP_LOGON: &str = "S-1-5-5-0-123";
+
+    #[test]
+    fn the_full_check_passes_a_fresh_logon_sid_of_the_pool_user() {
+        assert_eq!(
+            check_full(&seen(), 41, &sid(POOL), &sid(DESKTOP_LOGON)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn the_full_check_refuses_each_doubt_as_logon() {
+        let other_pid = TokenSeen {
+            ready_pid: 42,
+            ..seen()
+        };
+        let other_user = TokenSeen {
+            user: sid("S-1-5-18"),
+            ..seen()
+        };
+        let desktops = TokenSeen {
+            logon: sid(DESKTOP_LOGON),
+            ..seen()
+        };
+        let no_logon = TokenSeen {
+            logon: sid("S-1-5-21-1-2-3-500"),
+            ..seen()
+        };
+        for (case, what) in [
+            (other_pid, "another process said ready"),
+            (other_user, "its token's user isn't the pool user"),
+            (
+                desktops,
+                "its token holds the desktop user's logon SID, not one of its own",
+            ),
+            (no_logon, "its token's logon SID isn't one"),
+        ] {
+            assert_eq!(
+                check_full(&case, 41, &sid(POOL), &sid(DESKTOP_LOGON)),
+                Err((
+                    RunExit::Logon,
+                    format!("the inner runner's full check: {what}")
+                )),
+                "{what}"
+            );
+        }
     }
 }

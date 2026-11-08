@@ -16,7 +16,7 @@ struct Record {
     escape_sweep: Vec<Point>,
     /// Reports told, and whether `ctl` was open when they were.
     told: Vec<(InnerReport, bool)>,
-    /// This step fails: "connect", "read", "start", "started".
+    /// This step fails: "handshake", "connect", "read", "start", "started".
     fail: Option<&'static str>,
     /// How many waits pass before the agent exits.
     waits_left: usize,
@@ -77,6 +77,13 @@ impl Inner for Record {
     fn log(&mut self, line: &str) {
         self.lines.push((line.to_owned(), self.open));
     }
+    fn handshake(&mut self) -> Result<(), RunExit> {
+        self.done.push("handshake".to_owned());
+        if self.fail == Some("handshake") {
+            return Err(RunExit::Pipe);
+        }
+        Ok(())
+    }
     fn connect(&mut self) -> Result<(), RunExit> {
         self.done.push("connect".to_owned());
         if self.fail == Some("connect") {
@@ -129,6 +136,7 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
     assert_eq!(
         record.done,
         [
+            "handshake",
             "sweep before launch",
             "clean",
             "connect",
@@ -149,6 +157,20 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
     assert!(!record.lines[0].1);
 }
 
+/// The handshake (ready, then the outer's go after its full check) is the first thing the inner
+/// does once resumed; one that fails (no go: the outer's check failed, or `ctl` broke) ends it
+/// with nothing else done: no sweep, no launch, no agent.
+#[test]
+fn nothing_runs_before_the_outers_go() {
+    let mut record = Record {
+        fail: Some("handshake"),
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Pipe.code());
+    assert_eq!(record.done, ["handshake"]);
+    assert!(record.told.is_empty() && record.lines.is_empty());
+}
+
 #[test]
 fn a_failed_first_act_sweep_exits_sweep_and_starts_no_agent() {
     let mut record = Record {
@@ -160,6 +182,7 @@ fn a_failed_first_act_sweep_exits_sweep_and_starts_no_agent() {
     assert_eq!(
         record.done,
         [
+            "handshake".to_owned(),
             "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(
@@ -251,6 +274,7 @@ fn an_escapee_at_the_first_act_is_reported_before_ctl_opens_and_exits_escapee() 
     assert_eq!(
         record.done,
         [
+            "handshake".to_owned(),
             "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(

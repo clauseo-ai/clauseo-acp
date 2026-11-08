@@ -1,7 +1,15 @@
 //! The order the outer runner starts the inner runner in (M1), apart from its calls so the tests
 //! hold it on every OS: the logon, the check of the inner's token user, the job, the shut of its
-//! process and thread, and only then the resume. A step that fails after the logon kills the
-//! suspended inner runner, which never runs.
+//! process and thread, the resume, and the full check of its token. A step that fails after the
+//! logon kills the inner runner: before the resume it never runs.
+//!
+//! The check is in two stages. Before the resume, the user alone (`check_user`): on the agent's
+//! own station the inner's token doesn't grant the outer `TOKEN_QUERY`, and the user is read
+//! from the process instead (`inner_user.rs`). After the resume the inner's one act is to grant
+//! the desktop user `TOKEN_QUERY` on its token, say it is ready on `ctl`, and wait; the outer
+//! then opens the token and checks it whole (`confirm`: the user again, and a logon SID of the
+//! run's own, not the desktop user's) before it sends the go. Until the go the inner has done
+//! nothing but the grant (`inner_flow.rs`).
 //!
 //! No step gives the inner a handle to its job: the job kills on close, which happens only when
 //! its last handle closes, so the outer's must be the only one, and the inner and the agent end
@@ -27,6 +35,8 @@ pub(crate) trait Steps {
     fn shut(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Lets it run.
     fn resume(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
+    /// Waits for its ready, checks its token whole, and sends it the go.
+    fn confirm(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Ends it after `error`.
     fn kill(&mut self, inner: &Self::Inner, error: &Self::Error);
 }
@@ -38,7 +48,8 @@ pub(crate) fn start<S: Steps>(steps: &mut S) -> Result<S::Inner, S::Error> {
         .check_user(&inner)
         .and_then(|()| steps.assign(&inner))
         .and_then(|()| steps.shut(&inner))
-        .and_then(|()| steps.resume(&inner));
+        .and_then(|()| steps.resume(&inner))
+        .and_then(|()| steps.confirm(&inner));
     match started {
         Ok(()) => Ok(inner),
         Err(error) => {
@@ -87,12 +98,22 @@ mod tests {
         fn resume(&mut self, _: &u32) -> Result<(), String> {
             self.step("resume")
         }
+        fn confirm(&mut self, _: &u32) -> Result<(), String> {
+            self.step("confirm")
+        }
         fn kill(&mut self, inner: &u32, error: &String) {
             self.done.push(format!("kill {inner} after {error}"));
         }
     }
 
-    const ORDER: [&str; 5] = ["log on", "check user", "assign", "shut", "resume"];
+    const ORDER: [&str; 6] = [
+        "log on",
+        "check user",
+        "assign",
+        "shut",
+        "resume",
+        "confirm",
+    ];
 
     /// The steps are the whole start: none hands the inner a handle (to its job or anything).
     #[test]
@@ -113,7 +134,9 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_after_logon_kills_the_inner_and_never_resumes_it() {
+    /// Each failure kills the inner: before the resume it never ran, and a failed full check
+    /// (`confirm`) kills it before its go, with nothing done but its token's grant.
+    fn a_failure_after_logon_kills_the_inner() {
         for (at, step) in ORDER.iter().enumerate().skip(1) {
             let mut record = Record {
                 fail: Some(step),

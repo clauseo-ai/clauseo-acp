@@ -1,13 +1,13 @@
 //! The inner runner (Windows): the pool user's half, started by the outer runner through
-//! `CreateProcessWithLogonW` with `--inner <pipe base>`. See `runner.rs` for the whole chain and
-//! `inner_flow.rs` for its order.
+//! `CreateProcessWithLogonW` with `--inner <pipe base> <desktop user's SID>`. See `runner.rs`
+//! for the whole chain and `inner_flow.rs` for its order.
 
 use std::fs::File;
 use std::path::Path;
 use std::time::Duration;
 
 use super::RunExit;
-use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
+use super::frame::{InnerGo, InnerLaunch, InnerReady, InnerReport, read_frame, write_frame};
 use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
@@ -21,24 +21,25 @@ use crate::windows::pipe::{PipeSet, Role};
 use crate::windows::sids::Sid;
 use crate::windows::token::TokenSpec;
 use crate::windows::token::os::{
-    logon_sid, make, own_token, shut_later, shut_self, shut_token_first, user,
+    logon_sid, make, own_token, shut_inner_token_first, shut_later, shut_self, user,
 };
 use crate::windows::write;
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
-pub fn run_inner(base: &str) -> u32 {
+pub fn run_inner(base: &str, desktop_user: &Sid) -> u32 {
     if restrict_dll_search().is_err() {
         return RunExit::DllSearch.code();
     }
     quiet_errors();
-    // First of all: shut this runner's own token to all but SYSTEM. The outer runner read its
-    // user while it was suspended; the launch adds the desktop user later. The handle opened
-    // here keeps its rights.
+    // First of all: shut this runner's own token to all but SYSTEM and the desktop user's
+    // TOKEN_QUERY (`token::runner_token_first_sddl`), so the outer can open it for its full
+    // check before its go (`inner_flow.rs`, step 0). The outer read its user while it was
+    // suspended. The handle opened here keeps its rights. A grant that fails refuses the launch.
     let Ok(token) = own_token() else {
-        return RunExit::Token.code();
+        return RunExit::TokenGrant.code();
     };
-    if shut_token_first(&token).is_err() {
-        return RunExit::Token.code();
+    if shut_inner_token_first(&token, desktop_user).is_err() {
+        return RunExit::TokenGrant.code();
     }
     let Ok(me) = user(&token) else {
         return RunExit::Token.code();
@@ -51,6 +52,7 @@ pub fn run_inner(base: &str) -> u32 {
         token,
         me,
         held: Vec::new(),
+        opened: None,
         ctl: None,
         launch: None,
     };
@@ -63,8 +65,11 @@ struct Calls {
     token: Handle,
     /// This runner's user: the pool user, as the outer checked.
     me: Sid,
-    /// Lines and reports told before `ctl` opened.
+    /// Lines and reports told before `connect`.
     held: Vec<InnerReport>,
+    /// `ctl` once the handshake opened it, until `connect` takes it: lines stay held meanwhile,
+    /// as before the handshake, so nothing is written that the outer doesn't read yet.
+    opened: Option<File>,
     ctl: Option<File>,
     launch: Option<InnerLaunch>,
 }
@@ -109,11 +114,32 @@ impl Inner for Calls {
         }
     }
 
-    fn connect(&mut self) -> Result<(), RunExit> {
+    fn handshake(&mut self) -> Result<(), RunExit> {
         let Ok(ctl) = open_client(&self.set.name(Role::Ctl), Role::Ctl, false) else {
             return Err(RunExit::Pipe);
         };
-        self.ctl = Some(into_file(ctl));
+        let ctl = into_file(ctl);
+        write_frame(
+            &ctl,
+            &InnerReady {
+                pid: std::process::id(),
+            },
+        )
+        .map_err(|_e| RunExit::Pipe)?;
+        // Blocks until the outer's full check passed; a failed one kills this process.
+        match read_frame::<InnerGo>(&ctl) {
+            Ok(InnerGo { go: true }) => {}
+            Ok(InnerGo { go: false }) | Err(_) => return Err(RunExit::Pipe),
+        }
+        self.opened = Some(ctl);
+        Ok(())
+    }
+
+    fn connect(&mut self) -> Result<(), RunExit> {
+        let Some(ctl) = self.opened.take() else {
+            return Err(RunExit::Pipe);
+        };
+        self.ctl = Some(ctl);
         for report in std::mem::take(&mut self.held) {
             self.tell(report);
         }
