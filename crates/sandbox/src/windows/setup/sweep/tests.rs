@@ -114,6 +114,9 @@ struct Fake {
     gone_from: Option<usize>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
+    /// What the admin-only log was given, and why it fails when `Some`.
+    admin_logged: Vec<String>,
+    admin_fails: Option<Failed>,
 }
 
 impl Fake {
@@ -163,6 +166,8 @@ impl Fake {
             gone_from: None,
             done: Vec::new(),
             logged: Vec::new(),
+            admin_logged: Vec::new(),
+            admin_fails: None,
         }
     }
 
@@ -461,6 +466,11 @@ impl Sweeper for Fake {
     fn log(&mut self, error: bool, line: &str) {
         self.logged.push((error, line.to_owned()));
     }
+
+    fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
+        self.admin_logged.push(line.to_owned());
+        self.admin_fails.clone().map_or(Ok(()), Err)
+    }
 }
 
 #[test]
@@ -502,8 +512,7 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
     assert_eq!(
         line,
         "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
-         tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file, and 0 \
-         with an odd descriptor), 0 with \
+         tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
          no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
          domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 0 \
          running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"

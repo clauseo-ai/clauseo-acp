@@ -143,11 +143,11 @@ fn a_clean_task_file_naming_someone_else_is_still_skipped() {
 }
 
 /// A DACL entry: its type, SID and mask.
-type Entry<'e> = (u8, &'e str, u32);
+pub(super) type Entry<'e> = (u8, &'e str, u32);
 
 /// A descriptor's DACL, for [`descriptor`].
 #[derive(Debug, Clone, Copy)]
-enum Dacl<'d> {
+pub(super) enum Dacl<'d> {
     /// None: the DACL-present bit unset.
     Absent,
     /// A NULL DACL: present, at offset 0.
@@ -157,7 +157,7 @@ enum Dacl<'d> {
 }
 
 /// A self-relative descriptor owned by `owner` with `dacl`.
-fn descriptor(owner: Option<&str>, dacl: Dacl<'_>) -> Vec<u8> {
+pub(super) fn descriptor(owner: Option<&str>, dacl: Dacl<'_>) -> Vec<u8> {
     let owner = owner.map(|owner| sid_bytes(&Sid::parse(owner).unwrap()));
     let entries = match dacl {
         Dacl::Of(entries) => Some(entries),

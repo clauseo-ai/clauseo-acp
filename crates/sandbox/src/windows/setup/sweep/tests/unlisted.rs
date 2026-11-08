@@ -1,6 +1,7 @@
 //! The cross-check: a task the task files or the Task Scheduler's cache hold but the listing
-//! didn't give (its descriptor shuts SYSTEM out, say) is 56, unless its trusted task file names
-//! a principal that isn't the pool's. Nothing is deleted through a file or the registry.
+//! didn't give (its descriptor shuts SYSTEM out, say) is 56, unless its cache key's owner reads
+//! and isn't the pool's and its trusted task file names a principal that isn't the pool's.
+//! Nothing is deleted through a file or the registry.
 
 use super::task_file::file;
 use super::*;
@@ -28,8 +29,14 @@ fn a_task_the_listing_hides_is_56_and_left() {
         assert!(fake.deleted().is_empty(), "never deleted through a file");
         let line = &fake.logged[0].1;
         assert!(line.contains("1 not listed (in a task file"), "{line}");
+        let counted = "; 1 tasks keep it at 56, named in the admin-only log";
+        assert!(line.ends_with(counted), "counted, never named: {line}");
         let named = format!("; tasks that keep the sweep at 56: \"{path}\"");
-        assert!(line.ends_with(&named), "only the task left named: {line}");
+        assert!(
+            fake.admin_logged[0].ends_with(&named),
+            "{:?}",
+            fake.admin_logged
+        );
     }
     // A file naming a pool user, or owned by one, is no proof either.
     let pool = file("<UserId>S-1-5-21-1-2-3-1010</UserId>");
@@ -82,37 +89,37 @@ fn a_hidden_task_owned_by_a_pool_user_is_56_whatever_its_trusted_file_says() {
 }
 
 #[test]
-fn a_hidden_task_with_an_odd_descriptor_is_decided_by_its_trusted_file() {
+fn a_hidden_task_with_an_odd_descriptor_is_56_whatever_its_file_says() {
+    // Unreadable (a DACL near 64 KiB), ownerless, over its cap: a trusted file proves nothing,
+    // since a registrant with WRITE_DAC can name SYSTEM there and then drop its own write.
     let odd = [
         "a task's descriptor in the Task Scheduler's cache couldn't be read (2)",
         "a task's descriptor in the Task Scheduler's cache names no owner",
         "a task's descriptor in the Task Scheduler's cache is larger than its cap",
     ];
     for why in odd {
-        // A trusted file naming SYSTEM: skipped, counted as an odd descriptor's.
-        let system = file("<UserId>S-1-5-18</UserId>");
-        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
-        fake.cache_owners
-            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
-        assert_eq!(sweep(&mut fake), SweepExit::Done, "{why}");
-        let line = &fake.logged[0].1;
-        assert!(line.contains("0 not listed"), "{line}");
-        assert!(line.contains("and 1 with an odd descriptor"), "{line}");
-        // A trusted file naming a pool user: 56.
-        let pool = file("<UserId>S-1-5-21-1-2-3-1010</UserId>");
-        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", pool)));
-        fake.cache_owners
-            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
-        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{why}");
-        // A file a pool user owns, so not trusted: 56.
-        let system = file("<UserId>S-1-5-18</UserId>");
-        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
-        fake.cache_owners
-            .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
-        let mut security = clean();
-        security.owner = sid(1010);
-        fake.securities.insert(r"A\hidden".to_owned(), security);
-        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{why}");
+        let mut owned = clean();
+        owned.owner = sid(1010);
+        let files = [
+            (file("<UserId>S-1-5-18</UserId>"), None),
+            (file("<UserId>S-1-5-21-1-2-3-1010</UserId>"), None),
+            (file("<UserId>S-1-5-18</UserId>"), Some(owned)),
+        ];
+        for (bytes, security) in files {
+            let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", bytes)));
+            fake.cache_owners
+                .insert(r"\A\hidden".to_owned(), Err(why.to_owned()));
+            if let Some(security) = security {
+                fake.securities.insert(r"A\hidden".to_owned(), security);
+            }
+            let (exit, line) = swept_line(&mut fake);
+            assert_eq!(exit, SweepExit::TasksLeft, "{why}: {line}");
+            assert!(line.contains("1 not listed"), "{line}");
+            assert!(line.contains("0 more skipped"), "{line}");
+            assert!(fake.deleted().is_empty(), "never deleted through a file");
+            let swept = sweep_tasks(&mut fake, &[sid(1010)]);
+            assert_eq!(swept.hidden_paths, [r"\A\hidden"], "{why}");
+        }
     }
 }
 
@@ -194,27 +201,22 @@ fn a_stray_task_file_is_ignored_unless_a_pool_user_owns_it_or_its_owner_cant_be_
 }
 
 #[test]
-fn a_cache_key_alone_is_ignored_only_when_its_task_cant_run_or_its_sd_names_another_owner() {
-    // Its task can run: only a readable SD naming an owner that isn't the pool's is ignored.
-    for owner in [None, Some(Ok(sid(1001)))] {
-        let mut fake = hiding(r"\A\task", None);
-        fake.stale.push(r"\stale".to_owned());
-        if let Some(owner) = owner.clone() {
-            fake.cache_owners.insert(r"\stale".to_owned(), owner);
-        }
-        let (exit, line) = swept_line(&mut fake);
-        assert_eq!(exit, SweepExit::Done, "{owner:?}: {line}");
-        let kind = "1 cache keys with no task file (1 ignored";
-        assert!(line.contains(kind), "{line}");
-    }
-    // A pool owner, or an SD that is missing, over its cap or ownerless: 56.
+fn a_cache_key_alone_is_56_whenever_its_task_can_run_whatever_its_sd_names() {
+    // Its task can run: its SD's owner, the registrant's input, is never trusted, so SYSTEM,
+    // a pool user or another user there, or an SD that is missing, over its cap or ownerless,
+    // is 56.
     let unread = [
         "a task's descriptor in the Task Scheduler's cache couldn't be read (2)",
         "a task's descriptor in the Task Scheduler's cache couldn't be read (234)",
         "a task's descriptor in the Task Scheduler's cache names no owner",
     ];
     let owners = unread.map(|why| Err(why.to_owned()));
-    for owner in owners.into_iter().chain([Ok(sid(1010))]) {
+    let readable = [
+        Ok(sid(1010)),
+        Ok(sid(1001)),
+        Ok(Sid::parse("S-1-5-18").unwrap()),
+    ];
+    for owner in owners.into_iter().chain(readable) {
         let mut fake = hiding(r"\A\task", None);
         fake.stale.push(r"\stale".to_owned());
         fake.cache_owners
@@ -238,6 +240,7 @@ fn a_cache_key_alone_is_ignored_only_when_its_task_cant_run_or_its_sd_names_anot
     stale.runnable.insert(r"\stale".to_owned(), Ok(false));
     let (exit, line) = swept_line(&mut stale);
     assert_eq!(exit, SweepExit::Done, "{line}");
+    assert!(line.contains("1 cache keys with no task file (1 ignored, can't run)"));
     // Whether it can run unread: 56.
     let mut unread = hiding(r"\A\task", None);
     unread.stale.push(r"\stale".to_owned());

@@ -1,13 +1,12 @@
 //! What the task walk (step 4) did, counted ([`Swept`]), and the run's one log line
-//! ([`log_line`]): counts, and the paths of at most five tasks that keep the run at 56,
-//! cleaned ([`log_path`]: SIDs redacted, non-ASCII characters replaced, quoted, capped);
-//! never another task's path, nor a SID.
+//! ([`log_line`]): counts alone, never a task's path, nor a SID. The paths of the tasks that
+//! keep the run at 56 go to the admin-only log ([`log_path`]).
 
 use std::collections::BTreeMap;
 
-use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs, log_path};
+use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
 #[cfg(doc)]
-use super::{running, unlisted};
+use super::{log_path, running, unlisted};
 
 /// What the task walk (step 4) did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -66,7 +65,7 @@ pub struct Swept {
     /// Of the task files alone, those ignored: the file's own owner isn't a pool SID.
     pub stray_files: usize,
     /// Of the cache keys alone, those ignored: their task can't run (no `TaskCache\Tasks` key for
-    /// their `Id`), or their `SD` is readable and names an owner that isn't a pool SID.
+    /// their `Id`).
     pub stale_keys: usize,
     /// Folders below `Tasks` or cache keys gone while they were listed, left out of it, and
     /// still gone when checked once more.
@@ -81,12 +80,8 @@ pub struct Swept {
     /// Folders or keys gone while listed that were there again when checked once more, or
     /// couldn't be checked: 56.
     pub reappeared: usize,
-    /// Hidden tasks a task file and the cache hold whose trusted task file names a principal
-    /// that isn't the pool's, skipped though the owner their cache key's `SD` names couldn't
-    /// be read (unreadable, ownerless, over its cap).
-    pub odd_sd_skipped: usize,
-    /// The path of each task that keeps the run at 56, where it was read: logged, cleaned and
-    /// capped ([`log_path`]).
+    /// The path of each task that keeps the run at 56, where it was read: written, cleaned and
+    /// capped, to the admin-only log alone ([`log_path`]).
     pub left_paths: Vec<String>,
 }
 
@@ -141,9 +136,8 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         format!(
             "; the listings disagreed and were read again: {} tasks in a task file and the cache \
              only, {} task files with no cache key ({} ignored, not a pool user's), {} cache keys \
-             with no task file ({} ignored, not a pool user's or can't run), {} folders or keys \
-             gone while listed and still gone, {} there again, {} tasks new to the second walk \
-             ({} the pool's)",
+             with no task file ({} ignored, can't run), {} folders or keys gone while listed \
+             and still gone, {} there again, {} tasks new to the second walk ({} the pool's)",
             swept.unlisted_in_both,
             swept.unlisted_files,
             swept.stray_files,
@@ -157,20 +151,18 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
     } else {
         String::new()
     };
-    let left = log_path::listed(&swept.left_paths);
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
-         file, and {} with an odd descriptor), {} with no user or group, {} unresolved (no SID, \
-         not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
-         not listed (in a task file or the cache only), {} running instances stopped, {} not, \
-         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}{left}",
+         file), {} with no user or group, {} unresolved (no SID, not another domain's), {} \
+         skipped (another domain's, no SID), {} not deleted, {} not listed (in a task file or \
+         the cache only), {} running instances stopped, {} not, {cancelled} BITS jobs \
+         cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
         swept.folders,
         swept.tasks,
         swept.deleted,
         swept.unreadable,
         swept.file_skipped,
-        swept.odd_sd_skipped,
         swept.no_principal,
         swept.unresolved,
         swept.skipped,

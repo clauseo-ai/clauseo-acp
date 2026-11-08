@@ -14,32 +14,30 @@
 //! walk that couldn't list a folder is 56 already and isn't repeated: the first read is judged.
 //! In it, a task the walk didn't list is:
 //!
-//! - in a task file and the cache: the trusted task file decides. Hidden, 56, unless its task
-//!   file, under the fallback's trust rules ([`file_trust::trusted`]), names a principal that
-//!   isn't the pool's and the owner of the descriptor its cache key holds isn't readably a pool
-//!   SID: then it is skipped, counted with the tasks skipped by their file, or as an odd
-//!   descriptor's when that owner can't be read (unreadable, ownerless, over its cap). The
-//!   Task Scheduler writes the file, and a standard user can't register a task for another
-//!   principal without that principal's credentials, so a vendor's task with an odd `SD`
-//!   doesn't block every launch. A readable pool owner is 56;
+//! - in a task file and the cache: hidden, 56, unless the owner of the descriptor its cache key
+//!   holds is readable and isn't a pool SID, and its task file, under the fallback's trust
+//!   rules ([`file_trust::trusted`]), names a principal that isn't the pool's: then it is
+//!   skipped, counted with the tasks skipped by their file. An owner that can't be read
+//!   (unreadable, ownerless, over its cap) is 56 whatever the file says: [`file_trust::trusted`]
+//!   reads today's DACL, and a registrant with write and `WRITE_DAC` on its file can name SYSTEM
+//!   there, then drop its own write. Security wins; the planned recycle restores availability;
 //! - in a task file alone (no cache key, so the Task Scheduler holds no such task): the file's
 //!   own owner, read through a handle that never follows a link
 //!   ([`Sweeper::task_file_owner`]), decides. A pool SID, or an owner that can't be read, is
 //!   56; any other (Administrators, SYSTEM, another user) leaves a stray file, ignored;
-//! - in the cache alone (no task file): first whether the task can run at all
-//!   ([`Sweeper::task_cache_runnable`]): a key whose `Id` names no `TaskCache\Tasks\{Id}` key
-//!   holds no task the Task Scheduler can run, a stale key, ignored. Otherwise the owner its
-//!   key's `SD` names decides, and only a readable one that isn't a pool SID is ignored: a pool
-//!   SID, an `SD` that is missing, unreadable, ownerless or over its cap is 56. The `SD` holds
-//!   the descriptor the task's registrant gave, so a pool user can make it unreadable (a DACL
-//!   near 64 KiB) or ownerless; and a pool user may delete its own task's file.
+//! - in the cache alone (no task file): whether the task can run decides
+//!   ([`Sweeper::task_cache_runnable`]). A key whose `Id` names no `TaskCache\Tasks\{Id}` key
+//!   holds no task the Task Scheduler can run, a stale key, ignored; one that can run, or can't
+//!   be told, is 56. Its `SD`'s owner is never trusted: the `SD` holds the descriptor the task's
+//!   registrant gave, and a pool user may delete its own task's file. The principal in
+//!   `Tasks\{Id}`'s binary values isn't read either: their format is undocumented.
 //!
 //! A folder or key that vanishes while listed is left out of its listing, never failing it,
 //! and checked once more after the judged read: one there again is 56 ([`Swept::reappeared`]);
 //! only one still gone is skipped and counted. A listing that can't be read on the judged read
-//! is 56. The log line counts each kind, and names the paths of the tasks that keep it at 56,
-//! cleaned ([`super::log_path`]). Nothing is deleted through a file or the registry: a hidden
-//! task is left, and the run fails closed.
+//! is 56. The log line counts each kind; the paths of the tasks that keep it at 56 go to the
+//! admin-only log alone ([`super::log_path`]). Nothing is deleted through a file or the
+//! registry: a hidden task is left, and the run fails closed.
 //!
 //! [`Swept::reappeared`]: super::Swept::reappeared
 
@@ -288,12 +286,8 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
             Held::Both => {
                 swept.unlisted_in_both += 1;
                 match file_trust::not_pool_by_path(fs, &path, pool, names, resolved) {
-                    Ok(odd) => {
-                        if odd {
-                            swept.odd_sd_skipped += 1;
-                        } else {
-                            swept.file_skipped += 1;
-                        }
+                    Ok(()) => {
+                        swept.file_skipped += 1;
                         Ok(())
                     }
                     Err(why) => Err(why),
@@ -312,7 +306,7 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
             }
             Held::Key => {
                 swept.unlisted_keys += 1;
-                match key_alone(fs, &path, pool) {
+                match key_alone(fs, &path) {
                     Ok(()) => {
                         swept.stale_keys += 1;
                         Ok(())
@@ -334,14 +328,11 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
 const REAPPEARED: &str = "a folder or key gone while listed was there again";
 
 /// Whether the cache key at `path`, with no task file, may be ignored, as the module says:
-/// `Ok` when its task can't run, or its `SD` is readable and names an owner that isn't a pool
-/// SID; `Err` with why it is 56.
-fn key_alone<S: Sweeper>(fs: &mut S, path: &str, pool: &[Sid]) -> Result<(), Failed> {
-    if !fs.task_cache_runnable(path)? {
-        return Ok(());
-    }
-    if pool.contains(&fs.task_cache_owner(path)?) {
-        return Err(POOL_KEY.to_owned());
+/// `Ok` only when its task can't run; `Err` with why it is 56. Its `SD`'s owner is never read:
+/// the registrant gave it.
+fn key_alone<S: Sweeper>(fs: &mut S, path: &str) -> Result<(), Failed> {
+    if fs.task_cache_runnable(path)? {
+        return Err(RUNNABLE_KEY.to_owned());
     }
     Ok(())
 }
@@ -350,7 +341,7 @@ fn key_alone<S: Sweeper>(fs: &mut S, path: &str, pool: &[Sid]) -> Result<(), Fai
 const POOL_FILE: &str = "a task file with no cache key is owned by a pool user";
 
 /// Why a cache key with no task file is 56.
-const POOL_KEY: &str = "a cache key with no task file names a pool user as the task's owner";
+const RUNNABLE_KEY: &str = "a cache key with no task file holds a task that can run";
 
 /// The owner of the task file of the task at `path` (`\A\name`), as the module says.
 fn file_owner<S: Sweeper>(fs: &mut S, path: &str) -> Result<Sid, Failed> {

@@ -1,9 +1,14 @@
-//! The paths the log line names: only tasks that keep the run at 56, at most five, each with
-//! its non-ASCII characters replaced, its SIDs redacted, its quotes replaced and its text in
-//! quotes, and cut at 260.
+//! The paths the admin-only log names: only tasks that keep the run at 56, at most five, each
+//! with its non-ASCII characters replaced, its SIDs redacted, its quotes replaced and its text
+//! in quotes, and cut at 260. The world-readable line names none; the admin-only log's
+//! descriptor and cap.
 
+use super::file_owner::{Dacl, descriptor};
 use super::*;
-use crate::windows::setup::sweep::log_path::{LOGGED_CAP, PATH_CAP, clean, listed};
+use crate::windows::setup::sweep::log_path::{
+    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_DIR, ADMIN_LOG_NAME, ADMIN_LOG_SDDL, LOGGED_CAP,
+    PATH_CAP, admin_only, clean, listed, rotates,
+};
 
 #[test]
 fn a_sid_in_a_name_is_redacted() {
@@ -103,22 +108,96 @@ fn at_most_five_paths_are_named_then_how_many_more() {
 }
 
 #[test]
-fn only_a_task_that_keeps_the_run_at_56_is_logged() {
+fn only_a_task_that_keeps_the_run_at_56_is_named_and_only_in_the_admin_only_log() {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\A", "fine", user("S-1-5-18"));
     fake.task("\\A", "gone", user("S-1-5-21-1-2-3-1010"));
     fake.task("\\B", "stuck", user("S-1-5-21-1-2-3-1010"));
     fake.delete_refuse = vec!["stuck".to_owned()];
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    let line = &fake.logged[0].1;
-    assert!(
-        line.ends_with(r#"; tasks that keep the sweep at 56: "\B\stuck""#),
-        "{line}"
+    assert_eq!(
+        fake.admin_logged,
+        [r#"the sandbox's task sweep; tasks that keep the sweep at 56: "\B\stuck""#]
     );
-    assert!(!line.contains("fine") && !line.contains("gone"), "{line}");
-    // A run that ends 0 names none.
+    // The world-readable sink: every line, the count alone, no path or name.
+    assert_eq!(fake.logged.len(), 1);
+    for (_, line) in &fake.logged {
+        assert!(line.ends_with("; 1 tasks keep it at 56, named in the admin-only log"));
+        for named in ["stuck", r"\B", "fine", "gone", "keep the sweep"] {
+            assert!(!line.contains(named), "{named}: {line}");
+        }
+    }
+    // A run that ends 0 names none, and writes nothing to the admin-only log.
     let mut clean_run = Fake::new(&[1010]);
     clean_run.task("\\A", "fine", user("S-1-5-18"));
     assert_eq!(sweep(&mut clean_run), SweepExit::Done);
-    assert!(!clean_run.logged[0].1.contains("keep the sweep"));
+    assert!(!clean_run.logged[0].1.contains("keep"));
+    assert_eq!(clean_run.admin_logged, Vec::<String>::new());
+}
+
+#[test]
+fn an_admin_only_log_that_cant_be_written_still_names_no_path_in_the_world_readable_line() {
+    let mut fake = Fake::new(&[1010]);
+    fake.task("\\B", "stuck", user("S-1-5-21-1-2-3-1010"));
+    fake.delete_refuse = vec!["stuck".to_owned()];
+    fake.admin_fails = Some("CreateFileW failed (5)".to_owned());
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    let line = &fake.logged[0].1;
+    let said = "; 1 tasks keep it at 56, not named: the admin-only log couldn't be written \
+                (CreateFileW failed (5))";
+    assert!(line.ends_with(said), "{line}");
+    assert!(!line.contains("stuck") && !line.contains(r"\B"), "{line}");
+}
+
+#[test]
+fn the_admin_only_log_is_made_for_system_and_administrators_alone() {
+    assert_eq!(ADMIN_LOG_SDDL, "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)");
+    assert_eq!(ADMIN_FOLDER_SDDL, "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+    assert_eq!(ADMIN_LOG_DIR, ["Clauseo", "Sandbox"]);
+    assert_eq!(ADMIN_LOG_NAME, "sweep-admin.log");
+    // That descriptor, as bytes: owner SYSTEM, a protected DACL, full control for SYSTEM and
+    // Administrators. Anything wider, unprotected or owned by another isn't admin-only.
+    let protect = |mut bytes: Vec<u8>| {
+        bytes[3] |= 0x10; // SE_DACL_PROTECTED (0x1000), the control word's high byte.
+        bytes
+    };
+    let full = 0x001F_01FF;
+    let ours: &[(u8, &str, u32)] = &[(0, "S-1-5-18", full), (0, "S-1-5-32-544", full)];
+    assert!(admin_only(&protect(descriptor(
+        Some("S-1-5-18"),
+        Dacl::Of(ours)
+    ))));
+    assert!(!admin_only(&descriptor(Some("S-1-5-18"), Dacl::Of(ours))));
+    let users: &[(u8, &str, u32)] = &[(0, "S-1-5-18", full), (0, "S-1-5-32-545", 0x0012_0089)];
+    assert!(!admin_only(&protect(descriptor(
+        Some("S-1-5-18"),
+        Dacl::Of(users)
+    ))));
+    let pool = "S-1-5-21-1-2-3-1010";
+    assert!(!admin_only(&protect(descriptor(
+        Some(pool),
+        Dacl::Of(ours)
+    ))));
+    assert!(!admin_only(&protect(descriptor(None, Dacl::Of(ours)))));
+    assert!(!admin_only(&protect(descriptor(
+        Some("S-1-5-18"),
+        Dacl::Null
+    ))));
+    let deny: &[(u8, &str, u32)] = &[(0, "S-1-5-18", full), (1, "S-1-1-0", full)];
+    assert!(!admin_only(&protect(descriptor(
+        Some("S-1-5-18"),
+        Dacl::Of(deny)
+    ))));
+}
+
+#[test]
+fn the_admin_only_log_rotates_once_past_256_kib() {
+    assert_eq!(ADMIN_LOG_CAP, 256 * 1024);
+    assert!(
+        !rotates(0, ADMIN_LOG_CAP + 1),
+        "a new log takes any first line"
+    );
+    assert!(!rotates(ADMIN_LOG_CAP - 10, 10));
+    assert!(rotates(ADMIN_LOG_CAP - 10, 11));
+    assert!(rotates(u64::MAX, 1));
 }

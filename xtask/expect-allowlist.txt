@@ -534,6 +534,7 @@ crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_
 # schtasks, which makes the lawyer's own task and deletes the test's tasks.
 crates/sandbox/src/windows/setup/sweep/windows_listing.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_sweeper.rs - unsafe_code
+crates/sandbox/src/windows/setup/sweep/windows_sweeper/admin_log.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs Made::drop clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods

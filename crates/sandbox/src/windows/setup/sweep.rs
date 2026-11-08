@@ -87,9 +87,9 @@
 //!    that stays held is 59. A run that is ended or ends non-zero never writes them. A session's
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
-//! 7. logs one line of counts, naming only the paths of at most five tasks that keep it at 56,
-//!    SIDs redacted, non-ASCII characters replaced and each path quoted ([`log_path`]): the
-//!    Application log is readable by every local user, so no other path, and no SID.
+//! 7. logs one line of counts to the Application log, which every local user can read: no path,
+//!    no SID. The paths of at most five tasks that keep it at 56 go to an admin-only log alone
+//!    (`%ProgramData%\Clauseo\Sandbox\sweep-admin.log`, SYSTEM and Administrators; [`log_path`]).
 //!
 //! It marks no profile for a reset, unlike `--stop`.
 
@@ -294,8 +294,10 @@ pub trait Sweeper: Gate + Bits + Record {
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
-    /// Writes one line to the log: `error` for a refusal or a failure.
+    /// Writes one line to the log, which every local user can read: `error` for a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Appends `line` to the admin-only log ([`log_path`]); `Err`, naming no path, if it can't.
+    fn admin_log(&mut self, line: &str) -> Result<(), Failed>;
 }
 
 /// Runs the sweep as the module says.
@@ -351,6 +353,7 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         SweepExit::Done
     };
     let mut line = log_line(pool.users.len(), &swept, &jobs);
+    line.push_str(&log_path::to_admin_log(fs, &swept.left_paths));
     if exit == SweepExit::Done {
         // Step 6, only on a run that ends 0.
         let recorded = reserved

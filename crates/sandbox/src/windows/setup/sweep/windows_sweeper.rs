@@ -3,7 +3,7 @@
 //! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`), a task's
 //! file (`windows_task_file.rs`), the task files' and the Task Scheduler cache's listings
 //! (`windows_listing.rs`), `LookupAccountNameW`, the record's lock and values
-//! (`pool_steps::windows_record`), and the Event Log.
+//! (`pool_steps::windows_record`), the Event Log, and the admin-only log (`admin_log`).
 #![expect(
     unsafe_code,
     reason = "COM calls to the Task Scheduler, LookupAccountNameW, SHGetKnownFolderPath and \
@@ -38,6 +38,8 @@ use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
 use crate::windows::sids::Sid;
+
+pub(crate) mod admin_log;
 
 /// `--sweep-tasks`: [`sweep`] over a [`WindowsSweeper`].
 pub(crate) fn run() -> SweepExit {
@@ -310,6 +312,10 @@ impl Sweeper for WindowsSweeper {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
+        admin_log::append(line)
     }
 }
 
