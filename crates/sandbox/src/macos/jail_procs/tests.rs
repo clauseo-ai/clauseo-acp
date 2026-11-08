@@ -6,7 +6,7 @@ use std::process::Stdio;
 use async_process::{Child, Command};
 use std::time::Duration;
 
-use super::{Probe, start_of, this_process};
+use super::{Probe, in_session, running, start_of, this_process};
 use crate::{Clock as _, SystemClock};
 
 /// A jail allowing the probe's name, as the launcher's profile does.
@@ -97,4 +97,42 @@ fn this_process_has_a_start() {
     assert_eq!(pid, std::process::id());
     assert!(start.is_some());
     assert_eq!(start, start_of(pid));
+}
+
+#[test]
+fn a_failed_check_counts_as_the_sessions() {
+    // Only a plain answer rules a process out.
+    assert!(in_session(Some(true), Some(true), Some(false)));
+    assert!(
+        !in_session(Some(false), Some(true), Some(false)),
+        "not sandboxed"
+    );
+    assert!(
+        !in_session(Some(true), Some(false), Some(false)),
+        "another launch's"
+    );
+    assert!(
+        !in_session(Some(true), Some(true), Some(true)),
+        "allows every name"
+    );
+    // A check that fails on a running process: still the session's.
+    assert!(in_session(None, Some(true), Some(false)));
+    assert!(in_session(Some(true), None, Some(false)));
+    assert!(in_session(Some(true), Some(true), None));
+    assert!(in_session(None, None, None));
+    assert!(
+        !in_session(None, None, Some(true)),
+        "an unjailed process answers plainly"
+    );
+}
+
+#[test]
+fn fail_closed_still_leaves_out_every_process_outside_the_jail() {
+    // No jail carries this name: no process on the Mac, sandboxed or not, is the session's,
+    // so a session's end is still seen.
+    let probe = Probe::new("clauseo-test-none", u64::from(std::process::id()));
+    assert_eq!(probe.pids(), Some(Vec::new()));
+    assert!(probe.gone());
+    assert!(running(i32::try_from(std::process::id()).unwrap()));
+    assert!(!running(i32::MAX), "a pid no process has");
 }

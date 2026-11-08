@@ -9,8 +9,10 @@
 //! the session when `sandbox_check` says it is sandboxed, may look up the session's name, and
 //! may not look up [`CONTROL`], a name no profile allows: no process outside a Seatbelt jail is
 //! sandboxed, and no other launch's profile allows this launch's name. The checks pass
-//! `SANDBOX_CHECK_NO_REPORT`, so they log no denial. One pass over every process
-//! (`proc_listallpids`) takes about 2 ms for 700 processes on an M-series Mac.
+//! `SANDBOX_CHECK_NO_REPORT`, so they log no denial. A check that fails on a running process
+//! counts as the session's (fail-closed): only a plain "not sandboxed", "may not look up the
+//! session's name" or "may look up the control name" rules a process out. One pass over every
+//! process (`proc_listallpids`) takes about 2 ms for 700 processes on an M-series Mac.
 //!
 //! Each libproc and libsandbox call has one wrapper here, with its `unsafe` block.
 #![expect(
@@ -20,7 +22,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
-use rustix::process::{Pid, Signal, kill_process};
+use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 
 use super::profile::PROBE_PREFIX as PREFIX;
 
@@ -144,21 +146,42 @@ impl Probe {
         sent
     }
 
-    /// Whether `pid` is a running process of this session.
+    /// Whether `pid` is a running process of this session; a failed check counts as yes.
     fn holds(&self, pid: i32) -> bool {
-        sandboxed(pid)
-            && may_look_up(pid, &self.c_name) == Some(true)
-            && may_look_up(pid, CONTROL) == Some(false)
-            && info(pid).is_some_and(|info| info.status != SZOMB)
+        in_session(
+            sandboxed(pid),
+            may_look_up(pid, &self.c_name),
+            may_look_up(pid, CONTROL),
+        ) && running(pid)
     }
 }
 
-/// Whether `pid` runs in a Seatbelt sandbox.
-fn sandboxed(pid: i32) -> bool {
+/// Whether a process belongs to the session, from its three checks (`None` for one that
+/// failed): fail-closed, so only a plain answer rules it out. A gone pid answers "sandboxed"
+/// but "may not look up" any name, so it is ruled out too.
+fn in_session(sandboxed: Option<bool>, probe: Option<bool>, control: Option<bool>) -> bool {
+    sandboxed != Some(false) && probe != Some(false) && control != Some(true)
+}
+
+/// Whether `pid` is running: not a zombie, or, when its info can't be read, not gone.
+fn running(pid: i32) -> bool {
+    match info(pid) {
+        Some(info) => info.status != SZOMB,
+        None => Pid::from_raw(pid)
+            .is_some_and(|pid| !matches!(test_kill_process(pid), Err(rustix::io::Errno::SRCH))),
+    }
+}
+
+/// Whether `pid` runs in a Seatbelt sandbox: `None` when the check fails.
+fn sandboxed(pid: i32) -> Option<bool> {
     // SAFETY: a null operation and no filter argument is `sandbox_check`'s documented "is this
     // process sandboxed" form; reading the exported constant is a plain load.
     let answer = unsafe { sandbox_check(pid, std::ptr::null(), FILTER_NONE | no_report()) };
-    answer == 1
+    match answer {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
 }
 
 /// Whether the sandbox of `pid` lets it look up the Mach service `name`: `Some(false)` when it
