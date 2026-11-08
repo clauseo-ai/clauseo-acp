@@ -448,43 +448,69 @@ fn as_an_administrator_a_data_folder_that_isnt_the_owners_is_never_read() {
     assert_eq!(machine.m.state.record, None);
 }
 
+/// What an administrator's removal takes off a matter folder `found` owns, holding our allow
+/// and our Low label, for an owner in Administrators or not: the lines on the matter.
+fn off_elevated_folder(found: &str, owner_admin: bool) -> (LedgerWork, Vec<String>) {
+    let (mut machine, mut acl) = pool("remove-ledger-admin-owned", None);
+    let data_dir = machine.m.data_dir();
+    let m1 = matters(&machine).join("m1");
+    let low = Sid::parse(LOW_LABEL_SID).unwrap();
+    let g = |sid: &Sid, rights| grant(&m1, sid, rights, Inherit::Tree, PathKind::Matter);
+    let grants = vec![
+        g(&pool_sid(1001), Rights::Modify),
+        g(&low, Rights::LowLabel),
+    ];
+    record(&data_dir, matter_one(), grants, None);
+    machine.admin_owned = vec![(m1.clone(), Sid::parse(found).unwrap())];
+    if owner_admin {
+        machine.admins.push(owner());
+    }
+    let removed = remove(&mut machine, &mut acl, true).unwrap();
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    let lines = machine.lines();
+    for kind in ["add ", "restore_label ", "reclaim ", "remove_recorded "] {
+        assert!(!lines.iter().any(|l| l.starts_with(kind)), "{lines:?}");
+    }
+    let on_matter = lines
+        .into_iter()
+        .filter(|l| l.contains("matters/") && !l.starts_with("admin_target "))
+        .collect();
+    (report.ledger, on_matter)
+}
+
 #[test]
-fn as_an_administrator_a_matter_folder_administrators_or_system_owns_loses_only_our_entries() {
-    // The built-in Administrator, or UAC off: the lawyer's matter folders are Administrators'.
+fn as_an_administrator_an_elevated_matter_folder_keeps_its_low_label_for_a_standard_owner() {
+    // A crafted ledger may name another program's folder, Administrators' or SYSTEM's: the
+    // pool's entries come off (they name only our SIDs), its Low label stays (K1).
     for found in ["S-1-5-32-544", "S-1-5-18"] {
-        let (mut machine, mut acl) = pool("remove-ledger-admin-owned", None);
-        let data_dir = machine.m.data_dir();
-        let m1 = matters(&machine).join("m1");
-        let low = Sid::parse(LOW_LABEL_SID).unwrap();
-        let g = |sid: &Sid, rights| grant(&m1, sid, rights, Inherit::Tree, PathKind::Matter);
-        let grants = vec![
-            g(&pool_sid(1001), Rights::Modify),
-            g(&low, Rights::LowLabel),
-        ];
-        record(&data_dir, matter_one(), grants, None);
-        machine.admin_owned = vec![(m1.clone(), Sid::parse(found).unwrap())];
-        let removed = remove(&mut machine, &mut acl, true).unwrap();
-        let Removed::All(report) = removed else {
-            panic!("{removed:?}");
+        let (work, on_matter) = off_elevated_folder(found, false);
+        let kept = LedgerWork::AsAdmin {
+            removed: 1,
+            left: 1,
         };
-        let work = LedgerWork::AsAdmin {
+        assert_eq!(work, kept, "{found}");
+        assert_eq!(on_matter, ["remove matters/m1 1001"], "{found}");
+    }
+}
+
+#[test]
+fn as_an_administrator_an_elevated_matter_folder_loses_our_entries_for_an_admin_owner() {
+    // The built-in Administrator, or UAC off: the lawyer's matter folders are Administrators',
+    // and the lawyer could take the label off anyway.
+    for found in ["S-1-5-32-544", "S-1-5-18"] {
+        let (work, on_matter) = off_elevated_folder(found, true);
+        let all = LedgerWork::AsAdmin {
             removed: 2,
             left: 0,
         };
-        assert_eq!(report.ledger, work, "{found}");
-        let lines = machine.lines();
-        let on_matter: Vec<&String> = lines
-            .iter()
-            .filter(|l| l.contains("matters/") && !l.starts_with("admin_target "))
-            .collect();
+        assert_eq!(work, all, "{found}");
         assert_eq!(
             on_matter,
             ["remove matters/m1 1001", "remove matters/m1 4096"],
             "{found}: our allow, then our Low label; nothing else"
         );
-        for kind in ["add ", "restore_label ", "reclaim ", "remove_recorded "] {
-            assert!(!lines.iter().any(|l| l.starts_with(kind)), "{lines:?}");
-        }
     }
 }
 

@@ -72,12 +72,13 @@ use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
 mod ledger_work;
-pub(in crate::windows::setup) mod owners;
+pub mod owners;
 mod seam;
 #[cfg(windows)]
 mod windows_removal;
 
 pub use ledger_work::LedgerWork;
+pub use owners::FolderOwner;
 pub use seam::Removal;
 #[cfg(windows)]
 pub use windows_removal::WindowsRemoval;

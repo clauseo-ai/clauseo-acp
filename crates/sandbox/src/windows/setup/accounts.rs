@@ -343,7 +343,9 @@ pub(crate) fn hidden(name: &str) -> Result<bool, MachineError> {
 }
 
 /// The account `sid` names, as (name, domain, use); `None` when it names none.
-fn lookup_sid(sid: &Sid) -> Result<Option<(String, String, SID_NAME_USE)>, MachineError> {
+pub(super) fn lookup_sid(
+    sid: &Sid,
+) -> Result<Option<(String, String, SID_NAME_USE)>, MachineError> {
     let parsed = LocalSid::parse(sid)?;
     let (mut name_len, mut domain_len) = (0u32, 0u32);
     let mut used = SID_NAME_USE::default();
@@ -458,7 +460,7 @@ fn text_of(units: &[u16]) -> String {
 }
 
 /// A `NET_API_STATUS` as `Ok`, or [`MachineError::Os`] naming `call`.
-fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
+pub(super) fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
     if status == NERR_Success {
         Ok(())
     } else {

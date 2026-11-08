@@ -35,11 +35,12 @@ use super::super::accounts::{self, Kind};
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
+use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
-use super::super::{args, ffi, processes, profile, record_write};
-use super::{Removal, acting_token, owners};
+use super::super::{admin_member, args, ffi, processes, profile, record_write};
+use super::{FolderOwner, Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
 use crate::windows::apply::Surroundings;
@@ -366,7 +367,14 @@ impl Removal for WindowsRemoval {
         }
     }
 
-    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<(), MachineError> {
+    fn owner_in_administrators(&mut self, owner: &Sid) -> bool {
+        admin_member::in_administrators(owner).unwrap_or_else(|error| {
+            tracing::warn!(cause = %cause_of(&error), "the owner's groups can't be read");
+            false
+        })
+    }
+
+    fn admin_target(&mut self, path: &Path, owner: &Sid) -> Result<FolderOwner, MachineError> {
         let (folder, folder_owner) =
             resolve_folder(path).map_err(|error| kind_of("a matter's folder", &error))?;
         if !(in_folder(&folder, path) && in_folder(path, &folder)) {
@@ -376,9 +384,9 @@ impl Removal for WindowsRemoval {
         }
         // The owner, Administrators or SYSTEM, as for the data folder: all that is done on a
         // folder that passes is taking our own pool and group entries, and our Low label, off.
-        owners::matter_folder(&folder_owner, owner)?;
+        let found = owners::matter_folder(&folder_owner, owner)?;
         match folder_support(&folder) {
-            Ok(FolderSupport::Ok) => Ok(()),
+            Ok(FolderSupport::Ok) => Ok(found),
             Ok(other) => Err(MachineError::Other(format!(
                 "a matter's folder fails the folder check ({other:?})"
             ))),
