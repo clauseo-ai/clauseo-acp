@@ -218,8 +218,9 @@ pub(crate) struct SharedTimer {
     armed: Arc<Mutex<Vec<Duration>>>,
 }
 
-/// The install's poll for npm's process tree to end: ends at once here, so a tree the OS has
-/// not reaped yet costs the test no manual firing (the poll's count is bounded).
+/// The install's poll for npm's process tree to end: a real 50 ms here, not a manual firing, so
+/// a tree the OS has not reaped yet costs the test no firing, and the poll's 10 s cap is 10 s of
+/// real time, as in the app (a poll that ended at once would spend the cap before the OS reaps).
 pub(crate) const TREE_POLL: Duration = Duration::from_millis(50);
 
 impl Timer for SharedTimer {
@@ -229,9 +230,16 @@ impl Timer for SharedTimer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(duration);
-        let manual = (duration != TREE_POLL).then(|| self.manual.after(duration));
+        let (manual, real) = if duration == TREE_POLL {
+            (None, Some(clauseo_process::AsyncIoTimer.after(duration)))
+        } else {
+            (Some(self.manual.after(duration)), None)
+        };
         async move {
             if let Some(wait) = manual {
+                wait.await;
+            }
+            if let Some(wait) = real {
                 wait.await;
             }
         }
