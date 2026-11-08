@@ -839,25 +839,25 @@
     "note": "The \"Allow this site\" refusal for a blocked-site notice the host no longer keeps (too old, or from before a restart) (ADR 0053)"
   },
   "U3-err-blocklist.allow_not_saved": {
-    "en": "Allowed until Clauseo closes. Clauseo couldn't save it, so it won't be allowed after a restart.",
-    "hi": "Clauseo के बंद होने तक यह वेबसाइट अनुमति में है। Clauseo इसे सहेज नहीं सका, इसलिए फिर से शुरू होने पर यह अनुमति में नहीं रहेगी।",
+    "en": "This site is allowed until Clauseo closes. Clauseo couldn't save the change, so it will be blocked again next time Clauseo opens.",
+    "hi": "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "stage E (provisional; Rohan batch review)",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
     "note": "The \"Allow this site\" allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
   },
   "U3-err-blocklist.revoke_not_saved": {
-    "en": "Removed until Clauseo closes. Clauseo couldn't save this, so the site may be allowed again after a restart.",
-    "hi": "Clauseo के बंद होने तक इस वेबसाइट की अनुमति हटा दी गई है। Clauseo यह सहेज नहीं सका, इसलिए फिर से शुरू होने पर वेबसाइट को फिर से अनुमति मिल सकती है।",
+    "en": "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
+    "hi": "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "stage E (provisional; Rohan batch review)",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
   }
 }

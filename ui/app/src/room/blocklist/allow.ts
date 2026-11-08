@@ -15,8 +15,12 @@ export const codeOf = (error: unknown): string =>
     ? String((error as { code: unknown }).code)
     : "internal";
 
+/** The host's answer for an allow that took but couldn't be saved (0053): it lasts until Clauseo
+ * closes. An error whose change still applied (0003), so the notice shows it allowed. */
+export const ALLOW_NOT_SAVED = "blocklist.allow_not_saved";
+
 /** Allows the site a notice named, as far as `scope`, unless its allow is already with the host.
- * The notice says how it went: allowed, or the refusal's code. */
+ * The notice says how it went: allowed (saved or for this run only), or the refusal's code. */
 export async function allowSite(
   transport: HostTransport,
   store: BlockedSitesStore,
@@ -28,8 +32,11 @@ export async function allowSite(
   const command: MainBlocklistCommand = { allow_blocked_site: { block_id: blockId, scope } };
   try {
     await transport.dispatch({ command_id: crypto.randomUUID(), command });
-    store.set(blockId, { sending: false, allowed: scope });
+    store.set(blockId, { sending: false, allowed: scope, unsaved: false });
   } catch (error: unknown) {
-    store.set(blockId, { sending: false, refused: codeOf(error) });
+    const code = codeOf(error);
+    if (code === ALLOW_NOT_SAVED)
+      store.set(blockId, { sending: false, allowed: scope, unsaved: true });
+    else store.set(blockId, { sending: false, refused: code });
   }
 }

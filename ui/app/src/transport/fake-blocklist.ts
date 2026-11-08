@@ -1,8 +1,10 @@
 // The unsafe-site list's host, scripted (0053, PR 2), for FakeTransport's `blocklist`: the allowed
 // sites `allowed_sites` lists, and the two commands, which change them as the host would: an allow
 // adds the notice's host (from the `site_blocked` events it was told of, `notice`), a revoke takes
-// one away. A refusal can be scripted for each. The notices themselves are the test's to play
-// (`FakeTransport.siteBlocked`).
+// one away. A refusal can be scripted for each. `blocklist.allow_not_saved` and
+// `blocklist.revoke_not_saved` apply the change first, as the host does when its save fails: the
+// allow is listed with `saved: false`, the revoked site is gone. The notices themselves are the
+// test's to play (`FakeTransport.siteBlocked`).
 import type { SiteBlocked } from "../room/host-next.ts";
 import type { AllowScope, AllowedSite, ErrorCode, HostCommand } from "./protocol.ts";
 
@@ -24,6 +26,10 @@ export type FakeBlocklistCommand = Extract<
 /** Whether a command is one of the unsafe-site list's. */
 export const isBlocklistCommand = (command: HostCommand): command is FakeBlocklistCommand =>
   command.allow_blocked_site !== undefined || command.revoke_allowed_site !== undefined;
+
+// the two codes whose change still applied (0003)
+const ALLOW_NOT_SAVED: ErrorCode = "blocklist.allow_not_saved";
+const REVOKE_NOT_SAVED: ErrorCode = "blocklist.revoke_not_saved";
 
 const refusal = (code: ErrorCode) => ({
   code,
@@ -48,7 +54,7 @@ export function fakeBlocklist({
 } = {}): FakeBlocklistHost & { list: () => AllowedSite[] } {
   let list = [...sites];
   const notices = new Map<string, SiteBlocked>();
-  const add = (site: SiteBlocked, scope: AllowScope) => {
+  const add = (site: SiteBlocked, scope: AllowScope, saved: boolean) => {
     const same = (s: AllowedSite) =>
       s.host === site.host && s.scope === scope && (scope === "always" || s.matter === site.matter);
     if (list.some(same)) return;
@@ -57,7 +63,7 @@ export function fakeBlocklist({
       scope,
       ...(scope === "matter" ? { matter: site.matter } : {}),
       allowed_at: now(),
-      saved: true,
+      saved,
     };
     // always ones first, as the host lists them
     list = scope === "always" ? [row, ...list] : [...list, row];
@@ -72,18 +78,22 @@ export function fakeBlocklist({
     command: (command) => {
       const allow = command.allow_blocked_site;
       if (allow !== undefined) {
-        if (refuse.allow_blocked_site !== undefined) throw refusal(refuse.allow_blocked_site);
+        const refused = refuse.allow_blocked_site;
+        if (refused !== undefined && refused !== ALLOW_NOT_SAVED) throw refusal(refused);
         const site = notices.get(allow.block_id);
         if (site === undefined) throw refusal("blocklist.notice_expired");
-        add(site, allow.scope);
+        add(site, allow.scope, refused === undefined);
+        if (refused !== undefined) throw refusal(refused);
         return;
       }
       const revoke = command.revoke_allowed_site;
       if (revoke === undefined) return;
-      if (refuse.revoke_allowed_site !== undefined) throw refusal(refuse.revoke_allowed_site);
+      const refused = refuse.revoke_allowed_site;
+      if (refused !== undefined && refused !== REVOKE_NOT_SAVED) throw refusal(refused);
       list = list.filter(
         (s) => !(s.host === revoke.host && s.scope === revoke.scope && s.matter === revoke.matter),
       );
+      if (refused !== undefined) throw refusal(refused);
     },
   };
 }

@@ -5,9 +5,11 @@
 // each after the presses that lead there (PressInOrder); the Allow confirm for each reach; and
 // Settings, Privacy's allowed sites, listed and empty. The no-override and override_off lines are
 // U3-err-blocklist.override_off's words and the expired one U3-err-blocklist.notice_expired's,
-// entered again here for the states that show them.
+// entered again here for the states that show them; so are the two codes whose change still
+// applied: an allow and a Remove that last until Clauseo closes. One allowed site is unsaved.
 import { bl, type BlocklistKey } from "@clauseo/components/lib/words-blocklist.ts";
 import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
+import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { ReactNode } from "react";
 import type { MatterInfo, SiteBlocked } from "../room/host-next.ts";
 import { agentText, step, THREAD, TURN, userMessage, uuid } from "../testing/stream-script.ts";
@@ -78,6 +80,12 @@ const SCENES = {
     refuse: "blocklist.notice_expired",
     press: ['[data-testid="site-allow-matter"]', '[data-testid="site-allow-ok"]'],
   },
+  // allowed, but only until Clauseo closes: the host couldn't save it
+  "allowed-unsaved": {
+    sites: [site()],
+    refuse: "blocklist.allow_not_saved",
+    press: ['[data-testid="site-allow-matter"]', '[data-testid="site-allow-ok"]'],
+  },
 } satisfies Record<string, Scene>;
 
 const roomOf = (scene: Scene): ReactNode => {
@@ -107,6 +115,8 @@ const room = (id: string, ref: WordsRef, scene: keyof typeof SCENES): Entry => (
 const AT = Date.UTC(2026, 10, 5, 6);
 const SITES: AllowedSite[] = [
   { host: "update-cdn.example", scope: "always", allowed_at: AT, saved: true },
+  // an allow Clauseo couldn't save: it lasts until Clauseo closes
+  { host: "files-share.example", scope: "always", allowed_at: AT, saved: false },
   {
     host: "invoice-paypa1.example",
     scope: "matter",
@@ -119,22 +129,42 @@ const SITES: AllowedSite[] = [
 ];
 const NAMED = [{ ...MATTER } as MatterInfo];
 
-const settings = (id: string, key: BlocklistKey, empty = false): Entry => ({
-  id,
-  words: words(key),
-  screen: "settings/privacy",
-  width: 960,
-  height: 900,
-  render: (lang) => (
+type Shelf = "listed" | "empty" | "revoke-unsaved";
+
+const settingsOf = (lang: Lang, shelf: Shelf): ReactNode => {
+  const over = (
     <SettingsOver
       section="privacy"
       lang={lang}
-      blocklist={fakeBlocklist({ sites: empty ? [] : SITES })}
+      blocklist={fakeBlocklist({
+        sites: shelf === "empty" ? [] : SITES,
+        ...(shelf === "revoke-unsaved"
+          ? { refuse: { revoke_allowed_site: "blocklist.revoke_not_saved" } }
+          : {}),
+      })}
       matters={NAMED}
     />
-  ),
+  );
+  // removed, but only until Clauseo closes: the host couldn't save that
+  return shelf === "revoke-unsaved" ? (
+    <PressInOrder press={['[data-testid="allowed-site-remove"]']}>{over}</PressInOrder>
+  ) : (
+    over
+  );
+};
+
+const settings = (id: string, ref: BlocklistKey | WordsRef, shelf: Shelf = "listed"): Entry => ({
+  id,
+  words: typeof ref === "string" ? words(ref) : ref,
+  screen: "settings/privacy",
+  width: 960,
+  height: 900,
+  render: (lang) => settingsOf(lang, shelf),
 });
 
+type ErrorKey = Parameters<typeof errorWords>[0];
+const ALLOW_NOT_SAVED = "blocklist.allow_not_saved";
+const REVOKE_NOT_SAVED = "blocklist.revoke_not_saved";
 const OFF = errorWords(ERROR_WORDS["blocklist.override_off"] as Parameters<typeof errorWords>[0]);
 const EXPIRED = errorWords(
   ERROR_WORDS["blocklist.notice_expired"] as Parameters<typeof errorWords>[0],
@@ -169,7 +199,7 @@ export const UBL: Entry[] = [
   room("UBL-18", words("Allow"), "confirm-matter"),
   settings("UBL-19", "Allowed sites"),
   settings("UBL-20", "Sites you allowed although they're on the unsafe-site list."),
-  settings("UBL-21", "No sites are allowed past the unsafe-site list.", true),
+  settings("UBL-21", "No sites are allowed past the unsafe-site list.", "empty"),
   settings("UBL-22", "This matter: {matter}"),
   settings("UBL-23", "One matter"),
   settings("UBL-24", "Always"),
@@ -179,4 +209,7 @@ export const UBL: Entry[] = [
   room("UBL-28", OFF, "no-override"),
   room("UBL-29", OFF, "override-off"),
   room("UBL-30", EXPIRED, "expired"),
+  room("UBL-31", errorWords(ERROR_WORDS[ALLOW_NOT_SAVED] as ErrorKey), "allowed-unsaved"),
+  settings("UBL-32", errorWords(ERROR_WORDS[REVOKE_NOT_SAVED] as ErrorKey), "revoke-unsaved"),
+  settings("UBL-33", "Until Clauseo closes"),
 ];

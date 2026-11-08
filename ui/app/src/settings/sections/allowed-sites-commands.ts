@@ -37,9 +37,17 @@ export type AllowedSitesState = {
   failed: string | null;
   /** The site whose Remove is with the host. */
   removing: AllowedSite | null;
+  /** The site last removed until Clauseo closes only (`blocklist.revoke_not_saved`): blocked
+   * again now, but Clauseo couldn't save that. Cleared by the next Remove. */
+  unsaved: AllowedSite | null;
 };
 
-const FIRST: AllowedSitesState = { sites: null, failed: null, removing: null };
+/** The host's answer for a revoke that took but couldn't be saved (0053): an error whose change
+ * still applied (0003), so the site is gone from the list and a quiet line says why it may
+ * return. */
+export const REVOKE_NOT_SAVED = "blocklist.revoke_not_saved";
+
+const FIRST: AllowedSitesState = { sites: null, failed: null, removing: null, unsaved: null };
 
 /** The list's state over a transport: `read` asks again, `remove` revokes one and reads again. An
  * answer stands only while no later read was asked for. */
@@ -62,15 +70,18 @@ function allowedSitesOver(transport: HostTransport) {
   };
   const remove = async (site: AllowedSite): Promise<void> => {
     if (state.removing !== null) return;
-    set({ removing: site });
+    set({ removing: site, unsaved: null });
     let failed: string | null = null;
+    let unsaved: AllowedSite | null = null;
     try {
       await revokeSite(transport, site);
     } catch (error: unknown) {
-      failed = codeOf(error);
+      const code = codeOf(error);
+      if (code === REVOKE_NOT_SAVED) unsaved = site;
+      else failed = code;
     }
     await read();
-    set({ removing: null, ...(failed === null ? {} : { failed }) });
+    set({ removing: null, unsaved, ...(failed === null ? {} : { failed }) });
   };
   return {
     subscribe: (listener: () => void) => {

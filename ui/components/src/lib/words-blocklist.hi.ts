@@ -43,6 +43,8 @@ export const HI = {
   "One matter": "एक मामला",
   Always: "हमेशा",
   "Allowed {date}": "{date} को अनुमति दी गई",
+  // a site Clauseo couldn't save: its allow lasts until Clauseo closes
+  "Until Clauseo closes": "Clauseo के बंद होने तक",
   Remove: "हटाएँ",
   // the Remove button's accessible name
   "Remove {host}": "{host} हटाएँ",

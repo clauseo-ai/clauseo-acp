@@ -143,10 +143,10 @@ export const HI = {
     "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
   "This notice has expired. Open the site again, then allow it from the new notice.":
     "यह सूचना अब पुरानी हो चुकी है। वेबसाइट फिर से खोलें, फिर नई सूचना से उसे अनुमति दें।",
-  "Allowed until Clauseo closes. Clauseo couldn't save it, so it won't be allowed after a restart.":
-    "Clauseo के बंद होने तक यह वेबसाइट अनुमति में है। Clauseo इसे सहेज नहीं सका, इसलिए फिर से शुरू होने पर यह अनुमति में नहीं रहेगी।",
-  "Removed until Clauseo closes. Clauseo couldn't save this, so the site may be allowed again after a restart.":
-    "Clauseo के बंद होने तक इस वेबसाइट की अनुमति हटा दी गई है। Clauseo यह सहेज नहीं सका, इसलिए फिर से शुरू होने पर वेबसाइट को फिर से अनुमति मिल सकती है।",
+  "This site is allowed until Clauseo closes. Clauseo couldn't save the change, so it will be blocked again next time Clauseo opens.":
+    "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
+  "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
+    "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
