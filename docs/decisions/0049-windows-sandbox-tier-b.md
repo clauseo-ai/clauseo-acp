@@ -2426,9 +2426,9 @@ group machine-wide takes nothing from them.
   Definition Language (SDDL) syntax" policy, and common on Entra- or Intune-managed machines)
   takes the place of the value, so our write doesn't count while the policy is set. The guard
   converts the policy's SDDL with Windows and checks it for the same deny. That check reads only
-  the header and the DACL's structure, so SDDL with no `O:`/`G:` part, or with old-form entries,
-  still counts; nothing read so is ever written. If the deny is there,
-  the state is `policy`. If not, the state is `degraded: group policy`. The value is still
+  the header and the DACL, so SDDL with no `O:`/`G:` part still counts. A DACL that mixes COM's
+  old form (`COM_RIGHTS_EXECUTE` alone) with the deny doesn't, since COM may reject it. Nothing
+  read so is ever written. If the deny is there, the state is `policy`. If not, the state is `degraded: group policy`. The value is still
   written either way, so the guard holds once the policy goes. Firm IT adds the ACE to the GPO
   (`docs/firm-it.md`).
 - **Degraded.** The record's `MachineLaunchDeny` (`REG_SZ`, readable by Users) holds the state:

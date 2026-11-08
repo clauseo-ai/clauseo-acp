@@ -115,8 +115,9 @@ impl LaunchStore for WindowsLaunchStore {
             return Ok(None);
         };
         let written = binary(get(&key, WRITTEN)?, WRITTEN)?.unwrap_or_default();
-        // Missing or unreadable as a DWORD counts as a put-back: the removal then keeps the
-        // value and takes off only the deny.
+        // Missing reads as no put-back (`PutBack` is written before `Original`, so a backup
+        // this code wrote always has it). A value of another type counts as a put-back: the
+        // removal then keeps the value and takes off only the deny.
         let put_back = match get(&key, PUT_BACK)? {
             None => false,
             Some((REG_DWORD, data)) => data != [0, 0, 0, 0],

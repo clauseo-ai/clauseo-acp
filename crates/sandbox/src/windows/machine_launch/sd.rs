@@ -221,10 +221,11 @@ impl LaunchSd {
     }
 
     /// Whether the descriptor `bytes` denies `group` first, as [`LaunchSd::denies_first`]
-    /// asks, read leniently: only the header and the DACL's structure are checked, so a Group
-    /// Policy value without an owner or a group, or with entries in COM's old form, still
-    /// counts when it carries the deny. Only this check reads that way; nothing read so is
-    /// ever written.
+    /// asks, read leniently: the owner and the group aren't required, so a Group Policy value
+    /// without them still counts when it carries the deny. COM's rules on the entries still
+    /// hold: a DACL that mixes the old form (`COM_RIGHTS_EXECUTE` alone) with the new, or has
+    /// an entry without `COM_RIGHTS_EXECUTE`, may be rejected by COM, so it doesn't count.
+    /// Only this check reads that way; nothing read so is ever written.
     pub fn policy_denies_first(bytes: &[u8], group: &Sid) -> Result<bool, SdError> {
         if bytes.len() < HEADER || bytes.first() != Some(&1) {
             return Err(SdError("shorter than its header, or not revision 1"));
@@ -243,6 +244,7 @@ impl LaunchSd {
             return Err(SdError("an offset inside the header"));
         }
         let (_, aces, _) = acl_at(bytes, dacl_at)?;
+        com_form(&aces)?;
         Ok(denies_first(&aces, group))
     }
 

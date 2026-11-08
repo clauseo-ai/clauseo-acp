@@ -162,20 +162,25 @@ fn a_group_policy_value_leaves_the_guard_degraded_unless_it_denies_the_group() {
     assert_eq!(applied.guard, Guard::ByPolicy);
     assert!(!applied.guard.degraded());
     assert_eq!(store.state.as_deref(), Some("policy"));
-    // The same ACE in SDDL with no owner or group, or beside entries in COM's old form: the
-    // strict parser refuses both, the policy check reads only the DACL and finds the deny.
+    // The same ACE in SDDL with no owner or group: the strict parser refuses it, the policy
+    // check doesn't need them and finds the deny.
     let mut no_owner = descriptor(&aces, false);
     no_owner[4..12].copy_from_slice(&[0; 8]);
-    let old_form = descriptor(
+    assert!(LaunchSd::parse(&no_owner).is_err());
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    store.policy = Some(Ok(no_owner));
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::ByPolicy);
+    // Our deny beside an entry in COM's old form: COM may reject the mixed list, so the deny
+    // can't be counted on, and the guard is degraded.
+    let mixed = descriptor(
         &[ace(D, 0, DENY_MASK, GROUP), ace(A, 0, 1, "S-1-1-0")],
         false,
     );
-    for policy in [no_owner, old_form] {
-        assert!(LaunchSd::parse(&policy).is_err());
-        let mut store = FakeStore::new(Raw::Binary(windows_11()));
-        store.policy = Some(Ok(policy));
-        assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::ByPolicy);
-    }
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    store.policy = Some(Ok(mixed));
+    let applied = apply(&mut store, &sid(GROUP));
+    assert_eq!(applied.guard, Guard::PolicyOverrides);
+    assert!(applied.why.unwrap().contains("old form"));
     // A lenient read still needs a DACL that holds the deny first.
     let mut store = FakeStore::new(Raw::Binary(windows_11()));
     let mut no_dacl = descriptor(&aces, false);

@@ -1079,6 +1079,11 @@ entry at the front of the policy's SDDL, after `D:`:
 (D;;CCDCLCSWRP;;;<SID of ClauseoSandboxUsers>)
 ```
 
+Use the SDDL rights letters for every entry in that policy, as above. Don't mix in entries in
+COM's old form, which grant `COM_RIGHTS_EXECUTE` alone (`CC`, or `0x1`, on its own): COM may
+reject a list that mixes the two forms, so Clauseo counts such a policy as
+`degraded: group policy` even when it holds the deny.
+
 The SID belongs to a local group, so it differs on every computer. Look it up on the computer with
 `(Get-LocalGroup -Name 'ClauseoSandboxUsers').SID.Value`, or read `GroupSid` in
 `HKLM\SOFTWARE\Clauseo\Sandbox`. A policy that applies one SDDL to many computers can't name
