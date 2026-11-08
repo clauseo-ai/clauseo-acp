@@ -41,8 +41,9 @@
 ;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
 ;    removal and never stops the tool, which finishes later and leaves its records consistent at
 ;    every step. Only an ended wait (WAIT_OBJECT_0), an exit code read and that code 0 count as
-;    removed, or 10 (CLAUSEO_REMOVED_COPY_LEFT): removed, with the admin copy left. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
-;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
+;    removed, or 10 (CLAUSEO_REMOVED_COPY_LEFT): removed, with the admin copy left. A removal
+;    that didn't finish (any exit but 0 or 10) keeps `sandbox\` and the machine's record; the
+;    recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
 ;    With the tool missing (Windows security can quarantine it: Defender called it
 ;    Trojan:Win32/Bearfoos.A!ml, a false positive) nothing can be removed. When the machine's
 ;    record (HKLM\SOFTWARE\Clauseo\Sandbox, 64-bit view) shows a set-up, the uninstaller says so
