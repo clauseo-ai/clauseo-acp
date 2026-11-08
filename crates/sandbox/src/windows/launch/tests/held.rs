@@ -36,10 +36,11 @@ fn a_walk_hung_in_a_step_makes_the_matter_stuck() {
     assert!(free.is_ok(), "other matters go on");
 }
 
-/// A session's end whose step never returns makes the matter stuck past the bound plus the
-/// grace; it stays stuck once the step returns and the end finishes.
+/// A session's end whose step makes no progress makes the matter stuck past the stall timer
+/// plus the grace; once the step returns, the end finishes (the stalled pass failed) and the
+/// matter is freed.
 #[test]
-fn an_end_hung_in_a_step_makes_the_matter_stuck() {
+fn an_end_hung_in_a_step_is_stuck_until_it_returns() {
     let world = World::new();
     let dir = TempDir::new("launch-stuck-end");
     let launchers = launchers(&world);
@@ -50,16 +51,22 @@ fn an_end_hung_in_a_step_makes_the_matter_stuck() {
     std::thread::scope(|scope| {
         let ending = scope.spawn(|| launchers.after_session(MATTER, "s1", &policy));
         held.reached();
-        world.advance(PREPARE_BOUND + STUCK_GRACE);
+        world.advance((PREPARE_STALL + STUCK_GRACE).saturating_sub(Duration::from_secs(1)));
+        let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+        assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+        world.advance(Duration::from_secs(1));
         let stuck = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
         assert!(matches!(stuck, Error::MatterStuck), "{stuck:?}");
         held.go();
         ending.join().unwrap();
     });
     let calls = world.calls();
+    let close = "write_clean_close cursor=true repaired=true passed=false";
+    assert!(calls.contains(&close.to_owned()), "{calls:?}");
     assert_eq!(calls[calls.len() - 2..], ["end_run 1", "release_slot"]);
-    let still = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
-    assert!(matches!(still, Error::MatterStuck), "{still:?}");
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok(), "freed once the end returned");
 }
 
 /// A failed `EndRun` keeps the account and its slot held back: the next reserve tries it again

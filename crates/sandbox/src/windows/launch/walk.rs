@@ -16,24 +16,26 @@
 //!
 //! **Two limits.** The waits (step 4's stops, sweeps and re-checks, step 6's retries) share one
 //! wall-clock budget, [`PREPARE_BOUND`]; running out refuses the launch. The work steps (1, 2, 5
-//! and 7) take as long as the matter's size needs, with no wall-clock cap, but cancel once their
-//! progress hasn't moved for [`PREPARE_STALL`] ([`Error::PrepareStalled`], undone as any
-//! failure). The walk looks at its cancel and its progress before and after every step, and
-//! `apply` sees both through [`Walk::cancelled`] at each folder. Once `apply` returns, the
-//! cancel is looked at again (and once more under the registry's lock): a cancel that came
-//! during or after `apply` undoes and is never prepared. A step blocked in one OS call can't be
-//! interrupted from here, so **the real steps (C5) bound their own waits** (every wait a timed
-//! one) and tick their progress every few seconds; a step that doesn't return makes its matter
-//! [`Error::MatterStuck`] after [`STUCK_GRACE`] (`registry.rs`).
+//! and 7) take as long as the matter's size needs, but cancel once their counted progress hasn't
+//! risen for [`PREPARE_STALL`], or past [`WORK_CEILING`] overall ([`Error::PrepareStalled`],
+//! undone as any failure). The walk looks at its cancel and its progress before and after
+//! every step, and `apply` sees both through [`Walk::cancelled`] at each folder. Once `apply`
+//! returns, the cancel is looked at again (and once more under the registry's lock): a cancel
+//! that came during or after `apply` undoes and is never prepared. A step blocked in one OS
+//! call can't be interrupted from here, so **the real steps (C5) bound their own waits** (every
+//! wait a timed one) and count their progress ([`Walk::advance`]) every few seconds, from the
+//! walking thread itself; a step that doesn't return makes its matter [`Error::MatterStuck`] after
+//! [`STUCK_GRACE`] (`registry.rs`).
 //!
 //! [`PREPARE_STALL`]: super::PREPARE_STALL
+//! [`WORK_CEILING`]: super::WORK_CEILING
 //! [`STUCK_GRACE`]: super::STUCK_GRACE
 
 use std::cell::Cell;
 use std::time::Duration;
 
 use super::RETRY_PAUSE;
-use super::prepare::{PREPARE_BOUND, PREPARE_STALL, Reserved, Shared, Stage, Walk};
+use super::prepare::{PREPARE_BOUND, PREPARE_STALL, Reserved, Shared, Stage, WORK_CEILING, Walk};
 use super::registry::Registry;
 use super::steps::{LaunchSteps, RunRefusal, Slot, Stopped};
 use crate::windows::pool::PoolUser;
@@ -50,10 +52,15 @@ struct Gate<'a, S: LaunchSteps> {
 
 impl<S: LaunchSteps> Gate<'_, S> {
     /// [`Error::Cancelled`] once cancelled; [`Error::PrepareStalled`] once its progress hasn't
-    /// moved for [`PREPARE_STALL`]. Otherwise a step's end counts as progress.
+    /// moved for [`PREPARE_STALL`], or past [`WORK_CEILING`]. Otherwise a step's end counts as
+    /// progress.
     fn go_on(&self) -> Result<(), Error> {
         self.shared.go_on()?;
         let now = self.steps.now();
+        if self.shared.over_ceiling(now) {
+            tracing::warn!(cap = ?WORK_CEILING, "tier B's preparation ran past its cap");
+            return Err(Error::PrepareStalled);
+        }
         if self.shared.stalled(now) {
             tracing::warn!(stall = ?PREPARE_STALL, "tier B's preparation stopped making progress");
             return Err(Error::PrepareStalled);

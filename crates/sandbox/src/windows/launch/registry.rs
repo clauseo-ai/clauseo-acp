@@ -18,8 +18,10 @@
 //!
 //! **A step that never returns** can't be undone around (it could still grant once it returns):
 //! past its limit and [`STUCK_GRACE`](super::STUCK_GRACE), `reserve` marks the matter stuck and
-//! refuses it with [`Error::MatterStuck`] until Clauseo restarts (`registry/held.rs`). A failed
-//! `EndRun` keeps the pool user and its slot held until a later `EndRun` succeeds.
+//! refuses it with [`Error::MatterStuck`] until Clauseo restarts (`registry/held.rs`), or, for
+//! a session's end, until its steps return. A walk and a session's end are stuck by the same
+//! progress rule (no counted progress for the stall timer, or past the cap, plus the grace).
+//! A failed `EndRun` keeps the pool user and its slot held until a later `EndRun` succeeds.
 //!
 //! **The map is this process's;** the sandbox folder's lock (`tier-b-launchers.lock`, held as
 //! long as the registry lives) keeps any other set of launchers, here or in another Clauseo,
@@ -40,7 +42,7 @@ use crate::{Error, SetAside};
 
 mod held;
 
-pub(super) use held::Finish;
+pub(super) use held::{Finish, FinishEnd};
 use held::{Owed, stuck};
 
 /// Each registry's own number, so a reservation another set of launchers handed out is told
@@ -74,7 +76,8 @@ pub(super) enum State {
     /// freed, if the reservation was dropped meanwhile: releasing).
     Undoing,
     /// A step for it didn't return within its limit and grace: refused with
-    /// [`Error::MatterStuck`] until Clauseo restarts; never freed in this process.
+    /// [`Error::MatterStuck`] until Clauseo restarts; never freed in this process, but for a
+    /// session's end whose steps return at last (`registry/held.rs`'s `finish_end`).
     Stuck,
 }
 
@@ -96,8 +99,12 @@ pub(super) struct Entry<S: LaunchSteps> {
     /// The matter folder the walk prepared, which `launch`'s policy must name.
     pub(super) prepared: Option<PathBuf>,
     /// The running walk, which a drop of the reservation cancels and a second `prepare` joins.
-    /// Releasing with a walk: the walk undoes and frees the matter when it stops.
+    /// Releasing with a walk: the walk undoes and frees the matter when it stops. Ending: the
+    /// end's progress, which its stall rule reads.
     pub(super) walk: Option<Arc<Shared>>,
+    /// The state a step hung in, once `begin` marked it stuck (not a launcher's `stick`): a
+    /// session's end stuck this way is freed once its steps return (`finish_end`).
+    pub(super) stuck_from: Option<State>,
     /// When it entered its state, on the steps' clock: the limit of a reserve, an undo, a
     /// release or a session's end counts from here.
     pub(super) since: Duration,
@@ -137,6 +144,8 @@ pub(super) struct Ended<S: LaunchSteps> {
     pub(super) pool: Option<PoolUser>,
     pub(super) slot: Option<Slot>,
     pub(super) run: Option<S::RunGroup>,
+    /// The end's progress, for its work steps' [`Walk`](super::Walk).
+    pub(super) walk: Arc<Shared>,
 }
 
 /// The sessions of one set of launchers, by matter.
@@ -225,6 +234,7 @@ impl<S: LaunchSteps> Registry<S> {
             if stuck(entry, now) {
                 if entry.state != State::Stuck {
                     tracing::warn!(state = ?entry.state, "tier B's matter is stuck in a step");
+                    entry.stuck_from = Some(entry.state);
                     entry.state = State::Stuck;
                 }
                 return Err(Error::MatterStuck);
@@ -246,6 +256,7 @@ impl<S: LaunchSteps> Registry<S> {
                 moved: Vec::new(),
                 prepared: None,
                 walk: None,
+                stuck_from: None,
                 since: now,
             },
         );
@@ -414,30 +425,25 @@ impl<S: LaunchSteps> Registry<S> {
         Ok((pool, std::mem::take(&mut entry.moved)))
     }
 
-    /// Starts `session`'s end: launched, it becomes ending. `None` for a session not launched.
+    /// Starts `session`'s end: launched, it becomes ending, with its progress (the walk's stall
+    /// rule and cap, not a wall bound). `None` for a session not launched.
     pub(super) fn end(&self, matter: &str, session: &str) -> Option<Ended<S>> {
+        let now = self.steps.now();
         let mut matters = self.lock();
         let entry = matters
             .get_mut(matter)
             .filter(|entry| entry.session == session && entry.state == State::Launched)?;
+        let walk = Shared::new(now);
         entry.state = State::Ending;
-        entry.since = self.steps.now();
+        entry.since = now;
+        entry.walk = Some(Arc::clone(&walk));
         Some(Ended {
             id: entry.id,
             pool: entry.pool.clone(),
             slot: entry.slot.clone(),
             run: entry.run.take(),
+            walk,
         })
-    }
-
-    /// Frees `matter` once claim `id`'s session has ended; a stuck one stays held.
-    pub(super) fn finish(&self, matter: &str, id: u64) {
-        let mut matters = self.lock();
-        let ours = |entry: &Entry<S>| entry.id == id && entry.state != State::Stuck;
-        if matters.get(matter).is_some_and(ours) {
-            matters.remove(matter);
-            self.freed.notify_all();
-        }
     }
 
     /// Runs `undo`'s steps, then frees claim `id`'s matter, even if a step panics. Blocks:
@@ -464,7 +470,7 @@ impl<S: LaunchSteps> Registry<S> {
     /// Lets go of claim `id`, never blocking: a running walk is cancelled and the entry marked
     /// releasing (the walk undoes and frees the matter when it stops), a failed claim is
     /// forgotten, and anything else not yet ended is marked releasing, its undo handed back for
-    /// the caller to run, then [`Registry::finish`]. Launched counts: a launcher's claim is
+    /// the caller to run, then [`Finish`]. Launched counts: a launcher's claim is
     /// armed only until its agent starts (`tier_b.rs`); once `after_session` began (ending), its
     /// end is that pass's.
     fn detach(&self, id: u64) -> Option<(u64, Undo<S>)> {

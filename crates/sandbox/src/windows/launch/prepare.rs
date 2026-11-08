@@ -29,15 +29,19 @@ use crate::{Error, Policy};
 pub const PREPARE_BOUND: Duration = Duration::from_secs(180);
 /// How long it waits between those tries, and before it stops a leftover again.
 pub const RETRY_PAUSE: Duration = Duration::from_secs(1);
-/// The **work** steps (the plan, the launch check's scan, the set-aside's pass, `apply`) take as
-/// long as the matter's size needs, but no longer than this without progress: a walk whose
-/// progress doesn't move for this long cancels, undoes and fails with
-/// [`Error::PrepareStalled`]. The real steps tick [`Walk::tick`] every few seconds.
+/// The **work** steps (the plan, the launch check's scan, the set-aside's pass, `apply`, and
+/// the session end's repair and pass) take as long as the matter's size needs, but no longer
+/// than this without progress: their counted progress ([`Walk::advance`], [`Walk::walked`])
+/// must go up within it. A walk that stalls cancels, undoes and fails with
+/// [`Error::PrepareStalled`]; a session's end that stalls stops the step and goes on.
 pub const PREPARE_STALL: Duration = Duration::from_secs(60);
+/// The work steps' overall cap, progress or not: a walk past it cancels, undoes and fails with
+/// [`Error::PrepareStalled`]; a session's end past it stops its steps and goes on to its end.
+pub const WORK_CEILING: Duration = Duration::from_mins(20);
 /// How long past its limit a step that hasn't returned may take before its matter is
-/// [`Error::MatterStuck`] (until Clauseo restarts): a walk with no progress for
-/// [`PREPARE_STALL`] plus this, or an undo, a release or a session's end running for
-/// [`PREPARE_BOUND`] plus this.
+/// [`Error::MatterStuck`] (until Clauseo restarts): a walk or a session's end with no progress
+/// for [`PREPARE_STALL`] plus this, or running past [`WORK_CEILING`] plus this; or a reserve,
+/// an undo or a release running for [`PREPARE_BOUND`] plus this.
 pub const STUCK_GRACE: Duration = Duration::from_secs(60);
 
 /// Which step a preparation is at.
@@ -78,8 +82,9 @@ pub struct Preparing {
     shared: Arc<Shared>,
 }
 
-/// A walk's state, shared by its thread, its handles and the registry (which cancels it when
-/// the reservation is dropped). Its lock is held only to read or post the stage and result.
+/// A walk's state (or a session end's), shared by its thread, its handles and the registry
+/// (which cancels it when the reservation is dropped). Its lock is held only to read or post
+/// the stage, the progress and the result.
 pub(super) struct Shared {
     inner: Mutex<Inner>,
     finished: Condvar,
@@ -96,11 +101,20 @@ struct Inner {
     result: Option<Result<(), Error>>,
     /// When its progress last moved, on the steps' clock.
     progressed: Duration,
+    /// When it began, on the steps' clock: [`WORK_CEILING`] counts from here.
+    began: Duration,
+    /// The work steps' counted progress ([`Walk::advance`]): only a rise moves `progressed`.
+    items: u64,
 }
 
 /// What the work steps ([`LaunchSteps::plan`], [`LaunchSteps::check_launch`],
-/// [`LaunchSteps::before_launch`], [`LaunchSteps::apply`]) are given: whether to stop, and
-/// where to report progress.
+/// [`LaunchSteps::before_launch`], [`LaunchSteps::apply`], and at a session's end
+/// [`LaunchSteps::repair`] and [`LaunchSteps::set_aside_after`] through [`Ending::walk`]) are
+/// given: whether to stop, and where to count progress. **Progress is counted from the walking
+/// thread itself**, as items are done, never from a heartbeat thread: a step that loops without
+/// doing anything must stall.
+///
+/// [`Ending::walk`]: super::Ending::walk
 pub struct Walk<'a> {
     pub(super) shared: &'a Shared,
     /// The steps' clock.
@@ -108,23 +122,39 @@ pub struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// Whether the preparation was cancelled or stalled (no progress for [`PREPARE_STALL`]):
-    /// the step stops at its next folder or item, with [`Error::Cancelled`] (the preparation
-    /// then fails with the cancel, or with [`Error::PrepareStalled`]).
+    /// Whether the preparation was cancelled or stalled (no progress for [`PREPARE_STALL`], or
+    /// past [`WORK_CEILING`]): the step stops at its next folder or item, with
+    /// [`Error::Cancelled`] (the preparation then fails with the cancel, or with
+    /// [`Error::PrepareStalled`]).
     pub fn cancelled(&self) -> bool {
         self.shared.is_cancelled() || self.shared.stalled((self.now)())
     }
 
-    /// Counts `folders` more walked: progress.
+    /// Counts `folders` more walked: progress, as [`Walk::advance`].
     pub fn walked(&self, folders: u64) {
         self.shared.walked.fetch_add(folders, Ordering::Relaxed);
-        self.tick();
+        self.advance(folders);
     }
 
-    /// Reports progress with nothing to count (a scan's files, a pass's items): the real steps
-    /// tick at least every few seconds, or [`PREPARE_STALL`] cancels the walk.
-    pub fn tick(&self) {
-        self.shared.tick((self.now)());
+    /// Counts `items` more done (a scan's files, a pass's items, `apply`'s entries): progress,
+    /// once the count rises; `advance(0)` is none. The real steps count at least every few
+    /// seconds, from the thread doing the work, or [`PREPARE_STALL`] stops them.
+    pub fn advance(&self, items: u64) {
+        if items == 0 {
+            return;
+        }
+        let now = (self.now)();
+        let mut inner = self.shared.lock();
+        inner.items = inner.items.saturating_add(items);
+        inner.progressed = now;
+    }
+}
+
+impl std::fmt::Debug for Walk<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Walk")
+            .field("cancelled", &self.cancelled())
+            .finish_non_exhaustive()
     }
 }
 
@@ -137,6 +167,8 @@ impl Shared {
                 done: false,
                 result: None,
                 progressed: now,
+                began: now,
+                items: 0,
             }),
             finished: Condvar::new(),
             cancelled: AtomicBool::new(false),
@@ -160,7 +192,7 @@ impl Shared {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Its progress moved at `now`.
+    /// Its progress moved at `now`: a step of the walk's own ended, or a wait tried again.
     pub(super) fn tick(&self, now: Duration) {
         self.lock().progressed = now;
     }
@@ -170,9 +202,23 @@ impl Shared {
         now.saturating_sub(self.lock().progressed)
     }
 
-    /// Whether, at `now`, its progress hasn't moved for [`PREPARE_STALL`].
+    /// Whether, at `now`, it has run past [`WORK_CEILING`].
+    pub(super) fn over_ceiling(&self, now: Duration) -> bool {
+        now.saturating_sub(self.lock().began) >= WORK_CEILING
+    }
+
+    /// Whether, at `now`, its progress hasn't moved for [`PREPARE_STALL`], or it has run past
+    /// [`WORK_CEILING`].
     pub(super) fn stalled(&self, now: Duration) -> bool {
-        self.idle(now) >= PREPARE_STALL
+        self.idle(now) >= PREPARE_STALL || self.over_ceiling(now)
+    }
+
+    /// Whether, at `now`, a step of it has hung past its limit and [`STUCK_GRACE`]: no
+    /// progress for [`PREPARE_STALL`] plus the grace, or running past [`WORK_CEILING`] plus it.
+    pub(super) fn hung(&self, now: Duration) -> bool {
+        let inner = self.lock();
+        now.saturating_sub(inner.progressed) >= PREPARE_STALL.saturating_add(STUCK_GRACE)
+            || now.saturating_sub(inner.began) >= WORK_CEILING.saturating_add(STUCK_GRACE)
     }
 
     /// Moves to `stage`.

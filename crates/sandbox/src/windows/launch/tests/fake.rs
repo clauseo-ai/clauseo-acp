@@ -104,7 +104,7 @@ impl World {
         *self.slow.lock().unwrap() = Some((step, time));
     }
 
-    /// Makes the work step `step` take `time` on the clock, ticking its progress every 10 s.
+    /// Makes the work step `step` take `time` on the clock, counting an item every 10 s.
     pub(super) fn progressing(&self, step: &'static str, time: Duration) {
         *self.progressing.lock().unwrap() = Some((step, time));
     }
@@ -199,7 +199,7 @@ impl World {
         self.log.lock().unwrap().push(call.into());
     }
 
-    /// A work step: [`World::step`], then the time it takes, its progress ticked.
+    /// A work step: [`World::step`], then the time it takes, its items counted.
     fn work(&self, step: &'static str, walk: &Walk<'_>) -> Result<(), Error> {
         self.step(step)?;
         let progressing = *self.progressing.lock().unwrap();
@@ -208,7 +208,7 @@ impl World {
             while done < time {
                 *self.clock.lock().unwrap() += Duration::from_secs(10);
                 done += Duration::from_secs(10);
-                walk.tick();
+                walk.advance(1);
             }
         }
         Ok(())
@@ -471,8 +471,12 @@ impl LaunchSteps for FakeSteps {
         Some(())
     }
 
-    fn repair(&self, _end: &Ending<'_>) -> Result<(), Error> {
-        self.world.step("repair")
+    fn repair(&self, end: &Ending<'_>) -> Result<(), Error> {
+        self.world.work("repair", end.walk)?;
+        if end.walk.cancelled() {
+            return Err(Error::Cancelled);
+        }
+        Ok(())
     }
 
     fn end_reads(&self, _end: &Ending<'_>) {
@@ -480,7 +484,10 @@ impl LaunchSteps for FakeSteps {
     }
 
     fn set_aside_after(&self, end: &Ending<'_>) -> Result<Vec<SetAside>, Error> {
-        self.world.step("set_aside_after")?;
+        self.world.work("set_aside_after", end.walk)?;
+        if end.walk.cancelled() {
+            return Err(Error::Cancelled);
+        }
         if let Some(sessions) = self.world.open.lock().unwrap().get_mut(end.matter) {
             sessions.remove(end.session);
         }

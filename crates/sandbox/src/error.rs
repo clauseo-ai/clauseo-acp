@@ -183,10 +183,10 @@ pub enum Error {
          continue with this matter."
     )]
     MatterStuck,
-    /// Windows tier B's preparation of the matter made no progress for 60 s
-    /// (`windows::launch`'s `PREPARE_STALL`): its work steps have no wall-clock cap, only this.
+    /// Windows tier B's preparation of the matter made no counted progress for 60 s
+    /// (`windows::launch`'s `PREPARE_STALL`), or ran past its 20 min cap (`WORK_CEILING`).
     /// It was cancelled and what it had done for the session undone. A failed launch.
-    #[error("Preparing the matter stopped making progress.")]
+    #[error("Preparing the matter stopped making progress or took too long.")]
     PrepareStalled,
 }
 
@@ -249,7 +249,9 @@ impl Error {
             Error::LeftoverProcess { .. } => "a program from an earlier agent run is still running",
             Error::LaunchersHeld => "another Clauseo is using the Safe workspace",
             Error::MatterStuck => "a step of the Safe workspace stopped answering",
-            Error::PrepareStalled => "preparing the matter stopped making progress",
+            Error::PrepareStalled => {
+                "preparing the matter stopped making progress or took too long"
+            }
         }
     }
 

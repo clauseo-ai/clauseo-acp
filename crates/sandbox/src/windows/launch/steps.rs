@@ -50,6 +50,10 @@ pub struct Stopped {
 /// The session whose end [`LaunchSteps`]' after-session calls handle.
 #[derive(Debug, Clone, Copy)]
 pub struct Ending<'a> {
+    /// The end's progress and stop, for its work steps ([`LaunchSteps::repair`],
+    /// [`LaunchSteps::set_aside_after`]): the walk's stall rule and cap. A step that stalls
+    /// stops (`Cancelled`), and the end goes on with the next.
+    pub walk: &'a Walk<'a>,
     /// The matter.
     pub matter: &'a str,
     /// The session.
@@ -72,13 +76,15 @@ pub struct Ending<'a> {
 /// ([`stop_pool_user`](Self::stop_pool_user), [`sweep_pool_user`](Self::sweep_pool_user)).
 ///
 /// **No step waits unbounded.** The walk looks at its cancel, its waits' 180 s budget and its
-/// work's 60 s stall timer between steps (`walk.rs`), but can't interrupt a step blocked in an
-/// OS call: every wait a real step makes (a scheduled task, the set-up server's pipe, a process
-/// handle, a file lock) is a timed one, no longer than the budget; the work steps
-/// ([`plan`](Self::plan), [`check_launch`](Self::check_launch),
-/// [`before_launch`](Self::before_launch), [`apply`](Self::apply)) tick [`Walk::tick`] every
-/// few seconds and stop once [`Walk::cancelled`] says so. A step that never returns makes its
-/// matter `MatterStuck` until Clauseo restarts.
+/// work's 60 s stall timer and 20 min cap between steps (`walk.rs`), but can't interrupt a step
+/// blocked in an OS call: every wait a real step makes (a scheduled task, the set-up server's
+/// pipe, a process handle, a file lock) is a timed one, no longer than the budget; the work
+/// steps ([`plan`](Self::plan), [`check_launch`](Self::check_launch),
+/// [`before_launch`](Self::before_launch), [`apply`](Self::apply), and at the end
+/// [`repair`](Self::repair) and [`set_aside_after`](Self::set_aside_after)) count their progress
+/// ([`Walk::advance`]) every few seconds, from the thread doing the work, and stop once
+/// [`Walk::cancelled`] says so. A step that never returns makes its matter `MatterStuck`
+/// until Clauseo restarts.
 ///
 /// **The launching session** is its session id together with its reservation's claim, never
 /// its name or a pid alone. C3's own checks (the registry's) use both. TODO(C5): where the real
@@ -193,12 +199,13 @@ pub trait LaunchSteps: Send + Sync + 'static {
 
     /// The journal's cursor, before the repair (`session_cursor`).
     fn session_cursor(&self, end: &Ending<'_>) -> Option<Self::Cursor>;
-    /// The repair (`repair_after_session`).
+    /// The repair (`repair_after_session`). A work step: counts `end.walk`, stops once it is
+    /// cancelled.
     fn repair(&self, end: &Ending<'_>) -> Result<Self::Repaired, Error>;
     /// Ends R18's reads of other matters (`end_reads`).
     fn end_reads(&self, end: &Ending<'_>);
     /// The set-aside's after-session pass (`set_aside::after_session`), which takes the session
-    /// out of the open sessions.
+    /// out of the open sessions. A work step, as `repair` is.
     fn set_aside_after(&self, end: &Ending<'_>) -> Result<Self::Passed, Error>;
     /// What that pass moved.
     fn moved(&self, passed: &Self::Passed) -> Vec<SetAside>;

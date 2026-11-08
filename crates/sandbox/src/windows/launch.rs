@@ -29,8 +29,9 @@
 //!
 //! **The host's 180 s bound is the overall one** and covers `reserve` through `launch`
 //! (D3b-win): its `MatterBusy` retries, the walk's waits and the launch. The walk's own limits
-//! (`walk.rs`: the waits' 180 s budget, the work's 60 s stall timer) only bound the walk inside
-//! it; a large matter's first walk keeps going while its progress moves, and the host shows it.
+//! (`walk.rs`: the waits' 180 s budget, the work's 60 s stall timer and 20 min cap) only bound
+//! the walk inside it; a large matter's first walk keeps going while its progress moves, and
+//! the host shows it.
 //!
 //! One set of launchers per sandbox folder, across processes: [`Launchers::with_steps`] takes
 //! the folder's lock ([`LAUNCHERS_LOCK`]) before it clears what a crash left, and a second set
@@ -50,13 +51,14 @@ mod tier_b;
 mod walk;
 
 pub use prepare::{
-    PREPARE_BOUND, PREPARE_STALL, Preparing, Progress, RETRY_PAUSE, STUCK_GRACE, Stage, Walk,
+    PREPARE_BOUND, PREPARE_STALL, Preparing, Progress, RETRY_PAUSE, STUCK_GRACE, Stage,
+    WORK_CEILING, Walk,
 };
 pub use steps::{Ending, LaunchSteps, RunRefusal, Slot, Stopped};
 pub use tier_b::TierBLauncher;
 
 use prepare::Reserved;
-use registry::{Begun, Finish, Registry, State};
+use registry::{Begun, FinishEnd, Registry, State};
 
 use crate::reservation::{Claim, Release};
 use crate::windows::pool::assign::Assign;
@@ -276,6 +278,12 @@ impl<S: LaunchSteps> Launchers<S> {
     ///
     /// `EndRun`, the slot and the matter's release always run: drop guards do them, so a panic
     /// in a step still ends the run's group and frees the matter before it goes on up.
+    ///
+    /// The repair and the pass take as long as the matter needs, under the walk's rule: their
+    /// counted progress ([`Ending::walk`]) must rise every [`PREPARE_STALL`], within
+    /// [`WORK_CEILING`] overall. A step that stalls or passes the cap stops (`Cancelled`) and
+    /// the end goes on, the clean-close record noting it failed. A step that doesn't return
+    /// makes the matter `MatterStuck` meanwhile; once it does return, the matter is freed.
     pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside> {
         let registry = &self.registry;
         let steps = &*registry.steps;
@@ -284,7 +292,7 @@ impl<S: LaunchSteps> Launchers<S> {
             return Vec::new();
         };
         // Dropped in reverse: the run's group and the slot first, then the matter freed.
-        let _finish = Finish {
+        let _finish = FinishEnd {
             registry,
             matter,
             id: ended.id,
@@ -297,14 +305,24 @@ impl<S: LaunchSteps> Launchers<S> {
         };
         let mut moved = Vec::new();
         if let Some(pool) = &ended.pool {
+            let now = || steps.now();
+            let walk = Walk {
+                shared: &ended.walk,
+                now: &now,
+            };
+            // Each step's end is progress: a stalled step stops, and the next gets its own time.
+            let stepped = || ended.walk.tick(steps.now());
             let end = Ending {
+                walk: &walk,
                 matter,
                 session,
                 policy,
                 pool,
             };
             let cursor = steps.session_cursor(&end);
+            stepped();
             let repaired = steps.repair(&end);
+            stepped();
             if let Err(error) = &repaired {
                 tracing::warn!(
                     kind = error.kind(),
@@ -312,6 +330,7 @@ impl<S: LaunchSteps> Launchers<S> {
                 );
             }
             steps.end_reads(&end);
+            stepped();
             let passed = steps.set_aside_after(&end);
             match &passed {
                 Ok(passed) => moved = steps.moved(passed),

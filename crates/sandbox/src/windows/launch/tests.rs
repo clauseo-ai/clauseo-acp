@@ -12,6 +12,7 @@ use crate::windows::sids::Sid;
 
 mod fake;
 mod held;
+mod limits;
 mod prepare;
 mod session;
 
