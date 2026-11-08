@@ -13,7 +13,6 @@
 use std::process::Command;
 
 mod admin_log;
-mod forged;
 
 use super::windows_listing::is_guid;
 use super::windows_sweeper::WindowsSweeper;

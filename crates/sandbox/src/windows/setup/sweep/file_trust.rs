@@ -2,11 +2,11 @@
 //! ([`by_file`]), and whether its file can be trusted to show the task isn't the pool's
 //! ([`trusted`]). The task's creator may hold write on its file, so a pool user may have
 //! rewritten the principal there; the file's principal counts only once the owner the task's
-//! own security descriptor names (for a task the listing hides, the one in its cache key's
-//! `SD`) isn't a pool SID, the file's owner isn't one, and no allow in the file's DACL gives a
-//! right to change it ([`WRITE_RIGHTS`]) to anyone a pool user's token may hold
-//! ([`may_be_pool`]). The judgment reads a [`FileSecurity`] and makes no Windows call,
-//! so it is tested on every OS; [`file_security`] reads one from the descriptor's bytes.
+//! own security descriptor names isn't a pool SID, the file's owner isn't one, and no allow
+//! in the file's DACL gives a right to change it ([`WRITE_RIGHTS`]) to anyone a pool user's
+//! token may hold ([`may_be_pool`]). The judgment reads a [`FileSecurity`] and makes no
+//! Windows call, so it is tested on every OS; [`file_security`] reads one from the
+//! descriptor's bytes.
 
 use std::collections::BTreeMap;
 
@@ -61,11 +61,6 @@ const ENTRA: &str = "S-1-12-1-";
 
 /// Why a task the fallback read stays unreadable: its file's principal is the pool's, or may be.
 const NOT_SKIPPED: &str = "the task file names a pool user or a name that resolves to none";
-
-/// Why a hidden task whose cache key's `SD` names no owner that can be read is 56, whatever its
-/// file says.
-pub(super) const ODD_SD: &str =
-    "the owner the task's cache key names can't be read, so its task file isn't trusted";
 
 /// Whether the file whose security is `security` can't have been changed by a pool user of
 /// `pool`: its owner isn't a pool SID, it has a DACL, and no allow there gives one of
@@ -140,45 +135,6 @@ pub(super) fn by_file<S: Sweeper>(
         | Found::NoPrincipal
         | Found::Unread(_)
         | Found::FileSkipped => Found::Unread(NOT_SKIPPED.to_owned()),
-    }
-}
-
-/// Whether the task at `path` (`\A\name`), which the Task Scheduler's listing didn't give but
-/// a task file or its cache holds (`unlisted.rs`), shows it isn't the pool's: the owner of the
-/// descriptor its cache key holds ([`Sweeper::task_cache_owner`]) readable and not a pool SID,
-/// then its file [`trusted`] and its principal resolving to a SID that isn't the pool's, or
-/// another domain's name. `Err` with why not: a pool owner, an owner that can't be read (an
-/// `SD` unreadable, ownerless or over its cap: [`ODD_SD`]), or a file that isn't trusted or
-/// names the pool. [`trusted`] reads today's DACL, not who wrote the file: a registrant with
-/// write and `WRITE_DAC` on its file can name SYSTEM there and then drop its own write, so the
-/// file counts only beside a readable owner. It only ever skips; nothing is deleted through a
-/// file.
-pub(super) fn not_pool_by_path<S: Sweeper>(
-    fs: &mut S,
-    path: &str,
-    pool: &[Sid],
-    names: &Names,
-    resolved: &mut BTreeMap<String, Resolved>,
-) -> Result<(), Failed> {
-    let (folder, name) = path
-        .rsplit_once('\\')
-        .ok_or_else(|| "the task's path doesn't start at the root".to_owned())?;
-    let folder = if folder.is_empty() { "\\" } else { folder };
-    match fs.task_cache_owner(path) {
-        Ok(owner) if pool.contains(&owner) => {
-            return Err("the task's owner is a pool user".to_owned());
-        }
-        Ok(_) => {}
-        Err(_) => return Err(ODD_SD.to_owned()),
-    }
-    let principal = principal_at(fs, folder, name, pool)?;
-    match by_name(fs, pool, names, resolved, &principal) {
-        Found::NotPool | Found::Skipped(_) => Ok(()),
-        Found::Pool
-        | Found::Unresolved(_)
-        | Found::NoPrincipal
-        | Found::Unread(_)
-        | Found::FileSkipped => Err(NOT_SKIPPED.to_owned()),
     }
 }
 

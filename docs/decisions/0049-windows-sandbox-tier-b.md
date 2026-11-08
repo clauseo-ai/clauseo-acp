@@ -2056,29 +2056,19 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    is 56, and only one still gone is skipped and counted. A walk that already couldn't list
    a folder is 56 and isn't repeated. In the read judged, a task the walk didn't list is one
    of three kinds:
-   - **in a task file and the cache**: hidden and 56, unless the owner of the security
-     descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
-     `REG_BINARY`, read-only in the 64-bit view) can be read and isn't a pool SID, and its task
-     file, under the fallback's trust rules above, names a principal that resolves to a SID
-     that isn't the pool's or is another domain's name: then it is skipped and counted with the
-     tasks skipped by their file. A pool owner, a trusted file naming the pool, and a file that
-     isn't trusted keep it 56. An owner that can't be read (an `SD` unreadable, ownerless or
-     over its cap) is 56 whatever the file says. Why: the trust rules read the file's DACL as
-     it is today, not who wrote the file. A registrant that holds write and `WRITE_DAC` on its
-     own file can rewrite the principal to SYSTEM and then remove its own write, leaving a
-     "trusted" file, while making its `SD` unreadable or ownerless. An earlier version of this
-     PR skipped such a task on its file alone; security wins, and the planned recycle (P2)
-     restores availability: a persistent 56 from a vendor's task with an odd `SD` is what it
-     neutralises. The trusted-file rule stays only beside a readable owner that isn't a pool
-     SID (`elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators`
-     checks that a standard user can't make that owner SYSTEM or Administrators). Elevated
-     tests (not run yet): `elevated_an_ownerless_or_system_owned_cache_sd_keeps_a_pool_users_task_at_56`
-     overwrites the test user's task's `SD` as the administrator with an ownerless
-     descriptor, then with `O:SY`, and the judgement must be 56;
-     `elevated_a_task_file_rewritten_to_system_and_relocked_doesnt_pass_an_odd_cache_sd`
-     rewrites its file to name SYSTEM, owned by Administrators with no write for the user
-     (the file then passes the trust rules), and with an ownerless, unparsable or over-cap
-     `SD` the judgement must be 56;
+   - **in a task file and the cache**: a task the Task Scheduler holds but SYSTEM's COM
+     listing hides is 56, full stop, whatever the owner of the security descriptor its cache
+     key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value) or its task file
+     says. Neither is evidence. The `SD`'s content is the descriptor the registrant gave, and
+     we don't probe whether a standard user can supply `O:SY` through `RegisterTask`'s SDDL.
+     The file-trust rules read the file's DACL as it is today, not who wrote it: a registrant
+     with write and `WRITE_DAC` on its own file can rewrite the principal to SYSTEM and then
+     remove its own write. SYSTEM can read virtually every legitimate task, so the cost is
+     tiny; the planned recycle (P2) restores availability where a vendor's task hides from
+     SYSTEM. Earlier versions of this PR skipped such a task on a trusted file, first alone and
+     then beside a readable owner outside the pool; both skips are gone
+     (`a_hidden_task_with_a_forged_system_owner_and_a_relocked_file_naming_system_is_56`
+     drives a forged `O:SY` and a re-locked file naming SYSTEM through a whole run);
    - **in a task file alone** (no cache key, so the Task Scheduler holds no such task): the
      file's own NTFS owner decides, read through a handle opened as the fallback opens (by
      handle below `Tasks`, never through a link, refused if a reparse point or a folder) for
@@ -2097,9 +2087,7 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
      `TaskCache\Tasks\{Id}` either, though only SYSTEM can write there: its `Triggers` and
      `Actions` values are binary blobs in an undocumented format, which the sweep doesn't rely
      on. A leftover key whose task can't run still never blocks, so system residue doesn't lock
-     the sandbox out. (For the file-and-cache rule, an `SD` over 256 KiB is 56: past the
-     largest legal self-relative descriptor, a 20-byte header, two SIDs of at most 68 bytes and
-     two ACLs of at most 65 535 bytes.)
+     the sandbox out.
 
    A hidden task is never deleted: with no task object, nothing is deleted through a file or
    the registry, and the run fails closed. A listing that can't be read on the read judged is
@@ -2177,7 +2165,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), on the listings' second read a task file and the Task Scheduler's cache hold a task the listing didn't give and its cache key's `SD` names a pool owner or none that can be read, or its file doesn't show it isn't the pool's, a task file with no cache key is a pool user's or its owner can't be read, a cache key with no task file holds a task that can run (or whether it can can't be told), a task new to the second walk is the pool's, a folder or key gone mid-listing is there again, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), on the listings' second read a task file and the Task Scheduler's cache hold a task the listing didn't give (always), a task file with no cache key is a pool user's or its owner can't be read, a cache key with no task file holds a task that can run (or whether it can can't be told), a task new to the second walk is the pool's, a folder or key gone mid-listing is there again, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
@@ -2200,8 +2188,8 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   the cache holds no task for is held to its own owner, and a reparse point fails the file
   walk), or a task of its own whose file it deletes, leaving its cache key, or whose cache
   `SD` it makes unreadable or ownerless. A stray file someone else owns, or a cache key whose
-  task can't run, no longer blocks; a vendor's runnable key with no file, or hidden task with
-  an odd `SD`, does, until the planned recycle (P2). No
+  task can't run, no longer blocks; a vendor's runnable key with no file, or any task hidden
+  from SYSTEM's listing, does, until the planned recycle (P2). No
   `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
   15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
   F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
@@ -2210,8 +2198,7 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   which the next launch's sweep completes, or runs `--remove` (with no pool recorded there is
   nothing to sweep). The Application log's sweep line says which count is non-zero (unreadable,
   not listed, folders not listed), and the admin-only `sweep-admin.log` names up to five of
-  the tasks that keep it at 56. A hidden task whose cache key's owner reads and isn't the
-  pool's, and whose trusted file shows it isn't the pool's, no longer blocks.
+  the tasks that keep it at 56.
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
@@ -2251,14 +2238,14 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   or no run (its action leaves no trace). If it runs, a key alone whose `Tasks` key is missing
   must be 56 too.
 - VM row (not run), and elevated test (not run yet)
-  `elevated_a_standard_user_cant_register_a_task_for_another_principal`: the file-and-cache
-  rule trusts a task file naming someone else because a standard user can't register a task
+  `elevated_a_standard_user_cant_register_a_task_for_another_principal`: the task-file
+  fallback (step 3, for a task the listing gives but whose principal can't be read) trusts a task file naming someone else because a standard user can't register a task
   for another principal without that principal's credentials. As a standard user, register
   (through `ITaskFolder::RegisterTask`) a task whose `<Principal>` holds another local user's
   `<UserId>` with `InteractiveToken` and no password, then one holding
   `<GroupId>S-1-5-32-545</GroupId>`: expect both refused, while the same user's own task
   registers. If either registers, a trusted file naming someone else proves nothing, and the
-  file-and-cache rule must be 56 beside a readable owner too.
+  fallback must be 56 for it.
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.

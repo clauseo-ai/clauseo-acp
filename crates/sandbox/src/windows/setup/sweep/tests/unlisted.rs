@@ -1,7 +1,6 @@
-//! The cross-check: a task the task files or the Task Scheduler's cache hold but the listing
-//! didn't give (its descriptor shuts SYSTEM out, say) is 56, unless its cache key's owner reads
-//! and isn't the pool's and its trusted task file names a principal that isn't the pool's.
-//! Nothing is deleted through a file or the registry.
+//! The cross-check: a task the task files and the Task Scheduler's cache hold but the listing
+//! didn't give (its descriptor shuts SYSTEM out, say) is 56, whatever its cache key's owner or
+//! its file says. Nothing is deleted through a file or the registry.
 
 use super::task_file::file;
 use super::*;
@@ -51,13 +50,30 @@ fn a_task_the_listing_hides_is_56_and_left() {
 }
 
 #[test]
-fn a_hidden_task_whose_trusted_file_names_another_principal_is_skipped() {
+fn a_hidden_task_with_a_forged_system_owner_and_a_relocked_file_naming_system_is_56() {
+    // A readable SD naming SYSTEM (a forged O:SY), and a file rewritten to name SYSTEM, owned
+    // by Administrators with no write for any pool user (`clean`): the file passes the trust
+    // rules, yet the task stays 56 through the whole run.
     let system = file("<UserId>S-1-5-18</UserId>");
     let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
-    assert_eq!(sweep(&mut fake), SweepExit::Done);
-    let line = &fake.logged[0].1;
-    assert!(line.contains("0 not listed"), "{line}");
-    assert!(line.contains("1 more skipped"), "{line}");
+    fake.cache_owners
+        .insert(r"\A\hidden".to_owned(), Ok(Sid::parse("S-1-5-18").unwrap()));
+    assert_eq!(trusted(&clean(), &[sid(1010)]), Ok(()));
+    let (exit, line) = swept_line(&mut fake);
+    assert_eq!(exit, SweepExit::TasksLeft, "{line}");
+    assert!(line.contains("1 not listed"), "{line}");
+    assert!(line.contains("0 more skipped"), "{line}");
+    assert!(fake.deleted().is_empty(), "never deleted through a file");
+    assert_eq!(fake.admin_logged.len(), 1, "named in the admin-only log");
+    // The default owner (Administrators) and any other non-pool owner: 56 too.
+    for owner in [None, Some(sid(1001))] {
+        let system = file("<UserId>S-1-5-18</UserId>");
+        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system)));
+        if let Some(owner) = owner.clone() {
+            fake.cache_owners.insert(r"\A\hidden".to_owned(), Ok(owner));
+        }
+        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{owner:?}");
+    }
 }
 
 #[test]
@@ -77,15 +93,6 @@ fn a_hidden_task_owned_by_a_pool_user_is_56_whatever_its_trusted_file_says() {
     let line = &fake.logged[0].1;
     assert!(line.contains("1 not listed"), "{line}");
     assert!(line.contains("0 more skipped"), "{line}");
-    // Another owner, with that file: skipped.
-    let mut other = hiding(
-        r"\A\hidden",
-        Some((r"A\hidden", file("<UserId>S-1-5-18</UserId>"))),
-    );
-    other
-        .cache_owners
-        .insert(r"\A\hidden".to_owned(), Ok(sid(1001)));
-    assert_eq!(sweep(&mut other), SweepExit::Done);
 }
 
 #[test]
