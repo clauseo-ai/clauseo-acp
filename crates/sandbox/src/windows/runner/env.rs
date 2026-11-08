@@ -8,8 +8,14 @@
 //!   `LOCALAPPDATA` at `<state>\AppData\Local`; `TEMP` and `TMP` at the session's temp folder
 //!   (`Policy::session_tmpdir`), else `<state>\tmp` (`Policy::tmpdir`'s fallback).
 //! - **git over OpenSSL** (§3: Schannel fails under any restricting-SID token,
-//!   `s15-spikes-traverse.md` (b)): `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.sslBackend`,
-//!   `GIT_CONFIG_VALUE_0=openssl`; any other `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.
+//!   `s15-spikes-traverse.md` (b)): `GIT_CONFIG_KEY_0=http.sslBackend`,
+//!   `GIT_CONFIG_VALUE_0=openssl`; then **`safe.directory`** at `GIT_CONFIG_KEY_n`/`VALUE_n`, two
+//!   per folder in `LaunchMessage::git_roots` (the matter, then the allowed folders): `<root>`
+//!   and `<root>/*`, so git trusts exactly what the run was granted and the repositories below
+//!   it, never a bare `*` or a parent. The pool user doesn't own the matter, so git would refuse
+//!   it as dubious. Paths are forward-slashed, the drive letter as given; a folder git can't
+//!   express is left out. `GIT_CONFIG_COUNT` is the total, and any other
+//!   `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.
 //! - **CA bundle** (`s15-spikes-traverse.md` (d): codex's rustls finds no roots under the token):
 //!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at the bundle, when the launch names one.
 //!   `SSL_CERT_FILE` makes every OpenSSL tool trust exactly the machine's roots, as intended.
@@ -27,9 +33,9 @@ use std::collections::BTreeMap;
 use super::paths::{WinPath, text_within};
 use super::{LaunchError, LaunchMessage};
 
-/// The git variables that turn on its OpenSSL backend (§3).
-pub const GIT_OPENSSL: [(&str, &str); 3] = [
-    ("GIT_CONFIG_COUNT", "1"),
+/// The git config entry that turns on its OpenSSL backend (§3): index 0 of the list
+/// [`git_config`] makes.
+pub const GIT_OPENSSL: [(&str, &str); 2] = [
     ("GIT_CONFIG_KEY_0", "http.sslBackend"),
     ("GIT_CONFIG_VALUE_0", "openssl"),
 ];
@@ -167,11 +173,7 @@ fn set_by_runner(message: &LaunchMessage, places: &Places) -> Vec<(String, Strin
         ("TEMP".to_owned(), places.temp.display()),
         ("TMP".to_owned(), places.temp.display()),
     ];
-    set.extend(
-        GIT_OPENSSL
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
-    );
+    set.extend(git_config(message));
     if let Some(bundle) = message.ca_bundle.as_deref().and_then(WinPath::parse) {
         set.extend(
             CA_VARS
@@ -180,6 +182,62 @@ fn set_by_runner(message: &LaunchMessage, places: &Places) -> Vec<(String, Strin
         );
     }
     set
+}
+
+/// git's config from the environment: `GIT_CONFIG_COUNT`, index 0 for OpenSSL, then for each root
+/// of `message.git_roots` in order, once: `<root>` and `<root>/*` as `safe.directory`. The first
+/// names the repository at the root's top; the second (git 2.46+: every repository below it)
+/// covers a repository in a subfolder. A root that [`safe_directory`] can't express is left out.
+fn git_config(message: &LaunchMessage) -> Vec<(String, String)> {
+    let mut roots: Vec<String> = Vec::new();
+    for root in message.git_roots.iter().filter_map(|r| safe_directory(r)) {
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    let values: Vec<String> = roots
+        .iter()
+        .flat_map(|root| [root.clone(), format!("{root}/*")])
+        .collect();
+    let mut set = vec![(
+        "GIT_CONFIG_COUNT".to_owned(),
+        (1 + values.len()).to_string(),
+    )];
+    set.extend(
+        GIT_OPENSSL
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+    );
+    for (index, value) in values.into_iter().enumerate() {
+        let index = index + 1;
+        set.push((
+            format!("GIT_CONFIG_KEY_{index}"),
+            "safe.directory".to_owned(),
+        ));
+        set.push((format!("GIT_CONFIG_VALUE_{index}"), value));
+    }
+    set
+}
+
+/// `root` as git's `safe.directory` names a repository's top: `X:/a/b`, the drive letter as
+/// given, or `//server/share/a` for UNC; no trailing slash. `None` for a folder git can't express:
+/// a drive or share root, a control character, or a `*`, git's wildcard.
+fn safe_directory(root: &str) -> Option<String> {
+    if root.chars().any(|c| c.is_control() || c == '*') {
+        return None;
+    }
+    let path = WinPath::parse(root)?;
+    let below = path.below_drive().replace('\\', "/");
+    if below == "/" {
+        return None;
+    }
+    let plain = root.replace('\\', "/");
+    let plain = plain.strip_prefix("//?/").unwrap_or(&plain);
+    let prefix = match path.drive() {
+        Some(_) => plain.get(..2)?.to_owned(),
+        None => "/".to_owned(),
+    };
+    Some(format!("{prefix}{below}"))
 }
 
 /// Whether the runner sets `name` itself, so the spec's value goes.

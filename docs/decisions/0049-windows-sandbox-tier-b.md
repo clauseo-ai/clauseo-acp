@@ -1395,9 +1395,11 @@ leaves that profile, both naming the part.
   and `TEMP`/`TMP` point under the state folder (the session's temp folder when the policy has
   one). A variable that points into the lawyer's profile outside the paths the launch grants is
   dropped, and so is a `PATH` or `PSModulePath` entry there outside the runtime paths. git uses
-  OpenSSL (`GIT_CONFIG_COUNT=1`, `http.sslBackend=openssl`): Schannel fails under any
-  restricting-SID token. System32's `curl.exe` (`SEC_E_NO_CREDENTIALS`) and PowerShell's web
-  calls fail for the same reason, a known breakage.
+  OpenSSL (`GIT_CONFIG_COUNT`, `http.sslBackend=openssl`): Schannel fails under any
+  restricting-SID token. The agent's git trusts exactly the run's matter roots
+  (`safe.directory`), because the pool user doesn't own them: each as `<root>` and `<root>/*`,
+  so a repo in a subfolder counts. System32's `curl.exe` (`SEC_E_NO_CREDENTIALS`) and
+  PowerShell's web calls fail for the same reason, a known breakage.
 - **The CA bundle.** Codex's rustls loads no roots from the Windows store under the token, so
   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` name `<data_dir>\sandbox-ca\roots.pem`: the local
   machine's and the current user's `Root` stores (group policy and enterprise included), less

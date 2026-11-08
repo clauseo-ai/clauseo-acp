@@ -35,6 +35,10 @@ pub(super) fn message_from_policy(
         .into_iter()
         .map(|p| path("granted", p))
         .collect::<Result<Vec<_>, _>>()?;
+    let git_roots = git_roots(policy)
+        .into_iter()
+        .map(|p| path("git_roots", p))
+        .collect::<Result<Vec<_>, _>>()?;
     let message = LaunchMessage {
         version: LAUNCH_VERSION,
         pool_user: pool.sid.clone(),
@@ -59,6 +63,7 @@ pub(super) fn message_from_policy(
             .transpose()?,
         runtime,
         granted,
+        git_roots,
         ca_bundle: ca_bundle.map(|p| path("ca_bundle", p)).transpose()?,
         credential_link: policy
             .credential_link()
@@ -84,6 +89,15 @@ pub fn granted_paths(policy: &crate::Policy) -> Vec<&Path> {
     paths.extend(policy.claude_store().map(crate::ClaudeStore::dir));
     paths.extend(policy.credential_link());
     paths
+}
+
+/// The folders git in the agent trusts: the matter, then each allowed folder, the lawyer's
+/// other matters granted read-only. The same folders the ACL grants give ([`granted_paths`],
+/// `acl_plan`), and never the state, runtime or profile folders.
+pub(super) fn git_roots(policy: &crate::Policy) -> Vec<&Path> {
+    std::iter::once(policy.matter())
+        .chain(policy.allowed_folders().iter().map(PathBuf::as_path))
+        .collect()
 }
 
 /// M3 before any entry is applied (for the launcher, PR6 and R17): refuses a policy any of whose

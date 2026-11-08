@@ -155,6 +155,7 @@ pub(crate) fn message(
         state: state.clone(),
         tmpdir: None,
         runtime: runtime.clone(),
+        git_roots: vec![matter.clone()],
         granted: [
             vec![matter, state],
             runtime,
