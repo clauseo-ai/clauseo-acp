@@ -2389,21 +2389,31 @@ pool account:
 VM facts: with both folders made this way, Git Bash, a local clone and an HTTPS clone all work
 under the agent's token. Each step that fails writes one line on stderr, `clauseo-sandbox-run:
 Git Bash is off for this run: <reason>`, naming no path, and the run goes on with no Git Bash.
-That fails closed: the spec's `CLAUDE_CODE_GIT_BASH_PATH` goes, and so does every `PATH` entry
-in a per-machine Git install (`GitForWindows`' `InstallPath`, `%ProgramFiles%\Git`,
-`%ProgramFiles(x86)%\Git`), matched as written and in its long form (`GetLongPathNameW`, so
-`C:\PROGRA~1\Git\cmd` is caught), so the agent's `PATH` never leads to the lawyer's Git. A Git elsewhere on a `PATH` the lawyer set (a
-package manager's shim, say) isn't recognised and stays. Under the agent's token it fails as
+That fails closed. `CLAUDE_CODE_GIT_BASH_PATH` names the stub (below), and `CLAUSEO_GIT_BASH_OFF`
+holds the reason; both replace the spec's values. Every `PATH` entry in a per-machine Git
+install goes (`GitForWindows`' `InstallPath`, `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git`),
+matched as written and in its long form (`GetLongPathNameW`, so `C:\PROGRA~1\Git\cmd` is
+caught), so the agent's `PATH` never leads to the lawyer's Git. A Git elsewhere on a `PATH`
+the lawyer set (a package manager's shim, say) isn't recognised and stays. Under the agent's token it fails as
 the lawyer's Git would.
 
-Claude Code itself still probes for the lawyer's Git Bash. Read from Claude Code 2.1.318's
-bundle: when `CLAUDE_CODE_GIT_BASH_PATH` is unset, or names a file that isn't there, it tries
-`C:\Program Files\Git\bin\bash.exe` and then `C:\Program Files (x86)\Git\bin\bash.exe`.
-Only after those does it derive `bin\bash.exe` from the `git` on `PATH`. So with Git Bash
-off, the agent can start the lawyer's own `bash.exe` under its token. That bash has the
-lawyer's key, whose session folder the pool user can't create, so it fails, as it did before
-the trees (VM row). That doesn't hold while the lawyer has Git Bash running in the session: msys
-has then made that folder already, and what the agent's bash does with it isn't verified.
+**The stub.** Read from Claude Code 2.1.318's bundle: when `CLAUDE_CODE_GIT_BASH_PATH` is unset,
+or names a file that isn't there, Claude Code tries `C:\Program Files\Git\bin\bash.exe` and then
+`C:\Program Files (x86)\Git\bin\bash.exe`. Only after those does it derive `bin\bash.exe` from
+the `git` on `PATH`. Dropping the variable would therefore hand the agent the lawyer's own Git
+Bash. That bash fails while the lawyer's key has no session folder, but while the lawyer's Git
+Bash runs in the session, msys has made that folder already. So "off" names a stub instead:
+`<admin>\git\_off\bash.exe`, a copy of `clauseo-sandbox-run.exe` that set-up makes.
+
+Claude Code takes the variable only when the file exists and its name is `bash.exe`, `sh.exe`,
+`bash` or `sh`, and it passes its own arguments. So the runner acts as the stub when its own
+file is named `bash.exe` (`runner/stub.rs`). It writes `Git Bash isn't available in the Safe
+workspace for this session: <reason>` on stderr and exits 1. The setup exe can't be the stub:
+its manifest asks for an administrator, so the agent can't start it. The outer names the stub
+only when it is a regular file under the checked admin chain. Otherwise it says so on one more
+line, and Claude Code may probe as above. The refresh, which has no runner beside the admin
+copy, keeps the stub it finds, so the stub follows an app update only at the next set-up. Its
+contract is just the file name and the variable.
 
 **Residuals (ruled acceptable for launch).**
 - msys's objects in the global folder (the pid table with each process's exe path, and
