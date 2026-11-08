@@ -200,6 +200,7 @@ crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
 # play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code
+crates/sandbox/src/windows/acl/authz.rs - unsafe_code
 crates/sandbox/src/windows/acl/profile.rs - unsafe_code
 crates/sandbox/src/windows/clean_close/ntfs.rs - unsafe_code
 crates/sandbox/src/windows/clean_close/ntfs/volume.rs - unsafe_code
@@ -489,6 +490,7 @@ crates/sandbox/src/windows/setup/logon/tests/links.rs wait clippy::disallowed_me
 crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
 # S15 PR7: the network filters' WFP calls, the owner's grants on them, a launch's reads of
 # them, and the firewall rules through COM.
+crates/sandbox/src/windows/watch_client/os.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/read.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/security.rs - unsafe_code
