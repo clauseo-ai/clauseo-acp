@@ -309,8 +309,9 @@ pub enum SetAsideFailure {
     )]
     DriveFolderNotYours,
     /// The live watch moves a folder whole unchecked only when a pool user (the agent) owns it,
-    /// read from the handle the move renames (`run::Need::Pool`); this one's owner is someone
-    /// else's, or can't be read, so it stays where it is for the check after the session.
+    /// read from the handle the move renames (`run::Need::Pool`; an owner that can't be read
+    /// counts as the agent's); this one's owner is someone else's, so it stays where it is for
+    /// the check after the session.
     #[error("the item isn't the agent's, so it stays where it is")]
     NotTheAgents,
     /// A restore of a link (a junction or a symbolic link) whose target, read by its words,
