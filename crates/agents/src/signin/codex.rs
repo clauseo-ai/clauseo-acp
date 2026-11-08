@@ -57,6 +57,7 @@
 mod device;
 mod ended;
 pub(crate) mod identity;
+mod written;
 
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, TcpListener};
@@ -71,7 +72,8 @@ use futures::channel::oneshot;
 use futures::future::{Either, select};
 
 use self::device::{CODE_LIFETIME, DeviceLines, is_device_code_off, is_port_busy};
-use self::ended::{checked_again, confirmed_or_failed, remove_own_login};
+use self::ended::{Removal, checked_again, confirmed_or_failed, remove_own_login};
+use self::written::{LoginRun, Stamp};
 use crate::cancel::Cancel;
 use crate::signin::claude::{LOGIN_LIMIT, LOGOUT_LIMIT, POLL, is_cancel_line};
 use crate::signin::codex::identity::AccountRead;
@@ -157,6 +159,18 @@ enum First {
     Expired,
 }
 
+impl First {
+    /// Whether a login process was spawned: a poll that saw signed in, or a code read, came
+    /// from a login that runs; a run stopped before it started spawned none.
+    fn spawned(&self) -> bool {
+        match self {
+            Self::Confirmed | Self::Expired => true,
+            Self::Ran(Ok(ran)) => ran.started,
+            Self::Ran(Err(_)) => false,
+        }
+    }
+}
+
 /// What the login's output said, line by line.
 #[derive(Default)]
 struct Said {
@@ -207,6 +221,9 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
     let (code_read, code_seen) = oneshot::channel::<()>();
     let code_read = Mutex::new(Some(code_read));
     let cancel = &job.ticket.cancel;
+    // The login file as it is before the login starts: only a file this run changed may go as
+    // its unconfirmed login (`written`).
+    let before = Stamp::of(&job.home);
     let first = {
         let login = pin!(run(
             &*job.launcher,
@@ -266,8 +283,9 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
             Either::Right((Either::Right(((), _)), _)) => First::Expired,
         }
     };
+    let login_run = LoginRun::new(before, first.spawned());
     let unconfirmed = match first {
-        First::Confirmed => return confirmed_or_failed(job, cancel, true).await,
+        First::Confirmed => return confirmed_or_failed(job, cancel, true, &login_run).await,
         First::Expired => job.failed(SigninCode::LinkExpired),
         First::Ran(Err(_)) => {
             job.note(SigninNote::LoginExited { code: None });
@@ -280,12 +298,14 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
             match ran.ended {
                 Ended::Cancelled => job.failed(SigninCode::Cancelled),
                 Ended::TimedOut => job.failed(SigninCode::LinkExpired),
-                Ended::Exited(Some(0)) => return confirmed_or_failed(job, cancel, false).await,
+                Ended::Exited(Some(0)) => {
+                    return confirmed_or_failed(job, cancel, false, &login_run).await;
+                }
                 Ended::Exited(_) => job.failed(refusal(&said)),
             }
         }
     };
-    checked_again(job, unconfirmed).await
+    checked_again(job, unconfirmed, &login_run).await
 }
 
 /// What [`confirm`] found.
@@ -492,7 +512,7 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         || super::found::is_reused(job)
         || home_shares_lawyers_login(job);
     if job.script().is_none() {
-        let gone = !reused && remove_own_login(job, &Cancel::new()).await;
+        let gone = !reused && remove_own_login(job, &Cancel::new(), Removal::SignOut).await;
         drop(files);
         return Some(if gone {
             SigninState::SignedOut { found: None }

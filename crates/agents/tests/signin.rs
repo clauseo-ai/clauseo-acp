@@ -36,6 +36,10 @@ mod status_retry;
 mod graceful;
 
 #[cfg(test)]
+#[path = "signin/kept_login.rs"]
+mod kept_login;
+
+#[cfg(test)]
 #[path = "signin/switch_guard.rs"]
 mod switch_guard;
 

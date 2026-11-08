@@ -101,6 +101,8 @@ pub(crate) struct Ran {
     pub(crate) ended: Ended,
     /// The last [`RING_BYTES`] of its output, stdout and stderr interleaved by line.
     pub(crate) output: Ring,
+    /// Whether the child was spawned: `false` only for a run stopped before it started.
+    pub(crate) started: bool,
 }
 
 /// The last [`RING_BYTES`] bytes of a run's output. Never shown or logged: its `Debug` prints
@@ -198,6 +200,7 @@ pub(crate) async fn run<T: Timer>(
         return Ok(Ran {
             ended: Ended::Cancelled,
             output: Ring::default(),
+            started: false,
         });
     }
     let on_stop = spec.on_stop;
@@ -291,7 +294,11 @@ pub(crate) async fn run<T: Timer>(
         stopping::after_kill(on_stop, &env, lawyer_home.as_deref(), &agent);
     }
     let output = ring.into_inner().unwrap_or_else(PoisonError::into_inner);
-    Ok(Ran { ended, output })
+    Ok(Ran {
+        ended,
+        output,
+        started: true,
+    })
 }
 
 /// A run's graceful stop, once its job's stop is seen.

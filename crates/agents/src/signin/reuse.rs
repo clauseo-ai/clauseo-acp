@@ -38,6 +38,11 @@ fn home_file(codex_home: &Path) -> PathBuf {
     codex_home.join(LOGIN_FILE)
 }
 
+/// The login file's path in `codex_home`, for a stat of it (`codex::written`).
+pub(crate) fn login_file(codex_home: &Path) -> PathBuf {
+    home_file(codex_home)
+}
+
 /// Tests only: the login file's path in `codex_home`, so a test elsewhere in `src` need not name
 /// it.
 #[cfg(test)]
