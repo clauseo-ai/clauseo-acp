@@ -84,6 +84,8 @@ mod state;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_fd;
+#[cfg(test)]
 mod tests_live;
 
 pub(crate) use check::Watch;
@@ -147,19 +149,43 @@ pub(crate) struct Meta {
 /// of its entries moves both, and no one can set the second back.
 pub(crate) type Stamp = [i64; 4];
 
-/// The file system the watch reads and changes: `os::Real`, or the tests' fake.
+/// The file system the watch reads and changes: `os::Real`, or the tests' fake. Paths are
+/// absolute and canonical: `os::Real` follows no link anywhere in one (`O_NOFOLLOW_ANY`) and
+/// refuses one with a link in its folders, or at or below `/net` or `/Network`.
 pub(crate) trait Fs: Send {
+    /// A folder held open while a walk lists it and opens its children: `os::Real`'s holds
+    /// its descriptor, so a folder swapped for a link once checked is never followed.
+    type Dir;
     /// The entry at `path`, never through a link; `None` when it is missing or unreadable.
     fn meta(&self, path: &Path) -> Option<Meta>;
     /// [`Fs::meta`] with the entry's [`Stamp`], from the same read.
     fn dated(&self, path: &Path) -> Option<(Meta, Stamp)>;
     /// Writes the file at `path`, made if missing, never through a link: the canary.
     fn touch(&self, path: &Path) -> io::Result<()>;
-    /// The names in folder `dir`, each with its kind.
+    /// The names in folder `dir`, each with its kind; refused as [`Fs::open_dir`] refuses.
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>>;
-    /// Where `path` leads with every link followed, canonical; `None` when it leads nowhere.
-    fn resolve(&self, path: &Path) -> Option<PathBuf>;
-    /// Whether `dir` is on a local volume; a scan never enters one that is not.
+    /// Opens folder `dir` for a walk, with its kind and file ID: `None` when it is missing or
+    /// not a folder (a link to one included). Refused with `ErrorKind::Unsupported` on a
+    /// volume a scan never enters: a network volume, an automount, `/net` or `/Network`.
+    fn open_dir(&self, dir: &Path) -> io::Result<Option<(Self::Dir, Meta)>>;
+    /// Opens folder `name` in the held folder `dir` (whose path joined with `name` is `path`,
+    /// for messages) as [`Fs::open_dir`] does, from `dir` itself, never through a link.
+    fn open_child(
+        &self,
+        dir: &Self::Dir,
+        name: &OsStr,
+        path: &Path,
+    ) -> io::Result<Option<(Self::Dir, Meta)>>;
+    /// The names in the held folder `dir`, each with its kind.
+    fn entries(&self, dir: &Self::Dir) -> io::Result<Vec<(OsString, Kind)>>;
+    /// Whether the link at `link` leads outside folder `root`, leads nowhere, or can't be
+    /// judged without following a link: its target is walked from the link's folder one name
+    /// at a time, and a name on the way that is itself a link counts as leading out; a target
+    /// that ends at another link is judged as that one is, up to 8 in a row. An absolute
+    /// target outside `root`, or one going above it, leads out. No link is followed.
+    fn leads_out(&self, link: &Path, root: &Path) -> bool;
+    /// Whether `dir` is on a local volume that is not an automount; a scan never enters one
+    /// that is not. One that can't be read counts as local; its listing then fails on its own.
     fn local(&self, dir: &Path) -> bool;
     /// Makes `dir` and the folders above it, as the lawyer only.
     fn make_dirs(&self, dir: &Path) -> io::Result<()>;

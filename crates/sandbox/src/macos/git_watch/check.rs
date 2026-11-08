@@ -13,7 +13,7 @@ use super::{
     ARRIVED, Asks, Event, Fs, Kind, Launch, Meta, Phase, RESCAN, head_of, is_git, repo_head,
 };
 use crate::GitItem;
-use crate::policy::{name_key, path_key, under};
+use crate::policy::{name_key, path_key};
 
 mod names;
 mod sweep;
@@ -379,16 +379,15 @@ impl<F: Fs> Watch<F> {
         })
     }
 
-    /// The link at `path`, when it leads out of the matter or nowhere and is not the launch's.
+    /// The link at `path`, when it leads out of the matter or nowhere and is not the launch's:
+    /// judged by [`Fs::leads_out`], which follows no link, in both phases.
     fn link(&self, path: &Path, kind: Kind) -> Option<Item> {
         if self.kept(&self.links, &path_key(path), path) {
             return None;
         }
-        let inside = self
-            .fs
-            .resolve(path)
-            .is_some_and(|target| under(&target, &self.matter));
-        (!inside).then(|| (path.to_owned(), GitItem::OutsideLink, kind))
+        self.fs
+            .leads_out(path, &self.matter)
+            .then(|| (path.to_owned(), GitItem::OutsideLink, kind))
     }
 
     /// Everything found in folder `top` and below: each `.git` not the launch's, each `HEAD`
@@ -470,29 +469,48 @@ impl<F: Fs> Watch<F> {
     }
 }
 
+/// How deep a walk holds each folder above it open; below that, a folder is opened again from
+/// its path, so a deep tree never runs out of descriptors.
+const HELD_MAX: usize = 32;
+
+/// A folder a walk will visit: its path, its parent held open (unless past [`HELD_MAX`]) and
+/// its depth.
+type Queued<D> = (PathBuf, Option<std::rc::Rc<D>>, usize);
+
 /// Visits folder `top` and every folder below it with its file ID and listing, never through
-/// a link, never into a `.git`, a folder `skip` names or a network volume. `visit` says whether
-/// to go below the folder.
-fn walk<F: Fs>(
+/// a link, never into a `.git`, a folder `skip` names, or a folder [`Fs::open_dir`] refuses (a
+/// network volume, an automount, `/net`), logged. Each folder is listed through its own held
+/// handle and its subfolders are opened from it, so one swapped for a link after the listing
+/// is never followed. `visit` says whether to go below the folder.
+pub(super) fn walk<F: Fs>(
     fs: &F,
     top: &Path,
     skip: &dyn Fn(&Path, Meta) -> bool,
     visit: &mut dyn FnMut(&Path, Meta, &Entries) -> bool,
 ) {
-    let mut folders: Vec<(PathBuf, Option<u64>)> = vec![(top.to_owned(), None)];
-    while let Some((dir, above)) = folders.pop() {
-        let Some(meta) = fs.meta(&dir).filter(|meta| meta.kind == Kind::Dir) else {
-            continue;
+    let mut folders: Vec<Queued<F::Dir>> = vec![(top.to_owned(), None, 0)];
+    while let Some((dir, above, depth)) = folders.pop() {
+        let opened = match (&above, dir.file_name()) {
+            (Some(above), Some(name)) => fs.open_child(above, name, &dir),
+            _ => fs.open_dir(&dir),
+        };
+        let (held, meta) = match opened {
+            Ok(Some(found)) => found,
+            Ok(None) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {
+                let shown = dir.display();
+                tracing::info!(dir = %shown, "the git watch skips a network volume or an automount");
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(dir = %dir.display(), %error, "the git watch can't open a folder");
+                continue;
+            }
         };
         if skip(&dir, meta) {
             continue;
         }
-        let volume = meta.id.0;
-        if above != Some(volume) && !fs.local(&dir) {
-            tracing::info!(dir = %dir.display(), "the git watch skips a network volume");
-            continue;
-        }
-        let entries = match fs.list(&dir) {
+        let entries = match fs.entries(&held) {
             Ok(entries) => entries,
             Err(error) => {
                 tracing::warn!(dir = %dir.display(), %error, "the git watch can't list a folder");
@@ -502,9 +520,11 @@ fn walk<F: Fs>(
         if !visit(&dir, meta, &entries) {
             continue;
         }
+        let held = std::rc::Rc::new(held);
         for (name, kind) in entries {
             if kind == Kind::Dir && !is_git(&name) {
-                folders.push((dir.join(name), Some(volume)));
+                let above = (depth < HELD_MAX).then(|| std::rc::Rc::clone(&held));
+                folders.push((dir.join(name), above, depth + 1));
             }
         }
     }

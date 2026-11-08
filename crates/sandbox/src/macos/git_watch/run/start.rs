@@ -139,8 +139,7 @@ fn start_root(
     let store = FileStore::new(data, dir);
     let this = jail_procs::this_process();
     state::begin(&store, &os::Real, dir, notices, &host::host())?;
-    let canary = os::Real
-        .resolve(&folder)
+    let canary = os::resolve(&folder)
         .unwrap_or_else(|| folder.clone())
         .join(CANARY);
     let aside = Aside::new(

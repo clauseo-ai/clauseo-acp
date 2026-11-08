@@ -1,156 +1,239 @@
-//! The real file system of the git watch: reads never follow a link, the folders it makes are
-//! the lawyer's alone, and a rename never replaces. Also the matter state file's lock and
-//! writes, and the volume set-aside folder's checks.
+//! The real file system of the git watch, every operation by descriptor (`os/fd.rs`): a path's
+//! folder is opened with `O_NOFOLLOW_ANY`, so no link anywhere in it is followed, and its last
+//! name is read or changed with the `*at` calls on that folder; a walk holds each folder open
+//! while it lists it and opens its children from it. The folders it makes are the lawyer's
+//! alone, and a rename never replaces. Also the matter state file's lock and writes, and the
+//! volume set-aside folder's checks, by descriptor too.
+//!
+//! Automounts. The watch never enters or lists a folder on a network volume (no `MNT_LOCAL`),
+//! one the automounter mounted (`MNT_AUTOMOUNTED`, which autofs's own mounts carry), or at or
+//! below `/net` or `/Network` (never even looked up), and it decides that without firing an
+//! automount trigger. A trigger fires when a lookup crosses it, or when the last name of a
+//! lookup is one and the operation opens it; a lookup for attributes doesn't (autofs's
+//! `trigger_resolve`, `triggers/triggers.c` in apple-oss-distributions/autofs: `OP_GETATTR`
+//! on the last name returns `RESOLVER_NOCHANGE` unless the node is a "force a mount" node, which
+//! only autofs's own maps make). So a folder's entry is first read with `fstatat` from its
+//! parent's descriptor; on another volume than the parent, that volume's flags are read with
+//! `getattrlistat` from the parent (`os/attr.rs`), and only a plain local volume is opened.
+//! Checked on this Mac (macOS 27.2): `/System/Volumes/Data/home` is `auto_home`'s autofs mount;
+//! `fstatat` of `home` from the Data volume's descriptor gives another `st_dev`, and
+//! `getattrlistat` gives flags `0x4500000`, without `MNT_LOCAL` and with `MNT_AUTOMOUNTED`, the
+//! same as its `fstatfs`; the mount table was the same 14 mounts before and after (`mount`).
+//! `tests_fd.rs` pins that the walk refuses it. `/net` and `/Network` don't exist on this Mac.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Write as _};
-use std::os::unix::fs::{
-    DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
-};
-use std::path::{Path, PathBuf};
+use std::io::{self, Read as _, Write as _};
+use std::os::fd::OwnedFd;
+use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
-use rustix::fs::{CWD, FlockOperation, RenameFlags, flock, renameat_with};
+use rustix::fs::{
+    AtFlags, CWD, FileType, FlockOperation, Mode, OFlags, RenameFlags, fchmod, flock, fstat,
+    mkdirat, openat, readlinkat, renameat, renameat_with, unlinkat,
+};
 
 use super::{Fs, Kind, Meta, Stamp};
 
-/// `statfs`'s flag for a volume on this Mac (`<sys/mount.h>`).
-const MNT_LOCAL: u32 = 0x0000_1000;
+mod attr;
+mod fd;
+mod link;
+
+pub(crate) use fd::{Folder, off_limits};
 
 /// The most bytes of a state file read.
 const STATE_MAX: u64 = 4 << 20;
+
+/// The flags a new file is made with: never through a link.
+const NEW: OFlags = OFlags::RDWR
+    .union(OFlags::CREATE)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
 
 /// The file system itself.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Real;
 
-fn kind(file_type: fs::FileType) -> Kind {
-    if file_type.is_symlink() {
-        Kind::Link
-    } else if file_type.is_dir() {
-        Kind::Dir
-    } else if file_type.is_file() {
-        Kind::File
-    } else {
-        Kind::Other
-    }
+/// The lawyer's own mode for what the watch makes.
+fn private(dir: bool) -> Mode {
+    Mode::from_raw_mode(if dir { 0o700 } else { 0o600 })
 }
 
-/// Whether `dir` is on a local volume: its `statfs` has `MNT_LOCAL`. One that can't be read
-/// counts as local; its listing then fails on its own.
-// once #766 lands: use network_paths
-pub(crate) fn local(dir: &Path) -> bool {
-    rustix::fs::statfs(dir).map_or(true, |stat| stat.f_flags & MNT_LOCAL != 0)
+/// Makes folder `name` in `dir`, the lawyer's alone; an existing one is `AlreadyExists`.
+fn make_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+    Ok(mkdirat(dir, name, private(true))?)
+}
+
+/// Writes new file `name` in folder `dir`, synced; an existing one is `AlreadyExists`.
+fn write_at(dir: &OwnedFd, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+    let fd = openat(dir, name, NEW | OFlags::EXCL, private(false))?;
+    let mut file = fs::File::from(fd);
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Where the lawyer's own folder `path` leads with every link followed, canonical: the
+/// set-aside folder, for the canary's path as `FSEvents` gives it. Never the matter's content:
+/// what an agent left is judged with [`Fs::leads_out`].
+pub(crate) fn resolve(path: &Path) -> Option<PathBuf> {
+    dunce::canonicalize(path).ok()
 }
 
 impl Fs for Real {
+    type Dir = Folder;
+
     fn meta(&self, path: &Path) -> Option<Meta> {
-        let meta = fs::symlink_metadata(path).ok()?;
-        Some(Meta {
-            kind: kind(meta.file_type()),
-            id: (meta.dev(), meta.ino()),
-        })
+        self.dated(path).map(|(meta, _)| meta)
     }
 
     fn dated(&self, path: &Path) -> Option<(Meta, Stamp)> {
-        let meta = fs::symlink_metadata(path).ok()?;
+        let (dir, name) = fd::parent(path, true).ok()?;
+        let stat = fd::lstat_at(&dir, name).ok()??;
         let stamp = [
-            meta.mtime(),
-            meta.mtime_nsec(),
-            meta.ctime(),
-            meta.ctime_nsec(),
+            stat.st_mtime,
+            stat.st_mtime_nsec,
+            stat.st_ctime,
+            stat.st_ctime_nsec,
         ];
-        let found = Meta {
-            kind: kind(meta.file_type()),
-            id: (meta.dev(), meta.ino()),
-        };
-        Some((found, stamp))
+        Some((fd::meta(&stat), stamp))
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the git watch's canary, in its set-aside folder outside the jail"
-    )]
     fn touch(&self, path: &Path) -> io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
-            .open(path)?;
-        file.write_all(b"canary\n")
+        let (dir, name) = fd::parent(path, false)?;
+        let fd = openat(&dir, name, NEW | OFlags::TRUNC, private(false))?;
+        fs::File::from(fd).write_all(b"canary\n")
     }
 
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
+        match fd::open_dir(dir)? {
+            Some((folder, _)) => self.entries(&folder),
+            None => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{} is not a folder", dir.display()),
+            )),
+        }
+    }
+
+    fn open_dir(&self, dir: &Path) -> io::Result<Option<(Folder, Meta)>> {
+        Ok(fd::open_dir(dir)?.map(|(folder, stat)| (folder, fd::meta(&stat))))
+    }
+
+    fn open_child(
+        &self,
+        dir: &Folder,
+        name: &OsStr,
+        path: &Path,
+    ) -> io::Result<Option<(Folder, Meta)>> {
+        let Some(folder) = fd::child(dir, name, path)? else {
+            return Ok(None);
+        };
+        let stat = fstat(&folder.fd)?;
+        Ok(Some((folder, fd::meta(&stat))))
+    }
+
+    fn entries(&self, dir: &Folder) -> io::Result<Vec<(OsString, Kind)>> {
         let mut out = Vec::new();
-        for entry in fs::read_dir(dir)? {
+        for entry in rustix::fs::Dir::read_from(&dir.fd)? {
             let entry = entry?;
-            out.push((entry.file_name(), kind(entry.file_type()?)));
+            let name = OsStr::from_bytes(entry.file_name().to_bytes());
+            if name == "." || name == ".." {
+                continue;
+            }
+            let kind = if entry.file_type() == FileType::Unknown {
+                fd::lstat_at(&dir.fd, name)?.map_or(Kind::Other, |stat| fd::meta(&stat).kind)
+            } else {
+                fd::kind(entry.file_type())
+            };
+            out.push((name.to_owned(), kind));
         }
         Ok(out)
     }
 
-    fn resolve(&self, path: &Path) -> Option<PathBuf> {
-        dunce::canonicalize(path).ok()
+    fn leads_out(&self, link: &Path, root: &Path) -> bool {
+        link::leads_out(link, root)
     }
 
     fn local(&self, dir: &Path) -> bool {
-        local(dir)
+        match fd::open_dir(dir) {
+            Err(error) => error.kind() != io::ErrorKind::Unsupported,
+            Ok(_) => true,
+        }
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the git watch's set-aside folder, outside the jail, the lawyer's alone"
-    )]
     fn make_dirs(&self, dir: &Path) -> io::Result<()> {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
+        if !dir.is_absolute() || off_limits(dir) {
+            return Err(io::Error::other(format!(
+                "{} can't be a set-aside folder",
+                dir.display()
+            )));
+        }
+        let mut at = openat(CWD, "/", OFlags::RDONLY | OFlags::DIRECTORY, Mode::empty())?;
+        for part in dir.components() {
+            let name = match part {
+                Component::RootDir => continue,
+                Component::Normal(name) => name,
+                Component::Prefix(_) | Component::CurDir | Component::ParentDir => {
+                    return Err(io::Error::other(format!(
+                        "{} is not canonical",
+                        dir.display()
+                    )));
+                }
+            };
+            let open = || openat(&at, name, fd::DIR, Mode::empty());
+            at = match open() {
+                Err(rustix::io::Errno::NOENT) => {
+                    match make_at(&at, name) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                        Err(error) => return Err(error),
+                    }
+                    open()?
+                }
+                found => found?,
+            };
+        }
+        Ok(())
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "one set-aside item's folder, outside the jail, the lawyer's alone"
-    )]
     fn make_dir(&self, dir: &Path) -> io::Result<()> {
-        fs::DirBuilder::new().mode(0o700).create(dir)
+        let (above, name) = fd::parent(dir, false)?;
+        make_at(&above, name)
     }
 
     fn rename_new(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let (from_dir, from_name) = fd::parent(from, true)?;
+        let (to_dir, to_name) = fd::parent(to, false)?;
         // renameatx_np with RENAME_EXCL on macOS.
-        renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(io::Error::from)
+        renameat_with(
+            &from_dir,
+            from_name,
+            &to_dir,
+            to_name,
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(io::Error::from)
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "one set-aside item's record, new, in its own folder"
-    )]
     fn write_new(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(bytes)?;
-        file.sync_all()
+        let (dir, name) = fd::parent(path, false)?;
+        write_at(&dir, name, bytes)
     }
 
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        fs::read_link(path)
+        let (dir, name) = fd::parent(path, true)?;
+        let target = readlinkat(&dir, name, Vec::new())?;
+        Ok(PathBuf::from(OsString::from_vec(target.into_bytes())))
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a link an agent left in the matter, its target recorded, once it is gone"
-    )]
     fn remove_link(&self, path: &Path) -> io::Result<()> {
-        if !fs::symlink_metadata(path)?.file_type().is_symlink() {
+        let (dir, name) = fd::parent(path, true)?;
+        let is_link = fd::lstat_at(&dir, name)?
+            .is_some_and(|stat| FileType::from_raw_mode(stat.st_mode) == FileType::Symlink);
+        if !is_link {
             return Err(io::Error::other("not a link"));
         }
-        fs::remove_file(path)
+        Ok(unlinkat(&dir, name, AtFlags::empty())?)
     }
 
     fn random(&self) -> u64 {
@@ -176,13 +259,9 @@ impl Fs for Real {
 }
 
 /// The matter state file's lock: held while the file is open.
-pub(crate) struct Lock(#[expect(dead_code, reason = "held for its flock")] fs::File);
+pub(crate) struct Lock(#[expect(dead_code, reason = "held for its flock")] OwnedFd);
 
 /// Takes the advisory lock on `path`, made if missing (the lawyer's alone), waiting for it.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the matter state file's lock, in the git set-aside folder outside the jail"
-)]
 pub(crate) fn lock(path: &Path) -> io::Result<Lock> {
     // Only the `matters` folder: the set-aside folder above it was made at the launch, and one
     // removed since is not made again.
@@ -193,53 +272,49 @@ pub(crate) fn lock(path: &Path) -> io::Result<Lock> {
             Err(error) => return Err(error),
         }
     }
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
-        .open(path)?;
-    flock(&file, FlockOperation::LockExclusive)?;
-    Ok(Lock(file))
+    let (dir, name) = fd::parent(path, false)?;
+    let flags = OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let fd = openat(&dir, name, flags, private(false))?;
+    flock(&fd, FlockOperation::LockExclusive)?;
+    Ok(Lock(fd))
 }
 
 /// The bytes of the small regular file at `path`, never through a link.
 pub(crate) fn read_small(path: &Path) -> io::Result<Vec<u8>> {
-    let meta = fs::symlink_metadata(path)?;
-    if !meta.is_file() || meta.len() > STATE_MAX {
-        return Err(io::Error::other(format!(
-            "{} is not a small file",
-            path.display()
-        )));
+    let (dir, name) = fd::parent(path, false)?;
+    let not_small = || io::Error::other(format!("{} is not a small file", path.display()));
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let fd = match openat(&dir, name, flags, Mode::empty()) {
+        Err(rustix::io::Errno::LOOP) => return Err(not_small()),
+        opened => opened?,
+    };
+    let stat = fstat(&fd)?;
+    let size = u64::try_from(stat.st_size).unwrap_or(u64::MAX);
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile || size > STATE_MAX {
+        return Err(not_small());
     }
-    fs::read(path)
+    let mut bytes = Vec::new();
+    fs::File::from(fd)
+        .take(STATE_MAX + 1)
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > STATE_MAX {
+        return Err(not_small());
+    }
+    Ok(bytes)
 }
 
 /// Replaces the file at `path` with `bytes`: a new file beside it, synced, renamed over it.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the matter state file, in the git set-aside folder outside the jail"
-)]
 pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-    let temp = path.with_file_name(format!(
-        "{}.{:016x}.new",
-        name.unwrap_or_default(),
-        Real.random()
-    ));
-    Real.write_new(&temp, bytes)?;
-    fs::rename(&temp, path)
+    let (dir, name) = fd::parent(path, false)?;
+    let mut temp = name.to_owned();
+    temp.push(format!(".{:016x}.new", Real.random()));
+    write_at(&dir, &temp, bytes)?;
+    Ok(renameat(&dir, &temp, &dir, name)?)
 }
 
 /// Makes and checks the volume set-aside folder `dir` (`<volume root>/.clauseo`), returning
 /// the git set-aside folder inside it. It must be a folder, never a link, owned by this user;
 /// it is made private when the volume keeps modes. An error says why, plainly.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the volume's .clauseo folder, outside the jail, the lawyer's alone"
-)]
 pub(crate) fn volume_folder(dir: &Path) -> io::Result<PathBuf> {
     let plain = |why: String| {
         io::Error::other(format!(
@@ -248,35 +323,44 @@ pub(crate) fn volume_folder(dir: &Path) -> io::Result<PathBuf> {
             dir.display()
         ))
     };
-    match Real.make_dir(dir) {
+    let (root, name) = fd::parent(dir, false).map_err(|error| plain(error.to_string()))?;
+    match make_at(&root, name) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(plain(error.to_string())),
     }
-    let meta = fs::symlink_metadata(dir).map_err(|error| plain(error.to_string()))?;
-    if !meta.file_type().is_dir() {
-        return Err(plain("it is not a folder".to_owned()));
-    }
-    if meta.uid() != rustix::process::geteuid().as_raw() {
+    let folder = match openat(&root, name, fd::DIR, Mode::empty()) {
+        Ok(folder) => folder,
+        Err(rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) => {
+            return Err(plain("it is not a folder".to_owned()));
+        }
+        Err(error) => return Err(plain(error.to_string())),
+    };
+    let stat = fstat(&folder).map_err(|error| plain(error.to_string()))?;
+    if stat.st_uid != rustix::process::geteuid().as_raw() {
         return Err(plain("another user owns it".to_owned()));
     }
-    if meta.mode() & 0o077 != 0 {
-        let private = fs::Permissions::from_mode(0o700);
-        if let Err(error) = fs::set_permissions(dir, private) {
+    if u32::from(stat.st_mode) & 0o077 != 0 {
+        if let Err(error) = fchmod(&folder, private(true)) {
             return Err(plain(error.to_string()));
         }
-        if fs::symlink_metadata(dir).is_ok_and(|meta| meta.mode() & 0o077 != 0) {
+        if fstat(&folder).is_ok_and(|stat| u32::from(stat.st_mode) & 0o077 != 0) {
             let shown = dir.display();
             tracing::warn!(dir = %shown, "the volume keeps no modes: the folder stays open");
         }
     }
-    let inner = dir.join("git-set-aside");
-    match Real.make_dir(&inner) {
-        Ok(()) => Ok(inner),
+    let inner = OsStr::new("git-set-aside");
+    match make_at(&folder, inner) {
+        Ok(()) => Ok(dir.join(inner)),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            match fs::symlink_metadata(&inner) {
-                Ok(meta) if meta.file_type().is_dir() => Ok(inner),
-                _ => Err(plain(format!("{} is not a folder", inner.display()))),
+            match fd::lstat_at(&folder, inner) {
+                Ok(Some(stat)) if FileType::from_raw_mode(stat.st_mode) == FileType::Directory => {
+                    Ok(dir.join(inner))
+                }
+                _ => Err(plain(format!(
+                    "{} is not a folder",
+                    dir.join(inner).display()
+                ))),
             }
         }
         Err(error) => Err(plain(error.to_string())),

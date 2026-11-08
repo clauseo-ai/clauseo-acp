@@ -1,9 +1,9 @@
 //! The tests' fakes: a file system in memory, a sink, a session, and the helpers.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -195,10 +195,70 @@ impl FakeFs {
     }
 }
 
+/// [`Fs::leads_out`] of `fs` as `os::Real` judges it, with `chain` links before this one.
+fn leads_out_from(fs: &FakeFs, link: &Path, root: &Path, chain: usize) -> bool {
+    let disk = fs.0.lock().unwrap();
+    let kind = |path: &Path| disk.entries.get(path).map(|&(kind, _)| kind);
+    // The link's folders, from `root` down: each a folder, none a link.
+    let Some(folder) = link.parent().filter(|dir| dir.starts_with(root)) else {
+        return true;
+    };
+    let folders = folder
+        .ancestors()
+        .take_while(|dir| dir.starts_with(root))
+        .all(|dir| kind(dir) == Some(Kind::Dir));
+    let Some(target) = disk.targets.get(link).filter(|_| folders) else {
+        return true;
+    };
+    let (mut at, steps) = if target.is_absolute() {
+        let Ok(rest) = target.strip_prefix(root) else {
+            return true;
+        };
+        (root.to_owned(), rest)
+    } else {
+        (folder.to_owned(), target.as_path())
+    };
+    // Its target, one name at a time: a link on the way leads out; one at the end is
+    // judged in turn.
+    let steps: Vec<Component<'_>> = steps.components().collect();
+    let mut next = None;
+    for (i, step) in steps.iter().enumerate() {
+        match step {
+            Component::CurDir => {}
+            Component::ParentDir if at == root => return true,
+            Component::ParentDir => {
+                at.pop();
+            }
+            Component::Normal(name) => {
+                at.push(name);
+                let last = i + 1 == steps.len();
+                match kind(&at) {
+                    Some(Kind::Dir) => {}
+                    Some(Kind::File | Kind::Other) if last => {}
+                    Some(Kind::Link) if last && chain < 8 => {
+                        next = Some(at.clone());
+                        break;
+                    }
+                    _ => return true,
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return true,
+        }
+    }
+    let nowhere = steps.is_empty() && !target.is_absolute();
+    drop(disk);
+    match next {
+        Some(next) => leads_out_from(fs, &next, root, chain + 1),
+        None => nowhere,
+    }
+}
+
 /// The records' bytes, by path (one test binary; paths include a unique session).
 static RECORDS: Mutex<BTreeMap<PathBuf, Vec<u8>>> = Mutex::new(BTreeMap::new());
 
 impl Fs for FakeFs {
+    type Dir = PathBuf;
+
     fn meta(&self, path: &Path) -> Option<Meta> {
         let disk = self.0.lock().unwrap();
         // A network volume is a volume of its own, as a real mount is.
@@ -248,16 +308,29 @@ impl Fs for FakeFs {
             .collect())
     }
 
-    fn resolve(&self, path: &Path) -> Option<PathBuf> {
-        let disk = self.0.lock().unwrap();
-        let mut at = path.to_owned();
-        for _ in 0..8 {
-            match disk.targets.get(&at) {
-                Some(target) => at = target.clone(),
-                None => return disk.entries.contains_key(&at).then_some(at),
-            }
+    fn open_dir(&self, dir: &Path) -> io::Result<Option<(PathBuf, Meta)>> {
+        if !self.local(dir) {
+            return Err(io::ErrorKind::Unsupported.into());
         }
-        None
+        let meta = self.meta(dir).filter(|meta| meta.kind == Kind::Dir);
+        Ok(meta.map(|meta| (dir.to_owned(), meta)))
+    }
+
+    fn open_child(
+        &self,
+        _dir: &PathBuf,
+        _name: &OsStr,
+        path: &Path,
+    ) -> io::Result<Option<(PathBuf, Meta)>> {
+        self.open_dir(path)
+    }
+
+    fn entries(&self, dir: &PathBuf) -> io::Result<Vec<(OsString, Kind)>> {
+        self.list(dir)
+    }
+
+    fn leads_out(&self, link: &Path, root: &Path) -> bool {
+        leads_out_from(self, link, root, 0)
     }
 
     fn local(&self, dir: &Path) -> bool {
