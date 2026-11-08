@@ -179,7 +179,15 @@ build 26100):
     with a moved item is decided by its exact path or its file ID, so a second entry differing only
     in case (a case-sensitive folder) is still checked. PR6's launcher calls `before_launch` before
     `apply`, and `after_session` when the agent exits, independently of `repair_after_session`'s
-    result. Every protected name or link that is new or whose file ID changed is set aside, whoever
+    result. A run with a notes folder (`Policy::notes`, which the agent can write too) gets the
+    same passes over it at launch and after the session, with its own record
+    (`notes-record.json`, beside the matter's, under the matter's lock); what they move goes to
+    the matter's set-aside and manifest. The launch check's fast path covers the matter alone, so
+    notes always gets its full pass, and the notes watch knows only what that pass recorded. The
+    notes pass is the matter's full pass: it also sets aside a new `CLAUDE.md`, `AGENTS.md`,
+    `.claude` or `.mcp.json` and every new link in notes, more than the notes watch moves (git
+    parts and links leading out). Whether notes should get only what its watch moves is open.
+    Every protected name or link that is new or whose file ID changed is set aside, whoever
     owns it, a link moved as itself and never followed: so a lawyer folder the agent renamed to
     `.git` or `sub\.git`, a lawyer file it hard-linked as `CLAUDE.md`, or a junction it made to a
     folder holding a `.git`, is caught. A scan that can't list a folder still sets aside what it
@@ -223,10 +231,17 @@ build 26100):
     file read from that handle (`FileAttributeTagInfo`), makes SYSTEM its owner with a protected,
     non-inheritable DACL of SYSTEM and Administrators written on the handle alone
     (`SetKernelObjectSecurity`; `SetSecurityInfo` would push entries down into the contents),
-    renames it by the same handle in place to `<name>.squatted-<UTC second>`
-    (`NtSetInformationFile`, no root, a bare name), and makes the lawyer's folder afresh, owned
-    by the lawyer with the drive DACL. Nothing inside is opened, listed or moved; one Event Log
-    line names the drive, the SIDs and the new name. Follow-ups: the launch's Preparing state
+    renames it by the same handle in place to `<name>.squatted-<UTC second>-<8 hex>`
+    (`NtSetInformationFile`, no root, a bare name, never over an existing name), and makes the
+    lawyer's folder afresh, owned by the lawyer with the drive DACL. The 8 hex digits are random,
+    so a squatter can't make the name first; a name that is taken anyway is tried again with new
+    digits, 4 names in all. A rename an open handle or a lease holds up is tried 3 times, 250 ms
+    apart, and each open and rename runs on its own thread with a 500 ms bound, so one folder
+    takes at most 2 s; past that the heal gives up, logs it, and leaves the folder locked down
+    as SYSTEM's. A folder made again at the name between the rename and the fresh one is
+    logged and counted, and healed again, 3 rounds at most. Nothing inside is opened, listed or
+    moved; one Event Log line names the drive, the SIDs and the new name. Follow-ups: the launch's
+    Preparing state
     asking for the run (`request_admin_refresh`) and retrying on `DriveFolderNotYours`, and a
     volume mounted on a folder, with no letter, which the heal doesn't visit.
     `OtherVolume` stays for a rename that still crosses volumes (a volume mounted on a folder
@@ -272,34 +287,82 @@ build 26100):
     outside the matter isn't watched. `objects` and `refs` that are links count as folders for a
     git folder's shape.
 
-    **Kill first.** The first item found ends the agent's job, by the outer's own end path (the
-    job ended and emptied), before anything moves, so nothing alive races the moves or puts
-    another back. Each scan moves what it finds as it finds it, never after the whole tree. An
-    agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or one path found gone
-    3 times (a tree renamed back and forth) ends the session too. A scan of a folder made or
-    moved in stops at the 2 s mark instead of walking on (a million empty folders with a
-    repository last would keep it there for tens of seconds): a pool user's folder is set aside
-    whole at once, and anyone else's (a lawyer dragging a big client folder in) stays for the
-    after-session pass. Full rescans walk on, with the job already ended. Each cause gives the
-    lawyer its own plain line, e.g. "Clauseo stopped this session because the matter changed
-    faster than Clauseo could check it (very many files at once). Nothing was lost." An overflow
+    **Kill first.** Any reported `.git` or `HEAD` record ends the agent's job at once, by the
+    outer's own end path, whether or not the item is still there when checked, and before
+    anything moves, so nothing alive races the moves or puts another back. Two `HEAD`s don't
+    end it: one in a launch `.git` (its parent known by file ID), and a folder named `HEAD`,
+    which git never reads as one and which is scanned like any new folder. In each batch the
+    name hits go first: the session ends, each hit is moved, then the other `.git` parts, links
+    and common names, and only then does it scan the folders reported. A scan that meets a git
+    folder the record doesn't know ends the session before it reads anything in that folder,
+    rescans included. Only then is its `commondir` read, as itself, relative to the folder's
+    handle (`Volume::read_small`: `FILE_OPEN_REPARSE_POINT`, `OBJ_DONT_REPARSE`,
+    `FILE_NON_DIRECTORY_FILE`, `FILE_COMPLETE_IF_OPLOCKED`, at most 4 KiB, a reparse point
+    refused). An oplock the agent holds on it makes the open return at once instead of waiting
+    for a break the agent never acknowledges; the `commondir` then counts as unreadable, names
+    nothing, and its folder is still the git folder it is. **[PLACEHOLDER: handle-relative reads
+    and identity compare (in progress).]** Each scan moves what it finds as it finds it, never
+    after the whole tree.
+
+    The watch's end empties the job and returns (`EndSweep::kill_now`: `TerminateJobObject`,
+    then a wait of at most 400 ms until the job has no process). The sweeper's logon follows on
+    its own thread, so it adds nothing before the moves. If the job doesn't empty, nothing moves:
+    the watch lists what it left, says once that the check after the session sets it aside, and
+    scans no more. Once the end has begun the outer never starts or resumes the inner: it checks
+    before the logon, after the job assignment and before the resume, and kills a suspended inner
+    it made. Such a session exits `AgentReserved`, the code of an agent the watch ended, with
+    "the session ended before its agent started; the agent never ran".
+
+    An agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or 3 items found
+    gone, counted across all paths (short-lived `.git`s renamed in and out), ends the session
+    too. The 2 s budget doesn't depend on the check returning: a watchdog thread
+    (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
+    once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
+    made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a
+    repository last would keep it there for tens of seconds). The folder is then set aside whole
+    only if a pool user owns it, read from the handle the move opens (`MOVE | READ_CONTROL`,
+    `GetKernelObjectSecurity`) against the pool's exact SIDs, so a folder swapped in after the
+    check can't pass; anyone else's (a lawyer dragging a big client folder in) is refused before
+    the rename (`SetAsideFailure::NotTheAgents`) and stays for the after-session pass. Full
+    rescans walk on, with the job already ended. Each cause gives the lawyer its own plain line,
+    e.g. "Clauseo stopped this session because the matter changed faster than Clauseo could
+    check it (very many files at once). Nothing was lost." or "Clauseo stopped this session
+    because checking the matter got stuck. Nothing was lost." An overflow
     (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole folder and reads
-    on; a watch that breaks or can't be armed rescans every 2 s and tries again, saying so once.
-    A watch thread that panics or ends before it is stopped ends the run. Once the job is empty,
-    the watch stops and rescans each folder one last time. Fail closed: an item that can't be
-    moved (the agent holding a handle) is tried again once the session ended; one still stuck is
-    said, and the after-session pass, the backstop, tries again. Each item moved gets the lawyer's
-    notice on the run's stderr, where it went and how to put back one the lawyer made ("The AI
-    tool tried to put a code repository in the matter. Clauseo stopped it and moved `<path>` to
-    `<set-aside path>`. If you made it yourself, move it back after the session ends."), and a
-    tab-separated line the Windows launcher reads back (`runner::denial_from_line`) as a
-    `Denial::SetAside` (its path, where it went, and the agent's plain words: "an agent can't
-    create a git repository inside a matter. Clone or init in your scratch folder instead.") for
-    the session's denial sink, the agent's refusal. The cost is plain:
-    **agents can't clone or init a repository into a matter**, since it is set aside at once; they
-    work in their own scratch or state folder. A lawyer's own `.git` whose folder the agent
-    renamed is moved too, as the after-session pass moves it, and so is a `HEAD` the lawyer's
-    git rewrites in a bare repository of their own in the matter.
+    on. A watch that can't be armed refuses the launch ("Clauseo can't watch the matter's folder
+    for changes, so it didn't start the session"), and one that breaks while the agent runs ends
+    the session (`Cause::Broken`); nothing falls back to rescans. A watch thread that panics or
+    ends before it is stopped ends the run. Once the job is empty, the watch stops and rescans
+    each folder one last time. Fail closed: an item that can't be moved (the agent holding a
+    handle) is tried again once the session ended; one still stuck is said, and the
+    after-session pass, the backstop for the matter and for notes, tries again.
+
+    Each item moved gets the lawyer's notice, chosen by its owner as read on the moved handle. A
+    pool user's: "The AI tool tried to put a code repository in the matter. Clauseo stopped it
+    and moved `<name>` to `<set-aside path>`." Anyone else's, or an owner that can't be read:
+    "Clauseo moved `<name>` to `<set-aside path>` because a git repository appeared in the
+    matter while an agent was working. If you made it yourself, move it back after the session
+    ends." Each item moved goes to the host as two records on its denial pipe, the lawyer's
+    notice and the set-aside; the session's end notice goes there too. Nothing on the outer's
+    stderr, which carries the agent's stderr too, is read back. The pipe
+    (`crates/sandbox/src/windows/denial_pipe.rs`) is `\\.\pipe\clauseo-denials-<32 hex>`, a
+    random name the launch message names (`denial_pipe`, checked against that shape). The host
+    makes it before it spawns the runner: one instance, inbound, remote clients refused, DACL
+    `D:P(A;;0x12019b;;;<lawyer>)S:(ML;;NWNR;;;ME)`, read only when the client's pid is the
+    runner's. Each record is one versioned JSON line (`{"v":1,"record":...}`, at most 256 KiB,
+    unknown versions, kinds and fields refused): `SetAside` (path, where it went, what) or
+    `Notice` (text). The outer opens the client end write-only before the inner starts
+    (`SECURITY_IDENTIFICATION`, a pipe by `GetFileType`), and a writer thread sends the
+    records, so a slow host never holds up a kill; the stop drains it for up to 2 s. With no pipe
+    named, one that won't open, or a failed write, records are only logged (the kind, no path).
+    The set-aside becomes a `Denial::SetAside` (its path, where it went, and the agent's plain
+    words: "an agent can't create a git repository inside a matter. Clone or init in your
+    scratch folder instead.") for the session's denial sink, the agent's refusal. The cost is
+    plain: **agents can't clone or init a repository into a matter**, since it is set aside at
+    once; they work in their own scratch or state folder. A lawyer's own `.git` whose folder
+    the agent renamed is moved too, as the after-session pass moves it. So is a `HEAD` the
+    lawyer's git rewrites (`HEAD.lock` renamed to `HEAD`) in a bare repository of their own in
+    the matter whose folder isn't named `.git`, and that now ends the session too.
   - **Restore never puts back a git folder.** `restore_set_aside` hands an item back as the
     lawyer's, which would make a set-aside `.git` trusted. It refuses any entry whose own name, a
     folder it was in below the matter, or any part of the path it goes back to opens as `.git`,
@@ -310,7 +373,13 @@ build 26100):
     made: your own git tools would run code from it as you"). The lawyer puts back one they made
     by hand, after the session. The folder it goes back into is opened by that path and must have
     it as its final path, so no short name or link lands it inside one; a short name there fails
-    that check, closed.
+    that check, closed. It also refuses what git reads from a folder a launch `commondir` named:
+    an item (not a link) named `config` or `hooks`, wherever it was, and an item that is one of
+    the `:common` folders the matter's or the notes record holds, or one of git's names inside
+    one (`SetAsideFailure::GitFolder`). A link is put back only if its target, read by its words
+    and resolved against the folder it goes back to, stays inside the matter or notes folder,
+    compared as the live watch compares it; a target that can't be read counts as leading out
+    (`SetAsideFailure::LinkOut`).
   - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
     run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
     `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
@@ -514,10 +583,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **The live watch** reads a link's target by its words: a junction within the matter that
   leads to another that leads out is moved only when that one is new. A folder the agent made
   that shuts the lawyer out can't be scanned when it is moved in; the after-session pass names it
-  as unscanned and keeps the session open. A bare repository the lawyer had in the matter at
-  launch isn't write-denied by the launch walk, so an agent could edit its hooks with no name
-  made; PR #784 makes every folder holding a `HEAD` at launch whole-tree read-only in the
-  Windows plan, which covers it once merged. A `commondir` naming a folder outside the matter
+  as unscanned and keeps the session open. The watch keeps a last-write `MODIFIED` record only
+  when the item carries the reparse-point attribute, and the launch walk doesn't write-deny a
+  bare repository the lawyer had in the matter at launch, so on this branch alone an agent could
+  edit that repository's hooks with no name made. PR #784 makes every folder holding a `HEAD`
+  at launch whole-tree read-only in the Windows plan and lands before this change (M1, confirmed
+  at the rebase). A `commondir` naming a folder outside the matter
   isn't watched. The uninstaller and forget know only the data folder's set-aside, not the
   drive folders (a follow-up).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
