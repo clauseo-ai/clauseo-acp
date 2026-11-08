@@ -74,17 +74,29 @@ pub enum NetworkGap {
         /// Its last port.
         last: u16,
     },
-    /// A port of `ports::TIER_B_PORTS` that Windows refuses to bind: an excluded port range.
+    /// All 8 ports of one block of the launch's slot are unusable: reserved by Windows (an
+    /// excluded port range), or, in its host block, held by other programs' listeners. Only
+    /// launches on this slot are refused.
     #[error(
-        "port {0} of the sandbox's ports 46100-46611 is reserved on this computer (Hyper-V, WSL \
-         and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
-         protocol=tcp`)"
+        "all 8 of this matter's {block} ports on this computer, {first}-{last} ({slot}), are \
+         reserved by Windows or held by other programs (Hyper-V, WSL and Docker reserve port \
+         ranges; see `netsh int ipv4 show excludedportrange protocol=tcp`)"
     )]
-    PortsReserved(u16),
-    /// A TCP listener in `ports::TIER_B_PORTS` that isn't this app's: its port and its program.
+    SlotPortsUnusable {
+        /// The slot.
+        slot: crate::ports::Slot,
+        /// Which of its blocks: "host", "browser" or "browser daemon".
+        block: &'static str,
+        /// The block's first port.
+        first: u16,
+        /// Its last port.
+        last: u16,
+    },
+    /// A TCP listener on a port the launch's policy names, its own listener's, that isn't this
+    /// app's: its port and its program.
     #[error(
-        "another program ({program}) listens on port {port}, inside the sandbox's ports \
-         46100-46611, where a sandboxed agent could reach it"
+        "another program ({program}) listens on port {port}, one of this launch's own ports, \
+         where a sandboxed agent could reach it"
     )]
     ForeignListener {
         /// Its port.

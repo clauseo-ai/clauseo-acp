@@ -48,33 +48,46 @@ use windows::Win32::System::Wmi::{
 use windows::core::{BOOL, BSTR, HRESULT, PCWSTR, PWSTR, w};
 
 use super::check::NetworkGap;
-use super::port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
+use super::port_check::{LaunchPorts, Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
 use crate::ports::{BoundListener, JobProbe, TIER_B_PORTS, refused_ports};
 
 /// `ERROR_INSUFFICIENT_BUFFER`.
 const INSUFFICIENT_BUFFER: u32 = 122;
 
-/// Checks tier B's ports on this machine ([`ports_usable`]): Windows' dynamic range and its
-/// excluded ports always, and with `launch` every listener in the range too, which must be this
-/// process's (its pid; the proxy and the relay run in the host). Fails closed when the machine
-/// can't be read.
-pub fn check_ports(launch: bool) -> Result<(), NetworkGap> {
+/// Checks tier B's ports on this machine ([`ports_usable`]): Windows' dynamic range always, and
+/// with `launch` its slot's 24 ports (excluded ones, by test binds) and the listeners, which on
+/// the policy's ports must be this process's (its pid; the proxy and the relay run in the host).
+/// Fails closed when the machine can't be read.
+pub fn check_ports(launch: Option<LaunchPorts<'_>>) -> Result<(), NetworkGap> {
     let dynamic = dynamic_ranges()?;
-    // The listeners first, then the test binds, then the listeners again for any port that
-    // refused a bind: a listener that came up in between is named as one, not as a reservation.
-    let mut found = listeners()?;
-    let listening: BTreeSet<u16> = found.iter().map(|listener| listener.port).collect();
-    let mut reserved = refused_ports(&listening);
+    let Some(LaunchPorts { slot, .. }) = launch else {
+        return ports_usable(
+            &PortsSeen {
+                dynamic,
+                ..PortsSeen::default()
+            },
+            None,
+            |_| true,
+        );
+    };
+    // Every socket's port first, then the test binds, then every socket's port again for any
+    // port that refused a bind: a socket that came up in between isn't a reservation (another
+    // user's socket on the port can refuse a bind with `WSAEACCES` too; `ports/reserved.rs`).
+    let found = listeners()?;
+    let slot_ports = slot.host().chain(slot.pool()).chain(slot.daemon());
+    let mut reserved = refused_ports(slot_ports, &ports_in_use()?);
     if !reserved.is_empty() {
-        found = listeners()?;
-        reserved.retain(|port| !found.iter().any(|listener| listener.port == *port));
+        let in_use = ports_in_use()?;
+        reserved.retain(|port| !in_use.contains(port));
     }
     let seen = PortsSeen {
         dynamic,
         reserved,
-        listeners: if launch { found } else { Vec::new() },
+        listeners: found,
     };
-    ports_usable(&seen, |listener| is_ours(listener, std::process::id()))
+    ports_usable(&seen, launch, |listener| {
+        is_ours(listener, std::process::id())
+    })
 }
 
 /// How long the whole WMI read may take before the check fails closed.

@@ -8,6 +8,7 @@
 use super::check::{NetworkGap, check_setup};
 use super::engine::Engine;
 use super::os_ports::check_ports;
+use super::port_check::LaunchPorts;
 use super::spec::{Namespace, checked_ports, permit_ports};
 use crate::ports::Slot;
 use crate::windows::sids::Sid;
@@ -44,7 +45,7 @@ pub fn check_launch_in(ns: &Namespace, user: &Sid, ports: &[u16]) -> Result<Slot
         .map_err(unfiltered)?;
     let slot = check_setup(ns, user, &mut engine).map_err(unfiltered)?;
     checked_ports(slot, ports).map_err(unfiltered)?;
-    check_ports(true).map_err(unfiltered)?;
+    check_ports(Some(LaunchPorts { slot, ports })).map_err(unfiltered)?;
     Ok(slot)
 }
 

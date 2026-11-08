@@ -852,14 +852,14 @@ small set of loopback ports, and Windows' filtering (WFP) lets no other sandbox 
 listen on them. What IT needs to know:
 - TCP ports 46100-46611 and 65024-65279 are reserved for Clauseo's sandbox users. Don't give them
   to other software as fixed ports. The one registered port among them is Inedo's agent, 46336;
-  while anything else listens in 46100-46355, Clauseo refuses to start its protected AI tools and
-  names the program.
+  Clauseo works around a program listening there, and the sandbox users can't reach it.
 - Windows' dynamic port range must stay at its default start, 49152, so it doesn't overlap
   46100-46611. `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
-  If it overlaps, or Hyper-V, WSL or Docker reserves ports in 46100-46611, Clauseo doesn't set up
-  the protection and names the cause. 65024-65279 is inside the dynamic range on purpose; a port
-  there that Windows has lent to another program only turns the AI tools' browser off for that
-  run.
+  If it overlaps, Clauseo doesn't set up the protection and names the cause. If Hyper-V, WSL or
+  Docker reserves all 8 ports of one sandbox user's block (`netsh int ipv4 show excludedportrange
+  protocol=tcp`), only that user's matters refuse to start, naming the ports. 65024-65279 is
+  inside the dynamic range on purpose; a port there that Windows has lent to another program only
+  turns the AI tools' browser off for that run.
 - A Windows Firewall rule, `clauseo_sandbox_block_loopback_tcp` ("Clauseo sandbox - Block
   Loopback TCP Outside 46100-46611 and 65024-65279"), blocks loopback TCP outside those ranges
   for the sandbox users. Three more `clauseo_sandbox_` rules block their network traffic that

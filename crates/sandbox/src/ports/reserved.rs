@@ -1,7 +1,18 @@
-//! The reserved-port check (`wfp::check_ports`, at set-up and before every tier-B launch): the
-//! ports of [`TIER_B_PORTS`] Windows refuses to bind on `127.0.0.1` or `::1`
-//! (`PermissionDenied`, `WSAEACCES`), an excluded port range (Hyper-V, WSL and Docker reserve
-//! them). Windows publishes no call that lists the excluded ranges (`netsh int ipv4 show
+//! The reserved-port check (`wfp::check_ports`, before every tier-B launch): the ports of the
+//! launch's slot Windows refuses to bind on `127.0.0.1` or `::1` because an excluded port range
+//! (Hyper-V, WSL and Docker reserve them) covers them.
+//!
+//! **Telling a reservation from a port in use.** A bind on an excluded port fails with
+//! `WSAEACCES` (10013, `PermissionDenied`): that is what Docker, WSL and Hyper-V users report
+//! for these ranges, and the VM row measures it on a set-up machine. A port another socket of
+//! the same user holds fails with `WSAEADDRINUSE` (10048, `AddrInUse`), which never counts.
+//! But `WSAEACCES` isn't only a reservation: Windows' socket security refuses a bind to a port
+//! another user's socket holds, or one held with `SO_EXCLUSIVEADDRUSE`, with `WSAEACCES` too
+//! (Microsoft's "Using `SO_REUSEADDR` and `SO_EXCLUSIVEADDRUSE`"). So the caller skips every
+//! port in Windows' TCP table (any state) before the binds and drops any that shows up there
+//! after them: a refused bind on a port no socket holds is read as a reservation.
+//!
+//! Windows publishes no call that lists the excluded ranges (`netsh int ipv4 show
 //! excludedportrange` reads the TCP/IP stack's private store), and the documented reservation
 //! calls, `CreatePersistentTcpPortReservation` and `LookupPersistentTcpPortReservation`, only
 //! make or look up one exact range, so a bind is the test.
@@ -13,7 +24,6 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::ops::RangeInclusive;
 
 use socket2::{Domain, Protocol, Socket, Type};
 
@@ -28,11 +38,11 @@ pub(crate) fn bind_only(ip: IpAddr, port: u16) -> io::Result<()> {
     socket.bind(&SocketAddr::new(ip, port).into())
 }
 
-/// The ports of `ports`, `skip` aside, that `bind` refuses with `PermissionDenied` on
-/// `127.0.0.1` or `::1`. Any other failure (`AddrInUse`: a connection still closing) isn't a
-/// reservation.
+/// The ports of `ports`, `skip` aside, that `bind` refuses with `PermissionDenied`
+/// (`WSAEACCES`) on `127.0.0.1` or `::1`. Any other failure (`AddrInUse`, `WSAEADDRINUSE`: a
+/// socket holds the port) isn't a reservation.
 pub(crate) fn refused_by(
-    ports: RangeInclusive<u16>,
+    ports: impl Iterator<Item = u16>,
     skip: impl Fn(u16) -> bool,
     bind: impl Fn(IpAddr, u16) -> io::Result<()>,
 ) -> Vec<u16> {
@@ -53,14 +63,17 @@ pub(crate) fn refused_by(
         .collect()
 }
 
-/// The reserved ports of [`TIER_B_PORTS`](super::TIER_B_PORTS), by [`bind_only`]. Ports in
-/// `listening`, which a listener holds, and ports this process holds are skipped.
+/// The reserved ports of `ports`, by [`bind_only`]. Ports in `in_use`, which a socket holds,
+/// and ports this process holds are skipped.
 #[cfg(windows)]
-pub(crate) fn refused_ports(listening: &std::collections::BTreeSet<u16>) -> Vec<u16> {
+pub(crate) fn refused_ports(
+    ports: impl Iterator<Item = u16>,
+    in_use: &std::collections::BTreeSet<u16>,
+) -> Vec<u16> {
     let held = super::Held::lock();
     refused_by(
-        super::TIER_B_PORTS,
-        |port| listening.contains(&port) || held.contains(port),
+        ports,
+        |port| in_use.contains(&port) || held.contains(port),
         bind_only,
     )
 }

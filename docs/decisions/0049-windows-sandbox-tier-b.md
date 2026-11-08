@@ -1434,30 +1434,39 @@ by default, so the OS never hands their ports to another program's port-0 bind. 
 the listeners known below it (WinRM 47001, the ASP.NET state service 42424, EtherNet/IP 44818,
 BACnet 47808, SQL Server's browser 1434). IANA registers one port in the blocks, `inedo`
 46336/tcp ("Loopback ports per slot", What stays open). No other port in the repo falls in
-46100-46611 or 65024-65279. Set-up and every launch check the machine against H and P
-(`wfp::check_ports`) and refuse tier B, named, on an overlap:
+46100-46611 or 65024-65279. Set-up and every launch check the machine (`wfp::check_ports`,
+`port_check.rs`). Only the dynamic range refuses every slot; the rest is checked per launch, for
+its own slot, and refuses that slot alone:
 - **Windows' TCP dynamic range**, read from WMI: `MSFT_NetTCPSetting` in `ROOT\StandardCimv2`,
   `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts`, every setting's (the class
   behind `Get-NetTCPSetting`; Microsoft documents it under "MSFT_NetTCPSetting class"), on a
   thread of its own, capped at 5 s (no answer fails closed, `PortsUnchecked`). A VM row measures
   its cost unelevated, which decides whether a host process should cache it. For IT:
   `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
-- **Excluded port ranges** (Hyper-V, WSL and Docker reserve blocks, sometimes below 49152).
-  Windows publishes no call that lists them: `netsh int ipv4 show excludedportrange` reads the
-  TCP/IP stack's private store, and the documented calls, `CreatePersistentTcpPortReservation`
-  and `LookupPersistentTcpPortReservation`, only make or look up one exact range. So each port of
-  46100-46611 nobody listens on is test-bound on `127.0.0.1` and `::1`, a bind with no listen;
-  `WSAEACCES` marks it excluded (`ports/reserved.rs`, "Loopback ports per slot").
-- **At each launch, the listeners**: every TCP listener in block H, IPv4 and IPv6, any address
-  (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`), must be this process's: the proxy
-  and the relay run in the host. A program-file match would pass another Windows user's Clauseo,
-  or this program started suspended and injected into, so it isn't one. Anything else,
-  `http.sys` as System included, refuses the launch (`NetworkGap::ForeignListener`, naming the
-  program from `QueryFullProcessImageNameW`). A port that refused its test bind is re-checked
-  against the listeners read after the binds, so a listener that came up meanwhile is named as
-  one. A listener in block P is a pool user's, and the filters let only that slot's user listen
-  there, so it isn't foreign; the browser's gate checks the launch's own slot. Block D is inside
-  the dynamic range by design and isn't checked here.
+- **Excluded port ranges** (Hyper-V, WSL and Docker reserve blocks, sometimes below 49152),
+  at each launch, for the launch's slot's 24 ports. Windows publishes no call that lists them:
+  `netsh int ipv4 show excludedportrange` reads the TCP/IP stack's private store, and the
+  documented calls, `CreatePersistentTcpPortReservation` and
+  `LookupPersistentTcpPortReservation`, only make or look up one exact range. So each of the
+  slot's ports that no socket holds is test-bound on `127.0.0.1` and `::1`, a bind with no
+  listen (`ports/reserved.rs`). `WSAEACCES` (10013) marks it excluded; `WSAEADDRINUSE` (10048)
+  never does. The assumption, which a VM row checks: an excluded range refuses the bind with
+  10013, as Docker, WSL and Hyper-V users report. Since Windows also answers 10013 for a port
+  another user's socket holds, or one held with `SO_EXCLUSIVEADDRUSE`, every port in the TCP
+  table (any state) is skipped before the binds and dropped if it appears after them. A block of
+  the slot (H_s, P_s or D_s) with all 8 ports excluded refuses that slot's launches
+  (`NetworkGap::SlotPortsUnusable`), naming the block; fewer is fine, since the claims skip a
+  port they can't use. Set-up doesn't check excluded ranges.
+- **At each launch, the listeners** (`GetExtendedTcpTable`, `TCP_TABLE_OWNER_PID_LISTENER`,
+  IPv4 and IPv6, any address). A listener on one of the launch's slot's H ports that isn't this
+  process's is skipped by the H claim, not refused: no static filter lets a pool user connect to
+  it, and PR6's permits name only ports the session holds. It counts toward H_s being wholly
+  unusable (with excluded ports), which refuses that slot alone. A foreign listener on an H port
+  the launch's policy names, one its own listener should hold, refuses the launch
+  (`NetworkGap::ForeignListener`, naming the program from `QueryFullProcessImageNameW`). Only
+  this process's pid counts as ours: a program-file match would pass another Windows user's
+  Clauseo, or this program started suspended and injected into. Listeners in other slots' ports
+  and in P and D aren't this check's; the browser's gate checks the launch's own P_s and D_s.
 
 **Set-up** (elevated, step 8a, between the fence and the journals) writes, in one WFP transaction
 (`writes::replace`: begin, the deletes and adds, commit; any error aborts): Clauseo's persistent
@@ -1769,11 +1778,9 @@ range, the listeners' secrets are the check".
   wait on the VM row that shows whether a loopback accept carries the user; the spike found the
   remote user empty there ("Defence in depth, dropped").
 - **IANA.** The only registered port in the blocks is `inedo`, 46336/tcp, in slot 29's H block
-  (`ClauseoSb30`, 46332-46339). It is accepted: the H claim skips a busy port. Note that the
-  launch check (`port_check.rs`) refuses tier B, naming the program, while anything that isn't
-  this app's listens anywhere in H, so an Inedo agent listening there stops every tier-B launch
-  on that computer, not only slot 29's. That costs availability, never confidentiality. Block D
-  (65024-65279) has no registration.
+  (`ClauseoSb30`, 46332-46339). It is accepted: an Inedo agent listening there costs slot 29
+  one of its 8 host ports, which the H claim skips; every slot still launches, slot 29's
+  included, and no pool user can connect to it. Block D (65024-65279) has no registration.
 - **407 log lines.** A program that can reach a proxy's agent listener without its token (a
   lawyer's program, say) can send requests naming hosts of its choosing. One bucket per proxy
   caps the 407 lines (`proxy/server/auth_log.rs`): 5, then 1 per 10 s. The next 407 record that
@@ -1810,9 +1817,14 @@ range, the listeners' secrets are the check".
 12. With PR6: one full `agent_browser_open` through the proxy's browser listener in H_s.
 13. An old install launches as `sandbox.setup_required`; set-up converts it in one go.
 14. `Us`'s stream server or daemon bound on `[::]` is allowed (F3 over IPv6).
-15. On a set-up machine, the reserved-port check's bind-only test of every P_s port succeeds as
-    the lawyer and as SYSTEM (no 10013), so a launch and a re-run of set-up pass; a real
-    excluded range (`netsh int ipv4 add excludedportrange`) still gives 10013 at the bind.
+15. On a set-up machine, the reserved-port check's bind-only test of every port of a slot
+    succeeds as the lawyer (no 10013), so a launch passes. A real excluded range (`netsh int ipv4
+    add excludedportrange protocol=tcp startport=46356 numberofports=8`) gives 10013 at the bind
+    and refuses slot 0's launch alone; a port held by another user's listener gives 10013 or
+    10048, and either way reads as in use (the TCP table), not reserved.
+17. A foreign listener on one H port (`python -m http.server 46336 --bind 127.0.0.1`): every
+    slot launches, slot 29's proxy binds another of its H ports, and slot 29's agent can't
+    connect to 46336 (10013).
 16. A deny-only, a restricted (without `Us`) and an `AppContainer` child of `Us` can't listen on
     P_s or D_s, as the arbitration model predicts.
 

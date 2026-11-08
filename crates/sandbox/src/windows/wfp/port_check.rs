@@ -1,17 +1,24 @@
-//! Whether tier B's static ports (`ports::TIER_B_PORTS`, blocks H and P) are usable on this
-//! machine (S15 PR7, 0049 "Loopback ports per slot"), with no Windows call. Windows' TCP dynamic
-//! range must not overlap them (the OS would hand their ports to any program's port-0 bind), no
-//! port of them may be excluded (Hyper-V, WSL and Docker reserve ranges Windows then refuses to
-//! bind), and at each launch every TCP listener in block H must be this app's. A listener in
-//! block P is a pool user's, and set-up's filters let only that slot's own user listen there; the
-//! browser's gate (`ports::gate`) checks the launch's own slot. Block D sits inside the dynamic
-//! range by design and isn't checked here: a port of it that is taken or excluded turns the
-//! browser off for one run. `os_ports.rs` reads the machine.
+//! Whether tier B's ports are usable on this machine (S15 PR7, 0049 "Loopback ports per slot"),
+//! with no Windows call. `os_ports.rs` reads the machine.
+//!
+//! - **Machine-wide**, at set-up and at every launch: Windows' TCP dynamic range must not overlap
+//!   blocks H and P (`ports::TIER_B_PORTS`), or the OS would hand their ports to any program's
+//!   port-0 bind.
+//! - **Per slot**, at a launch: only the launch's slot is looked at, and only that slot can be
+//!   refused. A block of it (`H_s`, `P_s` or `D_s`) whose 8 ports are all unusable refuses
+//!   the launch ([`NetworkGap::SlotPortsUnusable`]): a port Windows reserves (an excluded range,
+//!   refused at the bind) is unusable, and in `H_s` so is one another program listens on. Fewer
+//!   than 8 is fine: the H claim skips a busy port, and a P or D claim the same (a reserved one
+//!   fails its bind and turns the browser off for the run). A foreign listener elsewhere in H
+//!   (Inedo's agent on 46336, say) is no concern of the launch: no static filter lets a pool
+//!   user connect to it, and PR6's permits name only ports the session holds.
+//! - A foreign listener on a host port the launch's policy names (one its own listener should
+//!   hold) refuses ([`NetworkGap::ForeignListener`]).
 
 use std::ops::RangeInclusive;
 
 use super::check::NetworkGap;
-use crate::ports::{HOST_BLOCK, TIER_B_PORTS};
+use crate::ports::{SLOT_PORTS, Slot, TIER_B_PORTS};
 
 /// A TCP listener as Windows lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,9 +36,10 @@ pub struct Listener {
 pub struct PortsSeen {
     /// Windows' TCP dynamic port ranges, first and last port, one per TCP setting.
     pub dynamic: Vec<(u16, u16)>,
-    /// The ports of the range Windows refuses to bind on `127.0.0.1` or `::1` (excluded).
+    /// The launch's slot's ports that Windows refuses to bind on `127.0.0.1` or `::1`
+    /// (excluded); none at set-up.
     pub reserved: Vec<u16>,
-    /// The TCP listeners in the range, any address, IPv4 and IPv6; none at set-up.
+    /// The TCP listeners, any address, IPv4 and IPv6; none at set-up.
     pub listeners: Vec<Listener>,
 }
 
@@ -53,9 +61,23 @@ pub fn is_ours(listener: &Listener, own_pid: u32) -> bool {
     listener.pid == own_pid
 }
 
-/// Checks `seen` for tier B: no dynamic range overlapping the range, no port of it reserved,
-/// and every listener in block H one that `ours` accepts.
-pub fn ports_usable(seen: &PortsSeen, ours: impl Fn(&Listener) -> bool) -> Result<(), NetworkGap> {
+/// What a launch checks beyond the machine: its slot, and the ports its policy names (its own
+/// listeners').
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchPorts<'a> {
+    /// The launch's slot.
+    pub slot: Slot,
+    /// The ports the launch's policy names.
+    pub ports: &'a [u16],
+}
+
+/// Checks `seen` for tier B: no dynamic range overlapping the range; with `launch`, no block of
+/// its slot wholly unusable and no listener on its policy's ports that `ours` refuses.
+pub fn ports_usable(
+    seen: &PortsSeen,
+    launch: Option<LaunchPorts<'_>>,
+    ours: impl Fn(&Listener) -> bool,
+) -> Result<(), NetworkGap> {
     if let Some(&(first, last)) = seen
         .dynamic
         .iter()
@@ -63,18 +85,37 @@ pub fn ports_usable(seen: &PortsSeen, ours: impl Fn(&Listener) -> bool) -> Resul
     {
         return Err(NetworkGap::DynamicPortsOverlap { first, last });
     }
-    if let Some(&port) = seen
-        .reserved
-        .iter()
-        .find(|port| TIER_B_PORTS.contains(port))
-    {
-        return Err(NetworkGap::PortsReserved(port));
+    let Some(LaunchPorts { slot, ports }) = launch else {
+        return Ok(());
+    };
+    let foreign = |port: u16| {
+        seen.listeners
+            .iter()
+            .find(|listener| listener.port == port && !ours(listener))
+    };
+    let blocks = [
+        ("host", slot.host(), true),
+        ("browser", slot.pool(), false),
+        ("browser daemon", slot.daemon(), false),
+    ];
+    for (block, range, listeners_count) in blocks {
+        let unusable = range
+            .clone()
+            .filter(|port| {
+                seen.reserved.contains(port) || (listeners_count && foreign(*port).is_some())
+            })
+            .count();
+        if unusable == usize::from(SLOT_PORTS) {
+            return Err(NetworkGap::SlotPortsUnusable {
+                slot,
+                block,
+                first: *range.start(),
+                last: *range.end(),
+            });
+        }
     }
-    let foreign = seen
-        .listeners
-        .iter()
-        .find(|listener| HOST_BLOCK.contains(&listener.port) && !ours(listener));
-    if let Some(listener) = foreign {
+    let own = ports.iter().filter(|port| slot.host().contains(port));
+    if let Some(listener) = own.into_iter().find_map(|port| foreign(*port)) {
         return Err(NetworkGap::ForeignListener {
             port: listener.port,
             program: listener

@@ -60,10 +60,10 @@ pub use slot::{DAEMON_BLOCK, HOST_BLOCK, POOL_BLOCK, SLOT_PORTS, Slot};
 /// so the OS never hands them to another program's port-0 bind; clear of the listeners known
 /// to sit below it (`WinRM` 47001, the `ASP.NET` state service 42424, `EtherNet/IP` 44818,
 /// `BACnet` 47808, SQL Server's browser 1434). IANA registers one port in them, `inedo` 46336
-/// (0049). Set-up and every tier-B launch refuse a machine whose dynamic range, or
-/// whose excluded port ranges (Hyper-V, WSL, Docker), overlap it, or where another program
-/// listens in it (`wfp::check_ports`). Block D sits inside the dynamic range by design
-/// ([`DAEMON_BLOCK`]).
+/// (0049). Set-up and every tier-B launch refuse a machine whose dynamic range overlaps it; a
+/// launch also refuses when one block of its own slot is wholly excluded (Hyper-V, WSL, Docker)
+/// or, for its host block, held by other programs (`wfp::check_ports`). Block D sits inside the
+/// dynamic range by design ([`DAEMON_BLOCK`]).
 pub const TIER_B_PORTS: RangeInclusive<u16> = 46_100..=46_611;
 
 /// Whether `port` is one of any slot's: [`TIER_B_PORTS`], and block D on Windows. Nothing but
