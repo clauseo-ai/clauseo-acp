@@ -36,7 +36,7 @@ pub(crate) use ascii_fold::name_folds_to;
 pub(crate) use share::{touchable, under_share_matter};
 pub(crate) use windows_names::refused_windows_name;
 
-mod ascii_fold;
+pub(crate) mod ascii_fold;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
 #[cfg(target_os = "macos")]
