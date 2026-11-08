@@ -93,7 +93,9 @@ impl Fake {
             folders,
             accounts: BTreeMap::new(),
             names: BTreeMap::new(),
-            computer: vec!["PC-7".to_owned(), "pc-7.firm.example".to_owned()],
+            // What GetComputerNameExW gives: the NetBIOS name, and the DNS host name, which here
+            // is the same name and so is listed once.
+            computer: vec!["PC-7".to_owned()],
             delete_refuse: Vec::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
