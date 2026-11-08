@@ -49,6 +49,10 @@ pub(super) struct Fake {
     pub(super) calls: Vec<&'static str>,
     /// The group each `secure_staged` denied, in order.
     pub(super) secured_for: Vec<Option<Sid>>,
+    /// The group the admin folder and copy deny (none: locked with no deny), which
+    /// `deny_group` sets, and the groups it was asked for.
+    pub(super) denies: Option<Sid>,
+    pub(super) denied_for: Vec<Sid>,
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
@@ -93,6 +97,8 @@ impl Fake {
             crashed: false,
             calls: Vec::new(),
             secured_for: Vec::new(),
+            denies: None,
+            denied_for: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
         }
@@ -212,6 +218,13 @@ impl Refresher for Fake {
     fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed> {
         self.secured_for.push(group.cloned());
         self.step("secure_staged")
+    }
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed> {
+        self.denied_for.push(group.clone());
+        self.step("deny_group")?;
+        let lacking = self.denies.as_ref() != Some(group);
+        self.denies = Some(group.clone());
+        Ok(lacking)
     }
     fn hold_admin_folder(&mut self) -> Result<(), Failed> {
         self.step("hold")

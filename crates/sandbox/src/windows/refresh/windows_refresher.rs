@@ -223,6 +223,12 @@ impl Refresher for WindowsRefresher {
         staging::secure_file(&self.staged(STAGED_NAME)?, &locked_file_sddl(group))
     }
 
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed> {
+        let sandbox = self.sandbox.clone()?;
+        os::heal_deny(&sandbox, &sandbox.join(EXE_NAME), group)
+            .map_err(|error| format!("the admin folder's deny: {error}"))
+    }
+
     fn hold_admin_folder(&mut self) -> Result<(), Failed> {
         let sandbox = self.sandbox.clone()?;
         self.held = Some(staging::hold_dir(&sandbox)?);

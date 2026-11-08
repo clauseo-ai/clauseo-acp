@@ -565,8 +565,24 @@ started elevated, by the app or by the uninstall hook.
     opens nothing). Every later `--adopt` and every refresh (the staged copy's DACL) deny the
     recorded group. The exact read-backs (`admin_copy::locked`) require the deny when there is
     a group and refuse it when there is none.
-  - **Drift.** The launch check requires the deny once there is a `GroupSid`, so a copy that
-    lost it is `AdminCopyUnsafe`, repaired as any other drift: the installer's repair runs
+  - **Upgrades heal with no prompt.** Two upgrades leave the folder and the copy locked exactly
+    as before, with no deny: a machine set up before the deny existed, and a per-user update
+    (`/UPDATE` runs no `--adopt`), whose refresh runs from the old copy and secures the new
+    one with the old DACL. A per-machine update runs `--adopt`, which denies the recorded
+    group before anything checks. For the rest (`admin_copy/heal.rs`):
+    - every refresh run of this build, with the set-up lock held and the record read, before
+      anything it may refuse on, locks the folder and the copy again with the deny when each
+      is exactly the locked form, with or without the deny, and one lacks it
+      (`admin_copy::owed`; `refresh/deny.rs`). A failed heal is logged and the run goes on;
+    - before the launch check, the elevated start's check and the state the app shows, a copy
+      that passes every rule but the deny, its folder and copy each in one of those two forms,
+      asks the refresh task to run (the lawyer may start it) and looks again every 0.5 s, for
+      at most 20 s, asking again every 3 s: the first run may be the old copy's, which swaps
+      this build in but can't heal, and the task never runs twice at once. Then the check
+      decides. Once a wait has run out in a process, later ones ask and look once. The app's
+      first detection can take those seconds once after such an update.
+  - **Drift.** Anything else (another group's deny, an extra entry, the deny on one and drift on
+    the other) is `AdminCopyUnsafe`, repaired as any other drift: the installer's repair runs
     `--adopt`, which locks with the deny. A re-run of set-up locks again too.
   - **Every pool token holds the group.** Set-up puts every pool user it makes or resets in
     `ClauseoSandboxUsers`, and every runner logs on afresh (`CreateProcessWithLogonW`), so the
@@ -1720,7 +1736,8 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    set-up lock (the named mutex the set-up, `--remove` and `--adopt` take) without waiting, and
    holds it to the end of the run; held elsewhere, it exits 44 having read nothing. `--adopt`
    holds the same lock from its record checks through its hash and record write, so a refresh
-   never swaps the copy between the two;
+   never swaps the copy between the two. With the record read, a `GroupSid` gives the folder
+   and the copy its deny when they lack only that ("The pool's group is denied the copy");
 3. refuses an install folder that isn't inside the copy owner's profile (`ProfileList`'s
    `ProfileImagePath` for `AdminCopyOwner`; a temporary profile counts as none). For a
    `machine` owner, the folder must instead be one only SYSTEM, Administrators or

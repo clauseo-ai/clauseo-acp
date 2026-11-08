@@ -545,6 +545,7 @@ crates/sandbox/src/windows/admin_copy/mark_os.rs - unsafe_code
 # The admin folder's lock-down walked through handles: a link's delete on its own handle.
 crates/sandbox/src/windows/admin_copy/lock_tree_os.rs - unsafe_code
 crates/sandbox/src/windows/admin_copy/os.rs open_shared clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/os.rs wait clippy::disallowed_methods
 # --adopt's and --remove's take-back deletes in the admin folder (0049, the staging folder's DACL).
 crates/sandbox/src/windows/admin_copy/take_back_os.rs NtfsLockDown::remove clippy::disallowed_methods
 crates/sandbox/src/windows/admin_copy/ntfs_tests.rs a_held_hash_keeps_the_file_from_changing_until_it_drops clippy::disallowed_methods
