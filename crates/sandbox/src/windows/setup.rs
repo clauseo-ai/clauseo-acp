@@ -80,6 +80,8 @@ pub mod args;
 #[cfg(windows)]
 pub mod around;
 mod create;
+#[cfg(any(windows, test))]
+mod event_line;
 #[cfg(windows)]
 mod event_trace;
 #[cfg(windows)]

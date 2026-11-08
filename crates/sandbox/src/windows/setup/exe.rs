@@ -35,7 +35,7 @@
 //!
 //! The exe has no log output of its own: `--adopt`'s failures go to the Event Log and the
 //! result file (`explain.rs`), and `tracing` lines at warn and above go to the Event Log as
-//! their message alone (`event_trace.rs`).
+//! their fixed message and codes, never a path (`event_trace.rs`, `event_line.rs`).
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
