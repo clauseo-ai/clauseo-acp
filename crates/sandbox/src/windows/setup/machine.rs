@@ -208,6 +208,10 @@ pub trait Machine {
     fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
     /// The same for `\Clauseo\SandboxStop`.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Per machine: gives the set-up task `\Clauseo\SandboxSetUp` its descriptor again with the
+    /// pool's `group` refused first (`refresh::deny_set_up_to`), as this process. `Ok(false)`
+    /// when the install has no set-up task.
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

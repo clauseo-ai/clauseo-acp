@@ -220,6 +220,9 @@ pub enum Step {
     /// 5: with an admin copy, registering the SYSTEM task `\Clauseo\SandboxRefresh` for the
     /// owner just recorded (`late_steps::tasks`).
     RefreshTask,
+    /// 5: per machine, refusing the pool's group the set-up task `\Clauseo\SandboxSetUp`
+    /// (`late_steps::tasks`).
+    SetUpTask,
 }
 
 impl fmt::Display for Step {
@@ -250,6 +253,7 @@ impl fmt::Display for Step {
             Step::Network => "setting up the network filters",
             Step::StopTask => "registering the sandbox's stop task",
             Step::RefreshTask => "registering the admin copy's refresh task",
+            Step::SetUpTask => "keeping the sandbox users from the set-up task",
         })
     }
 }

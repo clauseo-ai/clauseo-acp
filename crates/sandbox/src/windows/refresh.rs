@@ -79,6 +79,9 @@ pub mod pe_version;
 #[cfg(test)]
 mod refusal_tests;
 mod rules;
+#[cfg(test)]
+#[cfg(windows)]
+mod set_up_task_tests;
 pub mod signature;
 #[cfg(windows)]
 mod source;
@@ -89,6 +92,8 @@ mod staging;
 pub mod task;
 #[cfg(any(windows, test))]
 mod task_folder;
+#[cfg(windows)]
+mod task_scheduler;
 #[cfg(test)]
 mod task_tests;
 #[cfg(test)]
@@ -105,13 +110,14 @@ pub(crate) mod windows_tests;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
-    TEARDOWN, Teardown, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, FOLDER_SDDL, REFRESH_ARG, SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL,
+    STOP_ARG, STOP_EXECUTION_LIMIT, Starters, SystemTask, TASKS, TEARDOWN, Teardown, action_path,
+    hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
+    TASK_FOLDER, TaskError, deny_set_up_to, last_refresh_run, register_task, request_admin_refresh,
     request_pool_stop, unregister_task,
 };
 pub use version::version_not_older;

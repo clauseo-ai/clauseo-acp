@@ -168,6 +168,8 @@ pub(super) struct State {
     pub(super) stop_task: Option<Sid>,
     /// The owner the task `\Clauseo\SandboxRefresh`'s descriptor names, while registered.
     pub(super) refresh_task: Option<Sid>,
+    /// The group the set-up task `\Clauseo\SandboxSetUp`'s descriptor refuses, once set.
+    pub(super) set_up_denied: Option<Sid>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -197,6 +199,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             copy_owner: None,
             stop_task: None,
             refresh_task: None,
+            set_up_denied: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),

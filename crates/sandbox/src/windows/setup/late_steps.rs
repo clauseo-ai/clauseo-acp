@@ -41,7 +41,14 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// registered for `owner` then. An install with no admin copy has no task, so nothing is
 /// registered either. A record that can't be read fails at [`Step::StopTask`]; a registration
 /// that fails at [`Step::RefreshTask`] or [`Step::StopTask`]; each rolled back.
-pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
+///
+/// Per machine, the set-up task `--adopt` registered for every interactive user then refuses the
+/// pool's `group`, which may exist only since this run (`Machine::deny_set_up_to`, every run,
+/// as a reinstall gives the task its install-time descriptor): a pool user holds `IU` too. A
+/// failure is [`Step::SetUpTask`]; an install with no set-up task skips it. The set-up task's
+/// server refuses a pool user whatever the descriptor says (`setup::serve`), so this is a
+/// second wall, not the only one. Per user, the task names the owner alone and needs nothing.
+pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid, group: &Sid) -> Result<(), Failed> {
     let refresh = match machine.copy_owner() {
         Ok(Some(CopyOwner::Machine)) => false,
         Ok(Some(CopyOwner::User(placed))) if placed == *owner => true,
@@ -70,7 +77,16 @@ pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid) -> Result<(), Faile
     }
     machine
         .register_stop_task(owner)
-        .map_err(|error| failed(Step::StopTask, "SandboxStop", &error))
+        .map_err(|error| failed(Step::StopTask, "SandboxStop", &error))?;
+    if !refresh {
+        let denied = machine
+            .deny_set_up_to(group)
+            .map_err(|error| failed(Step::SetUpTask, "SandboxSetUp", &error))?;
+        if !denied {
+            tracing::info!("this per-machine install has no set-up task to keep the pool from");
+        }
+    }
+    Ok(())
 }
 
 /// Before step 7: the folders whose denies protect what is below them, which an owner could

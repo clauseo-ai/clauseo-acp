@@ -10,6 +10,7 @@ use crate::windows::setup::record_values::{AdminValues, CopyOwner};
 
 mod place_only;
 mod reports;
+mod set_up_task;
 
 const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 const OTHER: &str = "S-1-5-21-1-2-3-1002";
@@ -29,6 +30,8 @@ struct Fake {
     owner: Option<Sid>,
     copy_owner: Option<CopyOwner>,
     version: Option<String>,
+    /// The record's `GroupSid`.
+    group: Option<Sid>,
     found: Vec<(PathBuf, Found)>,
     security: Vec<u8>,
     changes: Vec<String>,
@@ -57,6 +60,7 @@ impl Fake {
             owner: None,
             copy_owner: None,
             version: None,
+            group: None,
             found: vec![
                 folder(r"C:\Program Files"),
                 folder(r"C:\Program Files\Clauseo"),
@@ -127,6 +131,7 @@ impl Adopter for Fake {
             pool_owner: self.owner.clone(),
             copy_owner: self.copy_owner.clone(),
             version: self.version.clone(),
+            group: self.group.clone(),
         })
     }
 
@@ -194,7 +199,7 @@ impl Adopter for Fake {
         Ok(())
     }
 
-    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Cause> {
+    fn register_task(&mut self, task: SystemTask, starters: &Starters) -> Result<(), Cause> {
         assert!(self.held, "registered under the set-up lock");
         if self.failing_task == Some(task) {
             return Err(Cause::with(
@@ -202,7 +207,15 @@ impl Adopter for Fake {
                 Code::Hresult(0x8004_1318),
             ));
         }
-        self.changes.push(format!("task {} {owner}", task.name()));
+        let starters = match starters {
+            Starters::Owner(owner) => owner.to_string(),
+            Starters::Interactive { denied: None } => "interactive".to_owned(),
+            Starters::Interactive {
+                denied: Some(group),
+            } => format!("interactive but {group}"),
+        };
+        self.changes
+            .push(format!("task {} {starters}", task.name()));
         Ok(())
     }
 
@@ -443,12 +456,14 @@ fn a_per_machine_adopt_takes_any_administrators_only_folder_and_sets_nobody_up()
         adopt(&mut fake, Path::new(MACHINE), &Target::Machine),
         SetupExit::Done
     );
-    // Lock and record only: no task, since a per-machine install doesn't update itself and has
-    // no owner yet (its set-up registers the stop task).
-    assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
+    // Lock, the set-up task for interactive users, and record: no refresh or stop task, since a
+    // per-machine install doesn't update itself and has no owner yet (its set-up registers the
+    // stop task).
+    assert_eq!(fake.changes.len(), 3, "{:?}", fake.changes);
+    assert_eq!(fake.changes[1], "task SandboxSetUp interactive");
     let version = admin_copy::APP_VERSION;
     assert_eq!(
-        fake.changes[1],
+        fake.changes[2],
         format!("record {HASH} {MACHINE} {version} machine")
     );
     // A folder Users can write, a link, or nothing there refuses.

@@ -16,20 +16,29 @@ pub const EXECUTION_LIMIT: &str = "PT5M";
 pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
+/// The set-up task's one argument (`setup::serve`): nothing else.
+pub const SET_UP_ARG: &str = "--serve-set-up";
+/// The set-up task's execution limit: 30 minutes, for a set-up (users, logons, filters) and
+/// the requests queued behind it.
+pub const SET_UP_EXECUTION_LIMIT: &str = "PT30M";
 
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
-/// fixed argument. Both share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
-/// one instance at a time and the settings `task.rs` gives every task; they differ only in
-/// what [`SystemTask`]'s methods say.
+/// fixed argument. They share the principal (LOCAL SYSTEM) and the settings `task.rs` gives
+/// every task; they differ only in what [`SystemTask`]'s methods say and in who may start them
+/// ([`Starters`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemTask {
     /// `\Clauseo\SandboxRefresh`: the admin copy's refresh (`--refresh`).
     Refresh,
     /// `\Clauseo\SandboxStop`: stops every process of the pool's users (`--stop`).
     Stop,
+    /// `\Clauseo\SandboxSetUp`: the set-up a standard user asks for over its pipe
+    /// (`--serve-set-up`, `setup::serve`), with no prompt.
+    SetUp,
 }
 
-/// Every task, in the order `--adopt` registers them.
+/// The tasks a per-user `--adopt` registers for the lawyer, in this order (`--place-only`
+/// registers [`SystemTask::SetUp`] alone; a per-machine `--adopt` too, for interactive users).
 pub const TASKS: [SystemTask; 2] = [SystemTask::Refresh, SystemTask::Stop];
 
 impl SystemTask {
@@ -38,6 +47,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
+            SystemTask::SetUp => "SandboxSetUp",
         }
     }
 
@@ -46,6 +56,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
+            SystemTask::SetUp => SET_UP_ARG,
         }
     }
 
@@ -54,6 +65,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
+            SystemTask::SetUp => SET_UP_EXECUTION_LIMIT,
         }
     }
 
@@ -61,7 +73,17 @@ impl SystemTask {
     pub fn at_logon(self) -> bool {
         match self {
             SystemTask::Refresh => true,
-            SystemTask::Stop => false,
+            SystemTask::Stop | SystemTask::SetUp => false,
+        }
+    }
+
+    /// Whether a start while it runs queues another run, which starts when this one ends
+    /// (`TASK_INSTANCES_QUEUE`); otherwise it is ignored (`TASK_INSTANCES_IGNORE_NEW`). The
+    /// set-up task queues, so a request made as its server is about to stop still gets one.
+    pub fn queues(self) -> bool {
+        match self {
+            SystemTask::Refresh | SystemTask::Stop => false,
+            SystemTask::SetUp => true,
         }
     }
 
@@ -72,6 +94,7 @@ impl SystemTask {
                 "Keeps the admin copy of Clauseo's sandbox set-up program current."
             }
             SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
+            SystemTask::SetUp => "Sets up Clauseo's sandbox for the user who asks, with no prompt.",
         }
     }
 }
@@ -89,24 +112,75 @@ pub enum Teardown {
     AdminFolder,
 }
 
-/// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 5] = [
+/// The removal's steps, in order: every task goes before the copy it runs, the set-up task
+/// first, so no set-up starts while the rest goes.
+pub const TEARDOWN: [Teardown; 6] = [
     Teardown::AdminValues,
+    Teardown::Task(SystemTask::SetUp),
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
 
-/// The descriptor of every task in [`TASKS`] and of their folder: owned by Administrators;
-/// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
-/// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
-/// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
-/// end a stop or a refresh: denial of service only, which code running as the owner could do to
-/// its own sessions anyway. An ended stop never writes `StopCompleted` (`setup::stop`), and an
-/// ended refresh keeps the old copy. The owner can't change or delete a task.
+/// The descriptor of every task in [`TASKS`] (and of the set-up task, per user): owned by
+/// Administrators; protected; SYSTEM and Administrators full control; the record owner `owner`
+/// read and execute (`FRFX`). Starting a task needs execute access: as the owner,
+/// `schtasks /run` with `FR` alone was refused (CI run 42416074600). Execute also ends a running
+/// task, so the owner can end a stop or a refresh: denial of service only, which code running as
+/// the owner could do to its own sessions anyway. An ended stop never writes `StopCompleted`
+/// (`setup::stop`), and an ended refresh keeps the old copy. The owner can't change or delete a
+/// task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
+}
+
+/// The folder `\Clauseo`'s own descriptor, whatever task is registered in it
+/// (`task_folder::prepare`): owned by Administrators; protected; SYSTEM and Administrators full
+/// control; interactive users (`IU`) read, so a user a task's descriptor names can reach it. No
+/// one else may add, change or delete anything in it.
+pub const FOLDER_SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)";
+
+/// Who may start a task: what its descriptor grants read and execute (`FRFX`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Starters {
+    /// The record owner alone ([`task_sddl`]): the refresh and stop tasks, and the set-up task
+    /// of a per-user install.
+    Owner(Sid),
+    /// Every interactive user (`IU`), but members of `denied`, the pool's group once it exists:
+    /// a per-machine install's set-up task. Pool users log on interactively, so they hold `IU`
+    /// too; the deny comes first and keeps them out.
+    Interactive {
+        /// `GroupSid`, when the record has one.
+        denied: Option<Sid>,
+    },
+}
+
+impl Starters {
+    /// The task's descriptor: [`task_sddl`] for an owner; for interactive users, owned by
+    /// Administrators, protected, `denied` refused read and execute first, SYSTEM and
+    /// Administrators full control, `IU` read and execute.
+    pub fn sddl(&self) -> String {
+        match self {
+            Starters::Owner(owner) => task_sddl(owner),
+            Starters::Interactive { denied } => {
+                let deny = denied
+                    .as_ref()
+                    .map(|group| format!("(D;;FRFX;;;{group})"))
+                    .unwrap_or_default();
+                format!("O:BAD:P{deny}(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)")
+            }
+        }
+    }
+
+    /// The user whose logon starts a task with a logon trigger: the owner; `None` for
+    /// interactive users, whose task has no such trigger.
+    pub fn owner(&self) -> Option<&Sid> {
+        match self {
+            Starters::Owner(owner) => Some(owner),
+            Starters::Interactive { .. } => None,
+        }
+    }
 }
 
 /// The task action's program: `exe`'s path in double quotes, as a command line takes a path

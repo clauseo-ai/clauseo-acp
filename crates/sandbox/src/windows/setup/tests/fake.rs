@@ -469,6 +469,14 @@ impl Machine for FakeMachine {
         Ok(())
     }
 
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {
+        assert!(!self.acting.get(), "the task's descriptor is set as admin");
+        // The group is checked through `set_up_denied`: its SID isn't known before the run.
+        self.call("deny_set_up_to")?;
+        self.state.set_up_denied = Some(group.clone());
+        Ok(true)
+    }
+
     fn held_users(
         &mut self,
         _pool: &[Sid],

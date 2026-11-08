@@ -147,7 +147,7 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::ServeSetUp => SetupExit::Usage,
     }
 }
 

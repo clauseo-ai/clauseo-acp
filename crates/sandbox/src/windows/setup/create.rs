@@ -289,7 +289,7 @@ fn change(
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
     // remove; after a re-run's, the pool as before.
-    tasks(machine, &req.owner)?;
+    tasks(machine, &req.owner, &group)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()

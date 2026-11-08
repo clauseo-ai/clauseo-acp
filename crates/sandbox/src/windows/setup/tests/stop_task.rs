@@ -1,9 +1,10 @@
 //! The SYSTEM tasks (`late_steps::tasks`, `remove::remove_stop_task`): with the owner's own
 //! per-user admin copy, the set-up registers `\Clauseo\SandboxRefresh` then
 //! `\Clauseo\SandboxStop` for the owner it records, with a per-machine one the stop task
-//! alone, each again on a re-run; a new owner's set-up replaces a previous owner's; a failed
-//! registration fails the set-up closed; another user's copy, or none, gets nothing. A
-//! per-machine removal deletes the stop task before the record.
+//! alone, then refuses the pool's group the set-up task, each again on a re-run; a new owner's
+//! set-up replaces a previous owner's; a failed registration fails the set-up closed; another
+//! user's copy, or none, gets nothing. A per-machine removal deletes the stop task before the
+//! record.
 
 use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::remove_fake::Remover;
@@ -37,12 +38,25 @@ const REGISTERED: [&str; 2] = ["register_refresh_task 1001", "register_stop_task
 
 /// A fresh set-up registers `want` once the record names the owner, right after its write and
 /// before anything after the users' steps; a re-run (the elevated first run again, or any later
-/// set-up) registers them again over the ones there, changing nothing else about them.
+/// set-up) registers them again over the ones there, changing nothing else about them. Per
+/// machine, each run then refuses the recorded group the set-up task.
 fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str]) {
     let refresh = want.len() == 2;
     let mut machine = installed(test, Some(copy));
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
+    let group = machine.state.group.clone().unwrap();
+    let mut want: Vec<&str> = want.to_vec();
+    if refresh {
+        assert_eq!(
+            machine.state.set_up_denied, None,
+            "{test}: per user, the owner alone"
+        );
+    } else {
+        want.push("deny_set_up_to");
+        assert_eq!(machine.state.set_up_denied.as_ref(), Some(&group), "{test}");
+    }
+    let want = want.as_slice();
     assert_eq!(task_owners(&machine), for_owner(refresh), "{test}");
     let calls = machine.calls_since(0);
     let at = calls.iter().position(|c| *c == want[0]);
@@ -64,7 +78,9 @@ fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str]) {
         let found: Vec<&str> = again
             .iter()
             .copied()
-            .filter(|c| c.starts_with("register_") && c.ends_with("_task 1001"))
+            .filter(|c| {
+                c.starts_with("register_") && c.ends_with("_task 1001") || *c == "deny_set_up_to"
+            })
             .collect();
         assert_eq!(found, want, "{test}: {again:?}");
         assert_eq!(task_owners(&machine), for_owner(refresh), "{test}");
@@ -104,15 +120,21 @@ fn a_failed_registration_fails_the_set_up_closed() {
     let user = || CopyOwner::User(owner());
     let stop = (Step::StopTask, "SandboxStop");
     let refresh = (Step::RefreshTask, "SandboxRefresh");
+    let set_up_task = (Step::SetUpTask, "SandboxSetUp");
     for (test, copy, failing, (step, name)) in [
         ("setup-tasks-fail-machine", CopyOwner::Machine, 1, stop),
         ("setup-tasks-fail-stop", user(), 1, stop),
         ("setup-tasks-fail-refresh", user(), 0, refresh),
+        ("setup-tasks-fail-deny", CopyOwner::Machine, 2, set_up_task),
     ] {
         let per_user = copy != CopyOwner::Machine;
         let mut machine = installed(test, Some(copy));
         let mut before = machine.state.clone();
-        machine.fail(REGISTERED[failing]);
+        if failing == 2 {
+            machine.fail("deny_set_up_to");
+        } else {
+            machine.fail(REGISTERED[failing]);
+        }
         let mut acl = FakeAcl::default();
         let req = request(&mut machine, 0, Vec::new());
         let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
@@ -125,6 +147,9 @@ fn a_failed_registration_fails_the_set_up_closed() {
         // refresh task registered before the stop task failed (the rollback has no step for it).
         if per_user && failing == 1 {
             before.refresh_task = Some(owner());
+        }
+        if failing == 2 {
+            before.stop_task = Some(owner());
         }
         assert_eq!(machine.state, before, "{test}");
         assert!(acl.aces.is_empty(), "{:?}", acl.aces);

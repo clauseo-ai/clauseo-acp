@@ -24,6 +24,8 @@
 //!   no other argument: everything it reads comes from the record and fixed paths.
 //! - `--stop`: stops every process of the pool's users (`stop.rs`), which the SYSTEM task
 //!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
+//! - `--serve-set-up`: serves set-up requests over the set-up pipe (`serve.rs`), which the SYSTEM
+//!   task `\Clauseo\SandboxSetUp` runs. No other argument: who asked comes from the pipe.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`), `--uninstall` (`--remove` only) and
 //! `--place-only` (`--adopt` only) are the flags without a value. Every other flag takes its
@@ -83,6 +85,8 @@ pub enum Mode {
     Refresh,
     /// `--stop`.
     Stop,
+    /// `--serve-set-up`.
+    ServeSetUp,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -100,7 +104,7 @@ pub struct AdoptUser {
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
          --data-dir <path> [--place-only] | --per-machine) | --remove [--uninstall] \
-         [--per-machine] | --refresh | --stop ({0})"
+         [--per-machine] | --refresh | --stop | --serve-set-up ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -109,7 +113,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
     // The SYSTEM tasks' modes take nothing else: what they act on comes from the record.
-    for (alone, parsed) in [("--refresh", Mode::Refresh), ("--stop", Mode::Stop)] {
+    for (alone, parsed) in [
+        ("--refresh", Mode::Refresh),
+        ("--stop", Mode::Stop),
+        ("--serve-set-up", Mode::ServeSetUp),
+    ] {
         if mode == alone {
             return match args.next() {
                 None => Ok(parsed),

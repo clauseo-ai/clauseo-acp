@@ -1,5 +1,6 @@
-//! `--adopt --place-only`: the copy placed, locked down and recorded, and nothing else (no
-//! task, no set-up), with plain `--adopt`'s exits; plain `--adopt` still does both.
+//! `--adopt --place-only`: the copy placed, locked down and recorded, and the set-up task
+//! registered for the lawyer, nothing else (no refresh or stop task, no set-up), with plain
+//! `--adopt`'s exits; plain `--adopt` still registers the other two and sets up.
 
 use super::*;
 
@@ -19,9 +20,9 @@ fn locked() -> String {
 }
 
 #[test]
-fn place_only_locks_down_and_records_with_no_task_and_no_set_up() {
+fn place_only_locks_down_registers_the_set_up_task_and_records_with_no_set_up() {
     let mut fake = Fake::new();
-    // A task that would fail, and a set-up that would: neither is reached.
+    // A refresh task that would fail, and a set-up that would: neither is reached.
     fake.failing_task = Some(SystemTask::Refresh);
     fake.set_up_exit = SetupExit::Failed;
     let target = place_only();
@@ -34,10 +35,10 @@ fn place_only_locks_down_and_records_with_no_task_and_no_set_up() {
         fake.changes,
         [
             locked(),
+            format!("task SandboxSetUp {LAWYER}"),
             format!("record {HASH} {INSTALL} {version} {LAWYER}"),
         ]
     );
-    assert!(!fake.changes.iter().any(|c| c.starts_with("task ")));
     assert!(!fake.changes.iter().any(|c| c.starts_with("set-up ")));
     assert!(fake.reports.is_empty(), "{:?}", fake.reports);
     assert!(!fake.held, "the lock is given back");

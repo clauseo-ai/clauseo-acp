@@ -36,7 +36,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh::{self, SystemTask};
+use crate::windows::refresh::{self, Starters, SystemTask, TaskError};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -413,13 +413,21 @@ impl Machine for WindowsMachine {
     }
 
     fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        refresh::register_task(SystemTask::Refresh, owner)
+        refresh::register_task(SystemTask::Refresh, &Starters::Owner(owner.clone()))
             .map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        refresh::register_task(SystemTask::Stop, owner)
+        refresh::register_task(SystemTask::Stop, &Starters::Owner(owner.clone()))
             .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {
+        match refresh::deny_set_up_to(group) {
+            Ok(()) => Ok(true),
+            Err(TaskError::NotRegistered) => Ok(false),
+            Err(error) => Err(MachineError::Other(error.to_string())),
+        }
     }
 
     fn held_users(

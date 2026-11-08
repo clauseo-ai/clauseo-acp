@@ -1,6 +1,8 @@
-//! The two SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh
-//! task with its own name, argument and limit, the same principal and descriptor, and no logon
-//! start; the uninstaller's removal takes both down before the copy they run.
+//! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh task
+//! with its own name, argument and limit, the same principal and descriptor, and no logon start;
+//! the set-up task queues its runs and is started by the owner or by interactive users but the
+//! pool's group; the folder keeps its own descriptor; the uninstaller's removal takes every task
+//! down before the copy they run, the set-up task first.
 
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
@@ -38,6 +40,60 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     let mode = |task: SystemTask| parse([std::ffi::OsString::from(task.argument())]);
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
+    let set_up = SystemTask::SetUp;
+    assert_eq!(
+        (set_up.name(), set_up.argument(), set_up.execution_limit()),
+        ("SandboxSetUp", "--serve-set-up", "PT30M")
+    );
+    assert_eq!(mode(set_up), Ok(Mode::ServeSetUp));
+    assert!(!set_up.at_logon(), "started only on demand: no trigger");
+    assert!(set_up.queues(), "a start during a run queues another");
+    assert!(!refresh.queues() && !stop.queues());
+    assert_ne!(set_up.description(), "");
+}
+
+#[test]
+fn the_set_up_task_is_the_owners_per_user_and_interactive_users_but_the_pool_per_machine() {
+    let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
+    let group = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1050").unwrap();
+    assert_eq!(Starters::Owner(owner.clone()).sddl(), task_sddl(&owner));
+    assert_eq!(Starters::Owner(owner.clone()).owner(), Some(&owner));
+    let install = Starters::Interactive { denied: None };
+    assert_eq!(
+        install.sddl(),
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)"
+    );
+    assert_eq!(install.owner(), None);
+    // After the first set-up: the group's deny comes first, so it wins over IU's grant.
+    let denied = Starters::Interactive {
+        denied: Some(group),
+    };
+    assert_eq!(
+        denied.sddl(),
+        "O:BAD:P(D;;FRFX;;;S-1-5-21-1-2-3-1050)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)"
+    );
+    let sddl = denied.sddl();
+    let aces: Vec<&str> = sddl.split('(').skip(1).collect();
+    assert!(aces[0].starts_with("D;;FRFX;;;"), "{aces:?}");
+    for ace in &aces[3..] {
+        for wider in ["FA", "FW", "GA", "GW", "WD", "WO", "SD"] {
+            assert!(!ace.contains(wider), "{wider}: {ace}");
+        }
+    }
+}
+
+#[test]
+fn the_folder_has_its_own_descriptor_whatever_task_is_registered() {
+    // Not any task's: a folder given the stop task's descriptor (one owner) would shut every
+    // other interactive user out of the set-up task inside it.
+    assert_eq!(FOLDER_SDDL, "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)");
+    let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
+    assert_ne!(FOLDER_SDDL, task_sddl(&owner));
+    assert_ne!(FOLDER_SDDL, Starters::Interactive { denied: None }.sddl());
+    // Read alone for IU: no one but SYSTEM and Administrators adds or changes a task in it.
+    let aces: Vec<&str> = FOLDER_SDDL.split('(').skip(1).collect();
+    assert_eq!(aces.len(), 3);
+    assert_eq!(aces[2], "A;;FR;;;IU)");
 }
 
 #[test]
@@ -61,18 +117,19 @@ fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
 }
 
 #[test]
-fn the_removal_takes_both_tasks_down_after_the_values_and_before_the_copy() {
+fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
     assert_eq!(
         TEARDOWN,
         [
             Teardown::AdminValues,
+            Teardown::Task(SystemTask::SetUp),
             Teardown::Task(SystemTask::Refresh),
             Teardown::Task(SystemTask::Stop),
             Teardown::Staging,
             Teardown::AdminFolder,
         ]
     );
-    for task in TASKS {
+    for task in [SystemTask::SetUp, SystemTask::Refresh, SystemTask::Stop] {
         let at = TEARDOWN
             .iter()
             .position(|step| *step == Teardown::Task(task));
