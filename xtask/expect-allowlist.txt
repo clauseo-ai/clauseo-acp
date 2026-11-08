@@ -540,6 +540,8 @@ crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_delet
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_standard_user_cant_register_a_task_for_another_principal clippy::disallowed_methods
+crates/sandbox/src/windows/setup/sweep/windows_tests/forged.rs - unsafe_code
+crates/sandbox/src/windows/setup/sweep/windows_tests/forged.rs elevated_a_task_file_rewritten_to_system_and_relocked_doesnt_pass_an_odd_cache_sd clippy::disallowed_methods
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code

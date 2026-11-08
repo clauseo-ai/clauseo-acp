@@ -12,6 +12,8 @@
 
 use std::process::Command;
 
+mod forged;
+
 use super::windows_listing::is_guid;
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
