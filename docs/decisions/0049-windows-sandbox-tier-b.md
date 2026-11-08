@@ -280,12 +280,13 @@ build 26100):
     doesn't hold at that key with that file ID; a `HEAD` made or renamed in outside every `.git`;
     below a folder made, cloned or moved in (the watch names only the folder, so a folder moved in
     from the agent's temp folder with a `.git` inside it is scanned), each `.git`, each git
-    folder whole and each `HEAD`; and a junction or symbolic link that leads outside the matter,
-    by its words alone, never followed, or whose target can't be read. A link within the matter is
+    folder whole and each `HEAD`; and a junction or symbolic link that leads outside the matter
+    (judged as below, never followed), or whose target can't be read. A link within the matter is
     left to the after-session pass, which moves every new link. What git reads from the folder a
     launch `commondir` names (`config`, `hooks`, `objects`, `refs`, `packed-refs`, `info`),
     when that folder is the matter's own, another folder in the matter outside every `.git`, or
-    missing (then the folder itself, once made), is moved when made, and the after-session pass
+    missing as its last part only (then the folder itself, once made; one whose parent is
+    missing isn't watched), is moved when made, and the after-session pass
     checks it too (`Kept::Common`, its folders kept in the record as `:common` keys). One
     outside the matter isn't watched. `objects` and `refs` that are links count as folders for a
     git folder's shape.
@@ -303,9 +304,28 @@ build 26100):
     `FILE_NON_DIRECTORY_FILE`, `FILE_COMPLETE_IF_OPLOCKED`, at most 4 KiB, a reparse point
     refused). An oplock the agent holds on it makes the open return at once instead of waiting
     for a break the agent never acknowledges; the `commondir` then counts as unreadable, names
-    nothing, and its folder is still the git folder it is. **[PLACEHOLDER: handle-relative reads
-    and identity compare (in progress).]** Each scan moves what it finds as it finds it, never
-    after the whole tree.
+    nothing, and its folder is still the git folder it is. The live watch makes no read by
+    path (`scan/reach.rs`): each read opens the watched root as itself, each folder on the way
+    relative to the one before it, as itself, and the item last. A link on the way stops the
+    read, and the item is listed gone and never moved. A link's target comes from the link's own
+    handle (`FSCTL_GET_REPARSE_POINT`, `FILE_COMPLETE_IF_OPLOCKED`; a tag other than a junction
+    or a symbolic link counts as leading out), and the intent's owner from its folder's handle.
+    Links and `commondir` targets are judged by identity, not spelling (`scan/locate.rs`). A
+    network or device path (two leading separators, `\\?\`, `\\.\` or `\??\` not followed
+    by a drive), a target with no drive, or another drive than the root's is outside, and nothing
+    is opened, so a symbolic link to a share makes no SMB connection. Otherwise the target is
+    walked from the root's handle, or from its drive's top down to the folder whose file ID
+    (volume serial and ID) is the root's, each part opened as a folder; a link, a file, or a
+    missing or unreadable part on the way counts as outside. Keys hold each folder's long name,
+    so a target spelled with a short name or in another case keys as the real folder. This
+    errs toward setting aside: a link to a link, a link to anything missing, and a target
+    reached only through a link above the matter (or a folder above it the lawyer can't list)
+    lead out. In a matter on a UNC path every link leads out and no `commondir` is watched.
+    Left by path: the move itself opens the item's folder by its full path and checks its final
+    path after, so a folder swapped for a network link between the walk and the move could still
+    cause one SMB open; the after-session pass reads the intent's owner by path. Each reported
+    name now costs the root's open plus one per part, not measured on Windows. Each scan moves
+    what it finds as it finds it, never after the whole tree.
 
     The watch's end empties the job and returns (`SessionEnd::kill_now`: `TerminateJobObject`,
     then a wait of at most 400 ms until the job has no process). The sweep task's request follows
@@ -381,8 +401,8 @@ build 26100):
     the `:common` folders the matter's or the notes record holds, or one of git's names inside
     one (`SetAsideFailure::GitFolder`). A link is put back only if its target, read by its words
     and resolved against the folder it goes back to, stays inside the matter or notes folder,
-    compared as the live watch compares it; a target that can't be read counts as leading out
-    (`SetAsideFailure::LinkOut`).
+    compared by spelling (ASCII case ignored), not yet by identity as the live watch compares; a
+    target that can't be read counts as leading out (`SetAsideFailure::LinkOut`).
   - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
     run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
     `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
@@ -583,8 +603,8 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **A deny on an item the lawyer renamed away from a protected name** stays after forget: the
   explicit entry goes with the file, and forget removes entries by path. This predates S15
   PR4a2, for the root names and nested `.git` (accepted).
-- **The live watch** reads a link's target by its words: a junction within the matter that
-  leads to another that leads out is moved only when that one is new. A folder the agent made
+- **The live watch** counts a junction within the matter that leads to another link as leading
+  out, so it sets that one aside even when both stay in the matter. A folder the agent made
   that shuts the lawyer out can't be scanned when it is moved in; the after-session pass names it
   as unscanned and keeps the session open. The watch keeps a last-write `MODIFIED` record only
   when the item carries the reparse-point attribute, and the launch walk doesn't write-deny a
