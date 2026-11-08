@@ -448,12 +448,10 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
     assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
     assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
-    // A sweep that served the marker's number ended 56: blocked, for whoever looks after it.
+    // A sweep that served the marker's number ended 56. A pool user can cause it, so it is no
+    // set-up cause: the launch's `Blocked::LeftoverTask` carries it instead.
     assert_eq!(RunExit::LeftoverTask.code(), 0xE0C1_5014);
-    assert_eq!(
-        RunExit::LeftoverTask.no_sandbox(),
-        Some(crate::NoSandbox::SetUpBlocked(crate::Blocked::LeftoverTask))
-    );
+    assert_eq!(RunExit::LeftoverTask.no_sandbox(), None);
     assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 21), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);

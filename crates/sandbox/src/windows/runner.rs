@@ -451,9 +451,9 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
-    /// F4: as [`RunExit::AwaitingSweep`], but the last sweep ended 56 at or past the number the
-    /// marker awaits (`unclean::leftover`): a task it can't remove is left, so the outer refused
-    /// at once, with a fresh sweep requested. Only an administrator can delete the task.
+    /// F4: as [`RunExit::AwaitingSweep`], but the last sweep had ended 56 at or past the number
+    /// the marker awaits and a fresh run ended 56 too, or none did within the wait
+    /// (`unclean::leftover`): a task it can't remove is left. Only an administrator can delete it.
     LeftoverTask,
 }
 
@@ -505,7 +505,6 @@ impl RunExit {
         match self {
             RunExit::SecondaryLogon => Some(NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned())),
             RunExit::LogonRight => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
-            RunExit::LeftoverTask => Some(NoSandbox::SetUpBlocked(crate::Blocked::LeftoverTask)),
             RunExit::NoSecret | RunExit::Password => {
                 Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
             }
@@ -524,7 +523,10 @@ impl RunExit {
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable
             | RunExit::AwaitingStop
-            | RunExit::AwaitingSweep => None,
+            | RunExit::AwaitingSweep
+            // A pool user can cause it on purpose: never a set-up cause that could move a
+            // launch to another tier. The launch's `Blocked::LeftoverTask` carries the cause.
+            | RunExit::LeftoverTask => None,
         }
     }
 }
