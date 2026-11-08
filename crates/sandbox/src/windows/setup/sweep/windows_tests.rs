@@ -201,13 +201,19 @@ fn task_paths_compare_as_windows_compares_them_not_by_unicode_lowercase() {
 /// A task as the test user registers it from XML: its own, on a trigger far ahead, with `sddl`
 /// as its descriptor; UTF-16LE after its byte order mark, as `schtasks /xml` reads it.
 fn task_xml(user: &str, sddl: &str) -> Vec<u8> {
+    let principal = format!("<UserId>{user}</UserId><LogonType>InteractiveToken</LogonType>");
+    task_xml_for(&principal, sddl)
+}
+
+/// [`task_xml`] with `principal` as what its `Principal` element holds.
+fn task_xml_for(principal: &str, sddl: &str) -> Vec<u8> {
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<Task version=\"1.2\" \
          xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n  \
          <RegistrationInfo><SecurityDescriptor>{sddl}</SecurityDescriptor></RegistrationInfo>\
          \r\n  <Triggers><TimeTrigger><StartBoundary>2099-01-01T00:00:00</StartBoundary>\
-         </TimeTrigger></Triggers>\r\n  <Principals><Principal id=\"Author\"><UserId>{user}\
-         </UserId><LogonType>InteractiveToken</LogonType></Principal></Principals>\r\n  \
+         </TimeTrigger></Triggers>\r\n  <Principals><Principal id=\"Author\">{principal}\
+         </Principal></Principals>\r\n  \
          <Actions Context=\"Author\"><Exec><Command>{}\\cmd.exe</Command><Arguments>/c exit 0\
          </Arguments></Exec></Actions>\r\n</Task>\r\n",
         system32()
@@ -444,5 +450,79 @@ fn a_task_cache_id_is_a_guid_in_braces_and_nothing_else() {
         "",
     ] {
         assert!(!is_guid(not), "{not}");
+    }
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_standard_user_cant_register_a_task_for_another_principal() {
+    if !gate("elevated_a_standard_user_cant_register_a_task_for_another_principal") {
+        return;
+    }
+    // The file-and-cache rule trusts a task file naming someone else because a standard user
+    // can't register a task for another principal without that principal's credentials: one
+    // for another local user (no password, an interactive token) or for Users must fail.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let other = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!(
+        "1. the test user {}, the other user {}",
+        user.name, other.name
+    );
+    let dir = TempDir::new("sweep-principal");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    let sddl = format!(
+        "O:{0}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{0})",
+        sid.as_str()
+    );
+    let token = "<LogonType>InteractiveToken</LogonType>";
+    // Each case: its name, what its Principal holds, its logon type
+    // (TASK_LOGON_INTERACTIVE_TOKEN 3, TASK_LOGON_GROUP 4), and whether it must register. The
+    // first, the test user's own, shows a refusal below isn't the script's or the XML's.
+    let own = format!("<UserId>{}</UserId>{token}", sid.as_str());
+    let others = format!("<UserId>{}</UserId>{token}", other.sid.as_str());
+    let users = "<GroupId>S-1-5-32-545</GroupId>".to_owned();
+    let cases = [
+        ("Own", own, 3, true),
+        ("Other", others, 3, false),
+        ("Users", users, 4, false),
+    ];
+    let names: Vec<String> = cases
+        .iter()
+        .map(|(case, ..)| format!("ClauseoSweepPrincipal{case}{suffix}"))
+        .collect();
+    // Dropped before the users, so the accounts outlive their tasks' clean-up.
+    let _made = Made(names.clone());
+    for ((case, principal, logon, registers), name) in cases.iter().zip(&names) {
+        let xml = dir.path().join(format!("{case}.xml"));
+        std::fs::write(&xml, task_xml_for(principal, &sddl)).unwrap();
+        let script = format!(
+            "$ErrorActionPreference='Stop'; $x=Get-Content -Raw -LiteralPath '{}'; \
+             $s=New-Object -ComObject Schedule.Service; $s.Connect(); $f=$s.GetFolder('\\'); \
+             try {{ $null=$f.RegisterTask('{name}', $x, 6, $null, $null, {logon}); 'REG-OK'; \
+             exit 0 }} catch {{ 'REG-REFUSED: ' + $_.Exception.Message; exit 3 }}",
+            xml.display()
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
+        eprintln!("2. {case} as the test user: exit {code:?}\n{printed}");
+        let (exit, said) = if *registers {
+            (Some(0), "REG-OK")
+        } else {
+            (Some(3), "REG-REFUSED")
+        };
+        assert!(
+            code == exit && printed.contains(said),
+            "{case}: expected exit {exit:?} with {said}:\n{printed}"
+        );
     }
 }
