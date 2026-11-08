@@ -36,6 +36,8 @@ struct Disk {
     dated: u64,
     /// The canary's writes, by path.
     touched: Vec<PathBuf>,
+    /// The next this many canary writes fail.
+    fail_touches: u32,
     /// How many folders were listed.
     lists: u64,
     /// Listing this folder waits until the flag is set.
@@ -113,6 +115,11 @@ impl FakeFs {
     }
 
     /// The canary's writes.
+    /// Fails the next `n` canary writes.
+    pub(super) fn fail_touches(&self, n: u32) {
+        self.0.lock().unwrap().fail_touches = n;
+    }
+
     pub(super) fn touched(&self) -> Vec<PathBuf> {
         self.0.lock().unwrap().touched.clone()
     }
@@ -277,7 +284,12 @@ impl Fs for FakeFs {
     }
 
     fn touch(&self, path: &Path) -> io::Result<()> {
-        self.0.lock().unwrap().touched.push(path.to_owned());
+        let mut disk = self.0.lock().unwrap();
+        if disk.fail_touches > 0 {
+            disk.fail_touches -= 1;
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        disk.touched.push(path.to_owned());
         Ok(())
     }
 

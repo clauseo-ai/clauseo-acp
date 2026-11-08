@@ -10,7 +10,7 @@ use super::super::host::{self, LIVE};
 use super::super::state::{self, FileStore, SessionRecord, Store};
 use super::super::{Fs, Launch, Watch, fsevents, os};
 use super::watchdog::{self, Busy};
-use super::{CANARY, End, Flow, Mode, Msg, Runner, Session, TICK};
+use super::{CANARY, CANARY_NOTES, End, Flow, Mode, Msg, Runner, Session, TICK};
 use crate::macos::jail_procs::{self, Probe};
 use crate::{Clock, DenialSink, MatterWatch, Policy, SystemClock};
 
@@ -97,6 +97,7 @@ pub(crate) fn start(
         folder,
         launch: Launch::of(policy),
         session: session.to_owned(),
+        canary: CANARY,
     };
     let mode = match policy.matter_watch() {
         MatterWatch::Live => Mode::Live,
@@ -116,6 +117,7 @@ pub(crate) fn start(
         folder: data.to_owned(),
         launch: Launch::default(),
         session: format!("{session}-notes"),
+        canary: CANARY_NOTES,
     };
     Ok(matter.and(start_root(root, data, probe, notices, Mode::Live)?))
 }
@@ -128,6 +130,11 @@ struct Root<'a> {
     launch: Launch,
     /// The watch's id in the records and the host's register.
     session: String,
+    /// Its canary file's name in its set-aside folder: the matter's and the notes folder's
+    /// differ, so the two watches of one launch, which share the data dir's folder when the
+    /// matter is on its volume, never create one file at the same moment (APFS can answer
+    /// such a race with `ENOENT`).
+    canary: &'static str,
 }
 
 /// [`start`] for one folder, its state kept under `data`.
@@ -143,6 +150,7 @@ fn start_root(
         folder,
         launch,
         session,
+        canary,
     } = root;
     let store = FileStore::new(data, dir);
     let this = jail_procs::this_process();
@@ -151,7 +159,7 @@ fn start_root(
     state::begin(&store, &fs, dir, notices, &host::host())?;
     let canary = os::resolve(&folder)
         .unwrap_or_else(|| folder.clone())
-        .join(CANARY);
+        .join(canary);
     let aside = Aside::new(
         dir.to_owned(),
         folder.clone(),

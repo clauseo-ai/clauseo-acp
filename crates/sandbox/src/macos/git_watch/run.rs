@@ -54,6 +54,13 @@ pub(crate) const CANARY_WAIT: Duration = Duration::from_secs(2);
 /// The canary file's name in the set-aside folder.
 const CANARY: &str = "watch-canary";
 
+/// The notes folder's canary file's name in the set-aside folder.
+const CANARY_NOTES: &str = "watch-canary-notes";
+
+/// How many times a canary write is tried before the stream counts as lost: a write can fail
+/// once for a moment (a create racing another process's in the same folder).
+const CANARY_TRIES: u32 = 3;
+
 /// How often the pass over changed folders runs.
 pub(crate) const SWEEP_EVERY: Duration = Duration::from_secs(30);
 
@@ -233,6 +240,7 @@ impl<F: Fs> Runner<F> {
     /// is ending, nor live without a stream.
     fn check(&mut self, msg: Option<Msg>, now: Duration) -> bool {
         let mut rescan = false;
+        let tick = msg.is_none();
         match msg {
             Some(Msg::Events(events)) => {
                 let events = self.echoes(events);
@@ -256,7 +264,7 @@ impl<F: Fs> Runner<F> {
         if self.ending.is_some() || self.mode == Mode::AfterOnly {
             return false;
         }
-        if self.canary(now) {
+        if self.canary(now, tick) {
             return true;
         }
         if rescan && self.watch.full_scan(Phase::Running).end {
@@ -331,21 +339,32 @@ impl<F: Fs> Runner<F> {
     }
 
     /// Rewrites the canary when due. Returns true once, when the stream is lost: the canary's
-    /// event is late, or the canary can't be written. The lawyer is told then.
-    fn canary(&mut self, now: Duration) -> bool {
+    /// event is late, or the canary can't be written. The lawyer is told then. Lateness is
+    /// judged only on a `tick`, which comes once the channel is empty: a thread held up past
+    /// the wait (a busy machine) reads the canary's queued event before it judges.
+    fn canary(&mut self, now: Duration, tick: bool) -> bool {
         let Some(canary) = &mut self.canary else {
             return false;
         };
         if self.lost.is_some() {
             return false;
         }
-        let late = canary
-            .sent
-            .is_some_and(|at| now.saturating_sub(at) >= CANARY_WAIT);
+        let late = tick
+            && canary
+                .sent
+                .is_some_and(|at| now.saturating_sub(at) >= CANARY_WAIT);
         let mut lost = late;
         if !lost && now >= canary.next_touch {
             canary.next_touch = now + CANARY_EVERY;
-            match self.watch.fs().touch(&canary.path) {
+            let fs = self.watch.fs();
+            let mut written = fs.touch(&canary.path);
+            for _ in 1..CANARY_TRIES {
+                if written.is_ok() {
+                    break;
+                }
+                written = fs.touch(&canary.path);
+            }
+            match written {
                 Ok(()) => {
                     canary.sent.get_or_insert(now);
                 }

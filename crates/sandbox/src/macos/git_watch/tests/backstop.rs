@@ -278,3 +278,33 @@ fn the_hosts_quit_gives_up_on_a_watch_after_its_time() {
     assert!(kills.load(Ordering::SeqCst) >= 2, "the kill went again");
     assert!(register.has("a"));
 }
+
+#[test]
+fn a_canary_event_queued_behind_others_is_read_before_lateness_is_judged() {
+    let fs = FakeFs::new();
+    let (mut runner, session, notices) = runner(&fs);
+    // The thread was held up past the wait: other events come first, the canary's after.
+    let other = Msg::Events(vec![event("/m/notes.txt", 0x1000)]);
+    assert_eq!(runner.input(Some(other), CANARY_WAIT + ms(500)), Flow::Go);
+    assert_eq!(runner.input(Some(echo()), CANARY_WAIT + ms(510)), Flow::Go);
+    assert_eq!(runner.input(None, CANARY_WAIT + ms(600)), Flow::Go);
+    assert!(!runner.lost());
+    assert_eq!(ends(&session), 0);
+    none(&notices);
+}
+
+#[test]
+fn a_canary_write_that_fails_for_a_moment_is_tried_again() {
+    let fs = FakeFs::new();
+    fs.fail_touches(2);
+    let (mut runner, session, notices) = runner(&fs);
+    assert_eq!(fs.touched().len(), 1, "the third try went");
+    assert_eq!(runner.input(Some(echo()), ms(100)), Flow::Go);
+    assert_eq!(ends(&session), 0);
+    none(&notices);
+    // One that keeps failing loses the stream.
+    fs.fail_touches(3);
+    assert_eq!(runner.input(None, CANARY_EVERY), Flow::Done);
+    assert!(runner.lost());
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
