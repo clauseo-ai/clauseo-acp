@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use super::links::link;
 use super::{aside, exit, key, launch, launch_as, list, none, volume, world};
 use crate::SetAsideWhat;
-use crate::windows::set_aside::live::{Failed, Live, Watched};
+use crate::windows::set_aside::live::{Ending, Failed, Hooks, Live, Watched};
 use crate::windows::set_aside::{Entry, Reason, SetAsideFailure, run};
 use crate::windows::test_world::matter_one;
 use crate::windows::write::rename_new;
 
 /// The watch over the matter at `root`, after session `s1`'s launch pass recorded it.
-fn watched(root: &Path, data: &Path) -> Watched {
+pub(super) fn watched(root: &Path, data: &Path) -> Watched {
     assert_eq!(
         launch_as(&volume(), root, data, "s1", &[], launch()).unwrap(),
         none()
@@ -20,8 +20,42 @@ fn watched(root: &Path, data: &Path) -> Watched {
     Watched::new(&volume(), root, data, &matter_one())
 }
 
+/// The watch's side of a check: each end it was asked for, and a clock that moves
+/// `step` at each reading.
+pub(super) struct Calm {
+    pub(super) ends: std::cell::RefCell<Vec<Ending>>,
+    clock: std::cell::Cell<std::time::Duration>,
+    step: std::time::Duration,
+}
+
+impl Hooks for Calm {
+    fn end(&self, why: Ending) {
+        self.ends.borrow_mut().push(why);
+    }
+
+    fn now(&self) -> std::time::Duration {
+        let now = self.clock.get();
+        self.clock.set(now + self.step);
+        now
+    }
+}
+
+/// Hooks whose clock stands still.
+pub(super) fn calm() -> Calm {
+    ticking(std::time::Duration::ZERO)
+}
+
+/// Hooks whose clock moves `step` at each reading.
+pub(super) fn ticking(step: std::time::Duration) -> Calm {
+    Calm {
+        ends: std::cell::RefCell::new(Vec::new()),
+        clock: std::cell::Cell::new(std::time::Duration::ZERO),
+        step,
+    }
+}
+
 /// The relative paths the watch reported, parts joined by `/`.
-fn reported(paths: &[&str]) -> Vec<PathBuf> {
+pub(super) fn reported(paths: &[&str]) -> Vec<PathBuf> {
     paths.iter().map(|rel| key(rel).iter().collect()).collect()
 }
 
@@ -31,7 +65,7 @@ fn entries(live: &Live) -> Vec<Entry> {
 }
 
 /// Where each item `live` moved was, sorted, after checking nothing failed.
-fn origins(live: &Live) -> Vec<PathBuf> {
+pub(super) fn origins(live: &Live) -> Vec<PathBuf> {
     assert_eq!(live.failed, Vec::<Failed>::new());
     let mut origins: Vec<PathBuf> = live.moved.iter().map(|m| m.entry.from.clone()).collect();
     origins.sort();
@@ -48,7 +82,7 @@ fn a_rename_to_git_is_set_aside_at_once() {
     let watch = watched(&root, &data);
 
     rename_new(&root.join("Precedents"), &root.join(".git")).unwrap();
-    let live = watch.changed(&volume(), &reported(&[".git"]), exit());
+    let live = watch.changed(&volume(), &reported(&[".git"]), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join(".git")]);
     let moved = &live.moved[0];
@@ -71,7 +105,7 @@ fn an_added_git_file_is_set_aside() {
     let watch = watched(&root, &data);
 
     w.dir.file("matter/sub/.git", "gitdir: ../../elsewhere\n");
-    let live = watch.changed(&volume(), &reported(&["sub/.git"]), exit());
+    let live = watch.changed(&volume(), &reported(&["sub/.git"]), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join("sub/.git")]);
     assert_eq!(live.moved[0].entry.within, key("sub"));
@@ -89,7 +123,12 @@ fn a_git_in_another_case_or_with_an_hfs_ignorable_is_set_aside() {
 
     rename_new(&root.join("Drafts"), &root.join(".GIT")).unwrap();
     rename_new(&root.join("Forms"), &root.join(".g\u{200C}it")).unwrap();
-    let live = watch.changed(&volume(), &reported(&[".GIT", ".g\u{200C}it"]), exit());
+    let live = watch.changed(
+        &volume(),
+        &reported(&[".GIT", ".g\u{200C}it"]),
+        exit(),
+        &calm(),
+    );
 
     assert_eq!(
         origins(&live),
@@ -108,7 +147,7 @@ fn gitignore_github_and_a_head_folder_never_trigger() {
     w.dir.file("matter/.github/workflows/ci.yml", "on: push\n");
     w.dir.file("matter/Head/notes.md", "");
     let paths = reported(&[".gitignore", ".github", ".github/workflows", "Head"]);
-    let live = watch.changed(&volume(), &paths, exit());
+    let live = watch.changed(&volume(), &paths, exit(), &calm());
 
     assert!(live.moved.is_empty() && live.failed.is_empty(), "{live:?}");
     assert!(root.join(".github/workflows/ci.yml").is_file());
@@ -126,8 +165,8 @@ fn a_git_in_the_launch_snapshot_is_left() {
 
     w.dir.file("matter/sub/.git/objects/ab/cdef", "blob");
     let paths = reported(&[".git", "sub/.git", "sub/.git/objects/ab", "sub/.git/HEAD"]);
-    let live = watch.changed(&volume(), &paths, exit());
-    let rescanned = watch.rescan(&volume(), exit());
+    let live = watch.changed(&volume(), &paths, exit(), &calm());
+    let rescanned = watch.rescan(&volume(), exit(), &calm());
 
     assert!(live.moved.is_empty() && live.failed.is_empty(), "{live:?}");
     assert!(rescanned.moved.is_empty(), "{rescanned:?}");
@@ -144,7 +183,12 @@ fn a_git_swapped_at_a_known_name_is_set_aside_as_changed() {
 
     rename_new(&root.join("sub/.git"), &root.join("sub/old")).unwrap();
     rename_new(&root.join("drafts"), &root.join("sub/.git")).unwrap();
-    let live = watch.changed(&volume(), &reported(&["sub/old", "sub/.git"]), exit());
+    let live = watch.changed(
+        &volume(),
+        &reported(&["sub/old", "sub/.git"]),
+        exit(),
+        &calm(),
+    );
 
     assert_eq!(origins(&live), [root.join("sub/.git")]);
     assert_eq!(live.moved[0].entry.reason, Reason::Changed);
@@ -169,7 +213,7 @@ fn a_folder_holding_a_git_moved_in_is_caught_at_any_depth() {
     rename_new(&root.join("Forms"), &temp.join("bar/deep/.git")).unwrap();
     rename_new(&temp.join("foo"), &root.join("foo")).unwrap();
     rename_new(&temp.join("bar"), &root.join("bar")).unwrap();
-    let live = watch.changed(&volume(), &reported(&["foo", "bar"]), exit());
+    let live = watch.changed(&volume(), &reported(&["foo", "bar"]), exit(), &calm());
 
     assert_eq!(
         origins(&live),
@@ -189,7 +233,12 @@ fn a_cloned_tree_is_caught_by_its_folder() {
     w.dir
         .file("matter/clone/.git/hooks/post-checkout", "#!/bin/sh\n");
     w.dir.file("matter/clone/README.md", "# cloned\n");
-    let live = watch.changed(&volume(), &reported(&["clone", "clone/.git/HEAD"]), exit());
+    let live = watch.changed(
+        &volume(),
+        &reported(&["clone", "clone/.git/HEAD"]),
+        exit(),
+        &calm(),
+    );
 
     assert_eq!(origins(&live), [root.join("clone/.git")]);
     assert!(root.join("clone/README.md").is_file());
@@ -208,7 +257,7 @@ fn a_new_folder_holding_a_bare_repository_is_set_aside_whole() {
     w.dir.file("matter/work/repo/refs/heads/main", "0123\n");
     w.dir
         .file("matter/work/repo/hooks/post-update", "#!/bin/sh\n");
-    let live = watch.changed(&volume(), &reported(&["work"]), exit());
+    let live = watch.changed(&volume(), &reported(&["work"]), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join("work/repo")]);
     assert!(live.moved[0].entry.to.join("hooks/post-update").is_file());
@@ -234,8 +283,8 @@ fn a_head_made_in_a_lawyers_folder_is_set_aside_alone() {
             .file(&format!("matter/{folder}/HEAD"), "ref: refs/heads/main\n");
     }
     let paths = reported(&["Precedents/objects", "Precedents/refs", "Precedents/HEAD"]);
-    let live = watch.changed(&volume(), &paths, exit());
-    let rescanned = watch.rescan(&volume(), exit());
+    let live = watch.changed(&volume(), &paths, exit(), &calm());
+    let rescanned = watch.rescan(&volume(), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join("Precedents/HEAD")]);
     assert_eq!(origins(&rescanned), [root.join("Forms/HEAD")]);
@@ -260,14 +309,19 @@ fn a_linked_head_and_a_commondir_folder_are_git_parts() {
     w.dir.file("matter/wt/gitdir/HEAD", "0123\n");
     w.dir
         .file("matter/wt/gitdir/commondir", "../../elsewhere/.git\n");
-    let live = watch.changed(&volume(), &reported(&["Precedents/HEAD", "wt"]), exit());
+    let live = watch.changed(
+        &volume(),
+        &reported(&["Precedents/HEAD", "wt"]),
+        exit(),
+        &calm(),
+    );
 
     assert_eq!(
         origins(&live),
         [root.join("Precedents/HEAD"), root.join("wt/gitdir")]
     );
     assert!(root.join("Precedents/brief.md").is_file());
-    let exit_scan = watch.rescan(&volume(), exit());
+    let exit_scan = watch.rescan(&volume(), exit(), &calm());
     assert!(exit_scan.moved.is_empty(), "{exit_scan:?}");
 }
 
@@ -282,7 +336,7 @@ fn a_link_out_of_the_matter_is_set_aside_and_one_within_is_left() {
 
     link(&w, "matter/out", &w.canonical("temp/foo"));
     link(&w, "matter/within", &root.join("sub"));
-    let live = watch.changed(&volume(), &reported(&["out", "within"]), exit());
+    let live = watch.changed(&volume(), &reported(&["out", "within"]), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join("out")]);
     assert_eq!(live.moved[0].what, SetAsideWhat::LinkOut);
@@ -303,7 +357,7 @@ fn a_rescan_finds_a_git_nobody_reported() {
 
     w.dir
         .file("matter/a/b/.git/hooks/post-checkout", "#!/bin/sh\n");
-    let live = watch.rescan(&volume(), exit());
+    let live = watch.rescan(&volume(), exit(), &calm());
 
     assert_eq!(origins(&live), [root.join("a/b/.git")]);
     assert!(root.join(".git/HEAD").is_file(), "the launch's .git stays");
@@ -325,7 +379,7 @@ fn a_retry_moves_what_failed_by_its_full_path() {
     };
     let elsewhere = w.at("elsewhere/.git");
     let tried = [failed(root.join("a/.git")), failed(elsewhere.clone())];
-    let live = watch.retry(&volume(), &tried, exit());
+    let live = watch.retry(&volume(), &tried, exit(), &calm());
 
     let moved: Vec<_> = live.moved.iter().map(|m| m.entry.from.clone()).collect();
     assert_eq!(moved, [root.join("a/.git")]);
@@ -342,7 +396,7 @@ fn restore_refuses_a_git_and_anything_inside_one() {
     w.dir.file("matter/sub/.git/hooks/x", "#!/bin/sh\n");
     let watch = watched(&root, &data);
     rename_new(&root.join("Precedents"), &root.join(".git")).unwrap();
-    let live = watch.changed(&volume(), &reported(&[".git"]), exit());
+    let live = watch.changed(&volume(), &reported(&[".git"]), exit(), &calm());
     let inside = run::set_aside_path(
         &volume(),
         &data,
@@ -362,6 +416,6 @@ fn restore_refuses_a_git_and_anything_inside_one() {
     assert!(
         SetAsideFailure::GitFolder
             .to_string()
-            .starts_with("Clauseo won't put back a .git folder an agent made")
+            .starts_with("Clauseo won't put back a git folder or repository an agent made")
     );
 }

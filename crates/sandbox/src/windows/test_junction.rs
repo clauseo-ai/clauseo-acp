@@ -39,7 +39,10 @@ pub fn junction(link: &Path, target: &Path) -> io::Result<()> {
     made
 }
 
-fn set_mount_point(link: &Path, target: &Path) -> io::Result<()> {
+/// Sets a mount-point reparse point toward `target` (absolute, an existing folder) on the
+/// existing empty folder `link`: `mklink /J`'s second step, alone (the git watch's test of a
+/// folder that becomes a junction).
+pub fn set_mount_point(link: &Path, target: &Path) -> io::Result<()> {
     let target = std::path::absolute(target)?;
     let print: Vec<u16> = target.as_os_str().encode_wide().collect();
     let mut substitute: Vec<u16> = r"\??\".encode_utf16().collect();

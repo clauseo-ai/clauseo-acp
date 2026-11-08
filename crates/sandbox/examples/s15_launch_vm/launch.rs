@@ -161,6 +161,7 @@ pub(crate) fn message(
         matter_sid: None,
         matter: matter_id(which)?,
         matter_root: matter.clone(),
+        notes_root: None,
         program: spec.program.clone(),
         args: spec.args.clone(),
         cwd: matter.clone(),

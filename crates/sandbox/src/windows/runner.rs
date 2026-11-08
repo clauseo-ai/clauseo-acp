@@ -177,6 +177,10 @@ pub struct LaunchMessage {
     /// The matter's folder, the run's one writable matter root, which the outer watches for a
     /// new `.git` (`git_watch.rs`); a granted path, never a read-only one.
     pub matter_root: String,
+    /// The matter's notes folder, when the run can write one: watched as the matter's folder is.
+    /// A granted path.
+    #[serde(default)]
+    pub notes_root: Option<String>,
     /// The agent's program, absolute; never a batch file.
     pub program: String,
     /// Its arguments.
@@ -222,6 +226,7 @@ impl std::fmt::Debug for LaunchMessage {
             .field("matter_sid", &self.matter_sid)
             .field("matter", &self.matter)
             .field("matter_root", &self.matter_root)
+            .field("notes_root", &self.notes_root)
             .field("program", &self.program)
             .field("args", &self.args.len())
             .field("cwd", &self.cwd)
@@ -294,6 +299,12 @@ impl LaunchMessage {
         local("matter_root", &self.matter_root)?;
         if !self.granted.contains(&self.matter_root) {
             return Err(field("matter_root", "is not a granted path"));
+        }
+        if let Some(notes) = &self.notes_root {
+            local("notes_root", notes)?;
+            if !self.granted.contains(notes) {
+                return Err(field("notes_root", "is not a granted path"));
+            }
         }
         local("state", &self.state)?;
         if WinPath::parse(&self.state).is_none_or(|state| state.drive().is_none()) {

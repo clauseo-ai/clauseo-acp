@@ -43,6 +43,7 @@ pub(super) fn message_from_policy(
         matter_sid: None,
         matter,
         matter_root: path("matter_root", policy.matter())?,
+        notes_root: policy.notes().map(|n| path("notes_root", n)).transpose()?,
         program: path("program", spec.program())?,
         args: spec
             .args()
