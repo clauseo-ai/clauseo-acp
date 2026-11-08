@@ -65,6 +65,10 @@ impl WslRead for Throwaway {
     fn service_app_ids(&self, _services: &[&str]) -> Result<Vec<AppId>, WslError> {
         Ok(Vec::new())
     }
+    // No hardening AppID is a target here: a real WSL's keys must not be denied on by the test.
+    fn app_id_exists(&self, _app_id: &AppId) -> Result<bool, WslError> {
+        Ok(false)
+    }
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError> {
         self.real.launch_permission(app_id)
     }

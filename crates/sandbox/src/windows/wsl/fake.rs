@@ -150,6 +150,11 @@ impl WslRead for FakeWsl {
             .collect())
     }
 
+    fn app_id_exists(&self, app_id: &AppId) -> Result<bool, WslError> {
+        self.failing(&format!("exists {app_id}"))?;
+        Ok(self.keys.contains_key(app_id))
+    }
+
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError> {
         self.reads.borrow_mut().push(format!("read {app_id}"));
         self.failing(&format!("read {app_id}"))?;
@@ -267,6 +272,10 @@ impl WslRead for NoWsl {
 
     fn service_app_ids(&self, _services: &[&str]) -> Result<Vec<AppId>, WslError> {
         Ok(Vec::new())
+    }
+
+    fn app_id_exists(&self, _app_id: &AppId) -> Result<bool, WslError> {
+        Ok(false)
     }
 
     fn launch_permission(&self, _app_id: &AppId) -> Result<Permission, WslError> {

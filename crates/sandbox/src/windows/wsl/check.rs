@@ -4,14 +4,15 @@ use super::record::AppId;
 use super::sd::LaunchSd;
 use super::seam::{ClassEntry, Permission, WslError, WslRead};
 use super::upgrade::{Upgrade, upgrade};
-use super::{CLASSES, LXSS_MANAGER, SERVICES, WSL_SERVICE};
+use super::{CLASSES, HARDENING_APP_IDS, LXSS_MANAGER, SERVICES, WSL_SERVICE};
 use crate::Blocked;
 
 /// The targets found on this machine.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resolved {
     /// Each `AppID` to deny on: those whose `LocalService` is one of [`SERVICES`], then the `AppID`
-    /// of each registered class of [`CLASSES`] not among them, each once.
+    /// of each registered class of [`CLASSES`] not among them, then each of
+    /// [`HARDENING_APP_IDS`] whose key is there, each once.
     pub app_ids: Vec<AppId>,
     /// Whether any of [`CLASSES`] is registered.
     pub registered: bool,
@@ -19,8 +20,8 @@ pub struct Resolved {
     pub no_app_id: usize,
 }
 
-/// The targets on this machine, as the module says. A read that fails is the error: the caller
-/// can't know what it missed.
+/// The targets found on this machine, as the module says. A read that fails is the error: the
+/// caller can't know what it missed.
 pub fn resolve(reg: &dyn WslRead) -> Result<Resolved, WslError> {
     let mut resolved = Resolved {
         app_ids: reg.service_app_ids(&SERVICES)?,
@@ -40,6 +41,12 @@ pub fn resolve(reg: &dyn WslRead) -> Result<Resolved, WslError> {
                     resolved.app_ids.push(app_id);
                 }
             }
+        }
+    }
+    // The hardening AppIDs are targets only where their key is: a missing one is no failure.
+    for app_id in HARDENING_APP_IDS.into_iter().filter_map(AppId::parse) {
+        if !resolved.app_ids.contains(&app_id) && reg.app_id_exists(&app_id)? {
+            resolved.app_ids.push(app_id);
         }
     }
     Ok(resolved)

@@ -6,9 +6,10 @@
 //! goes through an activation.
 //!
 //! - **Targets** ([`resolve`]), found at run time, never hard-coded: every `AppID` whose
-//!   `LocalService` is `WSLService` or `LxssManager`, and the `AppID` of each of [`CLASSES`]
-//!   that is registered. The value is `HKLM\SOFTWARE\Classes\AppID\{...}\LaunchPermission`, a
-//!   self-relative security descriptor, read and written in the 64-bit view.
+//!   `LocalService` is `WSLService` or `LxssManager`, the `AppID` of each of [`CLASSES`] that
+//!   is registered, and each of [`HARDENING_APP_IDS`] whose key is there. The value is
+//!   `HKLM\SOFTWARE\Classes\AppID\{...}\LaunchPermission`, a self-relative security descriptor,
+//!   read and written in the 64-bit view.
 //! - **The edit** ([`LaunchSd`], `sd.rs`, pure): `(D;;CCDCLCSWRP;;;G)` ([`DENY_MASK`]) at DACL
 //!   index 0, every other part and entry kept; nothing to do when a deny for G with at least
 //!   [`NEEDED_MASK`] already comes before every allow. A missing value is built from
@@ -79,6 +80,16 @@ pub const CLASSES: [&str; 3] = [
     WSLC_SESSION_MANAGER,
     LXSS_USER_SESSION_INBOX,
 ];
+/// The `AppID`s WSL's MSI registers with the same Authenticated Users launch grant as the
+/// classes above, denied as hardening when their keys are there (a missing one is skipped):
+/// `{1FAB86C3-F4DF-4271-8E63-6F071C4F708A}`, `wslcsession.exe`, the per-user WSLC session
+/// server, and `{17696EAC-9568-4CF5-BB8C-82515AAD6C09}`, `wsldevicehost.dll`'s `DllSurrogate`.
+/// Neither has a `LocalService`, so [`SERVICES`] misses them. microsoft/WSL
+/// `msipackage/package.wix.in:189-196,326-335`.
+pub const HARDENING_APP_IDS: [&str; 2] = [
+    "{1FAB86C3-F4DF-4271-8E63-6F071C4F708A}",
+    "{17696EAC-9568-4CF5-BB8C-82515AAD6C09}",
+];
 
 #[cfg(test)]
 mod fake;
@@ -86,3 +97,5 @@ mod fake;
 pub(crate) use fake::{FakeWsl, NoWsl};
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_hardening;

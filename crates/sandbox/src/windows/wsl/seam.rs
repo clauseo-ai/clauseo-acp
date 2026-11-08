@@ -42,6 +42,8 @@ pub trait WslRead {
     fn class(&self, clsid: &str) -> Result<ClassEntry, WslError>;
     /// Every `AppID` whose `LocalService` is one of `services`, letter case ignored.
     fn service_app_ids(&self, services: &[&str]) -> Result<Vec<AppId>, WslError>;
+    /// Whether `app_id`'s key is there (`HKLM\SOFTWARE\Classes\AppID\{...}`).
+    fn app_id_exists(&self, app_id: &AppId) -> Result<bool, WslError>;
     /// `app_id`'s `LaunchPermission`.
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError>;
     /// Whether `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex`, or the calling user's (the
