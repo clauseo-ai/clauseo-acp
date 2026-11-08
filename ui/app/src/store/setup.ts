@@ -72,6 +72,16 @@ export type SetupState = {
   pasting: boolean;
   copied: "message" | "log" | null;
   counts: CountsState;
+  /** The settings the firm's policy locks (SettingsView.locked), as read at the start: a locked plan's sign-in has no
+   * control on the first screen. */
+  locked: readonly string[];
+};
+
+/** Whether a firm's policy locks the agent's plan: `plans.<id>`, or a prefix of it ending in `.` (`plans.`, while a
+ * policy source can't be read; SettingsView.locked). */
+export const planLocked = (locked: readonly string[], agent: AgentId): boolean => {
+  const key = `plans.${agent}`;
+  return locked.some((k) => k === key || (k.endsWith(".") && key.startsWith(k)));
 };
 
 const START: SetupState = {
@@ -83,6 +93,7 @@ const START: SetupState = {
   pasting: false,
   copied: null,
   counts: { on: true, locked: false, started: false },
+  locked: [],
 };
 
 const MB = 1_000_000;
@@ -234,6 +245,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
         locked,
         started,
       },
+      locked: settings.locked,
     });
   };
   return {

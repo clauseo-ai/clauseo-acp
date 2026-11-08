@@ -195,7 +195,13 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { first: true, events: [install(CLAUDE, { missing: { download_bytes: 182_400_000 } })] },
     "welcome",
   ],
-  ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
+  // installed but signed out: the words on the foot's line, with the plan's Sign in (once signed in, the same words
+  // stand alone, for an install that finished in this window)
+  [
+    "{name} is ready",
+    { first: true, events: [install(CLAUDE, "installing"), READY, SIGNED_OUT] },
+    "welcome",
+  ],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
   ["Ask your IT team", { first: true, events: [blocked] }, "dl-blocked"],
