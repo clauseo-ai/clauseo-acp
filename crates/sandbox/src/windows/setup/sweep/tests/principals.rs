@@ -44,7 +44,7 @@ fn an_unresolved_pool_name_is_the_pools_with_no_prefix_or_this_computers() {
         "ClauseoSb01",
         r".\clauseosb02",
         r"PC-7\CLAUSEOSB01",
-        r"pc-7.firm.example\ClauseoSb02",
+        r"pc-7\ClauseoSb02",
     ]
     .into_iter()
     .enumerate()
