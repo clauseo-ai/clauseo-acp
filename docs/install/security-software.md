@@ -118,12 +118,26 @@ Inside it:
 Check on the laptop pass: the programs in Claude's and Codex's packages on each system, with
 their paths under `node_modules`.
 
-**What to allow.** Restore anything quarantined from these folders by its path, then allow the
-`agents` folder, or the programs above, in your antivirus, EDR or application control. It's a
-user-writable folder, so an exclusion there also covers anything else that could write to it.
-Where your product allows, scope the exclusion to `agents`, not the whole data folder. At an
-administrator's prompt, `%LOCALAPPDATA%` is the administrator's folder, so name the user's own
-folder: `C:\Users\<user>\AppData\Local\ai.clauseo.desktop\agents`.
+**What to allow, from narrowest to widest.**
+
+1. **Restore and allow that one detection.** In Windows Security's Protection history, or in
+   Microsoft Defender for Endpoint, choose **Allow on device** for the detection, or your
+   product's equivalent for that file. Scanning stays on for everything else.
+2. **Allow by signer or hash, not by path.** Use Defender for Endpoint file or certificate
+   indicators, or your EDR's certificate allow. The Node runtime's `node.exe` is signed by the
+   OpenJS Foundation and Codex's `codex.exe` by OpenAI; allow anything unsigned, possibly
+   `rg.exe`, by its hash. Hashes change when Clauseo downloads a new version.
+
+   Check on the laptop pass: the signers of `node.exe`, `codex.exe`, `rg.exe` and the programs
+   in Claude's package.
+
+3. **A path exclusion only as a last resort.** An exclusion is not an allow: it turns scanning off
+   for everything in that folder. These folders are user-writable, so anything that can write
+   there is no longer scanned. If you need one, scope it to `agents\runtime\` and
+   `agents\<agent>\install\`, never the whole data folder, and prefer a process exclusion for
+   `node.exe` from that path if your product supports it. At an administrator's prompt,
+   `%LOCALAPPDATA%` is the administrator's folder, so name the user's own:
+   `C:\Users\<user>\AppData\Local\ai.clauseo.desktop\agents\runtime\`.
 
 [Clauseo for firm IT](../firm-it.md) has the rest: AppLocker and WDAC rules for this folder in
 [section 3](../firm-it.md#3-applocker-and-wdac), and what to do when Windows security removes
