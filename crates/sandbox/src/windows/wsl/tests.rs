@@ -5,6 +5,7 @@
 use super::fake::{FakeWsl, INBOX_APP, Key, LXSS_APP, WSLC_APP, app, group, stock};
 use super::*;
 use crate::Blocked;
+use crate::windows::sids::Sid;
 
 /// An inbox-only machine: `LxssManager`, its class on an `AppID` with no `LaunchPermission`.
 fn inbox() -> FakeWsl {
@@ -368,4 +369,30 @@ fn a_class_naming_an_appid_with_no_key_is_a_listed_failure_and_refused() {
     assert!(!fake.keys.contains_key(&app(WSLC_APP)), "never made");
     assert!(applied.outcome().is_err());
     assert_eq!(check(&fake), Err(Blocked::WslDenyMissing));
+}
+
+#[test]
+fn a_group_sid_that_isnt_a_local_groups_is_refused_and_nothing_written() {
+    assert!(local_group(&group()));
+    for text in [
+        "S-1-1-0",
+        "S-1-5-11",
+        "S-1-5-4",
+        "S-1-5-18",
+        "S-1-5-32-545",
+        "S-1-5-32-544",
+        "S-1-5-21-1-2-3-500",
+        "S-1-5-21-1-2-3-513",
+        "S-1-5-21-1-2-1001",
+        "S-1-5-21-1-2-3-4-1001",
+        "S-1-5-80-1-2-3-4-5",
+    ] {
+        let sid = Sid::parse(text).unwrap();
+        assert!(!local_group(&sid), "{text}");
+        let mut fake = FakeWsl::lifted();
+        let error = apply(&mut fake, &sid).unwrap_err();
+        assert!(error.0.contains("GroupSid"), "{text}: {error}");
+        assert!(!error.0.contains(text), "no SID in the line: {error}");
+        assert!(fake.writes.is_empty(), "{text}: {:?}", fake.writes);
+    }
 }

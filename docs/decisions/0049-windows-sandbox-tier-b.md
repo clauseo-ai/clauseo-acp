@@ -2423,7 +2423,10 @@ for them, and last, whatever they gave, so a run that began before an installer 
 re-applies after it (`refresh/wsl_phase.rs`, both idempotent). Each waits up to 10 s for the set-up
 lock (`WSL_LOCK_WAIT`), so a brief holder doesn't push the deny to the next run; one still held then
 is logged (a set-up or removal holding it does its own WSL step). Neither runs while the record
-says a removal is under way, nor with no `GroupSid`. The task also starts on an event trigger:
+says a removal is under way, nor with no `GroupSid`. A `GroupSid` that isn't a local group's
+(`S-1-5-21-<a>-<b>-<c>-<rid>` with a relative id from 1000 up) is refused before anything is
+written, and logged without the SID (`wsl::local_group`): Everyone, Authenticated Users,
+INTERACTIVE or a `BUILTIN` group there would deny the lawyer too. The task also starts on an event trigger:
 the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and
 11728 (`rules::msi_event_query`), 15 s after the event (`PT15S`, `rules::MSI_EVENT_DELAY`). The
 task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`), so an installer's burst of

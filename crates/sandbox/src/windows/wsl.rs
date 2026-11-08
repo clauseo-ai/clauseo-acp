@@ -42,7 +42,7 @@ mod record;
 mod sd;
 mod seam;
 
-pub use apply::{WslApplied, WslRemoved, apply, remove};
+pub use apply::{WslApplied, WslRemoved, apply, local_group, remove};
 pub use check::{Found, Resolved, check, resolve};
 #[cfg(windows)]
 pub use os::WindowsWsl;
