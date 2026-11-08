@@ -24,7 +24,9 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
-use super::{Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, sweep, windows_task_file};
+use super::{
+    Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep, windows_task_file,
+};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
 use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
@@ -223,7 +225,7 @@ impl Sweeper for WindowsSweeper {
         Ok(path.to_string())
     }
 
-    fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed> {
+    fn read_task_file(&mut self, parts: &[String]) -> Result<TaskFile, Failed> {
         windows_task_file::read(&system_folder()?, parts, TASK_FILE_CAP)
     }
 

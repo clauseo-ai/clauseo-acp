@@ -28,12 +28,12 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, ExtendedFileIdType, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO,
-    FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
+    FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
     FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
     GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
-    GetVolumePathNameW, OPEN_EXISTING, OpenFileById, READ_CONTROL, ReadFile, SYNCHRONIZE,
-    VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
+    GetVolumePathNameW, OPEN_EXISTING, OpenFileById, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
+    VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
@@ -42,6 +42,7 @@ use crate::windows::folder::verbatim_wide;
 use crate::windows::writer::{ApplyFailure, FileId};
 
 mod listing;
+mod read;
 
 use listing::listed;
 
@@ -81,6 +82,12 @@ impl Object {
     pub(in crate::windows) fn open(path: &Path) -> io::Result<Object> {
         let wide = verbatim_wide(path)?;
         ladder(0, |access| open_raw(&wide, access))
+    }
+
+    /// Opens `path` itself, as [`Object::open`] does, for `rights` and its attributes alone.
+    pub(in crate::windows) fn open_for(path: &Path, rights: u32) -> io::Result<Object> {
+        let access = rights | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
+        Object::describe(open_raw(&verbatim_wide(path)?, access)?, false, false)
     }
 
     /// [`Object::open`], with the right to list it: a walk's root.
@@ -321,41 +328,18 @@ impl Object {
         name: &[u16],
         cap: usize,
     ) -> io::Result<Option<Vec<u8>>> {
-        let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0;
-        let handle = match open_at(&self.handle, name, access, true) {
-            Ok(handle) => handle,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e),
-        };
-        let file = Object::describe(handle, false, false)?;
-        if file.folder || file.tag.is_some() || file.links > 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a plain file",
-            ));
-        }
-        let mut bytes = vec![0u8; cap.saturating_add(1)];
-        let mut filled = 0;
-        loop {
-            let mut read = 0u32;
-            let room = bytes.get_mut(filled..).unwrap_or_default();
-            // SAFETY: the handle is open for synchronous reads with FILE_READ_DATA; `room` is
-            // a live, writable slice and `read` a live out-pointer.
-            unsafe { ReadFile(file.handle.0, Some(room), Some(&raw mut read), None) }
-                .map_err(|e| os_error(&e))?;
-            if read == 0 {
-                break;
-            }
-            filled += usize::try_from(read).map_err(io::Error::other)?;
-            if filled > cap {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "larger than its cap",
-                ));
-            }
-        }
-        bytes.truncate(filled);
-        Ok(Some(bytes))
+        Ok(read::read_child(self, name, cap, 0)?.map(|(bytes, _)| bytes))
+    }
+
+    /// [`Object::read_child`], and the parts of the file's security descriptor `info` asks for
+    /// (self-relative, as [`Object::security`] reads it), through the same handle.
+    pub(in crate::windows) fn read_child_secured(
+        &self,
+        name: &[u16],
+        cap: usize,
+        info: u32,
+    ) -> io::Result<Option<(Vec<u8>, Vec<u8>)>> {
+        read::read_child(self, name, cap, info)
     }
 
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's
