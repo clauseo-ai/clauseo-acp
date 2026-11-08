@@ -270,18 +270,22 @@ fn a_chrome_outside_the_tree_gets_the_full_probe_on_windows() {
     );
 }
 
-/// Windows: an agent tree whose process listens on the session's debugging port (Chrome under
-/// the agent), killed: the wait ends only once the port is closed, so the port binds at once
-/// after it. `TerminateJobObject` sets the job's count to 0 while the listener is still ending;
-/// the tree reads gone only once that process has exited.
+/// Windows: an agent tree whose process listens on a port, killed: the wait on the tree alone
+/// (no browser, so no look at the port) ends only once that process has exited, so the port
+/// binds at once after it. `TerminateJobObject` sets the job's count to 0 while the listener is
+/// still ending; a watch that read only the count would end the wait while the port is held.
 #[cfg(windows)]
 #[test]
 fn after_the_tree_s_kill_the_wait_ends_only_once_its_listener_is_closed() {
     use clauseo_process::{LaunchSpec, Launched, SpawnOptions, spawn_in_tree};
     use futures::AsyncReadExt as _;
 
-    let session = claims("tree-listener");
-    let port = session.ports.cdp.port();
+    // A free port: bound and let go here, then taken by the tree's listener.
+    let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let root = std::env::var_os("SystemRoot").unwrap();
     let powershell = std::path::Path::new(&root)
         .join("System32")
@@ -308,21 +312,29 @@ fn after_the_tree_s_kill_the_wait_ends_only_once_its_listener_is_closed() {
         handle, mut stdout, ..
     } = spawn_in_tree(&spec, &SpawnOptions::new()).unwrap();
     let tree = handle.tree_watch();
-    futures::executor::block_on(async {
-        let mut seen = Vec::new();
-        let mut chunk = [0_u8; 256];
-        while !String::from_utf8_lossy(&seen).contains("listening") {
-            let n = stdout.read(&mut chunk).await.unwrap();
-            assert!(n > 0, "no listener: {}", String::from_utf8_lossy(&seen));
-            seen.extend_from_slice(&chunk[..n]);
-        }
+    // Read on a thread of its own, so a PowerShell that hangs fails the test at the limit.
+    let (said, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        futures::executor::block_on(async {
+            let mut seen = Vec::new();
+            let mut chunk = [0_u8; 256];
+            while !String::from_utf8_lossy(&seen).contains("listening") {
+                match stdout.read(&mut chunk).await {
+                    Ok(n @ 1..) => seen.extend_from_slice(&chunk[..n]),
+                    _ => break,
+                }
+            }
+            drop(said.send(String::from_utf8_lossy(&seen).into_owned()));
+        });
     });
+    let seen = heard
+        .recv_timeout(Duration::from_secs(60))
+        .expect("PowerShell said nothing in 60 s");
+    assert!(seen.contains("listening"), "no listener: {seen}");
     // The handle's drop sends `TerminateJobObject` and does not wait.
     drop(handle);
     assert_eq!(
-        wait_gone(Some(&tree), Some(&session), Duration::from_secs(10), || {
-            false
-        }),
+        wait_gone(Some(&tree), None, Duration::from_secs(10), || false),
         Ok(())
     );
     let bound = TcpListener::bind((Ipv4Addr::LOCALHOST, port));

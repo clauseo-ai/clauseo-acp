@@ -6,20 +6,18 @@
 //! The job's count (`JobObjectBasicAccountingInformation`'s `ActiveProcesses`) is not enough:
 //! `TerminateJobObject` sets it to 0 as it is called, while each process is still ending and
 //! still holds its handles (its working folder, its sockets). So the watch also holds a handle
-//! to each process of the job, taken when the watch is made, by the tree's kill, and at each
-//! check, each confirmed in the job (`IsProcessInJob`), and the tree is gone only once the count
-//! is 0 and every held process has exited (its handle signalled). A child of `windows.rs`, whose
+//! to each process of the job, each confirmed in the job (`IsProcessInJob`): taken when the
+//! watch is made, by the tree's kill (just before `TerminateJobObject`, and from the system's
+//! process list after it when a process joined meanwhile), and from the job's list at each check
+//! that finds the count at 0. The tree is gone only once the count is 0 and every held process
+//! has exited (its handle signalled). A child of `windows.rs`, whose
 //! `unsafe_code` expectation covers its Win32 calls.
 
 use std::os::windows::io::OwnedHandle;
 use std::sync::{Arc, PoisonError};
 
-use windows::Win32::System::JobObjects::{
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
-    QueryInformationJobObject,
-};
-
-use super::{Held, Tree, alive, hold_listed, raw};
+use super::job::accounting;
+use super::{Held, Tree, alive, hold_listed};
 
 /// Asks whether the agent's job is empty. Holds the job open (see `TreeWatch`).
 ///
@@ -46,9 +44,9 @@ pub(crate) fn watch(tree: &Tree) -> Watch {
 
 impl Watch {
     /// Whether every process of the job has exited: the job counts none running, and each
-    /// process held (as the watch was made, by the kill, and listed now) has exited. False when
-    /// the count cannot be read, so a caller's wait fails closed; never true while a process of
-    /// the job still holds its handles.
+    /// process held (as the watch was made, by the kill, and from the job's list now, read only
+    /// once the count is 0) has exited. False when the count cannot be read, so a caller's wait
+    /// fails closed; never true while a held process of the job still holds its handles.
     pub(crate) fn gone(&self) -> bool {
         if active(&self.job) != Some(0) {
             return false;
@@ -62,21 +60,7 @@ impl Watch {
 
 /// The job's running processes, or `None` when the query fails.
 fn active(job: &OwnedHandle) -> Option<u32> {
-    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
-    let size = u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>()).ok()?;
-    // SAFETY: `info` is a live JOBOBJECT_BASIC_ACCOUNTING_INFORMATION of `size` bytes, the
-    // struct this information class writes, and `job` is a live job handle.
-    unsafe {
-        QueryInformationJobObject(
-            Some(raw(job)),
-            JobObjectBasicAccountingInformation,
-            (&raw mut info).cast(),
-            size,
-            None,
-        )
-    }
-    .ok()?;
-    Some(info.ActiveProcesses)
+    accounting(job).map(|(active, _)| active)
 }
 
 #[cfg(test)]
