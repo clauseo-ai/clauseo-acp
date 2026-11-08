@@ -45,6 +45,8 @@ pub(crate) mod fake;
 #[cfg(test)]
 mod launch_tests;
 #[cfg(windows)]
+pub(crate) mod lock_tree_os;
+#[cfg(windows)]
 pub(crate) mod mark_os;
 #[cfg(test)]
 #[cfg(windows)]

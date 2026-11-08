@@ -1,15 +1,17 @@
 //! [`LockDownFs`] on NTFS: `--adopt`'s lock-down and `--remove`'s teardown of the admin
 //! folder (`take_back.rs`). A take-back runs with `SeTakeOwnershipPrivilege`,
 //! `SeRestorePrivilege` and `SeBackupPrivilege` enabled for the call (`acl::privilege`, as
-//! `--reclaim` enables them), so its opens, all with backup semantics and none through a reparse
-//! point (`os::lock_down`, `os::found`), get `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER` and the
-//! listing whatever the DACL says. An elevated or SYSTEM token holds all three.
+//! `--reclaim` enables them), so its opens, all with backup semantics and none through a
+//! reparse point (`os::lock_down`, `lock_tree_os`, `os::found`), get `READ_CONTROL`,
+//! `WRITE_DAC`, `WRITE_OWNER` and the listing whatever the DACL says. An elevated or SYSTEM
+//! token holds all three.
 
 use std::io;
 use std::path::Path;
 
 use super::Found;
-use super::os::{self, lock_down, lock_tree};
+use super::lock_tree_os::lock_tree;
+use super::os::{self, lock_down};
 use super::take_back::LockDownFs;
 use crate::windows::acl::privilege::Privileges;
 
