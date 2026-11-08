@@ -76,7 +76,11 @@ fn made_users_the_ledger_names_stay_in_the_record_after_a_rollback() {
 
 #[test]
 fn a_group_that_wont_go_stays_recorded() {
-    for call in ["group_members 1000", "delete_group 1000"] {
+    for call in [
+        "group_members 1000",
+        "remove_remote_logon_deny 1000",
+        "delete_group 1000",
+    ] {
         let mut machine = FakeMachine::new("setup-group-stays");
         machine.fail("write_marker");
         machine.fail(call);

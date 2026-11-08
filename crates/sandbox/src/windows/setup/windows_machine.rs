@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::accounts::{self, Kind};
+use super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
@@ -246,6 +247,16 @@ impl Machine for WindowsMachine {
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
         accounts::delete_group(&self.group_name(group)?)
+    }
+
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.group_name(group)?;
+        preflight::add_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
+    }
+
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.group_name(group)?;
+        preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
     }
 
     fn new_password(&mut self) -> Password {

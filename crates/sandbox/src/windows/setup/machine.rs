@@ -118,6 +118,13 @@ pub trait Machine {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Grants the group `group` "Deny log on through Remote Desktop Services"
+    /// (`SeDenyRemoteInteractiveLogonRight`, `LsaAddAccountRights`), so no pool user signs in
+    /// over Remote Desktop; a right already held is `Ok`.
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Takes that right off the group `group` (`LsaRemoveAccountRights`, this right only); a
+    /// right not held is `Ok`.
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// A new random password for a pool user (`PR4e`'s generator).
     fn new_password(&mut self) -> Password;
     /// Makes the local account `name` with `password`, `UF_DONT_EXPIRE_PASSWD |

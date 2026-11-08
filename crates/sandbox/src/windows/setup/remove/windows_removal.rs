@@ -29,13 +29,14 @@ use std::rc::Rc;
 use clauseo_protocol::MatterId;
 
 use super::super::accounts::{self, Kind};
+use super::super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
-use super::super::{args, ffi, processes, profile, record_write};
+use super::super::{args, ffi, preflight, processes, profile, record_write};
 use super::{Removal, acting_token};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
@@ -302,6 +303,11 @@ impl Removal for WindowsRemoval {
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
         accounts::delete_group(&self.group_name(group)?)
+    }
+
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.group_name(group)?;
+        preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
     }
 
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {

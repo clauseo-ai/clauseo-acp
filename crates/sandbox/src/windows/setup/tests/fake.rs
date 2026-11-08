@@ -208,6 +208,18 @@ impl Machine for FakeMachine {
         Ok(())
     }
 
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("deny_remote_logon {}", rid(group)))?;
+        self.state.remote_denied.insert(group.clone());
+        Ok(())
+    }
+
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("remove_remote_logon_deny {}", rid(group)))?;
+        self.state.remote_denied.remove(group);
+        Ok(())
+    }
+
     fn new_password(&mut self) -> Password {
         self.passwords += 1;
         Password::new(format!("password {}", self.passwords))

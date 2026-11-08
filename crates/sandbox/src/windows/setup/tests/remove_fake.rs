@@ -278,6 +278,11 @@ impl Removal for Remover {
         Machine::delete_group(&mut self.m, group)
     }
 
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("remove_remote_logon_deny {}", rid(group)))?;
+        Machine::remove_remote_logon_deny(&mut self.m, group)
+    }
+
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
         if !self.can_act_as_owner() {
             return Err(MachineError::Other(

@@ -166,6 +166,8 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
+    /// The SIDs local policy denies "log on through Remote Desktop Services".
+    pub(super) remote_denied: BTreeSet<Sid>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -194,6 +196,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             secrets: BTreeMap::new(),
             copy_owner: None,
             stop_task: None,
+            remote_denied: BTreeSet::new(),
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
