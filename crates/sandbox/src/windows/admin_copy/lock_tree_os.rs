@@ -22,8 +22,8 @@ use super::os::lock_handle;
 use crate::windows::acl::object::{Child, Object, os_error};
 
 /// [`os::lock_down`](super::os::lock_down) on `dir` and, below it, on every folder and file but
-/// `skip` (a name in `dir`); a link below is deleted, `dir` being one is refused.
-pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
+/// `skip` (names in `dir`); a link below is deleted, `dir` being one is refused.
+pub(crate) fn lock_tree(dir: &Path, skip: &[String]) -> io::Result<()> {
     let root = Object::open_folder(dir)?;
     if root.reparse() || !root.folder {
         return Err(io::Error::other(
@@ -34,10 +34,11 @@ pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
 }
 
 /// A take-back's lock-down of `path` (`take_back_os`), opened once as itself and refused
-/// through no link: a folder is locked with all below it, as [`lock_tree`] does; a file is
+/// through no link: a folder is locked with all below it but `skip` (names in it), as
+/// [`lock_tree`] does; a file is
 /// locked and read back through that same handle, and refused if it has more than one name. A
 /// link, or nothing there, is left: a link is deleted as itself, never taken back through.
-pub(crate) fn take_back(path: &Path) -> io::Result<()> {
+pub(crate) fn take_back(path: &Path, skip: &[String]) -> io::Result<()> {
     // The listing right is `FILE_READ_DATA` on a file, which backup semantics grants.
     let object = match Object::open_folder(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -46,18 +47,18 @@ pub(crate) fn take_back(path: &Path) -> io::Result<()> {
     if object.reparse() {
         Ok(())
     } else if object.folder {
-        lock_level(&object, None)
+        lock_level(&object, skip)
     } else {
         lock(&object)
     }
 }
 
 /// Locks the open folder `folder`, then each entry it lists but `skip`, as the module says.
-fn lock_level(folder: &Object, skip: Option<&str>) -> io::Result<()> {
+fn lock_level(folder: &Object, skip: &[String]) -> io::Result<()> {
     lock(folder)?;
     for child in folder.children()? {
         let name = OsString::from_wide(&child.name);
-        if skip.is_some_and(|skip| name.eq_ignore_ascii_case(skip)) {
+        if skip.iter().any(|skip| name.eq_ignore_ascii_case(skip)) {
             continue;
         }
         if child.reparse {
@@ -74,7 +75,7 @@ fn lock_level(folder: &Object, skip: Option<&str>) -> io::Result<()> {
                 "an entry in the admin folder changed while it was locked",
             ));
         } else if object.folder {
-            lock_level(&object, None)?;
+            lock_level(&object, &[])?;
         } else {
             lock(&object)?;
         }

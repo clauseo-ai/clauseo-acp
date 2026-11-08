@@ -219,7 +219,7 @@ fn elevated_the_lock_down_refuses_a_file_with_two_names_and_leaves_it() {
     protect_with(&exe, OWN_FILE).unwrap();
     let other = dir.hard_link("elsewhere.exe", &exe);
     let before = os::security(&other).unwrap();
-    for refused in [lock_tree(&sandbox, None), lock_down_tree(&sandbox, &exe)] {
+    for refused in [lock_tree(&sandbox, &[]), lock_down_tree(&sandbox, &exe)] {
         let error = refused.unwrap_err();
         assert!(error.to_string().contains("more than one name"), "{error}");
         assert_eq!(
@@ -263,7 +263,7 @@ fn elevated_the_lock_down_never_follows_a_junction_in_the_admin_folder() {
     // Below the admin folder: deleted as itself, the rest locked.
     let link = sandbox.join("linked");
     junction(&link, &target).unwrap();
-    lock_tree(&sandbox, None).unwrap();
+    lock_tree(&sandbox, &[]).unwrap();
     assert_eq!(os::found(&link).unwrap(), Found::Missing);
     assert!(locked(&os::security(&sandbox).unwrap(), true));
     assert!(locked(&os::security(&exe).unwrap(), false));
@@ -271,7 +271,7 @@ fn elevated_the_lock_down_never_follows_a_junction_in_the_admin_folder() {
     // The admin folder itself a junction: refused, and the junction stays.
     let root = dir.path().join("root-link");
     junction(&root, &target).unwrap();
-    assert!(lock_tree(&root, None).is_err());
+    assert!(lock_tree(&root, &[]).is_err());
     assert_eq!(os::found(&root).unwrap(), Found::Link);
     untouched();
 }
@@ -361,7 +361,7 @@ fn elevated_a_system_only_staging_is_taken_back_by_the_lock_down_and_the_teardow
     // The take-back alone: re-secured as the locked folder, and readable again.
     let dir = TempDir::new("admin-copy-take-back-secure");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
-    NtfsLockDown.take_back(&staging).unwrap();
+    NtfsLockDown.take_back(&staging, &[]).unwrap();
     assert!(locked(&os::security(&staging).unwrap(), true));
     assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 1);
 }
@@ -381,7 +381,7 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     let dir = TempDir::new("admin-copy-take-back-file");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
     let old = staging.join("clauseo-sandbox-setup.exe.old");
-    NtfsLockDown.take_back(&old).unwrap();
+    NtfsLockDown.take_back(&old, &[]).unwrap();
     assert!(locked(&os::security(&old).unwrap(), false));
     assert_eq!(
         os::sha256(&old).unwrap(),
@@ -392,7 +392,7 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     dir.hard_link("second.exe", &linked);
     system_only(&linked, false);
     let before = os::security(&linked).unwrap();
-    assert!(NtfsLockDown.take_back(&linked).is_err());
+    assert!(NtfsLockDown.take_back(&linked, &[]).is_err());
     assert_eq!(os::security(&linked).unwrap(), before);
     // A junction: left, and what it names untouched.
     let target = dir.dir("target");
@@ -400,9 +400,11 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     let target_before = os::security(&target).unwrap();
     let link = dir.path().join("link");
     junction(&link, &target).unwrap();
-    NtfsLockDown.take_back(&link).unwrap();
+    NtfsLockDown.take_back(&link, &[]).unwrap();
     assert_eq!(os::found(&link).unwrap(), Found::Link);
     assert_eq!(os::security(&target).unwrap(), target_before);
     // Nothing there: nothing to do.
-    NtfsLockDown.take_back(&dir.path().join("none")).unwrap();
+    NtfsLockDown
+        .take_back(&dir.path().join("none"), &[])
+        .unwrap();
 }

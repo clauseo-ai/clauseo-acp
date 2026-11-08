@@ -301,9 +301,15 @@ fn hashes_are_64_lowercase_hex_digits() {
 }
 
 #[test]
-fn anything_beside_the_copy_but_its_signature_and_staging_is_unsafe() {
+fn anything_beside_the_copy_but_its_signature_staging_and_git_is_unsafe() {
     let mut fake = Fake::ready();
-    for name in ["clauseo-sandbox-setup.exe.sig", "staging", "STAGING"] {
+    for name in [
+        "clauseo-sandbox-setup.exe.sig",
+        "staging",
+        "STAGING",
+        "git",
+        "Git",
+    ] {
         fake.set(&sandbox().join(name), Found::File, locked_dacl(false));
     }
     assert!(passes(check(&fake)), "the expected entries");
@@ -311,6 +317,8 @@ fn anything_beside_the_copy_but_its_signature_and_staging_is_unsafe() {
         "version.dll",
         "clauseo-sandbox-setup.exe.123.delete",
         "staging2",
+        "git2",
+        "_source",
     ] {
         let mut fake = Fake::ready();
         fake.set(&sandbox().join(stray), Found::File, locked_dacl(false));
