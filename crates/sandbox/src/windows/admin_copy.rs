@@ -17,8 +17,8 @@
 //!    a generic right that holds one of those ([`level_safe`]); the volume root itself, where
 //!    every account may add a folder, is held only to the rights that could replace what is in
 //!    it ([`root_safe`]): else [`Blocked::AdminCopyUnsafe`]. Deny entries don't matter:
-//!    they only take rights away. The admin folder holds nothing but the copy, its signature and
-//!    the staging folder ([`expected_entry`]): a DLL planted beside the copy is refused too;
+//!    they only take rights away. The admin folder holds nothing but the copy, its signature,
+//!    staging and `locks` ([`expected_entry`]): a DLL planted beside the copy is refused too;
 //! 3. the copy's SHA-256 is the recorded one: else [`Blocked::AdminCopyChanged`].
 //!
 //! The folder check comes before the hash: a copy in a folder others can change proves nothing
@@ -72,6 +72,8 @@ pub const SETUP_EXE: &str = "clauseo-sandbox-setup.exe";
 pub const SETUP_SIG: &str = "clauseo-sandbox-setup.exe.sig";
 /// The refresh task's staging folder in the admin folder (PR 3).
 pub const STAGING: &str = "staging";
+/// The WSL deny task's lock folder in the admin folder (`refresh/wsl_phase/run_lock.rs`).
+pub const LOCKS: &str = "locks";
 /// This build's version: `tauri.conf.json`'s `version` (`build.rs`), the exe's `FileVersion`,
 /// recorded as `AdminCopyVersion`.
 pub const APP_VERSION: &str = env!("CLAUSEO_APP_VERSION");
@@ -235,10 +237,10 @@ fn owner_check(fs: &dyn AdminCopyFs) -> Result<(), Blocked> {
     }
 }
 
-/// Whether `name` may be in the admin folder: the copy, its signature, the staging folder.
+/// Whether `name` may be in the admin folder: the copy, its signature, staging, `locks`.
 /// `--adopt` deletes anything else there, and [`check`] refuses while anything else is.
 pub fn expected_entry(name: &str) -> bool {
-    [SETUP_EXE, SETUP_SIG, STAGING]
+    [SETUP_EXE, SETUP_SIG, STAGING, LOCKS]
         .iter()
         .any(|expected| name.eq_ignore_ascii_case(expected))
 }

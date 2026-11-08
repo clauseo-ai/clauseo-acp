@@ -4,11 +4,10 @@ use std::time::Duration;
 
 use super::super::fake::{Fake, good, key, new, old};
 use super::super::fake_lock::FakeLock;
-use super::run_lock::{
-    ADMIN_FOLDER_SDDL, AGAIN_VALUE, LOCK_FOLDERS, LOCK_NAME, LOCK_SDDL, system_only,
-};
+use super::run_lock::{AGAIN_VALUE, LOCK_NAME, LOCK_SDDL, LOCKS_SDDL, system_only};
 use super::{WSL_DENY_BUDGET, WslDenyExit, wsl_deny};
 use crate::windows::admin_copy::fake::descriptor;
+use crate::windows::admin_copy::{LOCKS, expected_entry};
 
 /// The fake machine, ready for the run.
 fn fake() -> Fake {
@@ -123,33 +122,52 @@ fn a_flag_set_once_the_budget_is_spent_ends_the_run_for_the_next_trigger() {
 }
 
 #[test]
-fn a_lock_path_that_fails_its_checks_is_logged_and_the_run_goes_on_without_it() {
+fn a_lock_that_cant_be_had_is_logged_and_the_start_exits_without_a_pass() {
     for why in [
+        "the admin copy failed its check (the admin copy is missing)",
         "a folder of the run lock is a reparse point or a file",
         "the run lock isn't kept to SYSTEM",
     ] {
         let mut machine = fake();
         machine.run_lock.refused = Some(why.to_owned());
         assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
-        assert_eq!(count(&machine, "reapply_wsl"), 5, "the passes still run");
+        assert_eq!(
+            count(&machine, "reapply_wsl"),
+            0,
+            "no pass without the lock"
+        );
+        assert!(!machine.calls.contains(&"watch"));
+        assert_eq!(machine.watch.clock, Duration::ZERO);
         assert_eq!(machine.logs.len(), 1, "{:?}", machine.logs);
         let (error, line) = &machine.logs[0];
-        assert!(*error && line.contains("without its run lock") && line.ends_with(why));
+        assert!(*error && line.contains("run lock can't be had") && line.ends_with(why));
         // No lock, so no flag: neither read nor set.
         for call in ["take_again", "ask_again", "asked_again", "run_unlock"] {
             assert!(!machine.calls.contains(&call), "{call}");
         }
     }
+    // Refused on a late start's second try: logged, the flag left set, no pass.
+    let mut machine = fake();
+    machine.run_lock.busy = 1;
+    machine.run_lock.refused_after_busy = Some("CreateFileW failed (5)".to_owned());
+    assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
+    assert_eq!(count(&machine, "reapply_wsl"), 0);
+    assert!(machine.run_lock.again);
+    assert_eq!(machine.logs.len(), 1, "{:?}", machine.logs);
 }
 
 #[test]
-fn the_lock_file_is_kept_to_system_and_its_folders_as_the_admin_only_log() {
+fn the_lock_file_is_kept_to_system_in_the_admin_folders_lock_folder() {
     const FA: u32 = 0x001F_01FF;
     assert_eq!(LOCK_SDDL, "O:SYD:P(A;;FA;;;SY)");
     assert_eq!(LOCK_NAME, "wsl-deny.lock");
     assert_eq!(AGAIN_VALUE, "WslDenyAgain");
-    assert_eq!(LOCK_FOLDERS.map(|(name, _)| name), ["Clauseo", "Sandbox"]);
-    assert_eq!(LOCK_FOLDERS[1].1, ADMIN_FOLDER_SDDL);
+    assert_eq!(LOCKS_SDDL, "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+    assert_eq!(LOCKS, "locks");
+    assert!(
+        expected_entry(LOCKS),
+        "the admin copy's check lets the lock folder be"
+    );
     let system = [(0, 0, FA, "S-1-5-18")];
     assert!(system_only(&descriptor("S-1-5-18", Some(&system), true)));
     // Another owner, an inherited (unprotected) DACL, another entry, less than full control.

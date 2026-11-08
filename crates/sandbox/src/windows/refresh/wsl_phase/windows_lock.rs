@@ -1,13 +1,13 @@
 //! `--wsl-deny`'s run lock and "run again" flag on Windows (`run_lock.rs`).
 //!
-//! The lock is `%ProgramData%\Clauseo\Sandbox\wsl-deny.lock`, `%ProgramData%` as Windows knows it
-//! (`FOLDERID_ProgramData`), never from the environment, opened with no sharing and held for the
-//! run. Its folders and file are made and checked as the sweep's admin-only log's are; this is a
-//! port of #750's `windows_sweeper/admin_log.rs`, which isn't in this branch's base: each folder
-//! made with its descriptor at once (`CreateDirectoryW`), then opened without following a
-//! reparse point (one, or a file, is refused) and its owner and DACL read through that handle
-//! (`admin_copy::level_safe`); the file made with [`LOCK_SDDL`] at once, then refused unless a
-//! plain file with one link that [`system_only`] keeps.
+//! The lock is `%ProgramFiles%\Clauseo\Sandbox\locks\wsl-deny.lock`. The admin folder must pass
+//! the admin copy's check first (`admin_copy::check`, `%ProgramFiles%` from
+//! `FOLDERID_ProgramFiles`, never the environment). `locks\` is made with [`LOCKS_SDDL`] at once
+//! when missing (`CreateDirectoryW`), then opened without following a reparse point (one, or a
+//! file, is refused) and its owner and DACL read through that handle (`admin_copy::level_safe`);
+//! the file is made with [`LOCK_SDDL`] at once, opened the same way, then refused unless a plain
+//! file with one link that [`system_only`] keeps. The handle code is a port of #750's
+//! `windows_sweeper/admin_log.rs`, which isn't in this branch's base.
 //!
 //! The handle asks for `FILE_READ_DATA`: sharing is only checked between opens that ask for
 //! data access, so a second run's open, asking the same, fails with a sharing violation
@@ -21,11 +21,9 @@
     reason = "the file, folder, security and registry calls of the run lock and its flag"
 )]
 
-use std::ffi::OsString;
 use std::fs::File;
-use std::os::windows::ffi::OsStringExt as _;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
@@ -46,18 +44,17 @@ use windows::Win32::Storage::FileSystem::{
     FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_MODE, FILE_SHARE_READ,
     GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING, READ_CONTROL,
 };
-use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_DWORD,
     REG_SAM_FLAGS, RRF_RT_REG_DWORD, RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegDeleteValueW,
     RegGetValueW, RegOpenKeyExW, RegSetValueExW,
 };
-use windows::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{HSTRING, PCWSTR};
 
 use super::super::Failed;
-use super::run_lock::{AGAIN_VALUE, LOCK_FOLDERS, LOCK_NAME, LOCK_SDDL, Locked, system_only};
-use crate::windows::admin_copy::level_safe;
+use super::run_lock::{AGAIN_VALUE, LOCK_NAME, LOCK_SDDL, LOCKS_SDDL, Locked, system_only};
+use crate::windows::admin_copy::os::WindowsAdminCopy;
+use crate::windows::admin_copy::{self, LOCKS, level_safe};
 
 /// Takes the run lock: the open file when held, as the module says.
 pub(in crate::windows::refresh) fn take() -> (Locked, Option<File>) {
@@ -70,11 +67,13 @@ pub(in crate::windows::refresh) fn take() -> (Locked, Option<File>) {
 
 /// [`take`]: `None` when another run holds it.
 fn take_in() -> Result<Option<File>, Failed> {
-    let mut folder = program_data()?;
-    for (part, sddl) in LOCK_FOLDERS {
-        folder.push(part);
-        lock_folder(&folder, sddl)?;
-    }
+    let exe = admin_copy::check(&WindowsAdminCopy)
+        .map_err(|blocked| format!("the admin copy failed its check ({blocked})"))?;
+    let folder = exe
+        .parent()
+        .ok_or("the admin copy has no folder")?
+        .join(LOCKS);
+    lock_folder(&folder, LOCKS_SDDL)?;
     let descriptor = Descriptor::from_sddl(LOCK_SDDL)?;
     let attributes = attributes(&descriptor);
     let access = FILE_READ_DATA.0 | READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0;
@@ -242,23 +241,6 @@ fn security_of(file: &File) -> Result<Vec<u8>, Failed> {
         }
     }
     Err("a security descriptor kept growing while it was read".to_owned())
-}
-
-/// `%ProgramData%` as Windows knows it (`FOLDERID_ProgramData`), never from the environment.
-fn program_data() -> Result<PathBuf, Failed> {
-    let folder = FOLDERID_ProgramData;
-    // SAFETY: `folder` is a live GUID for the call; no token is passed. The string returned is
-    // copied, then freed with CoTaskMemFree, once.
-    let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
-        .map_err(|error| failed("SHGetKnownFolderPath", &error))?;
-    // SAFETY: on success the call wrote a NUL-terminated string at `path`.
-    let units = unsafe { path.as_wide() }.to_vec();
-    // SAFETY: the string came from SHGetKnownFolderPath and is freed once, here.
-    unsafe { CoTaskMemFree(Some(path.0.cast_const().cast())) };
-    if units.is_empty() {
-        return Err("Windows gave no ProgramData folder".to_owned());
-    }
-    Ok(PathBuf::from(OsString::from_wide(&units)))
 }
 
 /// Sets the flag in `HKLM\<record>`, which must exist.

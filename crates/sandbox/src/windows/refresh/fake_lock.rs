@@ -14,6 +14,8 @@ pub(super) struct FakeLock {
     pub(super) busy: u32,
     /// Every `run_lock` is refused with this: a junction, or a file another user owns.
     pub(super) refused: Option<Failed>,
+    /// Once a try has found it busy, every later try is refused with this.
+    pub(super) refused_after_busy: Option<Failed>,
     /// This run holds it.
     pub(super) held: bool,
     /// The flag.
@@ -46,6 +48,7 @@ impl WslRunLock for Fake {
         }
         if lock.busy > 0 {
             lock.busy -= 1;
+            lock.refused = lock.refused_after_busy.take();
             return Locked::Busy;
         }
         lock.held = true;

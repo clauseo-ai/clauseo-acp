@@ -102,17 +102,13 @@ impl LockDownFs for Tree {
         Ok(())
     }
 
-    fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()> {
+    fn lock_tree(&mut self, dir: &Path, skip: &[String]) -> io::Result<()> {
         self.calls.push(format!("lock {}", shown(dir)));
-        let skipped = skip.map(|name| dir.join(name));
+        let skipped: Vec<_> = skip.iter().map(|name| dir.join(name)).collect();
         let shut = self
             .below(dir)
             .iter()
-            .filter(|at| {
-                skipped
-                    .as_ref()
-                    .is_none_or(|skipped| !at.starts_with(skipped))
-            })
+            .filter(|at| skipped.iter().all(|skipped| !at.starts_with(skipped)))
             .any(|at| self.entries[at].1);
         if shut { Err(refused()) } else { Ok(()) }
     }
@@ -227,4 +223,28 @@ fn the_removal_takes_back_a_staging_folder_it_cant_open() {
     tree.privileged = false;
     tree.add(STAGED, Found::Folder, true);
     assert!(remove_taking_back(&mut tree, Path::new(STAGED)).is_err());
+}
+
+#[test]
+fn the_wsl_deny_lock_folder_goes_as_staging_does_and_one_that_stays_is_left_out_of_the_lock() {
+    let locks = format!("{DIR}/locks");
+    let lock = format!("{locks}/wsl-deny.lock");
+    // Free: deleted, as staging is; the WSL deny task makes it again.
+    let mut tree = Tree::new();
+    tree.add(&locks, Found::Folder, false);
+    tree.add(&lock, Found::File, false);
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(tree.found(Path::new(&locks)).unwrap(), Found::Missing);
+    // A run holding the lock (here: refused, and not taken back), staging stuck too: both stay,
+    // neither fails the lock-down, and the lock doesn't reach them.
+    let mut tree = Tree::new();
+    tree.privileged = false;
+    tree.add(&locks, Found::Folder, true);
+    tree.add(&lock, Found::File, true);
+    tree.add(STAGED, Found::Folder, true);
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(tree.found(Path::new(&locks)).unwrap(), Found::Folder);
+    assert_eq!(tree.found(Path::new(STAGED)).unwrap(), Found::Folder);
+    assert_eq!(tree.calls.last(), Some(&format!("lock {DIR}")));
+    assert!(expected_entry("locks") && expected_entry("LOCKS"));
 }

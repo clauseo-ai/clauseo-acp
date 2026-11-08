@@ -9,14 +9,15 @@
 //! ([`LockDownFs::take_back`]: `SeTakeOwnershipPrivilege`, `SeRestorePrivilege` and
 //! `SeBackupPrivilege` enabled for the call, every open with backup semantics and never through
 //! a reparse point, Administrators made the owner and the locked DACL set, then the same below
-//! it), then deleted. [`lock_down_with`] is `--adopt`'s lock-down over it: `staging\` is always
-//! deleted (the refresh makes it again), and never fails the lock-down. Pure: tested on every
-//! OS; `take_back_os.rs` is the machine.
+//! it), then deleted. [`lock_down_with`] is `--adopt`'s lock-down over it: `staging\` and
+//! `locks\` are always deleted (the refresh and the WSL deny task make them again), and never
+//! fail the lock-down: one that can't be deleted (a WSL deny run holding its lock) stays out of
+//! it. Pure: tested on every OS; `take_back_os.rs` is the machine.
 
 use std::io;
 use std::path::Path;
 
-use super::{Found, STAGING, expected_entry};
+use super::{Found, LOCKS, STAGING, expected_entry};
 
 /// What the lock-down and the removal read and change.
 pub(crate) trait LockDownFs {
@@ -26,9 +27,9 @@ pub(crate) trait LockDownFs {
     fn entries(&mut self, dir: &Path) -> io::Result<Vec<String>>;
     /// Deletes `path`, of kind `kind`: a folder with everything in it, a link as itself.
     fn remove(&mut self, path: &Path, kind: Found) -> io::Result<()>;
-    /// Gives the folder `dir` and everything in it, but `skip` (a name in `dir`), the locked
+    /// Gives the folder `dir` and everything in it, but `skip` (names in `dir`), the locked
     /// owner and DACL, read back; a link below is deleted.
-    fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()>;
+    fn lock_tree(&mut self, dir: &Path, skip: &[String]) -> io::Result<()>;
     /// Takes `path` back for Administrators, as the module says: afterwards it, and all below
     /// it, has the locked owner and DACL.
     fn take_back(&mut self, path: &Path) -> io::Result<()>;
@@ -70,23 +71,24 @@ pub(crate) fn remove_taking_back(fs: &mut dyn LockDownFs, path: &Path) -> io::Re
     }
 }
 
-/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`: `staging\` deleted,
-/// taken back if need be, and only logged when even that fails (it stays out of the lock-down
-/// then, as SYSTEM's alone); every other entry but the copy and its signature deleted, taken
-/// back if need be; then `dir` and what is left locked, read back, taken back if refused.
+/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`: `staging\` and
+/// `locks\` deleted, taken back if need be, and only logged when even that fails (each stays
+/// out of the lock-down then, as SYSTEM's alone); every other entry but the copy and its
+/// signature deleted, taken back if need be; then `dir` and what is left locked, read back,
+/// taken back if refused.
 pub(crate) fn lock_down_with(fs: &mut dyn LockDownFs, dir: &Path, exe: &Path) -> io::Result<()> {
     if fs.found(dir)? != Found::Folder || fs.found(exe)? != Found::File {
         return Err(io::Error::other(
             "the admin folder or copy isn't a plain folder and file",
         ));
     }
-    let mut skip = None;
+    let mut skip = Vec::new();
     for name in fs.entries(dir)? {
         let path = dir.join(&name);
-        if name.eq_ignore_ascii_case(STAGING) {
+        if name.eq_ignore_ascii_case(STAGING) || name.eq_ignore_ascii_case(LOCKS) {
             if let Err(error) = remove_taking_back(fs, &path) {
-                tracing::warn!(%error, "--adopt: the refresh's staging folder stays");
-                skip = Some(name);
+                tracing::warn!(%error, name, "--adopt: staging or locks stays");
+                skip.push(name);
             }
             continue;
         }
@@ -96,8 +98,8 @@ pub(crate) fn lock_down_with(fs: &mut dyn LockDownFs, dir: &Path, exe: &Path) ->
         }
         remove_taking_back(fs, &path)?;
     }
-    match fs.lock_tree(dir, skip.as_deref()) {
-        Err(error) if denied(&error) && skip.is_none() => fs.take_back(dir),
+    match fs.lock_tree(dir, &skip) {
+        Err(error) if denied(&error) && skip.is_empty() => fs.take_back(dir),
         other => other,
     }
 }
