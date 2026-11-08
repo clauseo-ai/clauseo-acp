@@ -105,7 +105,8 @@ pub(crate) struct SigninJob<T> {
     /// Pasted codes, for a sign-in.
     pub(crate) paste: Option<async_channel::Receiver<PasteCode>>,
     /// The limit every status run of this job takes instead of its vendor's own, while set:
-    /// the status check's retries (10 s, then 20 s) and the quick check before a sign-in (5 s).
+    /// the start-up status check's runs (15 s, then the retry's 20 s) and the quick check before a
+    /// sign-in (5 s).
     pub(crate) status_limit: Mutex<Option<Duration>>,
 }
 

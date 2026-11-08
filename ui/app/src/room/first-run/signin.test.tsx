@@ -37,6 +37,8 @@ const at = (state: SignIn, more: Parameters<typeof info>[0] = true) =>
   mountFirstRun({ first: [info(more), install(CLAUDE, READY), signIn(CLAUDE, state)] });
 
 const gateState = () => byId("signin-state")?.dataset["state"];
+/** The gate's Sign in button: the act's, where Ask will stand. */
+const signButton = () => byId<HTMLButtonElement>("signin")?.querySelector("button") ?? null;
 const field = () => byId<HTMLTextAreaElement>("composer");
 
 test("plan: the composer says Sign in to Claude, and Sign in sends StartSignIn; never a model's name", async () => {
@@ -55,17 +57,36 @@ test("plan: the composer says Sign in to Claude, and Sign in sends StartSignIn; 
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("checking: while the sign-in status check runs the composer says it is checking, with nothing to press; Sign in once it ends signed out", async () => {
+test("checking: while the sign-in status check runs the composer says it is checking, and Sign in is busy; Sign in once it ends signed out", async () => {
   const t = await at("checking");
   expect(gateState()).toBe("checking");
   expect(text()).toContain("Checking whether you're signed in to Claude…");
   expect(text()).not.toContain("Sign in to Claude to ask about this matter");
-  expect(byId("signin")?.querySelector("button")).toBeNull();
+  expect(signButton()?.disabled).toBe(true);
+  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
   await play(t, signIn(CLAUDE, { signed_out: {} }));
   expect(gateState()).toBe("signed-out");
   expect(text()).not.toContain("Checking whether");
   expect(text()).toContain("Sign in to Claude to ask about this matter");
   expect(button("Sign in")).not.toBeNull();
+});
+
+test("a Sign in press shows the checking line and a busy button until the check answers", async () => {
+  const t = await at({ signed_out: {} });
+  expect(signButton()?.disabled).toBe(false);
+  await press("Sign in");
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  // the quick status check runs first: the line says so, and Sign in waits, busy
+  await play(t, signIn(CLAUDE, "checking"));
+  expect(gateState()).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(signButton()?.disabled).toBe(true);
+  expect(signButton()?.getAttribute("aria-busy")).toBe("true");
+  // it answers signed out: the sign-in goes on, and an enabled Sign in is back
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(text()).not.toContain("Checking whether");
+  expect(signButton()?.disabled).toBe(false);
+  expect(signButton()?.hasAttribute("aria-busy")).toBe(false);
 });
 
 test("plan-early, plan-queued: Sign in works before the install is ready, and the queued line says the browser opens when Claude is ready (offline: when you reconnect)", async () => {

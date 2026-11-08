@@ -143,10 +143,9 @@ fn time_out_statuses(fx: &Fixture, before: usize, count: usize) {
     }
 }
 
-/// A startup status whose `login status` never answers shows `Checking`; it is killed at its
-/// 15 s limit and asked once more, and the check is retried with the 10 s retry's limit (Codex's
-/// own 15 s, which is longer) and the 20 s one, each asked twice. Killed every time, it shows
-/// Sign in: never signed in, never failed, never nothing.
+/// A startup status whose `login status` never answers shows `Checking`; its first check (15 s)
+/// is asked twice, each run killed at its limit, then the retry (20 s) is asked twice too. Killed
+/// every time, it shows Sign in: never signed in, never failed, never nothing.
 #[cfg(unix)]
 #[test]
 fn a_startup_status_that_times_out_is_neither_signed_in_nor_failed() {
@@ -156,8 +155,8 @@ fn a_startup_status_that_times_out_is_neither_signed_in_nor_failed() {
     fx.stall(Some("status"));
     let before = statuses(&fx);
     agents.check_status(&codex()).unwrap();
-    time_out_statuses(&fx, before, 4);
-    for n in 5..=6 {
+    time_out_statuses(&fx, before, 2);
+    for n in 3..=4 {
         crate::support::eventually("the status ran", || statuses(&fx) >= before + n);
         fx.timer.fire(std::time::Duration::from_secs(20));
     }
@@ -170,7 +169,7 @@ fn a_startup_status_that_times_out_is_neither_signed_in_nor_failed() {
             crate::support::Seen::State(SigninState::SignedOut { found: None }),
         ]
     );
-    assert_eq!(statuses(&fx), before + 6, "asked twice at each limit");
+    assert_eq!(statuses(&fx), before + 4, "asked twice at each limit");
 }
 
 /// Review H1: a first status that times out is asked once more, and an answer then counts.

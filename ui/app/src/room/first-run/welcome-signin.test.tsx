@@ -1,6 +1,7 @@
 // The first screen for a plan that is installed but not signed in: the plan's Sign in on the working line at the foot,
 // where a missing plan's install line stands, sending the room gate's start_sign_in; a sign-in under way says the
-// gate's words with its Cancel and no second Sign in; a signed-in or locked plan shows none.
+// gate's words with its Cancel and no second Sign in; a status check under way says it is checking, with Sign in busy;
+// a signed-in or locked plan shows none.
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import {
@@ -50,6 +51,17 @@ test("installed and signed out: the foot says Claude is ready with Sign in, whic
   await play(t, signIn(CLAUDE, SIGNED_IN));
   expect(line()).toBeNull();
   expect(signInButtons()).toEqual([]);
+});
+
+test("installed, the sign-in status check still running: the foot is the checking line, not Claude is ready with Sign in", async () => {
+  await mountFirstRun({ matters: [], first: [install(CLAUDE, READY), signIn(CLAUDE, "checking")] });
+  expect(line()).toBeNull();
+  expect(byId("install-foot")?.dataset["state"]).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(byId("install-foot")?.textContent).not.toContain("is ready");
+  expect(byId("signin-foot-sign-in")).toBeNull();
+  expect(signInButtons()).toHaveLength(1);
+  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
 });
 
 test("installed by the firm and signed out: the same Sign in", async () => {

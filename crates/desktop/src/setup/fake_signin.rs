@@ -19,12 +19,12 @@
 //!   - `signed_out` (the default: unset, empty or any other value): `SignedOut` at once, the
 //!     plain Sign in;
 //!   - `slow`: `Checking` ("Checking whether you're signed in to …"), then `SignedOut` after
-//!     1.5 × the limit: an answer past the first check's limit, inside its retry's;
-//!   - `hang`: `Checking`, then `SignedOut` after 7 × the limit, as S18 gives up after its 5 s,
-//!     10 s and 20 s tries.
+//!     1.5 × the limit: an answer past the first run's limit, inside its retry's (20 s);
+//!   - `hang`: `Checking`, then `SignedOut` after 7 × the limit, past both of S18's start-up
+//!     runs (15 s, then 20 s), so Sign in shows.
 //!
-//!   The limit is `E2E_FAKE_STATUS_LIMIT_MS` (default 5000, S18's first limit); a spec sets it
-//!   low (`200`) to watch `Checking` turn into Sign in quickly. A sign-in pressed meanwhile
+//!   The limit is `E2E_FAKE_STATUS_LIMIT_MS` (default 15000, S18's first start-up limit); a spec
+//!   sets it low (`200`) to watch `Checking` turn into Sign in quickly. A sign-in pressed meanwhile
 //!   replaces the check, whose end then never comes.
 //! - Its states reach the pump as S18's do, on a second channel merged with S18's, which ends
 //!   when S18's does ([`wrap`]).
@@ -61,10 +61,10 @@ const HOLD: Duration = Duration::from_millis(1500);
 pub(crate) const EMAIL: &str = "e2e@example.invalid";
 /// The status answer of the agents `E2E_FAKE_INSTALLED` names.
 const STATUS_VAR: &str = "E2E_FAKE_STATUS";
-/// The status check's first limit, in ms, that `slow` and `hang` count from.
+/// The status check's first run's limit, in ms, that `slow` and `hang` count from.
 const STATUS_LIMIT_VAR: &str = "E2E_FAKE_STATUS_LIMIT_MS";
-/// S18's first status limit.
-const STATUS_LIMIT: Duration = Duration::from_secs(5);
+/// S18's first start-up status limit (`found::FIRST_LIMIT`).
+const STATUS_LIMIT: Duration = Duration::from_secs(15);
 /// The page the script "opens": logged only.
 pub(crate) const TEST_URL: &str = "https://example.invalid/e2e-signin";
 
@@ -82,9 +82,9 @@ pub(crate) enum Script {
 pub(crate) enum Status {
     /// `signed_out`: `SignedOut` at once.
     SignedOut,
-    /// `slow`: `Checking`, then `SignedOut` after 1.5 × the limit.
+    /// `slow`: `Checking`, then `SignedOut` after 1.5 × the limit (answered by the retry).
     Slow,
-    /// `hang`: `Checking`, then `SignedOut` after 7 × the limit.
+    /// `hang`: `Checking`, then `SignedOut` after 7 × the limit (past the retry too).
     Hang,
 }
 

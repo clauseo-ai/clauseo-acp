@@ -216,9 +216,12 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
     Some(detect::codex(job, cancel).await?.state)
 }
 
-/// The limits of the status check's retries after a check got no answer (a run killed at its
-/// limit): 10 s, then 20 s, or the vendor's own limit when that is longer.
-pub(crate) const RETRY_LIMITS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(20)];
+/// The limit of the status check's first run at start: 15 s. A post-reboot run takes about 11 s
+/// on Windows, so it is not killed as a 5 s one was (the Claude limit, [`claude::STATUS_LIMIT`],
+/// and Codex's 15 s are both no longer than this).
+pub(crate) const FIRST_LIMIT: Duration = Duration::from_secs(15);
+/// The limit of the one retry after the first run got no answer (a run killed at its limit): 20 s.
+pub(crate) const RETRY_LIMIT: Duration = Duration::from_secs(20);
 /// The waits before the first background re-checks once Sign in is shown after the retries:
 /// 30 s, then 60 s; [`RECHECK_CAP`] each time after.
 pub(crate) const RECHECK_BACKOFF: [Duration; 2] =
@@ -228,22 +231,15 @@ pub(crate) const RECHECK_CAP: Duration = Duration::from_secs(120);
 /// The limit of the quick status check a sign-in runs first.
 pub(crate) const QUICK_LIMIT: Duration = Duration::from_secs(5);
 
-/// The vendor's own limit of one status run.
-fn base_limit<T>(job: &SigninJob<T>) -> Duration {
-    match job.vendor {
-        Vendor::Claude => claude::STATUS_LIMIT,
-        Vendor::Codex => codex::STATUS_LIMIT,
-    }
-}
-
 /// The status check job (`check_status`, at start and when desktop asks again), so the card is
 /// never left with nothing on it:
 /// - with no state shown yet, `Checking` first;
-/// - a check that could not tell (a run killed at its limit) is asked again with a 10 s limit,
-///   then a 20 s one ([`RETRY_LIMITS`]);
+/// - the first run has a 15 s limit ([`FIRST_LIMIT`]); a check that could not tell (a run killed
+///   at its limit) is asked once more with a 20 s one ([`RETRY_LIMIT`]);
 /// - still no answer: a state already shown stays (Codex's kept rule); with none shown, a
 ///   `warn` naming the limits, `SignedOut` (Sign in), and re-checks in the background after
 ///   30 s, 60 s, then every 120 s ([`RECHECK_BACKOFF`]) until one answers, which is the state.
+///   That late answer always flips the card.
 ///   A sign-in, sign-out or any other job supersedes the job and ends them, as does shutdown.
 pub(crate) async fn start_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     let hub = &job.shared.signin;
@@ -255,15 +251,11 @@ pub(crate) async fn start_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> O
     if blank {
         job.report(SigninState::Checking);
     }
-    let mut tried = vec![base_limit(job)];
-    if let Some(state) = check(job).await {
-        return Some(state);
-    }
-    for limit in RETRY_LIMITS {
+    let mut tried = Vec::with_capacity(2);
+    for limit in [FIRST_LIMIT, RETRY_LIMIT] {
         if !hub.is_live(&job.ticket) {
             return None;
         }
-        let limit = limit.max(base_limit(job));
         job.set_status_limit(Some(limit));
         tried.push(limit);
         if let Some(state) = check(job).await {
@@ -319,6 +311,10 @@ pub(crate) async fn quick_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> O
     {
         return None;
     }
+    // The card shows `Checking` while the quick check runs, as at start (`start_check`), so a
+    // press that waits up to the limit never looks unchanged. The sign-in flow publishes its own
+    // states once the check has answered "not signed in" or timed out.
+    job.report(SigninState::Checking);
     job.set_status_limit(Some(QUICK_LIMIT));
     let own = RunKind::Own { home: &job.home };
     let state = match job.vendor {

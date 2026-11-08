@@ -1,11 +1,13 @@
 // The first screen's working line, at its foot where the composer will stand: the install's line while the plan isn't
 // here yet (install.tsx, with the room gate's Sign in while it is missing), and once it is installed but not signed in,
-// the plan's Sign in in the same place, so a lawyer can get the plan going without opening a matter. No gate stands on
-// the first screen: the line says the gate's own words for a sign-in under way and offers its Cancel, never a second
-// Sign in; the states only a matter's gate walks (a device code, a login found, switching accounts) leave the foot as
-// it was. A plan the firm's policy locks shows no control. Settings' Plans has its own Sign in again.
+// the plan's Sign in in the same place (busy while the sign-in status check runs), so a lawyer can get the plan going
+// without opening a matter. No gate stands on the first screen: the line says the gate's own words for a sign-in under
+// way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, a login
+// found, switching accounts) leave the foot as it was. A plan the firm's policy locks shows no control. Settings'
+// Plans has its own Sign in again.
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import {
+  checkingLine,
   installLine,
   type InstallActs,
   type InstallTestIds,
@@ -88,6 +90,9 @@ export function welcomeFoot(
       return view.pasting
         ? null
         : line(fl(lang, "Finish signing in with your browser."), view.kind, cancel);
+    // the sign-in status check runs: its words, and Sign in busy until it answers
+    case "checking":
+      return checkingLine(lang, name, ids);
     default:
       return null;
   }
