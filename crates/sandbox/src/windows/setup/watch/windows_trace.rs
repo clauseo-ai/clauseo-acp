@@ -236,12 +236,6 @@ impl Trace {
             drop(stop_session());
             return Err(TraceError::Other(failed("OpenTraceW", error)));
         }
-        // SAFETY: `context` is the live Callback from above; no thread uses it yet.
-        unsafe {
-            (*context)
-                .consumer
-                .set_stamp_rate(logfile.LogfileHeader.PerfFreq);
-        }
         let owned = context as usize;
         let thread = std::thread::Builder::new()
             .name("watch-trace".to_owned())

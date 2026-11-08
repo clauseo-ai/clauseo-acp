@@ -45,6 +45,7 @@ use super::writer::{AclWriter, Added, ApplyFailure, DenyStrip, Label, Reach, Str
 use object::{Handle, Object, os_error};
 use walk::{Foreign, Mode};
 
+pub(in crate::windows) mod authz;
 pub(in crate::windows) mod object;
 pub(in crate::windows) mod privilege;
 pub(crate) mod profile;

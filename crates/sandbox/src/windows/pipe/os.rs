@@ -192,20 +192,20 @@ fn ended(error: &windows::core::Error) -> bool {
 }
 
 /// [`ended`] for a raw OS code.
-fn ended_code(code: i32) -> bool {
+pub(in crate::windows) fn ended_code(code: i32) -> bool {
     [ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED, ERROR_NO_DATA]
         .iter()
         .any(|known| i32::try_from(known.0).is_ok_and(|known| known == code))
 }
 
 /// One overlapped operation's state and its manual-reset event.
-struct Overlapped {
+pub(in crate::windows) struct Overlapped {
     overlapped: Box<OVERLAPPED>,
     event: Handle,
 }
 
 impl Overlapped {
-    fn new() -> io::Result<Overlapped> {
+    pub(in crate::windows) fn new() -> io::Result<Overlapped> {
         // SAFETY: no attributes and no name; the event is owned by `Handle`.
         let event = unsafe { CreateEventW(None, true, false, None) }.map_err(|e| os_error(&e))?;
         let event = Handle(event);
@@ -216,12 +216,17 @@ impl Overlapped {
         Ok(Overlapped { overlapped, event })
     }
 
-    fn as_mut_ptr(&mut self) -> *mut OVERLAPPED {
+    pub(in crate::windows) fn as_mut_ptr(&mut self) -> *mut OVERLAPPED {
         &raw mut *self.overlapped
     }
 
+    /// The event the operation signals when it ends.
+    pub(in crate::windows) fn event(&self) -> HANDLE {
+        self.event.0
+    }
+
     /// Waits for the operation on `handle` and gives the bytes it moved.
-    fn result(&self, handle: &Handle) -> io::Result<usize> {
+    pub(in crate::windows) fn result(&self, handle: &Handle) -> io::Result<usize> {
         let mut moved = 0u32;
         // SAFETY: the operation was started with this OVERLAPPED on `handle`; waiting is
         // allowed, and `moved` is a live out-pointer.

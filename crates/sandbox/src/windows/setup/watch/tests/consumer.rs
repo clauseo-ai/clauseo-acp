@@ -319,11 +319,9 @@ fn a_line_with_no_net_reads_as_network() {
 
 #[test]
 fn a_waiting_create_older_than_two_seconds_is_stale_and_pairs_with_nothing() {
-    use super::super::consumer::STALE_AFTER_SECONDS;
-    let rate = 1000;
+    use super::super::consumer::{STALE_AFTER_SECONDS, STAMP_TICKS_PER_SECOND};
     let mut fed = Fed::new();
-    fed.consumer.set_stamp_rate(rate);
-    let limit = STALE_AFTER_SECONDS * rate;
+    let limit = STALE_AFTER_SECONDS * STAMP_TICKS_PER_SECOND;
     // An end whose own Create came late finds an older, stale entry: dropped, unpaired.
     create_at(&mut fed, 0, 0x60, NAME);
     end_at(&mut fed, limit + 1, 0x60, ACCESS_DENIED);
@@ -333,4 +331,22 @@ fn a_waiting_create_older_than_two_seconds_is_stale_and_pairs_with_nothing() {
     create_at(&mut fed, 10, 0x61, NAME);
     end_at(&mut fed, 10 + limit, 0x61, ACCESS_DENIED);
     assert_eq!(fed.out.len(), 1);
+}
+
+#[test]
+fn the_stale_window_is_two_seconds_of_100_ns_stamps_whatever_the_perf_freq() {
+    // Stamps are system time in 100 ns units (no raw timestamps). Scaled by a 3.579545 MHz
+    // `PerfFreq`, the window would be 7,159,090 ticks, 0.7 s, and the end below dropped; it
+    // stays 2 s of 100 ns ticks.
+    assert_eq!(super::super::consumer::STAMP_TICKS_PER_SECOND, 10_000_000);
+    let mut fed = Fed::new();
+    create_at(&mut fed, 0, 0x70, NAME);
+    end_at(&mut fed, 2 * 3_579_545 + 1, 0x70, ACCESS_DENIED);
+    assert_eq!(fed.out.len(), 1, "0.7 s is well inside the window");
+    create_at(&mut fed, 0, 0x71, NAME);
+    end_at(&mut fed, 20_000_000, 0x71, ACCESS_DENIED);
+    assert_eq!(fed.out.len(), 2, "at 2 s it pairs");
+    create_at(&mut fed, 0, 0x72, NAME);
+    end_at(&mut fed, 20_000_001, 0x72, ACCESS_DENIED);
+    assert_eq!(fed.out.len(), 2, "past 2 s it is stale");
 }

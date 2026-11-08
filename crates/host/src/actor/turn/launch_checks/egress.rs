@@ -192,11 +192,12 @@ impl CountDenials {
 
 impl DenialSink for CountDenials {
     fn denied(&self, d: Denial) {
-        // The rate cap's summary stands for that many refusals.
+        // The rate cap's summary stands for that many refusals; the reporter's pause notice for
+        // none.
         let refused = if let Denial::Dropped { count } = d {
             u64::from(count)
         } else {
-            1
+            u64::from(!matches!(d, Denial::ReporterPaused { .. }))
         };
         self.count.fetch_add(refused, Ordering::Relaxed);
     }

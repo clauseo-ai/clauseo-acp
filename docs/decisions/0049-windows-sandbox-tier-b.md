@@ -1946,7 +1946,7 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
   oldest evicted. `Status == 0xC0000022` makes a record. Each pending Create keeps its
   `EventHeader.TimeStamp`. An OperationEnd stamped before it ends an earlier use of the IRP
   (real-time buffers are per CPU, so delivery can be out of order), and pairs with nothing. A
-  waiting Create more than 2 s older (QPC, at the trace's `PerfFreq`) than the end is stale: it
+  waiting Create more than 2 s older (system time, 100 ns ticks) than the end is stale: it
   is dropped unpaired, so an end that arrives before its own Create can't pair with an old one.
 - **Versions.** Only Create v1 and OperationEnd v0 are read, the versions the spike recorded on
   WS2025 26100 and the offsets were written for. Any other version is skipped and counted, and
@@ -2104,6 +2104,133 @@ the enforcement: the kernel refuses the same opens, and each pause is announced 
 | W11 | Idle cost: an idle session, then 10 minutes of Word and Explorer, ABBA with the watcher on and off; kernel and consumer CPU. An idle cost reopens running the trace only during tool calls | open |
 | W12 | The breaker, with `WatchRateLog=1`: `npm ci` logs its per-second rates (the final `PAUSE_RATE` comes from that distribution); a trip pauses after 10 s at the rate, sends `paused`, resumes 60 s later with `resumed`; an editing turn never trips it | open |
 
+### The denial reporter, client side
+
+Part B (`windows::watch_client`, with `acl/authz.rs`) is the runner's half: it connects to the
+watcher, turns its lines into `Denial::Path`, and falls back to the host-side source when it
+can't. It mirrors `macos/watch.rs`.
+
+**Registration.** `watch_client::register(pool_user, policy, denials)` registers one launch: its
+pool user's SID, its `Policy`, and its sink behind a `CappedSink` (20 a second). `Launchers`'
+launcher calls it once, on its first launch, and keeps the `Registration` while the agent runs,
+as `SeatbeltLauncher` does. The first registration starts one supervisor thread for the host and
+waits up to 6 s for its first attempt, whether that attempt connects or fails. Dropping the last
+registration makes the reader close the pipe within 250 ms. The watcher then has no client
+and exits by itself after its 3 s grace.
+
+**An attempt** (`supervise.rs`, over the `Watch` trait; `os.rs` is the Windows glue):
+1. reads IT's off switch, `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\DenialReporter` (64-bit
+   view). A `DWORD` 0 means the task is never started: the reporter is `Down(TurnedOff)` ("turned
+   off by policy"), logged once, and the host-side source reports alone. It is read again at
+   each retry, so a change applies within a minute. A value present but of another type (a
+   `REG_SZ "0"`, say) or unreadable counts as off too, logged once as treated as off; only an
+   absent value or a `DWORD` other than 0 leaves the reporter on. Only the client reads the
+   switch; the watcher doesn't. So a run started by hand (Task Scheduler, `schtasks /run`) still runs, and a
+   connection already open when IT sets the switch stays open until it ends;
+2. starts `\Clauseo\SandboxWatch` (`refresh::request_watch`);
+3. polls `HKLM\SOFTWARE\Clauseo\SandboxWatch` every 100 ms, for up to 5 s, and opens only a
+   `PipeName` that `protocol::is_pipe_name` accepts. It reads the name on a key handle whose
+   owner it first checks is LOCAL SYSTEM;
+4. asks the task once more after 2 s if no pipe is open yet. The task ignores a run while one is
+   running (`IGNORE_NEW`), so a request made while an old watcher was exiting is lost, and a
+   watcher that exited 74 wants a new one;
+5. opens the pipe with `GENERIC_READ` alone and `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`,
+   so a fake server can't act as the lawyer;
+6. checks the server before reading a byte (`verify::check_server`, the check SandboxSetUp's
+   client makes in #733; once both are on one branch they become one function):
+   - the proof is the pipe's owner, LOCAL SYSTEM (`GetSecurityInfo` on the handle);
+   - backing it up: session 0, and `GetNamedPipeServerProcessId`, whose process's user in the
+     kernel's list must be `S-1-5-18` and whose image must be the admin copy;
+   - a fact that differs refuses. A fact Windows won't give this user is accepted on the owner's
+     proof and logged;
+   - a refused name is polled past, in case a new run publishes another.
+
+**Readiness: no probe.** The reporter is live once connected. The watcher starts its session and
+its consumer before it publishes the name, so a name the client can open belongs to a feed that
+is already running. A probe would have to run something as the pool user. The host has no cheap
+way to do that: each logon needs the pool password and loads a profile. The inner runner's
+order before the launch (M1) is kept free of anything else. Row C2 measures what this costs.
+
+**Lines** (`route.rs`):
+- A refusal goes to the newest registration of its pool SID; a SID nobody registered is dropped.
+- `read` and `write` stay as sent. `unknown` (a plain open) is decided by
+  `would_deny(pool, path, Read)`: if the pool user may read the path, the refused open was a
+  write; anything else, including a check that can't tell, makes it a read.
+- A line is local only when it sends `"net":false` itself and its path matches
+  `^[A-Za-z]:\\` with backslashes only (`is_local_drive_path`). The client reads `net` from the
+  raw JSON, not through `Line`'s serde default: a missing `net` is a network path. Anything
+  else, `"net":true` or a `\\…` display string included, opens nothing at all, and its
+  `unknown` becomes a read.
+- `policy.classify` compares strings only and opens nothing. The path goes out through
+  `display_safe_path` (`denial.rs`). It escapes every character `is_invisible_or_control`
+  names as `\u{202E}`: General_Category Cc, Cf, Zl, Zp, Co, Cs and Cn (so noncharacters and
+  unassigned code points too), and every Default_Ignorable_Code_Point, from ICU4X's compiled
+  data (`icu_properties`). It is not ASCII-only: letters and marks of every script (a Hindi
+  name with its nukta, CJK, accented Latin) and plain emoji are kept. An emoji sequence joined by
+  ZWJ or carrying a variation selector shows those as escapes. A character newer than ICU4X's
+  Unicode reads as unassigned and is escaped. The macOS reporter doesn't use it yet.
+- The watcher's breaker sends `{"paused":{"secs":n,"reason":"rate"}}` during heavy disk
+  activity. Every registered launch gets `Denial::ReporterPaused { secs }` once (appended to
+  `Denial`), which says file refusals aren't reported for that long and the host-side source
+  still works. It passes `CappedSink` uncapped, and the host's counting sink counts it as no
+  refusal. A launch registered during the pause gets it as it registers. A second `paused`
+  changes nothing; `resumed`, or a new connection, clears the state.
+- `{"dropped":n}` carries no SID. It goes to the launch of the last refusal routed, or to every
+  launch when none has been routed yet. The sinks are ticked once a second.
+
+**The Authz check** (`acl::authz::Checker`, `watch_client::would_deny`), run as the lawyer,
+unelevated:
+- It refuses (`None`), before opening anything, any path that isn't `X:\...` with no `.` or
+  `..` part, and any drive `GetDriveTypeW` calls remote or unknown. UNC, `\\?\`, `\\.\` and
+  device paths never reach the network or a device. A letter `subst`-ed to a UNC path may make
+  `GetDriveTypeW` open that root, but the letter is the lawyer's own mapping, never one the
+  agent chose.
+- It opens the path one part at a time (`watch_client::open_no_reparse`): the drive's root by
+  name, then each part relative to the handle of the folder before it (`object::open_at`:
+  `NtCreateFile` with `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT` and backup intent). No
+  part is ever followed. A folder a pool user swaps for a link to `\\server\share` after an
+  earlier part was opened fails its own relative open instead of reaching the network, and no
+  full path is ever opened, so there is no window between a check and an open. A part that is
+  itself a reparse point (a junction, a symbolic link, a mount point), the last included, or any
+  failed open, gives `None`.
+- It reads the descriptor (owner, group and DACL) on the last part's handle, opened with
+  `READ_CONTROL`.
+- It checks with `AuthzInitializeResourceManager(NO_AUDIT)`, a context per pool SID from
+  `AuthzInitializeContextFromSid` (with the SID's local groups, cached), and `AuthzAccessCheck`
+  for `FILE_READ_DATA` or `FILE_WRITE_DATA`.
+- It models the DACL only: not the agent's Low label, nor the token's restricting SIDs.
+
+**The fallback.** The reporter is `Down` and logs each reason once until it is live again when:
+- IT turned it off;
+- the task isn't registered;
+- no name comes within 5 s, naming the watcher's last result: 68 is `ProviderFull`, and 71
+  (no record) and 74 are named in the log;
+- a key or server fails the check;
+- a call fails.
+
+Launches go ahead either way. The reporter only informs, and the host-side source keeps working.
+When the pipe closes while connected, refusals may have been lost: the watcher ended, or it
+exited 0 because the record's owner changed. `Denial` has no "unknown count", so a closed pipe is
+logged each time it happens. The supervisor tries again at most once a minute after any failure
+or closed pipe, as on macOS.
+
+**Privacy.** The client receives only pool users' refusals. It logs no path and no SID; paths go
+only into `Denial`.
+
+**Rows to check on the VM** (open):
+
+| Row | Check | Result |
+|---|---|---|
+| C1 | Card latency end to end: a pool user's refused `type` of a file outside the matter, to `Denial::Path` at the sink; p95 under 1.5 s over 50 tries | open |
+| C2 | No probe: the first launch's first refusal, made 100 ms after `register` returns, arrives; repeat 20 times from a cold task | open |
+| C3 | Provider full: hold 8 Kernel-File sessions, then a launch logs `ProviderFull` once, starts its agent, and the host-side source still reports | open |
+| C4 | Restart: kill the watcher with `taskkill /f` while connected; one "closed" line, a reconnect within 60 s, refusals again | open |
+| C5 | Squatter: a pool user serves the stale name after C4; the client refuses it (owner), logs once, and connects to the next run's name | open |
+| C6 | `would_deny` agrees with a real open by the pool user's Medium token on 20 paths (lawyer profile, another matter, data dir, Program Files write); a mapped network drive and a UNC path give `None` with no SMB traffic | open |
+| C7 | `unknown` resolution: `notepad` saving to a read-only folder (write) and `type` of a refused file (read) come out as such | open |
+| C8 | Off switch: set `DenialReporter` to `DWORD` 0 by GPO; a launch starts no `SandboxWatch` run (Task Scheduler history), logs "turned off by policy" once; removing it brings the reporter back within a minute | open |
+| C9 | Breaker: `npm ci` in the matter until the watcher pauses; each open session's sink gets one `ReporterPaused`, and refusals come again after `resumed` | open |
+
 ### The launcher (PR6 interface)
 
 This section is the single source both sides point to. The host and stage C agreed it, and the
@@ -2136,6 +2263,12 @@ impl Launchers {
     /// Once per spawned agent, and only after its process tree is gone (the host's straggler
     /// wait): the repair, `set_aside::after_session` and the clean-close record.
     pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside>;
+
+    /// Whether the session's pool user is refused `access` to `path` by its DACL
+    /// (`watch_client::would_deny`, as the lawyer): `None` when it can't tell, for a session it
+    /// doesn't know, and for any path not on a local drive letter. For the host-side source's
+    /// confirmation before a card.
+    pub fn would_deny(&self, session: &str, path: &Path, access: Access) -> Option<bool>;
 }
 
 impl Preparing {
@@ -2167,8 +2300,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
     never `Any`;
   - the agent's credentials file, through `Policy::credentials(path)`.
 
-  `denials` is accepted but unused: WFP gives no denial feed, and the host's proxy reports
-  denials.
+  `denials` gets the file refusals: the returned launcher registers the launch with the
+  denial reporter (`watch_client::register`) on its first launch, as `SeatbeltLauncher` does.
+  WFP gives no network feed; the host's proxy reports those denials.
 - **Errors:** `Error` with `code()` and `cause()`. Appended: `PoolFull` (the host shows
   `NotProtectedCause::PoolFull`), `NotPrepared` (retryable: the host goes back to `prepare`) and
   `Cancelled`. There is no "matter busy" error: a matter's second concurrent session gets a pool

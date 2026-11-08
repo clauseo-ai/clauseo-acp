@@ -1,10 +1,13 @@
 //! The denial types every stage C task shares, the sink a launch reports them to, and the rate
 //! cap in front of that sink.
 
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use icu_properties::props::{DefaultIgnorableCodePoint, GeneralCategory};
+use icu_properties::{CodePointMapData, CodePointSetData};
 use serde::Serialize;
 
 /// Something the jail or the egress proxy refused. One definition for every OS and for the
@@ -67,6 +70,13 @@ pub enum Denial {
         tag: clauseo_blocklist::Tag,
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
+    },
+    /// Not a refusal but a notice: the Windows reporter of file refusals is paused for `secs`
+    /// seconds during heavy disk activity. The host-side source still reports. It passes a
+    /// [`CappedSink`] uncapped, and counts as no refusal.
+    ReporterPaused {
+        /// How long the pause lasts.
+        secs: u64,
     },
 }
 
@@ -191,9 +201,10 @@ impl Clock for SystemClock {
 /// ended. The excess is counted and reaches the inner sink as one [`Denial::Dropped`] when the
 /// next window starts (at the next denial, before it) or at the first [`CappedSink::tick`]
 /// after the window ends, whichever is first; the owner calls `tick` from its own timer so a
-/// burst's count is not held until the next denial. [`DenialSink::upstream`] passes through
-/// uncapped. Safe from many threads: the count is behind a mutex, and the inner sink is
-/// called after the mutex is released, so it may block or call back.
+/// burst's count is not held until the next denial. [`DenialSink::upstream`] and
+/// [`Denial::ReporterPaused`] pass through uncapped. Safe from many threads: the count is
+/// behind a mutex, and the inner sink is called after the mutex is released, so it may block or
+/// call back.
 #[derive(Debug)]
 pub struct CappedSink<S, C = SystemClock> {
     inner: S,
@@ -264,6 +275,11 @@ impl<S: DenialSink, C: Clock> CappedSink<S, C> {
 
 impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
     fn denied(&self, d: Denial) {
+        if matches!(d, Denial::ReporterPaused { .. }) {
+            // A notice, not a refusal: never held back.
+            self.inner.denied(d);
+            return;
+        }
         let now = self.clock.now();
         let (late, pass) = {
             let mut window = self.lock();
@@ -290,6 +306,55 @@ impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
     fn upstream(&self, r: Reachability) {
         self.inner.upstream(r);
     }
+}
+
+/// Whether `c` is invisible or a control, the characters [`display_safe`] escapes:
+/// - by `General_Category`: a control (Cc: C0, C1 and DEL), any format character (Cf: bidi
+///   marks, embeddings, overrides and isolates, zero-width characters, the byte order mark,
+///   tags), the line and paragraph separators (Zl, Zp), private use (Co: U+E000–F8FF and planes
+///   15 and 16), a surrogate (Cs; a `char` holds none, and a lone one in a path arrives as
+///   U+FFFD), and unassigned (Cn), which includes the noncharacters;
+/// - every `Default_Ignorable_Code_Point` (`DerivedCoreProperties.txt`): U+00AD, U+034F,
+///   U+115F–1160, U+17B4–17B5, U+180B–180F, U+3164, U+FE00–FE0F, U+FFA0 and the rest.
+///
+/// The data is ICU4X's compiled Unicode data (`icu_properties`); a code point assigned in a
+/// later Unicode than it knows reads as unassigned, and is escaped. Letters and marks of every
+/// script (Devanagari with its nukta and virama, CJK, accented Latin) and emoji are kept. Named
+/// so a log sanitiser could share it.
+pub fn is_invisible_or_control(c: char) -> bool {
+    let category = CodePointMapData::<GeneralCategory>::new().get(c);
+    matches!(
+        category,
+        GeneralCategory::Control
+            | GeneralCategory::Format
+            | GeneralCategory::LineSeparator
+            | GeneralCategory::ParagraphSeparator
+            | GeneralCategory::PrivateUse
+            | GeneralCategory::Surrogate
+            | GeneralCategory::Unassigned
+    ) || CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(c)
+}
+
+/// `text` safe to show the lawyer: each invisible or control character
+/// ([`is_invisible_or_control`]) becomes a visible escape, `\u{202E}`, so a name can't hide a
+/// part of itself, reorder what is shown, or break a line. Everything else is kept.
+pub fn display_safe(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if is_invisible_or_control(c) {
+            // Writing to a String can't fail.
+            write!(out, "\\u{{{:04X}}}", u32::from(c)).unwrap_or_default();
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// [`display_safe`] for a path, for [`Denial::Path`]: classify the path as reported first,
+/// then show this. A name that isn't Unicode keeps its replacement characters.
+pub fn display_safe_path(path: &Path) -> PathBuf {
+    PathBuf::from(display_safe(&path.to_string_lossy()))
 }
 
 #[cfg(test)]
