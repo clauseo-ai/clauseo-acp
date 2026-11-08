@@ -180,3 +180,13 @@ fn the_server_check_needs_systems_owner_and_takes_unread_facts_on_its_word() {
         assert!(check_server(&wrong, exe, device).is_err(), "{wrong:?}");
     }
 }
+
+#[test]
+fn turned_off_by_policy_never_starts_the_task_and_is_logged_once() {
+    let (fake, status) = down_with(|s| s.off = true, 3);
+    assert_eq!(status, Status::Down(Down::TurnedOff));
+    assert_eq!(fake.requests(), []);
+    let errors = fake.errors();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("turned off by policy"));
+}

@@ -30,14 +30,15 @@ use windows::Win32::System::Registry::{
     RegOpenKeyExW,
 };
 use windows::Win32::System::Threading::{Sleep, WaitForSingleObject};
-use windows::core::{HSTRING, PWSTR};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::verify::{ServerFacts, check_server};
-use super::{ConnectError, Pipe, StartError, Watch};
+use super::{ConnectError, POLICY_KEY, POLICY_VALUE, Pipe, StartError, Watch};
 use crate::windows::acl::authz::{self, Checker};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::admin_copy::{self, os as admin_os};
 use crate::windows::pipe::os::{Overlapped, ended_code};
+use crate::windows::record::read_dword;
 use crate::windows::refresh::{TaskError, last_watch_result, request_watch};
 use crate::windows::setup::stop::windows_stopper::listed_users;
 use crate::windows::setup::watch::protocol::{PIPE_VALUE, WATCH_KEY};
@@ -109,6 +110,12 @@ impl Watch for OsWatch {
             );
         }
         Ok(pipe)
+    }
+
+    fn turned_off(&self) -> bool {
+        let key = HSTRING::from(POLICY_KEY);
+        let value = HSTRING::from(POLICY_VALUE);
+        read_dword(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr())).is_ok_and(|read| read == Some(0))
     }
 
     fn last_exit(&self) -> Option<u32> {

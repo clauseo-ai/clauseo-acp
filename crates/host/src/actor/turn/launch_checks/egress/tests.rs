@@ -77,5 +77,7 @@ fn the_denial_sink_counts_each_refusal() {
         shared_hosting: false,
     });
     sink.denied(Denial::Dropped { count: 4 });
+    // The Windows reporter's pause is a notice, not a refusal.
+    sink.denied(Denial::ReporterPaused { secs: 60 });
     assert_eq!(sink.count(), 5);
 }

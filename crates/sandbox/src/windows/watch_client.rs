@@ -39,6 +39,11 @@
 //! - **A closed pipe** may have lost refusals (the watcher ended, or exited 0 because the record's
 //!   owner changed): it is logged each time, `Denial` having no "unknown count", and the
 //!   supervisor reconnects under the restart limit.
+//! - **The IT off switch:** [`POLICY_VALUE`] a `DWORD` 0 in `HKLM\`[`POLICY_KEY`] means the
+//!   task is never started: [`Down::TurnedOff`], logged once.
+//! - **The breaker:** the watcher's `paused` line (heavy disk activity) reaches every registered
+//!   launch once as [`Denial::ReporterPaused`](crate::Denial::ReporterPaused); `resumed`, or a
+//!   new connection, clears it.
 //! - **Fallback:** a task not registered, a watcher that exits 68 (the provider's sessions are
 //!   taken) or anything else, no name within [`PIPE_WAIT`], or a key or server that fails the
 //!   check marks the reporter [`Status::Down`] and is logged once per reason. Launches go
@@ -95,6 +100,10 @@ pub const READ_WAIT: Duration = Duration::from_millis(250);
 pub const TICK: Duration = Duration::from_secs(1);
 /// The longest line kept; a longer one is skipped to its `\n`.
 pub const LINE_CAP: usize = 256 * 1024;
+/// The policy key IT may set to turn the reporter off, under `HKLM`.
+pub const POLICY_KEY: &str = r"SOFTWARE\Policies\Clauseo\Sandbox";
+/// Its `DWORD` value: 0 turns the reporter off; anything else, or none, leaves it on.
+pub const POLICY_VALUE: &str = "DenialReporter";
 /// The watcher's exit code when the provider's sessions are taken (`WatchExit::ProviderFull`).
 pub const PROVIDER_FULL: u32 = 68;
 
@@ -125,6 +134,9 @@ pub enum Down {
     Failed,
     /// The pipe closed or its read failed; the supervisor starts it again.
     Ended,
+    /// IT turned it off: [`POLICY_VALUE`] in `HKLM\`[`POLICY_KEY`] is a `DWORD` 0. The task is
+    /// never started.
+    TurnedOff,
 }
 
 /// The reporter's state.
@@ -178,6 +190,9 @@ pub trait Watch: Send + Sync + 'static {
     fn pipe_name(&self) -> Result<Option<String>, String>;
     /// Opens the pipe `name` and checks its server ([`verify::check_server`]).
     fn connect(&self, name: &str) -> Result<Self::Pipe, ConnectError>;
+    /// Whether IT turned the reporter off: [`POLICY_VALUE`] in `HKLM\`[`POLICY_KEY`] (64-bit
+    /// view) is a `DWORD` 0. Read before each attempt, so a change applies at the next.
+    fn turned_off(&self) -> bool;
     /// The task's last result, when it can be read.
     fn last_exit(&self) -> Option<u32>;
     /// Whether the path's descriptor refuses `access` to `pool_user`; `None` when it can't tell.
@@ -210,6 +225,8 @@ struct State {
     logged: Option<Down>,
     /// The registration the last refusal went to, for a `dropped` line.
     last_routed: Option<u64>,
+    /// The watcher's breaker is open: its pause was told, and isn't told again until it resumes.
+    paused: bool,
 }
 
 /// The client: its effects and its state.
@@ -355,6 +372,7 @@ impl<W: Watch> Shared<W> {
             if state.generation == generation && !state.launches.is_empty() {
                 state.status = Status::Live;
             }
+            state.paused = false;
             state.logged.take().is_some()
         };
         let line = if was_down {

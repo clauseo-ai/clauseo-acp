@@ -1,4 +1,5 @@
-//! Each line read, to its launch: a refusal as `Denial::Path`, `dropped` as `Denial::Dropped`.
+//! Each line read, to its launch: a refusal as `Denial::Path`, `dropped` as `Denial::Dropped`,
+//! the breaker's pause as `Denial::ReporterPaused` to every launch once, until it resumes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,7 +22,28 @@ pub(super) fn deliver<W: Watch>(shared: &Shared<W>, text: &str) {
             ..
         }) => refused(shared, &sid, path, &access, net),
         Some(Line::Dropped { dropped: count, .. }) => dropped(shared, count),
-        Some(Line::Paused { .. } | Line::Resumed { .. }) | None => {}
+        Some(Line::Paused { paused, .. }) => pause(shared, paused.secs),
+        Some(Line::Resumed { .. }) => shared.lock().paused = false,
+        None => {}
+    }
+}
+
+/// The watcher's breaker opened for `secs`: every registered launch hears it once, until a
+/// `resumed` line (or a new connection) clears it. The host-side source still reports.
+fn pause<W: Watch>(shared: &Shared<W>, secs: u64) {
+    let sinks: Vec<Arc<dyn Capped>> = {
+        let mut state = shared.lock();
+        if std::mem::replace(&mut state.paused, true) {
+            return;
+        }
+        state
+            .launches
+            .values()
+            .map(|entry| Arc::clone(&entry.sink))
+            .collect()
+    };
+    for sink in sinks {
+        sink.denied(Denial::ReporterPaused { secs });
     }
 }
 

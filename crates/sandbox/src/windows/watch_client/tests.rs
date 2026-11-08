@@ -25,6 +25,8 @@ struct Script {
     /// What each connect gives, in order; `Absent` once empty.
     connects: VecDeque<Result<Receiver<Vec<u8>>, ConnectError>>,
     last_exit: Option<u32>,
+    /// The IT off switch.
+    off: bool,
     /// `would_deny`'s answers for a read, by path.
     deny: BTreeMap<PathBuf, Option<bool>>,
 }
@@ -37,6 +39,7 @@ impl Default for Script {
             name_from: Duration::ZERO,
             connects: VecDeque::new(),
             last_exit: None,
+            off: false,
             deny: BTreeMap::new(),
         }
     }
@@ -141,6 +144,10 @@ impl Watch for Fake {
             Some(Err(error)) => Err(error),
             None => Err(ConnectError::Absent),
         }
+    }
+
+    fn turned_off(&self) -> bool {
+        self.script().off
     }
 
     fn last_exit(&self) -> Option<u32> {
@@ -493,6 +500,34 @@ fn only_a_local_drive_letter_path_is_one_the_check_may_open() {
     ] {
         assert!(!is_local_drive_path(Path::new(bad)), "{bad}");
     }
+}
+
+#[test]
+fn a_pause_is_told_to_every_launch_once_until_it_resumes() {
+    let fake = Fake::default();
+    let pipe = fake.pipe();
+    let hub = Hub::new(fake);
+    let dir = TempDir::new("watch-client-pause");
+    let policy = policy(&dir);
+    let (a, b) = (launch(), launch());
+    let _a = hub.register(sid(POOL_A), Arc::clone(&policy), Arc::clone(&a.sink));
+    let _b = hub.register(sid(POOL_B), Arc::clone(&policy), Arc::clone(&b.sink));
+    let paused = b"{\"v\":1,\"paused\":{\"secs\":30,\"reason\":\"rate\"}}\n";
+    pipe.send(paused.to_vec()).unwrap();
+    // A second pause line while paused tells no one again.
+    pipe.send(paused.to_vec()).unwrap();
+    pipe.send(denied(POOL_A, r"C:\a", "read")).unwrap();
+    eventually("a got the refusal", || a.keep.got().len() == 2);
+    let notice = Denial::ReporterPaused { secs: 30 };
+    assert_eq!(a.keep.got()[0], notice);
+    assert_eq!(b.keep.got(), [notice]);
+    // Resumed, then paused again: told again.
+    pipe.send(b"{\"v\":1,\"resumed\":true}\n".to_vec()).unwrap();
+    pipe.send(b"{\"v\":1,\"paused\":{\"secs\":5,\"reason\":\"rate\"}}\n".to_vec())
+        .unwrap();
+    eventually("b heard the second pause", || b.keep.got().len() == 2);
+    assert_eq!(b.keep.got()[1], Denial::ReporterPaused { secs: 5 });
+    assert_eq!(a.keep.got().len(), 3);
 }
 
 mod fallback;

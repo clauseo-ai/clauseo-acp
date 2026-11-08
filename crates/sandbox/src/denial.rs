@@ -69,6 +69,13 @@ pub enum Denial {
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
     },
+    /// Not a refusal but a notice: the Windows reporter of file refusals is paused for `secs`
+    /// seconds during heavy disk activity. The host-side source still reports. It passes a
+    /// [`CappedSink`] uncapped, and counts as no refusal.
+    ReporterPaused {
+        /// How long the pause lasts.
+        secs: u64,
+    },
 }
 
 /// The kind of file access refused.
@@ -192,9 +199,10 @@ impl Clock for SystemClock {
 /// ended. The excess is counted and reaches the inner sink as one [`Denial::Dropped`] when the
 /// next window starts (at the next denial, before it) or at the first [`CappedSink::tick`]
 /// after the window ends, whichever is first; the owner calls `tick` from its own timer so a
-/// burst's count is not held until the next denial. [`DenialSink::upstream`] passes through
-/// uncapped. Safe from many threads: the count is behind a mutex, and the inner sink is
-/// called after the mutex is released, so it may block or call back.
+/// burst's count is not held until the next denial. [`DenialSink::upstream`] and
+/// [`Denial::ReporterPaused`] pass through uncapped. Safe from many threads: the count is
+/// behind a mutex, and the inner sink is called after the mutex is released, so it may block or
+/// call back.
 #[derive(Debug)]
 pub struct CappedSink<S, C = SystemClock> {
     inner: S,
@@ -265,6 +273,11 @@ impl<S: DenialSink, C: Clock> CappedSink<S, C> {
 
 impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
     fn denied(&self, d: Denial) {
+        if matches!(d, Denial::ReporterPaused { .. }) {
+            // A notice, not a refusal: never held back.
+            self.inner.denied(d);
+            return;
+        }
         let now = self.clock.now();
         let (late, pass) = {
             let mut window = self.lock();

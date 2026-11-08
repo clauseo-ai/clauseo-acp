@@ -204,3 +204,16 @@ fn display_safe_escapes_controls_and_bidi_and_invisible_formatting_and_keeps_the
         PathBuf::from(r"C:\x\u{2067}y")
     );
 }
+
+#[test]
+fn the_reporters_pause_passes_the_cap_even_in_a_full_window() {
+    let clock = HandClock::default();
+    let cap = CappedSink::with_clock(Kept::default(), &clock);
+    for n in 0..25 {
+        cap.denied(path_denial(n));
+    }
+    cap.denied(Denial::ReporterPaused { secs: 30 });
+    let got = cap.inner().denials();
+    assert_eq!(got.len(), 21);
+    assert_eq!(got.last(), Some(&Denial::ReporterPaused { secs: 30 }));
+}

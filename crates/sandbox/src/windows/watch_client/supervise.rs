@@ -70,6 +70,10 @@ fn wait_until<W: Watch>(shared: &Shared<W>, generation: u64, at: Duration) -> bo
 /// One attempt: starts the task, polls the name, opens and checks the pipe, asking the task
 /// once more after [`RETRIGGER_AFTER`].
 fn connect<W: Watch>(shared: &Shared<W>, generation: u64) -> Result<W::Pipe, (Down, String)> {
+    if shared.watch.turned_off() {
+        let line = "the denial reporter is turned off by policy (DenialReporter is 0)";
+        return Err((Down::TurnedOff, line.to_owned()));
+    }
     request(shared)?;
     let began = shared.watch.now();
     let mut retriggered = false;
