@@ -231,9 +231,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // longer waiting
   "escalation.not_pending":
     "That request isn't waiting any more. If Clauseo still needs it, it will ask again.",
-  // provisional (R18 PR 1, words from the task): "Allow access" on what the host never widens
+  // provisional (R18 PR 1, the app thread's words): "Allow access" on what the host never widens
   "escalation.not_offerable":
-    "This can't be allowed from here. Your firm's settings or the Safe workspace keep it closed.",
+    "This can't be allowed. The Safe workspace always keeps this closed, or your firm's settings do. Nothing was changed.",
   // provisional (R18 PR 1, words from the task): "Switch protection off" the firm forbids
   "sandbox.unprotected_auto_forbidden":
     "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.",

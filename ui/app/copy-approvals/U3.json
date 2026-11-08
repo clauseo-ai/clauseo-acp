@@ -912,8 +912,8 @@
     "note": "\"Allow access\" or \"Allow this site\" on a card that is no longer waiting (R18)"
   },
   "U3-err-escalation.not_offerable": {
-    "en": "This can't be allowed from here. Your firm's settings or the Safe workspace keep it closed.",
-    "hi": "इसकी अनुमति यहाँ से नहीं दी जा सकती। आपकी फ़र्म की सेटिंग्स या सुरक्षित कार्यक्षेत्र इसे बंद रखते हैं।",
+    "en": "This can't be allowed. The Safe workspace always keeps this closed, or your firm's settings do. Nothing was changed.",
+    "hi": "इसकी अनुमति नहीं दी जा सकती। सुरक्षित कार्यक्षेत्र इसे हमेशा बंद रखता है, या आपकी फ़र्म की सेटिंग्स इसे बंद रखती हैं। कुछ भी नहीं बदला गया।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
