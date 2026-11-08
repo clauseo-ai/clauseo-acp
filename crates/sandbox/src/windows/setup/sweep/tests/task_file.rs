@@ -81,8 +81,15 @@ fn a_task_file_that_cant_be_read_or_is_malformed_stays_56() {
     let mut big = file("<UserId>S-1-5-18</UserId>");
     big.resize(TASK_FILE_CAP + 2, 0x20);
     let utf8 = |xml: &str| Ok(xml.as_bytes().to_vec());
-    let cases: Vec<(&str, Result<Vec<u8>, Failed>)> = vec![
+    let cases: Vec<(&str, Result<Vec<u8>, Failed>)> =
+        vec![
         ("missing", Err("the task file is missing".to_owned())),
+        (
+            "held open for writing",
+            Err("the task file couldn't be read (The process cannot access the file because it \
+                 is being used by another process. (os error 32))"
+                .to_owned()),
+        ),
         ("over the cap", Ok(big)),
         ("odd UTF-16", Ok(vec![0xFF, 0xFE, b'<'])),
         (

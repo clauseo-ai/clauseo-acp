@@ -1995,7 +1995,9 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    one above with `OBJ_DONT_REPARSE` and refused if a reparse point, the file refused unless a
    plain file with one name, `SeBackupPrivilege` enabled for the opens alone and put back
    after; the folders are opened without write rights, and the file's owner and DACL are read
-   through the same handle (`sweep::file_trust`). The file counts only when its owner isn't a
+   through the same handle (`sweep::file_trust`). The file is opened sharing reads alone, so a
+   write handle a pool user opened before its DACL changed can't write it during the read; while
+   one is open the read fails with a sharing violation, and the task is 56. The file counts only when its owner isn't a
    pool SID, it has a DACL, and no allow gives write, append, extended-attribute, attribute,
    delete, `WRITE_DAC`, `WRITE_OWNER`, generic-write or generic-all access to anyone but
    SYSTEM, Administrators, the service accounts, a service SID, CREATOR OWNER, OWNER RIGHTS or

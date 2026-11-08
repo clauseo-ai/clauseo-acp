@@ -29,7 +29,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO,
     FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
+    FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
     FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
     GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
     GetVolumePathNameW, OPEN_EXISTING, OpenFileById, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
@@ -328,18 +328,20 @@ impl Object {
         name: &[u16],
         cap: usize,
     ) -> io::Result<Option<Vec<u8>>> {
-        Ok(read::read_child(self, name, cap, 0)?.map(|(bytes, _)| bytes))
+        Ok(read::read_child(self, name, cap, 0, SHARE_ALL)?.map(|(bytes, _)| bytes))
     }
 
     /// [`Object::read_child`], and the parts of the file's security descriptor `info` asks for
-    /// (self-relative, as [`Object::security`] reads it), through the same handle.
+    /// (self-relative, as [`Object::security`] reads it), through the same handle. The file is
+    /// opened sharing reads alone, so a write handle opened before its DACL changed can't write
+    /// it meanwhile: one open already fails the read (`ERROR_SHARING_VIOLATION`).
     pub(in crate::windows) fn read_child_secured(
         &self,
         name: &[u16],
         cap: usize,
         info: u32,
     ) -> io::Result<Option<(Vec<u8>, Vec<u8>)>> {
-        read::read_child(self, name, cap, info)
+        read::read_child(self, name, cap, info, FILE_SHARE_READ)
     }
 
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's
@@ -442,12 +444,27 @@ fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
 /// well, after Codex's `no_reparse_dir.rs` (`open_no_reparse`, at e7f32cf): any reparse met
 /// on the way fails the open ([`reparse_refused`]) rather than being followed. A `synchronous`
 /// handle (`FILE_SYNCHRONOUS_IO_NONALERT`) needs `SYNCHRONIZE` in `access`; one that isn't is
-/// for the security calls alone.
+/// for the security calls alone. It shares reads, writes and deletes ([`SHARE_ALL`]).
 pub(in crate::windows) fn open_at(
     dir: &Handle,
     name: &[u16],
     access: u32,
     synchronous: bool,
+) -> io::Result<Handle> {
+    open_at_sharing(dir, name, access, synchronous, SHARE_ALL)
+}
+
+/// Every sharing: what [`open_at`] allows other opens.
+const SHARE_ALL: FILE_SHARE_MODE =
+    FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0);
+
+/// [`open_at`], sharing `share` alone.
+pub(super) fn open_at_sharing(
+    dir: &Handle,
+    name: &[u16],
+    access: u32,
+    synchronous: bool,
+    share: FILE_SHARE_MODE,
 ) -> io::Result<Handle> {
     let bytes = u16::try_from(name.len() * 2)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -465,7 +482,6 @@ pub(in crate::windows) fn open_at(
     };
     let mut handle = HANDLE::default();
     let mut status = IO_STATUS_BLOCK::default();
-    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     let mut options = FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT;
     if synchronous {
         options |= FILE_SYNCHRONOUS_IO_NONALERT;
