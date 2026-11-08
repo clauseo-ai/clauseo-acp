@@ -36,8 +36,9 @@
 //!   [`WSL_INSTALL_QUIET`], a pass that verifies every target ends the run, held or not. One
 //!   that doesn't is tried again every [`WSL_RECHECK_PAUSE`]. [`WSL_DENY_BUDGET`] ends the run
 //!   whatever it is waiting for, inside the task's 6-minute limit
-//!   (`rules::WSL_DENY_EXECUTION_LIMIT`): an error line with the deny unverified, a warning
-//!   with it verified (an install still in progress may yet remove it).
+//!   (`rules::WSL_DENY_EXECUTION_LIMIT`); a run again (`run_lock.rs`) gets what is left of it.
+//!   An error line with the deny unverified, a warning with it verified (an install still in
+//!   progress may yet remove it, or one just over left no time for its settle).
 //!
 //! A repeated failure is logged once while it repeats, so a run that waits out an install with a
 //! key missing writes one line, not one a pass; so is a watch failure that repeats.
@@ -61,7 +62,7 @@ pub(in crate::windows::refresh) const WSL_ABSENT_GRACE: Duration = Duration::fro
 /// The run's own bound: the task's 6 minutes less 30 s. No pass starts that could end past it.
 pub(in crate::windows::refresh) const WSL_DENY_BUDGET: Duration = Duration::from_secs(330);
 /// The longest a woken pass takes: its wait before the pass, then the lock's.
-const PASS_WORST: Duration = WSL_WAKE_GAP.saturating_add(WSL_LOCK_WAIT);
+pub(super) const PASS_WORST: Duration = WSL_WAKE_GAP.saturating_add(WSL_LOCK_WAIT);
 
 /// What [`WslWatch::installer`] read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -134,8 +135,10 @@ struct Schedule {
     watch_error: Option<String>,
 }
 
-/// The passes, as the module says: the first included, once the run is allowed.
-pub(super) fn passes<F: WslWatch>(fs: &mut F) {
+/// The passes, as the module says: the first included, once the run is allowed, within
+/// `budget` (what is left of [`WSL_DENY_BUDGET`] for the process, `run_lock.rs`). Whether the
+/// run ended before the budget stopped it.
+pub(super) fn passes<F: WslWatch>(fs: &mut F, budget: Duration) -> bool {
     let start = fs.now();
     let mut run = Schedule {
         start,
@@ -152,6 +155,7 @@ pub(super) fn passes<F: WslWatch>(fs: &mut F) {
     };
     let armed = run.arm(fs);
     run.pass(fs, Duration::ZERO, armed);
+    let mut in_time = true;
     loop {
         let at = run.at(fs);
         run.arm(fs);
@@ -159,11 +163,10 @@ pub(super) fn passes<F: WslWatch>(fs: &mut F) {
         if run.done(at) {
             break;
         }
-        let left = WSL_DENY_BUDGET
-            .saturating_sub(PASS_WORST)
-            .saturating_sub(at);
+        let left = budget.saturating_sub(PASS_WORST).saturating_sub(at);
         if left.is_zero() {
             run.out_of_time(fs);
+            in_time = false;
             break;
         }
         let woke = match fs.wait_change(run.wait(at).min(left)) {
@@ -198,6 +201,7 @@ pub(super) fn passes<F: WslWatch>(fs: &mut F) {
             ),
         );
     }
+    in_time
 }
 
 impl Schedule {
@@ -243,7 +247,11 @@ impl Schedule {
                 "{stopped}: Windows Installer's install was still in progress"
             ));
         } else {
-            fs.warn(&format!("{stopped}: WSL's AppID keys weren't watched"));
+            // InProgress went too late for its 3 s settle and a final pass inside the budget.
+            fs.warn(&format!(
+                "{stopped}: Windows Installer's install had just ended, with no time left to \
+                 settle and check again"
+            ));
         }
     }
 

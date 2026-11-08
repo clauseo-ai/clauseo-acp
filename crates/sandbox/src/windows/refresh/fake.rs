@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::fake_lock::FakeLock;
 use super::fake_watch::FakeWatch;
 use super::test_signer::{TestKey, comment, image};
 use super::*;
@@ -55,6 +56,8 @@ pub(super) struct Fake {
     pub(super) paused: Vec<std::time::Duration>,
     /// The clock, `AppID` keys, notification and installer `--wsl-deny`'s schedule sees.
     pub(super) watch: FakeWatch,
+    /// `--wsl-deny`'s run lock and "run again" flag.
+    pub(super) run_lock: FakeLock,
     /// What `upgrade_wsl` gives.
     pub(super) upgrade: WslUpgraded,
     /// What `pool_busy` gives.
@@ -105,6 +108,7 @@ impl Fake {
             wsl_passes: Vec::new(),
             paused: Vec::new(),
             watch: FakeWatch::default(),
+            run_lock: FakeLock::default(),
             upgrade: WslUpgraded::NotPending,
             pool_busy: Ok(false),
         }

@@ -14,9 +14,10 @@
 //!   what changed). It does nothing else, no admin-copy step and never WSL's upgrade. Anyone
 //!   who can log on can forge such an event, so the trigger is on this task alone: a forged one
 //!   gains a re-applied deny.
-//!   The trigger starts it at once (no delay); a start while it runs is queued
-//!   (`TASK_INSTANCES_QUEUE`), so an install's event during a held run still gives a run after
-//!   it, and a forged flood only chains bounded re-check runs. The
+//!   The trigger starts it at once (no delay); a start while it runs runs beside it
+//!   (`TASK_INSTANCES_PARALLEL`), finds the run lock held, asks for one more run and exits at
+//!   once (`wsl_phase/run_lock.rs`): an install's event during a held run still gives a run
+//!   after it, and a forged flood costs only processes that exit at once. The
 //!   launch check starts it too, as the lawyer, for a missing deny (`clean_close::wsl_heal`);
 //! - `\Clauseo\SandboxWslUpgrade` (`--wsl-upgrade`, [`wsl_upgrade`], `upgrade.rs`), on demand
 //!   only, which the launch check alone asks for: WSL's pending MSI upgrade, verified and
@@ -43,13 +44,19 @@ pub(super) const WSL_RECHECKS: u32 = 4;
 /// The wait before each of them (`schedule.rs` bounds the run as a whole).
 pub(super) const WSL_RECHECK_PAUSE: Duration = Duration::from_secs(5);
 
+mod run_lock;
+#[cfg(test)]
+mod run_lock_tests;
 mod schedule;
 #[cfg(test)]
 mod schedule_tests;
 mod upgrade;
 #[cfg(windows)]
+pub(super) mod windows_lock;
+#[cfg(windows)]
 pub(super) mod windows_watch;
 
+pub use run_lock::{Locked, WslRunLock};
 pub use schedule::{Installer, Waited, WslWatch};
 #[cfg(test)]
 pub(super) use schedule::{
@@ -100,13 +107,15 @@ impl WslDenyExit {
 
 /// `--wsl-deny`, the task `\Clauseo\SandboxWslDeny`'s run: once allowed (LOCAL SYSTEM, from the
 /// admin copy, as the refresh's step 1), the phase, then its passes on the schedule
-/// (`schedule.rs`), and nothing else: never WSL's upgrade, never the pool's processes.
-pub fn wsl_deny<F: WslWatch>(fs: &mut F) -> WslDenyExit {
+/// (`schedule.rs`), one run at a time (`run_lock.rs`), and nothing else: never WSL's upgrade,
+/// never the pool's processes. A start that finds a run going on asks it for one more and gives
+/// `Done` at once.
+pub fn wsl_deny<F: WslWatch + WslRunLock>(fs: &mut F) -> WslDenyExit {
     if let Err((_, why)) = allowed(fs) {
         fs.log(true, &format!("WSL's deny wasn't re-applied: {why}"));
         return WslDenyExit::NotAllowed;
     }
-    schedule::passes(fs);
+    run_lock::runs(fs);
     WslDenyExit::Done
 }
 
@@ -250,6 +259,10 @@ mod tests {
             "wait_change",
             "installer",
             "recorded_key_missing",
+            "run_lock",
+            "run_unlock",
+            "take_again",
+            "asked_again",
         ];
         let rest: Vec<&str> = machine
             .calls

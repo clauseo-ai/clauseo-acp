@@ -75,6 +75,8 @@ mod exit;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]
+mod fake_lock;
+#[cfg(test)]
 mod fake_watch;
 #[cfg(windows)]
 pub mod installed;
@@ -128,8 +130,8 @@ pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny, run_wsl_upgrade};
 pub use wsl_phase::{
-    Installer, Waited, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, WslWatch, wsl_deny,
-    wsl_upgrade,
+    Installer, Locked, Waited, WslDenyExit, WslRunLock, WslUpgrade, WslUpgradeExit, WslUpgraded,
+    WslWatch, wsl_deny, wsl_upgrade,
 };
 
 use crate::windows::setup::record_values::CopyOwner;

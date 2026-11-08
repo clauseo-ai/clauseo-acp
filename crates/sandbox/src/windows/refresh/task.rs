@@ -34,8 +34,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::TaskScheduler::{
     IEventTrigger, IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService,
     TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW,
-    TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT,
-    TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_INSTANCES_PARALLEL, TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT, TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
@@ -279,11 +279,12 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
-        // A start while it runs is dropped, but the WSL deny task's is queued
-        // (`SystemTask::instances`): its run may hold up to 330 s through an install.
+        // A start while it runs is dropped, but the WSL deny task's runs beside it
+        // (`SystemTask::instances`), meets the run lock, asks for one more run and exits.
         let instances = match spec.instances() {
             Instances::IgnoreNew => TASK_INSTANCES_IGNORE_NEW,
             Instances::Queue => TASK_INSTANCES_QUEUE,
+            Instances::Parallel => TASK_INSTANCES_PARALLEL,
         };
         settings
             .SetMultipleInstances(instances)
@@ -416,8 +417,9 @@ pub fn request_pool_stop() -> bool {
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxWslDeny` now, as whoever calls it: the launch
 /// check calls it as the lawyer, unelevated, when WSL's deny is missing
-/// (`clean_close::wsl_heal`), then waits for the deny. It returns once the run is queued; with a
-/// run already going on, this start runs after it (`TASK_INSTANCES_QUEUE`). Blocks on COM calls.
+/// (`clean_close::wsl_heal`), then waits for the deny. It returns once the run is started; with
+/// a run already going on, this one asks it for one more run and exits
+/// (`wsl_phase/run_lock.rs`). Blocks on COM calls.
 pub fn request_wsl_deny() -> Result<(), TaskError> {
     run_task(SystemTask::WslDeny)
 }

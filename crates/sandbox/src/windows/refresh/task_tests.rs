@@ -57,9 +57,9 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
     assert_eq!(mode(wsl), Ok(Mode::WslDeny));
-    // A start during a run: the WSL deny task's is queued (its run may hold through an
-    // install), every other task's dropped.
-    assert_eq!(wsl.instances(), Instances::Queue);
+    // A start during a run: the WSL deny task's runs beside it (and meets the run lock), every
+    // other task's dropped.
+    assert_eq!(wsl.instances(), Instances::Parallel);
     for task in [refresh, stop, SystemTask::WslUpgrade] {
         assert_eq!(task.instances(), Instances::IgnoreNew, "{task:?}");
     }

@@ -26,11 +26,13 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::{Handle, read_capped};
 use super::wsl_phase::Installer;
+use super::wsl_phase::windows_lock;
 use super::wsl_phase::windows_watch::{self, Watch};
 use super::{
-    EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, Waited, WslDenyExit, WslUpgrade, WslUpgradeExit,
-    WslUpgraded, WslWatch, refresh, staging, walk, wsl_deny, wsl_upgrade,
+    EXE_CAP, Failed, Locked, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL,
+    SourceError, SourceFile, Sources, Trust, UPDATER_KEY, Waited, WslDenyExit, WslRunLock,
+    WslUpgrade, WslUpgradeExit, WslUpgraded, WslWatch, refresh, staging, walk, wsl_deny,
+    wsl_upgrade,
 };
 use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
@@ -86,6 +88,8 @@ pub struct WindowsRefresher {
     lock: Option<Held>,
     /// `--wsl-deny`'s change notification, opened at its first arm.
     watch: Option<Watch>,
+    /// `--wsl-deny`'s run lock, while held (`wsl_phase/run_lock.rs`).
+    run_lock: Option<std::fs::File>,
 }
 
 impl Default for WindowsRefresher {
@@ -102,6 +106,7 @@ impl WindowsRefresher {
             held: None,
             lock: None,
             watch: None,
+            run_lock: None,
         }
     }
 
@@ -382,6 +387,30 @@ impl WslWatch for WindowsRefresher {
             }
         }
         Ok(false)
+    }
+}
+
+impl WslRunLock for WindowsRefresher {
+    fn run_lock(&mut self) -> Locked {
+        let (locked, file) = windows_lock::take();
+        self.run_lock = file;
+        locked
+    }
+
+    fn run_unlock(&mut self) {
+        self.run_lock = None;
+    }
+
+    fn ask_again(&mut self) -> Result<(), Failed> {
+        windows_lock::ask_again(RECORD_KEY)
+    }
+
+    fn take_again(&mut self) -> Result<bool, Failed> {
+        windows_lock::take_again(RECORD_KEY)
+    }
+
+    fn asked_again(&mut self) -> Result<bool, Failed> {
+        windows_lock::asked_again(RECORD_KEY)
     }
 }
 
