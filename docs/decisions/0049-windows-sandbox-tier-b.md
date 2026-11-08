@@ -2352,15 +2352,60 @@ can't be deleted is `RemovedPartly`. A first set-up's rollback that leaves no re
 them the same way. `--remove --uninstall` deletes the admin folder with whatever is left,
 `git\` by the same plain deletes, its leftovers scheduled with the folder.
 
-**Part 2 (not built here).** Before it points `CLAUDE_CODE_GIT_BASH_PATH` at a tree, the runner
-checks it: owner SYSTEM, no reparse point on the way, the marker naming the tree id and the
-account, and the tree id the record names. It
-pre-creates the key's session directory. A launch reads the recorded path just before starting
-its first process as the account, so a refresh that retires the old tree in that gap leaves the
-launch without one; part 2 must check that the tree is still there before it uses it. Part 2
-fails closed: a missing, unknown or `Git Bash unavailable` record value, or a tree that fails a
-check, means no Git Bash for that run, never the lawyer's Git or `PATH`; with the stub there,
-`CLAUDE_CODE_GIT_BASH_PATH` points at `git\_off\bash.exe`.
+**The runner's side** (`runner/git_bash.rs`, `runner/git_bash/os.rs`). The outer runner does it
+as the desktop user, before it makes the agent's environment and before anything runs as the
+pool account:
+1. It reads the record's value for the run's pool SID. A missing value, one it can't parse, or
+   `Git Bash unavailable: <code>` turns Git Bash off.
+2. It checks the admin folder's chain (`admin_dir_checked`). The recorded path must then be
+   exactly `<admin>\git\<pool account>\<tree id>`, with no temporary tree's name.
+3. It opens `git`, `<account>` and `<tree id>` relative to the level above, never through a
+   reparse point (`git_tree::checked_chain`). Each must be a folder owned by SYSTEM whose
+   protected DACL is exactly set-up's; it reads them through the Authenticated Users ACE above.
+4. The tree's completion marker `.clauseo-tree` must hold the record's tree id and the run's
+   pool SID.
+5. It opens `usr\bin\msys-2.0.dll` as itself. Its final path (`GetFinalPathNameByHandleW`)
+   must be the tree's own and plain ASCII. The key is 16 hex digits of msys's `hash_path_name`
+   over its NT form `\??\C:\…`, upper-cased (`mm/cygheap.cc`). Pinned vectors:
+   `C:\Program Files\Git` gives `1888ae32e00d56aa`, and `C:\clauseo-test\run-A\git` gives
+   `45a176edb0b42059`. The prefix (`msys-2.0S5`) comes from the same file: whatever follows
+   `%%% MSYS shared id: `, which must read `msys-<digits>.<digits>S<digits>`.
+6. It makes `\Sessions\<its session>\BaseNamedObjects\<prefix>-<key>` and
+   `\BaseNamedObjects\<prefix>-<key>` (just the global one in session 0) with
+   `NtCreateDirectoryObject` and no `OBJ_OPENIF`. Their descriptor:
+   `O:<desktop user>D:(A;;0xF000F;;;SY)(A;;0xF000F;;;<desktop user>)(A;;0x2000F;;;<pool user>)S:(ML;;NW;;;LW)`.
+   It holds both handles until it exits, and the folders go with the last handle. One already
+   there counts as squatted: Git Bash is off and the line says so.
+7. The agent gets `CLAUDE_CODE_GIT_BASH_PATH=<tree>\bin\bash.exe` and `<tree>\cmd` first in its
+   `PATH`, so its `git` is the tree's and finds the tree's `sh.exe`. `GIT_CONFIG_*` stays as it
+   was.
+
+VM facts: with both folders made this way, Git Bash, a local clone and an HTTPS clone all work
+under the agent's token. Each step that fails writes one line on stderr, `clauseo-sandbox-run:
+Git Bash is off for this run: <reason>`, naming no path, and the run goes on with no Git Bash.
+That fails closed: the spec's `CLAUDE_CODE_GIT_BASH_PATH` goes, and so does every `PATH` entry
+in a per-machine Git install (`GitForWindows`' `InstallPath`, `%ProgramFiles%\Git`), so the
+agent never falls back to the lawyer's Git. A Git elsewhere on a `PATH` the lawyer set (a
+package manager's shim, say) isn't recognised and stays. Under the agent's token it fails as
+the lawyer's Git would.
+
+**Residuals (ruled acceptable for launch).**
+- msys's objects in the global folder (the pid table with each process's exe path, and
+  `shared.5` with a NULL DACL) can be read and written by any run that knows the key, a
+  concurrent run included. The key is a hash of a path anyone can read. The squat check covers
+  pre-creation only: it can't keep another run out of a folder once that folder exists.
+- The lawyer's side: msys's sections for the lawyer's own Git live in the global folder under
+  the lawyer's key. A Low agent can read them, so it can read the exe paths (not the folders)
+  of the lawyer's running Git Bash processes.
+- A refresh that retires the tree between this check and the agent's first Git leaves the agent
+  with a Git Bash that fails to start. It is never someone else's: a new tree has another id.
+- Tier B's named objects: any tool that makes its own `Local\` named object fails under the
+  agent's token, Chrome's ProcessSingleton for one. `\Sessions\<N>\BaseNamedObjects` grants
+  CreateObject only to its owner, the session's logon SID, Administrators, SYSTEM and DWM. msys
+  gets around this through the pre-creation above, and Chrome through `chrome-headless-shell`.
+
+**After launch.** A patched msys with a per-run object namespace. That would close the shared
+global folder, along with the squat window.
 
 ### The launcher (PR6 interface)
 
