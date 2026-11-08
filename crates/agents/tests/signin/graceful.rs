@@ -37,6 +37,7 @@ fn login_listening(fx: &Fixture) -> (clauseo_agents::Agents, crate::support::Eve
 /// then says signed out, so the state is `Failed { Cancelled }` (the signed-out card), never the
 /// `SignedIn` from before.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn cancel_sends_cancel_and_the_login_ends_writing_nothing() {
     let mut fx = Fixture::new("graceful-cancel", "never");
     fx.listen_for_cancel();
@@ -69,6 +70,7 @@ fn cancel_sends_cancel_and_the_login_ends_writing_nothing() {
 
 /// The quit: the same `/cancel`, inside the bound, and no check or logout after it.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn quit_sends_cancel_and_ends_inside_its_bound() {
     let mut fx = Fixture::new("graceful-quit", "never");
     fx.listen_for_cancel();
@@ -92,6 +94,7 @@ fn quit_sends_cancel_and_ends_inside_its_bound() {
 /// The saved login was never confirmed and has no `login-source` record, which at the next start
 /// would read as reused, so the quit removes it: the home holds no unmarked login file.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn a_quit_in_the_middle_of_a_save_lets_it_finish_and_leaves_no_unmarked_file() {
     let mut fx = Fixture::new("graceful-mid-write", "slow-save:1000");
     fx.listen_for_cancel();
@@ -110,6 +113,7 @@ fn a_quit_in_the_middle_of_a_save_lets_it_finish_and_leaves_no_unmarked_file() {
 /// with a bound the request's 1 s read would pass, the quit still kills the login inside it,
 /// and the cut file, unmarked, goes.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn a_slow_cancel_does_not_delay_the_kill_at_the_bound() {
     let mut fx = Fixture::new("graceful-slow-cancel", "slow-save:3000");
     fx.listen_for_cancel();
@@ -241,6 +245,7 @@ fn a_confirmation_cut_by_the_kill_leaves_no_file_and_starts_no_logout() {
 /// The lawyer's Cancel while the login saves, then the quit while the check after it confirms:
 /// the confirmation that lands is recorded as Clauseo's own.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn cancel_then_quit_records_a_confirmation_that_lands() {
     let mut fx = Fixture::new("graceful-cancel-quit-confirm", "slow-save:1000");
     fx.set_env("FAKE_APP_SERVER_PAUSE_MS", "1000");
@@ -260,6 +265,7 @@ fn cancel_then_quit_records_a_confirmation_that_lands() {
 /// After the lawyer's Cancel a status check follows; a second Cancel stops it: the status
 /// running is awaited, and nothing more starts (no logout).
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn a_second_cancel_stops_the_check_after_the_first() {
     let mut fx = Fixture::new("graceful-cancel-twice", "never");
     fx.set_env("FAKE_STATUS_PAUSE_MS", "800");
@@ -283,6 +289,7 @@ fn a_second_cancel_stops_the_check_after_the_first() {
 /// The same with the quit as the second stop: the check stops and the quit ends inside its
 /// bound.
 #[test]
+#[cfg_attr(windows, ignore = "fake login never listens on Windows CI: #759")]
 fn the_quit_after_a_cancel_stops_the_check() {
     let mut fx = Fixture::new("graceful-cancel-then-quit", "never");
     fx.set_env("FAKE_STATUS_PAUSE_MS", "800");
