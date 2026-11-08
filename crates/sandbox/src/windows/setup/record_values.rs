@@ -5,6 +5,7 @@
 //!
 //! Pure: built on every OS so its tests run everywhere.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
@@ -100,6 +101,13 @@ pub const RESET_SIDS: &str = "ResetSids";
 /// The next stop that holds the lock folds it into `ResetSids` and deletes it, before it writes
 /// [`STOP_SEQUENCE`], so no marker clears with a reset still owed only here.
 pub const RESET_OWED: &str = "ResetOwed";
+/// `InstallId` (`REG_SZ`, a set-up value): 32 lowercase hex, 128 random bits the set-up writes
+/// with the first record of an install ([`new_install_id`]) and never again; `--remove` deletes
+/// it with the record. Each unclean-session marker records the id it was written under: one
+/// whose id isn't the current one belongs to a removed install, whose `Stop*` and `Sweep*`
+/// counters went with it, and is stale (`runner::unclean`). An install from before the id has
+/// none, and its markers none either.
+pub const INSTALL_ID: &str = "InstallId";
 /// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the last completed
 /// stop's last clean observation began (the pass that found no pool user's process, or the BITS
 /// enumeration, whichever began first), not when it was written; written only by a run that
@@ -142,7 +150,7 @@ pub const SWEEP_NEXT: &str = "SweepNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 13] = [
+pub const SETUP_VALUES: [&str; 14] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -150,6 +158,7 @@ pub const SETUP_VALUES: [&str; 13] = [
     REMOVING,
     RESET_SIDS,
     RESET_OWED,
+    INSTALL_ID,
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
@@ -167,6 +176,23 @@ pub fn resets_with(listed: &[Sid], add: &[Sid]) -> Vec<Sid> {
         }
     }
     all
+}
+
+/// An install id ([`INSTALL_ID`]) from 16 random bytes: their lowercase hex.
+pub fn new_install_id(random: [u8; 16]) -> String {
+    random.iter().fold(String::new(), |mut hex, byte| {
+        // Writing to a String can't fail.
+        let _written = write!(hex, "{byte:02x}");
+        hex
+    })
+}
+
+/// Whether `text` is an install id: 32 lowercase hex.
+pub fn is_install_id(text: &str) -> bool {
+    text.len() == 32
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `listed` (`ResetSids` as read) without `done`, the users a set-up has reset.
@@ -475,6 +501,20 @@ mod tests {
         // And the resets a stop owed without the lock.
         assert_eq!(RESET_OWED, "ResetOwed");
         assert!(SETUP_VALUES.contains(&RESET_OWED));
+        // And the install's id, so a reinstall's markers can tell the last install's apart.
+        assert_eq!(INSTALL_ID, "InstallId");
+        assert!(SETUP_VALUES.contains(&INSTALL_ID));
+        let id = new_install_id([0xab; 16]);
+        assert_eq!(id, "ab".repeat(16));
+        assert!(is_install_id(&id));
+        for bad in [
+            "",
+            "AB".repeat(16).as_str(),
+            &"ab".repeat(15),
+            &"ab".repeat(17),
+        ] {
+            assert!(!is_install_id(bad), "{bad}");
+        }
         // So do its completion's.
         assert_eq!(
             (STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT),

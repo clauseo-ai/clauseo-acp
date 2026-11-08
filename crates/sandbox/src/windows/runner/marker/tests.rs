@@ -65,7 +65,7 @@ fn a_marker_is_left_until_it_is_removed() {
     let ids = ["00000000000000aa", "00000000000000bb", "00000000000000cc"];
     let paths: Vec<PathBuf> = ids
         .iter()
-        .map(|id| write_marker(data.path(), id, &sid(POOL)).unwrap())
+        .map(|id| write_marker(data.path(), id, &sid(POOL), None).unwrap())
         .collect();
     for path in &paths {
         assert!(path.is_file(), "{}", path.display());
@@ -85,11 +85,13 @@ fn a_marker_is_left_until_it_is_removed() {
                 id: ids[1].to_owned(),
                 pool_user: Some(sid(POOL)),
                 state: Some(MarkerState::Open),
+                install: None,
             },
             UncleanSession {
                 id: ids[2].to_owned(),
                 pool_user: Some(sid(POOL)),
                 state: Some(MarkerState::Open),
+                install: None,
             },
         ]
     );
@@ -110,7 +112,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
     // Not a marker's content, and not the user's alone: listed, with no pool user.
     let garbled = data.file("sandbox/run/00000000000000dd.session", "not json");
     owner_only(&garbled);
-    let shared = write_marker(data.path(), "00000000000000ee", &sid(POOL)).unwrap();
+    let shared = write_marker(data.path(), "00000000000000ee", &sid(POOL), None).unwrap();
     #[cfg(unix)]
     crate::test_support::set_mode(&shared, 0o644);
     #[cfg(not(unix))]
@@ -123,6 +125,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
                 id: "00000000000000dd".to_owned(),
                 pool_user: None,
                 state: None,
+                install: None,
             },
             UncleanSession {
                 id: "00000000000000ee".to_owned(),
@@ -132,6 +135,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
                 } else {
                     Some(MarkerState::Open)
                 },
+                install: None,
             },
         ]
     );
@@ -142,7 +146,7 @@ fn a_marker_takes_only_a_launch_id() {
     let data = TempDir::new("marker-id");
     run_folder(&data);
     for bad in ["../escape", "0123456789ABCDEF", "short"] {
-        let got = write_marker(data.path(), bad, &sid(POOL));
+        let got = write_marker(data.path(), bad, &sid(POOL), None);
         assert_eq!(
             got.map_err(|e| e.kind()),
             Err(io::ErrorKind::InvalidInput),
@@ -161,20 +165,22 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
         .join(format!("{ID}.json"));
     // No run folder: the write fails, and the session (the logons) never runs.
     let mut logged_on = false;
-    let refused = marked(data.path(), &launch, &sid(POOL), |_| logged_on = true);
+    let refused = marked(data.path(), &launch, &sid(POOL), None, |_| logged_on = true);
     assert!(refused.is_err());
     assert!(!logged_on, "a session ran with no marker");
     // Nor with a launch file whose name gives no id.
     run_folder(&data);
     let unnamed = data.path().join("sandbox").join("run").join("launch.json");
-    let refused = marked(data.path(), &unnamed, &sid(POOL), |_| logged_on = true);
+    let refused = marked(data.path(), &unnamed, &sid(POOL), None, |_| {
+        logged_on = true;
+    });
     assert_eq!(
         refused.map_err(|e| e.kind()),
         Err(io::ErrorKind::InvalidInput)
     );
     assert!(!logged_on);
     // Written, the session runs with the marker's path, already on disk.
-    let ran = marked(data.path(), &launch, &sid(POOL), |marker| {
+    let ran = marked(data.path(), &launch, &sid(POOL), None, |marker| {
         logged_on = true;
         marker.is_file().then_some(marker)
     });
@@ -186,14 +192,14 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
 fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
     let data = TempDir::new("marker-states");
     run_folder(&data);
-    let path = write_marker(data.path(), ID, &sid(POOL)).unwrap();
+    let path = write_marker(data.path(), ID, &sid(POOL), None).unwrap();
     owner_only(&path);
     let states = [
         MarkerState::AwaitingSweep { sweep: 7 },
         MarkerState::AwaitingStop { stop: 3 },
     ];
     for state in states {
-        write_marker_at(&path, Some(&sid(POOL)), state).unwrap();
+        write_marker_at(&path, Some(&sid(POOL)), None, state).unwrap();
         owner_only(&path);
         let left = unclean_sessions(data.path()).unwrap();
         assert_eq!(left.len(), 1);
@@ -201,7 +207,7 @@ fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
         assert_eq!(left[0].pool_user, Some(sid(POOL)));
     }
     // One the desktop's start wrote for a marker it couldn't read names no pool user.
-    write_marker_at(&path, None, states[1]).unwrap();
+    write_marker_at(&path, None, None, states[1]).unwrap();
     owner_only(&path);
     let left = unclean_sessions(data.path()).unwrap();
     assert_eq!(
@@ -214,7 +220,7 @@ fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
         .join("sandbox")
         .join("run")
         .join("notes.session");
-    let refused = write_marker_at(&other, Some(&sid(POOL)), states[0]);
+    let refused = write_marker_at(&other, Some(&sid(POOL)), None, states[0]);
     assert_eq!(
         refused.map_err(|e| e.kind()),
         Err(io::ErrorKind::InvalidInput)
@@ -248,12 +254,8 @@ fn a_stop_awaiting_marker_written_with_a_sweep_number_reads_without_it() {
     let left = unclean_sessions(data.path()).unwrap();
     assert_eq!(left[0].state, Some(MarkerState::AwaitingStop { stop: 3 }));
     // Written again, it holds no sweep number.
-    write_marker_at(
-        &path,
-        Some(&sid(POOL)),
-        MarkerState::AwaitingStop { stop: 3 },
-    )
-    .unwrap();
+    let stop = MarkerState::AwaitingStop { stop: 3 };
+    write_marker_at(&path, Some(&sid(POOL)), None, stop).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("sweep"), "{text}");
 }
@@ -279,4 +281,21 @@ fn a_marker_is_clean_once_every_number_it_waits_for_is_met() {
         (MarkerState::Open.stop(), MarkerState::Open.sweep()),
         (None, None)
     );
+}
+
+#[test]
+fn a_marker_records_the_install_it_was_written_under() {
+    let data = TempDir::new("marker-install");
+    run_folder(&data);
+    let install = "0123456789abcdef0123456789abcdef";
+    let path = write_marker(data.path(), ID, &sid(POOL), Some(install)).unwrap();
+    owner_only(&path);
+    let left = unclean_sessions(data.path()).unwrap();
+    assert_eq!(left[0].install.as_deref(), Some(install));
+    // Under an install without one, none is written, and one from before reads as none.
+    write_marker_at(&path, Some(&sid(POOL)), None, MarkerState::Open).unwrap();
+    owner_only(&path);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("install"), "{text}");
+    assert_eq!(unclean_sessions(data.path()).unwrap()[0].install, None);
 }

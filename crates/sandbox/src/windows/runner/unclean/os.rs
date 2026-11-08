@@ -13,8 +13,8 @@ use super::super::marker::{
 use super::{Markers, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
-use crate::windows::setup::read_record_value;
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
+use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
 /// The markers of the data folder `data_dir`.
@@ -56,8 +56,18 @@ impl Markers for OsMarkers {
         sandbox_pool_sids().unwrap_or_default()
     }
 
-    fn settle(&mut self, id: &str, pool_user: Option<&Sid>, state: MarkerState) -> io::Result<()> {
-        write_marker_at(&marker_path(&self.data_dir, id), pool_user, state)
+    fn install_id(&mut self) -> Result<Option<String>, String> {
+        read_record_install_id().map_err(|error| error.to_string())
+    }
+
+    fn settle(
+        &mut self,
+        id: &str,
+        pool_user: Option<&Sid>,
+        install: Option<&str>,
+        state: MarkerState,
+    ) -> io::Result<()> {
+        write_marker_at(&marker_path(&self.data_dir, id), pool_user, install, state)
     }
 
     fn remove(&mut self, id: &str) -> io::Result<()> {

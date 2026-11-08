@@ -6,8 +6,10 @@
 //!   refused while a marker of this pool user, or one naming none or unreadable, awaits a stop
 //!   with `StopSequence` below its number. An `Open` marker of this pool user is a dead outer's
 //!   (one live session per pool user, and this outer hasn't written its own yet): it becomes
-//!   `AwaitingStop`, with `StopNext` read now, after its session's last launch path closed.
-//!   Each refusal requests the stop task. TODO: once slot groups land (two pool users share a
+//!   `AwaitingStop`, with `StopNext` read now, after its session's last launch path closed. An
+//!   unreadable or corrupt marker, or an `Open` one naming no pool user, becomes the same,
+//!   naming none, so it heals once that stop completes instead of refusing every logon for
+//!   good. Each refusal requests the stop task. TODO: once slot groups land (two pool users share a
 //!   slot's grants on a matter), the scope becomes the pool user's slot, since an escapee of one
 //!   user still holds the slot group's grants.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
@@ -22,10 +24,14 @@
 //! with the escapee dead, it reads `SweepNext` (`M`), requests the sweep and makes the marker
 //! `AwaitingSweep { sweep: M }`. A sweep that completed before the stop proves nothing, since the
 //! escapee could have registered a task after it. A launch refuses while a marker whose stop
-//! completed couldn't be re-marked. A clean marker is removed by whoever finds it clean. A
-//! marker naming a pool user the record no longer lists is stale (a removal stopped every
-//! process of that SID before it deleted the account) and is removed too. An absent `…Sequence`
-//! counts as 0, an absent `…Next` as 1.
+//! completed couldn't be re-marked. A clean marker is removed by whoever finds it clean.
+//!
+//! A marker naming a pool user the record no longer lists is stale (a removal stopped every
+//! process of that SID before it deleted the account) and is removed too. So is a readable
+//! marker whose install id isn't the record's `InstallId` (or has one while the record has
+//! none): it belongs to a removed install, whose counters its numbers count against. With
+//! neither holding one (an install from before the id) nothing changes; an id that can't be
+//! read makes no marker stale. An absent `…Sequence` counts as 0, an absent `…Next` as 1.
 //!
 //! No Windows call here: [`Markers`] carries every effect (`unclean/os.rs`), so the tests run on
 //! every OS.
@@ -58,8 +64,17 @@ pub trait Markers {
     /// The record's `PoolSids`; empty when there is no record or it can't be read, which
     /// makes no marker stale.
     fn pool(&mut self) -> Vec<Sid>;
-    /// Writes the marker `id` as `state`, naming `pool_user`.
-    fn settle(&mut self, id: &str, pool_user: Option<&Sid>, state: MarkerState) -> io::Result<()>;
+    /// The record's `InstallId`: `None` when it has none; `Err` when it can't be read, which
+    /// makes no marker stale.
+    fn install_id(&mut self) -> Result<Option<String>, String>;
+    /// Writes the marker `id` as `state`, naming `pool_user`, under the install id `install`.
+    fn settle(
+        &mut self,
+        id: &str,
+        pool_user: Option<&Sid>,
+        install: Option<&str>,
+        state: MarkerState,
+    ) -> io::Result<()>;
     /// Removes the marker `id`.
     fn remove(&mut self, id: &str) -> io::Result<()>;
     /// Asks for a run of `\Clauseo\SandboxStop`: whether it was queued.
@@ -70,22 +85,37 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
 }
 
-/// The markers, the stale ones removed.
+/// The markers, the stale ones removed: those of a pool user the record no longer lists, and
+/// those of another install. An unreadable one is given the current install id, if known, for
+/// when it is written again.
 fn current(fs: &mut impl Markers) -> io::Result<Vec<UncleanSession>> {
     let sessions = fs.sessions()?;
     let pool = fs.pool();
+    let install = fs.install_id().ok();
     let mut kept = Vec::new();
-    for session in sessions {
-        let stale = !pool.is_empty()
+    for mut session in sessions {
+        let gone_user = !pool.is_empty()
             && session
                 .pool_user
                 .as_ref()
                 .is_some_and(|user| !pool.contains(user));
-        if !(stale && fs.remove(&session.id).is_ok()) {
-            kept.push(session);
+        let readable = session.state.is_some();
+        let other_install = readable && install.as_ref().is_some_and(|now| session.install != *now);
+        if (gone_user || other_install) && fs.remove(&session.id).is_ok() {
+            continue;
         }
+        if !readable && let Some(now) = &install {
+            session.install.clone_from(now);
+        }
+        kept.push(session);
     }
     Ok(kept)
+}
+
+/// Writes `session`'s marker as `state`, as it names its pool user and install.
+fn settle(fs: &mut impl Markers, session: &UncleanSession, state: MarkerState) -> io::Result<()> {
+    let install = session.install.as_deref();
+    fs.settle(&session.id, session.pool_user.as_ref(), install, state)
 }
 
 /// Removes each of `sessions` that `done` meets; the ones left.
@@ -127,9 +157,7 @@ fn remark(
     let state = MarkerState::AwaitingSweep { sweep };
     for session in &mut sessions {
         if session.state.is_some_and(|state| state.stopped(done))
-            && fs
-                .settle(&session.id, session.pool_user.as_ref(), state)
-                .is_ok()
+            && settle(fs, session, state).is_ok()
         {
             session.state = Some(state);
         }
@@ -151,18 +179,22 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
         .collect();
     let mut standing = false;
     let mut awaiting = Vec::new();
+    let mut stop_next = None;
     for session in ours {
         match session.state {
-            // Its outer died: it now awaits a stop that begins after this read.
-            Some(MarkerState::Open) if session.pool_user.is_some() => {
+            // Its outer died, or it can't be read (or names no one): it now awaits a stop that
+            // begins after this read, so it heals once that stop completes.
+            Some(MarkerState::Open) | None => {
                 standing = true;
-                if let Some(state) = dead_outer(fs) {
-                    drop(fs.settle(&session.id, Some(pool_user), state));
+                if stop_next.is_none() {
+                    stop_next = dead_outer(fs);
+                }
+                if let Some(state) = stop_next {
+                    drop(settle(fs, &session, state));
                 }
             }
             Some(MarkerState::AwaitingStop { .. }) => awaiting.push(session),
             Some(MarkerState::AwaitingSweep { .. }) => {}
-            Some(MarkerState::Open) | None => standing = true,
         }
     }
     if !awaiting.is_empty() {
@@ -271,10 +303,7 @@ pub fn start_up(fs: &mut impl Markers) -> io::Result<StartUp> {
             numbers = dead_outer(fs);
         }
         let Some(state) = numbers else { continue };
-        if fs
-            .settle(&session.id, session.pool_user.as_ref(), state)
-            .is_ok()
-        {
+        if settle(fs, session, state).is_ok() {
             session.state = Some(state);
         }
     }

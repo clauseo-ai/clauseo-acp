@@ -1237,7 +1237,7 @@ leaves that profile, both naming the part.
     (`RunExit::Escapee`, no agent).
   - **The unclean-session marker.** Once it has read the launch, before anything runs as the
     pool user, the outer writes `<data_dir>\sandbox\run\<launch id>.session`, holding the pool
-    user's SID, as the launch file is written: atomically, with the run folder's three entries
+    user's SID and the install id it is written under (below), as the launch file is written: atomically, with the run folder's three entries
     (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
     the pool user can neither write nor remove it. A marker that can't be written refuses the
     launch before anything runs as the pool user (`runner::marker::marked`): the outer exits
@@ -1275,7 +1275,11 @@ leaves that profile, both naming the part.
       number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
       live session per pool user, and this outer hasn't written its own): it becomes
       `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
-      and the logon is refused. One whose stop completed is re-marked, and the logon goes. Escapees of other pool users don't count: one can't
+      and the logon is refused. One whose stop completed is re-marked, and the logon goes. An
+      unreadable or corrupt marker, or an `Open` one naming no pool user, would otherwise
+      refuse every logon for good: it is replaced by `AwaitingStop` with `StopNext` read then,
+      naming no pool user (so it counts for all), the stop is requested and the logon refused,
+      and it heals once that stop completes. Escapees of other pool users don't count: one can't
       open this pool user's runner. Once slot groups land (two pool users share a slot's grants
       on a matter), the scope becomes the pool user's slot, since an escapee of one still holds
       the slot group's grants.
@@ -1295,7 +1299,19 @@ leaves that profile, both naming the part.
       stop and sweep tasks are requested for what is still awaited. It never waits.
 
     A marker naming a pool SID the record no longer lists is stale and removed: a removal stopped
-    every process of that SID before it deleted the account. `--remove` clears the markers as
+    every process of that SID before it deleted the account. **The install id.** The set-up
+    writes `InstallId` (`REG_SZ`, 32 lowercase hex: 128 bits from `getrandom`) with the first
+    record of an install, when the key holds neither `OwnerSid` nor `InstallId`, and never
+    again (`record_write::write`); it is a set-up value, so a rollback of that first set-up and
+    `--remove` delete it. The outer reads it (as the lawyer) and writes it into its marker, and
+    refuses the launch with `RunExit::MarkerUnwritable` when it can't be read; every rewrite of
+    a marker keeps it. A readable marker whose id isn't the record's (another id, or none while
+    the record has one, or one while the record has none) belongs to a removed install: its
+    numbers count against counters `--remove` deleted, so after a reinstall it would refuse
+    logons until the new `StopSequence` caught up. It is stale and removed. A marker with no id
+    while the record has none either (an install from before the id, which a later set-up
+    doesn't give one, so its live markers aren't dropped) keeps the rules above. An id that
+    can't be read makes no marker stale. `--remove` clears the markers as
     the owner; an administrator's removal leaves them to that rule.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon before the first act. The first act removes the classes, `Run` values and Startup
