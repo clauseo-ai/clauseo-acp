@@ -2,6 +2,7 @@
 //! checks up to the connect. The block list's check, the lawyer's allowed sites first, is in
 //! `server/blocked.rs`.
 
+pub(crate) mod auth_log;
 mod route;
 
 use std::cell::{Cell, RefCell};
@@ -30,7 +31,8 @@ use crate::proxy::{
     Allowlist, Exchange, Limits, Listener, Record, Shared, SharedClock, Unopened, Verdict, connect,
     http,
 };
-use crate::{CappedSink, Denial, DenialSink, HostRefusal, Reachability};
+use crate::{CappedSink, Clock, Denial, DenialSink, HostRefusal, Reachability};
+use auth_log::{Admit, AuthLog};
 
 mod blocked;
 
@@ -72,6 +74,10 @@ pub(crate) struct Ctx {
     pub(crate) load: Rc<Load>,
     /// Each host's last good route, for a failed lookup.
     remembered: route::Remembered,
+    /// Read for the 407s' log lines.
+    clock: SharedClock,
+    /// The cap on the 407s' log lines, for all connections together.
+    auth_log: RefCell<AuthLog>,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -89,6 +95,8 @@ pub(crate) fn run(
     browser: Option<&Async<TcpListener>>,
     stopped: oneshot::Receiver<()>,
 ) {
+    let clock = SharedClock(Arc::clone(&parts.clock.0));
+    let auth_log = RefCell::new(AuthLog::new(clock.now()));
     let ctx = Rc::new(Ctx {
         shared: parts.shared,
         silent: parts.silent,
@@ -103,6 +111,8 @@ pub(crate) fn run(
         reach: RefCell::new(Reach::default()),
         load: Rc::new(Load::default()),
         remembered: route::Remembered::default(),
+        clock,
+        auth_log,
     });
     let executor = LocalExecutor::new();
     async_io::block_on(executor.run(async {
@@ -183,7 +193,10 @@ async fn serve(
     let answered = handle(&ctx, &client, &mut exchange, pending).await;
     drop(client);
     drop(socket);
-    if answered && let Some(record) = &ctx.record {
+    if answered
+        && let Some(record) = &ctx.record
+        && ctx.logs(&exchange)
+    {
         record(&exchange);
     }
 }
@@ -480,6 +493,23 @@ impl Ctx {
         } else {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
             Err(())
+        }
+    }
+
+    /// Whether the exchange's log line is written: a 407's only when the cap lets it through.
+    /// The count of the ones dropped before it goes to the tracing log, since the record has no
+    /// field for it.
+    fn logs(&self, exchange: &Exchange) -> bool {
+        if exchange.verdict != Verdict::AuthRequired {
+            return true;
+        }
+        match self.auth_log.borrow_mut().admit(self.clock.now()) {
+            Admit::Log { suppressed: 0 } => true,
+            Admit::Log { suppressed } => {
+                tracing::info!(suppressed, "egress: {suppressed} more 407s suppressed");
+                true
+            }
+            Admit::Drop => false,
         }
     }
 
