@@ -1,13 +1,14 @@
 //! Linux: the mount points that may live on another machine, from `/proc/self/mounts`, read as
 //! bytes. An allow list: a mount counts as local only when its type is a known local one
 //! ([`LOCAL_TYPES`]); every other type is remote, so a network or FUSE file system nobody listed
-//! (`autofs`, `fuse.gvfsd-fuse`, `fuse.rclone`, `9p`, `virtiofs`, plain `fuse`) is refused.
+//! (`autofs`, `fuse.gvfsd-fuse`, `fuse.rclone`, `9p` (WSL's drives and gVisor's root included),
+//! `virtiofs`, plain `fuse`) is refused.
 
 use std::path::PathBuf;
 
 /// The file system types that live on this machine: disk file systems, memory and image file
 /// systems, and the kernel's own. Every other type counts as remote.
-pub(crate) const LOCAL_TYPES: [&str; 46] = [
+pub(crate) const LOCAL_TYPES: [&str; 49] = [
     "ext2",
     "ext3",
     "ext4",
@@ -54,6 +55,9 @@ pub(crate) const LOCAL_TYPES: [&str; 46] = [
     "nsfs",
     "selinuxfs",
     "fuse.portal",
+    "ecryptfs",
+    "fuse.gocryptfs",
+    "fuse.lxcfs",
 ];
 
 /// The mount points in a Linux mount table (`/proc/self/mounts`) whose type is not in

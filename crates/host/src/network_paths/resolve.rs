@@ -195,7 +195,7 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
                         let Ok(target) = disk.fs.read_link(&next) else {
                             return Walked::Refused;
                         };
-                        let target = net.plain(&local(target));
+                        let target = net.plain(&target);
                         if net.is_network(&target) || net.is_network(&at.join(&target)) {
                             return Walked::Refused;
                         }
@@ -205,7 +205,7 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
                         rest.extend(parts_of(&target));
                     }
                     Ok(Entry::Dir | Entry::File) => {
-                        at = (disk.real)(&next).map_or(next, local);
+                        at = (disk.real)(&next).unwrap_or(next);
                         if net.is_network(&at) {
                             return Walked::Refused;
                         }
@@ -258,17 +258,6 @@ fn parts_of(path: &Path) -> Vec<Part> {
         .collect();
     parts.reverse();
     parts
-}
-
-/// `path` in its drive form on Windows when it names the local machine's own share
-/// ([`drive_form`]); as it is elsewhere.
-fn local(path: PathBuf) -> PathBuf {
-    if !cfg!(windows) {
-        return path;
-    }
-    path.to_str()
-        .and_then(drive_form)
-        .map_or(path, PathBuf::from)
 }
 
 /// A Windows path to this machine's own drive in its drive form: `\\localhost\c$\x`,
