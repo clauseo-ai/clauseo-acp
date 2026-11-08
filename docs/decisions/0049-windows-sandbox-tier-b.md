@@ -2118,10 +2118,11 @@ like a lifted one. With no WSL nothing is refused.
 
 **A pending WSL upgrade refuses the launch** (`wsl/upgrade.rs`, `Blocked::WslUpgradePending`,
 `wsl_upgrade_pending`). The Store package's `WslInstaller` service has a packaged COM class that
-grants launch to Authenticated Users (WSL `AppxManifest.in:74-78`), and its `Install()` upgrades
+grants launch to Authenticated Users (microsoft/WSL @19cd15ea `msixinstaller/AppxManifest.in:74-77`,
+the commit this section cites from here on), and its `Install()` upgrades
 through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
 is empty or older than the package's own version, compared as (major, minor, revision)
-(`WslInstaller.cpp:114-133`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
+(`src/windows/wslinstaller/exe/WslInstaller.cpp:142-165`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
 package is newer than the MSI, and the MSI's rewrite drops the deny until the WSL deny task's run,
 which the installer's first event starts. The check mirrors that test: the package's version comes from its
 packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
@@ -2152,6 +2153,39 @@ line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolR
 a stop that ends 48 writes no `StopSequence`, so what waits for a completed stop (the
 unclean-session marker and its refusal, F4) clears only after a later one, as for any process a
 stop left. One cause, one exit: no second refusal says the same.
+
+**`WslInstaller` can't be denied as the `AppID`s are** (microsoft/WSL @19cd15ea). Its class
+`{B5AEB4C3-9541-492F-AD4D-505951F6ADA4}` (`src/windows/wslinstaller/exe/WslInstaller.h:19`) is
+packaged COM only: the package's manifest declares it in a `com3:ServiceServer` of the packaged
+service `WslInstaller`, its launch permission the manifest's own `LaunchAndActivationPermission`
+(`O:BAG:BAD:(A;;11;;;AU)(A;;11;;;PS)(A;;11;;;SY)`, `msixinstaller/AppxManifest.in:74-77`), and
+the MSI registers no class, `AppID` or `LaunchPermission` for it (`msipackage/package.wix.in`
+names `B5AEB4C3` nowhere; its `AppID` keys are `LxssUserSession`'s and `WSLCSessionManager`'s,
+whose `LocalService` is `WSLService`, and those of `wsldevicehost.dll`'s surrogate and
+`WSLCSessionFactory`'s `wslcsession.exe`, servers that run as whoever starts them). Windows'
+deployment service builds the packaged-COM catalog from the signed manifest: there is no `AppID`
+whose `LaunchPermission` Clauseo could edit, and an edit of the catalog would be undone by the
+package's next deployment. So the pool can't be kept from activating it, and the launch check
+repairs a pending upgrade instead of refusing (below, "Self-healing"). The service upgrades by
+itself too: it starts with Windows (`AppxManifest.in:50`, `StartupType="auto"`), and each start
+runs `LaunchInstall()` (`src/windows/wslinstaller/exe/ServiceMain.cpp:91-108`) unless
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `AutoUpgradeViaMsix` is 0
+(`ServiceMain.cpp:52-61`), so a pending upgrade also completes at the next boot with no user.
+
+On the VM (F1, Server 2025, WSL 3.0.3.0) the installed package's `AppxManifest.xml` has no
+`desktop6:Service` and no COM server at all, only `windows.appExecutionAlias` and
+`windows.appExtension`; the package is registered for the owner only, and the service comes from
+the MSI (`C:\Program Files\WSL\`). `PackagedCom\ClassIndex` holds none of WSL's CLSIDs in `HKCU`
+or `HKLM` (F5). So there `WslInstaller` isn't registered and no one can activate it: this
+settles, for 3.0.3.0, the hypothesis above that a pool user can't start the lawyer-only package's
+upgrade. The manifest at @19cd15ea (newer) has the service again, so the check keeps comparing.
+F6 confirms the target resolution: the `AppID` `{E9B79997-57E3-4201-AECC-6A464E530DD2}`
+(`LocalService` `WSLService`) also holds `WSLCProcess` (`{AFBEA6D6-…}`) and `WSLCContainer`
+(`{B1F1C4E3-…}`), and `WindowsWsl::service_app_ids` (`wsl/os.rs`) takes every `AppID` whose
+`LocalService` is `WSLService` or `LxssManager`, so that `AppID` is a target by its service
+(and by `WSLCSessionManager`'s class, `package.wix.in:322-323`), and its three classes share its
+deny. F2 confirms that a pool token holds INTERACTIVE, which may write the Application log: the
+reason the `MsiInstaller` trigger is on the WSL deny task alone (below).
 
 **The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
