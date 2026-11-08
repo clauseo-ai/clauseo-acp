@@ -180,6 +180,8 @@ expression: text
 ; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by
 ; name. NVRAM variables, read or written (`nvram -p`).
 (deny nvram* (with message "clauseo-4242-7"))
+; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.
+(deny iokit-get-properties (with message "clauseo-4242-7"))
 
 ; The matter and the state folder: read and write.
 (allow file-read* file-write*

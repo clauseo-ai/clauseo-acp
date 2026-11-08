@@ -472,3 +472,16 @@ fn system_sockets_and_fsctl_are_refused() {
     j.probe_outside(&["fsctl", file]).assert_ok();
     assert_refused_with(&j.probe(&["fsctl", file]), refused);
 }
+
+/// Class 8, the registry: `(deny default)` let a jailed `ioreg` read the Mac's serial number
+/// on macOS 27.2 until the profile named `iokit-get-properties`.
+#[test]
+fn the_serial_number_cannot_be_read_from_the_registry() {
+    let j = Jail::new();
+    let args = ["-r", "-d", "1", "-c", "IOPlatformExpertDevice"];
+    let key = "IOPlatformSerialNumber";
+    let outside = run_outside("/usr/sbin/ioreg", &args, &j.m1());
+    assert!(outside.assert_ok().stdout.contains(key), "{outside:#?}");
+    let inside = run(&j.launcher, "/usr/sbin/ioreg", &args, &j.m1(), &[]);
+    assert!(!inside.stdout.contains(key), "{inside:#?}");
+}

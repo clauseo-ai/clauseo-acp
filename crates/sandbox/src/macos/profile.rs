@@ -197,8 +197,8 @@ impl Writer {
 
     /// The operations `(deny default)` leaves allowed, refused by name. No later rule allows
     /// them, so they hold for the whole profile. Measured on macOS 27.2 (26B123), 2026-11-09:
-    /// a jailed `nvram -p` printed every variable until this rule named it
-    /// (`tests/jail/deny.rs`).
+    /// a jailed `nvram -p` printed every variable and `ioreg` the Mac's serial number until
+    /// these rules named them (`tests/jail/deny.rs`).
     fn default_gaps(&mut self) {
         self.text.push_str(concat!(
             "\n; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by\n",
@@ -206,6 +206,11 @@ impl Writer {
         ));
         let nvram = format!("(deny nvram* {})", self.message);
         self.line(&nvram);
+        self.text.push_str(
+            "; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.\n",
+        );
+        let properties = format!("(deny iokit-get-properties {})", self.message);
+        self.line(&properties);
     }
 
     /// The policy's allows, before any of its denies.
