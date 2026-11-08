@@ -65,6 +65,14 @@ pub struct Neighbours {
 /// inherited deny of reads and writes for every SID of `pool` but `assigned`. A Low-labelled
 /// matter that inherits `C:\`'s `Users` write entries is closed to other pool agents this way
 /// (spike B, rows 2 and 4).
+///
+/// On the matter folder the deny is two entries, one on the folder alone and one for
+/// everything below it (R18): a session granted a read of the whole matter lifts the first for
+/// its own pool user, so it can list the folder, while the second still closes every child
+/// the grant doesn't allow. The state and notes folders keep the one entry for their tree: no
+/// read reaches them. A ledger that lists the one entry on a matter folder (before R18) doesn't
+/// list this fence as applied, so the next launch plans it, and `apply` takes the old entry
+/// back once the two are written (`apply/split.rs`).
 pub fn plan_fence(folders: &MatterFolders, assigned: &Sid, pool: &[Sid]) -> Vec<Grant> {
     fence_grants(&folders.each(), assigned, pool)
 }
@@ -90,13 +98,20 @@ pub(crate) fn fence_grants(
     let mut fence = Vec::new();
     for other in pool.iter().filter(|sid| *sid != assigned) {
         for &(folder, kind) in folders {
-            fence.push(Grant {
-                path: folder.to_owned(),
-                sid: other.clone(),
-                rights: Rights::DenyReadWrite,
-                inherit: Inherit::Tree,
-                kind,
-            });
+            let split: &[Inherit] = if kind == PathKind::Matter {
+                &[Inherit::ThisOnly, Inherit::Below]
+            } else {
+                &[Inherit::Tree]
+            };
+            for &inherit in split {
+                fence.push(Grant {
+                    path: folder.to_owned(),
+                    sid: other.clone(),
+                    rights: Rights::DenyReadWrite,
+                    inherit,
+                    kind,
+                });
+            }
         }
     }
     fence
@@ -119,10 +134,18 @@ mod tests {
         };
         let pool = [sid(1001), sid(1002), sid(1003)];
         let fence = plan_fence(&folders, &pool[1], &pool);
-        assert_eq!(fence.len(), 6);
+        assert_eq!(fence.len(), 8);
         assert!(fence.iter().all(|g| g.sid != pool[1]));
         assert!(fence.iter().all(|g| g.rights == Rights::DenyReadWrite));
-        assert!(fence.iter().all(|g| g.inherit == Inherit::Tree));
+        // The matter folder's deny is split: the folder alone, and everything below it.
+        for g in &fence {
+            let want: &[Inherit] = if g.kind == PathKind::Matter {
+                &[Inherit::ThisOnly, Inherit::Below]
+            } else {
+                &[Inherit::Tree]
+            };
+            assert!(want.contains(&g.inherit), "{g:?}");
+        }
         for other in [&pool[0], &pool[2]] {
             for (folder, kind) in folders.each() {
                 let found = fence

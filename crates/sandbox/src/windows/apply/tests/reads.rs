@@ -7,7 +7,7 @@ use super::fake::Broad;
 use super::*;
 use crate::windows::ledger::Entry;
 
-mod access;
+pub(in crate::windows::apply::tests) mod access;
 
 use access::{POOL_TOKEN, READ, USERS, WRITE, granted, volume_default};
 

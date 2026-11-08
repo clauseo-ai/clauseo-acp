@@ -203,7 +203,9 @@ impl World {
                 id: matter_two(),
                 folders: MatterFolders {
                     root,
-                    state: self.at("data/agent-state/01890a5d-ac96-774b-8cce-b302099a8058/c"),
+                    state: self
+                        .canonical("data")
+                        .join("agent-state/01890a5d-ac96-774b-8cce-b302099a8058/c"),
                     notes: None,
                 },
                 pool_user: Sid::parse(OTHER_POOL_SIDS[0]).unwrap(),

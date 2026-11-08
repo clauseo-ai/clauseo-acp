@@ -169,17 +169,25 @@ fn every_other_pool_user_is_denied_this_matters_own_folders_and_no_one_else_is()
         .filter(|g| g.rights == Rights::DenyReadWrite)
         .collect();
     let own = [policy.matter(), policy.state(), policy.notes().unwrap()];
+    // The matter folder's deny is two entries (R18): the folder alone and what is below it.
     assert_eq!(
         denies.len(),
-        OTHER_POOL_SIDS.len() * own.len(),
+        OTHER_POOL_SIDS.len() * (own.len() + 1),
         "{denies:#?}"
     );
     for other in OTHER_POOL_SIDS {
         for folder in own {
-            let found = denies
-                .iter()
-                .any(|g| g.sid.as_str() == other && g.path == folder && g.inherit == Inherit::Tree);
-            assert!(found, "{other} on {folder:?}");
+            let inherits: &[Inherit] = if folder == policy.matter() {
+                &[Inherit::ThisOnly, Inherit::Below]
+            } else {
+                &[Inherit::Tree]
+            };
+            for inherit in inherits {
+                let found = denies
+                    .iter()
+                    .any(|g| g.sid.as_str() == other && g.path == folder && g.inherit == *inherit);
+                assert!(found, "{other} on {folder:?} {inherit:?}");
+            }
         }
     }
     for g in &denies {
@@ -457,8 +465,9 @@ fn an_unlaunched_registered_matter_is_fenced_at_another_matters_launch() {
         .zip(plan.owners().iter().copied())
         .filter(|(g, _)| g.path == m2.root || g.path == m2.state)
         .collect();
-    // This launch's pool user and the other one, denied on m2's two folders; m2's own user not.
-    assert_eq!(theirs.len(), 4, "{theirs:#?}");
+    // This launch's pool user and the other one, denied on m2's two folders (the root's deny
+    // split in two, R18); m2's own user not.
+    assert_eq!(theirs.len(), 6, "{theirs:#?}");
     for (grant, owner) in &theirs {
         assert_eq!(
             *owner,

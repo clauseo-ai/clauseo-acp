@@ -51,7 +51,8 @@ fn growing_the_pool_sets_a_planted_child_aside_into_the_matter_whose_tree_holds_
     let grown = [small[0].clone(), small[1].clone(), sid(OTHER_POOL_SIDS[1])];
     let next = fence_registered(&mut ledger, &registered, &grown, &mut acl, &mut around).unwrap();
 
-    assert_eq!(next.written, 3 + 2);
+    // Each matter folder's deny is two entries (R18).
+    assert_eq!(next.written, 4 + 3);
     let mut moved: Vec<(PathBuf, MatterId)> =
         around.set_aside.into_iter().zip(around.owners).collect();
     moved.sort();

@@ -16,21 +16,21 @@ use crate::windows::acl_plan::{Inherit, Rights};
 use crate::windows::test_world::{GROUP_SID, USER_SID};
 
 /// `BUILTIN\Users`, in every pool user's restricting set.
-pub(super) const USERS: &str = "S-1-5-32-545";
+pub(in crate::windows::apply::tests) const USERS: &str = "S-1-5-32-545";
 
 /// `FILE_GENERIC_READ`: read data (or list a folder), attributes, extended attributes and the
 /// permissions.
-pub(super) const READ: u32 = 0x0012_0089;
+pub(in crate::windows::apply::tests) const READ: u32 = 0x0012_0089;
 
 /// `FILE_WRITE_DATA` (or add a file to a folder).
-pub(super) const WRITE: u32 = 0x2;
+pub(in crate::windows::apply::tests) const WRITE: u32 = 0x2;
 
 /// Matter one's pool user's token: the pool user, its group, `Users`.
-pub(super) const POOL_TOKEN: [&str; 3] = [USER_SID, GROUP_SID, USERS];
+pub(in crate::windows::apply::tests) const POOL_TOKEN: [&str; 3] = [USER_SID, GROUP_SID, USERS];
 
 /// What a volume's root gives `Users` and every folder below inherits: read and write, as
 /// `C:\` gives, the reason for the fence.
-pub(super) fn volume_default(root: &Path) -> Key {
+pub(in crate::windows::apply::tests) fn volume_default(root: &Path) -> Key {
     (
         root.to_owned(),
         USERS.to_owned(),
@@ -67,7 +67,12 @@ fn dacl<'k>(aces: &'k BTreeSet<Key>, path: &Path) -> Vec<&'k Key> {
 }
 
 /// Whether a token holding `sids` is granted all of `want` on `path`.
-pub(super) fn granted(aces: &BTreeSet<Key>, path: &Path, sids: &[&str], want: u32) -> bool {
+pub(in crate::windows::apply::tests) fn granted(
+    aces: &BTreeSet<Key>,
+    path: &Path,
+    sids: &[&str],
+    want: u32,
+) -> bool {
     let (mut allowed, mut denied) = (0u32, 0u32);
     for (_, sid, rights, _) in dacl(aces, path) {
         if !sids.contains(&sid.as_str()) {

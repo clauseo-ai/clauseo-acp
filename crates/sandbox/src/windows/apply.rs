@@ -35,9 +35,11 @@
 //!    owns is handed to the desktop user, and refuses as [`ApplyFailure::PoolOwned`] (`Child`)
 //!    only if that hand-back fails ([`Strict`]'s `assigned`, S15 `PR4h`).
 //! 6. Only then are the entries marked `applied`.
-//! 7. Only after all that succeeds does a folder that is now a registered matter lose the
-//!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
-//!    replaced by the walk-down set first (`lift.rs`). A refused launch leaves every deny.
+//! 7. Only after all that succeeds, a fence's whole-tree deny on a matter folder that this
+//!    plan split in two is taken back (`split.rs`, R18), and a folder that is now a registered
+//!    matter loses the sibling deny on it, for every matter whose entry names it; a deny on a
+//!    folder holding it is replaced by the walk-down set first (`lift.rs`). A refused launch
+//!    leaves every deny.
 //!
 //! Any failure rolls back this launch's new entries only (`back.rs`): under the ledger's lock
 //! they are marked `removing`, each permission entry this launch wrote for them is removed unless
@@ -68,6 +70,7 @@ mod fence;
 mod lift;
 mod reads;
 mod roots;
+mod split;
 mod stuck;
 mod walk;
 
@@ -182,6 +185,8 @@ fn apply_with_pool(
     let run = run_plan(ledger, plan, acl, around, &own, pool)
         .inspect_err(|error| stuck::owe(ledger, plan, error))?;
     stuck::settled(ledger, plan);
+    // R18: a whole-tree fence entry on a matter folder goes once its split pair is applied.
+    split::retire_whole(ledger, plan, acl, around);
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),
