@@ -140,8 +140,24 @@ pub trait PolicyTree {
 /// The most `*.json` files read from one Linux folder; more is a read error.
 pub const MAX_FILES: usize = 256;
 
-/// The most bytes read from one Linux policy file (1 MiB); a longer file is a read error.
-pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
+/// The most bytes read from one Linux policy file (16 MiB, room for a firm's long URL lists); a
+/// longer file is a read error.
+pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Whether a Win32 error code from a registry read means the key or value is missing:
+/// `ERROR_FILE_NOT_FOUND` (2) or `ERROR_PATH_NOT_FOUND` (3). Any other is a read error.
+pub fn registry_missing(code: u32) -> bool {
+    matches!(code, 2 | 3)
+}
+
+/// Whether a file system error means nothing is there: the path is missing, or a file stands
+/// where a folder on it should be (Chrome skips both). Any other is a read error.
+fn fs_missing(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
+}
 
 /// The real file system, following links.
 #[derive(Debug, Clone, Copy, Default)]
@@ -233,7 +249,7 @@ impl PolicyTree for SystemTree {
         use std::io::Read as _;
         let file = match std::fs::File::open(path) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if fs_missing(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
         let mut bytes = Vec::new();
@@ -244,7 +260,7 @@ impl PolicyTree for SystemTree {
     fn json_files(&self, dir: &Path) -> io::Result<Vec<PathBuf>> {
         let entries = match std::fs::read_dir(dir) {
             Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) if fs_missing(&error) => return Ok(Vec::new()),
             Err(error) => return Err(error),
         };
         let mut files = Vec::new();
@@ -405,7 +421,7 @@ pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
             let said = match tree.read(&file, MAX_FILE_BYTES) {
                 Ok(None) => Found::Absent,
                 Ok(Some(bytes)) if bytes.len() as u64 > MAX_FILE_BYTES => {
-                    Found::Unreadable("a file is larger than 1 MiB".to_owned())
+                    Found::Unreadable("a file is larger than 16 MiB".to_owned())
                 }
                 Ok(Some(bytes)) => json_says(&bytes),
                 Err(error) => Found::Unreadable(format!("a file was not read ({})", error.kind())),

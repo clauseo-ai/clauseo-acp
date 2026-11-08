@@ -218,7 +218,7 @@ fn past_either_linux_cap_is_a_read_error() {
     let said = at(&read_linux(&tree), Browser::Chromium, Scope::Machine);
     assert_eq!(
         said,
-        Found::Unreadable("a file is larger than 1 MiB".into())
+        Found::Unreadable("a file is larger than 16 MiB".into())
     );
     let mut fits = br#"{"RemoteDebuggingAllowed": false}"#.to_vec();
     fits.resize(usize::try_from(MAX_FILE_BYTES).unwrap(), b' ');

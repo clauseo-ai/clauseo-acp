@@ -696,7 +696,7 @@ in Chrome's, Edge's and Chromium's policy locations. It takes the same values Ch
 - **Linux:** every `*.json` file in `/etc/opt/chrome/policies/managed/`,
   `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`; other files are
   skipped, as Chrome skips them. The value is a boolean, or the integer 0 (false) or 1 (true).
-  Clauseo reads at most 256 `.json` files in each folder and 1 MiB in each file; a folder or
+  Clauseo reads at most 256 `.json` files in each folder and 16 MiB in each file; a folder or
   file past either limit counts as one it can't read (below). Clauseo skips `recommended/`,
   because Chrome doesn't take this policy as a recommendation either.
 
@@ -705,7 +705,7 @@ in Chrome's, Edge's and Chromium's policy locations. It takes the same values Ch
 a managed preferences file or a policy folder. To have Clauseo honour such a policy, deploy
 `RemoteDebuggingAllowed` through one of the places above too.
 
-**The rule.** Each place says one of five things:
+**The rule.** Each place says one of four things:
 
 - **False:** Clauseo's browser doesn't start, and the app tells the lawyer that your firm doesn't
   allow apps to control a browser on this computer.

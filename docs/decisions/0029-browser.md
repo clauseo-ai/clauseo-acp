@@ -1011,7 +1011,7 @@ session that cannot get the browser makes no file system calls for it. Before an
 below, the prep reads the firm's own Chrome, Edge and Chromium `RemoteDebuggingAllowed` (registry
 `HKLM`/`HKCU`, `SOFTWARE\Policies\Chromium` too; macOS managed preferences files,
 `org.chromium.Chromium` too; Linux `managed` policy folders of Chrome, Edge (`/etc/opt/edge`)
-and Chromium (`/etc/chromium`), at most 256 files of 1 MiB each;
+and Chromium (`/etc/chromium`), at most 256 files of 16 MiB each;
 `clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`), taking what Chrome's own
 conversion takes (a `REG_SZ` `"0"` is false). Chrome for Testing reads its own policy key and
 chrome-headless-shell none, so a false anywhere starts no browser at all, and the entry drops with
