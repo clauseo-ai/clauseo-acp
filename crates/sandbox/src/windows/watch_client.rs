@@ -74,10 +74,12 @@ mod supervise;
 #[cfg(test)]
 mod tests;
 pub mod verify;
+mod walk;
 
 #[cfg(test)]
 use route::Lines;
-pub use route::{crosses_reparse, is_local_drive_path};
+pub use route::is_local_drive_path;
+pub use walk::{Walker, open_no_reparse};
 
 #[cfg(windows)]
 pub use os::would_deny;

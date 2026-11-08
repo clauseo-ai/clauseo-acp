@@ -2174,16 +2174,16 @@ unelevated:
 - It refuses (`None`), before opening anything, any path that isn't `X:\...` with no `.` or
   `..` part, and any drive `GetDriveTypeW` calls remote or unknown. UNC, `\\?\`, `\\.\` and
   device paths never reach the network or a device.
-- It refuses (`None`) a path any part of which is a reparse point (a junction, a symbolic link,
-  a mount point), the last part included (`watch_client::crosses_reparse`). Each part's
-  attributes are read with `GetFileAttributesW`, which doesn't follow the part it names, from
-  the drive's first folder down, so no link a pool user planted is traversed. That is one call
-  per part on an `unknown` refusal, which is cheap next to the 20-a-second cap. **Residual:** a
-  part swapped for a link between that walk and the open below is traversed; the pool user
-  gains only a wrong read-or-write label on a card, and nothing leaves the local drive, since
-  the drive type was checked first.
-- It reads the descriptor (owner, group and DACL) on a handle opened with `READ_CONTROL`,
-  `FILE_FLAG_OPEN_REPARSE_POINT` and backup semantics.
+- It opens the path one part at a time (`watch_client::open_no_reparse`): the drive's root by
+  name, then each part relative to the handle of the folder before it (`object::open_at`:
+  `NtCreateFile` with `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT` and backup intent). No
+  part is ever followed. A folder a pool user swaps for a link to `\\server\share` after an
+  earlier part was opened fails its own relative open instead of reaching the network, and no
+  full path is ever opened, so there is no window between a check and an open. A part that is
+  itself a reparse point (a junction, a symbolic link, a mount point), the last included, or any
+  failed open, gives `None`.
+- It reads the descriptor (owner, group and DACL) on the last part's handle, opened with
+  `READ_CONTROL`.
 - It checks with `AuthzInitializeResourceManager(NO_AUDIT)`, a context per pool SID from
   `AuthzInitializeContextFromSid` (with the SID's local groups, cached), and `AuthzAccessCheck`
   for `FILE_READ_DATA` or `FILE_WRITE_DATA`.

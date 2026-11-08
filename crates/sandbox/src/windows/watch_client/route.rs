@@ -153,32 +153,6 @@ pub fn is_local_drive_path(path: &Path) -> bool {
     })
 }
 
-/// Whether any part of the local drive path `path` is a reparse point (a junction, a symbolic
-/// link, a mount point): the folders an open would pass through, from the drive's first
-/// folder down, and the last part, whose link a pool user's open would follow. `is_reparse`
-/// reads one part's attributes without following it; `None` (it can't tell) for any part, or
-/// a path that isn't a local drive path, is `None`. The drive's root isn't asked.
-pub fn crosses_reparse(
-    path: &Path,
-    mut is_reparse: impl FnMut(&Path) -> Option<bool>,
-) -> Option<bool> {
-    if !is_local_drive_path(path) {
-        return None;
-    }
-    let text = path.to_str()?;
-    let mut prefix = text.get(..3)?.to_owned();
-    for part in text.get(3..)?.split('\\').filter(|part| !part.is_empty()) {
-        if !prefix.ends_with('\\') {
-            prefix.push('\\');
-        }
-        prefix.push_str(part);
-        if is_reparse(Path::new(&prefix))? {
-            return Some(true);
-        }
-    }
-    Some(false)
-}
-
 /// The bytes read so far split into lines, each at most [`LINE_CAP`] long.
 #[derive(Default)]
 pub(super) struct Lines {
