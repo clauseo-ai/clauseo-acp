@@ -62,6 +62,7 @@ use crate::windows::sids::Sid;
 
 pub use identify::{
     ClientFacts, Gate, Refusal, ServerFacts, check_owner, check_server, identify, pipe_sddl,
+    pool_squat,
 };
 pub use protocol::{
     Op, PROTOCOL, REPLY_CAP, REQUEST_CAP, Reply, SetUpError, retry_squatted, via_task,

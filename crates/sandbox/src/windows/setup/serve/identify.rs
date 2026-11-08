@@ -206,6 +206,16 @@ pub fn check_owner(owner: &Result<Sid, String>) -> Result<(), String> {
     }
 }
 
+/// Whether a pipe that failed [`check_owner`] is a pool user's squat, which stopping the pool's
+/// processes frees: its owner `owner` is one of `pool` (`PoolSids`) or `groups` (the pool's
+/// group). Any other owner, or one that couldn't be read, is not: per machine, stopping the pool
+/// for it would end every lawyer's matters and free nothing.
+pub fn pool_squat(owner: &Result<Sid, String>, pool: &[Sid], groups: &[Sid]) -> bool {
+    owner
+        .as_ref()
+        .is_ok_and(|owner| pool.contains(owner) || groups.contains(owner))
+}
+
 /// Whether `server` is the set-up task's. The proof is the pipe's owner ([`check_owner`]): the
 /// server makes the pipe owned by LOCAL SYSTEM ([`pipe_sddl`]), which a pool user can't, and
 /// the owner stays with the pipe, so a squatter's pipe passed to another process, or a server

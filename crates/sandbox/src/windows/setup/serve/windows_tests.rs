@@ -213,7 +213,8 @@ fn elevated_a_squatted_pipe_name_is_served_to_no_one_and_the_app_sends_it_nothin
         (app.join().unwrap(), sent)
     });
     eprintln!("the app: {asked:?}\nthe squatter read: {sent:?}");
-    let Err(SetUpError::NotTheServer(why)) = &asked else {
+    // Its owner (Administrators) is no pool user's: a squat at once, with no pool stop.
+    let Err(SetUpError::Squatted(why)) = &asked else {
         panic!("{asked:?}");
     };
     assert!(why.contains("isn't owned by LOCAL SYSTEM"), "{why}");

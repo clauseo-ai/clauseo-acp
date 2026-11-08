@@ -2089,10 +2089,14 @@ for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, on
    result file does, except `refused`: the gate shouldn't refuse a lawyer, so for one it didn't
    foresee the app logs why and runs the prompted `--set-up` (`serve::via_task`), which needs an
    administrator's credentials and so grants no one anything;
-6. a pipe someone else serves is most likely a pool user's process holding the name: the app
-   starts the stop task (`request_pool_stop`), waits while it is queued or running (up to 60 s),
-   and runs steps 2 to 5 once more. A pipe still someone else's, or a stop that didn't start, is a
-   failure naming a squatted pipe (`SetUpError::Squatted`), with nothing sent and no prompt.
+6. a pipe whose owner is one of the record's pool users or its group (`serve::pool_squat`) is a
+   pool user's process holding the name: the app starts the stop task (`request_pool_stop`),
+   waits while it is queued or running (up to 60 s), and runs steps 2 to 5 once more. Any other
+   squat (another user's pipe, one that refuses this user, an owner that can't be read, a SYSTEM
+   pipe whose image doesn't match, as through a `subst` drive) stops nothing: per machine a stop
+   would end every lawyer's matters and free nothing. That, a pipe still someone else's, or a stop
+   that didn't start, is a failure naming a squatted pipe (`SetUpError::Squatted`), with nothing
+   sent and no prompt.
 
 **Accepted.** A non-admin user can now make local accounts, WFP filters and the D5 claim on a
 per-machine install; IT opts in by deploying it. The set-up's change journal step grows journals

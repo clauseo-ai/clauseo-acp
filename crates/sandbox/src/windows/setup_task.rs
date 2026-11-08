@@ -22,13 +22,14 @@
 //!    SYSTEM's in the kernel's process list, and its image, as the kernel names it, is the admin
 //!    copy: one that differs refuses, one Windows won't give this user is logged and set aside.
 //!    A pool user can make the pipe's name first, and a pipe that refuses this user or fails the
-//!    check gets nothing ([`SetUpError::NotTheServer`]). A server process no longer listed was
-//!    ending as this connected, and is taken as gone;
+//!    check gets nothing: [`SetUpError::NotTheServer`] when its owner is one of the record's
+//!    pool users or its group (`serve::pool_squat`), otherwise [`SetUpError::Squatted`] at once.
+//!    A server process no longer listed was ending as this connected, and is taken as gone;
 //! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
 //!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server
 //!    that went away before replying (one that was ending as this connected) is asked again,
 //!    once, after the task is started again;
-//! 5. a pipe someone else serves is most likely a pool user's process holding the name: the
+//! 5. a pipe a pool user's process serves ([`SetUpError::NotTheServer`]): the
 //!    pool's processes are stopped (`request_pool_stop`), and once the stop task is done, steps
 //!    1 to 4 run once more. A pipe still someone else's is [`SetUpError::Squatted`]
 //!    (`serve::retry_squatted`).
@@ -58,11 +59,12 @@ use super::acl::object::{Handle, os_error};
 use super::admin_copy::{self, os};
 use super::pipe::PIPE_RIGHTS;
 use super::pipe::os::Overlapped;
+use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::refresh::task::{run_task, task_busy};
 use super::refresh::{SystemTask, TaskError, request_pool_stop};
 use super::setup::serve::{
     CONNECT_WAIT, Op, PIPE_NAME, REPLY_CAP, REPLY_WAIT, RERUN_AFTER, ServerFacts, check_owner,
-    check_server, retry_squatted,
+    check_server, pool_squat, retry_squatted,
 };
 use super::setup::stop::windows_stopper::listed_users;
 use super::sids::Sid;
@@ -165,6 +167,7 @@ pub(crate) fn ask(
                     return Err(SetUpError::Pipe("the server went away twice".to_owned()));
                 }
                 Err(Exchange::NotTheServer(why)) => return Err(SetUpError::NotTheServer(why)),
+                Err(Exchange::Squatted(why)) => return Err(SetUpError::Squatted(why)),
                 Err(Exchange::Failed(why)) => return Err(SetUpError::Pipe(why)),
             },
             Err(code)
@@ -187,8 +190,9 @@ pub(crate) fn ask(
                     unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) };
             }
             Err(code) if code == ERROR_ACCESS_DENIED => {
-                // The set-up task's pipe lets this user in: one that doesn't is someone else's.
-                return Err(SetUpError::NotTheServer(
+                // The set-up task's pipe lets this user in: one that doesn't is someone else's,
+                // whose owner can't be read, so nothing is stopped for it.
+                return Err(SetUpError::Squatted(
                     "the pipe refuses this user, so another process made it".to_owned(),
                 ));
             }
@@ -247,10 +251,12 @@ pub(in crate::windows) fn open(
 pub(in crate::windows) enum Exchange {
     /// The server closed before any reply.
     Gone,
-    /// The server isn't the set-up task's.
+    /// The server isn't the set-up task's: a pool user's (`serve::pool_squat`).
     NotTheServer(String),
     /// Anything else.
     Failed(String),
+    /// The server isn't the set-up task's, nor a pool user's.
+    Squatted(String),
 }
 
 /// Checks the server on `pipe` against `admin_exe` ([`check_pipe`]), then sends `request`
@@ -353,10 +359,18 @@ fn gone_or(error: &windows::core::Error) -> Exchange {
 /// fact Windows wouldn't give this user logged. Nothing is written before it passes.
 pub(in crate::windows) fn check_pipe(pipe: &Handle, admin_exe: &Path) -> Result<(), Exchange> {
     let owner = pipe_owner(pipe);
-    check_owner(&owner).map_err(Exchange::NotTheServer)?;
+    if let Err(why) = check_owner(&owner) {
+        let (pool, groups) = record_pool();
+        return Err(if pool_squat(&owner, &pool, &groups) {
+            Exchange::NotTheServer(why)
+        } else {
+            Exchange::Squatted(why)
+        });
+    }
     let facts = server_facts(pipe, owner)?;
     let device = drive_device(admin_exe).map_err(Exchange::Failed)?;
-    let unread = check_server(&facts, admin_exe, &device).map_err(Exchange::NotTheServer)?;
+    // The pipe is LOCAL SYSTEM's, which no pool user can make: stopping the pool frees nothing.
+    let unread = check_server(&facts, admin_exe, &device).map_err(Exchange::Squatted)?;
     if !unread.is_empty() {
         tracing::info!(
             ?unread,
@@ -364,6 +378,23 @@ pub(in crate::windows) fn check_pipe(pipe: &Handle, admin_exe: &Path) -> Result<
         );
     }
     Ok(())
+}
+
+/// The record's pool users (`PoolSids`) and its group (`GroupSid`), as this user reads them;
+/// a read that fails is logged and counts as none, so nothing is stopped on it.
+fn record_pool() -> (Vec<Sid>, Vec<Sid>) {
+    let pool = sandbox_pool_sids().unwrap_or_else(|error| {
+        tracing::warn!(%error, "the record's pool can't be read");
+        Vec::new()
+    });
+    let group = match sandbox_group_sid() {
+        Ok(group) => group.and_then(|text| Sid::parse(&text).ok()),
+        Err(error) => {
+            tracing::warn!(%error, "the record's group can't be read");
+            None
+        }
+    };
+    (pool, group.into_iter().collect())
 }
 
 /// Every fact [`check_pipe`] reads of `pipe`'s server, its owner included, unchecked: what a
@@ -412,6 +443,7 @@ fn unread(error: &windows::core::Error, what: &str) -> Result<String, Exchange> 
     Err(match gone_or(error) {
         Exchange::Failed(why) => Exchange::Failed(format!("{what}: {why}")),
         Exchange::NotTheServer(why) => Exchange::NotTheServer(why),
+        Exchange::Squatted(why) => Exchange::Squatted(why),
         Exchange::Gone => Exchange::Gone,
     })
 }

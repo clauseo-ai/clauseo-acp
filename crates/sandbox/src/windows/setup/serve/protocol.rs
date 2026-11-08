@@ -221,14 +221,17 @@ pub enum SetUpError {
     /// The pipe wasn't there in time (`CONNECT_WAIT`).
     #[error("the set-up task didn't open its pipe in time")]
     NoServer,
-    /// Who serves the pipe isn't the set-up task; nothing was sent.
+    /// A pool user's process serves the pipe (its owner is one of `PoolSids` or the pool's
+    /// group, `serve::pool_squat`), not the set-up task; nothing was sent.
     #[error("the set-up pipe isn't served by Clauseo's set-up task: {0}")]
     NotTheServer(String),
     /// The pipe failed: what failed.
     #[error("the set-up pipe failed: {0}")]
     Pipe(String),
-    /// Another process held the pipe's name, still after the pool's processes were stopped
-    /// ([`retry_squatted`]); nothing was sent.
+    /// Another process held the pipe's name: one no pool user owns (another user's, one that
+    /// refused this user, one whose owner couldn't be read, or a SYSTEM pipe that failed the
+    /// rest of the check), at once with nothing stopped; or a pool user's, still after the
+    /// pool's processes were stopped ([`retry_squatted`]). Nothing was sent.
     #[error(
         "another process holds the set-up pipe's name (a squatted pipe), so nothing was sent; \
          restarting Windows frees it: {0}"
@@ -236,9 +239,10 @@ pub enum SetUpError {
     Squatted(String),
 }
 
-/// What `request_set_up` makes of a first answer from a pipe someone else serves: a pool user's
-/// process can make the pipe's name before the task does, and keeps it while it lives. The
-/// pool's processes are stopped (`stop_pool`, the stop task: whether it started), `settle`
+/// What `request_set_up` makes of a first answer from a pipe a pool user's process serves
+/// ([`SetUpError::NotTheServer`]): one can make the pipe's name before the task does, and keeps
+/// it while it lives. Any other squat is already [`SetUpError::Squatted`], and stops nothing.
+/// The pool's processes are stopped (`stop_pool`, the stop task: whether it started), `settle`
 /// waits for that, and `ask` runs once more; a pipe still someone else's, or a stop that
 /// didn't start, is [`SetUpError::Squatted`]. Any other answer is the first one's.
 pub fn retry_squatted(

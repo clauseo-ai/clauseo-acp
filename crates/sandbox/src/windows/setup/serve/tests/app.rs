@@ -97,10 +97,13 @@ fn a_squatted_pipe_stops_the_pool_and_asks_once_more_then_refuses_naming_the_squ
     assert_eq!((asked, stopped, settled), (1, 1, 0));
     assert!(matches!(answer, Err(SetUpError::Squatted(_))), "{answer:?}");
     // Any other answer is the first one's, with no stop.
+    // A squat no pool user made (another user's, an ACCESS_DENIED open, an unread owner, a SYSTEM
+    // pipe whose image differs) is already Squatted: answered at once, nothing stopped.
     for first in [
         Ok(done()),
         Err(SetUpError::NoServer),
         Err(SetUpError::NotRegistered),
+        Err(SetUpError::Squatted("the pipe refuses this user".into())),
     ] {
         assert_eq!(run(vec![first.clone()], true), (1, 0, 0, first));
     }
@@ -110,4 +113,22 @@ fn a_squatted_pipe_stops_the_pool_and_asks_once_more_then_refuses_naming_the_squ
         matches!(refused, Err(crate::SetupError::Failed(_))),
         "{refused:?}"
     );
+}
+
+#[test]
+fn only_a_pipe_a_pool_user_or_the_pool_group_owns_is_a_pool_squat() {
+    let (pool, groups) = (vec![sid(POOL)], vec![sid(GROUP)]);
+    assert!(pool_squat(&Ok(sid(POOL)), &pool, &groups));
+    assert!(pool_squat(&Ok(sid(GROUP)), &pool, &groups));
+    for owner in [
+        Ok(sid(OTHER)),
+        Ok(sid(LAWYER)),
+        Ok(sid("S-1-5-32-544")),
+        Ok(sid("S-1-12-1-3263492174-1177263218-2391161522-1513380577")),
+        Err("access denied".to_owned()),
+    ] {
+        assert!(!pool_squat(&owner, &pool, &groups), "{owner:?}");
+    }
+    // No pool recorded (unread, or none yet): nothing is a pool squat.
+    assert!(!pool_squat(&Ok(sid(POOL)), &[], &[]));
 }
