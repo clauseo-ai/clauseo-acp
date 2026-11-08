@@ -4,7 +4,8 @@
 //! each made user still there (or gone but named by a ledger entry), and a group this run made
 //! that is still there, so no account or group is left that the record doesn't name. WSL's deny
 //! comes off before that group goes (it names the group in machine-wide keys, and its record
-//! goes with the group's); every other deny stays (D12). Nothing that existed before the run is removed.
+//! goes with the group's); every other deny stays (D12). Nothing that existed before the run is
+//! removed.
 //!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The

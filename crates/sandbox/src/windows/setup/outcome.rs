@@ -359,9 +359,9 @@ pub struct SetupReport {
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
-    /// WSL's deny for the pool group (its last pass, after the marker, `windows::wsl`): what it found and wrote, and
-    /// each target it couldn't; `Err` when the targets couldn't be found, and why. Never a
-    /// failure of the set-up: the launch check refuses while a deny is missing.
+    /// WSL's deny for the pool group (its last pass, after the marker, `windows::wsl`): what it
+    /// found and wrote, and each target it couldn't; `Err` when the targets couldn't be found,
+    /// and why. Never a failure of the set-up: the launch check refuses while a deny is missing.
     pub wsl: Result<WslApplied, String>,
 }
 

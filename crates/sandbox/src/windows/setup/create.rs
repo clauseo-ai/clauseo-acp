@@ -285,8 +285,7 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
-    // WSL's deny, first: as soon as the group and the record (which records its targets) both
-    // exist, so no later step runs while a pool user could start WSL. Again at the end.
+    // WSL's deny, first, once the group and the record (its targets' record) exist; again last.
     run.wsl_tried = true;
     let first_wsl = wsl_deny(machine, &group);
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
@@ -322,8 +321,7 @@ fn change(
     };
     owned(machine, |machine| machine.write_marker(&marker))
         .map_err(|error| (Step::Marker, cause_of(&error)))?;
-    // And last: idempotent, so it only writes what changed since the first (a WSL install or
-    // update during the set-up). Its outcome is the report's; the first's failure is logged.
+    // Last: it writes only what a WSL install or update changed since; the report's outcome.
     if let Err(why) = &first_wsl {
         tracing::warn!(%why, "WSL's first deny pass failed; the last pass is the report's");
     }
