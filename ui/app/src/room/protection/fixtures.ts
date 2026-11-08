@@ -14,6 +14,7 @@ export const PROT = {
   off: np({ switched_off: { at: 1_762_400_000_000 } }),
   // design B: R17 PR-E's causes, not in bindings.ts yet
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
+  logon: np({ blocked: { reason: "logon_right" } }),
   policy: np({ blocked: { reason: "policy" } }),
   blockedNewer: np({ blocked: { reason: "a_reason_from_a_newer_clauseo" } }),
   otherAccount: np("other_account"),

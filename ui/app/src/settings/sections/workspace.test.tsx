@@ -426,6 +426,34 @@ test.each([
   expect(one("protection-setup")).toBeNull();
 });
 
+test.each([
+  ["Windows' prompt follows: the set-up's confirm first, then", true],
+  ["no prompt: at once", false],
+] as const)(
+  "a block, logon_right: setting up again usually fixes it, and the set-up is offered; %s retry_protection",
+  async (_c, asks) => {
+    const t = await mount(
+      held(PROT.logon, { retry_asks_admin: asks } as Partial<ProtectionView>).host,
+    );
+    expect(block()?.dataset["state"]).toBe("blocked");
+    expect(one("protection-block")?.textContent).toBe(
+      pw(
+        "en",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+      ),
+    );
+    expect(one("protection-installer")).toBeNull();
+    expect(one("protection-setup")?.textContent).toBe(pw("en", "Set up the Safe workspace"));
+    await press(one("protection-setup"));
+    if (asks) {
+      expect(one("protection-confirm")?.dataset["act"]).toBe("setup");
+      expect(t.protectionCommands()).toEqual([]);
+      await press(one("protection-confirm-ok"));
+    } else expect(one("protection-confirm")).toBeNull();
+    expect(t.protectionCommands()).toEqual(["retry_protection"]);
+  },
+);
+
 test("#protection opens the Safe workspace, the name the wire gives it", async () => {
   await mount({ view: () => view(PROT.a) }, "mac", "#protection");
   expect(document.querySelector("main h2")?.textContent).toBe("Safe workspace");

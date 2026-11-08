@@ -145,7 +145,7 @@ export function NotProtectedNote({
                       : named1385
                         ? [
                             p(
-                              "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+                              "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
                             ),
                           ]
                         : []),
@@ -156,11 +156,10 @@ export function NotProtectedNote({
     onProtect === undefined ||
     why === "off" ||
     why === "cant" ||
-    why === "blocked" ||
     why === "not_built" ||
     (why === "pool" && !addRoom)
       ? null
-      : why === "needs_set_up"
+      : why === "needs_set_up" || why === "blocked"
         ? p("Set up the Safe workspace")
         : why === "pool"
           ? p("Add room")

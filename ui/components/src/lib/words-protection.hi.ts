@@ -53,8 +53,8 @@ export const HI = {
   "Clauseo can add room for 4 more. Windows asks for permission first.":
     "Clauseo 4 और स्थानों के लिए जगह जोड़ सकता है। Windows पहले अनुमति माँगता है।",
   // Windows error 1385, once R17 PR-E names it (UC-33)
-  "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.":
-    "इस कंप्यूटर की Windows नीति सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने देती। अपनी IT टीम से उन्हें Allow log on locally नीति में जोड़ने को कहें।",
+  "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.":
+    "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है। अगर ऐसा न हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से ClauseoSandboxUsers को Allow log on locally नीति में जोड़ने को कहें।",
   // the firm (UC-50, UC-51)
   "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है। इसे एक बार तैयार करें, फिर यहाँ पूछें।",
