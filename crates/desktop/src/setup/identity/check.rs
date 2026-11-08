@@ -218,9 +218,14 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
     };
     refusal::sync(backend, agent).await;
     let read = read_account(backend, agent, begun).await;
-    let unwritten_again =
-        matches!(read, Read::Unwritten(_)) && identity.refresh.unwritten_before(agent);
-    if unwritten_again || *read.account() == AccountRead::Refused {
+    // A record, a sign-out or a key login during the read overtook it: what it read holds
+    // nothing against the login (no stuck unknown, no card, no forced-read outcome).
+    let Ticket(began) = ticket;
+    let overtaken = identity.entry(agent, |entry| entry.generation != began);
+    let unwritten_again = !overtaken
+        && matches!(read, Read::Unwritten(_))
+        && identity.refresh.unwritten_before(agent);
+    if unwritten_again || (!overtaken && *read.account() == AccountRead::Refused) {
         // A second answer with no rewrite (the refresh fails with the network up), or Codex's
         // refused login: unknown, and it sticks until a forced read confirms or a sign-in.
         identity.refresh.stick(agent);
@@ -236,7 +241,9 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
         confirming,
     );
     tracing::info!(%agent, kind = verdict.kind(), "identity check");
-    unconfirmed(backend, agent, &read, unwritten_again, verdict);
+    if !overtaken {
+        unconfirmed(backend, agent, &read, unwritten_again, verdict);
+    }
     let ended = match read {
         Read::Plain(_) => None,
         Read::Missed(_) => Some(Ended::Missed),
@@ -247,7 +254,7 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
         }
         Read::Rewritten(..) => Some(Ended::Unconfirmed),
     };
-    if let Some(ended) = ended {
+    if let Some(ended) = ended.filter(|_| !overtaken) {
         identity.refresh.forced_ended(agent, ended, now);
     }
     if verdict == Verdict::Changed {

@@ -884,26 +884,32 @@
   },
   "U3-err-agent.identity_checking": {
     "en": "Clauseo is still checking which account your sign-in belongs to. Try again in a moment.",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "Clauseo अभी जाँच रहा है कि आपका साइन इन किस खाते का है। थोड़ी देर में फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-agent.identity_unknown": {
     "en": "Clauseo couldn't confirm which account your sign-in belongs to. Try again.",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "Clauseo पुष्टि नहीं कर सका कि आपका साइन इन किस खाते का है। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-signin.account_changed": {
-    "en": "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped answering so no matter's work goes to the wrong account. Sign in again. Your questions are kept and run once you do.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped, so that work on your matters doesn't go to the wrong account. Sign in again. Your questions are kept and run once you do.",
+    "hi": "आपका साइन इन अब उस खाते से अलग किसी दूसरे खाते का है, जिसे आपने Clauseo में चुना था। Clauseo रुक गया है, ताकि आपके मामलों का काम गलत खाते में न जाए। फिर से साइन इन करें। आपके प्रश्न रखे गए हैं और साइन इन करते ही चलेंगे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-signin.unconfirmed": {
@@ -912,8 +918,8 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-07",
-    "by": "app track copy review (scratch-S18/words-signin.md)"
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

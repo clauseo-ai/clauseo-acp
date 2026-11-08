@@ -92,16 +92,10 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return wire(agent, state);
     }
     if let Some(since) = facts.blocked {
-        return Some(SignIn::Failed {
-            code: ErrorCode::SigninPolicyUnreadable,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::SigninPolicyUnreadable, since, false));
     }
     if let Some(since) = facts.unreadable {
-        return Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::AgentKeyUnreadable, since, false));
     }
     if let Some(since) = facts.managed.or(facts.firm) {
         return Some(signed_in_by(SignInMethod::Firm, since));
@@ -109,19 +103,29 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     if let Some(since) = facts.key {
         return Some(signed_in_by(SignInMethod::ApiKey, since));
     }
+    let reused = matches!(
+        s18,
+        Some(SigninState::SignedIn {
+            source: Source::Reused,
+            ..
+        })
+    );
     if let Some(since) = facts.account_changed {
-        return Some(SignIn::Failed {
-            code: ErrorCode::SigninAccountChanged,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::SigninAccountChanged, since, reused));
     }
     if let Some(since) = facts.unconfirmed {
-        return Some(SignIn::Failed {
-            code: ErrorCode::SigninUnconfirmed,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::SigninUnconfirmed, since, reused));
     }
     s18.and_then(|state| wire(agent, state))
+}
+
+/// `Failed`: `code` since `since`; `reused`, a reused login, takes no sign-in (`refuse_reused`).
+fn failed(code: ErrorCode, since: SystemTime, reused: bool) -> SignIn {
+    SignIn::Failed {
+        code,
+        at: timestamp(since),
+        reused,
+    }
 }
 
 /// A fixed word for `state`'s kind, for the log: never an email, a plan, a code or an address.
@@ -207,10 +211,9 @@ pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
             source: sign_in_source(*source)?,
             at: timestamp(*at),
         },
-        SigninState::Failed { code, at } => SignIn::Failed {
-            code: ErrorCode::from_str_lossy(code.code()),
-            at: timestamp(*at),
-        },
+        SigninState::Failed { code, at } => {
+            failed(ErrorCode::from_str_lossy(code.code()), *at, false)
+        }
         _ => return None,
     })
 }

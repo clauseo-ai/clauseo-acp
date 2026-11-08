@@ -21,7 +21,7 @@ export function Failed({
   onAct,
 }: {
   plan: Plan;
-  view: { code: string; at: string };
+  view: { code: string; at: string; reused?: boolean | undefined };
   w: (key: FirstLaunchKey, slots?: Record<string, string | number>) => string;
   way: (label: string, a: GateAct) => ReactNode;
   signIn: (label: string) => ReactNode;
@@ -31,6 +31,15 @@ export function Failed({
   const { lang } = useDisplay();
   const name = NAME[plan];
   const plans = () => onAct({ act: "plans" });
+  // over a login Clauseo reuses from the lawyer's own app, desktop refuses a plain sign-in: the way out is another account
+  const again = () =>
+    view.reused === true ? (
+      <Button kind="tone" className="room-field-ask" onClick={() => onAct({ act: "different" })}>
+        {w("Sign in with a different account")}
+      </Button>
+    ) : (
+      signIn(w("Sign in"))
+    );
   switch (view.code) {
     case "signin.cancelled":
       return (
@@ -44,8 +53,15 @@ export function Failed({
     // Codex's refresh-on-check could not confirm the login (R17): sign in again
     case "signin.unconfirmed":
       return (
-        <Act act={signIn(w("Sign in"))}>
+        <Act act={again()}>
           <Say>{errorWords(lang, "signin.unconfirmed")}</Say>
+        </Act>
+      );
+    // the login now belongs to another account than the one chosen (R17): sign in again
+    case "signin.account_changed":
+      return (
+        <Act act={again()}>
+          <Say>{errorWords(lang, "signin.account_changed")}</Say>
         </Act>
       );
     case "signin.link_expired":

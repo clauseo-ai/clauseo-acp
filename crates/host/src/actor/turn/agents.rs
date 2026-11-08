@@ -170,7 +170,8 @@ pub(super) fn start_after_gate(actor: &mut Actor, thread: ThreadId, waiting: Vec
     start_with(actor, thread, waiting, true);
 }
 
-/// [`start`]; `gate_waited` once the launch gate's refusal was waited for.
+/// [`start`]; `gate_waited` once the launch gate's refusal was waited for. A launch that waits
+/// for `sign_in::keys_wait` here counts as waited too, so no launch waits twice.
 fn start_with(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, gate_waited: bool) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
@@ -189,6 +190,8 @@ fn start_with(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, gate_w
         log_detach(actor, thread, reason);
     }
     super::idle::make_room(actor, thread);
+    // A launch that waits out a refusal here has had its one wait (`launch_checks/gate.rs`).
+    let gate_waited = gate_waited || keys_wait.is_some();
     launch_checks::prepare(actor, thread, waiting, keys_wait, gate_waited);
 }
 

@@ -279,7 +279,7 @@ error_codes! {
         its agents were stopped. Sign in again.";
     SigninUnconfirmed = "signin.unconfirmed", retryable: false, meaning: "Clauseo could not \
         confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. \
-        Its launches are refused until it is confirmed or signed in again.";
+        Sign in again.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

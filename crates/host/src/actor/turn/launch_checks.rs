@@ -35,10 +35,12 @@
 //! is found and closed as the run drops.
 //!
 //! Desktop's launch gate (`HostConfig::with_launch_gate`, R17 M3) is asked on the same thread,
-//! for every agent kind, right after the data-folder refusal and before anything is made: a stat
-//! of the agent's shared login file, so a login changed since desktop's last poll is caught at
-//! this launch. Its refusal code comes back as its own answer ([`TurnInput::Gated`]), never
-//! written into the launch refusals by the host, and [`gate::on_gated`] fails the waiting
+//! for every agent kind, last, once everything else is made: a stat of the agent's shared login
+//! file, so a login changed since desktop's last poll, or during the rest of the preparation, is
+//! caught at this launch. A refusal takes back what was made, as a late prep does
+//! ([`undo_late`]); the agent's home stays, as it does for every launch. Its refusal code comes
+//! back as its own answer ([`TurnInput::Gated`]), never written into the launch refusals by the
+//! host, and [`gate::on_gated`] fails the waiting
 //! work with it, or, for a code the launch waits out (`agent.identity_checking`), sends the
 //! launch back through `sign_in::keys_wait` and phase one again, once per launch
 //! ([`Preparing::gate_waited`]). A panic, or a code that is no launch refusal, fails closed
@@ -334,10 +336,6 @@ pub(super) fn prepare(
                 data_folder::refuse_data_folder(&stored, &data)?;
                 // The working folder the agent starts in, as spawn takes it (`session_folder`).
                 crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
-                // Desktop's launch gate, before anything is made (`gate.rs`).
-                if let Some(code) = gate::ask(launch_gate)? {
-                    return Ok(Found::Gated(code));
-                }
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match codex_home {
@@ -371,7 +369,7 @@ pub(super) fn prepare(
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
-                Ok(Found::Prepared(Box::new(Prepared {
+                let prepared = Found::Prepared(Box::new(Prepared {
                     stored,
                     codex,
                     claude_home,
@@ -379,7 +377,10 @@ pub(super) fn prepare(
                     run,
                     skills_written,
                     packs_skipped,
-                })))
+                }));
+                // Desktop's launch gate, last, so its answer is the freshest the launch can
+                // have (`gate.rs`); a refusal takes back what was made.
+                gate::last(launch_gate, prepared, undo_late)
             },
             undo_late,
         )
@@ -430,9 +431,9 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
     run.lease.keep(held, parts);
 }
 
-/// A prep nobody waits for any more takes back what it made: the relay's token first, then the
-/// run folder with the token file. No agent was started, so nothing waits. A launch the gate
-/// refused made nothing.
+/// A prep nobody waits for any more, or one the gate refused, takes back what it made: the
+/// relay's token first, then the run folder with the token file. No agent was started, so
+/// nothing waits.
 fn undo_late(late: Found) {
     let Found::Prepared(late) = late else {
         return;

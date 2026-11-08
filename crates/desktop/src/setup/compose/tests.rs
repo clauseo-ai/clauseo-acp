@@ -94,6 +94,7 @@ fn the_composition_table() {
     let blocked = SignIn::Failed {
         code: ErrorCode::SigninPolicyUnreadable,
         at: timestamp(at(T)),
+        reused: false,
     };
     let mut states: Vec<Option<SigninState>> = s18_states().into_iter().map(Some).collect();
     states.push(None);
@@ -196,7 +197,8 @@ fn s18_states_map_to_the_wire_with_the_plan_in_words() {
         ),
         Some(SignIn::Failed {
             code: ErrorCode::SigninPortBusy,
-            at: timestamp(at(T))
+            at: timestamp(at(T)),
+            reused: false,
         })
     );
     assert_eq!(compose(&claude(), None, Facts::default()), None);
@@ -309,4 +311,38 @@ fn a_search_waits_through_running_states_for_its_resting_answer() {
         sent(&mut feed),
         [reuse_off.clone(), SignIn::Queued, reuse_off]
     );
+}
+
+#[test]
+fn a_reused_login_s_unconfirmed_or_changed_card_says_it_is_reused() {
+    let signed = |source| SigninState::SignedIn {
+        email: Some("a@example.com".to_owned()),
+        plan: None,
+        source,
+        at: at(T),
+    };
+    let unconfirmed = Facts {
+        unconfirmed: Some(at(T)),
+        ..Facts::default()
+    };
+    let changed = Facts {
+        account_changed: Some(at(T)),
+        ..Facts::default()
+    };
+    for (facts, code) in [
+        (unconfirmed, ErrorCode::SigninUnconfirmed),
+        (changed, ErrorCode::SigninAccountChanged),
+    ] {
+        for (source, reused) in [(Source::Reused, true), (Source::Own, false)] {
+            assert_eq!(
+                compose(&codex(), Some(&signed(source)), facts),
+                Some(SignIn::Failed {
+                    code,
+                    at: timestamp(at(T)),
+                    reused,
+                }),
+                "{code:?}, {source:?}"
+            );
+        }
+    }
 }

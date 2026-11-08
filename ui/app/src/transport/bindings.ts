@@ -1741,7 +1741,7 @@ export type ErrorCode =
 "agent.identity_unknown" | 
 /** The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. */
 "signin.account_changed" | 
-/** Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Its launches are refused until it is confirmed or signed in again. */
+/** Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Sign in again. */
 "signin.unconfirmed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
@@ -5026,6 +5026,12 @@ export type SignIn =
 	code: ErrorCode,
 	/**  When. */
 	at: Timestamp,
+	/**
+	 *  The agent's login is the lawyer's own, reused (with `signin.account_changed` and
+	 *  `signin.unconfirmed`): Clauseo starts no sign-in over it, so the way out is
+	 *  `UseDifferentAccount`. Absent, and false, otherwise.
+	 */
+	reused?: boolean,
 } }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**
  *  Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login

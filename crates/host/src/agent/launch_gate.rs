@@ -17,7 +17,8 @@ use crate::error::Error;
 /// It must be cheap and must not block: a stat of the login file (its size, its modified time,
 /// its file id), never an open of a file's contents, never a status run of the agent, and no
 /// lock held across I/O. It runs off the actor, on the launch's `clauseo-codex-fs` prepare
-/// thread beside the data-folder refusal, never on the host's actor; a gate that hangs is
+/// thread, last, once the launch's folders and writes are made (a refusal takes them back), so
+/// its answer is the freshest the launch can have; never on the host's actor. A gate that hangs is
 /// bounded by that prepare job's wait, and the launch then fails with `agent.launch_failed`,
 /// which may be retried.
 ///
@@ -30,7 +31,9 @@ use crate::error::Error;
 ///   changes the refusal, asks desktop's launch retry with the code, and prepares again,
 ///   asking the gate again. Lifted already, it prepares again at once. One wait per launch: a
 ///   second waited-out answer fails the launch with that code, and so does a refusal still in
-///   force after the wait. Any other refusal fails the launch with its code.
+///   force after the wait. Any other refusal fails the launch with the refusal in force when
+///   the host acts on the answer, or with its code when none is. A launch that already waited
+///   out a key or identity refusal before its preparation counts as waited.
 /// - `Some(code)` with a code that is not a launch refusal: the launch fails closed with
 ///   `agent.launch_failed`, and a warning names the agent and the code.
 /// - A panic: in release builds a panic aborts the process (the workspace's `[profile.release]`

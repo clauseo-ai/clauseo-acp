@@ -11,16 +11,22 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use clauseo_agents::{AccountHash, AccountRead};
+use clauseo_agents::{AccountHash, AccountRead, SigninState, Source};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{ErrorCode, SignIn};
-use futures::future::{Either, select};
+use futures::future::{Either, join, select};
+use serde_json::json;
 
+use super::MAIN;
 use super::codex;
-use super::identity::{IdRig, refused};
+use super::fakes::command;
+use super::identity::{IdRig, refused, signed_in};
+use super::identity_watch::until;
 use super::switching::shown;
 use super::timing::{Stepping, start};
-use crate::setup::identity::{Identities, Verdict, check, poll_once};
+use crate::bridge::lock;
+use crate::setup::identity::{Identities, Verdict, check, expect, on_state, poll_once};
+use crate::setup::refusal::wanted;
 use crate::test_support::block_on;
 
 const ONE: &str = "lawyer@firm.example";
@@ -440,4 +446,65 @@ fn a_change_ten_seconds_after_our_last_force_is_forced_sixty_seconds_after_it() 
     assert_eq!(forced_and_plain(&id).0, 1);
     id.look(62);
     assert_eq!(forced_and_plain(&id).0, 2, "60 s after the last force");
+}
+
+#[test]
+fn a_sign_in_during_a_check_leaves_no_held_unknown_after_it() {
+    let id = changed_login("refresh-overtaken");
+    let (backend, accounts) = (&id.rig.backend, &id.rig.agents.accounts);
+    let open = accounts.hold(&codex());
+    // Codex's refused login: an answer that would hold the unknown, had nothing overtaken it.
+    accounts.answers(&codex(), AccountRead::Refused);
+    let signs_in = async {
+        until("the check runs", || verdict(&id) == Verdict::Checking).await;
+        expect(backend, &codex());
+        on_state(backend, &codex(), &signed_in(ONE, Source::Own)).await;
+        open.send(()).unwrap();
+    };
+    block_on(join(check(backend, &codex()), signs_in));
+    assert!(
+        !backend.wiring.identity.refresh.stuck(&codex()),
+        "the overtaken check holds nothing"
+    );
+    assert!(!sign_in_again(&id), "no sign-in-again card");
+    assert_ne!(verdict(&id), Verdict::Unknown);
+    assert_eq!(wanted(backend, &codex()), None, "launches go");
+}
+
+#[test]
+fn a_reused_login_held_unknown_offers_a_different_account_whose_sign_in_clears_it() {
+    let id = changed_login("refresh-reused-unknown");
+    let rig = &id.rig;
+    // The login is the lawyer's own Codex login, reused; then Codex refuses its refresh.
+    super::leave::reuse(rig, &codex());
+    rig.agents.accounts.answers(&codex(), AccountRead::Refused);
+    id.look(2);
+    assert_eq!(verdict(&id), Verdict::Unknown);
+    assert!(
+        matches!(
+            shown(rig, &codex()),
+            Some(SignIn::Failed {
+                code: ErrorCode::SigninUnconfirmed,
+                reused: true,
+                ..
+            })
+        ),
+        "the card says the login is reused: its way out is a different account"
+    );
+    // A plain sign-in over the reused login is refused (review M1), so it is no way out.
+    let sent = command("start_sign_in", &codex(), &json!({}));
+    let refused_start = rig.pumped(async { rig.setup().run(MAIN, sent).await });
+    assert!(refused_start.is_err(), "no sign-in over the lawyer's login");
+    // "Use a different account": the reuse is left first, then Clauseo's own sign-in, which
+    // records and lifts the unknown.
+    let out = SigninState::SignedOut { found: None };
+    lock(&rig.agents.answers).insert("stop_using_login", out);
+    let own = signed_in(ONE, Source::Own);
+    lock(&rig.agents.answers).insert("use_different_account", own);
+    rig.agents.accounts.names(&codex(), ONE);
+    let sent = command("use_different_account", &codex(), &json!({}));
+    rig.pumped(async { rig.setup().run(MAIN, sent).await.unwrap() });
+    assert!(!rig.backend.wiring.identity.refresh.stuck(&codex()));
+    assert!(!sign_in_again(&id), "the card is gone");
+    assert_eq!(wanted(&rig.backend, &codex()), None, "launches go");
 }

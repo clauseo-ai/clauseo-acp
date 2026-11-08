@@ -191,6 +191,46 @@ fn a_gate_answering_a_waited_out_code_twice_fails_the_turn_after_one_wait() {
 }
 
 #[test]
+fn a_launch_that_waited_for_its_identity_refusal_does_not_wait_again_at_the_gate() {
+    let mut gated = gated("launch_gate_waited_first", move |handle, _agent| {
+        refuse(handle, Some(ErrorCode::AgentIdentityChecking));
+        Some(ErrorCode::AgentIdentityChecking)
+    });
+    // Desktop is checking before the launch: the launch waits for that refusal first.
+    refuse(&gated.host.handle, Some(ErrorCode::AgentIdentityChecking));
+    let (turn, _) = gated.host.prompt(gated.thread, "Look at the matter.");
+    until_keys_wait_armed(&gated.host);
+    refuse(&gated.host.handle, None);
+    // The gate answers the waited-out code again: the launch had its one wait, so it fails.
+    let code = failed_with(&mut gated.events, turn);
+    assert_eq!(code, ErrorCode::AgentIdentityChecking);
+    assert_eq!(
+        gated.retries.lock().unwrap().len(),
+        1,
+        "one wait and one retry per launch"
+    );
+    assert_eq!(
+        gated.launches.lock().unwrap().len(),
+        0,
+        "no process started"
+    );
+    end(gated);
+}
+
+#[test]
+fn a_launch_the_gate_refuses_fails_with_the_refusal_in_force_when_the_answer_lands() {
+    let mut gated = gated("launch_gate_moved_on", move |handle, _agent| {
+        // Desktop's check finished between its answer and the host acting on it.
+        refuse(handle, Some(ErrorCode::SigninAccountChanged));
+        Some(ErrorCode::AgentIdentityUnknown)
+    });
+    let (turn, _) = gated.host.prompt(gated.thread, "Look at the matter.");
+    let code = failed_with(&mut gated.events, turn);
+    assert_eq!(code, ErrorCode::SigninAccountChanged);
+    end(gated);
+}
+
+#[test]
 fn a_gate_answering_a_code_that_is_no_launch_refusal_fails_closed() {
     let mut gated = gated("launch_gate_not_refusal", |_handle, _agent| {
         Some(ErrorCode::CommandInvalid)

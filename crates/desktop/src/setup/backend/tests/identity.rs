@@ -87,7 +87,9 @@ impl IdRig {
     }
 
     /// [`IdRig::over`], its keys loaded from `keychain` (a memory one). Codex's forced
-    /// refresh is off unless `with` turns it on (`identity_refresh.rs` does).
+    /// refresh is off unless `with` turns it on (`identity_refresh.rs` does), and so is
+    /// Claude's Keychain fallback, whose default is on only on macOS: a test that wants it
+    /// turns it on, so every test reads the same on every platform.
     pub(super) fn over_keys(
         scratch: Scratch,
         keychain: Keychain,
@@ -99,7 +101,9 @@ impl IdRig {
             Some(scratch.path().join("lawyer")),
             [&claude(), &codex()],
         );
-        let identity = identity.with_forced_refresh(false);
+        let identity = identity
+            .with_forced_refresh(false)
+            .with_keychain_fallback(false);
         let rig = rig_identity(&scratch.path().join("homes"), with(identity), keychain);
         Self { rig, scratch }
     }
