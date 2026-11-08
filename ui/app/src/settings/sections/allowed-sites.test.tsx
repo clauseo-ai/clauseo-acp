@@ -2,8 +2,9 @@
 // Settings, Privacy, "Allowed sites" (0053) over the real settings window and FakeTransport: each
 // allowed site with its reach (a matter by its name from the app feed, or always) and its date;
 // Remove sending revoke_allowed_site with the site's host, scope and matter, then reading the list
-// again; the empty list's line; a refusal's words; a read again when the window regains focus; and
-// the room's allow_blocked_site, never sent from here, by type and by source.
+// again; the empty list's line; a refusal's words; an unsaved site's mark and a Remove answered
+// blocklist.revoke_not_saved (removed, with a quiet line); a read again when the window regains
+// focus; and the room's allow_blocked_site, never sent from here, by type and by source.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
@@ -218,4 +219,36 @@ test("the settings window never sends allow_blocked_site", async () => {
     /allow_blocked_site: \{/.test(readFileSync(f, "utf8")),
   );
   expect(senders.map((f) => f.slice(src.length + 1))).toEqual(["room/blocklist/allow.ts"]);
+});
+
+test("a site Clauseo couldn't save says it lasts until Clauseo closes; a saved one doesn't", async () => {
+  const { el } = await mount({ sites: [{ ...ALWAYS, saved: false }, IN_MATTER] });
+  expect(rows(el)).toEqual([
+    "cdn.exampleAlways · Allowed 5 November 2026 · Until Clauseo closes",
+    "invoice-paypa1.exampleThis matter: \u2068Sharma v. State of Delhi\u2069 · Allowed 5 November 2026",
+  ]);
+  const marks = el.querySelectorAll('[data-testid="allowed-site-unsaved"]');
+  expect(marks).toHaveLength(1);
+  expect(marks[0]?.closest('[data-testid="allowed-site"]')?.textContent).toContain("cdn.example");
+});
+
+test("Remove answered blocklist.revoke_not_saved: the site is gone, with a quiet line, no refusal", async () => {
+  const { el, transport } = await mount({
+    refuse: { revoke_allowed_site: "blocklist.revoke_not_saved" },
+  });
+  await click(removeOf(el, "cdn.example"));
+  expect(blocklistSent(transport)).toEqual([
+    { revoke_allowed_site: { host: "cdn.example", scope: "always" } },
+  ]);
+  expect(rows(el)).toHaveLength(1);
+  expect(rows(el)[0]).toContain("invoice-paypa1.example");
+  const line = el.querySelector('[data-testid="allowed-sites-unsaved"]');
+  expect(line?.textContent).toBe(`cdn.example${errorWords("en", "blocklist.revoke_not_saved")}`);
+  expect(el.querySelector('[data-testid="allowed-sites-failed"]')).toBeNull();
+  // the next Remove's answer replaces it
+  await click(removeOf(el, "invoice-paypa1.example"));
+  expect(el.querySelectorAll('[data-testid="allowed-sites-unsaved"]')).toHaveLength(1);
+  expect(el.querySelector('[data-testid="allowed-sites-unsaved"] bdi')?.textContent).toBe(
+    "invoice-paypa1.example",
+  );
 });

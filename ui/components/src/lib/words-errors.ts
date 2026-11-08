@@ -202,11 +202,11 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (stage E, Rohan's batch review): "Allow this site" that lasts until Clauseo
   // closes, because the host couldn't save it (decision record 0053)
   "blocklist.allow_not_saved":
-    "Allowed until Clauseo closes. Clauseo couldn't save it, so it won't be allowed after a restart.",
+    "This site is allowed until Clauseo closes. Clauseo couldn't save the change, so it will be blocked again next time Clauseo opens.",
   // provisional (stage E, Rohan's batch review): "Remove" of an allow that lasts until
   // Clauseo closes, because the host couldn't save that (decision record 0053)
   "blocklist.revoke_not_saved":
-    "Removed until Clauseo closes. Clauseo couldn't save this, so the site may be allowed again after a restart.",
+    "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

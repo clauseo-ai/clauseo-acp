@@ -5,7 +5,8 @@
 // conversation shows one notice per site per turn, updated in place. A notice is shown under its
 // turn's answer, so one without a thread or a turn is kept but shown nowhere.
 //
-// It also holds each notice's allow: sending, allowed (and how far), or refused with a code. The
+// It also holds each notice's allow: sending, allowed (and how far, and whether it was saved), or
+// refused with a code. The
 // store sends nothing; the room's allow lives in room/blocklist/allow.ts, which nothing in the
 // settings window imports.
 //
@@ -26,6 +27,9 @@ export type BlockedNotice = {
   allowed: AllowScope | null;
   /** The code the host refused the allow with. */
   refused: string | null;
+  /** The allow took, but Clauseo couldn't save it (`blocklist.allow_not_saved`): it lasts until
+   * Clauseo closes. */
+  unsaved: boolean;
 };
 
 export type BlockedSitesStore = {
@@ -59,7 +63,7 @@ export function createBlockedSitesStore(transport: HostTransport): BlockedSitesS
     const was = byId.get(site.block_id);
     const notice: BlockedNotice =
       was === undefined
-        ? { site, sending: false, allowed: null, refused: null }
+        ? { site, sending: false, allowed: null, refused: null, unsaved: false }
         : { ...was, site: { ...site, count: Math.max(site.count, was.site.count) } };
     byId.set(site.block_id, notice);
     if (was === undefined && site.thread !== undefined && site.turn !== undefined) {

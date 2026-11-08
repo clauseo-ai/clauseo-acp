@@ -4,7 +4,8 @@
 // updated in place, the confirm naming the site, the reason and the reach, Allow sending
 // allow_blocked_site with the notice's block_id and scope, Cancel sending nothing, and the
 // refusals' words (override_off and blocklist.notice_expired take the buttons away; any other,
-// command.invalid included, says its code's words and keeps them).
+// command.invalid included, says its code's words and keeps them); blocklist.allow_not_saved
+// shows the site allowed, with its words as a quiet line, never as a refusal.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, expect, test, vi } from "vitest";
@@ -39,6 +40,7 @@ const T2 = uuid(2, 4);
 const OFF =
   "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.";
 const EXPIRED = "This notice has expired. Open the site again, then allow it from the new notice.";
+const UNSAVED = errorWords("en", "blocklist.allow_not_saved");
 
 const site = (over: Partial<SiteBlocked> = {}): SiteBlocked => ({
   block_id: BLOCK,
@@ -234,4 +236,39 @@ test.each([
 
 test("the expired line is blocklist.notice_expired's words", () => {
   expect(errorWords("en", "blocklist.notice_expired")).toBe(EXPIRED);
+});
+
+test.each([
+  ["site-allow-matter", "matter", "Allowed for this matter"],
+  ["site-allow-always", "always", "Allowed always"],
+] as const)(
+  "%s answered blocklist.allow_not_saved: allowed, plus the until-Clauseo-closes line",
+  async (button, scope, done) => {
+    await mount("blocklist.allow_not_saved");
+    await play(site());
+    await openConfirm(button);
+    await h!.click(inBody("site-allow-ok"));
+    await h!.settle();
+    expect(h!.sent("allow_blocked_site")).toEqual([{ block_id: BLOCK, scope }]);
+    const notice = notices()[0]!;
+    expect(notice.dataset["state"]).toBe(`allowed-${scope}`);
+    expect(notice.textContent).toContain(done);
+    expect(h!.one("site-blocked-unsaved")?.textContent).toBe(UNSAVED);
+    expect(h!.one("site-allow-matter")).toBeNull();
+    expect(h!.one("site-allow-always")).toBeNull();
+    // a repeat of the notice keeps it allowed, and the line
+    await play(site({ count: 2 }));
+    expect(notices()[0]?.dataset["state"]).toBe(`allowed-${scope}`);
+    expect(h!.one("site-blocked-unsaved")?.textContent).toBe(UNSAVED);
+  },
+);
+
+test("a saved allow has no until-Clauseo-closes line", async () => {
+  await mount();
+  await play(site());
+  await openConfirm("site-allow-matter");
+  await h!.click(inBody("site-allow-ok"));
+  await h!.settle();
+  expect(notices()[0]?.dataset["state"]).toBe("allowed-matter");
+  expect(h!.one("site-blocked-unsaved")).toBeNull();
 });
