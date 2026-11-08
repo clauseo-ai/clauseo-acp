@@ -72,10 +72,7 @@ pub(crate) fn file_sddl(user: &str) -> String {
     format!("D:P(A;;FA;;;{user})(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
-/// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`.
-pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
-    owner == user || owner.as_str() == SYSTEM || owner.as_str() == ADMINISTRATORS
-}
+pub(crate) use super::sids::owner_allowed;
 
 /// Makes the folder `path` (its parent must exist) with [`sddl`]'s protected DACL for this
 /// thread's user (`current_user_sid`) in place from the start (`CreateDirectoryW` with the

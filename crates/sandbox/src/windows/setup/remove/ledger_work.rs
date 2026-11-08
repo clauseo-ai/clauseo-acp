@@ -33,7 +33,9 @@
 //! - lies in a matter folder the ledger records ([`PathKind::Matter`], an allow to the whole tree
 //!   for a pool SID), not a drive's root;
 //! - and whose path, checked right before, is a folder reached with no junction or link, owned by
-//!   the record's owner, on a local volume that keeps permissions (`Removal::admin_target`).
+//!   the record's owner, Administrators or SYSTEM (`sids::owner_allowed`: an elevated process
+//!   makes Administrators the owner of the folders it creates), on a local volume that keeps
+//!   permissions (`Removal::admin_target`).
 //!
 //! Besides, each recorded matter folder that passes that check has the Low label the ledger
 //! records on it taken off, through the same [`AclWriter::remove`] (the label alone, the folder

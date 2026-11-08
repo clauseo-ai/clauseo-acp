@@ -166,6 +166,14 @@ impl Reserved {
     }
 }
 
+/// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`: the
+/// user, `SYSTEM` or `Administrators` (what an elevated process makes the owner of what it
+/// creates). The removal holds the data folder and the matter folders to it too.
+#[cfg(any(windows, test))]
+pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
+    owner == user || ["S-1-5-18", "S-1-5-32-544"].contains(&owner.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
