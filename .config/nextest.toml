@@ -78,6 +78,14 @@ slow-timeout = { period = "30s", terminate-after = 10 }
 filter = 'package(clauseo-sandbox) & test(/(^|::)elevated_/) & test(/::logon::tests::/)'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# The set-up pipe test logs two new accounts on first (each first logon makes a profile, 12 to
+# 20 s on the windows-2025 runner, as above), then serves them and waits its 5 s idle wait.
+# It passed in 18 s in run 42466982778 and passed 30 s on both tries in run 42504256341, its
+# first try with both clients answered and the server done. 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/elevated_the_pipe_server_refuses_a_user/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The owner's task run test logs a new account on twice (its first makes its profile, 20 to 40 s)
 # and waits up to 15 s three times for the Task Scheduler; 120 s still ends a hung one.
 [[profile.default.overrides]]
