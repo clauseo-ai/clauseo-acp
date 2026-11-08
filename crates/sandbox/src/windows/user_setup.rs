@@ -106,18 +106,19 @@ impl UserSetup {
     }
 
     /// The set-up (`add` none) or extend through its one prompt: the admin copy's `--set-up`,
-    /// started elevated, as before the set-up task. [`SandboxSetup::run`] falls back to it only
-    /// on an install with no set-up task; its declined prompt is `SetupError::Refused`.
+    /// started elevated, as before the set-up task. [`SandboxSetup::run`] falls back to it on an
+    /// install with no set-up task and when the task refuses this user (logged); its declined
+    /// prompt is `SetupError::Refused`.
     pub fn run_elevated(&self) -> Result<(), SetupError> {
         self.set_up(0)
     }
 
     /// Asks the set-up task (`setup_task::request_set_up`) and reads its reply as the exe's
-    /// result is read (`serve::via_task`); with no set-up task, `elevated`. The last result file
-    /// is removed first, as before a prompted run, so a request the task refused before running
-    /// anything leaves no earlier result to be read as its own. The task sets up the folder it
-    /// derives from this user's profile: when that isn't `data_dir` (`serve::task_serves`), it
-    /// isn't asked, the reason is logged, and `elevated` runs.
+    /// result is read (`serve::via_task`); with no set-up task, or a refusal, `elevated`. The
+    /// last result file is removed first, as before a prompted run, so a request the task refused
+    /// before running anything leaves no earlier result to be read as its own. The task sets up
+    /// the folder it derives from this user's profile: when that isn't `data_dir`
+    /// (`serve::task_serves`), it isn't asked, the reason is logged, and `elevated` runs.
     fn through_task(
         &self,
         add: Option<u8>,

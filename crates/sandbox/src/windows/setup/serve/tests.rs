@@ -9,6 +9,7 @@ use std::time::Duration;
 use super::*;
 use crate::windows::setup::record_values::CopyOwner;
 
+mod app;
 mod flow;
 mod identify;
 

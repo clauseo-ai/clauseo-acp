@@ -266,14 +266,20 @@ pub fn retry_squatted(
 }
 
 /// What `UserSetup::run` (and its extend) return for `asked`, the set-up task's answer: its reply
-/// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task runs
-/// `elevated`, the set-up with its prompt, whose declined prompt is still `SetupError::Refused`;
-/// any other failure to ask is a failure saying why, with no prompt raised.
+/// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task, or a
+/// refusal (one the gate didn't foresee for a lawyer it should serve), runs `elevated`, the
+/// set-up with its prompt, whose declined prompt is still `SetupError::Refused`. The prompt
+/// needs an administrator's credentials, so falling back to it grants no one anything. Any
+/// other failure to ask is a failure saying why, with no prompt raised.
 pub fn via_task(
     asked: Result<Reply, SetUpError>,
     elevated: impl FnOnce() -> Result<(), SetupError>,
 ) -> Result<(), SetupError> {
     match asked {
+        Ok(Reply::Refused(why)) => {
+            tracing::warn!(%why, "the set-up task refused this user; asking with the prompt");
+            elevated()
+        }
         Ok(reply) => reply.outcome(),
         Err(SetUpError::NotRegistered) => elevated(),
         Err(error) => Err(SetupError::Failed(error.to_string())),

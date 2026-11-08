@@ -2086,7 +2086,9 @@ for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, on
 5. writes the request (5 s) and reads the reply line, waiting as long as the task may run, 30
    minutes and one more. A server that closed before replying (one that was ending) is asked
    again once, after another start. The reply maps to `SandboxSetup::run`'s result as the exe's
-   result file does;
+   result file does, except `refused`: the gate shouldn't refuse a lawyer, so for one it didn't
+   foresee the app logs why and runs the prompted `--set-up` (`serve::via_task`), which needs an
+   administrator's credentials and so grants no one anything;
 6. a pipe someone else serves is most likely a pool user's process holding the name: the app
    starts the stop task (`request_pool_stop`), waits while it is queued or running (up to 60 s),
    and runs steps 2 to 5 once more. A pipe still someone else's, or a stop that didn't start, is a
