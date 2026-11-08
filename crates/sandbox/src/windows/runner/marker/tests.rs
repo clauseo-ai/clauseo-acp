@@ -16,13 +16,17 @@ fn run_folder(data: &TempDir) -> PathBuf {
     data.dir("sandbox/run")
 }
 
-/// The marker made the desktop user's alone, as `check_owned_file` and `own_file` make it on
-/// Windows.
+/// The marker made the desktop user's alone: mode 0600, or on Windows through
+/// `check_owned_file` and `own_file`, as `write_marker_at` makes it. A file the test writes
+/// itself has the temp folder's inherited DACL, which the read takes as missing.
 fn owner_only(path: &Path) {
     #[cfg(unix)]
     crate::test_support::set_mode(path, 0o600);
-    #[cfg(not(unix))]
-    let _ = path;
+    #[cfg(windows)]
+    {
+        crate::windows::write::check_owned_file(path).unwrap();
+        crate::windows::private_dir::own_file(path).unwrap();
+    }
 }
 
 #[test]
