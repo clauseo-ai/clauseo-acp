@@ -47,6 +47,9 @@ mod real_chrome;
 #[path = "guard/records.rs"]
 mod records;
 #[cfg(test)]
+#[path = "guard/sandbox.rs"]
+mod sandbox;
+#[cfg(test)]
 #[path = "guard/saved.rs"]
 mod saved;
 #[cfg(test)]
