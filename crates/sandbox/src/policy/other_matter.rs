@@ -174,12 +174,14 @@ pub(super) fn check_read<'m>(
             h.display()
         ));
     }
+    // A hidden path in the matter other than its root, held by the grant or holding it, stays
+    // hidden: no grant reaches into it or around it.
     if let Some(h) = hidden
         .iter()
-        .find(|h| under(h, path) && !same(h, &other.path))
+        .find(|h| !same(h, &other.path) && (under(h, path) || under(path, h)))
     {
         return refuse(format!(
-            "{what} may not hold a hidden path: {shown} and {}",
+            "{what} may not hold or sit in a hidden path: {shown} and {}",
             h.display()
         ));
     }

@@ -63,8 +63,9 @@ grant with `other_matter_read(path, is_file)`. `allowed_folder` is unchanged and
 folder in another matter: a grant there is read-only by its type, and no call makes one writable.
 `build()` refuses a grant that is not inside a `hidden_matter` root; one with `.git`,
 `.clauseo`, `.claude`, `.codex` or `.agents` (`REFUSED_IN_OTHER_MATTER`, any ASCII case)
-anywhere in its canonical path, so a link that resolves into one is refused too; one that holds a
-hidden path, the home folder or this matter; one in a matter that sits inside another hidden path
+anywhere in its canonical path, so a link that resolves into one is refused too; one that holds or
+sits in a hidden path other than the matter's own folder (a grant of `m2/secret/deep` when the host
+hides `m2/secret`); one that holds the home folder or this matter; one in a matter that sits inside another hidden path
 (the data dir); and a file granted as a tree or the other way round. `check_allowed_folder` runs
 the same rules for a path in another matter (its cross-matter branch) and the old ones elsewhere.
 `classify` answers `PathClass::OtherMatter { matter }` for a refused path in another matter's

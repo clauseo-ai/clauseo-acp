@@ -101,7 +101,7 @@ fn a_read_with_a_refused_name_anywhere_is_refused() {
 }
 
 #[test]
-fn a_read_outside_another_matter_or_holding_a_hidden_path_is_refused() {
+fn a_read_outside_another_matter_or_holding_or_in_a_hidden_path_is_refused() {
     let w = world("other-read-where");
     let what = "a read of another matter";
     // Not in a matter: the data dir, a plain folder.
@@ -120,9 +120,21 @@ fn a_read_outside_another_matter_or_holding_a_hidden_path_is_refused() {
             .hidden(w.at("m2/docs/secret"))
             .other_matter_read(&w.at("m2/docs"), false)
             .build(),
-        &format!("{what} may not hold a hidden path"),
+        &format!("{what} may not hold or sit in a hidden path"),
         &w.at("m2/docs"),
     );
+    // In a hidden path inside the matter that is not the matter's root, or that path itself.
+    w.dir.dir("m2/docs/secret/deep");
+    for rel in ["m2/docs/secret/deep", "m2/docs/secret"] {
+        refused(
+            with_m2(&w)
+                .hidden(w.at("m2/docs/secret"))
+                .other_matter_read(&w.at(rel), false)
+                .build(),
+            &format!("{what} may not hold or sit in a hidden path"),
+            &w.at(rel),
+        );
+    }
     w.dir.dir("data/m3/docs");
     w.dir.dir("data/m3/.clauseo");
     refused(

@@ -345,8 +345,9 @@ impl Policy {
     ///
     /// The cross-matter branch: a path in another matter's folder
     /// ([`PolicyBuilder::hidden_matter`]) is refused with one of [`REFUSED_IN_OTHER_MATTER`]
-    /// anywhere in it, or holding a hidden path, the home folder or this matter, or in a matter
-    /// that sits in another hidden path; else it passes, and may be granted read-only through
+    /// anywhere in it, holding or inside a hidden path other than the matter's own folder,
+    /// holding the home folder or this matter, or in a matter that sits in another hidden
+    /// path; else it passes, and may be granted read-only through
     /// [`PolicyBuilder::other_matter_read`] only ([`PolicyBuilder::allowed_folder`] refuses it).
     pub fn check_allowed_folder(&self, folder: &Path) -> Result<(), Error> {
         let folder = build::existing(folder, "allowed folder")?;
