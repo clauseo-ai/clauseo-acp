@@ -221,7 +221,7 @@ export const UC: Entry[] = [
   first(
     "UC-11",
     pw(
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   ),
   room("UC-12", pw("Set up the Safe workspace"), "room/np-note", {
@@ -354,7 +354,7 @@ export const UC: Entry[] = [
   settings(
     "UC-42",
     pw(
-      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
     held(P.b),
     ['[data-testid="protection-remove"]'],
@@ -365,6 +365,14 @@ export const UC: Entry[] = [
       "Afterwards, Clauseo works on this computer without the Safe workspace until it's set up again.",
     ),
     held(P.b),
+    ['[data-testid="protection-remove"]'],
+  ),
+  settings(
+    "UC-45",
+    pw(
+      "Your firm requires the Safe workspace, so afterwards Clauseo won't answer on this computer until it's set up again.",
+    ),
+    held(P.b, { required: true }),
     ['[data-testid="protection-remove"]'],
   ),
   settings("UC-44", pw("Remove set-up"), held(P.b)),
@@ -381,6 +389,21 @@ export const UC: Entry[] = [
     ),
     "room/protection-required",
     { protection: P.pool, computer: P.b, over: { required: true } },
+  ),
+  // the note while the firm requires the Safe workspace: the firm's line in the cause's place
+  room(
+    "UC-52",
+    pw(
+      "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
+    ),
+    "room/np-note-pool",
+    { ...note(P.pool), over: { required: true } },
+  ),
+  room(
+    "UC-53",
+    pw("Your firm requires the Safe workspace on this computer. Set it up once, then ask here."),
+    "room/np-note",
+    { ...note(P.needs), over: { required: true, ...NO_PROMPT } },
   ),
   settings("UC-60", "Safe workspace", held(P.a)),
   settings("UC-61", "Clauseo can't show this computer's Safe workspace here yet.", REFUSED_INVALID),
@@ -541,7 +564,7 @@ export const UC: Entry[] = [
   room(
     "UC-95",
     pw(
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
     "room/protection-confirm",
     { protection: P.pool, press: [LINE, SETUP] },

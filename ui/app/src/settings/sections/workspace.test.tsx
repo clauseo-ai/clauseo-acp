@@ -279,6 +279,19 @@ test("Remove set-up always confirms first: Cancel sends nothing, confirming send
   expect(block()?.dataset["state"]).toBe("needs_set_up");
 });
 
+test("required: Remove set-up still shows, and its confirm says Clauseo won't answer afterwards", async () => {
+  await mount(held(PROT.b, { required: true }).host);
+  await press(one("protection-remove"));
+  const said = one("protection-confirm")?.textContent ?? "";
+  expect(said).toContain(
+    pw(
+      "en",
+      "Your firm requires the Safe workspace, so afterwards Clauseo won't answer on this computer until it's set up again.",
+    ),
+  );
+  expect(said).not.toContain("works on this computer without");
+});
+
 test("Set up again with no Windows prompt sends at once, with no confirm, and a refusal says its words", async () => {
   const s = held(PROT.refused, NO_PROMPT);
   const t = await mount(s.host);
@@ -335,7 +348,7 @@ test("after a finished in-app Remove, the app offers Set up, with the announce l
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   );
   await press(one("protection-confirm-ok"));

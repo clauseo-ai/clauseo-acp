@@ -256,6 +256,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
       <ProtectionConfirm
         act="remove"
         open={removing}
+        required={view.required}
         onOpenChange={setRemoving}
         onConfirm={() => {
           setRemoving(false);
