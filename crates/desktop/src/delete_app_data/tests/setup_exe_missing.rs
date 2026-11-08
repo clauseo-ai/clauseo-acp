@@ -347,9 +347,14 @@ fn the_uninstaller_says_nothing_when_the_key_names_no_owner() {
         values.contains("pub const OWNER_SID: &str = \"OwnerSid\";"),
         "record_values.rs"
     );
-    // OwnerSid comes first among the set-up's values, which a removal deletes.
+    // OwnerSid comes first among the set-up's values, which a removal deletes, however many
+    // values the list holds (the stop's `ResetOwed` and the install's `InstallId` among them).
+    let list = values
+        .split_once("pub const SETUP_VALUES: [&str; ")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(count, rest)| (count.parse::<usize>(), rest));
     assert!(
-        values.contains("pub const SETUP_VALUES: [&str; 12] = [\n    OWNER_SID,"),
+        matches!(list, Some((Ok(_), rest)) if rest.starts_with(" = [\n    OWNER_SID,")),
         "record_values.rs"
     );
 }
