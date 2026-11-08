@@ -138,6 +138,7 @@ pub struct Policy {
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
     keychain: bool,
+    native_code_deny: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     link_targets: Vec<PathBuf>,
@@ -164,6 +165,7 @@ pub struct PolicyBuilder {
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
     keychain: bool,
+    native_code_deny: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     scan: Option<MatterScan>,
@@ -275,6 +277,13 @@ impl Policy {
     /// Whether Claude's Keychain rules apply (macOS).
     pub fn keychain(&self) -> bool {
         self.keychain
+    }
+
+    /// Whether nothing the agent writes may run (both OSes): on Windows an inherited deny of
+    /// execute on the files of every place the agent may write; on macOS no
+    /// `file-map-executable` there. Off unless set; see [`PolicyBuilder::native_code_deny`].
+    pub fn native_code_deny(&self) -> bool {
+        self.native_code_deny
     }
 
     /// Files in the matter over the checkpoint size cap, read-only (literal rules).
@@ -495,6 +504,15 @@ impl PolicyBuilder {
     /// Whether Claude's Keychain rules apply (macOS); off unless set.
     pub fn keychain(mut self, on: bool) -> PolicyBuilder {
         self.keychain = on;
+        self
+    }
+
+    /// Whether nothing the agent writes may run ([`Policy::native_code_deny`]); off unless set.
+    /// The product alone sets it, from a value pinned per release (0049): never from a
+    /// lawyer's setting, an environment variable or anything an agent can reach. This method
+    /// is the only way in; nothing in this crate reads it from elsewhere.
+    pub fn native_code_deny(mut self, on: bool) -> PolicyBuilder {
+        self.native_code_deny = on;
         self
     }
 
