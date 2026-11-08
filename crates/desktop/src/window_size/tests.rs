@@ -1,6 +1,6 @@
 use super::{
-    DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WINDOW_SIZE, fit, fitted, ground, state_denylist,
-    state_flags,
+    DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE, fit, fitted,
+    ground, state_denylist, state_flags, webview2_background,
 };
 use std::path::Path;
 use tauri_plugin_window_state::StateFlags;
@@ -116,4 +116,20 @@ fn window_state_is_in_the_local_data_folder_not_the_roaming_one() {
     );
     let keys: Vec<&str> = over.keys().map(String::as_str).collect();
     assert_eq!(keys, ["config"], "only the config folder is overridden");
+}
+
+/// `WebView2` takes its first frame's colour from the variable as opaque ARGB hex: the ground of
+/// the theme, the same `ground` the builder and the native mark take.
+#[test]
+fn webview2_s_first_background_is_the_ground_of_the_theme() {
+    assert_eq!(WEBVIEW2_BACKGROUND_ENV, "WEBVIEW2_DEFAULT_BACKGROUND_COLOR");
+    assert_eq!(webview2_background(false), "FFE5E2DC");
+    assert_eq!(webview2_background(true), "FF1B1A18");
+    for dark in [false, true] {
+        let (r, g, b) = ground(dark);
+        assert_eq!(
+            webview2_background(dark),
+            format!("FF{r:02X}{g:02X}{b:02X}")
+        );
+    }
 }

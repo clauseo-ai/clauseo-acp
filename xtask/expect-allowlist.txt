@@ -38,6 +38,8 @@ crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/ui_language/windows.rs - unsafe_code
 # One RegGetValueW of HKCU's AppsUseLightTheme before the main window exists (the first frame's colour).
 crates/desktop/src/window_size/windows_theme.rs - unsafe_code
+# WEBVIEW2_DEFAULT_BACKGROUND_COLOR set to the ground in main, before any thread: set_var.
+crates/desktop/src/window_size.rs ground_in_env unsafe_code
 # The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
 crates/desktop/src/native_mark/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code

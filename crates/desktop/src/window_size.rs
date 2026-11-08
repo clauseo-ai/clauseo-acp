@@ -18,7 +18,9 @@
 //!   (`windows_theme.rs`), never the lawyer's Settings choice, which only the host knows later;
 //!   the page's own first paint (`ui/app/index.html`) follows the OS too until the display is
 //!   set. Elsewhere the window takes the ground once built ([`paint_first_frame`]), which Windows
-//!   does as well, a no-op when the theme agrees.
+//!   does as well, a no-op when the theme agrees. `WebView2` also takes the ground from
+//!   [`WEBVIEW2_BACKGROUND_ENV`] ([`ground_in_env`], first in `main`): on a fresh profile in
+//!   the dark theme, the builder's colour alone left `WebView2`'s #121212 for 0.5 to 0.75 s.
 
 use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder};
 
@@ -131,6 +133,36 @@ pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
     #[cfg(windows)]
     let builder = builder.background_color(colour(ground(windows_theme::apps_dark())));
     builder
+}
+
+/// The variable through which `WebView2` takes its default background before its controller
+/// exists (Microsoft's `DefaultBackgroundColor` docs: the property alone can leave a first frame
+/// in `WebView2`'s own colour).
+#[cfg(any(windows, test))]
+pub(crate) const WEBVIEW2_BACKGROUND_ENV: &str = "WEBVIEW2_DEFAULT_BACKGROUND_COLOR";
+
+/// [`WEBVIEW2_BACKGROUND_ENV`]'s value for the ground of a `dark` theme or not: opaque ARGB in
+/// hex, `FFE5E2DC` by day, `FF1B1A18` by night.
+#[cfg(any(windows, test))]
+pub(crate) fn webview2_background(dark: bool) -> String {
+    let (r, g, b) = ground(dark);
+    format!("FF{r:02X}{g:02X}{b:02X}")
+}
+
+/// Sets [`WEBVIEW2_BACKGROUND_ENV`] to the ground of Windows' app theme, the colour
+/// [`with_ground`] and the native mark (`native_mark.rs`) take, so a fresh profile's dark
+/// runs show the ground between the native mark and the page's, not `WebView2`'s #121212.
+/// `main` calls it before any thread starts.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "set_var, which is unsafe once other threads may read the environment"
+)]
+pub fn ground_in_env() {
+    let value = webview2_background(windows_theme::apps_dark());
+    // SAFETY: `main` calls this before any thread starts and before Tauri, logging or a runtime
+    // reads the environment, right after `keep_no_dns_in_env`.
+    unsafe { std::env::set_var(WEBVIEW2_BACKGROUND_ENV, value) };
 }
 
 /// Whether Windows' app theme is dark (`windows_theme.rs`): the native mark's colours
