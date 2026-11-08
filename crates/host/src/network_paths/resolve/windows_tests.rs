@@ -130,3 +130,30 @@ fn drive_paths_drop_dot_dots_by_their_text_and_refuse_a_drive_relative_target() 
     assert_eq!(on(r"C:\m\driverel\y", &fs, &net), Walked::Refused);
     assert!(!fs.touched().iter().any(|path| path.starts_with(r"C:\deep")));
 }
+
+/// Every failure is refused on Windows itself too, in drive spellings, nothing past it looked at:
+/// a loop, an unreadable link, a folder the walk may not read; a rejected name is kept.
+#[cfg(windows)]
+#[test]
+fn drive_paths_refuse_every_failure_and_keep_a_rejected_name() {
+    let net = plain_net(true);
+    let fs = FakeFs::with(&[
+        (r"C:\m\a", Fake::Link(r"C:\m\b".into())),
+        (r"C:\m\b", Fake::Link(r"C:\m\a".into())),
+        (r"C:\m\bad", Fake::BadLink),
+        (r"C:\m\locked", Fake::Denied),
+        (r"C:\m\docs\*.docx", Fake::BadName),
+    ]);
+    for path in [r"C:\m\a\x", r"C:\m\bad\x", r"C:\m\locked\x"] {
+        assert_eq!(on(path, &fs, &net), Walked::Refused, "{path}");
+    }
+    assert_eq!(
+        on(r"C:\m\docs\*.docx", &fs, &net),
+        local(r"C:\m\docs\*.docx")
+    );
+    assert!(
+        !fs.touched()
+            .iter()
+            .any(|path| path.starts_with(r"C:\m\bad\x") || path.starts_with(r"C:\m\locked\x"))
+    );
+}
