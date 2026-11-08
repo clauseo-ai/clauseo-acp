@@ -48,7 +48,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::parent::Parent;
-use super::session::{self, Shared, Stopped};
+use super::session::{self, Shared, StartError, Stopped};
 use super::{Child, note};
 pub(crate) use lines::{Line, Overflow, read_line};
 use lines::{answer_all, lock};
@@ -89,7 +89,7 @@ pub(crate) enum Event {
     /// The guard's parent has gone.
     ParentGone,
     /// The browser could not start for a tool call; the reason.
-    StartFailed(String),
+    StartFailed(StartError),
     /// A one-shot agent-browser could not start; the error.
     AgentFailed(String),
     /// A one-shot agent-browser ended the server with this code.
@@ -114,7 +114,7 @@ pub(crate) enum Outcome {
     /// The guard's parent went and agent-browser was ended.
     ParentGone,
     /// The browser could not start; the reason.
-    StartFailed(String),
+    StartFailed(StartError),
     /// agent-browser could not start; the error.
     AgentFailed(String),
 }
@@ -129,7 +129,7 @@ enum End {
     ParentGone,
     /// The agent left with no agent-browser running.
     AgentGone,
-    StartFailed(String),
+    StartFailed(StartError),
     AgentFailed(String),
     OneShotEnded(i32),
 }

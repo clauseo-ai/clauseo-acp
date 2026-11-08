@@ -123,6 +123,23 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {error}"),
     })?;
+    // Nothing that reaches agent-browser's command line or `AGENT_BROWSER_ARGS` may name a switch
+    // that weakens Chrome's sandbox, though agent-browser never starts Chrome here (`chrome.rs`).
+    if let Some(switch) = command
+        .child_args
+        .iter()
+        .chain(env.get(env::ARGS))
+        .find_map(|arg| chrome::sandbox::weakening_in(arg))
+    {
+        return Err(Failure {
+            code: EXIT_USAGE,
+            message: format!(
+                "clauseo-mcp browser-guard: agent-browser's arguments or {} name {switch}, which \
+                 weakens Chrome's sandbox",
+                env::ARGS
+            ),
+        });
+    }
     #[cfg(unix)]
     {
         let dir = env.get(env::SOCKET_DIR).map_or(Path::new(""), Path::new);
@@ -238,7 +255,7 @@ fn outcome_code(outcome: relay::Outcome, agent_browser: &Path) -> Result<i32, Fa
         }
         relay::Outcome::ChromeExited => Err(failed("Chrome exited; the guard ended agent-browser")),
         relay::Outcome::ParentGone => Err(failed(PARENT_GONE)),
-        relay::Outcome::StartFailed(reason) => Err(failed(&reason)),
+        relay::Outcome::StartFailed(reason) => Err(failed(&reason.to_string())),
         relay::Outcome::AgentFailed(error) => Err(failed(&format!(
             "cannot run {}: {error}",
             agent_browser.display()
