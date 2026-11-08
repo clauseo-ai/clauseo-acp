@@ -357,9 +357,11 @@ pub fn task_sddl_matches(found: &str, expected: &str) -> bool {
                 .find_map(|flag| rest.strip_prefix(flag))?;
         }
         // Entries alone, each `(...)`, and nothing after them (no SACL or group).
-        let whole = aces
-            .split_inclusive(')')
-            .all(|ace| ace.starts_with('(') && ace.ends_with(')') && ace[1..].find('(').is_none());
+        let whole = aces.split_inclusive(')').all(|ace| {
+            ace.strip_prefix('(')
+                .and_then(|ace| ace.strip_suffix(')'))
+                .is_some_and(|inner| !inner.contains('('))
+        });
         whole.then(|| (owner.to_owned(), aces.to_owned()))
     };
     let (Some((found_owner, found_aces)), Some((owner, aces))) = (split(found), split(expected))
