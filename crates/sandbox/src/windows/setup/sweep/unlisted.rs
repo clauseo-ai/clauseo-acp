@@ -7,9 +7,12 @@
 //!
 //! When the three disagree (either listing holds a task the walk didn't list), or a listing
 //! can't be read or had a folder or key vanish while it was read, all three are read again
-//! once, the Task Scheduler's by a walk that only lists, and only that second read is judged:
-//! a task made or deleted mid-run then agrees. A walk that couldn't list a folder is 56
-//! already and isn't repeated: the first read is judged. In it, a task the walk didn't list is:
+//! once, the Task Scheduler's by a walk that lists ([`listed_again`]), and only that second
+//! read is judged: a task made or deleted mid-run then agrees. A task the second walk lists
+//! that the first didn't is no proof of safety: it is held to the first walk's principal check
+//! ([`super::sweep_task`]), deleted when the pool's, and a pool task arrived mid-run is 56. A
+//! walk that couldn't list a folder is 56 already and isn't repeated: the first read is judged.
+//! In it, a task the walk didn't list is:
 //!
 //! - in a task file and the cache: hidden, 56, unless the owner of the descriptor its cache key
 //!   holds isn't a pool SID and its task file, under the fallback's trust rules
@@ -19,31 +22,37 @@
 //!   own owner, read through a handle that never follows a link
 //!   ([`Sweeper::task_file_owner`]), decides. A pool SID, or an owner that can't be read, is
 //!   56; any other (Administrators, SYSTEM, another user) leaves a stray file, ignored;
-//! - in the cache alone (no task file): the owner its key's `SD` names decides. A pool SID is
-//!   56 (a pool user may delete its own task's file, which leaves its own `SD`); any other, or
-//!   an `SD` that is missing or can't be read, is a stale key, ignored. Only the Task Scheduler
-//!   service, as SYSTEM, writes those keys, so a pool user can't make one unreadable, and
-//!   residue the system left mustn't refuse every launch.
+//! - in the cache alone (no task file): first whether the task can run at all
+//!   ([`Sweeper::task_cache_runnable`]): a key whose `Id` names no `TaskCache\Tasks\{Id}` key
+//!   holds no task the Task Scheduler can run, a stale key, ignored. Otherwise the owner its
+//!   key's `SD` names decides, and only a readable one that isn't a pool SID is ignored: a pool
+//!   SID, an `SD` that is missing, unreadable, ownerless or over its cap is 56. The `SD` holds
+//!   the descriptor the task's registrant gave, so a pool user can make it unreadable (a DACL
+//!   near 64 KiB) or ownerless; and a pool user may delete its own task's file.
 //!
-//! A folder or key that vanishes while listed is left out of its listing (it holds no task
-//! now), never failing it. A listing that can't be read on the second read is 56. The log
-//! line counts each kind, never a path or SID. Nothing is deleted through a file or the
-//! registry: a hidden task is left, and the run fails closed.
+//! A folder or key that vanishes while listed is left out of its listing, never failing it,
+//! and checked once more after the judged read: one there again is 56 ([`Swept::reappeared`]);
+//! only one still gone is skipped and counted. A listing that can't be read on the judged read
+//! is 56. The log line counts each kind, never a path or SID. Nothing is deleted through a file
+//! or the registry: a hidden task is left, and the run fails closed.
+//!
+//! [`Swept::reappeared`]: super::Swept::reappeared
 
 use std::collections::BTreeSet;
 
-use super::{FOLDERS_CAP, Failed, Sweeper, Walk, file_trust, running, task_file};
+use super::{FOLDERS_CAP, Failed, Sweeper, Walk, file_trust, running, sweep_task, task_file};
 use crate::windows::sids::Sid;
 
 /// One of the cross-check's listings ([`Sweeper::task_file_paths`],
-/// [`Sweeper::task_cache_paths`]): every task's path (`\A\name`), and how many folders or keys
+/// [`Sweeper::task_cache_paths`]): every task's path (`\A\name`), and the folders or keys that
 /// vanished while it was read, each left out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Listing {
     /// Every task's path.
     pub paths: Vec<String>,
-    /// Folders or keys gone while listed.
-    pub vanished: usize,
+    /// Each folder (below `Tasks`, as `\A\B`) or key (below `Tree`, as `\A\name`) gone while
+    /// listed, by path: never logged.
+    pub vanished: Vec<String>,
 }
 
 /// Where a task the walk didn't list was found.
@@ -62,8 +71,9 @@ enum Held {
 struct Views {
     /// Why each listing that couldn't be read wasn't.
     failed: Vec<Failed>,
-    /// Folders or keys gone while listed.
-    vanished: usize,
+    /// Folders below `Tasks`, and keys below `Tree`, gone while listed.
+    vanished_folders: Vec<String>,
+    vanished_keys: Vec<String>,
     /// Each task the walk didn't list, its path and where it was found; `Err` where a
     /// comparison failed, since it may be one.
     unlisted: Vec<Result<(String, Held), Failed>>,
@@ -72,7 +82,10 @@ struct Views {
 impl Views {
     /// Whether the listings agree: each read whole, and no task the walk didn't list.
     fn agree(&self) -> bool {
-        self.failed.is_empty() && self.vanished == 0 && self.unlisted.is_empty()
+        self.failed.is_empty()
+            && self.vanished_folders.is_empty()
+            && self.vanished_keys.is_empty()
+            && self.unlisted.is_empty()
     }
 }
 
@@ -90,7 +103,8 @@ pub(super) fn cross_check<S: Sweeper>(fs: &mut S, listed: &[String], at: Walk<'_
         return;
     }
     at.swept.relisted = true;
-    match listed_again(fs) {
+    let mut at = at;
+    match listed_again(fs, listed, &mut at) {
         Ok(again) => {
             let second = read_views(fs, &again);
             judge(fs, second, at);
@@ -102,37 +116,59 @@ pub(super) fn cross_check<S: Sweeper>(fs: &mut S, listed: &[String], at: Walk<'_
     }
 }
 
-/// Every task the Task Scheduler lists, by path, from a walk that only lists: `Err` when a
-/// folder, its path, its tasks or its subfolders can't be read, or past [`FOLDERS_CAP`].
-fn listed_again<S: Sweeper>(fs: &mut S) -> Result<Vec<String>, Failed> {
+/// Every task the Task Scheduler lists, by path, from a second walk; each task it lists that
+/// isn't one of `listed`, the first walk's (or can't be compared), is held to the first walk's
+/// check ([`super::sweep_task`]), and one found the pool's counts in
+/// [`super::Swept::arrived_pool`]: 56. `Err` when a folder, its path, its tasks or its
+/// subfolders can't be read, or past [`FOLDERS_CAP`].
+fn listed_again<S: Sweeper>(
+    fs: &mut S,
+    listed: &[String],
+    at: &mut Walk<'_>,
+) -> Result<Vec<String>, Failed> {
+    let first: BTreeSet<&str> = listed.iter().map(String::as_str).collect();
     let mut stack = vec![fs.root()?];
     let mut folders = 0_usize;
-    let mut listed = Vec::new();
+    let mut again = Vec::new();
     while let Some(folder) = stack.pop() {
         folders += 1;
         if folders > FOLDERS_CAP {
             return Err(format!("more than {FOLDERS_CAP} folders, read again"));
         }
         let path = fs.folder_path(&folder)?;
-        let tasks = fs.tasks(&folder)?;
-        listed.extend(
-            tasks
-                .iter()
-                .map(|task| running::task_path(&path, &task.name)),
-        );
+        for task in fs.tasks(&folder)? {
+            let at_path = running::task_path(&path, &task.name);
+            let known = first.contains(at_path.as_str()) || holds(fs, listed, &at_path) == Ok(true);
+            again.push(at_path);
+            if known {
+                continue;
+            }
+            at.swept.arrived += 1;
+            let pool_before = at.swept.pool_paths.len();
+            let one = Walk {
+                pool: at.pool,
+                names: at.names,
+                resolved: &mut *at.resolved,
+                swept: &mut *at.swept,
+            };
+            sweep_task(fs, &folder, task, one);
+            if at.swept.pool_paths.len() > pool_before {
+                at.swept.arrived_pool += 1;
+            }
+        }
         for sub in fs.subfolders(&folder)? {
             stack.push(sub?);
         }
     }
-    Ok(listed)
+    Ok(again)
 }
 
 /// The task files and the cache, read and held against `listed`.
 fn read_views<S: Sweeper>(fs: &mut S, listed: &[String]) -> Views {
     let mut views = Views::default();
-    let paths = |list: Result<Listing, Failed>, views: &mut Views| match list {
+    let files = match fs.task_file_paths() {
         Ok(list) => {
-            views.vanished += list.vanished;
+            views.vanished_folders = list.vanished;
             list.paths
         }
         Err(why) => {
@@ -140,8 +176,16 @@ fn read_views<S: Sweeper>(fs: &mut S, listed: &[String]) -> Views {
             Vec::new()
         }
     };
-    let files = paths(fs.task_file_paths(), &mut views);
-    let keys = paths(fs.task_cache_paths(), &mut views);
+    let keys = match fs.task_cache_paths() {
+        Ok(list) => {
+            views.vanished_keys = list.vanished;
+            list.paths
+        }
+        Err(why) => {
+            views.failed.push(why);
+            Vec::new()
+        }
+    };
     let walked: BTreeSet<&str> = listed.iter().map(String::as_str).collect();
     let mut seen = BTreeSet::new();
     let each = files
@@ -197,10 +241,31 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
         resolved,
         swept,
     } = at;
-    swept.vanished += views.vanished;
     for why in views.failed {
         swept.unlisted += 1;
         swept.note(why);
+    }
+    // Each folder or key gone while listed, checked once more: one there again may hold a
+    // task the listing missed.
+    let folders = views.vanished_folders.into_iter().map(|path| (path, true));
+    let keys = views.vanished_keys.into_iter().map(|path| (path, false));
+    for (path, folder) in folders.chain(keys) {
+        let present = if folder {
+            fs.task_folder_present(&path)
+        } else {
+            fs.task_cache_key_present(&path)
+        };
+        match present {
+            Ok(false) => swept.vanished += 1,
+            Ok(true) => {
+                swept.reappeared += 1;
+                swept.note(REAPPEARED.to_owned());
+            }
+            Err(why) => {
+                swept.reappeared += 1;
+                swept.note(why);
+            }
+        }
     }
     for one in views.unlisted {
         let (path, held) = match one {
@@ -230,12 +295,12 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
             }
             Held::Key => {
                 swept.unlisted_keys += 1;
-                match fs.task_cache_owner(&path) {
-                    Ok(owner) if pool.contains(&owner) => Err(POOL_KEY.to_owned()),
-                    Ok(_) | Err(_) => {
+                match key_alone(fs, &path, pool) {
+                    Ok(()) => {
                         swept.stale_keys += 1;
                         Ok(())
                     }
+                    Err(why) => Err(why),
                 }
             }
         };
@@ -245,6 +310,22 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
             swept.note(why);
         }
     }
+}
+
+/// Why a folder or key gone while listed and there again is 56.
+const REAPPEARED: &str = "a folder or key gone while listed was there again";
+
+/// Whether the cache key at `path`, with no task file, may be ignored, as the module says:
+/// `Ok` when its task can't run, or its `SD` is readable and names an owner that isn't a pool
+/// SID; `Err` with why it is 56.
+fn key_alone<S: Sweeper>(fs: &mut S, path: &str, pool: &[Sid]) -> Result<(), Failed> {
+    if !fs.task_cache_runnable(path)? {
+        return Ok(());
+    }
+    if pool.contains(&fs.task_cache_owner(path)?) {
+        return Err(POOL_KEY.to_owned());
+    }
+    Ok(())
 }
 
 /// Why a task file with no cache key is 56.

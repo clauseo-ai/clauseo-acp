@@ -286,6 +286,18 @@ impl Sweeper for WindowsSweeper {
         windows_task_file::owner(&system_folder()?, parts)
     }
 
+    fn task_cache_runnable(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_listing::task_cache_runnable(path)
+    }
+
+    fn task_folder_present(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_task_file::folder_present(&system_folder()?, path)
+    }
+
+    fn task_cache_key_present(&mut self, path: &str) -> Result<bool, Failed> {
+        windows_listing::task_cache_key_present(path)
+    }
+
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
         windows_listing::task_cache_owner(path)
     }

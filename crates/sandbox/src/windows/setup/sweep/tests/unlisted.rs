@@ -155,9 +155,9 @@ fn a_stray_task_file_is_ignored_unless_a_pool_user_owns_it_or_its_owner_cant_be_
 }
 
 #[test]
-fn a_stale_cache_key_is_ignored_unless_its_descriptor_names_a_pool_owner() {
-    let missing = "a task's descriptor in the Task Scheduler's cache couldn't be read (2)";
-    for owner in [None, Some(Err(missing.to_owned())), Some(Ok(sid(1001)))] {
+fn a_cache_key_alone_is_ignored_only_when_its_task_cant_run_or_its_sd_names_another_owner() {
+    // Its task can run: only a readable SD naming an owner that isn't the pool's is ignored.
+    for owner in [None, Some(Ok(sid(1001)))] {
         let mut fake = hiding(r"\A\task", None);
         fake.stale.push(r"\stale".to_owned());
         if let Some(owner) = owner.clone() {
@@ -168,28 +168,53 @@ fn a_stale_cache_key_is_ignored_unless_its_descriptor_names_a_pool_owner() {
         let kind = "1 cache keys with no task file (1 ignored";
         assert!(line.contains(kind), "{line}");
     }
-    let mut pool = hiding(r"\A\task", None);
-    pool.stale.push(r"\stale".to_owned());
-    pool.cache_owners
+    // A pool owner, or an SD that is missing, over its cap or ownerless: 56.
+    let unread = [
+        "a task's descriptor in the Task Scheduler's cache couldn't be read (2)",
+        "a task's descriptor in the Task Scheduler's cache couldn't be read (234)",
+        "a task's descriptor in the Task Scheduler's cache names no owner",
+    ];
+    let owners = unread.map(|why| Err(why.to_owned()));
+    for owner in owners.into_iter().chain([Ok(sid(1010))]) {
+        let mut fake = hiding(r"\A\task", None);
+        fake.stale.push(r"\stale".to_owned());
+        fake.cache_owners
+            .insert(r"\stale".to_owned(), owner.clone());
+        let (exit, line) = swept_line(&mut fake);
+        assert_eq!(exit, SweepExit::TasksLeft, "{owner:?}");
+        assert!(line.contains("1 not listed"), "{line}");
+        let kind = "1 cache keys with no task file (0 ignored";
+        assert!(line.contains(kind), "{line}");
+        assert!(
+            fake.deleted().is_empty(),
+            "never deleted through the registry"
+        );
+    }
+    // No TaskCache\Tasks key for its Id: it can't run, so even a pool owner is ignored.
+    let mut stale = hiding(r"\A\task", None);
+    stale.stale.push(r"\stale".to_owned());
+    stale
+        .cache_owners
         .insert(r"\stale".to_owned(), Ok(sid(1010)));
-    let (exit, line) = swept_line(&mut pool);
-    assert_eq!(exit, SweepExit::TasksLeft);
-    assert!(line.contains("1 not listed"), "{line}");
-    assert!(
-        line.contains("1 cache keys with no task file (0 ignored"),
-        "{line}"
-    );
-    assert!(
-        pool.deleted().is_empty(),
-        "never deleted through the registry"
-    );
+    stale.runnable.insert(r"\stale".to_owned(), Ok(false));
+    let (exit, line) = swept_line(&mut stale);
+    assert_eq!(exit, SweepExit::Done, "{line}");
+    // Whether it can run unread: 56.
+    let mut unread = hiding(r"\A\task", None);
+    unread.stale.push(r"\stale".to_owned());
+    let why = "a task's Id in the Task Scheduler's cache couldn't be read (5)";
+    unread
+        .runnable
+        .insert(r"\stale".to_owned(), Err(why.to_owned()));
+    assert_eq!(swept_line(&mut unread).0, SweepExit::TasksLeft);
 }
 
 #[test]
 fn a_task_made_or_deleted_mid_run_or_a_key_gone_mid_listing_is_read_again_not_56() {
     // Made once the walk was done: the second walk lists it.
     let mut late = Fake::new(&[1010]);
-    late.late.push((r"\A".to_owned(), "late".to_owned()));
+    late.late
+        .push((r"\A".to_owned(), "late".to_owned(), "S-1-5-18".to_owned()));
     let (exit, line) = swept_line(&mut late);
     assert_eq!(exit, SweepExit::Done, "{line}");
     assert!(line.contains("were read again: 0 tasks"), "{line}");
@@ -230,4 +255,54 @@ fn a_pool_owned_hidden_task_is_still_56_after_the_second_read() {
     assert!(line.contains(kind), "{line}");
     let swept = sweep_tasks(&mut fake, &[sid(1010)]);
     assert_eq!(swept.hidden_paths, [r"\A\hidden"]);
+}
+
+#[test]
+fn a_pool_task_new_to_the_second_walk_is_deleted_and_56() {
+    let mut fake = Fake::new(&[1010]);
+    let principal = "S-1-5-21-1-2-3-1010".to_owned();
+    fake.late
+        .push((r"\A".to_owned(), "late".to_owned(), principal));
+    let (exit, line) = swept_line(&mut fake);
+    assert_eq!(exit, SweepExit::TasksLeft, "{line}");
+    assert_eq!(fake.deleted(), [r"\A\late"]);
+    assert!(
+        line.contains("1 tasks new to the second walk (1 the pool's)"),
+        "{line}"
+    );
+    // Another's: checked, not 56.
+    let mut other = Fake::new(&[1010]);
+    let system = "S-1-5-18".to_owned();
+    other
+        .late
+        .push((r"\A".to_owned(), "late".to_owned(), system));
+    let (exit, line) = swept_line(&mut other);
+    assert_eq!(exit, SweepExit::Done, "{line}");
+    assert!(
+        line.contains("1 tasks new to the second walk (0 the pool's)"),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_folder_or_key_gone_mid_listing_and_there_again_is_56() {
+    let unread = Err("the folder couldn't be opened (5)".to_owned());
+    for (folder, again) in [(true, Ok(true)), (false, Ok(true)), (true, unread)] {
+        let mut fake = Fake::new(&[1010]);
+        if folder {
+            fake.vanish_folder = 2;
+        } else {
+            fake.vanish = 2;
+        }
+        fake.present_again = again.clone();
+        let (exit, line) = swept_line(&mut fake);
+        assert_eq!(exit, SweepExit::TasksLeft, "{folder} {again:?}: {line}");
+        assert!(line.contains("0 folders or keys gone while listed and still gone, 1 there"));
+    }
+    // Still gone: skipped and counted.
+    let mut gone = Fake::new(&[1010]);
+    gone.vanish_folder = 2;
+    let (exit, line) = swept_line(&mut gone);
+    assert_eq!(exit, SweepExit::Done, "{line}");
+    assert!(line.contains("1 folders or keys gone while listed and still gone, 0 there"));
 }

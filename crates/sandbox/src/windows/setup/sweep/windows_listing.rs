@@ -28,12 +28,13 @@ use std::io;
 use std::path::Path;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_KEY_DELETED, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_KEY_DELETED, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS,
+    WIN32_ERROR,
 };
 use windows::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_64KEY, REG_BINARY,
-    REG_VALUE_TYPE, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
+    REG_SZ, REG_VALUE_TYPE, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
 };
 use windows::core::{HSTRING, PWSTR, w};
 
@@ -46,8 +47,13 @@ use crate::windows::sids::Sid;
 /// What the file walk enables.
 const BACKUP: [&str; 1] = ["SeBackupPrivilege"];
 
-/// The most a task's `SD` value is read to: a descriptor larger is refused.
-const SD_CAP: usize = 64 * 1024;
+/// The most a task's `SD` value is read to: a descriptor larger is refused (56). The largest
+/// legal self-relative descriptor is a 20-byte header, two SIDs of at most 68 bytes each and
+/// two ACLs of at most 65 535 bytes each, about 128 KiB; the cap leaves room past that.
+const SD_CAP: usize = 256 * 1024;
+
+/// The Task Scheduler's cache of task definitions by `Id`, below `HKEY_LOCAL_MACHINE`.
+const TASKS: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks";
 
 /// The Task Scheduler's cache of task paths, below `HKEY_LOCAL_MACHINE`.
 const TREE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree";
@@ -64,7 +70,7 @@ pub(super) fn task_files(system: &Path) -> Result<Listing, Failed> {
     let tasks = listable(&root, &wide("Tasks"))?
         .ok_or_else(|| "the system folder holds no Tasks folder".to_owned())?;
     let mut stack = vec![(String::new(), tasks)];
-    let mut vanished = 0_usize;
+    let mut vanished = Vec::new();
     // Counted, and capped, before a folder's handle is opened: the stack holds one open handle
     // per folder in it, so a wide folder can't open more than the cap.
     let mut folders = 1_usize;
@@ -87,7 +93,7 @@ pub(super) fn task_files(system: &Path) -> Result<Listing, Failed> {
                 }
                 match listable(&folder, &child.name)? {
                     Some(next) => stack.push((at, next)),
-                    None => vanished += 1,
+                    None => vanished.push(at),
                 }
             } else {
                 paths.push(at);
@@ -236,6 +242,12 @@ impl Key {
                 Some(&raw mut length),
             )
         };
+        if read == ERROR_MORE_DATA {
+            return Err(
+                "a task's descriptor in the Task Scheduler's cache is larger than its cap"
+                    .to_owned(),
+            );
+        }
         if read != ERROR_SUCCESS {
             return Err(format!(
                 "a task's descriptor in the Task Scheduler's cache couldn't be read ({})",
@@ -250,6 +262,77 @@ impl Key {
         bytes.truncate(length as usize);
         Ok(bytes)
     }
+
+    /// This key's `Id` value: a `REG_SZ` GUID in braces (`{8-4-4-4-12}`, hex digits), checked
+    /// before it names a key; `None` when the key is gone.
+    fn id(&self) -> Result<Option<String>, Failed> {
+        let mut text = [0_u16; 64];
+        let mut length = u32::try_from(size_of_val(&text)).unwrap_or(0);
+        let mut kind = REG_VALUE_TYPE::default();
+        // SAFETY: the key is open and the name a NUL-terminated literal; `text` is writable
+        // for `length` bytes, and the call writes the type and the length it used back.
+        let read = unsafe {
+            RegQueryValueExW(
+                self.0,
+                w!("Id"),
+                None,
+                Some(&raw mut kind),
+                Some(text.as_mut_ptr().cast()),
+                Some(&raw mut length),
+            )
+        };
+        if read == ERROR_KEY_DELETED {
+            return Ok(None);
+        }
+        if read != ERROR_SUCCESS || kind != REG_SZ {
+            return Err(format!(
+                "a task's Id in the Task Scheduler's cache couldn't be read ({})",
+                read.0
+            ));
+        }
+        let used = text.get(..length as usize / 2).unwrap_or(&text);
+        let used = used.strip_suffix(&[0]).unwrap_or(used);
+        let id = String::from_utf16(used).unwrap_or_default();
+        if !is_guid(&id) {
+            return Err("a task's Id in the Task Scheduler's cache isn't a GUID".to_owned());
+        }
+        Ok(Some(id))
+    }
+}
+
+/// Whether `id` is a GUID in braces: `{`, then hex digits in groups of 8, 4, 4, 4 and 12
+/// joined by `-`, then `}`.
+pub(super) fn is_guid(id: &str) -> bool {
+    let Some(inner) = id.strip_prefix('{').and_then(|rest| rest.strip_suffix('}')) else {
+        return false;
+    };
+    let groups: Vec<&str> = inner.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Whether the task at `path` can run, for [`Sweeper::task_cache_runnable`]: its `Tree` key's
+/// `Id` names a `TaskCache\Tasks\{Id}` key. `Ok(false)` when either is gone.
+///
+/// [`Sweeper::task_cache_runnable`]: super::Sweeper::task_cache_runnable
+pub(super) fn task_cache_runnable(path: &str) -> Result<bool, Failed> {
+    let Some(key) = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))? else {
+        return Ok(false);
+    };
+    let Some(id) = key.id()? else {
+        return Ok(false);
+    };
+    let task = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TASKS}\\{id}")))?;
+    Ok(task.is_some())
+}
+
+/// Whether the key at `path` below `Tree` is there.
+pub(super) fn task_cache_key_present(path: &str) -> Result<bool, Failed> {
+    let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
+    Ok(key.is_some())
 }
 
 /// The owner of the task at `path` (`\A\name`) that its key in the Task Scheduler's cache
@@ -270,7 +353,7 @@ pub(super) fn task_cache() -> Result<Listing, Failed> {
     let mut stack = vec![String::new()];
     let mut keys = 0_usize;
     let mut paths = Vec::new();
-    let mut vanished = 0_usize;
+    let mut vanished = Vec::new();
     while let Some(path) = stack.pop() {
         let opened = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
         let read = opened.map(|key| {
@@ -285,7 +368,7 @@ pub(super) fn task_cache() -> Result<Listing, Failed> {
             if path.is_empty() {
                 return Err("the Task Scheduler's cache is gone".to_owned());
             }
-            vanished += 1;
+            vanished.push(path);
             continue;
         };
         if task {

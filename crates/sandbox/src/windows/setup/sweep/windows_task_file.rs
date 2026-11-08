@@ -25,7 +25,7 @@ use std::path::Path;
 use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 use windows::Win32::Storage::FileSystem::READ_CONTROL;
 
-use super::{Failed, TaskFile, file_trust};
+use super::{Failed, TaskFile, file_trust, task_file};
 use crate::windows::acl::object::Object;
 use crate::windows::acl::privilege::Privileges;
 use crate::windows::acl_bytes::owner_sid;
@@ -72,20 +72,64 @@ pub(super) fn owner(system: &Path, parts: &[String]) -> Result<Sid, Failed> {
     owner_sid(&descriptor).ok_or_else(|| "the task file's descriptor names no owner".to_owned())
 }
 
+/// Whether the folder `path` (`\A\B`) below `Tasks`, in the system folder `system`, is there:
+/// each part opened by handle as the module says; `Ok(false)` once one isn't found.
+pub(super) fn folder_present(system: &Path, path: &str) -> Result<bool, Failed> {
+    let (parent, name) = path
+        .rsplit_once('\\')
+        .ok_or_else(|| "the folder's path doesn't start at the root".to_owned())?;
+    let parent = if parent.is_empty() { "\\" } else { parent };
+    let parts = task_file::parts(parent, name)?;
+    let _backup = Privileges::enable(&BACKUP).map_err(|error| error.to_string())?;
+    match folder_of(system, &parts) {
+        Ok(_) => Ok(true),
+        Err(Missing::Gone) => Ok(false),
+        Err(Missing::Failed(why)) => Err(why),
+    }
+}
+
+/// Why [`folder_of`] gave no folder.
+enum Missing {
+    /// A part wasn't found.
+    Gone,
+    /// Anything else.
+    Failed(Failed),
+}
+
+impl From<Missing> for Failed {
+    fn from(missing: Missing) -> Failed {
+        match missing {
+            Missing::Gone => "a folder on the task file's path is gone".to_owned(),
+            Missing::Failed(why) => why,
+        }
+    }
+}
+
 /// The folder `folders` name below `Tasks` in the system folder `system`, each opened by
 /// handle as the module says.
-fn folder_of(system: &Path, folders: &[String]) -> Result<Object, Failed> {
-    let mut folder = Object::open_for(system, 0)
-        .map_err(|error| format!("the system folder couldn't be opened ({error})"))?;
+fn folder_of(system: &Path, folders: &[String]) -> Result<Object, Missing> {
+    let mut folder = Object::open_for(system, 0).map_err(|error| {
+        Missing::Failed(format!("the system folder couldn't be opened ({error})"))
+    })?;
     if folder.reparse() || !folder.folder {
-        return Err("the system folder isn't a plain folder".to_owned());
+        let why = "the system folder isn't a plain folder".to_owned();
+        return Err(Missing::Failed(why));
     }
     for part in std::iter::once("Tasks").chain(folders.iter().map(String::as_str)) {
-        let next = folder.open_child_for(&wide(part), 0).map_err(|error| {
-            format!("a folder on the task file's path couldn't be opened ({error})")
-        })?;
+        let next = match folder.open_child_for(&wide(part), 0) {
+            Ok(next) => next,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Missing::Gone);
+            }
+            Err(error) => {
+                return Err(Missing::Failed(format!(
+                    "a folder on the task file's path couldn't be opened ({error})"
+                )));
+            }
+        };
         if next.reparse() || !next.folder {
-            return Err("a folder on the task file's path isn't a plain folder".to_owned());
+            let why = "a folder on the task file's path isn't a plain folder".to_owned();
+            return Err(Missing::Failed(why));
         }
         folder = next;
     }
