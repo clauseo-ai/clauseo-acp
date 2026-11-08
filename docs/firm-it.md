@@ -374,6 +374,17 @@ file (`unknown images: ...`), by file name only. A security product that hides i
 tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
 gives.
 
+### Sandbox sign-ins in the Security log
+
+Each sandboxed run signs one sandbox user (`ClauseoSb01` to `ClauseoSb32`) on. Besides the sign-in
+the Secondary Logon service makes to start the run, each launch adds one more, from
+`clauseo-sandbox-run.exe` running as the lawyer: it makes the run's own window station as that
+sandbox user. So each launch adds one event 4624 (an account was logged on) with logon type 2
+(interactive) for the sandbox user, from that process, and one 4634 (an account was logged off)
+when it ends. There is no 4672 (special privileges assigned): the sandbox users hold no
+administrator rights. Alerting on interactive sign-ins by local accounts will see these; the
+account names and the process name tell them apart.
+
 ### If Defender quarantines a Clauseo file
 
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
