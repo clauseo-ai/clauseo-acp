@@ -181,8 +181,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       - name: Show the pnpm and Node versions against ui/package.json
         run: |
@@ -226,6 +231,16 @@ jobs:
       # (workflow-token-test.rb, with its own planted cases).
       - name: Test the workflows' token rule
         run: ruby .github/scripts/workflow-token-test.rb
+
+      # The cache scripts: prune on main's real cache list of 2026-11-08; install-pinned-tools'
+      # cache with a fake folder, bad checksums included; every key the workflows save has a family
+      # in cache-families.txt; no job a pull request or merge group runs holds actions: write but
+      # the two cancel jobs the token rule above lists.
+      - name: Test the cache scripts and the workflows' cache rules
+        run: |
+          bash .github/scripts/cache-entries-test.sh
+          bash .github/scripts/tool-cache-test.sh
+          ruby .github/scripts/cache-keys-test.rb
 
       # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
       # clean-up (#479's group, 2026-11-05).
@@ -314,6 +329,14 @@ jobs:
             exit 1
           fi
 
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
   # vitest on the newest Node release that "engines.node" allows; see the note at the top.
   vitest-newest-node:
     name: vitest (newest Node)
@@ -338,8 +361,13 @@ jobs:
         with:
           node-version-file: ui/package.json
           check-latest: true
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       - name: Show the Node version against ui/package.json
         run: echo "node $(node -v), the newest release ui/package.json's engines.node $(node -p 'require("./ui/package.json").engines.node') allows"
@@ -349,6 +377,14 @@ jobs:
 
       - name: vitest
         run: pnpm -C ui/app run test
+
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
 
   build:
     name: build (${{ matrix.target }})
@@ -468,8 +504,14 @@ jobs:
         if: env.BUILD == 'true' && env.UI == 'true'
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        if: env.BUILD == 'true' && env.UI == 'true'
+        uses: ./.github/actions/pnpm-store
 
       - name: Install the ui workspace
         if: env.BUILD == 'true' && env.UI == 'true'
@@ -667,6 +709,14 @@ jobs:
           APP: target/${{ env.TARGET }}/release/${{ env.EXE }}
         run: .github/scripts/launch-xvfb.sh "$APP"
 
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && env.BUILD == 'true' && env.UI == 'true' && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
   # Tier 2 runs nightly and on demand. On a pull request and in a merge group the build matrix leaves Intel
   # macOS out, and this job reports its required check instead: skipped by `if`, it takes no runner
   # (the org shares 20 concurrent jobs, 5 of them macOS) and reports as skipped, which satisfies a
@@ -683,7 +733,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: echo "Intel macOS is tier 2; it builds nightly and on demand."
-
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
@@ -990,3 +1039,31 @@ jobs:
 
       - name: The quarantined tests
         run: cargo nextest run --workspace --profile quarantine --no-tests=pass
+
+  # Main's Actions cache, after the nightly saves: deletes every entry not on main, every main entry
+  # no family in .github/scripts/cache-families.txt matches, and each family's entries but the
+  # newest, logging each with its size (.github/scripts/cache-entries.sh prune; .deb entries and
+  # unknown ones only once unused for 3 days). It never deletes a family's newest entry, the one runs
+  # restore, so a save never leaves merge groups cold. Main's scheduled and on-demand runs only: the
+  # one job in this workflow with actions: write, and no pull request or merge group runs it.
+  cache-prune:
+    name: cache prune
+    needs: [fast-lane, vitest-newest-node, build, mutants, reducer-bench, quarantine]
+    if: >-
+      ${{ always() && github.ref == 'refs/heads/main'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Prune the Actions cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/cache-entries.sh prune
