@@ -1171,8 +1171,9 @@ leaves that profile, both naming the part.
     1 s `GRACE`, a full 400 ms wait for the job to empty, the escapee snapshot, two record reads,
     the requests and the marker's write). At its end (`end::SessionEnd::finish`) it writes the
     session's marker as awaiting a sweep `>= M` (below). When a sweep of the session found an
-    escapee it also reads `StopNext`, requests `\Clauseo\SandboxStop` (`request_pool_stop`) and
-    writes the marker as awaiting that stop too. A number that can't be read leaves the marker
+    escapee it instead reads `StopNext`, requests `\Clauseo\SandboxStop` (`request_pool_stop`)
+    and writes the marker as awaiting that stop alone; its sweep number is read once the stop
+    completed (below). A number that can't be read leaves the marker
     open.
     The outer starts no process as the pool user at the end, so the end opens no logon gap. A
     process of the pool user's outside the job is killed by the next inner's first act, which also
@@ -1248,9 +1249,14 @@ leaves that profile, both naming the part.
       cancel whose agent outlived its grace, a job that didn't empty. The next inner's first act
       kills what is left of the pool user's and reports an escapee, so only the pool user's tasks
       and BITS jobs are owed. Clean once `SweepSequence >= M`.
-    - `AwaitingStop { stop, sweep }` after an escapee: `stop` is `StopNext` read once the job
-      ended, before the stop is requested. Clean once `StopSequence >= stop` and
-      `SweepSequence >= sweep`.
+    - `AwaitingStop { stop }` after an escapee: `stop` is `StopNext` read once the job ended,
+      before the stop is requested. It holds no sweep number: one read while the escapee lives
+      proves nothing, since the escapee can watch that sweep complete, register a task, and only
+      then be killed by the stop. It is never clean itself. Once `StopSequence >= stop`, whoever
+      reads it (F4, a launch, the desktop's start) re-marks it: reads `SweepNext` (`M`) only
+      then, requests the sweep, and writes `AwaitingSweep { sweep: M }`. A marker written
+      before this rule as `AwaitingStop { stop, sweep }` reads as `AwaitingStop { stop }`, its
+      `sweep` ignored.
     - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
       couldn't read a number.
 
@@ -1268,8 +1274,8 @@ leaves that profile, both naming the part.
       user's, or one naming none or unreadable, awaits a stop with `StopSequence` below its
       number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
       live session per pool user, and this outer hasn't written its own): it becomes
-      `AwaitingStop` with `StopNext` and `SweepNext` read then, after its session's last launch
-      path closed, and the logon is refused. Escapees of other pool users don't count: one can't
+      `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
+      and the logon is refused. One whose stop completed is re-marked, and the logon goes. Escapees of other pool users don't count: one can't
       open this pool user's runner. Once slot groups land (two pool users share a slot's grants
       on a matter), the scope becomes the pool user's slot, since an escapee of one still holds
       the slot group's grants.
@@ -1277,12 +1283,16 @@ leaves that profile, both naming the part.
       clean-close record is touched, finds every marker awaiting a sweep clean, or requests the
       sweep and reads `SweepSequence` every 100 ms for up to 15 s (inside the host's 180 s); one
       still short refuses the launch with `Error::UncleanSession` (appended,
-      `sandbox.cleaning_up`, retryable). `Open` markers are left there: they may be live sessions'.
+      `sandbox.cleaning_up`, retryable). A marker whose stop completed is re-marked first, and
+      the launch then waits for its sweep; one that couldn't be re-marked (`SweepNext`
+      unreadable, the write failed) refuses the launch the same way. A marker still awaiting its
+      stop is F4's and doesn't hold the launch. `Open` markers are left there: they may be live
+      sessions'.
     - **The desktop's start** (`runner::start_up_requests(data_dir)`, once, before any launch,
       off the UI thread): every outer of the last run is gone, so each `Open` or unreadable
-      marker becomes `AwaitingStop` with the numbers read then (an unreadable one naming no pool
-      user, so it counts for all); the clean ones go; the stop and sweep tasks are requested for
-      what is still awaited. It never waits.
+      marker becomes `AwaitingStop` with `StopNext` read then (an unreadable one naming no pool
+      user, so it counts for all); one whose stop completed is re-marked; the clean ones go; the
+      stop and sweep tasks are requested for what is still awaited. It never waits.
 
     A marker naming a pool SID the record no longer lists is stale and removed: a removal stopped
     every process of that SID before it deleted the account. `--remove` clears the markers as
@@ -1808,7 +1818,10 @@ the admin copy.
    and the waits stop 15 s after the passes' 60 s, so the run ends inside the task's 2 minutes
    with the lock's 30 s wait. What the pass after 60 s still finds is left (48), its users
    marked: so a pool user's process the list names but SYSTEM can't terminate (a PPL) never
-   ends a run at 0;
+   ends a run at 0. Once the passes stop, whatever they found, the run requests
+   `\Clauseo\SandboxSweep` (`request_pool_sweep`): what a killed escapee left (a task, a BITS
+   job) is the sweep's. The request is logged in the run's line and changes no exit code; a
+   marker that awaited this stop re-marks to a sweep whose number is read after it completed;
 5. cancels every BITS job a pool user owns (`EnumJobs(BG_JOB_ENUM_ALL_USERS)`, each job's
    `GetOwner`), at the impersonate level on the manager, the enumerator and each job
    (`pool_steps::cancel_pool_jobs`, which `--sweep-tasks` shares). A pool user's BITS job can't
@@ -1843,8 +1856,8 @@ the admin copy.
 (CI run 42416074600) and which also ends a task, so code running as the lawyer can end a stop
 mid-pass. An ended stop can't pass for a finished one. The rule: an unclean-session marker
 awaiting a stop records `StopNext` as it reads it (M), and only after its session's last launch
-path has closed (the session's job ended, or its outer is dead). The F4 refusal and the marker
-clear only when `StopSequence >= M`: a stop reserved its number after the marker read it and
+path has closed (the session's job ended, or its outer is dead). The F4 refusal lifts, and the
+marker moves on to await a sweep read then, only when `StopSequence >= M`: a stop reserved its number after the marker read it and
 then completed, so its observation began after the session could launch nothing more. The
 marker reads `StopNext` as the lawyer, **without the set-up lock**, which only an
 administrator's token can open (an earlier version of this rule asked for the lock). The read

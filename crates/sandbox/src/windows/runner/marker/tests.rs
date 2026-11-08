@@ -190,7 +190,7 @@ fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
     owner_only(&path);
     let states = [
         MarkerState::AwaitingSweep { sweep: 7 },
-        MarkerState::AwaitingStop { stop: 3, sweep: 8 },
+        MarkerState::AwaitingStop { stop: 3 },
     ];
     for state in states {
         write_marker_at(&path, Some(&sid(POOL)), state).unwrap();
@@ -238,6 +238,27 @@ fn a_marker_from_before_the_states_reads_as_open() {
 }
 
 #[test]
+fn a_stop_awaiting_marker_written_with_a_sweep_number_reads_without_it() {
+    let data = TempDir::new("marker-compat");
+    run_folder(&data);
+    let state = r#"{"kind":"awaiting_stop","stop":3,"sweep":2}"#;
+    let old = format!(r#"{{"pool_user":"{POOL}","state":{state}}}"#);
+    let path = data.file(&format!("sandbox/run/{ID}.session"), &old);
+    owner_only(&path);
+    let left = unclean_sessions(data.path()).unwrap();
+    assert_eq!(left[0].state, Some(MarkerState::AwaitingStop { stop: 3 }));
+    // Written again, it holds no sweep number.
+    write_marker_at(
+        &path,
+        Some(&sid(POOL)),
+        MarkerState::AwaitingStop { stop: 3 },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("sweep"), "{text}");
+}
+
+#[test]
 fn a_marker_is_clean_once_every_number_it_waits_for_is_met() {
     let done = |stop, sweep| Sequences { stop, sweep };
     // Open is never clean; absent sequences read as 0.
@@ -246,11 +267,13 @@ fn a_marker_is_clean_once_every_number_it_waits_for_is_met() {
     assert!(!sweep.clean(done(9, 4)));
     assert!(sweep.clean(done(0, 5)));
     assert!(sweep.clean(done(0, 6)));
-    let stop = MarkerState::AwaitingStop { stop: 2, sweep: 5 };
-    assert!(!stop.clean(done(1, 9)));
-    assert!(!stop.clean(done(2, 4)));
-    assert!(stop.clean(done(2, 5)));
-    assert_eq!((stop.stop(), stop.sweep()), (Some(2), Some(5)));
+    // A stop-awaiting marker is never clean: once its stop completed it is re-marked.
+    let stop = MarkerState::AwaitingStop { stop: 2 };
+    assert!(!stop.clean(done(u64::MAX, u64::MAX)));
+    assert!(!stop.stopped(done(1, 9)));
+    assert!(stop.stopped(done(2, 0)));
+    assert!(!sweep.stopped(done(9, 9)));
+    assert_eq!((stop.stop(), stop.sweep()), (Some(2), None));
     assert_eq!((sweep.stop(), sweep.sweep()), (None, Some(5)));
     assert_eq!(
         (MarkerState::Open.stop(), MarkerState::Open.sweep()),
