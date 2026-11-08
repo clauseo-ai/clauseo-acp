@@ -7,6 +7,7 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
+  DenialId,
   ElicitationId,
   ElicitationResponse,
   ErrorCode,
@@ -100,6 +101,11 @@ export type ThreadActions = {
   answerElicitation: (elicitation: ElicitationId, response: ElicitationResponse) => Promise<void>;
   /** Stop: cancels the open thread's turn. */
   stop: () => void;
+  /** R18's card: asks the host for the computer's own dialog about a denial (RequestEscalation); resolves once the
+   * dialog closes, whatever the answer, and rejects with the HostError when the host refuses. */
+  escalate: (denial: DenialId) => Promise<void>;
+  /** R18's Not now: hides a denial's card (DismissDenial); rejects with the HostError when the host refuses. */
+  dismissDenial: (denial: DenialId) => Promise<void>;
   /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
    * the HostError when the host refuses. */
   retry?: ((message: MessageId, at: Timestamp) => Promise<void>) | undefined;
@@ -310,6 +316,32 @@ export function useThreadSession(
     [command],
   );
 
+  const escalate = useCallback(
+    async (denial: DenialId) => {
+      const thread = open.current;
+      if (thread === null) throw internalError("no thread is open");
+      try {
+        await command({ request_escalation: { request: { denial: { thread, denial } } } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
+  );
+
+  const dismissDenial = useCallback(
+    async (denial: DenialId) => {
+      const thread = open.current;
+      if (thread === null) throw internalError("no thread is open");
+      try {
+        await command({ dismiss_denial: { thread, denial } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
+  );
+
   const retry = useMemo(
     () =>
       retryFrom === undefined
@@ -328,8 +360,30 @@ export function useThreadSession(
 
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry }),
-    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry],
+    () => ({
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      escalate,
+      dismissDenial,
+      retry,
+    }),
+    [
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      escalate,
+      dismissDenial,
+      retry,
+    ],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

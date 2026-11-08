@@ -43,7 +43,9 @@ const turnOf = (e: ViewEntry): TurnId | undefined =>
   e.tool_call?.turn ??
   e.agent_content?.turn ??
   e.step?.turn ??
-  e.limit_stop?.turn;
+  e.limit_stop?.turn ??
+  e.denial?.turn ??
+  e.denials_paused?.turn;
 
 const STEP = "step:";
 
