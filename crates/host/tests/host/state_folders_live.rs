@@ -150,9 +150,7 @@ fn no_launch_gate_refuses_the_launch_and_starts_nothing() {
 
     let dir = two_agents("state_folders_no_gate");
     let wired = Wired::new(&dir);
-    let host = dir.start_launching(0, Arc::<Wired>::clone(&wired), |config| {
-        config.without_launch_gate()
-    });
+    let host = dir.start_ungated(0, Arc::<Wired>::clone(&wired));
     let matter = host.create_matter("a", &dir.folder("a", &[("brief.txt", "x\n")]));
     for agent in [CLAUDE, CODEX] {
         let thread = host.create_thread(matter, agent);

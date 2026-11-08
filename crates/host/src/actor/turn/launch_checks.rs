@@ -304,19 +304,14 @@ pub(super) fn prepare(
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
-    let reused = reused_login(actor, thread);
-    let gated = actor.wiring.launch_gate.is_some();
-    let gate_agent = actor
-        .threads
-        .get(&thread)
-        .map(|entry| entry.row.agent.clone());
-    let state_use = match state_use(actor, thread) {
-        Ok(state_use) => state_use,
+    let plan = match StatePlan::of(actor, thread) {
+        Ok(plan) => plan,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
             return;
         }
     };
+    let reused = plan.reused;
     let LaunchPaths {
         stored,
         data,
@@ -377,27 +372,8 @@ pub(super) fn prepare(
                 data_folder::refuse_data_folder(&stored, &data)?;
                 // The working folder the agent starts in, as spawn takes it (`session_folder`).
                 crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
-                // Fail closed: a launch with a state folder shares the one login, and with no
-                // identity check wired (`HostConfig::with_launch_gate`, #554) it may not start.
-                if run.state.is_some() && !gated {
-                    refuse_ungated(gate_agent.as_ref())?;
-                }
-                let mut answer = None;
-                let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
-                let codex = match (codex_home, run.state.clone()) {
-                    (Some(home), Some(state)) => {
-                        let (prepared, support) =
-                            prepare_codex(&check, &stored, &data, home, state, reused, state_use)?;
-                        answer = Some(support);
-                        Some(prepared)
-                    }
-                    _ => None,
-                };
-                // Claude is never refused for its folder: the answer decides its forced ask.
-                if let Some(home) = &claude_home {
-                    answer = Some(check.run(&crate::agent::session_folder(&stored)));
-                    prepare_claude(&data, home, run.state.as_deref(), state_use.in_use)?;
-                }
+                let (codex, claude_home, answer) =
+                    plan.prepare_agent(&check, &stored, &data, home, claude, &run)?;
                 run.make(&data, &sweep)?;
                 let claude_state = run.state.clone().filter(|_| claude);
                 run.data_deny = launch_deny(&run, &stored, &data, claude_state.as_deref());
@@ -432,29 +408,10 @@ pub(super) fn prepare(
             }
             (result, _) => result,
         };
-        let result = match result {
-            Ok(mut prepared) if reused => {
-                if let Some(codex) = prepared.codex.as_mut() {
-                    link_reused_after(check_clock, matter, codex).await;
-                }
-                Ok(prepared)
-            }
-            result => result,
-        };
+        let result = link_reused(result, reused, check_clock, matter).await;
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
-}
-
-/// The refusal of a launch with a state folder when no launch gate is wired: `agent.launch_failed`,
-/// logged with the agent.
-fn refuse_ungated(agent: Option<&AgentId>) -> Result<(), Error> {
-    let agent = agent.map(AgentId::as_str).unwrap_or_default();
-    tracing::warn!(agent, "no identity check is wired; the launch is refused");
-    Err(Error::refused(
-        clauseo_protocol::ErrorCode::AgentLaunchFailed,
-        "Clauseo can't start the agent: no sign-in check is set up.",
-    ))
 }
 
 /// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
@@ -636,7 +593,7 @@ use folders::{launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod state_prep;
-use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login, state_use};
+use state_prep::{StatePlan, link_reused};
 
 #[cfg(test)]
 mod tests;

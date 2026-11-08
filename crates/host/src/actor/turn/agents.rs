@@ -30,6 +30,7 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod forced;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
@@ -285,43 +286,14 @@ fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
-    let prepared_run_tmp = prepared.run.tmp();
-    let (forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor);
-        let guard = hooks.is_some();
-        let mut forced =
-            agent::codex::launch_env(&prepared.state, &settings.env, prepared.keys, hooks);
-        // The shell's temp folder is the session's run folder's (`RunFolders::tmp`), never the
-        // state folder's `tmp`, whose `arg0` links Codex puts first on `PATH` and runs
-        // unsandboxed.
-        forced.insert(
-            std::ffi::OsString::from(agent::codex::TMPDIR_VAR),
-            prepared_run_tmp.as_os_str().to_owned(),
-        );
-        let codex = CodexAgent {
-            folder: prepared.folder,
-            guard,
-            key_retry: KeyRetry::default(),
-        };
-        (forced, Some((codex, prepared.login)))
-    } else {
-        // A Claude agent's state folder goes in before `plans_folder` reads the merged map
-        // below; its login store is the login home, or the lawyer's default store while
-        // desktop says the login is reused.
-        // The reused store `""` is the lawyer's default store (on macOS their Keychain). Right
-        // at tier C, all PR-C has: no jail stands between the agent and that store. The tier A
-        // and B rule (`SignedOut { found: ClaudeSandbox }`, S18) lands with the jail in R17
-        // PR-D.
-        let reused = actor.wiring.sign_in.reused.contains(&row.agent);
-        let store = prepared.claude_home.as_deref().filter(|_| !reused);
-        let forced = prepared
-            .run
-            .state
-            .as_deref()
-            .filter(|_| prepared.claude_home.is_some())
-            .map(|state| agent::home::claude_launch_env(state, store));
-        (forced.unwrap_or_default(), None)
-    };
+    let (forced, codex) = forced::of(
+        actor,
+        &row.agent,
+        &settings.env,
+        prepared.codex,
+        &prepared.run,
+        prepared.claude_home.as_deref(),
+    );
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {

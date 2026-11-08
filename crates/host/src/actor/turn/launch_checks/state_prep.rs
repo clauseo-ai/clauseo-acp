@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use clauseo_protocol::{AgentKind, ThreadId};
 
-use super::CodexPrepared;
+use super::{CodexPrepared, Prepared, RunFolders};
 use crate::actor::Actor;
 use crate::agent::codex;
 use crate::agent::folder_support::{Answer, FolderCheck};
@@ -256,4 +256,115 @@ pub(super) fn reused_login(actor: &Actor, thread: ThreadId) -> bool {
         .threads
         .get(&thread)
         .is_some_and(|entry| actor.wiring.sign_in.reused.contains(&entry.row.agent))
+}
+
+/// What a launch takes from the actor for the state folder: whether the agent's login is
+/// reused, the matter's [`StateUse`], and, when no launch gate is wired
+/// (`HostConfig::with_launch_gate`, #554), the agent, whose launch with a state folder is
+/// refused.
+pub(super) struct StatePlan {
+    /// The agent's login is reused (`reused_login`).
+    pub(super) reused: bool,
+    state_use: StateUse,
+    /// A launch gate is wired.
+    gated: bool,
+    /// The thread's agent, for the refusal's log.
+    agent: Option<clauseo_protocol::AgentId>,
+}
+
+/// An agent's own preparation ([`StatePlan::prepare_agent`]): Codex's preparation, Claude's
+/// home and the folder check's answer.
+pub(super) type AgentPrep = (Option<CodexPrepared>, Option<PathBuf>, Option<Answer>);
+
+impl StatePlan {
+    /// The plan for `thread`'s launch, read on the actor; an error fails the launch.
+    pub(super) fn of(actor: &mut Actor, thread: ThreadId) -> Result<Self, Error> {
+        let reused = reused_login(actor, thread);
+        let gated = actor.wiring.launch_gate.is_some();
+        let agent = actor
+            .threads
+            .get(&thread)
+            .map(|entry| entry.row.agent.clone());
+        let state_use = state_use(actor, thread)?;
+        Ok(Self {
+            reused,
+            state_use,
+            gated,
+            agent,
+        })
+    }
+
+    /// The agent's own preparation on the launch-prep thread, after the data-folder refusals:
+    /// a launch with a state folder refused when no launch gate is wired (fail closed: it shares
+    /// the one login), then Codex's (`home` its login home, [`prepare_codex`]) or Claude's
+    /// ([`prepare_claude`]). Returns Codex's preparation, Claude's home and the folder check's
+    /// answer. Claude is never refused for its folder: the answer decides its forced ask.
+    pub(super) fn prepare_agent(
+        &self,
+        check: &FolderCheck,
+        stored: &Path,
+        data: &Path,
+        home: Option<PathBuf>,
+        claude: bool,
+        run: &RunFolders,
+    ) -> Result<AgentPrep, Error> {
+        if run.state.is_some() && !self.gated {
+            refuse_ungated(self.agent.as_ref())?;
+        }
+        let mut answer = None;
+        let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
+        let codex = match (codex_home, run.state.clone()) {
+            (Some(home), Some(state)) => {
+                let (prepared, support) = prepare_codex(
+                    check,
+                    stored,
+                    data,
+                    home,
+                    state,
+                    self.reused,
+                    self.state_use,
+                )?;
+                answer = Some(support);
+                Some(prepared)
+            }
+            _ => None,
+        };
+        if let Some(home) = &claude_home {
+            answer = Some(check.run(&crate::agent::session_folder(stored)));
+            prepare_claude(data, home, run.state.as_deref(), self.state_use.in_use)?;
+        }
+        Ok((codex, claude_home, answer))
+    }
+}
+
+/// The refusal of a launch with a state folder when no launch gate is wired: `agent.launch_failed`,
+/// logged with the agent.
+fn refuse_ungated(agent: Option<&clauseo_protocol::AgentId>) -> Result<(), Error> {
+    let agent = agent
+        .map(clauseo_protocol::AgentId::as_str)
+        .unwrap_or_default();
+    tracing::warn!(agent, "no identity check is wired; the launch is refused");
+    Err(Error::refused(
+        clauseo_protocol::ErrorCode::AgentLaunchFailed,
+        "Clauseo can't start the agent: no sign-in check is set up.",
+    ))
+}
+
+/// A prepared launch on a `reused` login, once the sign-in hook has answered: the reused
+/// login's link made in the matter's state folder ([`link_reused_after`]).
+pub(super) async fn link_reused(
+    result: Result<Prepared, Error>,
+    reused: bool,
+    clock: Arc<dyn crate::clock::Clock>,
+    matter: clauseo_protocol::MatterId,
+) -> Result<Prepared, Error> {
+    match result {
+        Ok(mut prepared) if reused => {
+            if let Some(codex) = prepared.codex.as_mut() {
+                link_reused_after(clock, matter, codex).await;
+            }
+            Ok(prepared)
+        }
+        result => result,
+    }
 }

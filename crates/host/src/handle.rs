@@ -65,7 +65,7 @@ impl Host {
     /// threads, creates the Scratch matter on the first start, repairs what the last run left
     /// open, and serves. Fails with `store.locked` when another host holds the data folder.
     pub fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), HostError> {
-        let splits = config.login_splits();
+        let splits = config.wiring.sign_in.receiver();
         let (mut handle, join) = crate::actor::start(config).map_err(HostError::from)?;
         handle.splits = splits;
         Ok((handle, join))

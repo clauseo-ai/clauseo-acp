@@ -12,7 +12,6 @@ use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
 use crate::agent::login_link::{LoginCheck, SignInAgain};
-use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
 #[cfg(feature = "test-support")]
 use crate::browser::install::InstallTools;
@@ -497,25 +496,11 @@ impl HostConfig {
         self
     }
 
-    /// Desktop's launch gate (R17, stage D's #554; [`LaunchGate`]): an identity check of the
-    /// shared login before each launch. Unset, every launch of an agent with a kind (which
-    /// uses the matter's state folder and the one shared login, R17 PR-C) is refused with
-    /// `agent.launch_failed`, failing closed; tests set a pass-through gate. PR-C only requires
-    /// one; #554 asks it.
-    ///
-    /// [`LaunchGate`]: crate::LaunchGate
+    /// Desktop's launch gate (#554, [`crate::LaunchGate`]); unset, every launch of an agent with a
+    /// kind is refused with `agent.launch_failed`, failing closed (R17 PR-C).
     #[must_use]
     pub fn with_launch_gate(mut self, gate: crate::LaunchGate) -> Self {
         self.wiring.launch_gate = Some(gate);
-        self
-    }
-
-    /// No launch gate, as a host that was given none (tests that check the fail-closed refusal;
-    /// the test hosts set a pass-through one).
-    #[cfg(feature = "test-support")]
-    #[must_use]
-    pub fn without_launch_gate(mut self) -> Self {
-        self.wiring.launch_gate = None;
         self
     }
 
@@ -608,11 +593,6 @@ impl HostConfig {
     /// The seam set, for the first detection in `Host::start`.
     pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
         self.sandbox.as_ref()
-    }
-
-    /// The receiving end of the login splits, for `HostHandle::login_splits`.
-    pub(crate) fn login_splits(&self) -> LoginSplits {
-        self.wiring.sign_in.receiver()
     }
 }
 
