@@ -104,13 +104,25 @@ pub enum Blocked {
     /// started it: `ShellExecuteExW` gave `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED`
     /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
     ToolMissing,
+    /// WSL is on this computer and the deny that keeps the sandbox users out of it
+    /// (`windows::wsl`) is missing from one of its classes' COM launch permissions, or comes
+    /// after an allow there: a WSL update or repair rewrote it, say. The SYSTEM task
+    /// `\Clauseo\SandboxRefresh` puts it back, at the next logon or Windows Installer event.
+    WslDenyMissing,
+    /// `WSLService` (the WSL that runs VMs) is on this computer and the deny can't be checked: a
+    /// launch permission can't be read or parsed, a WSL class names no `AppID`, or WSL's class is
+    /// registered as packaged COM, whose permission Clauseo can't change.
+    WslDenyUnverifiable,
+    /// Reserved for the stop's WSL clean-up (part B of the WSL deny): a WSL instance a sandbox
+    /// user started that couldn't be ended. Nothing gives it yet.
+    WslPoolResidue,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, the test of the names lists this, and a
     /// compile-time match below fails the build until a new variant has its place here.
-    pub const ALL: [Blocked; 7] = [
+    pub const ALL: [Blocked; 10] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
@@ -118,6 +130,9 @@ impl Blocked {
         Blocked::AdminCopyUnsafe,
         Blocked::OtherAccount,
         Blocked::ToolMissing,
+        Blocked::WslDenyMissing,
+        Blocked::WslDenyUnverifiable,
+        Blocked::WslPoolResidue,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -131,6 +146,9 @@ impl Blocked {
             Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
             Blocked::OtherAccount => "other_account",
             Blocked::ToolMissing => "tool_missing",
+            Blocked::WslDenyMissing => "wsl_deny_missing",
+            Blocked::WslDenyUnverifiable => "wsl_deny_unverifiable",
+            Blocked::WslPoolResidue => "wsl_pool_residue",
         }
     }
 }
@@ -148,9 +166,23 @@ const _: () = {
             Blocked::AdminCopyUnsafe => 4,
             Blocked::OtherAccount => 5,
             Blocked::ToolMissing => 6,
+            Blocked::WslDenyMissing => 7,
+            Blocked::WslDenyUnverifiable => 8,
+            Blocked::WslPoolResidue => 9,
         }
     }
-    let [first, second, third, fourth, fifth, sixth, seventh] = Blocked::ALL;
+    let [
+        first,
+        second,
+        third,
+        fourth,
+        fifth,
+        sixth,
+        seventh,
+        eighth,
+        ninth,
+        tenth,
+    ] = Blocked::ALL;
     assert!(
         place(first) == 0
             && place(second) == 1
@@ -158,7 +190,10 @@ const _: () = {
             && place(fourth) == 3
             && place(fifth) == 4
             && place(sixth) == 5
-            && place(seventh) == 6,
+            && place(seventh) == 6
+            && place(eighth) == 7
+            && place(ninth) == 8
+            && place(tenth) == 9,
         "Blocked::ALL is out of order"
     );
 };
@@ -195,6 +230,20 @@ impl std::fmt::Display for Blocked {
                 "Windows security blocked or removed clauseo-sandbox-setup.exe, Clauseo's set-up \
                  program, when Clauseo started it; whoever looks after this computer can allow it \
                  and re-run the Clauseo installer"
+            }
+            Blocked::WslDenyMissing => {
+                "WSL is on this computer and Clauseo's setting that keeps its sandbox users out of \
+                 it is missing, after a WSL update say; signing out and in again restores it, or \
+                 whoever looks after this computer can"
+            }
+            Blocked::WslDenyUnverifiable => {
+                "WSL is on this computer and Clauseo can't check the setting that keeps its \
+                 sandbox users out of it; whoever looks after this computer can repair or update \
+                 WSL"
+            }
+            Blocked::WslPoolResidue => {
+                "a WSL instance one of Clauseo's sandbox users started is still running; \
+                 restarting the computer ends it"
             }
         })
     }
