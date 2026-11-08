@@ -1322,7 +1322,12 @@ admin copy.
    empty), or a Win32 path inside `FOLDERID_Windows`, `FOLDERID_ProgramFiles` or
    `FOLDERID_ProgramFilesX86` (from `SHGetKnownFolderPath`, never the environment), compared by
    whole components, ASCII case aside, with nothing trimmed, so `C:\Windows2` or `C:\Windows `
-   isn't `C:\Windows`. Why: a standard user may start a signed binary as a protected process
+   isn't `C:\Windows`, and whose file is owned by SYSTEM, TrustedInstaller or Administrators.
+   The owner is read by opening the path as itself (`FILE_FLAG_OPEN_REPARSE_POINT |
+   FILE_FLAG_BACKUP_SEMANTICS`, `READ_CONTROL`, sharing everything); a reparse point, or an
+   open or read that fails, isn't a system image. The Windows folder has subfolders any user
+   writes (`Temp`, `Tasks`, `tracing`, `System32\spool\drivers\color`), and a file a pool user
+   writes there is owned by that user. Why: a standard user may start a signed binary as a protected process
    (PPL), which SYSTEM can't open with `READ_CONTROL` even with `SeDebugPrivilege`, so neither
    its token nor its owner can be read, and the list gives no SID once its token's DACL shuts out
    SYSTEM. A pool user's processes run in the lawyer's interactive session

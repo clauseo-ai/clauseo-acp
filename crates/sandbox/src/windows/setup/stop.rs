@@ -38,7 +38,9 @@
 //!    add a process, never clear one: an owner is its creator, not its user, and an elevated
 //!    administrator's processes are owned by Administrators). Or it can't be opened to be
 //!    terminated, the list put it in session 0, and its image lies under the Windows or a
-//!    Program Files folder, or it has none (a protected system process; [`system_image`]).
+//!    Program Files folder in a file owned by SYSTEM, `TrustedInstaller` or Administrators (the
+//!    Windows folder has subfolders users write, such as `Temp`), or it has none (a protected
+//!    system process; [`system_image`]).
 //!    A pool user's process runs in the lawyer's interactive session
 //!    (`CreateProcessWithLogonW` starts it in the caller's), and one it starts protected can't
 //!    be opened with `READ_CONTROL`, so neither the token nor the owner names it, nor the list
