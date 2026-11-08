@@ -2357,7 +2357,10 @@ checks it: owner SYSTEM, no reparse point on the way, the marker naming the tree
 account, and the tree id the record names. It
 pre-creates the key's session directory. A launch reads the recorded path just before starting
 its first process as the account, so a refresh that retires the old tree in that gap leaves the
-launch without one; part 2 must check that the tree is still there before it uses it.
+launch without one; part 2 must check that the tree is still there before it uses it. Part 2
+fails closed: a missing, unknown or `Git Bash unavailable` record value, or a tree that fails a
+check, means no Git Bash for that run, never the lawyer's Git or `PATH`; with the stub there,
+`CLAUDE_CODE_GIT_BASH_PATH` points at `git\_off\bash.exe`.
 
 ### The launcher (PR6 interface)
 
