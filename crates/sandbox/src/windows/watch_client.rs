@@ -21,9 +21,10 @@
 //! - **Records:** each line is `protocol::Line`. A refusal goes to the newest registration of
 //!   its pool SID. Its access is the line's, and `unknown` (a plain open) is worked out with
 //!   [`Watch::would_deny`]: a pool user allowed to read the path was refused a write, and
-//!   anything else, a check that can't tell included, is a read. Only a local drive-letter path
-//!   is checked ([`is_local_drive_path`]); a line marked `net` (a network or unmapped device
-//!   path, for display only) opens nothing at all, and its `unknown` is a read. Then
+//!   anything else, a check that can't tell included, is a read. A line is local only when it
+//!   sends `"net":false` itself (a missing `net` is a network path, whatever `Line`'s serde
+//!   default says) and its path is `X:\...` ([`is_local_drive_path`]); anything else is
+//!   for display only, opens nothing at all, and its `unknown` is a read. Then
 //!   `policy.classify`, which compares strings and opens nothing, and [`Denial::Path`] into that
 //!   launch's capped sink, its path shown through `display_safe_path` (controls and bidi or
 //!   invisible formatting escaped). A `dropped` line carries no SID; it goes
@@ -76,7 +77,7 @@ pub mod verify;
 
 #[cfg(test)]
 use route::Lines;
-pub use route::is_local_drive_path;
+pub use route::{crosses_reparse, is_local_drive_path};
 
 #[cfg(windows)]
 pub use os::would_deny;

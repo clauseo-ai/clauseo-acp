@@ -9,7 +9,6 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use super::*;
 use crate::Denial;
 use crate::test_support::TempDir;
-use crate::windows::setup::watch::protocol::Line;
 use std::path::PathBuf;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1101";
@@ -232,15 +231,11 @@ fn denied(sid: &str, path: &str, access: &str) -> Vec<u8> {
     line(sid, path, access, false)
 }
 
+/// A refusal line that always carries `net`, as the watcher sends it.
 fn line(sid: &str, path: &str, access: &str, net: bool) -> Vec<u8> {
-    let line = Line::Denied {
-        v: 1,
-        sid: sid.to_owned(),
-        pid: 7,
-        path: path.to_owned(),
-        access: access.to_owned(),
-        net,
-    };
+    let line = serde_json::json!({
+        "v": 1, "sid": sid, "pid": 7, "path": path, "access": access, "net": net,
+    });
     let mut bytes = serde_json::to_vec(&line).unwrap();
     bytes.push(b'\n');
     bytes
@@ -480,7 +475,7 @@ fn a_path_is_shown_with_its_controls_and_bidi_characters_escaped() {
 
 #[test]
 fn only_a_local_drive_letter_path_is_one_the_check_may_open() {
-    for good in [r"C:\", r"C:\Users\a b\x.txt", r"d:/x/y", r"C:\folder\"] {
+    for good in [r"C:\", r"C:\Users\a b\x.txt", r"d:\x\y", r"C:\folder\"] {
         assert!(is_local_drive_path(Path::new(good)), "{good}");
     }
     for bad in [
@@ -490,6 +485,8 @@ fn only_a_local_drive_letter_path_is_one_the_check_may_open() {
         r"\\.\pipe\x",
         r"\Device\Mup\x",
         r"//server/share",
+        r"d:/x/y",
+        r"C:\a/b",
         r"C:x.txt",
         r"C:",
         r"1:\x",
@@ -531,3 +528,4 @@ fn a_pause_is_told_to_every_launch_once_until_it_resumes() {
 }
 
 mod fallback;
+mod local;

@@ -15,12 +15,13 @@ use crate::{Access, Denial, display_safe_path};
 pub(super) fn deliver<W: Watch>(shared: &Shared<W>, text: &str) {
     match Line::parse(text) {
         Some(Line::Denied {
-            sid,
-            path,
-            access,
-            net,
-            ..
-        }) => refused(shared, &sid, path, &access, net),
+            sid, path, access, ..
+        }) => {
+            // Local only when the line says `"net":false` itself and the path is `X:\...`:
+            // a missing `net` is a network path, whatever `Line`'s default says.
+            let local = sent_local(text) && is_local_drive_path(Path::new(&path));
+            refused(shared, &sid, path, &access, !local);
+        }
         Some(Line::Dropped { dropped: count, .. }) => dropped(shared, count),
         Some(Line::Paused { paused, .. }) => pause(shared, paused.secs),
         Some(Line::Resumed { .. }) => shared.lock().paused = false,
@@ -45,6 +46,14 @@ fn pause<W: Watch>(shared: &Shared<W>, secs: u64) {
     for sink in sinks {
         sink.denied(Denial::ReporterPaused { secs });
     }
+}
+
+/// Whether the line `text` carries `"net":false` itself (not by a default).
+fn sent_local(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|line| line.get("net").and_then(serde_json::Value::as_bool))
+        == Some(false)
 }
 
 /// A refusal of `path` to the pool user `sid`; a `net` path is only shown, never opened.
@@ -85,7 +94,7 @@ fn refused<W: Watch>(shared: &Shared<W>, sid: &str, path: String, access: &str, 
 }
 
 /// A plain open's access: a write when the pool user may read the path, else a read. Only a
-/// local drive-letter path is checked.
+/// local drive-letter path is checked, and only by a line that isn't `net`.
 fn resolve<W: Watch>(shared: &Shared<W>, sid: &Sid, path: &Path) -> Access {
     if !is_local_drive_path(path) {
         return Access::Read;
@@ -118,8 +127,9 @@ fn dropped<W: Watch>(shared: &Shared<W>, dropped: u64) {
         sink.denied(Denial::Dropped { count });
     }
 }
-/// Whether `path` is a local drive-letter path, `X:\...`, the only kind the Authz check opens:
-/// not UNC, `\\?\`, `\\.\` or any device path, not drive-relative (`X:name`), and with no `.` or
+/// Whether `path` is a local drive-letter path, `X:\...` with backslashes only, the only kind
+/// the Authz check opens: not UNC, `\\?\`, `\\.\` or any device path, not drive-relative
+/// (`X:name`), with no `/`, and with no `.` or
 /// `..` part and no empty part but a trailing one, so nothing it names can be rewritten into
 /// another kind. A drive letter mapped to a share is refused by the Windows check after this.
 pub fn is_local_drive_path(path: &Path) -> bool {
@@ -129,22 +139,44 @@ pub fn is_local_drive_path(path: &Path) -> bool {
     let mut chars = text.chars();
     let drive = matches!(
         (chars.next(), chars.next(), chars.next()),
-        (Some(letter), Some(':'), Some('\\' | '/')) if letter.is_ascii_alphabetic()
+        (Some(letter), Some(':'), Some('\\')) if letter.is_ascii_alphabetic()
     );
-    if !drive || text.contains('\0') {
+    if !drive || text.contains(['\0', '/']) {
         return false;
     }
-    let parts: Vec<&str> = text
-        .get(3..)
-        .unwrap_or_default()
-        .split(['\\', '/'])
-        .collect();
+    let parts: Vec<&str> = text.get(3..).unwrap_or_default().split('\\').collect();
     let last = parts.len().saturating_sub(1);
     parts.iter().enumerate().all(|(at, part)| match *part {
         "." | ".." => false,
         "" => at == last,
         _ => true,
     })
+}
+
+/// Whether any part of the local drive path `path` is a reparse point (a junction, a symbolic
+/// link, a mount point): the folders an open would pass through, from the drive's first
+/// folder down, and the last part, whose link a pool user's open would follow. `is_reparse`
+/// reads one part's attributes without following it; `None` (it can't tell) for any part, or
+/// a path that isn't a local drive path, is `None`. The drive's root isn't asked.
+pub fn crosses_reparse(
+    path: &Path,
+    mut is_reparse: impl FnMut(&Path) -> Option<bool>,
+) -> Option<bool> {
+    if !is_local_drive_path(path) {
+        return None;
+    }
+    let text = path.to_str()?;
+    let mut prefix = text.get(..3)?.to_owned();
+    for part in text.get(3..)?.split('\\').filter(|part| !part.is_empty()) {
+        if !prefix.ends_with('\\') {
+            prefix.push('\\');
+        }
+        prefix.push_str(part);
+        if is_reparse(Path::new(&prefix))? {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 /// The bytes read so far split into lines, each at most [`LINE_CAP`] long.

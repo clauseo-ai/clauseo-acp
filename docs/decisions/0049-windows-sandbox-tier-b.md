@@ -2152,9 +2152,11 @@ order before the launch (M1) is kept free of anything else. Row C2 measures what
 - `read` and `write` stay as sent. `unknown` (a plain open) is decided by
   `would_deny(pool, path, Read)`: if the pool user may read the path, the refused open was a
   write; anything else, including a check that can't tell, makes it a read.
-- A line marked `"net":true` (a network or unmapped device path, sent for display only) opens
-  nothing at all. Its `unknown` becomes a read. A path that isn't a local drive-letter path
-  (`is_local_drive_path`) is never checked either.
+- A line is local only when it sends `"net":false` itself and its path matches
+  `^[A-Za-z]:\\` with backslashes only (`is_local_drive_path`). The client reads `net` from the
+  raw JSON, not through `Line`'s serde default: a missing `net` is a network path. Anything
+  else, `"net":true` or a `\\…` display string included, opens nothing at all, and its
+  `unknown` becomes a read.
 - `policy.classify` compares strings only and opens nothing. The path goes out through
   `display_safe_path` (`denial.rs`), which escapes C0 and C1 controls, DEL, and bidi or
   invisible formatting (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+061C, U+FEFF) as
@@ -2172,6 +2174,14 @@ unelevated:
 - It refuses (`None`), before opening anything, any path that isn't `X:\...` with no `.` or
   `..` part, and any drive `GetDriveTypeW` calls remote or unknown. UNC, `\\?\`, `\\.\` and
   device paths never reach the network or a device.
+- It refuses (`None`) a path any part of which is a reparse point (a junction, a symbolic link,
+  a mount point), the last part included (`watch_client::crosses_reparse`). Each part's
+  attributes are read with `GetFileAttributesW`, which doesn't follow the part it names, from
+  the drive's first folder down, so no link a pool user planted is traversed. That is one call
+  per part on an `unknown` refusal, which is cheap next to the 20-a-second cap. **Residual:** a
+  part swapped for a link between that walk and the open below is traversed; the pool user
+  gains only a wrong read-or-write label on a card, and nothing leaves the local drive, since
+  the drive type was checked first.
 - It reads the descriptor (owner, group and DACL) on a handle opened with `READ_CONTROL`,
   `FILE_FLAG_OPEN_REPARSE_POINT` and backup semantics.
 - It checks with `AuthzInitializeResourceManager(NO_AUDIT)`, a context per pool SID from

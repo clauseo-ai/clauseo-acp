@@ -8,7 +8,12 @@
 //!   Windows doesn't call remote (`GetDriveTypeW` of its root, which opens nothing on it): a UNC,
 //!   `\\?\`, `\\.\` or device path, or a letter mapped to a share, is `None` before anything is
 //!   opened, so no check reaches the network.
-//! - The path is opened with `READ_CONTROL` alone, never through a link
+//! - Any part of the path that is a reparse point (a junction, a symbolic link, a mount point),
+//!   the last part included, is `None` (`watch_client::crosses_reparse`, each part's
+//!   attributes read by `GetFileAttributesW`, which doesn't follow it): the check never
+//!   traverses a link a pool user may have planted, nor reads a link's own descriptor for its
+//!   target's. A part swapped for a link between that walk and the open is the residual (0049).
+//! - The path is opened with `READ_CONTROL` alone, never through a link at its last part
 //!   (`FILE_FLAG_OPEN_REPARSE_POINT`), and with backup semantics so a folder opens too; its
 //!   owner, group and DACL are read on that handle.
 //! - The check asks for the data right: `FILE_READ_DATA` (a folder's `FILE_LIST_DIRECTORY`) for a
@@ -36,7 +41,8 @@ use windows::Win32::Security::{
     PSECURITY_DESCRIPTOR,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_READ_DATA, FILE_WRITE_DATA, GetDriveTypeW, READ_CONTROL,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_READ_DATA, FILE_WRITE_DATA, GetDriveTypeW,
+    GetFileAttributesW, INVALID_FILE_ATTRIBUTES, READ_CONTROL,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -45,7 +51,7 @@ use crate::Access;
 use crate::windows::folder::verbatim_wide;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::LocalSid;
-use crate::windows::watch_client::is_local_drive_path;
+use crate::windows::watch_client::{crosses_reparse, is_local_drive_path};
 
 /// `DRIVE_REMOTE`, `DRIVE_NO_ROOT_DIR` and `DRIVE_UNKNOWN`: drives the check doesn't open.
 const NOT_LOCAL: [u32; 3] = [4, 1, 0];
@@ -61,6 +67,16 @@ fn local(path: &Path) -> bool {
     // SAFETY: a live HSTRING naming a drive's root; the call opens nothing on it.
     let kind = unsafe { GetDriveTypeW(&HSTRING::from(root)) };
     !NOT_LOCAL.contains(&kind)
+}
+
+/// Whether the path part `part` is a reparse point, read without following it; `None` when
+/// its attributes can't be read.
+fn is_reparse(part: &Path) -> Option<bool> {
+    let wide = verbatim_wide(part).ok()?;
+    // SAFETY: `wide` is NUL-terminated and outlives the call, which reads attributes only.
+    let attributes = unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) };
+    (attributes != INVALID_FILE_ATTRIBUTES)
+        .then_some(attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0)
 }
 
 /// A resource manager and the pool users' contexts, freed on drop.
@@ -110,7 +126,7 @@ impl Checker {
         path: &Path,
         access: Access,
     ) -> Option<bool> {
-        if !local(path) {
+        if !local(path) || crosses_reparse(path, is_reparse) != Some(false) {
             return None;
         }
         let wide = verbatim_wide(path).ok()?;
