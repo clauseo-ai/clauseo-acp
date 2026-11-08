@@ -118,8 +118,9 @@ fn an_admin_owned_users_task_and_a_system_owned_sandbox_group_task_are_ignored()
         ),
         "{line}"
     );
-    // Both groups are known to hold pool users without a members lookup.
-    assert_eq!(members_read(&fake), Vec::<&str>::new());
+    // Both groups are known to hold pool users without a members lookup; the sandbox group's
+    // members are read once, for whether it may hold the lawyer (`harden.rs`).
+    assert_eq!(members_read(&fake), ["S-1-5-21-1-2-3-1100"]);
 }
 
 #[test]

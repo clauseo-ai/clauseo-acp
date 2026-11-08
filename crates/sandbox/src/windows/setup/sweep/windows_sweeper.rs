@@ -29,7 +29,7 @@ use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
     Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
-    windows_groups, windows_listing, windows_task_file,
+    windows_groups, windows_harden, windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -56,6 +56,9 @@ pub(crate) struct WindowsSweeper {
     service: Option<ITaskService>,
     /// The last list of running task instances, `None` where one couldn't be read.
     running: Vec<Option<IRunningTask>>,
+    /// Whether the admin-only log is made when missing: the sweep's, as SYSTEM; set-up's
+    /// administrator only appends to one already there (`admin_log::append_existing`).
+    make_admin_log: bool,
     /// COM on this thread; the last field, so it is uninitialised after every interface above.
     _com: Com,
 }
@@ -68,7 +71,17 @@ impl WindowsSweeper {
             bits: WindowsBits::default(),
             service: None,
             running: Vec::new(),
+            make_admin_log: true,
             _com: Com::new(),
+        }
+    }
+
+    /// The machine for set-up's hardening (`windows_harden::at_set_up`): as [`Self::new`],
+    /// but the admin-only log is only appended to when it is there already.
+    pub(super) fn for_set_up() -> WindowsSweeper {
+        WindowsSweeper {
+            make_admin_log: false,
+            ..WindowsSweeper::new()
         }
     }
 
@@ -91,7 +104,7 @@ impl WindowsSweeper {
 }
 
 /// `call` failed with an error, as a line for the log: the call and its HRESULT, no name.
-fn failed(call: &'static str) -> impl Fn(windows::core::Error) -> Failed {
+pub(super) fn failed(call: &'static str) -> impl Fn(windows::core::Error) -> Failed {
     move |error| format!("{call} failed ({:#010x})", error.code().0)
 }
 
@@ -315,7 +328,11 @@ impl Sweeper for WindowsSweeper {
     }
 
     fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
-        admin_log::append(line)
+        if self.make_admin_log {
+            admin_log::append(line)
+        } else {
+            admin_log::append_existing(line)
+        }
     }
 
     fn pool_group(&mut self) -> Result<Option<Sid>, Failed> {
@@ -328,6 +345,19 @@ impl Sweeper for WindowsSweeper {
 
     fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed> {
         windows_groups::group_members(sid)
+    }
+
+    fn task_security(&mut self, folder: &ITaskFolder, name: &str) -> Result<Vec<u8>, Failed> {
+        windows_harden::task_security(folder, name)
+    }
+
+    fn set_task_security(
+        &mut self,
+        folder: &ITaskFolder,
+        name: &str,
+        descriptor: &[u8],
+    ) -> Result<(), Failed> {
+        windows_harden::set_task_security(folder, name, descriptor)
     }
 }
 

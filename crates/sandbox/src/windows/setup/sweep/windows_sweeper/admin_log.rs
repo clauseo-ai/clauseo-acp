@@ -57,40 +57,58 @@ pub(crate) fn append(line: &str) -> Result<(), Failed> {
     append_in(&base, line)
 }
 
+/// [`append`] only when the log and its folders are there already, checked as [`append`]
+/// checks them; nothing is made, and a log that would rotate isn't written. For set-up's
+/// elevated administrator (`harden.rs`), which can't make a file owned by SYSTEM.
+pub(crate) fn append_existing(line: &str) -> Result<(), Failed> {
+    let base = program_data().map_err(|error| format!("the ProgramData folder: {error}"))?;
+    write_in(&base, line, false)
+}
+
 /// [`append`] below `base` instead of `%ProgramData%`: the elevated test's own folder.
 pub(crate) fn append_in(base: &Path, line: &str) -> Result<(), Failed> {
+    write_in(base, line, true)
+}
+
+/// [`append_in`], making what is missing when `make`, as [`append_existing`] says otherwise.
+fn write_in(base: &Path, line: &str, make: bool) -> Result<(), Failed> {
     let mut folder = base.to_path_buf();
     for (part, sddl) in ADMIN_LOG_FOLDERS {
         folder.push(part);
-        admin_folder(&folder, sddl)?;
+        admin_folder(&folder, make.then_some(sddl))?;
     }
     let log = folder.join(ADMIN_LOG_NAME);
     let text = format!("{} {line}\r\n", stamp());
     let add = u64::try_from(text.len()).unwrap_or(ADMIN_LOG_CAP);
-    let (mut file, size) = open_log(&log)?;
+    let (mut file, size) = open_log(&log, make)?;
     if rotates(size, add) {
+        if !make {
+            return Err("the admin-only log is full, and only the sweep rotates it".to_owned());
+        }
         drop(file);
         rotate(&log, &folder.join(format!("{ADMIN_LOG_NAME}.1")))?;
-        (file, _) = open_log(&log)?;
+        (file, _) = open_log(&log, make)?;
     }
     file.write_all(text.as_bytes())
         .map_err(|error| format!("the admin-only log couldn't be written ({error})"))
 }
 
-/// Makes the folder `path` with `sddl` when missing, then refuses it unless it
-/// is a folder, not a reparse point, that only SYSTEM, Administrators or `TrustedInstaller` may
-/// change.
-fn admin_folder(path: &Path, sddl: &str) -> Result<(), Failed> {
-    let descriptor = Descriptor::from_sddl(sddl).map_err(|error| error.to_string())?;
-    let attributes = attributes(&descriptor);
-    let name = HSTRING::from(path.as_os_str());
-    // SAFETY: `name` is NUL-terminated and `attributes` points at a live descriptor; both
-    // outlive the call.
-    let made = unsafe { CreateDirectoryW(&name, Some(&raw const attributes)) };
-    if let Err(error) = made
-        && code(&error) != ERROR_ALREADY_EXISTS.0
-    {
-        return Err(failed("CreateDirectoryW", &error));
+/// Makes the folder `path` with `sddl` when missing (none: it must be there), then refuses it
+/// unless it is a folder, not a reparse point, that only SYSTEM, Administrators or
+/// `TrustedInstaller` may change.
+fn admin_folder(path: &Path, sddl: Option<&str>) -> Result<(), Failed> {
+    if let Some(sddl) = sddl {
+        let descriptor = Descriptor::from_sddl(sddl).map_err(|error| error.to_string())?;
+        let attributes = attributes(&descriptor);
+        let name = HSTRING::from(path.as_os_str());
+        // SAFETY: `name` is NUL-terminated and `attributes` points at a live descriptor; both
+        // outlive the call.
+        let made = unsafe { CreateDirectoryW(&name, Some(&raw const attributes)) };
+        if let Err(error) = made
+            && code(&error) != ERROR_ALREADY_EXISTS.0
+        {
+            return Err(failed("CreateDirectoryW", &error));
+        }
     }
     let flags = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT;
     let folder = open(
@@ -117,14 +135,19 @@ fn admin_folder(path: &Path, sddl: &str) -> Result<(), Failed> {
     Ok(())
 }
 
-/// The log `path`, opened for appending (made with [`ADMIN_LOG_SDDL`] when missing), and its
-/// size; refused unless a plain file with one link that [`admin_only`] keeps.
-fn open_log(path: &Path) -> Result<(File, u64), Failed> {
+/// The log `path`, opened for appending (made with [`ADMIN_LOG_SDDL`] when missing and `make`),
+/// and its size; refused unless a plain file with one link that [`admin_only`] keeps.
+fn open_log(path: &Path, make: bool) -> Result<(File, u64), Failed> {
     let descriptor = Descriptor::from_sddl(ADMIN_LOG_SDDL).map_err(|error| error.to_string())?;
     let attributes = attributes(&descriptor);
     let access = FILE_APPEND_DATA.0 | READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
     let flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT;
-    let file = open(path, access, Some(&attributes), OPEN_ALWAYS, flags)?;
+    let (made, how) = if make {
+        (Some(&attributes), OPEN_ALWAYS)
+    } else {
+        (None, OPEN_EXISTING)
+    };
+    let file = open(path, access, made, how, flags)?;
     let info = info(&file)?;
     let kind = FILE_ATTRIBUTE_REPARSE_POINT.0 | FILE_ATTRIBUTE_DIRECTORY.0;
     if info.dwFileAttributes & kind != 0 || info.nNumberOfLinks != 1 {

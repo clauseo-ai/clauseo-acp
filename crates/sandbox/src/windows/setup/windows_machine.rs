@@ -27,7 +27,7 @@ use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
-use super::{ffi, journal, logon, password, preflight, profile};
+use super::{ffi, journal, logon, password, preflight, profile, sweep};
 use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::admin_copy;
@@ -440,6 +440,10 @@ impl Machine for WindowsMachine {
             admin_copy::admin_exe(&program_files),
         );
         admin_copy::os::lock_down_tree(&dir, &exe, Some(group)).map_err(other)
+    }
+
+    fn harden_tasks(&mut self) -> Result<String, MachineError> {
+        sweep::windows_harden::at_set_up().map_err(MachineError::Other)
     }
 
     fn held_users(

@@ -1,12 +1,14 @@
 //! One task of step 4's walk (`sweep.rs`): its principal resolved and, when the pool's, the
 //! task deleted ([`sweep_task`]); a task the Task Scheduler won't give held to its owner and
-//! its file ([`file_trust::by_file`]); a group's task counted apart ([`group`]).
+//! its file ([`file_trust::by_file`]); a group's task counted apart ([`group`]); a task that
+//! runs as the lawyer hardened ([`harden`]).
 
 use std::collections::BTreeMap;
 
 #[cfg(doc)]
 use super::group;
 use super::group::Groups;
+use super::harden::{self, HardenWith};
 use super::{
     Failed, Names, Resolved, Sweeper, Swept, Task, file_trust, pool_owned, resolve, running,
 };
@@ -16,6 +18,8 @@ use crate::windows::sids::Sid;
 pub(super) struct Walk<'w> {
     /// The pool's SIDs.
     pub(super) pool: &'w [Sid],
+    /// The record's `OwnerSid`, for hardening ([`harden`]); `None` hardens nothing.
+    pub(super) lawyer: Option<&'w Sid>,
     /// The pool's names, for a name that resolves to no SID.
     pub(super) names: &'w Names,
     /// Each name's resolution, once a run.
@@ -50,10 +54,12 @@ pub(super) enum Found {
 /// user's name that resolves to no SID) or its owner is a pool SID, counted in `swept` either
 /// way. A task the Task Scheduler won't give is held to its owner and its file
 /// ([`file_trust::by_file`]). A group's task is judged alike (a pool owner deleted, an owner
-/// that can't be read 56, any other ignored) and counted apart.
+/// that can't be read 56, any other ignored) and counted apart. A task left whose principal may
+/// be the lawyer is hardened ([`harden::harden_task`]), never 56.
 pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
     let Walk {
         pool,
+        lawyer,
         names,
         resolved,
         groups,
@@ -63,6 +69,7 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
     let left_before = swept.left_tasks();
     let deleted_before = swept.deleted;
     let mut author = String::new();
+    let mut lawyer_task = false;
     let (found, group) = match task.principal {
         Ok(principal) => {
             let found = match principal.name() {
@@ -70,6 +77,9 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
                 None => Found::NoPrincipal,
             };
             let group = groups.group_task(fs, &principal, resolved, pool);
+            lawyer_task = lawyer.is_some_and(|lawyer| {
+                groups.runs_as_lawyer(fs, &principal, resolved, pool, lawyer)
+            });
             // The registrant writes `Author`: logged for a group task left at 56, never
             // trusted, never part of the judgment.
             author = principal.author;
@@ -93,6 +103,13 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
             (found, group)
         }
     };
+    // Only a task left and read: a pool task is deleted, and one whose owner can't be read
+    // can't be hardened either.
+    let harden = lawyer_task
+        && matches!(
+            found,
+            Found::NotPool | Found::Skipped(_) | Found::Unresolved(_)
+        );
     match found {
         Found::Pool => {
             // Deleted first, so no trigger starts another instance; deleting the task ends
@@ -125,6 +142,15 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
             swept.note(why);
         }
         Found::FileSkipped => swept.file_skipped += 1,
+    }
+    if harden && let Some(lawyer) = lawyer {
+        let at = HardenWith {
+            pool,
+            lawyer,
+            groups: &mut *groups,
+            hardened: &mut swept.hardened,
+        };
+        harden::harden_task(fs, folder, &task.name, at);
     }
     let left = swept.left_tasks() > left_before;
     if let Some(may_hold_pool) = group {

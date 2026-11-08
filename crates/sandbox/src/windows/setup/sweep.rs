@@ -75,7 +75,11 @@
 //!    owner is a pool SID or can't be read, else ignored; a cache key alone whose task can run
 //!    is 56 unless its `SD` reads and names an owner that isn't a pool SID; a folder or key gone
 //!    while listed and there again is 56. Nothing is deleted through a file or the registry. A
-//!    listing that can't be read is 56 too;
+//!    listing that can't be read is 56 too. A listed task left whose owner is SYSTEM,
+//!    Administrators or `TrustedInstaller` and whose principal may be the lawyer loses every
+//!    write its DACL gives an account a pool user may be ([`harden`]): the owner rule catches
+//!    a task a pool user registered, this one a task it could modify. Never 56, a failure
+//!    included;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -94,7 +98,8 @@
 //!    (`runner::marker`);
 //! 7. logs one line of counts to the Application log, which every local user can read: no path,
 //!    no SID. The paths of at most five tasks that keep it at 56, and the `Author` of at most
-//!    five group tasks that do, go to an admin-only log alone
+//!    five group tasks that do, and each task hardened or not hardened with the rights it lost,
+//!    go to an admin-only log alone
 //!    (`%ProgramData%\Clauseo\Sandbox\sweep-admin.log`, SYSTEM and Administrators; [`log_path`]).
 //!
 //! It marks no profile for a reset, unlike `--stop`.
@@ -109,6 +114,7 @@ use crate::windows::sids::Sid;
 
 mod file_trust;
 mod group;
+pub mod harden;
 pub mod log_path;
 mod resolve;
 mod running;
@@ -120,6 +126,8 @@ mod unlisted;
 mod walk;
 #[cfg(windows)]
 mod windows_groups;
+#[cfg(windows)]
+pub(crate) mod windows_harden;
 #[cfg(windows)]
 mod windows_listing;
 #[cfg(windows)]
@@ -325,6 +333,19 @@ pub trait Sweeper: Gate + Bits + Record {
     /// by the name `LookupAccountSidW` gives, which must resolve back to `sid`); `Err` when
     /// it isn't one or they can't all be read.
     fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed>;
+    /// The security descriptor of the task `name` in `folder`, self-relative, with its owner,
+    /// group, DACL and SACL (`IRegisteredTask::GetSecurityDescriptor`, its SDDL converted);
+    /// `Err` when any part can't be read.
+    fn task_security(&mut self, folder: &Self::Folder, name: &str) -> Result<Vec<u8>, Failed>;
+    /// Gives the task `name` in `folder` the self-relative descriptor `descriptor`, its owner,
+    /// group, DACL and SACL (`IRegisteredTask::SetSecurityDescriptor` with
+    /// `TASK_DONT_ADD_PRINCIPAL_ACE`, so no entry is added for its principal).
+    fn set_task_security(
+        &mut self,
+        folder: &Self::Folder,
+        name: &str,
+        descriptor: &[u8],
+    ) -> Result<(), Failed>;
 }
 
 /// Runs the sweep as the module says.
@@ -363,7 +384,7 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         }
     };
     let at = fs.now();
-    let mut swept = sweep_tasks(fs, &pool.users);
+    let mut swept = sweep_tasks(fs, &pool.users, Some(&pool.owner));
     let jobs = cancel_pool_jobs(fs, &pool.users);
     // Only now, the pool's tasks deleted and its BITS jobs cancelled, can no trigger or notify
     // command start another instance: the running ones are stopped last.
@@ -384,6 +405,11 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         fs,
         &swept.left_paths,
         &swept.group_authors,
+    ));
+    line.push_str(&harden::to_admin_log(
+        fs,
+        &swept.hardened,
+        "the sandbox's task sweep",
     ));
     if exit == SweepExit::Done {
         // Step 6, only on a run that ends 0.
@@ -413,9 +439,10 @@ fn refused(fs: &mut impl Sweeper, exit: SweepExit, why: &str) -> SweepExit {
 }
 
 /// Step 4: every folder from the root, depth first through a stack, at most [`FOLDERS_CAP`];
-/// each task read, resolved and, when the pool's, deleted ([`sweep_task`]). Each name is
-/// resolved once.
-pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
+/// each task read, resolved and, when the pool's, deleted ([`sweep_task`]), or hardened when
+/// it may run as `lawyer` ([`harden`]; `None`, for the elevated tests on a real machine,
+/// hardens nothing). Each name is resolved once.
+pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid], lawyer: Option<&Sid>) -> Swept {
     let mut swept = Swept::default();
     let mut resolved = BTreeMap::new();
     let names = Names::of(fs, pool);
@@ -454,6 +481,7 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
                 for task in tasks {
                     let at = Walk {
                         pool,
+                        lawyer,
                         names: &names,
                         resolved: &mut resolved,
                         groups: &mut groups,
@@ -488,6 +516,7 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
     if !swept.capped {
         let at = Walk {
             pool,
+            lawyer,
             names: &names,
             resolved: &mut resolved,
             groups: &mut groups,

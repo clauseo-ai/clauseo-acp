@@ -41,8 +41,10 @@ pub(super) struct Groups {
     pool_group: Result<Option<Sid>, Failed>,
     /// Whether each SID asked about is a group's ([`Sweeper::is_group`]).
     kinds: BTreeMap<Sid, bool>,
-    /// Whether each group asked about may hold a pool user ([`Groups::can_contain`]).
-    contain: BTreeMap<Sid, bool>,
+    /// Each group's members as [`Sweeper::group_members`] read them, `None` where they
+    /// couldn't be: read once a run, for [`Groups::can_contain`] and
+    /// [`Groups::may_hold_lawyer`] both.
+    members: BTreeMap<Sid, Option<Vec<Sid>>>,
 }
 
 impl Groups {
@@ -51,7 +53,7 @@ impl Groups {
         Groups {
             pool_group: fs.pool_group(),
             kinds: BTreeMap::new(),
-            contain: BTreeMap::new(),
+            members: BTreeMap::new(),
         }
     }
 
@@ -91,15 +93,99 @@ impl Groups {
         if pool.contains(sid) || SERVICES.contains(&sid.as_str()) {
             return false;
         }
-        if self.named(sid) {
-            return true;
-        }
+        self.named(sid) || self.kind(fs, sid)
+    }
+
+    /// Whether `sid` is a group's ([`Sweeper::is_group`]), read once a run; one whose kind
+    /// can't be read counts as a group's.
+    fn kind(&mut self, fs: &mut impl Sweeper, sid: &Sid) -> bool {
         if let Some(known) = self.kinds.get(sid) {
             return *known;
         }
         let group = fs.is_group(sid).unwrap_or(true);
         self.kinds.insert(sid.clone(), group);
         group
+    }
+
+    /// Whether the task whose principal is `principal` (its name already resolved, in
+    /// `resolved`) may run as `lawyer`, for hardening (`harden.rs`): its name is the lawyer's
+    /// SID, or a group's that may hold the lawyer ([`Groups::may_hold_lawyer`]), or resolves to
+    /// no SID at all (a name the lookup can't place may be the lawyer's, a domain account's
+    /// with no domain controller reachable, say). A pool user's name, the service accounts and
+    /// any other user can't; nor can a task that names no one.
+    pub(super) fn runs_as_lawyer(
+        &mut self,
+        fs: &mut impl Sweeper,
+        principal: &Principal,
+        resolved: &BTreeMap<String, Resolved>,
+        pool: &[Sid],
+        lawyer: &Sid,
+    ) -> bool {
+        let Some(name) = principal.name() else {
+            return false;
+        };
+        let sid = match resolved.get(name) {
+            Some(Resolved::Sid(sid)) => sid,
+            Some(Resolved::PoolName) => return false,
+            Some(Resolved::Skipped(_) | Resolved::Unresolved(_)) | None => return true,
+        };
+        if sid == lawyer {
+            return true;
+        }
+        if pool.contains(sid) || SERVICES.contains(&sid.as_str()) {
+            return false;
+        }
+        let group = principal.user_id.is_empty() || self.kind(fs, sid);
+        group && self.may_hold_lawyer(fs, sid, lawyer)
+    }
+
+    /// Whether the group `sid` may hold `lawyer`: a group outside `S-1-5-21` (a well-known or
+    /// built-in one: Users, Everyone, Administrators, …) may; a local or domain group may when
+    /// its members ([`Sweeper::group_members`]) include the lawyer or a group outside
+    /// `S-1-5-21`, or can't be read.
+    fn may_hold_lawyer(&mut self, fs: &mut impl Sweeper, sid: &Sid, lawyer: &Sid) -> bool {
+        if sid.domain().is_none() {
+            return true;
+        }
+        self.members(fs, sid).is_none_or(|members| {
+            members
+                .iter()
+                .any(|member| member == lawyer || member.domain().is_none())
+        })
+    }
+
+    /// The members of the group `sid` ([`Sweeper::group_members`]), read once a run; `None`
+    /// when they can't be read.
+    fn members(&mut self, fs: &mut impl Sweeper, sid: &Sid) -> Option<&Vec<Sid>> {
+        if !self.members.contains_key(sid) {
+            let members = fs.group_members(sid).ok();
+            self.members.insert(sid.clone(), members);
+        }
+        self.members.get(sid)?.as_ref()
+    }
+
+    /// Whether a pool user's token may hold `sid` (`None`: an entry whose SID wasn't read), for
+    /// hardening (`harden.rs`): never `lawyer`; always a pool SID, one of [`POOL_GROUPS`] or
+    /// the record's `GroupSid`; otherwise only a group's SID (a user that isn't the pool's holds
+    /// its own token alone) that [`may_be_pool`] lets through and that may hold a pool user
+    /// ([`Groups::can_contain`], a lookup that fails counting as yes).
+    pub(super) fn pool_may_hold(
+        &mut self,
+        fs: &mut impl Sweeper,
+        sid: Option<&Sid>,
+        pool: &[Sid],
+        lawyer: &Sid,
+    ) -> bool {
+        let Some(sid) = sid else {
+            return true;
+        };
+        if sid == lawyer {
+            return false;
+        }
+        if pool.contains(sid) || self.named(sid) {
+            return true;
+        }
+        may_be_pool(Some(sid), pool) && self.kind(fs, sid) && self.can_contain(fs, sid, pool)
     }
 
     /// Whether a pool user may be one of the members of the group `sid`: a pool SID, one of
@@ -114,17 +200,12 @@ impl Groups {
         if !may_be_pool(Some(sid), pool) {
             return false;
         }
-        if let Some(known) = self.contain.get(sid) {
-            return *known;
-        }
-        let can = match fs.group_members(sid) {
-            Ok(members) => members
+        let members = self.members(fs, sid).cloned();
+        members.is_none_or(|members| {
+            members
                 .iter()
-                .any(|member| pool.contains(member) || self.named(member)),
-            Err(_) => true,
-        };
-        self.contain.insert(sid.clone(), can);
-        can
+                .any(|member| pool.contains(member) || self.named(member))
+        })
     }
 
     /// Whether `sid` is one of [`POOL_GROUPS`] or the record's `GroupSid`.

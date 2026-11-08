@@ -138,7 +138,7 @@ fn elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers() {
     }
 
     // 5. The sweep's task step, with the test user as the pool.
-    let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid));
+    let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid), None);
     eprintln!("5. {swept:?}");
     assert!(swept.deleted >= 1, "{swept:?}");
     assert_eq!(swept.not_deleted, 0, "{swept:?}");
@@ -164,7 +164,7 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     // one that isn't would end every real run at 56. Each failure is listed by its kind (the
     // call that failed), never by a task's or an account's name.
     let mut sweeper = WindowsSweeper::new();
-    let swept = sweep_tasks(&mut sweeper, &[]);
+    let swept = sweep_tasks(&mut sweeper, &[], None);
     eprintln!(
         "{} folders, {} tasks, {} with no user or group, {} unreadable, {} skipped, {} folders \
          unlisted",
@@ -316,7 +316,7 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         .iter()
         .any(|task| task.name == name);
     eprintln!("3. listed by GetTasks: {listed}");
-    let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid));
+    let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid), None);
     eprintln!(
         "   {} deleted, {} unreadable, {} not deleted, {} hidden, {} unlisted",
         swept.deleted, swept.unreadable, swept.not_deleted, swept.hidden, swept.unlisted

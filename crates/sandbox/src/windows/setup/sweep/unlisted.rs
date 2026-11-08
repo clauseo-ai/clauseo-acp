@@ -149,6 +149,7 @@ fn listed_again<S: Sweeper>(
             let pool_before = at.swept.pool_paths.len();
             let one = Walk {
                 pool: at.pool,
+                lawyer: at.lawyer,
                 names: at.names,
                 resolved: &mut *at.resolved,
                 groups: &mut *at.groups,

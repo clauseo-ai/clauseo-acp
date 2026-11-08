@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use super::harden::Hardened;
 use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
 #[cfg(doc)]
 use super::{log_path, running, unlisted};
@@ -96,6 +97,9 @@ pub struct Swept {
     /// The `Author` of each group task that keeps the run at 56 and gave one: its registrant's
     /// word, never trusted; logged cleaned and capped ([`log_path`]).
     pub group_authors: Vec<String>,
+    /// The tasks that run as the lawyer hardened, and those that couldn't be (`harden.rs`):
+    /// counted in the log line, named in the admin-only log alone; never 56.
+    pub hardened: Hardened,
 }
 
 impl Swept {

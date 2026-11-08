@@ -75,6 +75,22 @@ pub(super) fn admin_lock(machine: &mut impl Machine, group: &Sid) -> Result<(), 
     }
 }
 
+/// Right after [`stop_task`]: every task that runs as the lawyer loses the write its DACL gives
+/// an account a pool user may be (`sweep::harden`, `harden_loose_tasks`), as set-up's elevated
+/// administrator; the sweep does the same as SYSTEM at every session's end. It never fails the
+/// set-up: the counts, or why it couldn't run, go to the Event Log, no path (the paths go only to
+/// an admin-only log that is already there). Once the SYSTEM set-up task (`SandboxSetUp`, #733)
+/// lands, this call can move there.
+pub(super) fn harden_tasks(machine: &mut impl Machine) {
+    match machine.harden_tasks() {
+        Ok(line) if line.is_empty() => {}
+        Ok(line) => tracing::warn!("set-up hardened the tasks that run as the lawyer{line}"),
+        Err(error) => {
+            tracing::warn!(%error, "set-up couldn't harden the tasks that run as the lawyer");
+        }
+    }
+}
+
 /// Before step 7: the folders whose denies protect what is below them, which an owner could
 /// undo through its implied `WRITE_DAC` (each pool user's `AppData\LocalLow`, whose deny for the
 /// group is inherited and whose `OWNER RIGHTS` deny is inherit-only). A fresh profile's
