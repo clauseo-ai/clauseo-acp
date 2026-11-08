@@ -31,7 +31,8 @@ use super::{
 use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::detect::native_machine;
-use crate::windows::record::read_string;
+use crate::windows::machine_launch::{self, LaunchApplied, os::WindowsLaunchStore};
+use crate::windows::record::{RecordError, read_string, sandbox_group_sid, sandbox_removing};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
 use crate::windows::setup::owner::this_process;
@@ -287,6 +288,24 @@ impl Refresher for WindowsRefresher {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn reapply_launch_deny(&mut self) -> Result<Option<LaunchApplied>, Failed> {
+        let unread = |error: RecordError| format!("the record: {error}");
+        if sandbox_removing().map_err(unread)? {
+            return Ok(None);
+        }
+        let Some(text) = sandbox_group_sid().map_err(unread)? else {
+            return Ok(None);
+        };
+        // The record's GroupSid: a local group's, `S-1-5-21-<machine>-<rid>`, never a
+        // well-known or builtin SID a deny would close COM to far more than the pool for.
+        let group = Sid::parse(&text)
+            .ok()
+            .filter(|sid| sid.domain().is_some() && sid.as_str().split('-').count() == 8)
+            .ok_or_else(|| "the record's GroupSid isn't a local group's".to_owned())?;
+        let mut store = WindowsLaunchStore::new(RECORD_KEY);
+        Ok(Some(machine_launch::apply(&mut store, &group)))
     }
 }
 
