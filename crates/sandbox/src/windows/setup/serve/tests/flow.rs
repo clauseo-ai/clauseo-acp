@@ -249,7 +249,7 @@ fn a_failed_set_up_is_the_reply_and_an_error_line() {
         host.lines,
         [(
             true,
-            "set-up request: failed (exit 2) at checking who owns the set-up".to_owned()
+            "set-up request (set_up): failed (exit 2) at checking who owns the set-up".to_owned()
         )]
     );
 }
@@ -373,6 +373,42 @@ fn requests_and_replies_round_trip_and_nothing_else_parses() {
             String::from_utf8_lossy(bad)
         );
     }
+}
+
+#[test]
+fn the_log_names_the_op_by_its_tag_and_never_echoes_the_client() {
+    let mut host = FakeHost::new();
+    let clients = vec![
+        FakeClient::asking(LAWYER, r#"{"v":1,"op":"EVIL-op"}"#),
+        FakeClient::asking(LAWYER, r#"{"v":1,"op":"set_up","EVIL-field":1}"#),
+        FakeClient::asking(LAWYER, "EVIL not json"),
+        FakeClient::asking(LAWYER, r#"{"v":1,"op":"add","n":2}"#),
+    ];
+    let (_, replies, _) = serve_all(&mut host, clients);
+    assert_eq!(replies.len(), 4);
+    let lines: Vec<&str> = host.lines.iter().map(|(_, line)| line.as_str()).collect();
+    assert_eq!(
+        lines,
+        [
+            "set-up request (unsupported) unsupported",
+            "set-up request refused: a request this server can't read",
+            "set-up request refused: a request this server can't read",
+            "set-up request (add): done",
+        ]
+    );
+    // The client still learns why, in its own reply.
+    assert!(matches!(&replies[1], Reply::Refused(why) if why.contains("EVIL-field")));
+}
+
+#[test]
+fn the_app_waits_for_a_reply_as_long_as_the_task_may_run() {
+    use crate::windows::refresh::SET_UP_EXECUTION_LIMIT;
+    assert_eq!(SET_UP_EXECUTION_LIMIT, "PT30M");
+    assert!(REPLY_WAIT > Duration::from_mins(30), "past the limit");
+    assert!(
+        READ_WAIT <= Duration::from_secs(2),
+        "a silent client holds no one up"
+    );
 }
 
 #[test]

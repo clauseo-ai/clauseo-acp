@@ -19,7 +19,7 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 /// The set-up task's one argument (`setup::serve`): nothing else.
 pub const SET_UP_ARG: &str = "--serve-set-up";
 /// The set-up task's execution limit: 30 minutes, for a set-up (users, logons, filters) and
-/// the requests queued behind it.
+/// the clients waiting behind it; the app waits as long for its reply (`serve::REPLY_WAIT`).
 pub const SET_UP_EXECUTION_LIMIT: &str = "PT30M";
 
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
@@ -78,12 +78,15 @@ impl SystemTask {
     }
 
     /// Whether a start while it runs queues another run, which starts when this one ends
-    /// (`TASK_INSTANCES_QUEUE`); otherwise it is ignored (`TASK_INSTANCES_IGNORE_NEW`). The
-    /// set-up task queues, so a request made as its server is about to stop still gets one.
+    /// (`TASK_INSTANCES_QUEUE`); otherwise it is ignored (`TASK_INSTANCES_IGNORE_NEW`). None
+    /// queues. The Task Scheduler has no limit on a queue, so any interactive user could pile
+    /// up set-up runs; a start during a set-up run is dropped instead, as the running server
+    /// serves every client that connects to it, and the app starts the task again itself when
+    /// the pipe stays missing or the server goes before replying (`windows::setup_task`): at
+    /// most one start waits, and it is the app's.
     pub fn queues(self) -> bool {
         match self {
-            SystemTask::Refresh | SystemTask::Stop => false,
-            SystemTask::SetUp => true,
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::SetUp => false,
         }
     }
 

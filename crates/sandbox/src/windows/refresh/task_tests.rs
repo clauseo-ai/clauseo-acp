@@ -1,6 +1,6 @@
 //! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh task
 //! with its own name, argument and limit, the same principal and descriptor, and no logon start;
-//! the set-up task queues its runs and is started by the owner or by interactive users but the
+//! the set-up task queues no runs and is started by the owner or by interactive users but the
 //! pool's group; the folder keeps its own descriptor; the uninstaller's removal takes every task
 //! down before the copy they run, the set-up task first.
 
@@ -47,8 +47,8 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     );
     assert_eq!(mode(set_up), Ok(Mode::ServeSetUp));
     assert!(!set_up.at_logon(), "started only on demand: no trigger");
-    assert!(set_up.queues(), "a start during a run queues another");
-    assert!(!refresh.queues() && !stop.queues());
+    // No run queues: a start during a set-up run is dropped, and the app starts it again.
+    assert!(!set_up.queues() && !refresh.queues() && !stop.queues());
     assert_ne!(set_up.description(), "");
 }
 

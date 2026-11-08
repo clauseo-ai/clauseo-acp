@@ -106,6 +106,17 @@ impl Op {
         }
     }
 
+    /// Its tag for the log: the op's name, or `unsupported` for anything this server doesn't
+    /// know, so no text the client sent reaches the Event Log.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Op::SetUp => "set_up",
+            Op::Add(_) => "add",
+            Op::EnsureSlots(_) => "ensure_slots",
+            Op::Unsupported(_) => "unsupported",
+        }
+    }
+
     /// The request as the client sends it: [`Op::Unsupported`] has none.
     pub fn to_bytes(&self) -> Option<Vec<u8>> {
         let value = match self {

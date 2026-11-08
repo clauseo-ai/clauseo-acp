@@ -28,7 +28,8 @@
 //! 1. its request, one message of at most [`REQUEST_CAP`] bytes read within [`READ_WAIT`]: an
 //!    op-tagged, versioned JSON object (`protocol.rs`, [`Op`]), `set_up` or `add`;
 //!    `ensure_slots` (reserved for several owners) and anything unknown are answered
-//!    `unsupported` once the client is identified;
+//!    `unsupported` once the client is identified. The log names the op by its tag alone, never
+//!    with text the client sent;
 //! 2. who it is ([`ClientFacts`]): its token's user, groups, restriction and integrity, read at
 //!    identification level (`ImpersonateNamedPipeClient`, `OpenThreadToken`), and its session
 //!    (`GetNamedPipeClientSessionId`), then the session's user (`WTSQueryUserToken`);
@@ -83,8 +84,13 @@ pub const PIPE_NAME: &str = r"\\.\pipe\ClauseoSandboxSetUp";
 pub const FIRST_WAIT: Duration = Duration::from_secs(30);
 /// How long it waits for each client after one was served.
 pub const IDLE_WAIT: Duration = Duration::from_secs(5);
-/// How long a connected client has to send its request.
-pub const READ_WAIT: Duration = Duration::from_secs(10);
+/// How long a connected client has to send its request: short, as a client holding its
+/// instance unsent keeps the next one waiting.
+pub const READ_WAIT: Duration = Duration::from_secs(2);
+/// How long the app waits for its reply once the request is sent: the set-up task's execution
+/// limit (`refresh::SET_UP_EXECUTION_LIMIT`, 30 minutes, past which the Task Scheduler ends the
+/// server) and a minute more, so a set-up that runs to the limit is never cut short by the app.
+pub const REPLY_WAIT: Duration = Duration::from_mins(31);
 /// How long the app tries the pipe for, in milliseconds (`windows::setup_task`).
 pub const CONNECT_WAIT: u64 = 30_000;
 /// After how long without a pipe the app starts the task once more, in milliseconds.
@@ -253,18 +259,32 @@ fn allowed(host: &mut impl Host) -> Result<bool, String> {
     Ok(host.is_system()? && same_path(&host.current_exe()?, &host.admin_copy()?))
 }
 
-/// The reply to one client, as the module says, logged.
+/// The reply to one client, as the module says, logged. The log line names the op by its tag
+/// alone ([`Op::tag`]) and holds no text the client sent: a request that can't be read is
+/// logged as that, its details only in the reply.
 fn handle<P: Pipe, H: Host>(pipe: &mut P, host: &mut H, client: &mut P::Client) -> Reply {
-    let reply = answer(pipe, host, client);
+    let op = match pipe.request(client).and_then(|bytes| Op::parse(&bytes)) {
+        Ok(op) => op,
+        Err(why) => {
+            host.log(
+                true,
+                "set-up request refused: a request this server can't read",
+            );
+            return Reply::Refused(format!("the request: {why}"));
+        }
+    };
+    let tag = op.tag();
+    let reply = answer(pipe, host, client, op);
     let line = match &reply {
-        Reply::Ran(result) if result.exit == 0 => "set-up request: done".to_owned(),
+        Reply::Ran(result) if result.exit == 0 => format!("set-up request ({tag}): done"),
         Reply::Ran(result) => format!(
-            "set-up request: failed (exit {}) at {}",
+            "set-up request ({tag}): failed (exit {}) at {}",
             result.exit,
             result.step.as_deref().unwrap_or("an unnamed step")
         ),
-        Reply::Refused(why) => format!("set-up request refused: {why}"),
-        Reply::Unsupported(what) => format!("set-up request unsupported: {what}"),
+        // The server's own words: a refusal names no SID or path, and none echoes the client.
+        Reply::Refused(why) => format!("set-up request ({tag}) refused: {why}"),
+        Reply::Unsupported(_what) => format!("set-up request ({tag}) unsupported"),
     };
     host.log(
         !matches!(&reply, Reply::Ran(result) if result.exit == 0),
@@ -273,12 +293,8 @@ fn handle<P: Pipe, H: Host>(pipe: &mut P, host: &mut H, client: &mut P::Client) 
     reply
 }
 
-/// [`handle`]'s reply, unlogged.
-fn answer<P: Pipe, H: Host>(pipe: &mut P, host: &mut H, client: &mut P::Client) -> Reply {
-    let op = match pipe.request(client).and_then(|bytes| Op::parse(&bytes)) {
-        Ok(op) => op,
-        Err(why) => return Reply::Refused(format!("the request: {why}")),
-    };
+/// [`handle`]'s reply to the request `op`, unlogged.
+fn answer<P: Pipe, H: Host>(pipe: &mut P, host: &mut H, client: &mut P::Client, op: Op) -> Reply {
     let facts = match pipe.facts(client) {
         Ok(facts) => facts,
         Err(why) => return Reply::Refused(format!("who asked can't be read: {why}")),

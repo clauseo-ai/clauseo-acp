@@ -25,7 +25,7 @@
 //!    check gets nothing ([`SetUpError::NotTheServer`]). A server process no longer listed was
 //!    ending as this connected, and is taken as gone;
 //! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
-//!    the one-line reply; a server that went away before replying (one that was ending as this
+//!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server that went away before replying (one that was ending as this
 //!    connected) is asked again, once, after the task is started again;
 //! 5. a pipe someone else serves is most likely a pool user's process holding the name: the
 //!    pool's processes are stopped (`request_pool_stop`), and once the stop task is done, steps
@@ -34,16 +34,17 @@
 #![expect(unsafe_code, reason = "FFI to the named pipe and process list calls")]
 
 use std::path::Path;
+use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY,
-    ERROR_PIPE_NOT_CONNECTED, HANDLE, HLOCAL, LocalFree, NTSTATUS, UNICODE_STRING,
+    ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING,
+    ERROR_PIPE_BUSY, ERROR_PIPE_NOT_CONNECTED, HANDLE, HLOCAL, LocalFree, NTSTATUS, UNICODE_STRING,
 };
 use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
 use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING, QueryDosDeviceW,
-    ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING,
+    QueryDosDeviceW, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
 };
 use windows::Win32::System::Pipes::{
     GetNamedPipeServerProcessId, GetNamedPipeServerSessionId, WaitNamedPipeW,
@@ -55,11 +56,12 @@ use windows::core::{HSTRING, PWSTR};
 use super::acl::object::{Handle, os_error};
 use super::admin_copy::{self, os};
 use super::pipe::PIPE_RIGHTS;
+use super::pipe::os::Overlapped;
 use super::refresh::task::{run_task, task_busy};
 use super::refresh::{SystemTask, TaskError, request_pool_stop};
 use super::setup::serve::{
-    CONNECT_WAIT, Op, PIPE_NAME, REPLY_CAP, RERUN_AFTER, ServerFacts, check_owner, check_server,
-    retry_squatted,
+    CONNECT_WAIT, Op, PIPE_NAME, REPLY_CAP, REPLY_WAIT, RERUN_AFTER, ServerFacts, check_owner,
+    check_server, retry_squatted,
 };
 use super::setup::stop::windows_stopper::listed_users;
 use super::sids::Sid;
@@ -67,6 +69,8 @@ use super::token::os::sid_text;
 
 pub use super::setup::serve::{Reply as SetUpReply, SetUpError};
 
+/// How long the request's write may take.
+const WRITE_WAIT: Duration = Duration::from_secs(5);
 /// The pause between two tries while the pipe isn't there, in milliseconds.
 const PAUSE_MS: u32 = 250;
 /// The pause between two looks at the stop task, in milliseconds.
@@ -212,7 +216,8 @@ fn now_ms() -> u64 {
     unsafe { GetTickCount64() }
 }
 
-/// The pipe's client end, synchronous, identification only; the Win32 error when it won't open.
+/// The pipe's client end, overlapped so every wait on it has a limit, identification only; the
+/// Win32 error when it won't open.
 fn open(name: &str) -> Result<Handle, windows::Win32::Foundation::WIN32_ERROR> {
     // SAFETY: the name is a live HSTRING; no security attributes; the handle returned is owned
     // by `Handle`.
@@ -223,7 +228,9 @@ fn open(name: &str) -> Result<Handle, windows::Win32::Foundation::WIN32_ERROR> {
             FILE_SHARE_NONE,
             None,
             OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(SECURITY_SQOS_PRESENT.0 | SECURITY_IDENTIFICATION.0),
+            FILE_FLAGS_AND_ATTRIBUTES(
+                FILE_FLAG_OVERLAPPED.0 | SECURITY_SQOS_PRESENT.0 | SECURITY_IDENTIFICATION.0,
+            ),
             None,
         )
     };
@@ -243,14 +250,20 @@ pub(in crate::windows) enum Exchange {
     Failed(String),
 }
 
-/// Checks the server on `pipe` against `admin_exe` ([`check_pipe`]), then sends `request` and
-/// reads the reply.
+/// Checks the server on `pipe` against `admin_exe` ([`check_pipe`]), then sends `request`
+/// within [`WRITE_WAIT`] and reads the reply within [`REPLY_WAIT`] in all.
 fn exchange(pipe: &Handle, request: &[u8], admin_exe: &Path) -> Result<SetUpReply, Exchange> {
     check_pipe(pipe, admin_exe)?;
-    let mut written = 0u32;
-    // SAFETY: a live client end opened for writing; `request` and `written` outlive the call.
-    unsafe { WriteFile(pipe.0, Some(request), Some(&raw mut written), None) }
-        .map_err(|error| gone_or(&error))?;
+    match write_within(pipe, request) {
+        Ok(Some(_written)) => {}
+        Ok(None) => {
+            return Err(Exchange::Failed(
+                "the request wasn't taken in time".to_owned(),
+            ));
+        }
+        Err(error) => return Err(closed_or(&error)),
+    }
+    let deadline = now_ms().saturating_add(u64::try_from(REPLY_WAIT.as_millis()).unwrap_or(0));
     let mut reply = Vec::new();
     let mut chunk = [0u8; 4096];
     while !reply.contains(&b'\n') {
@@ -259,20 +272,66 @@ fn exchange(pipe: &Handle, request: &[u8], admin_exe: &Path) -> Result<SetUpRepl
                 "a reply of more than {REPLY_CAP} bytes"
             )));
         }
-        let mut read = 0u32;
-        // SAFETY: a live client end opened for reading; `chunk` and `read` outlive the call.
-        let done = unsafe { ReadFile(pipe.0, Some(&mut chunk), Some(&raw mut read), None) };
-        match done {
-            Ok(()) if read == 0 => break,
-            Ok(()) => reply.extend_from_slice(chunk.get(..read as usize).unwrap_or_default()),
-            Err(error) if reply.is_empty() => return Err(gone_or(&error)),
-            Err(error) => return Err(Exchange::Failed(os_error(&error).to_string())),
+        let left = Duration::from_millis(deadline.saturating_sub(now_ms()));
+        match read_within(pipe, &mut chunk, left) {
+            Ok(Some(0)) => break,
+            Ok(Some(read)) => reply.extend_from_slice(chunk.get(..read).unwrap_or_default()),
+            Ok(None) => {
+                return Err(Exchange::Failed(format!(
+                    "no reply within {} minutes",
+                    REPLY_WAIT.as_secs() / 60
+                )));
+            }
+            Err(error) if reply.is_empty() => return Err(closed_or(&error)),
+            Err(error) => return Err(Exchange::Failed(error.to_string())),
         }
     }
     if reply.is_empty() {
         return Err(Exchange::Gone);
     }
     SetUpReply::parse(&reply).map_err(Exchange::Failed)
+}
+
+/// Writes `request` to `pipe` within [`WRITE_WAIT`]: the bytes written, or `None` when it
+/// was cancelled for taking longer.
+fn write_within(pipe: &Handle, request: &[u8]) -> std::io::Result<Option<usize>> {
+    let mut io = Overlapped::new()?;
+    // SAFETY: a live client end opened overlapped; `request` and `io` outlive the operation,
+    // which `within` completes or cancels before either drops.
+    let started = unsafe { WriteFile(pipe.0, Some(request), None, Some(io.as_mut_ptr())) };
+    match started {
+        Ok(()) => {}
+        Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(error) => return Err(os_error(&error)),
+    }
+    io.within(pipe, WRITE_WAIT)
+}
+
+/// Reads into `chunk` from `pipe` within `wait`: the bytes read, or `None` when it was
+/// cancelled for taking longer.
+fn read_within(pipe: &Handle, chunk: &mut [u8], wait: Duration) -> std::io::Result<Option<usize>> {
+    let mut io = Overlapped::new()?;
+    // SAFETY: a live client end opened overlapped; `chunk` and `io` outlive the operation,
+    // which `within` completes or cancels before either drops.
+    let started = unsafe { ReadFile(pipe.0, Some(chunk), None, Some(io.as_mut_ptr())) };
+    match started {
+        Ok(()) => {}
+        Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(error) => return Err(os_error(&error)),
+    }
+    io.within(pipe, wait)
+}
+
+/// `error` as [`Exchange::Gone`] when it says the server closed, else a failure.
+fn closed_or(error: &std::io::Error) -> Exchange {
+    let closed = [ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED]
+        .iter()
+        .any(|code| error.raw_os_error() == i32::try_from(code.0).ok());
+    if closed {
+        Exchange::Gone
+    } else {
+        Exchange::Failed(error.to_string())
+    }
 }
 
 /// `error` as [`Exchange::Gone`] when it says the server closed, else a failure.

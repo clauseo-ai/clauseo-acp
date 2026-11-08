@@ -14,8 +14,8 @@
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more. The set-up task (`--serve-set-up`, 30
 //!   minutes) is registered by `--adopt --place-only` for the lawyer and by a per-machine
-//!   `--adopt` for every interactive user ([`Starters::Interactive`]); its runs queue rather
-//!   than being dropped. The folder `\Clauseo` gets its own fixed owner and DACL
+//!   `--adopt` for every interactive user ([`Starters::Interactive`]); like the others, a
+//!   start while it runs is dropped (the app starts it again when its pipe stays missing). The folder `\Clauseo` gets its own fixed owner and DACL
 //!   ([`FOLDER_SDDL`](super::FOLDER_SDDL)), made with them, or set again when an
 //!   administrator made it; one anyone else made is deleted with what is in it and made again
 //!   (`task_folder.rs`).

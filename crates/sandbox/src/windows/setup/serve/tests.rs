@@ -329,7 +329,10 @@ fn a_set_up_request_runs_the_set_up_for_the_session_user_in_their_data_folder() 
         ]
     );
     assert!(!host.held, "the lock is given back");
-    assert_eq!(host.lines, [(false, "set-up request: done".to_owned())]);
+    assert_eq!(
+        host.lines,
+        [(false, "set-up request (set_up): done".to_owned())]
+    );
 }
 
 #[test]

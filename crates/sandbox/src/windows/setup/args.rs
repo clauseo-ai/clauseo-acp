@@ -9,11 +9,12 @@
 //!   lock the admin folder, record the copy's hash and the install folder, then, per user, set
 //!   up. `--owner-sid` and `--data-dir` come from the unelevated installer, the lawyer's own;
 //!   `--adopt` checks the SID against that process's token (`adopt.rs`).
-//! - `--adopt --place-only` (per user only): the per-user installer's form. It places the copy
-//!   and writes the record's admin-copy values, and nothing else: no SYSTEM task and no set-up
-//!   (no pool user, group, filters or denies). The app's first run does those, through the admin
-//!   copy's `--set-up`, so the installer's process tree never creates users, tasks or filters
-//!   (0049, "Admin copy": Microsoft Defender quarantined the installer when it did).
+//! - `--adopt --place-only` (per user only): the per-user installer's form. It places the copy,
+//!   writes the record's admin-copy values and registers the set-up task for the lawyer
+//!   (`SandboxSetUp`, `adopt.rs`), and nothing else: no refresh or stop task and no set-up (no
+//!   pool user, group, filters or denies). The app's first run does those, through the set-up
+//!   task or the admin copy's `--set-up`, so the installer's process tree never creates users or
+//!   filters (0049, "Admin copy": Microsoft Defender quarantined the installer when it did).
 //! - `--remove [--uninstall] [--per-machine]`: the removal (`PR4j`). The app's in-app removal
 //!   passes `--remove` alone, which keeps the admin copy and its record values, so a later
 //!   set-up runs the verified copy with no installer; the uninstaller's hook adds `--uninstall`,
@@ -67,8 +68,8 @@ pub enum Mode {
         /// The lawyer the unelevated installer names, for the set-up that follows; `None` with
         /// `--per-machine`, which sets nobody up.
         user: Option<AdoptUser>,
-        /// `--place-only`: place the copy and write its record values, nothing else (no task,
-        /// no set-up). Per user only.
+        /// `--place-only`: place the copy, write its record values and register the set-up task
+        /// for the lawyer; no refresh or stop task, no set-up. Per user only.
         place_only: bool,
     },
     /// `--remove`.
@@ -77,8 +78,8 @@ pub enum Mode {
         /// whoever asked (D-B9 as ruled). Without it, only the record's owner removes anything.
         per_machine: bool,
         /// `--uninstall`: the uninstaller's removal, which also deletes the admin copy, its
-        /// record values and the SYSTEM tasks (refresh and stop), last. Without it (the app's),
-        /// they stay.
+        /// record values and the SYSTEM tasks (set-up, refresh and stop), last. Without it (the
+        /// app's), they stay.
         uninstall: bool,
     },
     /// `--refresh`.
