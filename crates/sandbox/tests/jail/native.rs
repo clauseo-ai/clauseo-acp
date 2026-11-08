@@ -122,6 +122,69 @@ fn assert_logged(launcher: &SeatbeltLauncher, loader: &Path, dylib: &Path) {
     );
 }
 
+/// Maps the file `argv[1]` (an arm64 `ret`) read-only and private, then asks for
+/// `PROT_EXEC` with `mprotect`, and calls it; then the same with anonymous `MAP_JIT` memory.
+/// Prints one line per step: `file-mprotect ok`, `file-call ok`, `jit-mmap ok`, `jit-call ok`,
+/// or the step and its errno. Exits 0 only if every step worked.
+const MPROTECT: &str = r#"#include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <libkern/OSCacheControl.h>
+static const unsigned char RET[4] = {0xc0, 0x03, 0x5f, 0xd6};
+int main(int argc, char **argv) {
+    int fd = open(argv[1], O_RDONLY);
+    if (fd < 0) { printf("open %d\n", errno); return 1; }
+    void *file = mmap(NULL, 16384, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (file == MAP_FAILED) { printf("file-mmap %d\n", errno); return 1; }
+    if (mprotect(file, 16384, PROT_READ | PROT_EXEC) != 0) {
+        printf("file-mprotect %d\n", errno);
+        return 2;
+    }
+    puts("file-mprotect ok");
+    fflush(stdout);
+    ((void (*)(void))file)();
+    puts("file-call ok");
+    fflush(stdout);
+    int flags = MAP_PRIVATE | MAP_ANON | MAP_JIT;
+    void *jit = mmap(NULL, 16384, PROT_READ | PROT_WRITE | PROT_EXEC, flags, -1, 0);
+    if (jit == MAP_FAILED) { printf("jit-mmap %d\n", errno); return 3; }
+    puts("jit-mmap ok");
+    pthread_jit_write_protect_np(0);
+    memcpy(jit, RET, sizeof RET);
+    pthread_jit_write_protect_np(1);
+    sys_icache_invalidate(jit, sizeof RET);
+    ((void (*)(void))jit)();
+    puts("jit-call ok");
+    return 0;
+}
+"#;
+
+/// With the switch on, a matter file mapped read-only and then `mprotect`ed to `PROT_EXEC`
+/// runs, and so does anonymous `MAP_JIT` memory: the deny covers `file-map-executable`, which
+/// Seatbelt checks when a file is mapped executable, not this later change of protection.
+/// A residual of the defence-in-depth layer, recorded in 0049. If this ever starts failing, the
+/// OS closed the gap: update 0049 and flip the test.
+#[cfg(target_arch = "aarch64")]
+#[test]
+fn on_a_matter_file_mprotected_to_exec_and_jit_memory_still_run() {
+    let w = World::new();
+    let source = w.file("m1/build/mprotect.c", MPROTECT);
+    let program = w.at("m1/build/mprotect");
+    let args = ["-o", s(&program), s(&source)];
+    run_outside("/usr/bin/cc", &args, &w.at("m1/build")).assert_ok();
+    // An arm64 `ret`, little-endian.
+    let code = w.bytes("m1/build/ret.bin", &[0xc0, 0x03, 0x5f, 0xd6]);
+    let policy = w.builder().native_code_deny(true).build().unwrap();
+    let (launcher, _denials) = launcher(policy);
+    let out = run(&launcher, s(&program), &[s(&code)], &w.at("m1"), &[]);
+    let steps = "file-mprotect ok\nfile-call ok\njit-mmap ok\njit-call ok\n";
+    assert_eq!(out.stdout, steps, "{out:#?}");
+    out.assert_ok();
+}
+
 /// Where a Chrome for Testing build might already be on this Mac: Playwright's headless shell,
 /// else agent-browser's full build, whose stub binary loads its framework at start.
 fn chrome() -> Option<(PathBuf, &'static str)> {

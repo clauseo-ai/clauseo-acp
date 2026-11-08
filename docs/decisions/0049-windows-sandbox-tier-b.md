@@ -2047,6 +2047,17 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   extensions loaded. The halves differ in one place: Windows denies execute, so an exe the agent
   writes doesn't start either, while on macOS a Mach-O the agent builds still runs (exec stays
   allowed); on both, a library it writes doesn't load.
+- **Residual of the macOS half (measured 2026-11-09, macOS 27.2, arm64).** The deny is defence in
+  depth, not a wall against code the agent writes. With the switch on, a program mapped a matter
+  file `PROT_READ`, `MAP_PRIVATE`, then `mprotect`ed it to `PROT_READ | PROT_EXEC` and called
+  the instructions in it, and both steps worked: Seatbelt checks `file-map-executable` when a
+  file is mapped executable, not when protection changes later. Anonymous `MAP_JIT` memory works
+  too: the program wrote an instruction into it and called it. So an agent that can already run
+  a binary it builds, or drive a runtime that can call `mmap` and `mprotect` (Python through
+  `ctypes`), can load and run code it wrote without dyld. What the deny stops is the ordinary path: `dlopen` of a library or
+  extension in a writable place, and a runtime or app (Chromium) copied there. The jail test
+  `on_a_matter_file_mprotected_to_exec_and_jit_memory_still_run` holds this; it fails if a later
+  macOS closes the gap.
 
 ## Status
 

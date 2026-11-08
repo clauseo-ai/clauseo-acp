@@ -84,6 +84,11 @@ impl World {
     }
 
     pub(crate) fn file(&self, rel: &str, content: &str) -> PathBuf {
+        self.bytes(rel, content.as_bytes())
+    }
+
+    /// [`World::file`] with any bytes.
+    pub(crate) fn bytes(&self, rel: &str, content: &[u8]) -> PathBuf {
         let path = self.at(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
