@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use super::super::super::Actor;
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::rd_policy::RdPolicy;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
-use clauseo_settings::chromium_policy::RemoteDebuggingPolicy;
+use clauseo_protocol::ToolsUnavailableReason;
 
 /// How the launch prep picks the session's Chrome.
 enum ChromeSearch {
@@ -62,8 +63,8 @@ pub(super) struct BrowserPrep {
     /// `--agent-browser` argument), as the profile hook gave them.
     sidecars: Vec<PathBuf>,
     chrome: ChromeSearch,
-    /// Reads the firm's Chrome and Edge `RemoteDebuggingAllowed` (the wiring's).
-    rd_policy: Arc<dyn RemoteDebuggingPolicy>,
+    /// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` (the wiring's).
+    rd_policy: Arc<RdPolicy>,
     /// The firm's `browser.allow_when_remote_debugging_disabled`.
     allowed_anyway: bool,
     /// Where the socket folder goes; `None` is `/tmp`.
@@ -89,8 +90,9 @@ impl BrowserPrep {
     }
 
     /// The Chrome found and the session's claims. The firm's browser policy comes first,
-    /// before any Chrome is picked, forced or found (`browser::rd_policy`): when it blocks,
-    /// both are left out and the entry drops with `BrowserBlockedByPolicy`. A missing sidecar
+    /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
+    /// launch: when it blocks, both are left out and the entry drops with
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
     /// leaves both out, with a warning (a development build has no agent-browser); a failed
     /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
     /// Registry, file system and socket calls: off the actor.
@@ -98,9 +100,9 @@ impl BrowserPrep {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return Prepared::default();
         }
-        if crate::browser::rd_policy::blocked(&*self.rd_policy, self.allowed_anyway) {
+        if let Some(reason) = self.rd_policy.check(self.allowed_anyway) {
             return Prepared {
-                blocked_by_policy: true,
+                policy_block: Some(reason),
                 ..Prepared::default()
             };
         }
@@ -126,7 +128,7 @@ impl BrowserPrep {
                 Prepared {
                     chrome: Some(chrome),
                     session: Some(Arc::new(session)),
-                    blocked_by_policy: false,
+                    policy_block: None,
                 }
             }
             Err(error) => {
@@ -150,8 +152,8 @@ pub(super) struct Prepared {
     pub(super) chrome: Option<PathBuf>,
     /// The session's claims, if made.
     pub(super) session: Option<Arc<BrowserSession>>,
-    /// Whether the firm's browser policy left the browser out (`browser::rd_policy`).
-    pub(super) blocked_by_policy: bool,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(super) policy_block: Option<ToolsUnavailableReason>,
 }
 
 /// How long a launch prep waits for a browser slot that a running removal may free

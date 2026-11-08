@@ -5824,6 +5824,13 @@ export type ToolsUnavailableReason =
  *  (`browser.allow_when_remote_debugging_disabled`).
  */
 "browser_blocked_by_policy" | 
+/**
+ *  The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+ *  can be set could not be read (not missing: denied or failed), so Clauseo does not know
+ *  whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+ *  not allow Clauseo's browser anyway. Checked again at the next launch.
+ */
+"browser_policy_unreadable" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

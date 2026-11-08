@@ -10,8 +10,9 @@
 //! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
-//! sources, paths, formats and the merge rule. It also reads one value of Chrome's and Edge's
-//! own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's browser.
+//! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
+//! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
+//! browser.
 //!
 //! # Interface
 //!

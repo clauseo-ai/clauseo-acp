@@ -2,8 +2,8 @@
 //! ([`chrome`]), how many run at once and the limits each gets ([`limits`]), the sites every
 //! matter's allowlist starts from ([`seed_sites`]) and the background hosts the proxy denies
 //! ([`deny_hosts`]), each session's loopback ports and socket folder ([`session`]), whether
-//! the firm's Chrome and Edge policy lets any browser start ([`rd_policy`]), and where Chrome
-//! runs ([`BrowserLaunch`]). The `browser` entry itself is
+//! the firm's Chrome, Edge and Chromium policy lets any browser start ([`rd_policy`]), and where
+//! Chrome runs ([`BrowserLaunch`]). The `browser` entry itself is
 //! filled in `agent/loads/browser.rs`; the pages it opens are recorded in `sources/browser.rs`.
 
 pub mod chrome;
