@@ -101,6 +101,11 @@ pub trait Removal {
     /// refused with nothing touched. The administrator's path never calls it: an administrator
     /// deletes nothing in the owner's folders (K1). Nothing checked yet is `Ok`, nothing touched.
     fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError>;
+    /// As the owner, inside [`Removal::as_owner`] and only there: every unclean-session marker
+    /// (`runner::marker`) in the run folder of the folder [`Removal::owners_ledger`] checked
+    /// removed; how many. Nothing checked yet is `Ok(0)`. Called outside it, refused with nothing
+    /// touched: an administrator deletes nothing in the owner's folders (K1).
+    fn clear_markers(&mut self) -> Result<usize, MachineError>;
     /// As this process, for a per-machine removal the owner didn't ask for: the record's
     /// `data_dir` checked as [`Removal::owners_ledger`] checks it, except that the folder and
     /// its `sandbox` folder must be owned by `owner` (the record's), then the ledger read, and
