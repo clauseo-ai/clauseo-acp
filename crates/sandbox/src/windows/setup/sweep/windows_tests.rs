@@ -12,6 +12,7 @@
 
 use std::process::Command;
 
+use super::windows_listing::is_guid;
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
 use super::{Names, Resolved, Sweeper as _, Task, resolve, sddl_owner, sweep_tasks};
@@ -333,9 +334,13 @@ fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrato
     );
     protect_with(dir.path(), &grant).unwrap();
     let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    // The owner each descriptor names (none: ownerless), and a task whose own descriptor names
+    // the test user, whose descriptor the test user then tries to rewrite.
     let names = [
-        ("SY", format!("ClauseoSweepOwnerSy{suffix}")),
-        ("BA", format!("ClauseoSweepOwnerBa{suffix}")),
+        ("O:SY", format!("ClauseoSweepOwnerSy{suffix}")),
+        ("O:BA", format!("ClauseoSweepOwnerBa{suffix}")),
+        ("", format!("ClauseoSweepOwnerNone{suffix}")),
+        ("O:self", format!("ClauseoSweepOwnerSet{suffix}")),
     ];
     // Dropped before the user, so the account outlives its tasks' clean-up.
     let _made = Made(names.iter().map(|(_, name)| name.clone()).collect());
@@ -344,27 +349,29 @@ fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrato
     for (alias, name) in &names {
         // 2. As that user: a task whose descriptor names `alias` its owner, readable by all
         // three, so this process can read what owner it got.
+        let owner = alias.replace("self", sid.as_str());
         let sddl = format!(
-            "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            "{owner}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
             sid.as_str()
         );
-        let xml = dir.path().join(format!("{alias}.xml"));
+        let xml = dir.path().join(format!("{name}.xml"));
         std::fs::write(&xml, task_xml(sid.as_str(), &sddl)).unwrap();
         let create = format!(
             r#""{schtasks}" /create /tn {name} /xml "{}" /f"#,
             xml.display()
         );
         let (code, printed) = try_in_cmd(&user, dir.path(), &create);
-        eprintln!("2. O:{alias} as the test user: exit {code:?}\n{printed}");
+        eprintln!("2. {alias:?} as the test user: exit {code:?}\n{printed}");
         if code != Some(0) {
-            eprintln!("   refused: the gap can't arise for O:{alias}");
+            assert_ne!(*alias, "O:self", "the test user's own task:\n{printed}");
+            eprintln!("   refused: the gap can't arise for {alias:?}");
             continue;
         }
         // 3. Registered: its owner, from the cache key's `SD` and from the Task Scheduler,
         // must be the test user.
         let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
         eprintln!("3. its cache key's owner: {cached:?}");
-        assert_eq!(cached.as_ref(), Ok(&sid), "O:{alias}: the cache key's SD");
+        assert_eq!(cached.as_ref(), Ok(&sid), "{alias:?}: the cache key's SD");
         let root = sweeper.root().unwrap();
         let read = sweeper.task_sddl(&root, name).unwrap();
         let owner = sddl_owner(&read);
@@ -372,7 +379,56 @@ fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrato
         assert_eq!(
             owner,
             Ok(Some(sid.clone())),
-            "O:{alias}: the task's descriptor"
+            "{alias:?}: the task's descriptor"
         );
+    }
+    // 4. As that user, on its own task: IRegisteredTask::SetSecurityDescriptor naming SYSTEM,
+    // then Administrators, its owner. Expected refused (an owner can be set only to the
+    // caller or a group its token may own by); either way the owner the cache records stays
+    // the test user's.
+    let (_, name) = &names[3];
+    for alias in ["SY", "BA"] {
+        let sddl = format!(
+            "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        let script = format!(
+            "$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; \
+             $s.Connect(); $s.GetFolder('\\').GetTask('{name}').SetSecurityDescriptor('{sddl}', 0)"
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &powershell(&script));
+        eprintln!("4. SetSecurityDescriptor O:{alias} as the test user: exit {code:?}\n{printed}");
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("   its cache key's owner: {cached:?}");
+        assert_eq!(
+            cached.as_ref(),
+            Ok(&sid),
+            "O:{alias} set later: the cache key's SD"
+        );
+    }
+}
+
+/// A cmd line that runs `script` in Windows PowerShell, passed encoded (UTF-16LE, base64) so
+/// cmd reads none of its characters.
+fn powershell(script: &str) -> String {
+    use base64::Engine as _;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let exe = format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system32());
+    format!(r#""{exe}" -NoProfile -NonInteractive -EncodedCommand {encoded}"#)
+}
+
+#[test]
+fn a_task_cache_id_is_a_guid_in_braces_and_nothing_else() {
+    assert!(is_guid("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}"));
+    for not in [
+        "0A1B2C3D-4E5F-6789-ABCD-EF0123456789",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF012345678}",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\\x",
+        "{..\\..\\Tree-4E5F-6789-ABCD-EF0123456789}",
+        "{0A1B2C3D-4E5F-6789-ABCD-EF012345678G}",
+        "",
+    ] {
+        assert!(!is_guid(not), "{not}");
     }
 }
