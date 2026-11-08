@@ -8,6 +8,7 @@ mod admin_copy_ask;
 mod admin_copy_contract;
 mod admin_copy_hook;
 mod admin_copy_record;
+mod installer_language;
 mod make;
 mod nsis_names;
 mod nsis_run;

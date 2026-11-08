@@ -77,10 +77,12 @@
 ; The language (English or Hindi, windows/nsis/*.nsh). NSIS fixes the pages' language after
 ; .onInit and un.onInit (NSIS 3.11 Source/exehead/Ui.c:396-397, set_language; Docs/src/var.but:54
 ; "You can only change this variable in .onInit"), and the template gives neither a hook, so
-; MUI_CUSTOMFUNCTION_GUIINIT (Ui.c:525, after set_language) would be too late. The installer
-; therefore speaks Windows' display language (NSIS's own choice), English otherwise. The
-; uninstaller's un.onInit runs MUI_UNGETLANGUAGE (installer.nsi:770), which reads
-; HKCU\${MANUPRODUCTKEY} "Installer Language" (installer.nsi:164-166) and, when that is empty and
+; MUI_CUSTOMFUNCTION_GUIINIT (Ui.c:525, after set_language) would be too late. So the template's
+; block "ui-language" in .onInit inserts CLAUSEO_UI_LANGUAGE (below): the installer speaks the
+; language the lawyer chose in the app when there is one, else Windows' display language (NSIS's
+; own choice), English otherwise. The uninstaller's un.onInit runs MUI_UNGETLANGUAGE
+; (installer.nsi:770), which reads HKCU\${MANUPRODUCTKEY} "Installer Language"
+; (installer.nsi:164-166) and, when that is empty and
 ; the uninstall is not silent, shows LangDLL's language picker (two languages). So
 ; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
 ; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
@@ -677,6 +679,30 @@
       ${EndIf}
     ${EndIf}
   ${EndIf}
+!macroend
+
+; The installer's language, both installers: the template's block "ui-language" inserts this in
+; .onInit, before NSIS fixes the pages' language, so setting $LANGUAGE here takes effect. The
+; lawyer's choice in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app
+; writes) wins over Windows' display language: a repair, a re-run and the updater's /UPDATE
+; re-run all follow it. The first install has no value yet, so Windows decides. A per-machine
+; install elevated as another account (an administrator's credentials at the UAC prompt) reads
+; that account's HKCU, so that account's choice or Windows'; accepted. LANG_HINDI and
+; LANG_ENGLISH come from the template's MUI_LANGUAGE lines, before .onInit. $R0 is put back;
+; the error flag a failed read sets is read by nothing after this in .onInit.
+!macro CLAUSEO_UI_LANGUAGE
+  !ifndef LANG_HINDI
+    !error "hooks.nsh needs Hindi in bundle.windows.nsis.languages"
+  !endif
+  Push $R0
+  ; A failed read leaves "", which is neither: NSIS's choice is kept.
+  ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage"
+  ${If} $R0 S== "hi"
+    StrCpy $LANGUAGE ${LANG_HINDI}
+  ${ElseIf} $R0 S== "en"
+    StrCpy $LANGUAGE ${LANG_ENGLISH}
+  ${EndIf}
+  Pop $R0
 !macroend
 
 ; The firm-policy folder and the admin copy, per-machine installs; the per-user installer asks for

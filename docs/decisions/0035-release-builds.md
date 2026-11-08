@@ -124,9 +124,13 @@ Developer ID.
   app thread's provisional Hindi replaces the English placeholders). On a Tauri upgrade, copy its
   new template keys into both files. The language is chosen by
   `HKCU\Software\Clauseo\UiLanguage` (`en` or `hi`, which the app writes), then by Windows'
-  display language, as far as NSIS allows: it fixes the pages' language right after `.onInit`
-  and `un.onInit`, and Tauri's template gives neither a hook. So the installer follows Windows'
-  display language only; the uninstaller follows the value `hooks.nsh`'s `NSIS_HOOK_POSTINSTALL`
+  display language: NSIS fixes the pages' language right after `.onInit` and `un.onInit`, and
+  Tauri's template gives neither a hook. So the installer follows `UiLanguage` when it is set,
+  else Windows' (2026-11-08): the template's block `ui-language` in `.onInit` inserts
+  `hooks.nsh`'s `CLAUSEO_UI_LANGUAGE`, before the pages' language is fixed. A first install has
+  no value yet, so Windows decides; a repair, a re-run and the updater's `/UPDATE` re-run follow
+  the app. A per-machine install elevated as another account reads that account's value. The
+  uninstaller follows the value `hooks.nsh`'s `NSIS_HOOK_POSTINSTALL`
   writes at every install and update (the template's `Installer Language`, which its
   `un.onInit` reads): `UiLanguage` then, else the installer's own language. Without that value
   a two-language uninstaller would show NSIS's picker. Deleting the data on uninstall deletes
@@ -134,9 +138,9 @@ Developer ID.
 - **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
   installer is built from `crates/desktop/windows/nsis/installer.nsi`
   (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus
-  eight marked blocks (S15 tier B, 2026-11-07). `admin-section`, at the top of `.onInit`, runs the
-  per-user installer's elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in,
-  page or section; in the per-machine installer it first makes the run's own temporary folder
+  nine marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08).
+  `admin-section`, at the top of `.onInit`, runs the per-user installer's elevated instance
+  (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in the per-machine installer it first makes the run's own temporary folder
   under `%ProgramFiles%\Clauseo\installer-temp`, locked to Administrators and SYSTEM, and points
   `$PLUGINSDIR` and `$TEMP` at it (`safe_temp.nsh`, decision 0049). The hooks alone couldn't do
   either: the template's `.onInit` calls plug-ins (`${RunningX64}` in `SetContext` on every run,

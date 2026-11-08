@@ -220,15 +220,18 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 }
 
 /// The machine: the defines, variables, error flag and stack, the record under
-/// `HKLM\SOFTWARE\Clauseo\Sandbox`, whether the run is silent, the user's SID for
-/// `CLAUSEO_OWN_SID`, the macros it runs inline (and the record each leaves), what it said
-/// (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which stubbed macros it reached.
+/// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
+/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
+/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which
+/// stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
     pub(super) error: bool,
     pub(super) stack: Vec<String>,
     pub(super) record: Record,
+    /// The lawyer's key, `HKCU\Software\Clauseo`, where the app writes `UiLanguage`.
+    pub(super) user: Record,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -246,6 +249,7 @@ impl Machine {
             error: false,
             stack: Vec::new(),
             record,
+            user: None,
             silent: false,
             own_sid: "",
             inline: HashMap::new(),
@@ -315,6 +319,7 @@ impl Machine {
         match op.as_str() {
             "==" => a.eq_ignore_ascii_case(&b),
             "!=" => !a.eq_ignore_ascii_case(&b),
+            "S==" => a == b,
             "S!=" => a != b,
             "=" => number(&a) == number(&b),
             "<>" => number(&a) != number(&b),
@@ -323,9 +328,11 @@ impl Machine {
     }
 
     fn key(&self, root: &str, key: &str) -> Option<&Vec<(&'static str, Value)>> {
-        assert_eq!(root, "HKLM");
-        assert_eq!(self.expand(key), "SOFTWARE\\Clauseo\\Sandbox");
-        self.record.as_ref()
+        match (root, self.expand(key).as_str()) {
+            ("HKLM", "SOFTWARE\\Clauseo\\Sandbox") => self.record.as_ref(),
+            ("HKCU", "Software\\Clauseo") => self.user.as_ref(),
+            (root, key) => panic!("a key this interpreter doesn't know: {root}\\{key}"),
+        }
     }
 
     /// Sets a variable, as a test seeds one.
