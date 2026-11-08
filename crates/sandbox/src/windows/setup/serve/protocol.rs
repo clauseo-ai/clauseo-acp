@@ -241,6 +241,10 @@ pub enum SetUpError {
     /// one read before the start, whose pipe was gone or someone else's (a stale name).
     #[error("the set-up task published no pipe name in time")]
     Unpublished,
+    /// The set-up task is disabled (a crashed uninstall, or IT disabled it), so it wasn't
+    /// started: the set-up with a prompt is the one left, and it enables the task again.
+    #[error("the set-up task is disabled")]
+    Disabled,
 }
 
 /// What `request_set_up` makes of a first answer from a pipe a pool user's process serves
@@ -276,8 +280,8 @@ pub fn retry_squatted(
 }
 
 /// What `UserSetup::run` (and its extend) return for `asked`, the set-up task's answer: its reply
-/// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task, or a
-/// refusal (one the gate didn't foresee for a lawyer it should serve), runs `elevated`, the
+/// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task, a disabled
+/// one (whose elevated set-up registers it again, `refresh::ensure_task`), or a refusal (one the gate didn't foresee for a lawyer it should serve), runs `elevated`, the
 /// set-up with its prompt, whose declined prompt is still `SetupError::Refused`. The prompt
 /// needs an administrator's credentials, so falling back to it grants no one anything. A task
 /// that couldn't be reached (a squatted pipe, no server or no published name in time) is
@@ -294,6 +298,10 @@ pub fn via_task(
         }
         Ok(reply) => reply.outcome(),
         Err(SetUpError::NotRegistered) => elevated(),
+        Err(SetUpError::Disabled) => {
+            tracing::warn!("the set-up task is disabled; asking with the prompt");
+            elevated()
+        }
         Err(
             error @ (SetUpError::Squatted(_)
             | SetUpError::NotTheServer(_)

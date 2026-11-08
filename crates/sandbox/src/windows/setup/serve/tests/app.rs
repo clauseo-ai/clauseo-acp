@@ -62,6 +62,28 @@ fn the_app_maps_the_tasks_answer_and_falls_back_to_the_prompt_without_a_task_or_
 }
 
 #[test]
+fn a_disabled_set_up_task_takes_the_prompt_which_the_first_run_words_promise() {
+    use crate::SetupError;
+    // A crashed uninstall or IT disabled it: the elevated set-up runs (and registers it again),
+    // never `Failed` or `Unreachable` with no prompt.
+    let prompted = std::cell::Cell::new(0);
+    let elevated = || {
+        prompted.set(prompted.get() + 1);
+        Ok(())
+    };
+    assert_eq!(via_task(Err(SetUpError::Disabled), elevated), Ok(()));
+    assert_eq!(prompted.get(), 1);
+    let declined = via_task(Err(SetUpError::Disabled), || Err(SetupError::Refused));
+    assert_eq!(declined, Err(SetupError::Refused));
+    // `asks_admin` reads the same task as disabled (`Ok(false)`), or missing: the prompt.
+    assert!(asks_admin(Ok(false), Ok(())));
+    assert!(asks_admin(
+        Err(SetUpError::NotRegistered.to_string()),
+        Ok(())
+    ));
+}
+
+#[test]
 fn a_squatted_pipe_stops_the_pool_and_asks_once_more_then_refuses_naming_the_squat() {
     use std::cell::{Cell, RefCell};
     let squat = || {

@@ -2,8 +2,9 @@
 //! `\Clauseo\SandboxSetUp` for a set-up, or an extend, with no prompt, and gives the server's
 //! reply. The desktop calls it for the first run's set-up and for a grow of the pool, off the UI
 //! thread, and maps the reply (`SetUpReply::outcome`) to its `SetupState`;
-//! [`SetUpError::NotRegistered`] means this install has no set-up task, and the elevated
-//! `UserSetup` path, with its prompt, is the one left.
+//! [`SetUpError::NotRegistered`] means this install has no set-up task, and
+//! [`SetUpError::Disabled`] that it is disabled; for either the elevated `UserSetup` path, with
+//! its prompt, is the one left, and it registers the task again.
 //!
 //! In order (`serve::ask_with`, whose order this module's calls fill in):
 //!
@@ -64,7 +65,7 @@ use super::admin_copy::{self, os};
 use super::pipe::PIPE_RIGHTS;
 use super::pipe::os::Overlapped;
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
-use super::refresh::task::{run_task, task_busy};
+use super::refresh::task::{run_task, task_busy, task_enabled};
 use super::refresh::{SystemTask, TaskError, request_pool_stop};
 use super::setup::serve::windows_published::read_published;
 use super::setup::serve::{
@@ -213,11 +214,26 @@ where
     }
 }
 
-/// Starts the set-up task.
+/// `SCHED_E_TASK_DISABLED`: `IRegisteredTask::Run` on a disabled task.
+const SCHED_E_TASK_DISABLED: u32 = 0x8004_1326;
+
+/// Starts the set-up task. A disabled one (a crashed uninstall, or IT) is
+/// [`SetUpError::Disabled`] and isn't started, so the elevated set-up runs, whose
+/// `refresh::ensure_task` registers it again enabled; a state that can't be read leaves the
+/// answer to the start.
 fn start() -> Result<(), SetUpError> {
+    match task_enabled(SystemTask::SetUp) {
+        Ok(false) => return Err(SetUpError::Disabled),
+        Err(TaskError::NotRegistered) => return Err(SetUpError::NotRegistered),
+        Ok(true) | Err(_) => {}
+    }
     match run_task(SystemTask::SetUp) {
         Ok(()) => Ok(()),
         Err(TaskError::NotRegistered) => Err(SetUpError::NotRegistered),
+        Err(TaskError::Com {
+            hresult: SCHED_E_TASK_DISABLED,
+            ..
+        }) => Err(SetUpError::Disabled),
         Err(error) => Err(SetUpError::Task(error.to_string())),
     }
 }
