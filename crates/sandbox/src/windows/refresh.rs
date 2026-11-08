@@ -128,7 +128,7 @@ pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny, run_wsl_upgrade};
 pub use wsl_phase::{
-    Installer, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, WslWatch, wsl_deny,
+    Installer, Waited, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, WslWatch, wsl_deny,
     wsl_upgrade,
 };
 

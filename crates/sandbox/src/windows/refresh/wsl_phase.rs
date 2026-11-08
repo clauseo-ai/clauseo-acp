@@ -14,8 +14,9 @@
 //!   what changed). It does nothing else, no admin-copy step and never WSL's upgrade. Anyone
 //!   who can log on can forge such an event, so the trigger is on this task alone: a forged one
 //!   gains a re-applied deny.
-//!   The trigger starts it at once (no delay), and the task ignores a start while it runs: a
-//!   burst of installer events gives one run, and an event after it ends gives another. The
+//!   The trigger starts it at once (no delay); a start while it runs is queued
+//!   (`TASK_INSTANCES_QUEUE`), so an install's event during a held run still gives a run after
+//!   it, and a forged flood only chains bounded re-check runs. The
 //!   launch check starts it too, as the lawyer, for a missing deny (`clean_close::wsl_heal`);
 //! - `\Clauseo\SandboxWslUpgrade` (`--wsl-upgrade`, [`wsl_upgrade`], `upgrade.rs`), on demand
 //!   only, which the launch check alone asks for: WSL's pending MSI upgrade, verified and
@@ -49,9 +50,11 @@ mod upgrade;
 #[cfg(windows)]
 pub(super) mod windows_watch;
 
-pub use schedule::{Installer, WslWatch};
+pub use schedule::{Installer, Waited, WslWatch};
 #[cfg(test)]
-pub(super) use schedule::{WSL_DENY_BUDGET, WSL_INSTALL_QUIET, WSL_WAKE_GAP, WSL_WAKE_SETTLE};
+pub(super) use schedule::{
+    WSL_ABSENT_GRACE, WSL_DENY_BUDGET, WSL_INSTALL_QUIET, WSL_WAKE_GAP, WSL_WAKE_SETTLE,
+};
 pub use upgrade::{WslUpgrade, WslUpgradeExit, WslUpgraded, wsl_upgrade};
 
 /// The WSL deny task's exit codes. They start at 51, after `StopExit`'s 50, so the one exe

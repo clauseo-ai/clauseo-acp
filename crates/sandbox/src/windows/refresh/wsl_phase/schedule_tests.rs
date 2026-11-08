@@ -6,8 +6,8 @@ use super::super::fake::{Fake, good, key, new, old};
 use super::super::fake_watch::{KeyEvent, Keys};
 use super::super::{WSL_DENY_EXECUTION_LIMIT, WSL_LOCK_WAIT};
 use super::{
-    WSL_DENY_BUDGET, WSL_INSTALL_QUIET, WSL_RECHECK_PAUSE, WSL_WAKE_GAP, WSL_WAKE_SETTLE,
-    WslDenyExit, wsl_deny,
+    WSL_ABSENT_GRACE, WSL_DENY_BUDGET, WSL_INSTALL_QUIET, WSL_RECHECK_PAUSE, WSL_WAKE_GAP,
+    WSL_WAKE_SETTLE, WslDenyExit, wsl_deny,
 };
 
 /// The fake machine, ready for the run.
@@ -115,16 +115,15 @@ fn with_no_in_progress_a_recorded_key_missing_holds_the_run_past_the_rewrite() {
 }
 
 #[test]
-fn with_wsl_uninstalled_its_recorded_app_ids_missing_hold_nothing() {
-    // WSL uninstalled 5 s in: its AppIDs stay in the record, their keys gone for good.
+fn with_wsl_uninstalled_its_recorded_app_ids_missing_hold_nothing_after_the_grace() {
+    // WSL uninstalled 5 s in: its AppIDs stay in the record, their keys gone for good. They hold
+    // the run until WSL has read as absent for more than the grace, then nothing.
     let mut machine = machine_with_keys(vec![(secs(5.0), KeyEvent::Uninstall)]);
     run(&mut machine);
-    assert_eq!(machine.watch.clock, secs(20.0));
-    // The uninstall's wake at 5.25 s takes the 5 s floor pass's place.
-    assert_eq!(
-        machine.watch.passes,
-        [0.0, 5.25, 10.0, 15.0, 20.0].map(secs)
-    );
+    let passes = [0.0, 5.25, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0].map(secs);
+    assert_eq!(machine.watch.passes, passes);
+    assert!(secs(40.0).saturating_sub(secs(5.25)) > WSL_ABSENT_GRACE);
+    assert_eq!(machine.watch.clock, secs(40.0));
     assert_eq!(errors(&machine), 0, "{:?}", machine.logs);
     let held = machine
         .logs
@@ -245,9 +244,11 @@ fn an_install_that_never_ends_stops_the_run_at_its_budget() {
         last + WSL_WAKE_GAP + WSL_LOCK_WAIT <= WSL_DENY_BUDGET,
         "{last:?}"
     );
-    let (error, line) = machine.logs.last().unwrap();
-    assert!(!error && line.contains("time limit"), "{line}");
+    // Verified, with the install still in progress: a warning, not an error.
+    let line = machine.watch.warnings.last().unwrap();
+    assert!(line.contains("time limit"), "{line}");
     assert!(line.ends_with("still in progress"), "{line}");
+    assert_eq!(errors(&machine), 0, "{:?}", machine.logs);
     // A deny left unverified at the budget (a recorded key that never comes back) is an error.
     let mut machine = machine_with_keys(vec![(secs(5.0), KeyEvent::Delete)]);
     run(&mut machine);
@@ -276,7 +277,8 @@ fn a_notification_that_cant_be_armed_leaves_the_timed_passes() {
     machine.watch.arm_fails = true;
     machine.watch.in_progress = vec![(secs(0.0), secs(12.0))];
     run(&mut machine);
-    assert_eq!(machine.calls.iter().filter(|c| **c == "watch").count(), 1);
+    // Tried again on every loop, logged once.
+    assert!(machine.calls.iter().filter(|c| **c == "watch").count() > 5);
     assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
     assert!(
         machine.logs[0].1.contains("aren't watched"),
@@ -285,4 +287,94 @@ fn a_notification_that_cant_be_armed_leaves_the_timed_passes() {
     );
     // The floor, then the end: InProgress gone at 12 s, quiet by the last floor pass.
     assert_eq!(machine.watch.passes, [0.0, 5.0, 10.0, 15.0, 20.0].map(secs));
+}
+
+#[test]
+fn during_a_hold_a_watch_that_cant_be_armed_gives_a_pass_every_5_s() {
+    let mut machine = fake();
+    machine.watch.arm_fails = true;
+    machine.watch.in_progress = vec![(secs(0.0), secs(40.0))];
+    run(&mut machine);
+    let passes = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 43.0];
+    assert_eq!(machine.watch.passes, passes.map(secs));
+    assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
+}
+
+#[test]
+fn during_a_hold_a_wait_that_fails_gives_a_pass_every_5_s() {
+    let mut machine = fake();
+    machine.watch.wait_fails_from = Some(secs(21.0));
+    machine.watch.in_progress = vec![(secs(0.0), secs(40.0))];
+    run(&mut machine);
+    for at in [25.0, 30.0, 35.0, 40.0] {
+        assert!(
+            machine.watch.passes.contains(&secs(at)),
+            "{:?}",
+            machine.watch.passes
+        );
+    }
+    // Each wait fails the same way: one line.
+    assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
+    assert!(
+        machine.logs[0].1.contains("aren't watched"),
+        "{:?}",
+        machine.logs
+    );
+}
+
+#[test]
+fn during_a_hold_an_unverified_pass_is_tried_again_every_5_s() {
+    let mut machine = machine_with_keys(vec![
+        (secs(22.0), KeyEvent::Delete),
+        (secs(38.0), KeyEvent::Rewrite),
+    ]);
+    machine.watch.in_progress = vec![(secs(0.0), secs(45.0))];
+    run(&mut machine);
+    for at in [22.25, 27.25, 32.25, 37.25] {
+        assert!(
+            machine.watch.passes.contains(&secs(at)),
+            "{:?}",
+            machine.watch.passes
+        );
+    }
+    let keys = machine.watch.keys.as_ref().unwrap();
+    assert!(keys.denied);
+    assert_eq!(keys.off, [WSL_WAKE_SETTLE]);
+}
+
+#[test]
+fn wsl_reading_absent_in_an_upgrades_middle_keeps_the_hold() {
+    // No InProgress; WSL's service, classes and package gone with its keys from 5 s to 21 s, as
+    // its MSI may leave them mid-upgrade: shorter than the grace, so the hold stays.
+    let mut machine = machine_with_keys(vec![
+        (secs(5.0), KeyEvent::Uninstall),
+        (secs(21.0), KeyEvent::Reinstall),
+    ]);
+    run(&mut machine);
+    let keys = machine.watch.keys.as_ref().unwrap();
+    assert!(keys.present && keys.denied);
+    assert_eq!(keys.off, [WSL_WAKE_SETTLE]);
+    assert_eq!(machine.watch.clock, secs(21.25));
+    assert!(
+        machine
+            .logs
+            .iter()
+            .all(|(_, line)| !line.contains("not installed"))
+    );
+}
+
+#[test]
+fn a_run_that_never_held_still_ends_on_a_verified_pass() {
+    // No install, no change; the floor's passes all fail (a write refused, say), the next
+    // verifies: the run ends on it, not at the floor.
+    let mut machine = fake();
+    let why = "{370121D2-AA7E-4608-A86D-0BBAB9DA1A60}: RegSetValueExW failed (5)";
+    machine.wsl_passes = vec![Err(why.to_owned()); 5];
+    run(&mut machine);
+    assert_eq!(
+        machine.watch.passes,
+        [0.0, 5.0, 10.0, 15.0, 20.0, 25.0].map(secs)
+    );
+    assert_eq!(machine.watch.clock, secs(25.0));
+    assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
 }

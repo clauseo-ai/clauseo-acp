@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use super::fake::Fake;
-use super::{Failed, Installer, WslWatch};
+use super::{Failed, Installer, Waited, WslWatch};
 
 /// A change to WSL's `AppID` keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,8 +17,11 @@ pub(super) enum KeyEvent {
     Rewrite,
     /// A change that leaves the deny as it is (another `AppID`'s key, say).
     Touch,
-    /// WSL is uninstalled: its keys are gone, and nothing names them any more.
+    /// WSL reads as absent: its keys are gone, and nothing names them (an uninstall, or an
+    /// upgrade's middle, when its service, classes and package may be gone too).
     Uninstall,
+    /// WSL is back, its keys written again with stock permissions: no deny.
+    Reinstall,
 }
 
 /// WSL's `AppID` keys, when a test models them; `reapply_wsl` then reads and writes them.
@@ -67,6 +70,10 @@ impl Keys {
                 (self.present, self.denied, self.off_since) = (false, false, None);
                 self.uninstalled = true;
             }
+            KeyEvent::Reinstall => {
+                self.uninstalled = false;
+                self.apply(KeyEvent::Rewrite, at);
+            }
         }
     }
 }
@@ -87,6 +94,10 @@ pub(super) struct FakeWatch {
     pub(super) storm_until: Duration,
     /// Arming fails.
     pub(super) arm_fails: bool,
+    /// Every wait from then on fails, dropping the watch until the next arm.
+    pub(super) wait_fails_from: Option<Duration>,
+    /// The warning lines.
+    pub(super) warnings: Vec<String>,
     /// When each pass read the keys.
     pub(super) passes: Vec<Duration>,
     armed: bool,
@@ -100,9 +111,11 @@ fn within(spans: &[(Duration, Duration)], at: Duration) -> bool {
 
 impl FakeWatch {
     /// A change: it fires the notification when one is armed.
+    /// As the real event: it stays signalled, and the notification counts as armed, until a
+    /// wait sees it; only then does the next arm register a new one.
     fn change(&mut self) {
         if self.armed {
-            (self.armed, self.signalled) = (false, true);
+            self.signalled = true;
         }
     }
 
@@ -189,22 +202,30 @@ impl WslWatch for Fake {
         Ok(())
     }
 
-    fn wait_change(&mut self, time: Duration) -> bool {
+    fn wait_change(&mut self, time: Duration) -> Waited {
         self.calls.push("wait_change");
         let watch = &mut self.watch;
         watch.waits.push(time);
         let until = watch.clock.saturating_add(time);
+        if watch
+            .wait_fails_from
+            .is_some_and(|from| watch.clock >= from)
+        {
+            (watch.armed, watch.signalled) = (false, false);
+            watch.advance(until);
+            return Waited::Failed("WaitForMultipleObjects gave 0xffffffff".to_owned());
+        }
         loop {
             if watch.armed && watch.clock < watch.storm_until {
                 watch.advance(watch.clock.saturating_add(Duration::from_millis(1)));
                 watch.change();
             }
             if watch.signalled {
-                watch.signalled = false;
-                return true;
+                (watch.armed, watch.signalled) = (false, false);
+                return Waited::Changed;
             }
             if watch.clock >= until {
-                return false;
+                return Waited::Quiet;
             }
             let next = watch.next_event(until).unwrap_or(until);
             watch.advance(next);
@@ -223,6 +244,10 @@ impl WslWatch for Fake {
             .keys
             .as_ref()
             .is_some_and(|keys| keys.uninstalled)
+    }
+
+    fn warn(&mut self, line: &str) {
+        self.watch.warnings.push(line.to_owned());
     }
 
     fn installer(&mut self) -> Installer {

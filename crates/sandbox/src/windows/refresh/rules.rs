@@ -145,6 +145,16 @@ impl SystemTask {
         }
     }
 
+    /// What a start while it runs does: the WSL deny task's is queued, so a second install's
+    /// event during a held run (`wsl_phase/schedule.rs`, up to its 330 s budget) still gives a
+    /// run after it; a forged flood only chains bounded re-check runs. Every other task drops it.
+    pub fn instances(self) -> Instances {
+        match self {
+            SystemTask::WslDeny => Instances::Queue,
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::WslUpgrade => Instances::IgnoreNew,
+        }
+    }
+
     /// Its description, as the Task Scheduler shows it.
     pub fn description(self) -> &'static str {
         match self {
@@ -159,6 +169,15 @@ impl SystemTask {
             }
         }
     }
+}
+
+/// What the Task Scheduler does with a start that comes while the task runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Instances {
+    /// Dropped (`TASK_INSTANCES_IGNORE_NEW`).
+    IgnoreNew,
+    /// Run once the running one ends (`TASK_INSTANCES_QUEUE`).
+    Queue,
 }
 
 /// One step of the uninstaller's removal of the admin copy (`setup::admin_remove`).

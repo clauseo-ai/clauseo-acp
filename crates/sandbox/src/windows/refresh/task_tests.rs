@@ -4,7 +4,8 @@
 //! removal takes every task down before the copy they run.
 
 use super::rules::{
-    MSI_EVENT_IDS, Trigger, WSL_UPGRADE_ARG, WSL_UPGRADE_EXECUTION_LIMIT, msi_event_query,
+    Instances, MSI_EVENT_IDS, Trigger, WSL_UPGRADE_ARG, WSL_UPGRADE_EXECUTION_LIMIT,
+    msi_event_query,
 };
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
@@ -56,6 +57,12 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
     assert_eq!(mode(wsl), Ok(Mode::WslDeny));
+    // A start during a run: the WSL deny task's is queued (its run may hold through an
+    // install), every other task's dropped.
+    assert_eq!(wsl.instances(), Instances::Queue);
+    for task in [refresh, stop, SystemTask::WslUpgrade] {
+        assert_eq!(task.instances(), Instances::IgnoreNew, "{task:?}");
+    }
 }
 
 #[test]
