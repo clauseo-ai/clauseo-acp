@@ -510,12 +510,17 @@ started elevated, by the app or by the uninstall hook.
   pool users, the SYSTEM tasks and the WFP filters, in `--adopt`'s set-up step. The controls
   narrowed it to that: only the installer tree's creation of users, tasks and WFP filters was
   flagged, not placing the copy. So that work leaves the installer's tree. `--place-only` does
-  `--adopt`'s checks, the lock-down, the take-back of `staging\` and the four record values,
-  and nothing else: no task and no set-up (no pool user, group, filters or WSL deny). Its exits
+  `--adopt`'s checks, the lock-down, the take-back of `staging\`, the set-up task
+  `\Clauseo\SandboxSetUp` for the lawyer ("The set-up task" below) and the four record
+  values, and nothing else: no other task and no set-up (no pool user, group, filters or WSL
+  deny). A failed set-up task registration exits 3 at step `set_up_task`, before any value is
+  written. Whether Defender accepts this one registration in the installer's tree is a VM row;
+  if not, the set-up task moves out of the installer too. Its exits
   are plain `--adopt`'s before the set-up (0, 1, 2, 3, 5, 7, 8, 9), with no new code, and
   `--data-dir` is still required, since an early failure's `setup-result.json` goes there. The
-  app's first run then starts the admin copy's `--set-up` elevated (`runas`), outside the
-  installer's tree, and that set-up makes the pool and registers `\Clauseo\SandboxRefresh`
+  app's first run then asks the set-up task, with no prompt (or, on an install with no set-up
+  task, starts the admin copy's `--set-up` elevated), outside the installer's tree, and that
+  set-up makes the pool and registers `\Clauseo\SandboxRefresh`
   and `\Clauseo\SandboxStop` for the lawyer (`late_steps::tasks`, when `AdminCopyOwner` is
   the owner it records), again on every re-run, replacing what is there. Between the install
   and that first run the copy is recorded with no task: the launcher's check passes, and the
@@ -1943,6 +1948,116 @@ process it couldn't stop, or once at Clauseo's start after an unclean session
 
 **What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
 tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
+
+### The set-up task
+
+A lawyer without admin rights can't answer a UAC prompt, and firms often lock admin rights down.
+The SYSTEM task `\Clauseo\SandboxSetUp` runs the set-up for the user who asks, with no
+prompt. The app asks over a named pipe; the task learns who asked from the pipe and the Windows
+session, never from an argument. This section is the pipe's contract: the app
+(`windows::setup_task::request_set_up`) and the server (`setup::serve`) both follow it.
+
+**The task.** `SystemTask::SetUp`: LOCAL SYSTEM runs the admin copy with `--serve-set-up` and
+nothing else. It has no trigger, runs on demand, stops after 30 minutes, and queues a start made
+while it runs (`TASK_INSTANCES_QUEUE`). `--adopt --place-only` registers it for the lawyer, with
+the refresh and stop tasks' descriptor (`task_sddl`, the owner read and execute). A per-machine
+`--adopt` registers it for every interactive user:
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)`. Pool users log on interactively, so they hold
+`IU` too. Each per-machine set-up then puts `(D;;FRFX;;;<GroupSid>)` first, through
+`IRegisteredTask::SetSecurityDescriptor` (`late_steps::tasks`, step "keeping the sandbox users
+from the set-up task"); a reinstall over a set-up pool registers it with the deny already. Plain
+per-user `--adopt` doesn't register it. `--remove --uninstall` deletes it first among the tasks
+(`refresh::TEARDOWN`), ending a running instance; the app's `--remove` keeps it, so the owner
+can set up again with no admin.
+
+**The folder.** `\Clauseo` has a fixed descriptor of its own,
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)` (`refresh::FOLDER_SDDL`). Before, each
+registration gave the folder that task's descriptor, so a per-machine set-up registering the
+stop task for one owner would have shut every other interactive user out of the folder. An
+elevated CI test starts the set-up task as a standard user beside another owner's stop task.
+
+**The server's run** (`--serve-set-up`; exits `ServeExit`, from 51):
+
+1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, as the stop task does
+   (51);
+2. reads the record; no admin copy recorded is 53;
+3. makes `\\.\pipe\ClauseoSandboxSetUp`: the first instance or nothing
+   (`FILE_FLAG_FIRST_PIPE_INSTANCE`), message mode, `PIPE_REJECT_REMOTE_CLIENTS`, and a
+   protected DACL built from the record: each pool group denied everything first, SYSTEM full
+   control, then per user the owner and per machine `IU` with read and write less
+   `FILE_CREATE_PIPE_INSTANCE` (`0x12019b`), and a Medium no-read-up, no-write-up label. A name
+   someone made first is logged and served to no one (52);
+4. waits 30 s for the first client and 5 s for each after, then exits 0. A spare instance waits
+   while one client is served, so the name is never free while the server runs. A read has
+   10 s.
+
+**Each client**, in order:
+
+1. one request message, at most 256 bytes;
+2. who it is: the token read at identification level (`ImpersonateNamedPipeClient`,
+   `OpenThreadToken` as self, then `RevertToSelf`): user, groups, restricted flag, integrity.
+   Its session comes from `GetNamedPipeClientSessionId`, and the session's user from
+   `WTSQueryUserToken`;
+3. the gate (`serve::identify`), checked once before any op. It refuses: no admin copy; a SID in
+   `PoolSids`; a token holding the pool's group (`GroupSid`, or the SID of a group named
+   `ClauseoSandboxUsers` that the record doesn't name); session 0; a SID that isn't
+   `S-1-5-21-...`; a restricted token; one below Medium; a client that isn't its session's
+   user; per user, anyone but `AdminCopyOwner`. The pool rules read only the record and the
+   token, so they hold before the task's deny exists and whatever the pipe's DACL says;
+4. the op. `set_up` and `add` go on; anything else is answered `unsupported`;
+5. the data folder: the identified user's `ProfileImagePath` (the only profile read) plus
+   `AppData\Local\ai.clauseo.desktop`, inside the profile. It is resolved as the user with the
+   session's token, lowered when elevated (`Owner::of_session`, `owners_data_dir`), so a link
+   in the profile can't send a SYSTEM write elsewhere;
+6. the set-up lock, waited for up to 5 minutes (the set-up only tries it), then the gate again on
+   a fresh read of the record;
+7. `set_up` for a user whose set-up is current answers `Done` with nothing run (a re-run resets
+   every pool password); otherwise, and always for `add`, `exe::run_set_up_in` runs for that
+   user, writing every file in their data folder as them, `secrets.bin`'s DPAPI blobs included,
+   and `setup-result.json` too.
+
+**Messages.** JSON, one request and one reply per connection. Every message has the version
+`v` (1) and a tag; a reader ignores fields it doesn't know.
+
+| Request | Meaning |
+|---|---|
+| `{"v":1,"op":"set_up"}` | Set up, or re-run, the asking user's pool. |
+| `{"v":1,"op":"add","n":2}` | Extend it by `n` users, 1 to 32. |
+| `{"v":1,"op":"ensure_slots","want":2}` | Reserved for several owners on one machine; answered `unsupported` until that work lands. |
+| any other `op`, or another `v` | Answered `unsupported`, never treated as malformed. |
+
+| Reply (one line, newline-terminated) | Meaning |
+|---|---|
+| `{"v":1,"reply":"ran","result":{...}}` | The set-up's outcome, in `setup-result.json`'s shape; `exit` 0 when it was current. |
+| `{"v":1,"reply":"refused","why":"..."}` | Refused before anything ran; the words name no SID or path. |
+| `{"v":1,"reply":"unsupported","what":"..."}` | An op or version this server doesn't serve. |
+
+A request that isn't such an object, or a known op with wrong fields, is `refused`.
+
+**The app** (`request_set_up`, which `UserSetup::run` and `UserSetup::extend` call):
+
+1. starts the task (`IRegisteredTask::Run`). `NotRegistered` means the install has no set-up
+   task, and `UserSetup` falls back to the prompted `--set-up` (`run_elevated`,
+   `extend_elevated`);
+2. opens the pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and the client rights
+   alone, retrying for 30 s and starting the task once more after 5 s; a busy pipe is waited for;
+3. on that handle, before writing, checks the server: `GetNamedPipeServerSessionId` is 0, the
+   process `GetNamedPipeServerProcessId` names is LOCAL SYSTEM in the kernel's process list, and
+   its image (`SystemProcessIdInformation`) is the admin copy. A pool user can make the name
+   first (its token holds `IU`), and a server that fails the check gets nothing;
+4. writes the request and reads the reply line. A server that closed before replying (one that
+   was ending) is asked again once, after another start. The reply maps to `SandboxSetup::run`'s
+   result as the exe's result file does.
+
+**Accepted.** A non-admin user can now make local accounts, WFP filters and the D5 claim on a
+per-machine install; IT opts in by deploying it. The set-up's change journal step grows journals
+on volumes the user's registered matters name, now with no admin consent, bounded at 256 MiB
+each. A squatter on the pipe's name denies the set-up, and the Event Log names it.
+
+**Not yet verified** (VM rows): `WTSQueryUserToken` and DPAPI under the session token as
+SYSTEM; a standard user reading SYSTEM's user from the process list and the image by id;
+Defender with the registration in `--place-only`; Remote Desktop and fast user switching; a
+pool process denied both `Run` and the pipe.
 
 ### The launcher (PR6 interface)
 
