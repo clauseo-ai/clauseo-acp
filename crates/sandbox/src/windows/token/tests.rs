@@ -194,17 +194,6 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
 }
 
 #[test]
-fn the_end_sweepers_threads_and_later_objects_name_system_alone() {
-    // No pool user and no desktop user (the sweeper doesn't know one); the owner held to
-    // READ_CONTROL, so the pool user keeps no implied WRITE_DAC.
-    assert_eq!(SWEEPER_THREAD_SDDL, "D:P(A;;GA;;;SY)(A;;RC;;;OW)");
-    assert_eq!(
-        SWEEPER_DEFAULT_DACL,
-        SWEEPER_THREAD_SDDL.replacen("D:P", "D:", 1)
-    );
-}
-
-#[test]
 fn the_agents_own_token_names_the_pool_user() {
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
     assert_eq!(
@@ -225,8 +214,8 @@ fn the_pool_user_cant_change_the_agents_token() {
 
 #[test]
 fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user_nothing() {
-    // The pool user's sweeps reach the runners (the inner, the end sweeper) through the desktop
-    // user's logon SID, which the agent holds deny-only.
+    // The pool user's sweeps reach an inner runner through the desktop user's logon SID, which
+    // the agent holds deny-only.
     let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
     let sddl = runner_process_sddl(&desktop, &logon);
     assert_eq!(
@@ -250,15 +239,4 @@ fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user
     // The agent's token holds that logon SID deny-only, so the allow never matches it.
     let spec = TokenSpec::for_pool(&sid(POOL), &logon, &desktop, None).unwrap();
     assert_eq!(spec.deny_only, [logon]);
-}
-
-#[test]
-fn the_sweepers_com_token_dacl_adds_query_duplicate_and_impersonate_for_its_user() {
-    assert_eq!(
-        sweeper_com_token_sddl(&sid(POOL)),
-        format!("D:P(A;;GA;;;SY)(A;;0xe;;;{POOL})(A;;RC;;;OW)")
-    );
-    // TOKEN_QUERY, TOKEN_DUPLICATE and TOKEN_IMPERSONATE alone: no TOKEN_ASSIGN_PRIMARY (0x1),
-    // TOKEN_ADJUST_* (0x20, 0x40, 0x80, 0x100), READ_CONTROL or WRITE_DAC/WRITE_OWNER.
-    assert_eq!(SWEEPER_COM_TOKEN_RIGHTS, 0x8 | 0x2 | 0x4);
 }

@@ -2,8 +2,8 @@
 //! `spawn_in_tree` with `--launch <data_dir>\sandbox\run\<16 hex>.json` (the outer runner, the
 //! desktop user); it starts itself again as the matter's pool user with `--inner <pipe base>`
 //! (the inner runner), which starts the agent under the (B) token; at the session's end the outer
-//! starts it once more as the pool user with `--sweep` (the end sweeper). It shows no window; its
-//! stdio is the agent's, and its exit code the agent's, or one of `RunExit`'s on a failure.
+//! asks the Task Scheduler to run the `SYSTEM` task `\Clauseo\SandboxSweep`. It shows no window;
+//! its stdio is the agent's, and its exit code the agent's, or one of `RunExit`'s on a failure.
 //!
 //! The work is in `clauseo_sandbox::windows::runner`. On macOS and Linux it exits 2.
 #![windows_subsystem = "windows"]
@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 #[cfg(windows)]
 fn main() -> ExitCode {
-    use clauseo_sandbox::windows::runner::{Mode, RunExit, mode, run_inner, run_outer, run_sweep};
+    use clauseo_sandbox::windows::runner::{Mode, RunExit, mode, run_inner, run_outer};
 
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let code = match mode(&args) {
@@ -21,7 +21,6 @@ fn main() -> ExitCode {
             Err(_) => RunExit::Usage.code(),
         },
         Some(Mode::Inner(base)) => run_inner(&base),
-        Some(Mode::Sweep) => run_sweep(),
         None => RunExit::Usage.code(),
     };
     exit_with(code)

@@ -61,7 +61,7 @@ fn a_refused_process_still_running_after_the_window_fails_the_first_act_closed()
 
 #[test]
 fn past_the_first_act_a_refused_process_is_logged_only_when_it_stays() {
-    for point in [Point::Tick, Point::End, Point::Sweeper] {
+    for point in [Point::Tick, Point::End] {
         let mut fake = console_machine();
         fake.exits_after.insert(13, 2);
         let (got, lines) = run(&mut fake, &[], point);

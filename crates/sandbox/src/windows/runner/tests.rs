@@ -517,11 +517,10 @@ fn the_firm_ca_files_come_from_the_launch_alone() {
 }
 
 #[test]
-fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
+fn the_command_line_names_one_mode_and_sweep_is_none_of_them() {
     let args = |list: &[&str]| -> Vec<std::ffi::OsString> {
         list.iter().map(std::ffi::OsString::from).collect()
     };
-    assert_eq!(mode(&args(&["--sweep"])), Some(Mode::Sweep));
     assert_eq!(
         mode(&args(&[
             "--launch",
@@ -537,6 +536,8 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
     );
     for wrong in [
         &[][..],
+        // The end sweeper is gone: its flag is a usage error like any other.
+        &["--sweep"],
         &["--sweep", "x"],
         &["--sweep", "--inner", "b"],
         &["--Sweep"],
