@@ -69,7 +69,8 @@ impl VmId {
     }
 }
 
-/// `Owner` of every compute system WSL makes.
+/// `Owner` of every compute system WSL makes. Verified for the Store WSL's VMs only; whether
+/// WSL's containers (WSLC) and the inbox WSL name the same owner is unconfirmed (a VM row).
 pub const WSL_OWNER: &str = "WSL";
 
 /// One entry of `HcsEnumerateComputeSystems`' result document: only its `Id` and `Owner` are
