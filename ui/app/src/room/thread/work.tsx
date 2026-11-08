@@ -180,17 +180,21 @@ export function Work({
     (held === "sign_in" || (held === "" && brk?.code === "agent.auth_required"))
       ? { agent: heldAgent, failedAt: brk?.step.ts ?? 0 }
       : null;
-  const noteFor = (fallback: ReactNode) => (
-    <Suspense fallback={fallback}>
-      <AfterSignInNote
-        transport={transport}
-        stream={stream}
-        thread={session.thread}
-        expired={expired}
-        fallback={fallback}
-      />
-    </Suspense>
-  );
+  // with no matter open there is no thread to note: the fallback alone, and the thread's chunk stays unloaded
+  const noteFor = (fallback: ReactNode) =>
+    matter === null ? (
+      fallback
+    ) : (
+      <Suspense fallback={fallback}>
+        <AfterSignInNote
+          transport={transport}
+          stream={stream}
+          thread={session.thread}
+          expired={expired}
+          fallback={fallback}
+        />
+      </Suspense>
+    );
   const retry = () => {
     if (stream !== null) store.retry(stream);
   };
@@ -209,8 +213,12 @@ export function Work({
   // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
   const matterId = matter?.matter ?? null;
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
-  // the thread's chunk, in memory before the first view or the first answer, with a matter or without
-  useEffect(() => void loadThread(), []);
+  // the thread's chunk, in memory before the first view or the first answer, once a matter opens: never at boot or
+  // under the welcome, where it would only compete with the first screen
+  const opened = matter !== null;
+  useEffect(() => {
+    if (opened) void loadThread();
+  }, [opened]);
   // folder rights: the notice, once per matter until Close
   const noted = notedFolder(matter?.folder_support);
   const [closed, setClose] = useState<MatterId | null>(null);
@@ -238,14 +246,16 @@ export function Work({
         {/* the list's box, holding Thread, whose .room-thread is the scroller inside it; below 1000 px it takes the
             thread's place in the one column (responsive.css orders the thread first) */}
         <div data-testid="transcript" className="flex min-h-0 flex-1 flex-col max-mid:order-1">
-          {/* empty until the thread's chunk is in: its arrival is one commit */}
-          <Suspense fallback={null}>
-            <KeyedRequestContext value={keyed}>
-              <FolderSupportContext value={matter?.folder_support}>
-                <LazyThreadList transport={transport} stream={stream} busy={busy} />
-              </FolderSupportContext>
-            </KeyedRequestContext>
-          </Suspense>
+          {/* empty with no matter open, and until the thread's chunk is in: its arrival is one commit */}
+          {opened && (
+            <Suspense fallback={null}>
+              <KeyedRequestContext value={keyed}>
+                <FolderSupportContext value={matter?.folder_support}>
+                  <LazyThreadList transport={transport} stream={stream} busy={busy} />
+                </FolderSupportContext>
+              </KeyedRequestContext>
+            </Suspense>
+          )}
         </div>
       </ThreadActionsContext>
       {archived ? (

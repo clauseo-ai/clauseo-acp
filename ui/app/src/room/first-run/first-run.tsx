@@ -1,9 +1,17 @@
-// UD1's first run in the room, the lazy chunk room.tsx loads where the host has the setup wire: the setup store
+// UD1's first run in the room, in the first load, which room.tsx renders where the host has the setup wire: the setup store
 // (store/setup.ts) and its subscription, the first screen while there is no matter yet, and the hold on the composer
 // (hold.ts): the install's working line, the sign-in gate in the field's row until the conversation's plan is signed
 // in, and the room's line under the field (the fine print until then, the signed-in line after). Each gate press is one
 // setup command; nothing else here talks to the host but the matter's creation, the counts and the first act.
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import {
   Gate,
@@ -49,6 +57,7 @@ import {
   type ProtectionStore,
 } from "../../store/protection.ts";
 import { loadProtectionNote } from "../protection/note-load.ts";
+import { markButton, markWelcome } from "../../start-marks.ts";
 
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, refusalView } from "./views.ts";
@@ -506,6 +515,8 @@ function FirstScreen({
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
   const wait = usePickWait();
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
+  // the start-up's marks (start-marks.ts): the welcome's first commit, then its button, which sends them all once
+  useLayoutEffect(markWelcome, []);
   const openFolder = async () => {
     setRefused(null);
     const picked = await wait.track(() => matters.pickFolder());
@@ -558,6 +569,7 @@ function FirstScreen({
           : () => void openSettings.call(transport).catch(() => {})
       }
       testIds={{ counts: IDS.counts, open: "open-folder", newMatter: "start-new-matter" }}
+      openRef={(button) => markButton(button, transport.pageMarks?.bind(transport))}
     />
   );
 }

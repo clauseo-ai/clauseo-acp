@@ -23,6 +23,7 @@ import type {
   ThreadId,
   ViewPosition,
 } from "./protocol.ts";
+import type { SendMarks } from "../start-marks.ts";
 
 export type { DisplayInfo };
 
@@ -67,6 +68,8 @@ export interface HostTransport {
    * `section` when named (R24: the case-law hint and the out-of-credit note open "connectors"). Only a transport whose
    * host has that window carries it: the desktop one; the room draws no Settings button without it. */
   openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
+  /** Sends the room's start-up marks to host.log, once, in the background (start-marks.ts); only the desktop's. */
+  pageMarks?: SendMarks | undefined;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
    * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last

@@ -29,7 +29,7 @@ use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFil
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 23] = [
+pub(crate) const COMMANDS: [&str; 24] = [
     "dispatch",
     "query",
     "open_stream",
@@ -53,6 +53,7 @@ pub(crate) const COMMANDS: [&str; 23] = [
     "count_ui",
     "setup",
     "quit_app",
+    "page_marks",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -445,8 +446,10 @@ pub(crate) async fn setup<R: Runtime>(
     .await
 }
 
+mod page;
 mod pick;
 
+pub(crate) use page::*;
 pub(crate) use pick::*;
 
 #[cfg(test)]

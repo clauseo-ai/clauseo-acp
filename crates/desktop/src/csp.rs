@@ -27,8 +27,8 @@ use tauri::{Manager, Runtime, WebviewWindowBuilder};
 const JAVASCRIPT: &str = "text/javascript";
 
 /// `app.security.csp` from the app's config, as a header value. `None` when the config has no
-/// CSP, or when its string is not a valid header value ([`header_value`]); either way no hook is
-/// installed, and the page goes without a CSP too, since Tauri sends the same string.
+/// CSP, or when its string is not a valid header value ([`header_value`]); either way the hook
+/// adds none, and the page goes without a CSP too, since Tauri sends the same string.
 pub(crate) fn policy<R: Runtime, M: Manager<R>>(app: &M) -> Option<HeaderValue> {
     let csp = app.config().app.security.csp.as_ref()?;
     header_value(&csp.to_string())
@@ -61,17 +61,20 @@ pub(crate) fn add_to_script(policy: &HeaderValue, response: &mut Response<Cow<'s
     }
 }
 
-/// `builder` with the hook that gives the app's scripts the config's policy.
+/// `builder` with the hook that gives the app's scripts the config's policy, and takes the
+/// start-up's mark for the first response the app's protocol built (`startup::first_response`).
+/// With no policy the hook only marks.
 pub(crate) fn on_scripts<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
     app: &M,
 ) -> WebviewWindowBuilder<'a, R, M> {
-    match policy(app) {
-        Some(policy) => builder.on_web_resource_request(move |_request, response| {
-            add_to_script(&policy, response);
-        }),
-        None => builder,
-    }
+    let policy = policy(app);
+    builder.on_web_resource_request(move |request, response| {
+        crate::startup::first_response(request.uri().path());
+        if let Some(policy) = &policy {
+            add_to_script(policy, response);
+        }
+    })
 }
 
 #[cfg(test)]

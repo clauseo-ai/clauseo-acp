@@ -40,7 +40,7 @@
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
 //!   `jailed.rs`): inside, it prints one line and exits with [`SANDBOXED_EXIT`] before `run`,
 //!   so no window, no single-instance hand-off and no settings read.
-//! - Twenty async commands (`commands.rs`), each granted by its own permission in
+//! - Twenty-four async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` (`count_ui` in `capabilities/counts.json`, `main` only) and
 //!   listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -59,6 +59,9 @@
 //!   `capabilities/marks.json`), granted to `main` alone. `tauri.conf.json` names `main`,
 //!   `settings` and `counts`: those builds add the two at setup (`e2e::grant_scoreboard`), and the
 //!   default build has neither.
+//! - The start-up logs its steps in host.log (`startup.rs`): `clauseo_desktop::startup::lifecycle`
+//!   lines from `run` to the main window's page load, and one `clauseo_desktop::page::lifecycle`
+//!   line with the page's own marks (`page_marks`), each in ms since `run` began.
 //! - Each command call logs one `clauseo_desktop::ipc::lifecycle` line in host.log, the first
 //!   300 of a run (`ipc.rs`): its name, start, length, outcome, and no argument.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
@@ -131,6 +134,7 @@ mod quit_signals;
 mod rust_only;
 mod settings_window;
 mod setup;
+mod startup;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -160,6 +164,7 @@ pub use pre_write_guard::guard_requested;
 use profile::{DesktopProfile, with_profile};
 use quit::{Exit, SetupStop};
 use rust_only::PluginRustOnly;
+use tauri::webview::PageLoadEvent;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 pub(crate) use window_events::{follows_limits, on_window_event, raise_main_window};
 
@@ -202,13 +207,10 @@ fn context<R: Runtime>() -> tauri::Context<R> {
 pub fn run() -> tauri::Result<()> {
     // The clock of the timing lines in host.log (chooser/trace.rs).
     chooser::trace::launch();
-    // On Windows, no window without a WebView2 runtime that can draw it (webview2.rs).
-    if webview2::stops_start() {
+    // The WebView2 runtime's check, then the host's log file, started before the app (startup.rs).
+    let Some(host_log) = startup::check_then_log() else {
         return Ok(());
-    }
-    // The host's log file (decision record 0047), started before the app; its guard is managed
-    // with the app and flushed when the host stops (`host_log.rs`).
-    let host_log = host_log::install(&SystemDirs, &SystemEnv);
+    };
     // The scoreboard's t0, before anything else the app does.
     #[cfg(feature = "e2e")]
     e2e::mark_start();
@@ -279,6 +281,7 @@ pub fn run() -> tauri::Result<()> {
             commands::count_ui,
             commands::setup,
             commands::quit_app,
+            commands::page_marks,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -349,7 +352,7 @@ pub fn run() -> tauri::Result<()> {
         RunEvent::Exit => {
             let _waited = quit::stop_on_exit(app, &exit);
         }
-        _ => {}
+        other => startup::on_run_event(&other),
     });
     Ok(())
 }
@@ -448,7 +451,8 @@ fn start_host<R: Runtime>(
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))
-    });
+    })
+    .inspect(|()| startup::mark("host thread spawned"));
     // Once the host start is kicked off; nothing waits for it (admin_refresh.rs).
     #[cfg(windows)]
     admin_refresh::spawn();
@@ -549,8 +553,17 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
+    // The page's load, for the start-up's marks (startup.rs).
+    let builder = builder.on_page_load(|_window, payload| match payload.event() {
+        PageLoadEvent::Started => startup::mark("main window page load started"),
+        PageLoadEvent::Finished => startup::mark("main window page load finished"),
+    });
     let built = settings_window::number_build(app);
+    // On Windows the build waits for WebView2's environment and controller (wry's
+    // `wait_with_pump`): the two marks around it time that.
+    startup::mark("main window build started");
     let window = builder.build()?;
+    startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
     // Destroyed: the bridge drops main's stream, and the settings window goes too.
