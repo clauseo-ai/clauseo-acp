@@ -2326,7 +2326,10 @@ The tests model the access check (`apply/tests/reads/access.rs`):
 **Listing the root.** After a launch applies a grant of another matter's root, `apply` lifts
 that matter's root deny of the session's pool user (`apply/lifts.rs`). The entry stays the
 other matter's. The ledger marks it lifted by the reading matter (`Entry::lifted`, under the
-lock) before anything changes on the root.
+lock) before anything changes on the root. Nothing changes unless the ledger as saved carries
+the mark: `set_lifted` answers `false` when the entry is gone, being removed or no longer
+liftable, and then the deny stays and no stand-in is written (R18 LOW 4). Test:
+`a_lift_whose_mark_isnt_saved_leaves_the_deny` (`apply/tests/lifts.rs`).
 
 The lift is a swap, not a removal (H1). With no deny on the root, nothing would deny that pool
 user writes there: the root inherits `Users`' create-files and create-folders from `C:\`

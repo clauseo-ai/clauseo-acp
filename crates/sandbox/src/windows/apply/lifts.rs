@@ -13,6 +13,8 @@
 //!
 //! The deny is the fenced matter's ledger entry. The lift is marked on it first
 //! ([`set_lifted`], under the lock), and the mark stands for the stand-in too; then the swap.
+//! No deny is touched unless the file as saved carries its mark: an entry another process
+//! removed or began removing in between takes none, and its deny stays.
 //! The restore swaps back, then clears the mark. So a crash leaves the mark, and the restore,
 //! run again, finds the deny there or writes it, and removes the stand-in if it is there.
 //! Nothing reads the mark as a missing fence: [`Ledger::fence_applied`] reads the entry, still
@@ -63,10 +65,16 @@ pub(super) fn lift(ledger: &mut Ledger, plan: &AdmittedPlan, acl: &mut dyn AclWr
         .cloned()
         .collect();
     for deny in denies {
-        let marked = set_lifted(ledger, deny.id, Some(matter));
-        if let Err(error) = marked {
+        if let Err(error) = set_lifted(ledger, deny.id, Some(matter)) {
             let error = error.kind();
             tracing::warn!(%error, "a fence's deny wasn't marked lifted; it stays");
+            continue;
+        }
+        // The file as saved must carry the mark: the entry may be gone, being removed, or no
+        // longer liftable since it was read. Without the mark nothing would put the deny back.
+        let ours = |e: &Entry| e.id == deny.id && e.lifted == Some(matter);
+        if !ledger.entries().any(ours) {
+            tracing::warn!("a fence's deny wasn't marked lifted; it stays");
             continue;
         }
         // The deny of writes first: the folder is never left open to them (see the module).

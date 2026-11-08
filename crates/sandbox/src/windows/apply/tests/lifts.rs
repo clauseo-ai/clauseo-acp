@@ -8,6 +8,7 @@ use super::reads::access::{
     APPEND, DELETE, POOL_TOKEN, READ, USERS, WRITE, granted, volume_default,
 };
 use super::*;
+use crate::windows::ledger::{Entry, Take};
 
 /// A fake with the volume's default entry at the top.
 pub(super) fn volume(w: &World) -> FakeAcl {
@@ -250,4 +251,46 @@ fn a_fence_written_again_mid_session_closes_the_folder_and_the_end_still_restore
     .unwrap();
     assert_eq!(ended.restored, vec![w.canonical("other/m2")]);
     assert_restored(&w, &ledger, &acl);
+}
+
+#[test]
+fn a_lift_whose_mark_isnt_saved_leaves_the_deny() {
+    let w = World::new("lift-mark-unsaved");
+    w.other_tree();
+    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+    launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
+    end_reads(
+        &mut ledger,
+        matter_one(),
+        &pool(),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
+    assert!(acl.aces.contains(&root_deny(&w)));
+    // This process read the ledger with the deny `applied`; another has begun removing it since
+    // (its matter is being forgotten), and its removal failed, so it stays `removing`.
+    let mut stale = super::ledger(&w);
+    let root = w.canonical("other/m2");
+    let id = stale
+        .entries()
+        .find(|e| e.path == root && e.inherit == Inherit::ThisOnly && e.sid.as_str() == USER_SID)
+        .map(|e| e.id)
+        .unwrap();
+    let mut other = super::ledger(&w);
+    let pick = |e: &Entry| (e.id == id).then_some(Take::Remove);
+    let taken = other
+        .take_back(pick, |_| Err(std::io::Error::other("kept")))
+        .unwrap();
+    assert_eq!(taken.kept, 1);
+
+    let policy = w.reading(&[("other/m2", false)]);
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let (data, others) = (w.at("data"), w.neighbour_m2());
+    let admitted = admit_with(&policy, &data, &others, ok, &FakeFolders::default()).unwrap();
+    let plan = plan(&admitted, &sids(), matter_one()).unwrap();
+    crate::windows::apply::lifts::lift(&mut stale, &plan, &mut acl);
+    assert!(acl.aces.contains(&root_deny(&w)), "the deny stays");
+    assert!(!acl.aces.contains(&stand_in(&w)));
+    assert!(super::ledger(&w).entries().all(|e| e.lifted.is_none()));
 }
