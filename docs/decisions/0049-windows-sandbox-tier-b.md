@@ -1377,11 +1377,16 @@ leaves that profile, both naming the part.
 
 ### The network (PR7)
 
-`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46399,
-where its launch's egress proxy and listed ports are, and nothing else. Rulings: the
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on the whole range,
+46100-46399, not only its launch's own ports: each pool user's static permit opens every port in
+it, so any pool user's agent can reach any listener in the range, other matters' included. The
+per-launch secrets on those listeners are the check (see "Inside the range" below), and a foreign
+listener in the range is caught only by the launch check, which reads every listener each launch.
+Widening to 300 ports widens where such a listener could sit until that next check. Rulings: the
 orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals,
-the range moved). The range was widened to 300 ports (46100-46399) on 2026-11-08, for about 60
-tier-B sessions at once, each binding about two, and a pool of up to 256 users: each user's
+the range moved). The range was widened to 300 ports (46100-46399) on 2026-11-08, sized for about 60
+tier-B sessions at once, each binding about two. The permit key space is sized for up to 256 pool
+users ahead of the pool-cap PR; today's `POOL_CAP` is 32, so only 32 are reachable. Each user's
 static permit keeps its key (`filters + 0x100 + index`, indices `0..256`), and the permit's remote
 ports change, so an install set up before this one is refused as `sandbox.setup_required` until
 set-up runs again, which empties the sublayer and rewrites the filters and the block rule in place.
@@ -1400,8 +1405,7 @@ so no pool user's static permit reaches them when a tier-C browser launch runs o
 machine. It sits below 49152,
 where Windows' dynamic range starts by default, so the OS never hands its ports to another
 program's port-0 bind, and clear of the listeners known below it (WinRM 47001, the ASP.NET state
-service 42424, EtherNet/IP 44818, BACnet 47808, SQL Server's browser 1434) and of IANA's
-registrations. The browser claims outside it (`claim_browser_port`, `claim_browser_port_at`;
+service 42424, EtherNet/IP 44818, BACnet 47808, SQL Server's browser 1434). The browser claims outside it (`claim_browser_port`, `claim_browser_port_at`;
 agent-browser's daemon port is 49152-65534), so Chrome's debugging port, from this or a concurrent
 tier-C session, never lands there. Set-up and every launch check the machine against the range
 (`wfp::check_ports`) and refuse tier B, named, on an overlap:
