@@ -2018,10 +2018,14 @@ upgrade's 60-62):
    `WTSQueryUserToken`;
 3. the gate (`serve::identify`), checked once before any op. It refuses: no admin copy; a SID in
    `PoolSids`; a token holding the pool's group (`GroupSid`, or the SID of a group named
-   `ClauseoSandboxUsers` that the record doesn't name); session 0; a SID that isn't
-   `S-1-5-21-...`; a restricted token; one below Medium; a client that isn't its session's
-   user; per user, anyone but `AdminCopyOwner`. The pool rules read only the record and the
-   token, so they hold before the task's deny exists and whatever the pipe's DACL says;
+   `ClauseoSandboxUsers` that the record doesn't name); session 0; a user that isn't a person's
+   account; a restricted token; one below Medium; a client that isn't its session's user; per
+   user, anyone but `AdminCopyOwner`; a token holding `NETWORK` (`S-1-5-2`) or lacking
+   `INTERACTIVE` (`S-1-5-4`). The pool rules read only the record and the token, so they hold
+   before the task's deny exists and whatever the pipe's DACL says. The lawyer is known by token,
+   not by SID prefix: a person's account is an exact allow-list (`Sid::is_user_account`, shared
+   with the launch's token spec), `S-1-5-21-a-b-c-rid` (local, AD, Microsoft-account-linked) or
+   `S-1-12-1-a-b-c-d` (an Entra ID user, as on Entra-joined firm laptops), and nothing else;
 4. the op. `set_up` and `add` go on; anything else is answered `unsupported`;
 5. the data folder: the identified user's `ProfileImagePath` (the only profile read) plus
    `AppData\Local\ai.clauseo.desktop`, inside the profile. It is resolved as the user with the
@@ -2095,7 +2099,11 @@ the app's failure names a squatted pipe.
 
 **Not yet verified** (VM rows): `WTSQueryUserToken` and DPAPI under the session token as
 SYSTEM; Defender with the registration in `--place-only`; Remote Desktop and fast user
-switching; a pool process denied both `Run` and the pipe; `setup_task_end_by_other_user`: per
+switching; a pool process denied both `Run` and the pipe; `setup_task_entra_owner`: an
+Entra-joined Windows 11 VM on Azure, signed in as an Entra ID user (`S-1-12-1-…`), sets up through
+the task and through the prompt, `secrets.bin` round-trips (DPAPI as that user under the session
+token), a launch runs, and the uninstall removes it all (assumed till then: its `ProfileList`
+entry and `ProfileImagePath` look like a local user's); `setup_task_end_by_other_user`: per
 machine, user B ends user A's running set-up (`schtasks /end /tn \Clauseo\SandboxSetUp`), A's
 app reports a failure, and A's next set-up runs to the end. Elevated CI, written but not yet
 run: the production descriptor with two standard users, a squat (exit 64, nothing sent), and a

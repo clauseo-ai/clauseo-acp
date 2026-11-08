@@ -12,8 +12,10 @@ use crate::windows::sids::Sid;
 
 /// LOCAL SYSTEM.
 const SYSTEM: &str = "S-1-5-18";
-/// The start of every local or domain account's SID.
-const ACCOUNT_PREFIX: &str = "S-1-5-21-";
+/// INTERACTIVE: in the token of every console and Remote Desktop logon.
+const INTERACTIVE: &str = "S-1-5-4";
+/// NETWORK: in the token of a network logon.
+const NETWORK: &str = "S-1-5-2";
 
 /// Who connected, as the server reads it: the client's token at identification level and the
 /// session the pipe says it runs in.
@@ -54,8 +56,9 @@ pub enum Refusal {
     PoolGroup,
     /// The client runs in session 0, where no one signs in.
     SessionZero,
-    /// The client's user isn't a local or domain account (`S-1-5-21-...`): a service, LOCAL
-    /// SYSTEM, a virtual account.
+    /// The client's user isn't a person's account ([`Sid::is_user_account`]: a machine's, an AD
+    /// domain's or an Entra ID user's): a service, LOCAL SYSTEM, a virtual account, an
+    /// `AppContainer`.
     NotAnAccount,
     /// The client's token is restricted.
     Restricted,
@@ -67,6 +70,10 @@ pub enum Refusal {
     NotSessionUser,
     /// A per-user install, and the client isn't the user it was installed for.
     NotTheOwner,
+    /// The client's token is a network logon's (it holds `NETWORK`).
+    NetworkLogon,
+    /// The client's token isn't an interactive logon's (it lacks `INTERACTIVE`).
+    NotInteractive,
 }
 
 impl fmt::Display for Refusal {
@@ -82,12 +89,17 @@ impl fmt::Display for Refusal {
             Refusal::NoSessionUser => "the user of the client's session can't be read",
             Refusal::NotSessionUser => "the client isn't its session's user",
             Refusal::NotTheOwner => "this install is another user's",
+            Refusal::NetworkLogon => "the client is a network logon",
+            Refusal::NotInteractive => "the client isn't an interactive logon",
         })
     }
 }
 
 /// The user to set up, once `client` passes every rule; otherwise the first rule it fails, in
-/// the order [`Refusal`] lists them. `session_user` is the user signed in to the client's
+/// the order [`Refusal`] lists them. The lawyer is known by token, never by a SID's prefix: the
+/// user signed in to the client's session, a person's account of any kind Windows signs in
+/// interactively (local, AD, Microsoft-account-linked, Entra ID), in no part of the pool, on an
+/// interactive logon that isn't a network one. `session_user` is the user signed in to the client's
 /// session, `None` when it couldn't be read. The pool rules come before everything else and
 /// read only the record and the token: no descriptor, no DACL and no session decides them, so
 /// they hold before the task's deny exists and if the pipe's DACL were ever wrong.
@@ -113,7 +125,7 @@ pub fn identify(
     if client.session == 0 {
         return Err(Refusal::SessionZero);
     }
-    if !client.user.as_str().starts_with(ACCOUNT_PREFIX) {
+    if !client.user.is_user_account() {
         return Err(Refusal::NotAnAccount);
     }
     if client.restricted {
@@ -132,6 +144,16 @@ pub fn identify(
         && *owner != client.user
     {
         return Err(Refusal::NotTheOwner);
+    }
+    if client.groups.iter().any(|group| group.as_str() == NETWORK) {
+        return Err(Refusal::NetworkLogon);
+    }
+    if !client
+        .groups
+        .iter()
+        .any(|group| group.as_str() == INTERACTIVE)
+    {
+        return Err(Refusal::NotInteractive);
     }
     Ok(client.user.clone())
 }

@@ -21,7 +21,7 @@ fn the_session_user_passes_and_each_rule_refuses_on_its_own() {
     assert_eq!(gated(|_, _| {}), Ok(sid(LAWYER)));
     // High integrity (an elevated app) passes: its owner is lowered after.
     assert_eq!(gated(|facts, _| facts.integrity = 0x3000), Ok(sid(LAWYER)));
-    let cases: [(&str, Change, Refusal); 8] = [
+    let cases: [(&str, Change, Refusal); 10] = [
         (
             "no admin copy",
             |_, gate| gate.copy_owner = None,
@@ -62,6 +62,16 @@ fn the_session_user_passes_and_each_rule_refuses_on_its_own() {
             |_, gate| gate.copy_owner = Some(CopyOwner::User(sid(OTHER))),
             Refusal::NotTheOwner,
         ),
+        (
+            "a network logon",
+            |facts, _| facts.groups.push(sid("S-1-5-2")),
+            Refusal::NetworkLogon,
+        ),
+        (
+            "not an interactive logon",
+            |facts, _| facts.groups.retain(|group| group.as_str() != "S-1-5-4"),
+            Refusal::NotInteractive,
+        ),
     ];
     for (case, change, refusal) in cases {
         assert_eq!(gated(change), Err(refusal), "{case}");
@@ -95,11 +105,57 @@ fn service_system_and_virtual_accounts_are_refused() {
         "S-1-5-96-0-1",
         "S-1-5-32-544",
         "S-1-5-21",
+        "S-1-5-7",
+        "S-1-5-82-1-2-3-4-5",
+        "S-1-5-83-1-1-2-3-4",
+        "S-1-15-2-1-2-3-4-5-6-7",
+        "S-1-15-3-1024-1-2-3-4-5-6-7",
+        "S-1-12-1-1-2-3",
     ] {
         let facts = client(user);
         let refused = identify(&facts, Some(&sid(user)), &machine_gate());
         assert_eq!(refused, Err(Refusal::NotAnAccount), "{user}");
     }
+}
+
+#[test]
+fn an_entra_id_user_signed_in_to_the_session_is_the_owner() {
+    let entra = "S-1-12-1-3263492174-1177263218-2391161522-1513380577";
+    let facts = client(entra);
+    assert_eq!(
+        identify(&facts, Some(&sid(entra)), &machine_gate()),
+        Ok(sid(entra))
+    );
+    let mut per_user = machine_gate();
+    per_user.copy_owner = Some(CopyOwner::User(sid(entra)));
+    assert_eq!(
+        identify(&facts, Some(&sid(entra)), &per_user),
+        Ok(sid(entra))
+    );
+    // The other rules still hold for one: another's session, a per-user install of another's,
+    // a network logon.
+    assert_eq!(
+        identify(&facts, Some(&sid(LAWYER)), &machine_gate()),
+        Err(Refusal::NotSessionUser)
+    );
+    per_user.copy_owner = Some(CopyOwner::User(sid(LAWYER)));
+    assert_eq!(
+        identify(&facts, Some(&sid(entra)), &per_user),
+        Err(Refusal::NotTheOwner)
+    );
+    // The pool rules come first for an Entra-shaped SID too.
+    let mut pooled = machine_gate();
+    pooled.pool.push(sid(entra));
+    assert_eq!(
+        identify(&facts, Some(&sid(entra)), &pooled),
+        Err(Refusal::PoolUser)
+    );
+    let mut network = client(entra);
+    network.groups.push(sid("S-1-5-2"));
+    assert_eq!(
+        identify(&network, Some(&sid(entra)), &machine_gate()),
+        Err(Refusal::NetworkLogon)
+    );
 }
 
 #[test]

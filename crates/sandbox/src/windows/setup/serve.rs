@@ -34,9 +34,10 @@
 //!    identification level (`ImpersonateNamedPipeClient`, `OpenThreadToken`), and its session
 //!    (`GetNamedPipeClientSessionId`), then the session's user (`WTSQueryUserToken`);
 //! 3. the gate ([`identify`]), which refuses a pool user or a member of the pool's group whatever
-//!    the task's descriptor or the pipe's DACL say, session 0, a SID that isn't a local or domain
-//!    user's, a restricted or Low token, a client that isn't its session's user, and, per user,
-//!    anyone but `AdminCopyOwner`;
+//!    the task's descriptor or the pipe's DACL say, session 0, a SID that isn't a person's account
+//!    (`Sid::is_user_account`: local, AD, Entra ID), a restricted or Low token, a client that
+//!    isn't its session's user, per user anyone but `AdminCopyOwner`, and a network or
+//!    non-interactive logon;
 //! 4. the data folder: the identified user's `ProfileImagePath` (the only profile read) and the
 //!    fixed [`DATA_SUFFIX`], inside the profile, resolved as the user (`exe::owners_data_dir`,
 //!    run with the session's token, lowered when elevated), so a link in the profile can't send
