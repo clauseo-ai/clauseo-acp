@@ -2001,7 +2001,8 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    pool SID, it has a DACL, and no allow gives write, append, extended-attribute, attribute,
    delete, `WRITE_DAC`, `WRITE_OWNER`, generic-write or generic-all access to anyone but
    SYSTEM, Administrators, the service accounts, a service SID, CREATOR OWNER, OWNER RIGHTS or
-   another domain's accounts and groups: a pool user may be able to rewrite its own task's file,
+   another domain's accounts and groups, Entra ID accounts and groups (`S-1-12-1-…`; pool users are
+   always local accounts): a pool user may be able to rewrite its own task's file,
    and with `WRITE_DAC` move its grant to any group it is in, so an allowlist, not a short
    list of broad groups. Otherwise the task stays unreadable, 56. A hidden task whose file
    grants write to another local account (the lawyer's, say) is 56 too. What it leaves: a pool
