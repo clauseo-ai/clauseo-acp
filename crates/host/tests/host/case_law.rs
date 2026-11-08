@@ -102,7 +102,9 @@ fn case_law_server() -> McpServer {
 }
 
 /// The entry `session/new` carries once filled: the port differs per run, so it matches any
-/// value; the token file is the session's own. On Windows it also carries `SystemRoot`.
+/// value; the token file is the session's own. On Windows it also carries `SystemRoot` and
+/// `windir`, then `TEMP`, `TMP` and `PATHEXT` when this process has them (the host runs in it,
+/// so it reads the same environment; `windows_env`).
 fn filled_case_law() -> Value {
     let mut env = vec![
         json!({"name": "CLAUSEO_RELAY", "value": "{{any}}"}),
@@ -111,6 +113,12 @@ fn filled_case_law() -> Value {
     ];
     if cfg!(windows) {
         env.push(json!({"name": "SystemRoot", "value": "{{any}}"}));
+        env.push(json!({"name": "windir", "value": "{{any}}"}));
+        for name in ["TEMP", "TMP", "PATHEXT"] {
+            if std::env::var(name).is_ok() {
+                env.push(json!({"name": name, "value": "{{any}}"}));
+            }
+        }
     }
     json!({"name": "case-law", "command": "{{any}}", "args": ["connector", "case-law"],
         "env": env})
