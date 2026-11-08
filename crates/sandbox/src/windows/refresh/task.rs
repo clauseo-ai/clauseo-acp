@@ -101,11 +101,11 @@ pub(super) fn missing(error: &windows::core::Error) -> bool {
 
 /// COM on this thread for the guard's life: uninitialised on drop when this call initialised
 /// it; a thread already in another apartment keeps it and is used as it is.
-pub(super) struct Apartment(bool);
+pub(crate) struct Apartment(bool);
 
 impl Apartment {
     /// Joins the multithreaded apartment, or uses the thread's.
-    pub(super) fn enter() -> Result<Apartment, TaskError> {
+    pub(crate) fn enter() -> Result<Apartment, TaskError> {
         // SAFETY: no reserved pointer; undone on drop when it succeeded.
         let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if entered == RPC_E_CHANGED_MODE {
@@ -126,7 +126,7 @@ impl Drop for Apartment {
 }
 
 /// The Task Scheduler on this machine, connected as this process's user.
-pub(super) fn service() -> Result<ITaskService, TaskError> {
+pub(crate) fn service() -> Result<ITaskService, TaskError> {
     // SAFETY: a registered in-process class and its interface; no outer object.
     let service: ITaskService =
         unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }

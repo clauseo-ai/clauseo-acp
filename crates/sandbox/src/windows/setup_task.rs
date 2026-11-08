@@ -218,7 +218,9 @@ fn now_ms() -> u64 {
 
 /// The pipe's client end, overlapped so every wait on it has a limit, identification only; the
 /// Win32 error when it won't open.
-fn open(name: &str) -> Result<Handle, windows::Win32::Foundation::WIN32_ERROR> {
+pub(in crate::windows) fn open(
+    name: &str,
+) -> Result<Handle, windows::Win32::Foundation::WIN32_ERROR> {
     // SAFETY: the name is a live HSTRING; no security attributes; the handle returned is owned
     // by `Handle`.
     let opened = unsafe {
@@ -361,6 +363,13 @@ pub(in crate::windows) fn check_pipe(pipe: &Handle, admin_exe: &Path) -> Result<
         );
     }
     Ok(())
+}
+
+/// Every fact [`check_pipe`] reads of `pipe`'s server, its owner included, unchecked: what a
+/// standard user can read, for the elevated tests to show.
+#[cfg(test)]
+pub(in crate::windows) fn read_facts(pipe: &Handle) -> Result<ServerFacts, Exchange> {
+    server_facts(pipe, pipe_owner(pipe))
 }
 
 /// The owner of the pipe `pipe` (`GetSecurityInfo`, which its `READ_CONTROL` allows).

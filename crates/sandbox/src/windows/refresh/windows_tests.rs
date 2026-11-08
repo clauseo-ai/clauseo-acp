@@ -149,7 +149,7 @@ pub(crate) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Optio
 }
 
 /// The test folder and its tasks: each task ended and deleted, then the folder, on drop.
-struct Scheduled {
+pub(crate) struct Scheduled {
     root: ITaskFolder,
     folder: ITaskFolder,
     name: String,
@@ -158,7 +158,7 @@ struct Scheduled {
 
 impl Scheduled {
     /// Makes `\<name>` with `sddl`, as `task_folder::prepare` makes `\Clauseo`.
-    fn new(service: &ITaskService, name: &str, sddl: &str) -> Scheduled {
+    pub(crate) fn new(service: &ITaskService, name: &str, sddl: &str) -> Scheduled {
         // SAFETY: a live service; the BSTRs and the VARIANT outlive each call.
         let (root, folder) = unsafe {
             let root = service.GetFolder(&BSTR::from("\\")).unwrap();
@@ -177,7 +177,13 @@ impl Scheduled {
 
     /// Registers `task` in the folder: LOCAL SYSTEM runs `cmd.exe` with `arguments`, on demand
     /// only, as `register_task` sets its tasks up, with `sddl` as its descriptor.
-    fn register(&mut self, service: &ITaskService, task: &str, arguments: &str, sddl: &str) {
+    pub(crate) fn register(
+        &mut self,
+        service: &ITaskService,
+        task: &str,
+        arguments: &str,
+        sddl: &str,
+    ) {
         self.tasks.push(task.to_owned());
         let cmd = format!(r"{}\cmd.exe", system32());
         // SAFETY: each call is on a live interface the one before returned, with BSTRs and
@@ -222,7 +228,7 @@ impl Scheduled {
     }
 
     /// The task `task` in the folder, read afresh.
-    fn task(&self, task: &str) -> IRegisteredTask {
+    pub(crate) fn task(&self, task: &str) -> IRegisteredTask {
         // SAFETY: a live folder and a BSTR that outlives the call.
         unsafe { self.folder.GetTask(&BSTR::from(task)) }.unwrap()
     }

@@ -142,7 +142,7 @@ impl FakeHost {
     }
 
     /// The calls that changed or read a user's files, or ran a set-up.
-    fn acted(&self) -> Vec<&str> {
+    pub(crate) fn acted(&self) -> Vec<&str> {
         let acting = ["profile", "owner", "data_dir", "lock", "current", "set_up"];
         self.calls
             .iter()
