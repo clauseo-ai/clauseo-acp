@@ -128,6 +128,45 @@ pub(crate) fn drive_is_local(letter: char, query: &dyn Fn(char) -> Option<String
     false
 }
 
+/// Where drive `letter` really is, for the no-follow open (asked as [`drive_is_local`] asks):
+/// the local volume's device (`\Device\HarddiskVolume3`) and the names to walk from its root, a
+/// `subst`'s folders first (`X:` → `\??\D:\a` → `\Device\HarddiskVolume1` gives that device
+/// and `a`), so the open never asks the drive letter again. `None` when the drive is not local
+/// by [`drive_is_local`]'s rules.
+#[cfg(any(windows, test))]
+pub(crate) fn volume_of(
+    letter: char,
+    query: &dyn Fn(char) -> Option<String>,
+) -> Option<(String, Vec<String>)> {
+    let mut seen: Vec<char> = Vec::new();
+    let mut letter = letter.to_ascii_uppercase();
+    let mut names: Vec<String> = Vec::new();
+    while seen.len() <= MAX_SUBST_HOPS && !seen.contains(&letter) {
+        seen.push(letter);
+        let target = query(letter)?;
+        if drive_target_is_local(&target) {
+            // `\Device\Name`, any further names walked like the rest.
+            let mut parts = target.split('\\').filter(|part| !part.is_empty());
+            let device = format!("\\{}\\{}", parts.next()?, parts.next()?);
+            let mut found: Vec<String> = parts.map(str::to_owned).collect();
+            found.append(&mut names);
+            return Some((device, found));
+        }
+        let next = subst_drive(&target)?;
+        let mut found: Vec<String> = target
+            .get(r"\??\X:".len()..)
+            .unwrap_or_default()
+            .split('\\')
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect();
+        found.append(&mut names);
+        names = found;
+        letter = next;
+    }
+    None
+}
+
 /// The drive a `subst` target `\??\X:\…` (or `\??\X:`) names, upper case.
 #[cfg(any(windows, test))]
 fn subst_drive(target: &str) -> Option<char> {
@@ -163,7 +202,9 @@ pub(crate) fn local_reparse_tag(tag: u32) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{drive_is_local, drive_target_is_local, local_reparse_tag, refused_windows_name};
+    use super::{
+        drive_is_local, drive_target_is_local, local_reparse_tag, refused_windows_name, volume_of,
+    };
     use crate::network_paths::tests::plain_net;
 
     #[test]
@@ -273,6 +314,26 @@ mod tests {
         }
         for letter in ['U', 'V', 'L', 'M', 'Z', 'N', 'D'] {
             assert!(!drive_is_local(letter, &query), "{letter}");
+            assert_eq!(volume_of(letter, &query), None, "{letter}");
         }
+        // The no-follow open starts from the volume's device, a subst's folders walked first.
+        let volume = |letter| volume_of(letter, &query).unwrap();
+        let device = r"\Device\HarddiskVolume3".to_owned();
+        assert_eq!(volume('c'), (device.clone(), Vec::new()));
+        let names = |list: &[&str]| list.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(
+            volume('S'),
+            (device.clone(), names(&["Users", "a", "Deals"]))
+        );
+        assert_eq!(
+            volume('T'),
+            (device, names(&["Users", "a", "Deals", "sub"]))
+        );
+        // A device answer with names after the device: those are walked too, never opened whole.
+        let deep = |_: char| Some(r"\Device\HarddiskVolume1\x\y".to_owned());
+        assert_eq!(
+            volume_of('Q', &deep),
+            (Some((r"\Device\HarddiskVolume1".to_owned(), names(&["x", "y"]))))
+        );
     }
 }

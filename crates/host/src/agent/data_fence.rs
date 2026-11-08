@@ -36,13 +36,15 @@
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use clauseo_matters::{HeldOpen, held_open_resolved};
+use clauseo_matters::HeldOpen;
 use clauseo_protocol::MatterPath;
 use identity::DataIdentity;
 use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
+use crate::network_paths::{
+    FOLD_CASE, NetEnv, fold_name, held_open_walked, refused_windows_name, touchable,
+};
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
@@ -420,7 +422,7 @@ pub(crate) fn check_paths(
         paths
             .into_iter()
             .filter_map(|path| touchable(&path, folder, &walk))
-            .find_map(|walked| held_open_resolved(folder, &walked)),
+            .find_map(|walked| held_open_walked(folder, &walked)),
     )
 }
 

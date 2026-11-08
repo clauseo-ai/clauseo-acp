@@ -6,6 +6,7 @@ mod programs;
 use std::path::Path;
 
 use super::{Held, MAX_READ_WORDS, Named, Stetdoc, names_word, program_name, stetdoc};
+use crate::network_paths::{Access, Kind, open_no_follow};
 use crate::pre_write_guard::Reach;
 use crate::pre_write_guard::shell::command_words;
 use crate::pre_write_guard::words::{Escape, Segment, Segments, shell_segments};
@@ -102,10 +103,16 @@ impl Check<'_> {
         self.writable(target)
             && path.is_absolute()
             && self.reach.walked(path).is_some_and(|walked| {
-                // The walked path, its links followed: not followed or resolved again.
-                std::fs::symlink_metadata(&walked).is_ok_and(|meta| meta.is_dir())
-                    && clauseo_matters::matter_path_of_resolved(self.folder, &walked.join("x"))
-                        .is_none()
+                // The walked path, its links followed: opened with none followed, never
+                // resolved again.
+                open_no_follow(&walked, Access::Look)
+                    .and_then(|opened| opened.kind())
+                    .is_ok_and(|kind| kind == Kind::Dir)
+                    && clauseo_matters::matter_path_of_resolved(
+                        self.folder,
+                        walked.join("x").as_path(),
+                    )
+                    .is_none()
             })
     }
 

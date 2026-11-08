@@ -13,7 +13,7 @@ use crate::network_paths::name_folds_to;
 pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path, reach: &Reach) -> bool {
     let absolute = base.join(path);
     if let Some(walked) = reach.walked(&absolute)
-        && let Some(inside) = clauseo_matters::matter_path_of_resolved(folder, &walked)
+        && let Some(inside) = clauseo_matters::matter_path_of_resolved(folder, walked.as_path())
         && inside.as_str().split('/').next().is_some_and(is_codex)
     {
         return true;

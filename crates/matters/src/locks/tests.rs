@@ -178,7 +178,11 @@ fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_composed_name() {
     assert_ne!(owner_names(&composed), owner_names(&decomposed));
     let owner = owner_only_in_decomposed(&composed, &decomposed);
     assert_eq!(
-        owner_in_another_form(dir.path(), &composed, Some(std::slice::from_ref(&owner))),
+        owner_in_another_form(
+            &super::PathFolder(dir.path()),
+            &composed,
+            Some(std::slice::from_ref(&owner))
+        ),
         Some(owner)
     );
 }
@@ -192,7 +196,11 @@ fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_decomposed_name()
     let (composed, decomposed) = nukta_names();
     let owner = owner_only_in_decomposed(&composed, &decomposed);
     assert_eq!(
-        owner_in_another_form(dir.path(), &decomposed, Some(std::slice::from_ref(&owner))),
+        owner_in_another_form(
+            &super::PathFolder(dir.path()),
+            &decomposed,
+            Some(std::slice::from_ref(&owner))
+        ),
         Some(owner)
     );
 }
@@ -248,15 +256,17 @@ fn off_windows_no_write_failure_is_held() {
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn the_pretend_word_keeps_an_owner_file_held_and_without_it_the_owner_file_is_stale() {
+    use super::PathFolder;
     use super::stale::{self, Decision};
     let dir = TestDir::new("locks-pretend-word");
     let root = dir.path();
     for name in ["Invoice.docx", "~$nvoice.docx"] {
         drop(write::create_new(&root.join(name)).unwrap());
     }
-    let document = root.join("Invoice.docx");
     assert_eq!(
-        stale::decide(root, "~$nvoice.docx", &document, || Some(Vec::new())),
+        stale::decide(&PathFolder(root), "~$nvoice.docx", "Invoice.docx", || Some(
+            Vec::new()
+        )),
         Decision::Stale
     );
     assert_eq!(
@@ -264,11 +274,16 @@ fn the_pretend_word_keeps_an_owner_file_held_and_without_it_the_owner_file_is_st
         Some(vec![std::time::SystemTime::UNIX_EPOCH])
     );
     assert_eq!(
-        stale::decide(root, "~$nvoice.docx", &document, stale::word_starts),
+        stale::decide(
+            &PathFolder(root),
+            "~$nvoice.docx",
+            "Invoice.docx",
+            stale::word_starts
+        ),
         Decision::Held
     );
     assert_eq!(
-        stale::decide(root, "~$nvoice.docx", &document, || None),
+        stale::decide(&PathFolder(root), "~$nvoice.docx", "Invoice.docx", || None),
         Decision::QueryFailed
     );
     assert_eq!(
@@ -287,9 +302,9 @@ fn off_macos_and_windows_an_owner_file_is_never_stale() {
         drop(write::create_new(&root.join(name)).unwrap());
     }
     assert!(!super::stale::is_stale(
-        root,
+        &super::PathFolder(root),
         "~$nvoice.docx",
-        &root.join("Invoice.docx")
+        "Invoice.docx"
     ));
     assert_eq!(
         held_open(root, &path("Invoice.docx")),
@@ -305,7 +320,9 @@ fn off_macos_and_windows_an_owner_file_is_never_stale() {
 fn a_resolved_path_is_compared_as_it_is_never_resolved_again() {
     use std::path::Path;
 
-    use super::{held_open_resolved, matter_path_in, matter_path_of_resolved};
+    use super::{PathFolder, held_open_resolved, matter_path_in, matter_path_of_resolved};
+
+    let by_path = |parent: &Path| Ok::<_, std::io::Error>(PathFolder(parent.to_path_buf()));
 
     let dir = TestDir::new("locks-resolved");
     let matter = dir.path().join("m");
@@ -323,14 +340,14 @@ fn a_resolved_path_is_compared_as_it_is_never_resolved_again() {
     let through = respelled.join("Brief.docx");
     assert_eq!(matter_path_in(&matter, &through), Some(path("Brief.docx")));
     assert_eq!(matter_path_of_resolved(&matter, &through), None);
-    assert_eq!(held_open_resolved(&matter, &through), None);
+    assert_eq!(held_open_resolved(&matter, &through, by_path), None);
     let direct = matter.join("Brief.docx");
     assert_eq!(
         matter_path_of_resolved(&matter, &direct),
         Some(path("Brief.docx"))
     );
     assert_eq!(
-        held_open_resolved(&matter, &direct).map(|(inside, _)| inside),
+        held_open_resolved(&matter, &direct, by_path).map(|(inside, _)| inside),
         Some(path("Brief.docx"))
     );
     assert_eq!(

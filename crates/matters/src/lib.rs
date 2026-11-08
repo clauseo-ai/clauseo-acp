@@ -38,8 +38,11 @@
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`], and
-//!   [`held_open_resolved`] and [`matter_path_of_resolved`] one a caller already resolved;
-//!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
+//!   [`held_open_resolved`] and [`matter_path_of_resolved`] one a caller already resolved, the
+//!   former looking at the document's folder only through a [`DocumentFolder`] the caller
+//!   opened (the host's no-follow open);
+//!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it
+//!   ([`held_open_in`] through a folder that caller opened),
 //!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
 //!   The host asks them before letting an agent write a file. An owner file a crashed Word left
 //!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
@@ -155,8 +158,8 @@ mod writeback;
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
-    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,
-    matter_path_in, matter_path_of_resolved,
+    DocumentFolder, HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside,
+    held_open_in, held_open_resolved, matter_path_in, matter_path_of_resolved,
 };
 pub use matter::{Matter, check_marker, remove_marker_of};
 pub use papers::{Paper, PaperList};

@@ -20,9 +20,9 @@
 //! `query_failed`), never a path (ADR 0047).
 
 #[cfg(any(target_os = "macos", windows))]
-use std::path::Path;
-#[cfg(any(target_os = "macos", windows))]
 use std::time::SystemTime;
+
+use super::DocumentFolder;
 
 /// Word's process name on macOS (`/Applications/Microsoft Word.app/Contents/MacOS/Microsoft
 /// Word`, bundle `com.microsoft.Word`; research 38 opens it as `open -a "Microsoft Word"`).
@@ -121,11 +121,12 @@ pub(crate) fn word_starts() -> Option<Vec<SystemTime>> {
     clauseo_process::processes_named(WORD_PROCESS)
 }
 
-/// Whether the owner file `owner` in `parent`, beside `document`, is stale by this OS's rule,
-/// logging the decision. Always `false` on Linux. Blocks: on macOS one open, one `fcntl`, one
-/// `statfs` and one listing of every process; on Windows one open and one process
-/// snapshot.
-pub(crate) fn is_stale(parent: &std::path::Path, owner: &str, document: &std::path::Path) -> bool {
+/// Whether the owner file `owner` in `parent`, beside the document `document` (a name in
+/// `parent`), is stale by this OS's rule, logging the decision. Always `false` on Linux.
+/// Blocks: on macOS one open, one `fcntl`, one `statfs` and one listing of every process; on
+/// Windows one open and one process snapshot. Every look goes through `parent`
+/// ([`DocumentFolder`]), never following a link at the entry it names.
+pub(crate) fn is_stale(parent: &impl DocumentFolder, owner: &str, document: &str) -> bool {
     #[cfg(any(target_os = "macos", windows))]
     {
         let decision = decide(parent, owner, document, word_starts);
@@ -146,9 +147,9 @@ pub(crate) fn is_stale(parent: &std::path::Path, owner: &str, document: &std::pa
 /// macOS: the facts read, with Word's starts from `word`, and [`mac_rule`]'s decision.
 #[cfg(target_os = "macos")]
 pub(crate) fn decide(
-    parent: &Path,
+    parent: &impl DocumentFolder,
     owner: &str,
-    document: &Path,
+    document: &str,
     word: impl FnOnce() -> Option<Vec<SystemTime>>,
 ) -> Decision {
     // The owner file's own facts no longer count on macOS (its birthtime went with research
@@ -156,43 +157,43 @@ pub(crate) fn decide(
     let _ = owner;
     mac_rule(MacFacts {
         word_running: word().map(|starts| !starts.is_empty()),
-        lock_seen: mac::lock_seen(document),
-        local_apfs_or_hfs: mac::local_apfs_or_hfs(parent),
+        lock_seen: parent
+            .open(document, false)
+            .ok()
+            .and_then(|file| mac::lock_seen(&file)),
+        local_apfs_or_hfs: parent.local_apfs_or_hfs(),
     })
 }
 
 /// Windows: the facts read, with Word's starts from `word`, and [`windows_rule`]'s decision.
 #[cfg(windows)]
 pub(crate) fn decide(
-    parent: &Path,
+    parent: &impl DocumentFolder,
     owner: &str,
-    document: &Path,
+    document: &str,
     word: impl FnOnce() -> Option<Vec<SystemTime>>,
 ) -> Decision {
     windows_rule(WindowsFacts {
-        owner_exists: parent.join(owner).symlink_metadata().is_ok(),
-        exclusive_open: crate::write::open_exclusive(document).is_ok(),
+        owner_exists: parent.has(owner),
+        exclusive_open: parent.open(document, true).is_ok(),
         word_running: word().map(|starts| !starts.is_empty()),
     })
 }
 
-/// The macOS queries, through `nix`'s safe wrappers: no `unsafe` here.
+/// The macOS query, through `nix`'s safe wrappers: no `unsafe` here.
 #[cfg(target_os = "macos")]
 mod mac {
     use std::fs::File;
-    use std::path::Path;
 
     use nix::fcntl::{FcntlArg, fcntl};
     use nix::libc;
-    use nix::mount::MntFlags;
 
-    /// Whether another process holds an advisory lock on `document` that a write lock over the
-    /// whole file would conflict with (Word holds a shared one while the document is open):
-    /// `F_GETLK`, which takes no lock, on a read-only open. `None` when the open or the call
-    /// fails. Closing the file drops any POSIX lock this process holds on the document; the app
-    /// holds none on matter files.
-    pub(super) fn lock_seen(document: &Path) -> Option<bool> {
-        let file = File::open(document).ok()?;
+    /// Whether another process holds an advisory lock on the document open as `file` that a
+    /// write lock over the whole file would conflict with (Word holds a shared one while the
+    /// document is open): `F_GETLK`, which takes no lock, on a read-only open. `None` when the
+    /// call fails. Closing the file drops any POSIX lock this process holds on the document; the
+    /// app holds none on matter files.
+    pub(super) fn lock_seen(file: &File) -> Option<bool> {
         let mut query = libc::flock {
             l_start: 0,
             // 0: to the end of the file, however it grows.
@@ -201,18 +202,8 @@ mod mac {
             l_type: libc::F_WRLCK,
             l_whence: libc::c_short::try_from(libc::SEEK_SET).ok()?,
         };
-        fcntl(&file, FcntlArg::F_GETLK(&mut query)).ok()?;
+        fcntl(file, FcntlArg::F_GETLK(&mut query)).ok()?;
         Some(query.l_type != libc::F_UNLCK)
-    }
-
-    /// Whether `folder` is on a local APFS or HFS+ volume: `MNT_LOCAL` in its `statfs` flags and
-    /// `apfs` or `hfs` as its type. `None` when `statfs` fails.
-    pub(super) fn local_apfs_or_hfs(folder: &Path) -> Option<bool> {
-        let stat = nix::sys::statfs::statfs(folder).ok()?;
-        Some(
-            stat.flags().contains(MntFlags::MNT_LOCAL)
-                && matches!(stat.filesystem_type_name(), "apfs" | "hfs"),
-        )
     }
 }
 

@@ -9,11 +9,12 @@
 //! follow a local link to `/net/host/…` or a Windows link to a UNC target and sign in there, so
 //! neither is used on an agent's path before this walk vouches for it.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::NetEnv;
+use super::no_follow::{self, Access, NoFollow};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -44,59 +45,51 @@ pub(crate) trait Fs {
     fn identity(&self, path: &Path) -> io::Result<(u64, u128)>;
 }
 
-/// The real disk.
+/// The real disk. Every look goes through the folder above the name, opened with no link
+/// followed on its way ([`super::no_follow`]), and then looks at the name itself without
+/// following it: a folder the walk already passed and an agent swapped for a link since is
+/// refused ([`super::no_follow::LinkOnTheWay`], an error the walk refuses on), never followed.
+/// On Windows a name's kind and reparse tag come from its folder's listing, so a reparse point
+/// that is not a known local kind is never opened.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RealFs;
 
+/// The folder above `path` opened with no link followed, and `path`'s last name; `None` for a
+/// root, which has no folder above it.
+fn folder_and_name(path: &Path) -> io::Result<Option<(NoFollow, &OsStr)>> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Ok(None);
+    };
+    let folder = no_follow::open_path(parent, Access::Folder).inspect_err(log_link)?;
+    Ok(Some((folder, name)))
+}
+
+/// Logs a link found on a walked folder (the walk refuses on it), by its kind only.
+fn log_link(error: &io::Error) {
+    if no_follow::is_link_on_the_way(error) {
+        no_follow::log_refusal(error);
+    }
+}
+
 impl Fs for RealFs {
     fn entry(&self, path: &Path) -> io::Result<Entry> {
-        let meta = std::fs::symlink_metadata(path)?;
-        let kind = meta.file_type();
-        if kind.is_symlink() {
-            return Ok(Entry::Link);
+        match folder_and_name(path)? {
+            Some((folder, name)) => folder.entry_at(name),
+            None => Ok(Entry::Dir),
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt as _;
-            /// `FILE_ATTRIBUTE_REPARSE_POINT`.
-            const REPARSE_POINT: u32 = 0x400;
-            // A reparse point that is not a link (DFS, Azure File Sync, a filter) may reach a
-            // server when it is opened: only a known local kind is walked.
-            if meta.file_attributes() & REPARSE_POINT != 0
-                && !super::windows::reparse_tag(path)
-                    .is_some_and(super::windows_names::local_reparse_tag)
-            {
-                return Err(io::Error::other(
-                    "a reparse point of a kind not known to be local",
-                ));
-            }
-        }
-        Ok(if kind.is_dir() {
-            Entry::Dir
-        } else {
-            Entry::File
-        })
     }
 
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        std::fs::read_link(path)
+        match folder_and_name(path)? {
+            Some((folder, name)) => folder.read_link_at(name),
+            None => Err(io::ErrorKind::InvalidInput.into()),
+        }
     }
 
     fn identity(&self, path: &Path) -> io::Result<(u64, u128)> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-            let meta = std::fs::symlink_metadata(path)?;
-            Ok((meta.dev(), u128::from(meta.ino())))
-        }
-        #[cfg(windows)]
-        {
-            super::windows::identity(path)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = path;
-            Err(io::ErrorKind::Unsupported.into())
+        match folder_and_name(path)? {
+            Some((folder, name)) => folder.identity_at(name),
+            None => no_follow::open_path(path, Access::Look)?.identity(),
         }
     }
 }
@@ -124,32 +117,34 @@ impl<'a> Disk<'a> {
     }
 
     /// The real disk under `net`, for a caller that goes on to use the walked path
-    /// ([`super::touchable`]) and compares it with the matter folder's canonical path: on
-    /// Windows each local name in its canonical form (its long name, not its 8.3 alias); as
-    /// written elsewhere, where the walk's result is already canonical but for case and Unicode
-    /// form, which the matter comparison folds as the file system does.
+    /// ([`super::touchable`]) and compares it with the matter folder's canonical path. The same
+    /// as [`Self::real`]: on Windows each local name in its canonical form (its long name, not
+    /// its 8.3 alias); as written elsewhere, where the walk's result is already canonical but for
+    /// case and Unicode form, which every comparison folds as the file system does.
     pub(crate) fn resolved(net: &'a NetEnv) -> Self {
-        Self {
-            fs: &RealFs,
-            real: if cfg!(windows) {
-                &canonical
-            } else {
-                &as_written
-            },
-            net,
-        }
+        Self::real(net)
     }
 }
 
-/// No canonical form: the name as written.
-fn as_written(_: &Path) -> Option<PathBuf> {
-    None
-}
-
-/// `path` canonicalised (`dunce`), asked only of a local name that is not a link, once every
-/// name before it was vouched for.
+/// The canonical form of a local name that is not a link, once every name before it was
+/// vouched for: on Windows the system's final path for it, opened with no link followed (a link
+/// swapped in refuses, and the name stays as written); elsewhere the name as written (`None`):
+/// with every link already read and `..` taken, the walked path is the canonical one but for
+/// case and Unicode form on macOS, which every comparison folds.
 fn canonical(path: &Path) -> Option<PathBuf> {
-    dunce::canonicalize(path).ok()
+    #[cfg(windows)]
+    {
+        no_follow::open_path(path, Access::Look)
+            .inspect_err(log_link)
+            .ok()?
+            .final_path()
+            .ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 /// Where a path leads.

@@ -626,5 +626,8 @@ crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
 # A network path is decided from the drive's root and the mount list, never the path.
 crates/host/src/network_paths/mac.rs - unsafe_code
 crates/host/src/network_paths/windows.rs - unsafe_code
+crates/host/src/network_paths/no_follow/windows.rs - unsafe_code
+crates/host/src/network_paths/no_follow/windows.rs Handle::local_apfs_or_hfs clippy::unused_self
+crates/host/src/network_paths/no_follow/unix.rs Handle::local_apfs_or_hfs clippy::unused_self
 # Vendored from clauseo_sandbox (stage C, #735) with its exported names; stage E's #764 calls it.
 crates/host/src/network_paths/ascii_fold.rs refused_in_other_matter dead_code
