@@ -511,12 +511,18 @@ started elevated, by the app or by the uninstall hook.
   install placed. Either exits 2 (`Blocked::OtherAccount`), changing nothing; a second user's
   launch and set-up meet the same cause. `AdminCopyVersion` (the app's version) newer than the
   running copy's own exits 9: no downgrade (`admin_copy::version_not_older`, which the refresh
-  task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy, its `.sig` and
-  `staging\`, gives the folder and everything left owner Administrators and a protected DACL
+  task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy and its `.sig`,
+  `staging\` included (taken back first if it shuts Administrators out; "The staging folder's
+  DACL" below), gives the folder and everything left owner Administrators and a protected DACL
   (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
   user, runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
   5 lock held, 6 data folder not the user's, 7 not elevated, 8 not the admin copy, 9 downgrade.
+  Every exit 3 before the set-up writes one Event Log line (source `Clauseo Sandbox`):
+  `--adopt failed (exit 3) at step <name>: <Win32 error N | HRESULT 0x... | no Windows error
+  code>`, naming no path or SID; once the lawyer is confirmed, also `setup-result.json`, with
+  the step, the cause, `code`, `kind` (`win32` or `hresult`) and `at` (when it was written,
+  so an earlier run's result isn't read as this one's).
 - **`UserInstallDir` is untrusted.** It is checked as text and its last folder for a link, but
   the lawyer can re-point any folder on the way through a junction at any time. Anything SYSTEM
   does with it (the refresh task reading a new exe from it) must open every component without
@@ -571,10 +577,12 @@ started elevated, by the app or by the uninstall hook.
   uninstaller's hook runs `--remove --uninstall`: all that, then, once the pool has no owner and
   only for the install that placed the copy (a per-machine removal for `machine`, the lawyer's
   own for theirs), the four values, the refresh and stop tasks (`unregister_task`), staging
-  (`remove_staging`), everything in the folder, then the folder; the key goes once empty. The
-  running copy is renamed in place to a name nothing starts and scheduled for deletion at
-  restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; a reinstall before the
-  restart keeps its new copy.
+  (`remove_staging`, taken back if need be), everything in the folder, then the folder; the key
+  goes once empty. The running copy is renamed in place to a name nothing starts and scheduled
+  for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it; if the
+  rename fails, the copy itself is scheduled. A reinstall before the restart keeps its new copy.
+  A step that fails writes an Event Log line naming it and its error code and exits 10
+  (`AdminCopyLeft`); the protection itself is gone, so the hook counts 10 as removed, as 0.
 - **The copy beside the app stays.** A per-user install still ships
   `clauseo-sandbox-setup.exe` beside `Clauseo.exe`, with its `requireAdministrator` manifest: it
   is the installer's payload and the refresh task's source, and nothing starts it.
@@ -1543,7 +1551,8 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    and refuses a reparse point, anything but a regular file, a second hard link, or more than
    16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
    SYSTEM never writes or deletes anything in the folder;
-5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
+5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected DACL for SYSTEM and
+   Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
    exe for another CPU never replaces it;
@@ -1556,8 +1565,28 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    the running copy into staging, which Windows allows for a running exe, and moves the staged
    file into place with the admin copy's DACL. Only then does it write the new
    `AdminCopyVersion` (the signed version, as signed), then the new hash. The set-aside copy
-   stays in staging until the next run deletes it. That run starts from the new copy, which shows
-   the new copy runs.
+   (`staging\clauseo-sandbox-setup.exe.old`) is the task's own running image, which Windows
+   won't delete: it and `staging\` are scheduled for deletion at restart
+   (`MOVEFILE_DELAY_UNTIL_REBOOT`), and the next run, which starts from the new copy and so
+   shows it runs, deletes them sooner;
+10. every run that got as far as clearing staging ends by leaving no staging folder: the staged
+    file is deleted and the folder removed, or, after a swap, both scheduled as step 9 says.
+
+**The staging folder's DACL** (VM reinstall finding, 2026-11-08). `STAGING_SDDL` was SYSTEM
+alone. After any refresh, an elevated `--adopt` (a repair, a reinstall after a per-user
+uninstall) was denied `staging\` (read attributes, then read control, write DAC and write owner),
+and exited 3 in its lock-down; `--remove --uninstall`'s teardown was denied it the same way, so
+the admin copy stayed. It is now `O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. This doesn't weaken
+#668's "verified as read back, no TOCTOU": the folder is SYSTEM-only so that the lawyer and the
+pool users, who aren't administrators, can't swap the staged exe between the signature check and
+the replace. Administrators are already inside that boundary: they can write
+`Program Files\Clauseo\Sandbox` and the admin copy directly, and change or replace the SYSTEM
+tasks. Granting them the staging folder adds no capability they lack. A staging folder made
+under the old DACL (or left by a refresh killed midway) is taken back by `--adopt` and
+`--remove` (`admin_copy::take_back`): `SeTakeOwnershipPrivilege`, `SeRestorePrivilege` and
+`SeBackupPrivilege` enabled for the call, every open with backup semantics and never through a
+reparse point, Administrators made the owner and the locked DACL set, then deleted. `--adopt`
+always deletes `staging\` (the refresh makes it again) and never fails on it.
 
 **Crash safety.** The record never names a hash the admin path doesn't hold: until the last step
 it holds the old hash. A crash after both renames leaves the new file under the old hash, which
