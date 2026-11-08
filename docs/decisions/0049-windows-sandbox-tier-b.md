@@ -2196,7 +2196,19 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    many were ignored, cache keys alone and how many were ignored (their task can't run),
    folders or keys gone while listed and still gone or there again, and tasks new to the
    second walk and how many were the pool's. It names no path and no SID; the paths of the
-   tasks that keep the run at 56 go to the admin-only log (below);
+   tasks that keep the run at 56 go to the admin-only log (below).
+
+   **Replaced under its name** (`sweep::replaced`). The walk and the cross-check match tasks
+   by path, so a pool user holding `DELETE` on a task could delete it once judged and register
+   its own under the name, which the cross-check would take as already listed. So the walk
+   reads each task's `TaskCache\Tree` `Id` before judging it, and once the cross-check is
+   done each path the walk judged is held by path and `Id`: a path whose `Id` changed is
+   judged again in the same sweep, as the walk judges (the task now under the name, deleted
+   when the pool's). One that can't be judged again is 56: an `Id` that can't be read then or
+   at the walk, a folder or list that can't be read, a task the listing hides that the cache
+   still holds, or a path replaced again after it was judged again. A path gone is no task.
+   The Task Scheduler assigns the `Id`, and a task re-created under a name gets a new one
+   (`elevated_a_re_created_task_gets_a_new_cache_id`, not yet run);
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
@@ -2334,7 +2346,9 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   pool's task, and the read-back would pass. So the task's `TaskCache\Tree` `Id` (read as
   #750's `windows_listing` reads it) is read before the first read, again just before the
   write, and again after it. Changed before the write: nothing is written, the task is counted
-  as swapped and logged, and the walk's own judgment of it stands. Otherwise, before
+  as swapped and logged, the run ends 56 with its path in the 56 list, and the task now under
+  the name is judged again in the same sweep, deleted when the pool's (set-up's hardening only
+  counts it). Otherwise, before
   the write, the task's path and `Id` go, pending (`P{Id}\A\name`), to the record's
   `OwnerUntrusted` (`REG_MULTI_SZ` in
   `HKLM\SOFTWARE\Clauseo\Sandbox`, entries `{Id}\A\name`; SYSTEM and Administrators write,
@@ -2346,7 +2360,8 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   (`{Id}\A\name`), or `{*}` (any `Id`) when it couldn't be read. A crash between the
   write-ahead and its removal, or a removal that fails, leaves the entry pending. It clears
   itself: the next sweep reads the task's `Id`, and the same `Id` proves the same task (the
-  Task Scheduler assigns `Id`s, and a deleted task can't come back with its old one), so the
+  Task Scheduler assigns `Id`s, and a deleted task can't come back with its old one:
+  `elevated_a_re_created_task_gets_a_new_cache_id`, not yet run), so the
   entry goes and the task is judged as usual. Another `Id` settles it with that `Id`, an
   unreadable one as `{*}`, and a task gone clears it. Every later sweep, for a listed task there
   whose `Id` still matches, ignores the owner and judges by principal and file alone: a pool
