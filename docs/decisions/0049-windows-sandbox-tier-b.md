@@ -328,26 +328,30 @@ build 26100):
     then a wait of at most 400 ms until the job has no process). The sweeper's logon follows on
     its own thread, so it adds nothing before the moves. If the job doesn't empty, nothing moves:
     the watch lists what it left, says once that the check after the session sets it aside, and
-    scans no more. Once the end has begun the outer never starts or resumes the inner: it checks
+    scans no more; its last rescan at the stop moves nothing either and leaves what it finds the
+    same way. Once the end has begun the outer never starts or resumes the inner: it checks
     before the logon, after the job assignment and before the resume, and kills a suspended inner
     it made. Such a session exits `AgentReserved`, the code of an agent the watch ended, with
     "the session ended before its agent started; the agent never ran".
 
     An agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or 3 items found
-    gone, counted across all paths (short-lived `.git`s renamed in and out), ends the session
-    too. The 2 s budget doesn't depend on the check returning: a watchdog thread
+    gone, counted across all paths (short-lived `.git`s renamed in and out, and folders reported
+    made, `FILE_ATTRIBUTE_DIRECTORY` in the extended record, that are gone before their scan),
+    ends the session too. The 2 s budget doesn't depend on the check returning: a watchdog thread
     (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
     once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
     made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a
     repository last would keep it there for tens of seconds). The folder is then set aside whole
     only if a pool user owns it, read from the handle the move opens (`MOVE | READ_CONTROL`,
     `GetKernelObjectSecurity`) against the pool's exact SIDs, so a folder swapped in after the
-    check can't pass; anyone else's (a lawyer dragging a big client folder in) is refused before
-    the rename (`SetAsideFailure::NotTheAgents`) and stays for the after-session pass. Full
-    rescans walk on, with the job already ended. Each cause gives the lawyer its own plain line,
-    e.g. "Clauseo stopped this session because the matter changed faster than Clauseo could
-    check it (very many files at once). Nothing was lost." or "Clauseo stopped this session
-    because checking the matter got stuck. Nothing was lost." An overflow
+    check can't pass; an owner that can't be read counts as the agent's, so the folder goes (the
+    agent can deny the lawyer `READ_CONTROL` on what it made); anyone else's (a lawyer dragging
+    a big client folder in) is refused before the rename (`SetAsideFailure::NotTheAgents`) and
+    stays for the after-session pass. Full rescans walk on, with the job already ended. Each
+    cause gives the lawyer its own plain line, e.g. "Clauseo stopped this session because the
+    matter changed faster than Clauseo could check it (very many files at once). Nothing was
+    lost." or "Clauseo stopped this session because checking the matter got stuck. Nothing was
+    lost." An overflow
     (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole folder and reads
     on. A watch that can't be armed refuses the launch ("Clauseo can't watch the matter's folder
     for changes, so it didn't start the session"), and one that breaks while the agent runs ends
@@ -359,12 +363,17 @@ build 26100):
 
     Each item moved gets the lawyer's notice, chosen by its owner as read on the moved handle. A
     pool user's: "The AI tool tried to put a code repository in the matter. Clauseo stopped it
-    and moved `<name>` to `<set-aside path>`." Anyone else's, or an owner that can't be read:
-    "Clauseo moved `<name>` to `<set-aside path>` because a git repository appeared in the
-    matter while an agent was working. If you made it yourself, move it back after the session
-    ends." Each item moved goes to the host as two records on its denial pipe, the lawyer's
-    notice and the set-aside; the session's end notice goes there too. Nothing on the outer's
-    stderr, which carries the agent's stderr too, is read back. The pipe
+    and moved `<name>` to `<set-aside path>`." An owner that can't be read counts as a pool
+    user's, so an agent can't deny the lawyer `READ_CONTROL` on its own `.git` to get the line
+    that says to move it back. Anyone else's: "Clauseo moved `<name>` to `<set-aside path>`
+    because a git repository appeared in the matter while an agent was working. If you made it
+    yourself, move it back after the session ends." The agent chose the names, so a notice and a
+    set-aside record show each with its control and bidi characters escaped as `\u{XXXX}` (C0,
+    DEL, C1, U+061C, U+200E, U+200F, U+2028, U+2029, U+202A to U+202E, U+2066 to U+2069), cut
+    to 512 characters with `…` (`denial/shown.rs`). Each item moved goes to the host as two
+    records on its denial pipe, the lawyer's notice and the set-aside; the session's end notice
+    goes there too. Nothing on the outer's stderr, which carries the agent's stderr too, is read
+    back: a valid record line the agent writes there is relayed as plain bytes. The pipe
     (`crates/sandbox/src/windows/denial_pipe.rs`) is one of the launcher's run pipes,
     `\\.\pipe\clauseo-run-<32 hex>-denials` (C4's `Role::Denials`), named in the launch message
     (`denial_pipe`, refused unless it has that shape). The host makes it before it spawns the
@@ -373,6 +382,9 @@ build 26100):
     (`SECURITY_IDENTIFICATION`, checked to be a pipe by `GetFileType`), not inheritable. A named
     pipe that is taken, gone or can't be reached refuses the launch (`RunExit::Pipe`) in plain
     words, without the pipe's name. With no name, records are only logged (the kind, no path).
+    Today `from_policy` passes none (`runner/policy.rs`), so the lawyer gets no notices yet.
+    Follow-up, **C5/D3b-win: the launcher must create the denial pipe and pass its name (C4 #804
+    does the create).**
     The inner gets no handle list, since `CreateProcessWithLogonW` takes no `STARTUPINFOEX`, but
     `log_on` names no std handles for it and it never holds the pipe; the agent, which the inner
     starts with a handle list of its three pipes, has no way to it. Each record is one flat
@@ -406,10 +418,12 @@ build 26100):
     that check, closed. It also refuses what git reads from a folder a launch `commondir` named:
     an item (not a link) named `config` or `hooks`, wherever it was, and an item that is one of
     the `:common` folders the matter's or the notes record holds, or one of git's names inside
-    one (`SetAsideFailure::GitFolder`). A link is put back only if its target, read by its words
-    and resolved against the folder it goes back to, stays inside the matter or notes folder,
-    compared by spelling (ASCII case ignored), not yet by identity as the live watch compares; a
-    target that can't be read counts as leading out (`SetAsideFailure::LinkOut`).
+    one (`SetAsideFailure::GitFolder`). A link, or a folder holding one at any depth, is put back
+    only if each link's target, read from the link and worked out against the folder it goes back
+    to, stays inside the matter or notes folder, told by identity as the live watch tells it
+    (`scan/locate.rs`). A target that can't be read, one inside the item itself (not back yet),
+    or a folder in the item that can't be listed counts as leading out
+    (`SetAsideFailure::LinkOut`).
   - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
     run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
     `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
