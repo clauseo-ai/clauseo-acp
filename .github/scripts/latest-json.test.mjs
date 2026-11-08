@@ -20,7 +20,8 @@
 // (SANDBOX_EXE), its updater signature before NSIS, its .sig in both installers, assemble's checks
 // of the published exe and .sig against both installers and the updater key, and the build env
 // its build.rs reads; and every job that passes release.conf.json to passing blocklist.conf.json
-// with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
+// and browser-pins.conf.json with it (in that order), needing `blocklist` and `browser-pins` and
+// downloading blocklist-snapshot and browser-pins-snapshot before it builds or bundles.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -318,7 +319,7 @@ test("release.yml keeps the workflow rules", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(lintWorkflow(text), []);
   // The lint read the jobs: each name the release depends on is there.
-  for (const job of ["check", "blocklist", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
+  for (const job of ["check", "blocklist", "browser-pins", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
     assert.match(text, new RegExp(`^  ${job}:`, "m"), job);
   }
 });
@@ -641,7 +642,7 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);
   assert.ok(assemble.some((line) => line.includes('"$SANDBOX_EXE" > missing.txt')), "latest-json.mjs gets SANDBOX_EXE");
-  // apt-get in assemble and blocklist (minisign) only.
+  // apt-get in assemble, blocklist and browser-pins (minisign) only.
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
   }
@@ -673,9 +674,19 @@ test("release.yml's build tells the sandbox's build.rs the mode and, for release
 });
 
 /**
- * The jobs that pass release.conf.json, and every way one of them leaves out the block-list
- * snapshot: a line passing release.conf.json without blocklist.conf.json, no `blocklist` in its
- * `needs:`, or no blocklist-snapshot download before its first `tauri build` or `tauri bundle`.
+ * The release jobs' snapshots: each one's overlay, the job that verifies and uploads it, and the
+ * artifact the build jobs download into crates/desktop/<dir>/.
+ */
+const SNAPSHOTS = [
+  { config: "blocklist.conf.json", job: "blocklist", artifact: "blocklist-snapshot" },
+  { config: "browser-pins.conf.json", job: "browser-pins", artifact: "browser-pins-snapshot" },
+];
+
+/**
+ * The jobs that pass release.conf.json, and every way one of them leaves out a block-list or
+ * browser-pins snapshot: a line passing release.conf.json without that snapshot's overlay (or with
+ * the overlays out of order), no snapshot job in its `needs:`, or no snapshot download before its
+ * first `tauri build` or `tauri bundle`.
  */
 function snapshotProblems(text) {
   const checked = [];
@@ -687,22 +698,28 @@ function snapshotProblems(text) {
       continue;
     }
     checked.push(job);
-    for (const line of release.filter((one) => !one.includes("--config release/blocklist.conf.json"))) {
-      problems.push(`${job}: ${line}`);
+    for (const line of release) {
+      const at = SNAPSHOTS.map(({ config }) => line.indexOf(`--config release/${config}`));
+      if (at.some((index) => index === -1) || at.some((index, i) => i > 0 && at[i - 1] > index)) {
+        problems.push(`${job}: ${line}`);
+      }
     }
-    if (!/^needs:.*\bblocklist\b/.test(lines.find((line) => line.startsWith("needs:")) ?? "")) {
-      problems.push(`${job}: no blocklist in needs`);
-    }
-    const download = lines.indexOf("name: blocklist-snapshot");
-    const first = lines.findIndex((line) => /\btauri (build|bundle)\b/.test(line));
-    if (download === -1 || download > first) {
-      problems.push(`${job}: no blocklist-snapshot download before its first tauri build or bundle`);
+    const needs = lines.find((line) => line.startsWith("needs:")) ?? "";
+    for (const { job: snapshotJob, artifact } of SNAPSHOTS) {
+      if (!new RegExp(`^needs:.*\\b${snapshotJob}\\b`).test(needs)) {
+        problems.push(`${job}: no ${snapshotJob} in needs`);
+      }
+      const download = lines.indexOf(`name: ${artifact}`);
+      const first = lines.findIndex((line) => /\btauri (build|bundle)\b/.test(line));
+      if (download === -1 || download > first) {
+        problems.push(`${job}: no ${artifact} download before its first tauri build or bundle`);
+      }
     }
   }
   return { checked, problems };
 }
 
-test("release.yml's builds with release.conf.json take the verified block-list snapshot", () => {
+test("release.yml's builds with release.conf.json take the verified block-list and browser-pins snapshots", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(snapshotProblems(text), { checked: ["build", "sign-windows", "measure-builds"], problems: [] });
   const broken = (from, to) => {
@@ -710,11 +727,37 @@ test("release.yml's builds with release.conf.json take the verified block-list s
     assert.notEqual(changed, text, from);
     return snapshotProblems(changed).problems;
   };
-  assert.equal(broken(/(--config release\/release\.conf\.json) --config release\/blocklist\.conf\.json --no-bundle/, "$1 --no-bundle").length, 1);
-  assert.deepEqual(broken("needs: [check, build, blocklist]", "needs: [check, build]"), ["sign-windows: no blocklist in needs"]);
+  // Each line that drops one overlay is named; so is a browser-pins overlay ahead of blocklist's.
+  assert.equal(broken(/(--config release\/release\.conf\.json) --config release\/blocklist\.conf\.json --config release\/browser-pins\.conf\.json --no-bundle/, "$1 --config release/browser-pins.conf.json --no-bundle").length, 1);
+  assert.equal(broken(/ --config release\/browser-pins\.conf\.json --no-bundle/, " --no-bundle").length, 1);
+  const reversed = broken(
+    "--config release/blocklist.conf.json --config release/browser-pins.conf.json --no-bundle",
+    "--config release/browser-pins.conf.json --config release/blocklist.conf.json --no-bundle",
+  );
+  assert.equal(reversed.length, 1);
+  assert.match(reversed[0], /^measure-builds: .*--config release\/browser-pins\.conf\.json --config release\/blocklist\.conf\.json --no-bundle/);
+  assert.deepEqual(broken("needs: [check, build, blocklist, browser-pins]", "needs: [check, build, browser-pins]"), ["sign-windows: no blocklist in needs"]);
+  assert.deepEqual(broken("needs: [check, build, blocklist, browser-pins]", "needs: [check, build, blocklist]"), ["sign-windows: no browser-pins in needs"]);
   assert.deepEqual(broken(/( {6}# The same verified snapshot)[^]*?path: crates\/desktop\/blocklist\n/, ""), [
     "sign-windows: no blocklist-snapshot download before its first tauri build or bundle",
   ]);
+  assert.deepEqual(broken(/( {6}# The same verified browser-pins snapshot)[^]*?path: crates\/desktop\/browser-pins\n/, ""), [
+    "sign-windows: no browser-pins-snapshot download before its first tauri build or bundle",
+  ]);
+});
+
+test("release.yml's browser-pins job verifies with the current key, then the next, and only then reads the comment", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  assert.match(text, /^  browser-pins:\n    name: browser-pins\n    needs: check\n/m);
+  const job = jobCommands(text, "browser-pins");
+  const at = (line) => job.findIndex((one) => one === line || one.startsWith(line));
+  const loop = at("for key in minisign minisign-next; do");
+  assert.ok(loop !== -1, "the current key is tried first, then minisign-next");
+  assert.ok(at('[ -n "$verified" ] ||') > loop, "no verifying key fails the job");
+  assert.ok(loop < at("comment=$(sed -n 's/^Trusted comment: //p' <<< \"$out\")"), "the comment is read after verification");
+  assert.ok(text.includes(String.raw`pattern='^clauseo-browser-pins v1 published=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) version=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) run=([0-9]+)$'`));
+  assert.ok(job.some((line) => line.includes("curl -fsSL") && line.includes("--max-filesize 1048576")), "the download is capped");
+  assert.ok(job.includes("if [ \"$age\" -gt 1209600 ]; then"), "a manifest older than 14 days warns");
 });
 
 test("the workflow lint fails each broken rule", () => {
