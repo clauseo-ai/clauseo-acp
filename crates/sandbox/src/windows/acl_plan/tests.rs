@@ -288,7 +288,8 @@ fn read_only_names_get_deny_write_for_the_pool_user() {
 }
 
 /// A repository-shaped folder the launch walk finds (`HEAD` beside `objects/` and `refs/`, or
-/// beside `commondir`; no `.git` name) gets the same whole-tree deny of writes as an existing `.git`.
+/// beside `commondir`; no `.git` name) gets the same whole-tree deny of writes as an existing
+/// `.git`.
 #[test]
 fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
     let w = World::new("plan-bare");
