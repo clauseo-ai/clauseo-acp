@@ -9,9 +9,16 @@
 //!   number after the session could launch nothing more, and completed.
 //! - [`MarkerState::AwaitingStop`] `{ stop }`: a session a sweep found an escapee in, `stop`
 //!   the `StopNext` read then. Never clean itself: once `StopSequence >= stop`, whoever reads
-//!   it reads `SweepNext` (`M`) only then, requests the sweep and makes it `AwaitingSweep`
-//!   `{ sweep: M }` (`unclean.rs`). A sweep number read before the escapee was dead could
-//!   belong to a sweep it watched complete before it registered a task.
+//!   it reads `SweepNext` (`M`) only then, requests the sweep and makes it
+//!   [`MarkerState::AwaitingSweepBeforeStop`] `{ sweep: M }` (`unclean.rs`). A sweep number
+//!   read before the escapee was dead could belong to a sweep it watched complete before it
+//!   registered a task.
+//! - [`MarkerState::AwaitingSweepBeforeStop`] `{ sweep: M }`: never clean itself either. Once
+//!   `SweepSequence >= M`, `StopNext` (`s`) is read only then and the marker becomes
+//!   [`MarkerState::AwaitingFinalStop`] `{ stop: s }`, clean once `StopSequence >= s`. Until the
+//!   sweep deleted the pool's tasks and cancelled its BITS jobs, a trigger or a notify command
+//!   could start a process of the pool user's after the first stop's snapshot; the sweep stops
+//!   only task instances, so the final stop, reserved after the sweep completed, ends the rest.
 //! - [`MarkerState::Open`] left standing: the outer died (the host's job end after its
 //!   `stdin_grace`, a crash) or couldn't read a number. The pool user's next logon or the
 //!   desktop's start makes it `AwaitingStop`, reading `StopNext` then (`unclean.rs`).
@@ -73,9 +80,21 @@ pub enum MarkerState {
         sweep: u64,
     },
     /// An escapee, or an outer that died: a stop must complete, after which the marker awaits a
-    /// sweep whose number is read then.
+    /// sweep whose number is read then ([`MarkerState::AwaitingSweepBeforeStop`]).
     AwaitingStop {
         /// `StopNext` as read once the session could launch nothing more.
+        stop: u64,
+    },
+    /// Its stop completed: a sweep that reserved `sweep` or later must complete, after which
+    /// the marker awaits a final stop whose number is read then
+    /// ([`MarkerState::AwaitingFinalStop`]).
+    AwaitingSweepBeforeStop {
+        /// `SweepNext` as read once `StopSequence` showed the stop completed.
+        sweep: u64,
+    },
+    /// Its stop, then its sweep, completed: a stop that reserved `stop` or later must complete.
+    AwaitingFinalStop {
+        /// `StopNext` as read once `SweepSequence` showed the sweep completed.
         stop: u64,
     },
 }
@@ -94,6 +113,12 @@ enum WireState {
         #[serde(default, rename = "sweep", skip_serializing)]
         _sweep: Option<u64>,
     },
+    AwaitingSweepBeforeStop {
+        sweep: u64,
+    },
+    AwaitingFinalStop {
+        stop: u64,
+    },
 }
 
 impl From<WireState> for MarkerState {
@@ -102,6 +127,10 @@ impl From<WireState> for MarkerState {
             WireState::Open => MarkerState::Open,
             WireState::AwaitingSweep { sweep } => MarkerState::AwaitingSweep { sweep },
             WireState::AwaitingStop { stop, .. } => MarkerState::AwaitingStop { stop },
+            WireState::AwaitingSweepBeforeStop { sweep } => {
+                MarkerState::AwaitingSweepBeforeStop { sweep }
+            }
+            WireState::AwaitingFinalStop { stop } => MarkerState::AwaitingFinalStop { stop },
         }
     }
 }
@@ -112,6 +141,10 @@ impl From<MarkerState> for WireState {
             MarkerState::Open => WireState::Open,
             MarkerState::AwaitingSweep { sweep } => WireState::AwaitingSweep { sweep },
             MarkerState::AwaitingStop { stop } => WireState::AwaitingStop { stop, _sweep: None },
+            MarkerState::AwaitingSweepBeforeStop { sweep } => {
+                WireState::AwaitingSweepBeforeStop { sweep }
+            }
+            MarkerState::AwaitingFinalStop { stop } => WireState::AwaitingFinalStop { stop },
         }
     }
 }
@@ -127,34 +160,53 @@ pub struct Sequences {
 }
 
 impl MarkerState {
-    /// The stop this marker waits for, if any.
+    /// The stop this marker waits for, the first or the final, if any.
     pub fn stop(self) -> Option<u64> {
         match self {
-            MarkerState::AwaitingStop { stop } => Some(stop),
-            MarkerState::Open | MarkerState::AwaitingSweep { .. } => None,
+            MarkerState::AwaitingStop { stop } | MarkerState::AwaitingFinalStop { stop } => {
+                Some(stop)
+            }
+            MarkerState::Open
+            | MarkerState::AwaitingSweep { .. }
+            | MarkerState::AwaitingSweepBeforeStop { .. } => None,
         }
     }
 
     /// The sweep this marker waits for, if any.
     pub fn sweep(self) -> Option<u64> {
         match self {
-            MarkerState::AwaitingSweep { sweep } => Some(sweep),
-            MarkerState::Open | MarkerState::AwaitingStop { .. } => None,
+            MarkerState::AwaitingSweep { sweep }
+            | MarkerState::AwaitingSweepBeforeStop { sweep } => Some(sweep),
+            MarkerState::Open
+            | MarkerState::AwaitingStop { .. }
+            | MarkerState::AwaitingFinalStop { .. } => None,
         }
     }
 
-    /// Whether `done` meets the sweep this marker waits for: never when open or awaiting a stop,
-    /// which is made one awaiting a sweep first ([`MarkerState::stopped`]).
+    /// Whether `done` meets what this marker waits for last: the sweep of one awaiting a sweep,
+    /// the final stop of one awaiting that. Never when open, awaiting its first stop or the
+    /// sweep before its final stop: each is re-marked first ([`MarkerState::stopped`],
+    /// [`MarkerState::swept`]).
     pub fn clean(self, done: Sequences) -> bool {
         match self {
             MarkerState::AwaitingSweep { sweep } => done.sweep >= sweep,
-            MarkerState::Open | MarkerState::AwaitingStop { .. } => false,
+            MarkerState::AwaitingFinalStop { stop } => done.stop >= stop,
+            MarkerState::Open
+            | MarkerState::AwaitingStop { .. }
+            | MarkerState::AwaitingSweepBeforeStop { .. } => false,
         }
     }
 
-    /// Whether this marker awaits a stop that `done` shows completed: it is due its re-mark.
+    /// Whether this marker awaits a first stop that `done` shows completed: it is due its
+    /// re-mark to a sweep.
     pub fn stopped(self, done: Sequences) -> bool {
-        self.stop().is_some_and(|stop| done.stop >= stop)
+        matches!(self, MarkerState::AwaitingStop { stop } if done.stop >= stop)
+    }
+
+    /// Whether this marker awaits a sweep before its final stop that `done` shows completed:
+    /// it is due its re-mark to the final stop.
+    pub fn swept(self, done: Sequences) -> bool {
+        matches!(self, MarkerState::AwaitingSweepBeforeStop { sweep } if done.sweep >= sweep)
     }
 }
 

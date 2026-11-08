@@ -441,13 +441,15 @@ pub enum RunExit {
     MarkerUnwritable,
     /// F4: a marker of this pool user's (or one that names none, or can't be read) awaits a stop
     /// that hasn't completed: a session a sweep found an escapee in, or one whose outer died
-    /// (`unclean::logon_check`). The outer requested `\Clauseo\SandboxStop` and refuses the
+    /// (`unclean::logon_check`), or one whose sweep after that stop completed and which now
+    /// awaits its final stop. The outer requested `\Clauseo\SandboxStop` and refuses the
     /// launch before its own marker or any logon; a launch once the stop completed goes ahead.
     AwaitingStop,
     /// F4: a marker of this pool user's awaits a sweep that didn't complete within 15 s of the
-    /// outer's wait, or its stop completed but it couldn't be re-marked to await a sweep
-    /// (`unclean::logon_check`). No stop is awaited, so none was requested; the outer refuses
-    /// the launch before its own marker or any logon, and a later launch checks again.
+    /// outer's wait, or its stop (or the sweep after it) completed but it couldn't be re-marked
+    /// to await the sweep (or the final stop) (`unclean::logon_check`). No stop is awaited, so
+    /// none was requested; the outer refuses the launch before its own marker or any logon, and
+    /// a later launch checks again.
     AwaitingSweep,
 }
 

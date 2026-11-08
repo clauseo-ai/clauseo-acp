@@ -414,8 +414,9 @@ fn an_unreadable_principal_is_56_and_the_pools_other_tasks_still_go() {
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
     assert_eq!(SweepExit::TasksLeft.as_code(), 56);
     assert_eq!(fake.deleted(), ["\\first", "\\last"]);
-    // The BITS step still ran.
-    assert_eq!(fake.done.last().map(String::as_str), Some("jobs"));
+    // The BITS step still ran, and then the pool tasks' instances were listed.
+    let tail: Vec<&str> = fake.done.iter().rev().take(2).map(String::as_str).collect();
+    assert_eq!(tail, ["running", "jobs"]);
     let (error, line) = &fake.logged[0];
     assert!(error);
     assert!(
