@@ -120,10 +120,10 @@ pub enum Blocked {
     /// unclean-session marker and its logon refusal, F4) clears only after a later one.
     WslPoolResidue,
     /// A WSL update is pending: the Store package
-    /// (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the installed MSI, or
-    /// the MSI isn't installed yet. Its packaged `WslInstaller` class lets any user start the
-    /// upgrade, which rewrites the launch permissions and drops the deny until the refresh puts
-    /// it back.
+    /// (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the installed MSI. Its
+    /// packaged `WslInstaller` class lets any user start the upgrade, which rewrites the launch
+    /// permissions and drops the deny until the refresh puts it back. A package with no MSI
+    /// installed isn't this (`WslDenyUnverifiable` where WSL 2 can run, else nothing).
     WslUpgradePending,
 }
 

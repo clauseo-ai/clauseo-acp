@@ -2500,7 +2500,12 @@ registered only for the lawyer is WSL present but no pending upgrade: COM activa
 class only for a user the package is registered for, through that user's own registration, and a
 pool user's hive has none, so a pool user can't activate `WslInstaller`'s class; an upgrade the
 lawyer starts is the refresh trigger's to cover. Its registrations unreadable is
-`WslDenyUnverifiable`. The MSI's version missing or older is `WslUpgradePending`; a version that can't be
+`WslDenyUnverifiable`. The MSI's version older is `WslUpgradePending`. No MSI version (missing or empty) isn't an
+upgrade under way: WSL's installer would install the MSI rather than upgrade it, and a package whose
+MSI was never run may stay that way for good, so "let the update complete" would never end. With
+`WSLService` or `LxssManager` installed, WSL 2 can run beside an MSI WSL doesn't record, which
+can't be judged: `WslDenyUnverifiable`. With neither, no WSL VM can run until the MSI is in, and
+its install's `MsiInstaller` events start the refresh, which writes the deny: nothing is refused. A version that can't be
 read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
 shown first. The lawyer's words: "finish or let the WSL update complete, then try again". Not
 verified on the VM: that the packaged-COM key lists the package for a machine where only another
