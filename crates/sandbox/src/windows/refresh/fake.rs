@@ -25,6 +25,10 @@ pub(super) const STEPS: [&str; 7] = [
 ];
 
 /// The fake machine: each file as bytes, or `None` when absent.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one independent fact of the fake machine"
+)]
 pub(super) struct Fake {
     pub(super) system: bool,
     pub(super) exe: PathBuf,
@@ -46,6 +50,10 @@ pub(super) struct Fake {
     pub(super) crashed: bool,
     pub(super) calls: Vec<&'static str>,
     pub(super) logs: Vec<(bool, String)>,
+    /// The staging folder is there.
+    pub(super) staging: bool,
+    /// The staging folder and the set-aside copy are scheduled for deletion at restart.
+    pub(super) at_restart: bool,
 }
 
 impl Fake {
@@ -74,6 +82,8 @@ impl Fake {
             crashed: false,
             calls: Vec::new(),
             logs: Vec::new(),
+            staging: false,
+            at_restart: false,
         }
     }
 
@@ -162,6 +172,7 @@ impl Refresher for Fake {
     }
     fn stage(&mut self, exe: &[u8]) -> Result<Vec<u8>, Failed> {
         self.step("stage")?;
+        self.staging = true;
         let staged = self
             .staged_reads_back
             .clone()
@@ -217,6 +228,18 @@ impl Refresher for Fake {
         self.calls.push("discard_staged");
         if !self.crashed {
             self.staged = None;
+        }
+    }
+    fn leave_staging(&mut self, swapped: bool) {
+        self.calls.push("leave_staging");
+        if self.crashed {
+            return;
+        }
+        if swapped {
+            self.at_restart = true;
+        } else if self.staged.is_none() && self.set_aside.is_none() {
+            // Removing a folder that still holds a file fails; a restored copy left it empty.
+            self.staging = false;
         }
     }
     fn log(&mut self, error: bool, line: &str) {

@@ -423,7 +423,7 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
         .collect();
     // PR 2's set-up codes, as the installer's hooks read them, and the refresh's from 32: the
     // one exe exits with either, and only 0 (done) means the same in both.
-    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     for code in &codes[1..] {
         assert!(!setup.contains(code), "{code} is a set-up code too");
     }
@@ -439,12 +439,18 @@ fn the_descriptors_say_what_the_module_says() {
     );
     // Read back with the flags SetSecurityInfo adds, the staging DACL still matches; any other
     // entry, owner or a lost protection doesn't.
-    assert!(sddl_matches("O:SYD:PAI(A;OICI;FA;;;SY)", STAGING_SDDL));
-    assert!(sddl_matches("O:SYD:P(A;OICI;FA;;;SY)", STAGING_SDDL));
+    assert_eq!(STAGING_SDDL, "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+    assert!(sddl_matches(
+        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        STAGING_SDDL
+    ));
+    assert!(sddl_matches(STAGING_SDDL, STAGING_SDDL));
     for wrong in [
-        "O:SYD:AI(A;OICI;FA;;;SY)",
-        "O:BAD:PAI(A;OICI;FA;;;SY)",
-        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BU)",
+        "O:SYD:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)",
+        // The old SYSTEM-only DACL: a folder an older refresh made is set again.
+        "O:SYD:PAI(A;OICI;FA;;;SY)",
         "O:SYD:PAI(A;OICI;FA;;;BA)",
         "O:SY",
     ] {

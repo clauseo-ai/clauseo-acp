@@ -115,9 +115,17 @@ pub fn action_path(exe: &Path) -> String {
     format!("\"{}\"", exe.display())
 }
 
-/// The staging folder's owner and DACL: SYSTEM, alone, full control, inherited by what is made
-/// inside; protected.
-pub const STAGING_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)";
+/// The staging folder's owner and DACL: SYSTEM and Administrators, full control, inherited by
+/// what is made inside; protected. No one else: not the lawyer, not a pool user.
+///
+/// Why Administrators don't weaken #668's "verified as read back, no TOCTOU": the folder is shut
+/// to the lawyer and the pool users (who aren't administrators) so that none of them can swap
+/// the staged exe between its signature check and the replace. Administrators are already inside
+/// that boundary: they can write `Program Files\Clauseo\Sandbox` and the admin copy directly,
+/// and change or replace the SYSTEM tasks. Granting them the staging folder adds no capability
+/// they lack. Without it, an elevated `--adopt` (a repair or reinstall) and `--remove` were
+/// denied a staging folder a refresh had made, and failed (the VM reinstall finding, 0049).
+pub const STAGING_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
 /// Whether `found`, an owner and DACL read back as SDDL, is `expected`: the same text but for
 /// the DACL's `AI` and `AR` flags, which Windows adds when it sets a descriptor through
