@@ -1924,7 +1924,12 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
    when it is the pool's, resolves to nothing else, or the file can't be read or is
    malformed, the task stays unreadable and 56. No failure stops the walk. Deleting a task
-   ends no running instance of it;
+   ends no running instance of it, so before a pool task is deleted its instances are stopped
+   (`sweep::running`): the running instances are listed
+   (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`) and each whose path (`IRunningTask::Path`,
+   compared without case) is the task's is stopped (`IRunningTask::Stop`). A stop that fails,
+   an instance whose path can't be read (it may be the task's), a list that can't be read, or a
+   folder whose path can't be read is 56, and the task is deleted all the same;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found;
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
@@ -1935,9 +1940,11 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    proper (`SETUP_VALUES`, each sequence before its next), deleted with the record by
    `--remove`, and every write opens the key without making it.
 
-It kills nothing: stopping processes is `--stop`'s, and its `Sweeper` trait has no process
-call. It logs one Event Log line with counts only (pool users, folders and tasks read, the
-pool's tasks deleted, unreadable, skipped and not deleted, BITS jobs cancelled and not), with
+It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
+process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
+Event Log line with counts only (pool users, folders and tasks read, the pool's tasks deleted,
+unreadable, skipped and not deleted, running instances stopped and not, BITS jobs cancelled
+and not), with
 no path, task name or SID, since every local user can read the Application log. Its
 exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 and 52
 (`WslDenyExit`):
@@ -1948,7 +1955,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted, a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |

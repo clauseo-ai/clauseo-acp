@@ -18,7 +18,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::TaskScheduler::{
-    IRegisteredTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
+    IRegisteredTask, IRunningTask, ITaskFolder, ITaskService, TASK_ENUM_HIDDEN, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
@@ -46,6 +46,8 @@ pub(crate) struct WindowsSweeper {
     bits: WindowsBits,
     /// The Task Scheduler, once connected.
     service: Option<ITaskService>,
+    /// The last list of running task instances, `None` where one couldn't be read.
+    running: Vec<Option<IRunningTask>>,
     /// COM on this thread; the last field, so it is uninitialised after every interface above.
     _com: Com,
 }
@@ -57,6 +59,7 @@ impl WindowsSweeper {
             lock: RecordLock::default(),
             bits: WindowsBits::default(),
             service: None,
+            running: Vec::new(),
             _com: Com::new(),
         }
     }
@@ -222,6 +225,43 @@ impl Sweeper for WindowsSweeper {
 
     fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed> {
         windows_task_file::read(&system_folder()?, parts, TASK_FILE_CAP)
+    }
+
+    fn running_tasks(&mut self) -> Result<Vec<Result<String, Failed>>, Failed> {
+        self.running.clear();
+        let service = self.service()?;
+        // SAFETY: a live service; hidden tasks' instances too.
+        let list = unsafe { service.GetRunningTasks(TASK_ENUM_HIDDEN.0) }
+            .map_err(failed("ITaskService::GetRunningTasks"))?;
+        // SAFETY: a live collection.
+        let count = unsafe { list.Count() }.map_err(failed("IRunningTaskCollection::Count"))?;
+        let mut read = Vec::new();
+        for at in 1..=count {
+            // SAFETY: a live collection and a 1-based index variant.
+            let instance = unsafe { list.get_Item(&VARIANT::from(at)) }
+                .map_err(failed("IRunningTaskCollection::Item"));
+            match instance {
+                Ok(instance) => {
+                    // SAFETY: a live instance.
+                    let path = unsafe { instance.Path() }.map_err(failed("IRunningTask::Path"));
+                    read.push(path.map(|path| path.to_string()));
+                    self.running.push(Some(instance));
+                }
+                Err(why) => {
+                    read.push(Err(why));
+                    self.running.push(None);
+                }
+            }
+        }
+        Ok(read)
+    }
+
+    fn stop_running(&mut self, at: usize) -> Result<(), Failed> {
+        let Some(Some(instance)) = self.running.get(at) else {
+            return Err("the running instance isn't in the last list".to_owned());
+        };
+        // SAFETY: a live instance.
+        unsafe { instance.Stop() }.map_err(failed("IRunningTask::Stop"))
     }
 
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {
