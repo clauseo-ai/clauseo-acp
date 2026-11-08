@@ -25,7 +25,6 @@ struct Tick {
 }
 
 /// A fake machine: the record, the trace and the pipe, scripted tick by tick.
-#[expect(clippy::struct_excessive_bools, reason = "a test fake's switches")]
 struct Fake {
     system: bool,
     exe: PathBuf,
@@ -39,7 +38,6 @@ struct Fake {
     /// Kernel-File events the callback sees each tick, and all so far.
     events_per_tick: u64,
     events: u64,
-    rate_log: bool,
     trace: Result<(), TraceError>,
     pipe: Result<(), Failed>,
     ticks: VecDeque<Tick>,
@@ -66,7 +64,6 @@ impl Fake {
             send_fails: false,
             events_per_tick: 0,
             events: 0,
-            rate_log: false,
             trace: Ok(()),
             pipe: Ok(()),
             ticks: VecDeque::new(),
@@ -152,7 +149,8 @@ impl Watcher for Fake {
         Ok(())
     }
     fn rate_log(&mut self) -> bool {
-        self.rate_log
+        // The breaker's test is the one with events: it logs their rate.
+        self.events_per_tick > 0
     }
     fn records(&mut self, wait: Duration) -> Delivery {
         self.now += wait;
@@ -396,16 +394,11 @@ fn past_the_rate_the_rest_go_as_one_dropped_line() {
 }
 
 /// The record as read again with `owner` as its owner.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "a re-check's read, beside its failures"
-)]
-fn owned_by(owner: &str) -> Result<Option<Pool>, Failed> {
-    let pool = Pool {
+fn owned_by(owner: &str) -> Pool {
+    Pool {
         owner: sid(owner),
         users: pool(),
-    };
-    Ok(Some(pool))
+    }
 }
 
 #[test]
@@ -414,9 +407,9 @@ fn another_owner_in_the_record_ends_the_run_with_0() {
     let mut fake = Fake::new().idle(4 * ticks_per_check, 1);
     // The first re-check reads the same owner, an unreadable one is let be, then a new set-up.
     fake.rechecks = VecDeque::from([
-        owned_by(LAWYER),
+        Ok(Some(owned_by(LAWYER))),
         Err("RegGetValueW failed (2)".to_owned()),
-        owned_by(POOL_1),
+        Ok(Some(owned_by(POOL_1))),
     ]);
     assert_eq!(watch(&mut fake), WatchExit::Done);
     assert!(
@@ -459,7 +452,6 @@ fn a_busy_machine_pauses_the_trace_tells_the_clients_and_resumes() {
     let mut fake = Fake::new().idle(ticks(Duration::from_secs(75)), 1);
     fake = fake.idle(ticks(LAST_CLIENT_GRACE) + 2, 0);
     fake.events_per_tick = PAUSE_RATE / 4 + 10;
-    fake.rate_log = true;
     assert_eq!(watch(&mut fake), WatchExit::Done);
     let window = Duration::from_secs(u64::from(WINDOW_SECONDS));
     let paused = format!("pause_trace {window:?}");
