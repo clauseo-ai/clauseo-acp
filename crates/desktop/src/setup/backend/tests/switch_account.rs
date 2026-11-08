@@ -7,7 +7,7 @@
 use std::time::UNIX_EPOCH;
 
 use clauseo_agents::{SigninState, Source};
-use clauseo_protocol::{AgentId, CommandOutcome, SetupCommand};
+use clauseo_protocol::{AgentId, CommandOutcome, Language, SetupCommand};
 use serde_json::json;
 
 use super::fakes::{Rig, command, rig};
@@ -117,12 +117,46 @@ fn signed_out_reused_and_claude_ask_nothing() {
 
 #[test]
 fn the_switch_words_name_the_agent() {
-    let (title, message, ok) = words(&switch());
-    assert_eq!(title, "Sign in with a different account?");
+    let words = words(&switch(), Language::En);
+    assert_eq!(words.title, "Sign in with a different account?");
     assert_eq!(
-        message,
+        words.message,
         "This signs you out of Codex first, in every matter. Then you can sign in with the account \
          you want."
     );
-    assert_eq!(ok, "Sign out and continue");
+    assert_eq!(words.ok, "Sign out and continue");
+    assert_eq!(words.cancel, "Cancel");
+}
+
+/// In Hindi each setup confirm says the Hindi words, its slots filled.
+#[test]
+fn the_setup_confirms_follow_the_language() {
+    let hi = words(&switch(), Language::Hi);
+    assert_eq!(hi.title, "किसी दूसरे खाते से साइन इन करें?");
+    assert!(
+        hi.message.starts_with("इससे पहले हर मामले में Codex से"),
+        "{}",
+        hi.message
+    );
+    assert_eq!(
+        (hi.ok.as_str(), hi.cancel.as_str()),
+        ("साइन आउट करके आगे बढ़ें", "रद्द करें")
+    );
+    let name = "Claude".to_owned();
+    let url = Some("https://ai.firm.example".to_owned());
+    let set = words(
+        &Ask::Endpoint {
+            name: name.clone(),
+            url,
+        },
+        Language::Hi,
+    );
+    assert_eq!(set.title, "Claude के लिए आपकी फ़र्म का पता इस्तेमाल करें?");
+    assert_eq!(
+        set.message,
+        "Claude आपका काम अपनी सामान्य सेवा के बजाय https://ai.firm.example पर भेजेगा।"
+    );
+    let clear = words(&Ask::Endpoint { name, url: None }, Language::Hi);
+    assert_eq!(clear.message, "Claude अपनी सामान्य सेवा पर लौट जाएगा।");
+    assert_eq!(clear.ok, "इस्तेमाल बंद करें");
 }

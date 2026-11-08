@@ -6,23 +6,31 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::HostError;
+use clauseo_protocol::{HostError, Language};
 use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};
 
 use super::listing::{LIST_WAIT, bounded};
 use super::{Chooser, PickAnswer};
 use crate::bridge::Bridge;
+use crate::dialogs::words::{ConfirmWords, Key};
 use crate::dialogs::{BoxFuture, LastPick, Picker};
 use crate::picked::PickedFolder;
 
 #[cfg(test)]
 mod tests;
 
-/// The confirm's words; the message is the folder's full path.
-const TITLE: &str = "Use this folder for the matter?";
-const OK: &str = "Use this folder";
-const CANCEL: &str = "Cancel";
+/// The confirm's words in `language` (`dialogs/words.rs`): the message is the title again, a
+/// blank line, then the folder's full path, [`escaped`].
+pub(crate) fn folder_words(path: &str, language: Language) -> ConfirmWords {
+    let mut words = ConfirmWords::new(
+        language,
+        [Key::FolderTitle, Key::FolderTitle, Key::FolderOk],
+        &[],
+    );
+    words.message = format!("{}\n\n{}", words.title, escaped(path));
+    words
+}
 
 /// Asks the lawyer to confirm the folder `path`: `true` to use it.
 pub(crate) trait FolderConfirm: Send + Sync {
@@ -30,28 +38,36 @@ pub(crate) trait FolderConfirm: Send + Sync {
     fn confirm(&self, path: &str) -> BoxFuture<'_, bool>;
 }
 
-/// The native confirm, drawn by Rust with Cancel first, so focused (`dialogs::confirm`).
-pub(crate) struct NativeFolderConfirm<R: Runtime> {
+/// The native confirm, drawn by Rust with Cancel first, so focused (`dialogs::confirm`), in the
+/// app's language.
+pub(crate) struct NativeFolderConfirm<'a, R: Runtime> {
     app: AppHandle<R>,
+    bridge: &'a Bridge,
 }
 
-impl<R: Runtime> NativeFolderConfirm<R> {
-    /// A confirm drawing on `app`.
-    pub(crate) fn new(app: AppHandle<R>) -> Self {
-        Self { app }
+impl<'a, R: Runtime> NativeFolderConfirm<'a, R> {
+    /// A confirm drawing on `app`, in the language `bridge` reads when it is asked.
+    pub(crate) fn new(app: AppHandle<R>, bridge: &'a Bridge) -> Self {
+        Self { app, bridge }
     }
 }
 
-impl<R: Runtime> FolderConfirm for NativeFolderConfirm<R> {
+impl<R: Runtime> FolderConfirm for NativeFolderConfirm<'_, R> {
     fn confirm(&self, path: &str) -> BoxFuture<'_, bool> {
-        crate::dialogs::confirm(
-            &self.app,
-            MessageLevel::Info,
-            TITLE.to_owned(),
-            format!("{TITLE}\n\n{}", escaped(path)),
-            OK.to_owned(),
-            CANCEL,
-        )
+        let path = path.to_owned();
+        Box::pin(async move {
+            let words = folder_words(&path, self.bridge.language().await);
+            let (title, message, ok) = (words.title, words.message, words.ok);
+            crate::dialogs::confirm(
+                &self.app,
+                MessageLevel::Info,
+                title,
+                message,
+                ok,
+                &words.cancel,
+            )
+            .await
+        })
     }
 }
 

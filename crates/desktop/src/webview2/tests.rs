@@ -1,7 +1,8 @@
 use super::DOWNLOAD_URL;
 use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, buttons, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::{MISSING, TOO_OLD, WIDTH, Words, fits, words};
+use super::words::{MISSING_EN, MISSING_HI, TOO_OLD_EN, TOO_OLD_HI, Words, fits, words};
+use clauseo_protocol::Language;
 use serde_json::Value;
 use std::path::Path;
 
@@ -96,40 +97,64 @@ fn versions_compare_part_by_part() {
     assert_eq!(parse("155.0"), parse("155.0.0.0"));
 }
 
-/// Both sets, for the tests that hold every set to the same thing.
-fn sets() -> [&'static Words; 2] {
-    [&MISSING, &TOO_OLD]
+/// Every set, for the tests that hold every set to the same thing.
+fn sets() -> [&'static Words; 4] {
+    [&MISSING_EN, &TOO_OLD_EN, &MISSING_HI, &TOO_OLD_HI]
+}
+
+/// Each verdict's set in English, then in Hindi.
+fn pairs() -> [(&'static Words, &'static Words); 2] {
+    [(&MISSING_EN, &MISSING_HI), (&TOO_OLD_EN, &TOO_OLD_HI)]
 }
 
 #[test]
 fn each_verdict_picks_its_set() {
+    let instruction = |verdict, language| words(verdict, language).map(|set| set.instruction);
     assert_eq!(
-        words(Verdict::Missing).map(|set| set.instruction),
-        Some(MISSING.instruction)
+        instruction(Verdict::Missing, Language::En),
+        Some(MISSING_EN.instruction)
     );
     assert_eq!(
-        words(Verdict::TooOld).map(|set| set.instruction),
-        Some(TOO_OLD.instruction)
+        instruction(Verdict::TooOld, Language::En),
+        Some(TOO_OLD_EN.instruction)
     );
-    assert!(words(Verdict::Start).is_none());
+    assert!(words(Verdict::Start, Language::En).is_none());
+    assert!(words(Verdict::Start, Language::Hi).is_none());
     // Through the check: a missing runtime and an old one each get their own set.
-    let missing = words(verdict(None, minimum()));
-    let too_old = words(verdict(Some("154.0.3485.54"), minimum()));
+    let missing = words(verdict(None, minimum()), Language::En);
+    let too_old = words(verdict(Some("154.0.3485.54"), minimum()), Language::En);
     assert_eq!(
         missing.map(|set| set.instruction),
-        Some(MISSING.instruction)
+        Some(MISSING_EN.instruction)
     );
     assert_eq!(
         too_old.map(|set| set.instruction),
-        Some(TOO_OLD.instruction)
+        Some(TOO_OLD_EN.instruction)
     );
     assert_eq!(
-        MISSING.instruction,
+        MISSING_EN.instruction,
         "Clauseo needs Microsoft Edge WebView2 to open"
     );
     assert_eq!(
-        TOO_OLD.instruction,
+        TOO_OLD_EN.instruction,
         "Clauseo needs a newer Microsoft Edge WebView2"
+    );
+}
+
+/// The registry's language picks the words: Hindi for Hindi, English for English, per verdict.
+#[test]
+fn the_language_picks_the_words() {
+    let missing_hi = words(Verdict::Missing, Language::Hi).unwrap();
+    assert_eq!(missing_hi.action, Some("WebView2 डाउनलोड करें"));
+    assert_eq!(missing_hi.close, "बंद करें");
+    let too_old_hi = words(Verdict::TooOld, Language::Hi).unwrap();
+    assert_eq!(too_old_hi.instruction, TOO_OLD_HI.instruction);
+    assert_eq!(too_old_hi.action, None);
+    let missing_en = words(Verdict::Missing, Language::En).unwrap();
+    assert_eq!(missing_en.action, Some("Download WebView2"));
+    assert_eq!(
+        message_box_text(missing_hi),
+        format!("{}\n\n{}", MISSING_HI.instruction, MISSING_HI.content)
     );
 }
 
@@ -138,22 +163,82 @@ fn every_string_is_there() {
     for set in sets() {
         for text in set.all() {
             assert_ne!(text.trim(), "");
+            assert_eq!(text.trim(), text);
         }
         assert_eq!(set.title, "Clauseo");
     }
     // Missing has its action; TooOld has none, so one string fewer, and no empty one.
-    assert_eq!(MISSING.all().len(), 6);
-    assert_eq!(TOO_OLD.all().len(), 5);
+    for (en, hi) in pairs() {
+        assert_eq!(en.all().len(), hi.all().len(), "{}", en.instruction);
+    }
+    assert_eq!(MISSING_EN.all().len(), 6);
+    assert_eq!(TOO_OLD_EN.all().len(), 5);
+}
+
+/// Each Hindi line is Devanagari (the title is the app's name in both), with a danda where the
+/// English has a full stop; the English keeps the app's voice.
+#[test]
+fn the_hindi_is_hindi_and_the_english_keeps_the_voice() {
+    for (en_set, hi_set) in pairs() {
+        for (en, hi) in en_set.all().into_iter().zip(hi_set.all()).skip(1) {
+            assert!(
+                hi.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+                "{hi}"
+            );
+            assert_eq!(en.ends_with('.'), hi.ends_with('।'), "{hi}");
+        }
+        for en in en_set.all() {
+            for word in crate::dialogs::words::OFF_VOICE {
+                assert!(!en.to_lowercase().contains(word), "{en}");
+            }
+        }
+    }
+}
+
+/// Every word of the dialog, in both languages, appears verbatim in its review home,
+/// `ui/app/src/review/registry-nd.tsx`: Missing's under ND-16 to ND-21, then `TooOld`'s own
+/// three lines under ND-22 to ND-24. `TooOld`'s title and Close are Missing's (ND-16, ND-21).
+#[test]
+fn the_dialogs_words_are_the_reviewed_copy() {
+    let registry =
+        std::fs::read_to_string(manifest_dir().join("../../ui/app/src/review/registry-nd.tsx"))
+            .unwrap();
+    let ids = (16..).zip(MISSING_EN.all().into_iter().zip(MISSING_HI.all()));
+    let lines = |set: &'static Words| [set.instruction, set.content, set.footer];
+    let too_old = (22..).zip(lines(&TOO_OLD_EN).into_iter().zip(lines(&TOO_OLD_HI)));
+    assert_eq!(
+        (TOO_OLD_EN.title, TOO_OLD_EN.close),
+        (MISSING_EN.title, MISSING_EN.close)
+    );
+    assert_eq!(
+        (TOO_OLD_HI.title, TOO_OLD_HI.close),
+        (MISSING_HI.title, MISSING_HI.close)
+    );
+    for (n, (en, hi)) in ids.chain(too_old) {
+        let id = format!("\"ND-{n}\"");
+        assert!(registry.contains(&id), "no {id}");
+        for text in [en, hi] {
+            assert!(
+                registry.contains(&format!("\"{text}\"")),
+                "{id} lacks {text}"
+            );
+        }
+    }
 }
 
 #[test]
 fn only_missing_offers_the_download() {
     // Missing's button takes the id the link opens (DOWNLOAD_URL); TooOld shows only Close.
     assert_eq!(
-        buttons(&MISSING),
+        buttons(&MISSING_EN),
         [(DOWNLOAD, "Download WebView2"), (CLOSE, "Close")]
     );
-    assert_eq!(buttons(&TOO_OLD), [(CLOSE, "Close")]);
+    assert_eq!(
+        buttons(&MISSING_HI),
+        [(DOWNLOAD, "WebView2 डाउनलोड करें"), (CLOSE, "बंद करें")]
+    );
+    assert_eq!(buttons(&TOO_OLD_EN), [(CLOSE, "Close")]);
+    assert_eq!(buttons(&TOO_OLD_HI), [(CLOSE, "बंद करें")]);
     assert_eq!(next::<()>(&Ok(DOWNLOAD)), Next::Download);
 }
 
@@ -161,7 +246,7 @@ fn only_missing_offers_the_download() {
 fn a_set_without_an_action_shows_only_close() {
     let only_close = Words {
         action: None,
-        ..TOO_OLD
+        ..TOO_OLD_EN
     };
     assert_eq!(buttons(&only_close), [(CLOSE, "Close")]);
     assert!(buttons(&only_close).iter().all(|(id, _)| *id != DOWNLOAD));
@@ -220,14 +305,14 @@ fn the_icon_is_named_only_when_the_exe_holds_it() {
 
 #[test]
 fn the_message_box_says_the_main_line_then_the_body() {
-    let missing = words(Verdict::Missing).unwrap();
+    let missing = words(Verdict::Missing, Language::En).unwrap();
     assert_eq!(
         message_box_text(missing),
         "Clauseo needs Microsoft Edge WebView2 to open\n\n\
          It's free from Microsoft and installs without an administrator."
     );
     assert_eq!(
-        message_box_text(words(Verdict::TooOld).unwrap()),
+        message_box_text(words(Verdict::TooOld, Language::En).unwrap()),
         "Clauseo needs a newer Microsoft Edge WebView2\n\n\
          Windows updates it by itself."
     );
@@ -236,11 +321,16 @@ fn the_message_box_says_the_main_line_then_the_body() {
 #[test]
 fn the_dialog_is_wide_enough_for_the_main_line_and_no_wider_than_a_small_screen() {
     for set in sets() {
-        assert!(fits(set.instruction, WIDTH), "{}", set.instruction);
+        assert!(fits(set.instruction, set.width), "{}", set.instruction);
+        // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
+        assert!(f64::from(set.width) * 1.75 * 1.5 < 1366.0);
     }
-    assert!(!fits(MISSING.instruction, 200));
-    // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
-    assert!(f64::from(WIDTH) * 1.75 * 1.5 < 1366.0);
+    assert!(!fits(MISSING_EN.instruction, 200));
+    // One width per language.
+    for (en, hi) in pairs() {
+        assert_eq!(en.width, MISSING_EN.width);
+        assert_eq!(hi.width, MISSING_HI.width);
+    }
 }
 
 /// The installer's language files, as `customLanguageFiles` names them, each with its NSIS

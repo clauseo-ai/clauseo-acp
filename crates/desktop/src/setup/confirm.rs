@@ -5,8 +5,9 @@
 //! `transport.unauthorized`, as `answer_permission`'s does. One more stands in front of a Codex
 //! sign-in while Codex is signed in with Clauseo's own login (`Ask::SwitchAccount`, since
 //! `codex login` signs that account out first); its decline runs nothing and answers `Done`.
-//! The words are fixed text and the values the backend fills in (the agent's name and the
-//! endpoint's address, checked before the confirm as the settings crate checks it,
+//! The words are fixed text (`dialogs/words.rs`, in the app's language as
+//! `ui_language::current` last saw it) and the values the backend fills in (the agent's name
+//! and the endpoint's address, checked before the confirm as the settings crate checks it,
 //! `backend.rs`'s `checked_endpoint`); Cancel is the default button.
 //!
 //! A confirm has no timeout: it waits until the lawyer answers. Cancel, Escape, closing the
@@ -15,9 +16,11 @@
 //! nothing. A command dropped while its confirm is up (its window gone) runs nothing either:
 //! the answer reaches no one, and nothing waits on it.
 
+use clauseo_protocol::Language;
 use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};
 
+use crate::dialogs::words::{ConfirmWords, Key};
 use crate::dialogs::{BoxFuture, confirm};
 
 /// What a setup confirm asks.
@@ -43,31 +46,26 @@ pub(crate) trait SetupConfirm: Send + Sync {
     fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool>;
 }
 
-/// The words of `ask`: title, message and the accepting button.
-pub(crate) fn words(ask: &Ask) -> (String, String, String) {
+/// The words of `ask` in `language`.
+pub(crate) fn words(ask: &Ask, language: Language) -> ConfirmWords {
     match ask {
         Ask::Endpoint {
             name,
             url: Some(url),
-        } => (
-            format!("Use your firm's endpoint for {name}?"),
-            format!("{name} will send your work to {url} instead of its usual service."),
-            "Use this endpoint".to_owned(),
+        } => ConfirmWords::new(
+            language,
+            [Key::EndpointTitle, Key::EndpointMessage, Key::EndpointOk],
+            &[("name", name), ("url", url)],
         ),
-        Ask::Endpoint { name, url: None } => (
-            format!("Stop using your firm's endpoint for {name}?"),
-            format!("{name} will go back to its usual service."),
-            "Stop using it".to_owned(),
+        Ask::Endpoint { name, url: None } => ConfirmWords::new(
+            language,
+            [Key::ClearTitle, Key::ClearMessage, Key::ClearOk],
+            &[("name", name)],
         ),
-        // The copy review's words (provisional). English only: the setup confirms have no Hindi
-        // path yet (`Ask::Install`'s neither); the review's Hindi waits in its words file.
-        Ask::SwitchAccount { name } => (
-            "Sign in with a different account?".to_owned(),
-            format!(
-                "This signs you out of {name} first, in every matter. Then you can sign in with \
-                 the account you want."
-            ),
-            "Sign out and continue".to_owned(),
+        Ask::SwitchAccount { name } => ConfirmWords::new(
+            language,
+            [Key::SwitchTitle, Key::SwitchMessage, Key::SwitchOk],
+            &[("name", name)],
         ),
     }
 }
@@ -90,7 +88,15 @@ impl<R: Runtime> SetupConfirm for NativeSetupConfirm<R> {
         if let Some(answer) = crate::e2e::confirm_always() {
             return Box::pin(async move { answer });
         }
-        let (title, message, ok) = words(&ask);
-        confirm(&self.app, MessageLevel::Info, title, message, ok, "Cancel")
+        let words = words(&ask, crate::ui_language::current());
+        let (title, message, ok) = (words.title, words.message, words.ok);
+        confirm(
+            &self.app,
+            MessageLevel::Info,
+            title,
+            message,
+            ok,
+            &words.cancel,
+        )
     }
 }

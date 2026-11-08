@@ -26,7 +26,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 use super::DOWNLOAD_URL;
 use super::dialog::{APP_ICON, CLOSE, Next, buttons, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Version, verdict};
-use super::words::{WIDTH, Words, words};
+use super::words::{Words, words};
 
 /// Reads the runtime's version and, when it is missing or too old, shows the dialog and acts on
 /// its answer. `true` when the app must not start.
@@ -36,8 +36,10 @@ pub(super) fn check() -> bool {
     let Some(minimum) = Version::parse(MINIMUM) else {
         return false;
     };
+    // The language the app last wrote; English on a first run or an unreadable value.
+    let language = crate::ui_language::saved().unwrap_or(clauseo_protocol::Language::En);
     // No words when the runtime starts: no dialog, and the app runs.
-    let Some(words) = words(verdict(installed.as_deref(), minimum)) else {
+    let Some(words) = words(verdict(installed.as_deref(), minimum), language) else {
         return false;
     };
     match next(&show(words)) {
@@ -94,7 +96,7 @@ fn show(words: &Words) -> windows::core::Result<i32> {
         hInstance: module,
         Anonymous1: TASKDIALOGCONFIG_0 { pszMainIcon: icon },
         // Wide enough for the main instruction on one line (words.rs).
-        cxWidth: WIDTH,
+        cxWidth: words.width,
         dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
         pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
