@@ -40,6 +40,7 @@ use crate::{Error, SetAside};
 
 mod held;
 
+pub(super) use held::Finish;
 use held::{Owed, stuck};
 
 /// Each registry's own number, so a reservation another set of launchers handed out is told
@@ -151,20 +152,6 @@ pub(super) struct Registry<S: LaunchSteps> {
     /// The sandbox folder's lock, held while anything (a reservation, a walk, a release thread)
     /// can still use the registry. `None` only once a test let go of it as a crash would.
     data_lock: Mutex<Option<File>>,
-}
-
-/// Frees claim `id`'s matter when dropped: at the end of an undo or a session's end, and on a
-/// panic in one of their steps too.
-pub(super) struct Finish<'a, S: LaunchSteps> {
-    pub(super) registry: &'a Registry<S>,
-    pub(super) matter: &'a str,
-    pub(super) id: u64,
-}
-
-impl<S: LaunchSteps> Drop for Finish<'_, S> {
-    fn drop(&mut self) {
-        self.registry.finish(self.matter, self.id);
-    }
 }
 
 impl<S: LaunchSteps> Registry<S> {

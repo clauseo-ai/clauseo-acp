@@ -1,6 +1,7 @@
 //! What holds a matter or a pool user past its session: a step that never returned (the matter
 //! stuck until Clauseo restarts) and an `EndRun` that failed (the pool user and its slot held
-//! back until a later one succeeds).
+//! back until a later one succeeds); and the guard that frees a matter once nothing more runs
+//! for it ([`Finish`]).
 
 use std::sync::PoisonError;
 use std::time::Duration;
@@ -10,6 +11,20 @@ use crate::Error;
 use crate::windows::launch::prepare::{PREPARE_BOUND, PREPARE_STALL, STUCK_GRACE};
 use crate::windows::launch::steps::{LaunchSteps, Slot};
 use crate::windows::pool::{PoolFullCause, PoolUser};
+
+/// Frees claim `id`'s matter when dropped: at the end of an undo or a session's end, and on a
+/// panic in one of their steps too.
+pub(in crate::windows::launch) struct Finish<'a, S: LaunchSteps> {
+    pub(in crate::windows::launch) registry: &'a Registry<S>,
+    pub(in crate::windows::launch) matter: &'a str,
+    pub(in crate::windows::launch) id: u64,
+}
+
+impl<S: LaunchSteps> Drop for Finish<'_, S> {
+    fn drop(&mut self) {
+        self.registry.finish(self.matter, self.id);
+    }
+}
 
 /// A run's group whose `EndRun` failed: tried again at each `reserve` of its pool user, which is
 /// refused meanwhile; its slot stays claimed until it succeeds.
