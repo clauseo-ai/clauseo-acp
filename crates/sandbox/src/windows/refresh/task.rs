@@ -11,7 +11,7 @@
 //!   else, on demand
 //!   (the refresh also at the record owner's logon; the WSL deny task on Windows Installer's
 //!   events, `rules::Trigger`, with no value queries), needs no network, stops after its limit
-//!   (5 minutes, 2 minutes, 2 minutes, 5 minutes), and never runs twice at once. Its descriptor
+//!   (5 minutes, 2 minutes, 6 minutes, 5 minutes), and never runs twice at once. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner

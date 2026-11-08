@@ -25,10 +25,12 @@ use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKno
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::{Handle, read_capped};
+use super::wsl_phase::Installer;
+use super::wsl_phase::windows_watch::{self, Watch};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
     SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded,
-    refresh, staging, walk, wsl_deny, wsl_upgrade,
+    WslWatch, refresh, staging, walk, wsl_deny, wsl_upgrade,
 };
 use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
@@ -82,6 +84,8 @@ pub struct WindowsRefresher {
     held: Option<Handle>,
     /// The set-up lock, held through the run.
     lock: Option<Held>,
+    /// `--wsl-deny`'s change notification, opened at its first arm.
+    watch: Option<Watch>,
 }
 
 impl Default for WindowsRefresher {
@@ -97,6 +101,7 @@ impl WindowsRefresher {
             sandbox: sandbox_dir(),
             held: None,
             lock: None,
+            watch: None,
         }
     }
 
@@ -312,6 +317,47 @@ impl Refresher for WindowsRefresher {
         let applied = wsl::apply(&mut wsl::WindowsWsl::writer(RECORD_KEY), &group)
             .map_err(|error| error.to_string())?;
         applied.outcome()
+    }
+}
+
+impl WslWatch for WindowsRefresher {
+    fn now(&mut self) -> std::time::Duration {
+        windows_watch::now()
+    }
+
+    fn watch(&mut self) -> Result<(), Failed> {
+        let watch = match &mut self.watch {
+            Some(watch) => watch,
+            None => self.watch.insert(Watch::open()?),
+        };
+        let armed = watch.arm();
+        if armed.is_err() {
+            // Unwatched from here on: the waits are timed alone.
+            self.watch = None;
+        }
+        armed
+    }
+
+    fn wait_change(&mut self, time: std::time::Duration) -> bool {
+        if let Some(watch) = &mut self.watch {
+            match watch.wait(time) {
+                Ok(woke) => return woke,
+                Err(why) => {
+                    // Unwatched from here on, as an arm that fails: the waits are timed alone.
+                    event_log(
+                        true,
+                        &format!("WSL's AppID keys are no longer watched: {why}"),
+                    );
+                    self.watch = None;
+                }
+            }
+        }
+        self.pause(time);
+        false
+    }
+
+    fn installer(&mut self) -> Installer {
+        windows_watch::installer()
     }
 }
 

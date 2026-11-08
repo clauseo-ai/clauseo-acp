@@ -19,8 +19,10 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 /// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it re-applies WSL's deny and does
 /// nothing else.
 pub const WSL_DENY_ARG: &str = "--wsl-deny";
-/// The WSL deny task's execution limit: 2 minutes, for its phase, which waits 10 s for the lock.
-pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT2M";
+/// The WSL deny task's execution limit: 6 minutes. Its run holds while a Windows Installer
+/// install is in progress and ends by its own budget, 30 s inside this
+/// (`wsl_phase/schedule.rs`).
+pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT6M";
 /// The WSL upgrade task's one argument (`wsl_phase::wsl_upgrade`): it installs WSL's pending
 /// upgrade when one is owed and no pool user has a process, then re-applies WSL's deny.
 pub(super) const WSL_UPGRADE_ARG: &str = "--wsl-upgrade";

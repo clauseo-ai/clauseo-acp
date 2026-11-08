@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::fake_watch::FakeWatch;
 use super::test_signer::{TestKey, comment, image};
 use super::*;
 
@@ -52,6 +53,8 @@ pub(super) struct Fake {
     pub(super) wsl_passes: Vec<Result<Option<String>, Failed>>,
     /// The waits `pause` was asked for.
     pub(super) paused: Vec<std::time::Duration>,
+    /// The clock, `AppID` keys, notification and installer `--wsl-deny`'s schedule sees.
+    pub(super) watch: FakeWatch,
     /// What `upgrade_wsl` gives.
     pub(super) upgrade: WslUpgraded,
     /// What `pool_busy` gives.
@@ -101,6 +104,7 @@ impl Fake {
             wsl: Ok(None),
             wsl_passes: Vec::new(),
             paused: Vec::new(),
+            watch: FakeWatch::default(),
             upgrade: WslUpgraded::NotPending,
             pool_busy: Ok(false),
         }
@@ -271,7 +275,9 @@ impl Refresher for Fake {
     }
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
         self.calls.push("reapply_wsl");
-        if self.wsl_passes.is_empty() {
+        if let Some(outcome) = self.watch.reapply() {
+            outcome
+        } else if self.wsl_passes.is_empty() {
             self.wsl.clone()
         } else {
             self.wsl_passes.remove(0)
@@ -280,6 +286,7 @@ impl Refresher for Fake {
     fn pause(&mut self, time: std::time::Duration) {
         self.calls.push("pause");
         self.paused.push(time);
+        self.watch.advance(self.watch.clock.saturating_add(time));
     }
 }
 

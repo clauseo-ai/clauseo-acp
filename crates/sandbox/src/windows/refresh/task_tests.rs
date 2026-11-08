@@ -32,11 +32,11 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     let wsl = SystemTask::WslDeny;
     assert_eq!(
         (wsl.name(), wsl.argument(), wsl.execution_limit()),
-        ("SandboxWslDeny", "--wsl-deny", "PT2M")
+        ("SandboxWslDeny", "--wsl-deny", "PT6M")
     );
     assert_eq!(
         (WSL_DENY_ARG, WSL_DENY_EXECUTION_LIMIT),
-        ("--wsl-deny", "PT2M")
+        ("--wsl-deny", "PT6M")
     );
     // One fixed argument each, with no value and nothing to quote: the action passes nothing
     // a caller chose.

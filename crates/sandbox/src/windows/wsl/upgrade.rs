@@ -31,7 +31,7 @@ use std::time::Duration;
 use super::seam::WslRead;
 
 /// How long the run waits for msiexec: an upgrade takes tens of seconds; the task's limit is 5
-/// minutes (`rules::WSL_DENY_EXECUTION_LIMIT`), and the deny is re-applied after the wait.
+/// minutes (`rules::WSL_UPGRADE_EXECUTION_LIMIT`), and the deny is re-applied after the wait.
 /// The launch's wait for the upgrade task's run follows it (`clean_close::wsl_heal`).
 pub const MSI_WAIT: Duration = Duration::from_secs(240);
 
