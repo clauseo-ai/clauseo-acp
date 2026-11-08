@@ -29,7 +29,7 @@ use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFil
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 24] = [
+pub(crate) const COMMANDS: [&str; 25] = [
     "dispatch",
     "query",
     "open_stream",
@@ -54,6 +54,7 @@ pub(crate) const COMMANDS: [&str; 24] = [
     "setup",
     "quit_app",
     "page_marks",
+    "repair_install",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -110,10 +111,23 @@ pub(crate) struct DisplayInfo {
     /// `…/releases/tag/v{version}`, a test build `…/releases/tag/test-v{version}`, and a dry build
     /// shows no button.
     pub(crate) release_mode: ReleaseMode,
+    /// Whether the Safe workspace's card may offer "Download and run the installer again":
+    /// Windows, a per-user install, a release or test build with its updater key
+    /// (`update/repair.rs`). False in a window with no repair state.
+    pub(crate) repair_available: bool,
+    /// What the window is told about the repair: this start follows its installer, or its
+    /// installer did not start and the window was built again. None otherwise.
+    pub(crate) repair: Option<crate::update::repair::RepairNote>,
 }
 
 /// The release mode of this build, as release.yml sets `CLAUSEO_RELEASE_MODE` for its cargo build.
 const RELEASE_MODE_ENV: Option<&str> = option_env!("CLAUSEO_RELEASE_MODE");
+
+/// This build's release mode, compiled in: [`release_mode`] of `CLAUSEO_RELEASE_MODE` and the
+/// `e2e` feature. The repair's release tag comes from it (`update/repair/plan.rs`).
+pub(crate) fn build_release_mode() -> ReleaseMode {
+    release_mode(RELEASE_MODE_ENV, cfg!(feature = "e2e"))
+}
 
 /// What kind of build this is: a tagged release, a test build (`test-v*`), or a dry run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -282,16 +296,47 @@ pub(crate) async fn answer_permission<R: Runtime>(
 /// release mode.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
-pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<DisplayInfo, HostError> {
+pub(crate) async fn display_info<R: Runtime>(app: AppHandle<R>) -> Result<DisplayInfo, HostError> {
     crate::ipc::timed("display_info", async {
+        use tauri::Manager as _;
+        let repair = app.try_state::<std::sync::Arc<crate::update::repair::RepairState>>();
+        let repair_available = match &repair {
+            Some(state) => {
+                let update = update_now(&app).await;
+                let (state, probe) = (std::sync::Arc::clone(state.inner()), app.clone());
+                // The install kind reads the registry: off the async workers, once.
+                tauri::async_runtime::spawn_blocking(move || {
+                    state.available(&probe, update.as_ref())
+                })
+                .await
+                .unwrap_or(false)
+            }
+            None => false,
+        };
         Ok(DisplayInfo {
             platform: Platform::CURRENT,
             release_date: RELEASE_DATE,
             test_build: cfg!(feature = "e2e"),
-            release_mode: release_mode(RELEASE_MODE_ENV, cfg!(feature = "e2e")),
+            release_mode: build_release_mode(),
+            repair_available,
+            repair: repair.and_then(|state| state.note()),
         })
     })
     .await
+}
+
+/// The updater's state, when the host has already started: never waits for its start, so
+/// `display_info` answers at once. The window reads it again once the host answers (the
+/// protection store asks after its first protection read).
+async fn update_now<R: Runtime>(app: &AppHandle<R>) -> Option<clauseo_protocol::UpdateState> {
+    use clauseo_protocol::QueryResult;
+    use tauri::Manager as _;
+    let bridge = app.try_state::<Bridge>()?;
+    bridge.cell().started()?;
+    match bridge.query(crate::MAIN_WINDOW, HostQuery::GetUpdate).await {
+        Ok(QueryResult::Update(view)) => Some(view.state),
+        _ => None,
+    }
 }
 
 /// Opens an https, http or mailto `url` in the default browser or mail app, after a native
@@ -406,6 +451,29 @@ pub(crate) async fn quit_app<R: Runtime>(app: AppHandle<R>) -> Result<(), HostEr
     crate::ipc::timed("quit_app", async {
         app.exit(0);
         Ok(())
+    })
+    .await
+}
+
+/// The Safe workspace card's "Download and run the installer again" (`update/repair.rs`):
+/// downloads this version's per-user installer for this architecture, checks its signature as
+/// the updater does, destroys the windows, starts it with `/CLAUSEO_REPAIR` and quits. `steps`
+/// hears `downloading`, then `launching`. Granted to `main` alone, and admitted from `main`
+/// alone (`bridge/admit.rs`): `command.invalid` from any other window. `repair.not_eligible`
+/// where it can't run (not a per-user Windows install, no release or key, an update
+/// installing), `command.conflict` while one runs, `repair.download_failed`,
+/// `repair.verify_failed` and `repair.launch_failed` as it fails. Once the installer started,
+/// the window is gone and nothing answers.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn repair_install<R: Runtime>(
+    webview: Webview<R>,
+    bridge: State<'_, Bridge>,
+    steps: Channel<crate::update::repair::RepairStep>,
+) -> Result<(), HostError> {
+    crate::ipc::timed("repair_install", async {
+        crate::bridge::admit_repair(webview.label())?;
+        crate::update::repair::start(&webview, &bridge, steps).await
     })
     .await
 }

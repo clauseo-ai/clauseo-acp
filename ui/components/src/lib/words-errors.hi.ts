@@ -147,6 +147,15 @@ export const HI = {
     "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
   "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
+  // provisional (installer track, Rohan's batch review): the Safe workspace card's repair
+  "Clauseo can't download the installer here. Choose Get the installer to download it from the release page.":
+    "Clauseo यहाँ इंस्टॉलर डाउनलोड नहीं कर सकता। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
+  "Clauseo couldn't download the installer. Check your internet connection and try again, or choose Get the installer.":
+    "Clauseo इंस्टॉलर डाउनलोड नहीं कर सका। अपना इंटरनेट कनेक्शन जाँचें और फिर से प्रयास करें, या इंस्टॉलर पाएँ चुनें।",
+  "The downloaded installer didn't pass Clauseo's check, so it wasn't run. Choose Get the installer to download it from the release page.":
+    "डाउनलोड किए गए इंस्टॉलर ने Clauseo की जाँच पास नहीं की, इसलिए उसे नहीं चलाया गया। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
+  "Clauseo couldn't start the installer. Choose Get the installer to download it from the release page.":
+    "Clauseo इंस्टॉलर शुरू नहीं कर सका। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

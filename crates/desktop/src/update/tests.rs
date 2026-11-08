@@ -35,7 +35,7 @@ use crate::test_support::block_on;
 
 mod arm64;
 mod download_binding;
-mod file_binding;
+pub(super) mod file_binding;
 mod plugin;
 mod test_key;
 mod watchdog;

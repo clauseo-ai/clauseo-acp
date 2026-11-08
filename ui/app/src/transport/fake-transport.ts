@@ -574,6 +574,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       release_date: this.host.releaseDate ?? null,
       test_build: this.host.testBuild ?? false,
       release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
+      repair_available: false,
+      repair: null,
     };
   }
 

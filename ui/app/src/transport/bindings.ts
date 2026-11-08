@@ -177,6 +177,18 @@ export const commands = {
 	 *  a run only. Always answers ok; carries only milliseconds.
 	 */
 	pageMarks: (marks: PageMarks) => typedError<null, HostError>(__TAURI_INVOKE("page_marks", { marks })),
+	/**
+	 *  The Safe workspace card's "Download and run the installer again" (`update/repair.rs`):
+	 *  downloads this version's per-user installer for this architecture, checks its signature as
+	 *  the updater does, destroys the windows, starts it with `/CLAUSEO_REPAIR` and quits. `steps`
+	 *  hears `downloading`, then `launching`. Granted to `main` alone, and admitted from `main`
+	 *  alone (`bridge/admit.rs`): `command.invalid` from any other window. `repair.not_eligible`
+	 *  where it can't run (not a per-user Windows install, no release or key, an update
+	 *  installing), `command.conflict` while one runs, `repair.download_failed`,
+	 *  `repair.verify_failed` and `repair.launch_failed` as it fails. Once the installer started,
+	 *  the window is gone and nothing answers.
+	 */
+	repairInstall: (steps: Channel<RepairStep>) => typedError<null, HostError>(__TAURI_INVOKE("repair_install", { steps })),
 };
 
 /* Constants */
@@ -1262,6 +1274,17 @@ export type DisplayInfo = {
 	 *  shows no button.
 	 */
 	release_mode: ReleaseMode,
+	/**
+	 *  Whether the Safe workspace's card may offer "Download and run the installer again":
+	 *  Windows, a per-user install, a release or test build with its updater key
+	 *  (`update/repair.rs`). False in a window with no repair state.
+	 */
+	repair_available: boolean,
+	/**
+	 *  What the window is told about the repair: this start follows its installer, or its
+	 *  installer did not start and the window was built again. None otherwise.
+	 */
+	repair: RepairNote | null,
 };
 
 /**
@@ -1704,6 +1727,14 @@ export type ErrorCode =
 "blocklist.allow_not_saved" | 
 /** The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. */
 "blocklist.revoke_not_saved" | 
+/** Clauseo can't download and run its installer here: it runs only for a per-user install on Windows, in a build with a release to download from, and not while an update installs. */
+"repair.not_eligible" | 
+/** Clauseo couldn't download this version's installer or its signature, or couldn't save it; trying again can succeed. */
+"repair.download_failed" | 
+/** The downloaded installer's signature didn't verify with Clauseo's updater key, or named another file or version, so it was deleted and not run. */
+"repair.verify_failed" | 
+/** Clauseo couldn't start the verified installer (Windows or security software refused it), so it was deleted and Clauseo stayed open. */
+"repair.launch_failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -4502,6 +4533,24 @@ export type RenameSource =
 "placeholder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  What the window is told about the repair, through `display_info`. */
+export type RepairNote = 
+/**
+ *  This start follows the installer a repair ran: a fresh `repair-pending` marker for this
+ *  version. While the admin copy is still missing the card says the installer didn't
+ *  finish; with the copy there it says nothing (the installer's `--adopt` ran the set-up).
+ */
+"returned" | 
+/**  The installer did not start, and the main window was built again. */
+"launch_failed";
+
+/**  What the window hears while the repair runs, on the command's channel. */
+export type RepairStep = 
+/**  Downloading the installer and checking it. */
+"downloading" | 
+/**  Checked: the installer starts next, and Windows will ask for permission. */
+"launching";
 
 /**  What a restore would do now, for `PreviewRestore`. Each list is sorted by path. */
 export type RestorePreview = {

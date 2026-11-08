@@ -38,6 +38,7 @@ pub(crate) mod install;
 mod install_kind;
 #[cfg(any(test, not(target_os = "linux")))]
 mod plugin;
+pub(crate) mod repair;
 #[cfg(test)]
 mod tests;
 
@@ -55,13 +56,13 @@ pub(crate) fn with_updater<R: Runtime>(
     locations: &Locations,
 ) -> HostConfig {
     let config = config.with_app_version(app.package_info().version.to_string());
+    // Last runs' repair attempts, before the host's own clean-up of updates/ (repair.rs).
+    repair::sweep_at_start(&locations.updates_dir());
     #[cfg(not(target_os = "linux"))]
     if let Some(updater) = choice::updater(app, locations.updates_dir()) {
         return config.with_updater(updater);
     }
     // Linux gives the host no updater, so nothing is saved under updates/.
-    #[cfg(target_os = "linux")]
-    let _ = locations;
     config
 }
 

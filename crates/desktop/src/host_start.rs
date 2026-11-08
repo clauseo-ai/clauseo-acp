@@ -61,6 +61,11 @@ impl HostCell {
         cell
     }
 
+    /// The host, if its start has already finished and worked; never waits.
+    pub(crate) fn started(&self) -> Option<&HostHandle> {
+        self.started.get().and_then(|started| started.as_ref().ok())
+    }
+
     /// The host, once its start finished; the start's error when it failed.
     pub(crate) async fn host(&self) -> Result<&HostHandle, HostError> {
         // Canceled (the start was dropped) leaves `started` unset: `internal` below.

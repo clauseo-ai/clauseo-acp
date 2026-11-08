@@ -23,13 +23,13 @@ const VERSION: &str = "0.4.1";
 const X64: &str = "Clauseo_0.4.1_x64-setup.exe";
 
 /// A minisign key made for one test.
-pub(super) struct TestKey {
+pub(in crate::update) struct TestKey {
     pair: Ed25519KeyPair,
     id: [u8; 8],
 }
 
 impl TestKey {
-    pub(super) fn new() -> TestKey {
+    pub(in crate::update) fn new() -> TestKey {
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
         TestKey {
             pair: Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap(),
@@ -38,7 +38,7 @@ impl TestKey {
     }
 
     /// The public key in Tauri's form: base64 of the minisign `.pub` text.
-    pub(super) fn public(&self) -> String {
+    pub(in crate::update) fn public(&self) -> String {
         let mut line = b"Ed".to_vec();
         line.extend_from_slice(&self.id);
         line.extend_from_slice(self.pair.public_key().as_ref());
@@ -68,13 +68,13 @@ impl TestKey {
     }
 
     /// [`Self::sig_text`] in Tauri's form: base64 of it.
-    pub(super) fn sign(&self, data: &[u8], comment: &str) -> String {
+    pub(in crate::update) fn sign(&self, data: &[u8], comment: &str) -> String {
         STANDARD.encode(self.sig_text(data, comment))
     }
 }
 
 /// The trusted comment `tauri signer sign --app-version` writes.
-pub(super) fn comment(file: &str, version: &str) -> String {
+pub(in crate::update) fn comment(file: &str, version: &str) -> String {
     format!("timestamp:1762500000\tfile:{file}\tversion:{version}")
 }
 

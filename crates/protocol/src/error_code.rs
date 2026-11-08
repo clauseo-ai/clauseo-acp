@@ -261,6 +261,18 @@ error_codes! {
     BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
         site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
         saved allows, so the site may be allowed again after a restart.";
+    RepairNotEligible = "repair.not_eligible", retryable: false, meaning: "Clauseo can't \
+        download and run its installer here: it runs only for a per-user install on Windows, \
+        in a build with a release to download from, and not while an update installs.";
+    RepairDownloadFailed = "repair.download_failed", retryable: true, meaning: "Clauseo \
+        couldn't download this version's installer or its signature, or couldn't save it; \
+        trying again can succeed.";
+    RepairVerifyFailed = "repair.verify_failed", retryable: false, meaning: "The downloaded \
+        installer's signature didn't verify with Clauseo's updater key, or named another file \
+        or version, so it was deleted and not run.";
+    RepairLaunchFailed = "repair.launch_failed", retryable: false, meaning: "Clauseo couldn't \
+        start the verified installer (Windows or security software refused it), so it was \
+        deleted and Clauseo stayed open.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

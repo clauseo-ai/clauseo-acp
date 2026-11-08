@@ -485,4 +485,32 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (353, 0x425a_63f5_b282_5767),
         (254, 0x3ee9_b135_98a3_b977),
     ),
+    (
+        "added/turn_failed-RepairNotEligible",
+        include_bytes!("added/turn_failed-RepairNotEligible.jsonl"),
+        include_bytes!("added/turn_failed-RepairNotEligible.msgpack"),
+        (363, 0x1257_293e_d5e1_1f77),
+        (265, 0xfc6c_5799_9128_dcb8),
+    ),
+    (
+        "added/turn_failed-RepairDownloadFailed",
+        include_bytes!("added/turn_failed-RepairDownloadFailed.jsonl"),
+        include_bytes!("added/turn_failed-RepairDownloadFailed.msgpack"),
+        (353, 0xede7_b155_f727_999b),
+        (255, 0x6e08_7c02_51cd_dad8),
+    ),
+    (
+        "added/turn_failed-RepairVerifyFailed",
+        include_bytes!("added/turn_failed-RepairVerifyFailed.jsonl"),
+        include_bytes!("added/turn_failed-RepairVerifyFailed.msgpack"),
+        (366, 0x297d_982c_acfb_5b3a),
+        (268, 0x8974_ef9d_87c8_3dec),
+    ),
+    (
+        "added/turn_failed-RepairLaunchFailed",
+        include_bytes!("added/turn_failed-RepairLaunchFailed.jsonl"),
+        include_bytes!("added/turn_failed-RepairLaunchFailed.msgpack"),
+        (366, 0x8940_0cad_74b0_716d),
+        (268, 0x209b_9fdc_7b65_1599),
+    ),
 ];

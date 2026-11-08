@@ -166,7 +166,7 @@ use profile::{DesktopProfile, with_profile};
 use quit::{Exit, SetupStop};
 use rust_only::PluginRustOnly;
 use tauri::webview::PageLoadEvent;
-use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 pub(crate) use window_events::{follows_limits, on_window_event, raise_main_window};
 
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
@@ -216,10 +216,13 @@ pub fn run() -> tauri::Result<()> {
     #[cfg(feature = "e2e")]
     e2e::mark_start();
     let context = context::<tauri::Wry>();
-    let builder = tauri::Builder::default().manage(host_log);
-    // Where the quit stands (quit.rs), read by the run loop and the second start's callback.
+    // Where the quit stands (quit.rs), read by the run loop, the second start's callback and the
+    // repair, which launches nothing once a quit started (update/repair).
     let exit = Arc::new(Exit::default());
     let launch_exit = Arc::clone(&exit);
+    let builder = tauri::Builder::default()
+        .manage(host_log)
+        .manage(Arc::clone(&exit));
     // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
     // menu would be a bar on the undecorated window.
     #[cfg(target_os = "macos")]
@@ -283,6 +286,7 @@ pub fn run() -> tauri::Result<()> {
             commands::setup,
             commands::quit_app,
             commands::page_marks,
+            commands::repair_install,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -307,6 +311,7 @@ pub fn run() -> tauri::Result<()> {
             let locations = Locations::resolve_without_documents(&SystemDirs, &SystemEnv)?;
             // Managed before the window opens: a command reaching unmanaged state fails.
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
+            update::repair::manage_at_start(app, &locations);
             app.manage(open::OpenGates::default());
             let (cell, start) = HostCell::new();
             // The setup command waits on this cell until the setup thread fills it
@@ -333,29 +338,38 @@ pub fn run() -> tauri::Result<()> {
             Ok(())
         })
         .build(context)?;
-    app.run(move |app, event| match event {
+    app.run(move |app, event| on_run_event(app, event, &exit));
+    Ok(())
+}
+
+/// The app's run events: the quit (`ExitRequested`, then `Exit`), and the start-up's marks.
+fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: RunEvent, exit: &Arc<Exit>) {
+    match event {
+        // The last window closing while the repair hands over is held (update/repair.rs).
+        RunEvent::ExitRequested { api, code, .. } if update::repair::holds_exit(code) => {
+            api.prevent_exit();
+        }
         RunEvent::ExitRequested { api, code, .. } if !exit.stopped.load(Ordering::Acquire) => {
             api.prevent_exit();
             // One stopper: a later request (another close, the stopper's own exit racing a
             // second one) only waits for it. The first saves the window state here, on the main
             // thread, then hides the windows, then starts the stopper (quit.rs).
             let _first = quit::on_exit_requested(
-                &exit,
+                exit,
                 || {
                     // The e2e build keeps the real config folder untouched.
                     #[cfg(not(feature = "e2e"))]
                     window_size::save_state(app);
                 },
                 || quit::hide_windows(app),
-                || stop_host_then_exit(app, Arc::clone(&exit), code.unwrap_or(0)),
+                || stop_host_then_exit(app, Arc::clone(exit), code.unwrap_or(0)),
             );
         }
         RunEvent::Exit => {
-            let _waited = quit::stop_on_exit(app, &exit);
+            let _waited = quit::stop_on_exit(app, exit);
         }
         other => startup::on_run_event(&other),
-    });
-    Ok(())
+    }
 }
 
 /// Starts the session host on its own thread (`Host::start` blocks until the store opens),
@@ -532,11 +546,11 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
 /// here, and give it the page's frame (`window_frame.rs`) and size (`window_size.rs`). The https
 /// scheme is fixed before the first release: changing it moves web storage. The title is
 /// `productName` from `tauri.conf.json`.
-fn open_main_window(app: &App) -> tauri::Result<()> {
+pub(crate) fn open_main_window<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<()> {
     let title = app.package_info().name.clone();
     // The e2e and marks builds open at WINDOW_SIZE whatever the work area; the release build
     // fits it to the primary monitor.
-    let fitted = window_size::fitted(window_size::primary_work_area(app.handle()));
+    let fitted = window_size::fitted(window_size::primary_work_area(app.app_handle()));
     let (width, height) = if cfg!(feature = "e2e") {
         window_size::WINDOW_SIZE
     } else {

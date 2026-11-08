@@ -97,6 +97,22 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::RepairNotEligible,
+            "the install is not a per-user Windows install",
+        ),
+        failed(
+            ErrorCode::RepairDownloadFailed,
+            "the installer download timed out",
+        ),
+        failed(
+            ErrorCode::RepairVerifyFailed,
+            "the installer's signature names another version",
+        ),
+        failed(
+            ErrorCode::RepairLaunchFailed,
+            "Windows refused to start the verified installer",
+        ),
     ]
 }
 

@@ -86,6 +86,10 @@ export type ErrorCode =
   | "blocklist.notice_expired"
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
+  | "repair.not_eligible"
+  | "repair.download_failed"
+  | "repair.verify_failed"
+  | "repair.launch_failed"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -207,6 +211,16 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // Clauseo closes, because the host couldn't save that (decision record 0053)
   "blocklist.revoke_not_saved":
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
+  // provisional (installer track, Rohan's batch review): the Safe workspace card's "Download and run
+  // the installer again" (decision record 0037)
+  "repair.not_eligible":
+    "Clauseo can't download the installer here. Choose Get the installer to download it from the release page.",
+  "repair.download_failed":
+    "Clauseo couldn't download the installer. Check your internet connection and try again, or choose Get the installer.",
+  "repair.verify_failed":
+    "The downloaded installer didn't pass Clauseo's check, so it wasn't run. Choose Get the installer to download it from the release page.",
+  "repair.launch_failed":
+    "Clauseo couldn't start the installer. Choose Get the installer to download it from the release page.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

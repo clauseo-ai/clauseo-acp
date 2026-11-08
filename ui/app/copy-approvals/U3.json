@@ -859,5 +859,49 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
+  },
+  "U3-err-repair.not_eligible": {
+    "en": "Clauseo can't download the installer here. Choose Get the installer to download it from the release page.",
+    "hi": "Clauseo यहाँ इंस्टॉलर डाउनलोड नहीं कर सकता। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The Safe workspace card's \"Download and run the installer again\" when Clauseo can't run the installer here (ADR 0037)"
+  },
+  "U3-err-repair.download_failed": {
+    "en": "Clauseo couldn't download the installer. Check your internet connection and try again, or choose Get the installer.",
+    "hi": "Clauseo इंस्टॉलर डाउनलोड नहीं कर सका। अपना इंटरनेट कनेक्शन जाँचें और फिर से प्रयास करें, या इंस्टॉलर पाएँ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The Safe workspace card's \"Download and run the installer again\" when the installer couldn't be downloaded (ADR 0037)"
+  },
+  "U3-err-repair.verify_failed": {
+    "en": "The downloaded installer didn't pass Clauseo's check, so it wasn't run. Choose Get the installer to download it from the release page.",
+    "hi": "डाउनलोड किए गए इंस्टॉलर ने Clauseo की जाँच पास नहीं की, इसलिए उसे नहीं चलाया गया। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The Safe workspace card's \"Download and run the installer again\" when the installer's signature didn't verify (ADR 0037)"
+  },
+  "U3-err-repair.launch_failed": {
+    "en": "Clauseo couldn't start the installer. Choose Get the installer to download it from the release page.",
+    "hi": "Clauseo इंस्टॉलर शुरू नहीं कर सका। रिलीज़ पेज से डाउनलोड करने के लिए इंस्टॉलर पाएँ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The Safe workspace card's \"Download and run the installer again\" when Windows refused to start the verified installer (ADR 0037)"
   }
 }
