@@ -88,10 +88,18 @@ jail tests `other_matter::a_read_grant_of_another_matter_reads_it_but_not_its_gi
 and `a_read_grant_of_one_file_reads_that_file_only` run `sandbox-exec`: the grant's files and a
 look-alike `.github` read, `.git/config`, `.clauseo/x`, a nested `.GIT/HEAD`, the agents'
 folders and the link refuse, the folder lists, and nothing in it is written, made or removed.
-Without the deny rule the same test reads all ten, so the order is what refuses them. Limits: the
+Without the deny rule the same test reads all ten, so the order is what refuses them.
+`a_read_grant_of_a_subfolder_refuses_links_out_of_it` grants `m2/sub`: its file reads, and links
+in it to `m2/doc.txt` (outside the grant), to `m2/.clauseo/x` and out of the matter refuse, as do
+the matter's own files outside the grant and its listing. Limits: the
 refused names still show in the grant's listing (`stat` on one is refused); the regex does not
 fold Unicode normalisation (the names are ASCII); a granted folder that sits in a folder of one of
 those names is refused by `build()` rather than written as a rule that would deny it whole.
+Residual, hard links: a file in the grant with another name under `.git` (or another refused
+name) reads through its granted name, since Seatbelt checks the path opened and SBPL has no
+filter on a file's link count (Windows leaves a multi-link file out of the grant). Low: the
+link has to exist in the other matter already, and the reading agent can't make one there, as
+it writes nothing in that matter; git itself doesn't hard-link a working file into `.git`.
 
 **Read-only names and links.** `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`,
 `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at the matter root, existing or not; each existing

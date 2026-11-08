@@ -121,3 +121,48 @@ fn a_read_grant_of_one_file_reads_that_file_only() {
     let out = sh(&launcher, &w.at("m1"), APPEND_EACH, &[&doc]);
     assert!(!out.stdout.contains("WROTE"), "{out:#?}");
 }
+
+#[test]
+fn a_read_grant_of_a_subfolder_refuses_links_out_of_it() {
+    let w = World::new();
+    other_matter(&w);
+    // Links in the granted subfolder to the matter's own file outside it, to its data folder
+    // and out of the matter; Seatbelt checks the path each resolves to.
+    w.symlink("m2/doc.txt", "m2/sub/to-doc");
+    w.symlink("m2/.clauseo/x", "m2/sub/to-data");
+    w.symlink("outside/secret.txt", "m2/sub/to-outside");
+    let policy = w
+        .builder()
+        .hidden_matter(&w.at("m2"), "m2-id")
+        .other_matter_read(&w.at("m2/sub"), false)
+        .build()
+        .unwrap();
+    let (launcher, _) = launcher(policy);
+    let at = |rel: &str| w.at(rel).to_str().unwrap().to_owned();
+    let refused = [
+        "m2/doc.txt",
+        "m2/.github/ci.yml",
+        "m2/sub/.GIT/HEAD",
+        "m2/sub/.codex/config.toml",
+        "m2/sub/git-config",
+        "m2/sub/to-doc",
+        "m2/sub/to-data",
+        "m2/sub/to-outside",
+    ]
+    .map(at);
+    let note = at("m2/sub/note.txt");
+    let mut all = vec![note.as_str()];
+    all.extend(refused.iter().map(String::as_str));
+    let out = sh(&launcher, &w.at("m1"), READ_EACH, &all);
+    out.assert_ok();
+    assert_eq!(lines(&out.stdout, "READ "), [note], "{out:#?}");
+    let mut want_refused = refused.to_vec();
+    want_refused.sort();
+    assert_eq!(lines(&out.stdout, "REFUSED "), want_refused, "{out:#?}");
+    // The subfolder lists; the matter's folder above it doesn't.
+    let out = sh(&launcher, &w.at("m1"), r#"ls "$1""#, &[&at("m2/sub")]);
+    out.assert_ok();
+    assert!(out.stdout.contains("note.txt"), "{out:#?}");
+    let out = sh(&launcher, &w.at("m1"), r#"ls "$1""#, &[&at("m2")]);
+    assert_ne!(out.code, Some(0), "{out:#?}");
+}
