@@ -4,6 +4,7 @@
 //! the words are the provisional ones. The rest is in `admin_copy.rs`.
 
 use super::admin_copy::{ASK, admin_code, assert_run, block, code_of, macro_body};
+use super::nsis_run::{Machine, chain, defines, parse_all};
 use super::sources::{hook_code, line_with, read};
 
 #[test]
@@ -86,7 +87,21 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
         assert!(info.contains(part), "{part}: {info}");
     }
     // A declined prompt is its own outcome; the wait has no end but the instance's own.
-    assert_run(body, &["${ElseIf} $R9 = 1223", "StrCpy $R6 4"]);
+    // Any other failed launch names its code; elevation this computer's settings refuse (1260,
+    // or 5 under some UAC settings), never a person's No (1223), is outcome 9.
+    assert_run(
+        body,
+        &[
+            "${ElseIf} $R9 = 1223",
+            "StrCpy $R6 4",
+            "${Else}",
+            "DetailPrint \"Windows refused the elevation (error $R9)\"",
+            "${If} $R9 = 1260",
+            "${OrIf} $R9 = 5",
+            "StrCpy $R6 9",
+            "${EndIf}",
+        ],
+    );
     // Up to 10 minutes, then outcome 7 (a details line).
     line_with(
         body,
@@ -189,6 +204,7 @@ fn every_exit_code_of_adopt_has_its_outcome() {
             "${AndIf} $R6 <> 6",
             "${AndIf} $R6 <> 7",
             "${AndIf} $R6 <> 8",
+            "${AndIf} $R6 <> 9",
         ],
     );
     line_with(
@@ -252,6 +268,9 @@ fn every_exit_code_of_adopt_has_its_outcome() {
             "DetailPrint \"$(setupExeRemoved)\"",
             "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
             "SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}",
+            "${ElseIf} $R6 = 9",
+            "DetailPrint \"$(adminCopyBlocked)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyBlocked)\"",
             "${EndIf}",
         ],
     );
@@ -261,6 +280,67 @@ fn every_exit_code_of_adopt_has_its_outcome() {
         seeded < line_with(body, &["ShellExecuteExW(p R5)"]),
         "{body:?}"
     );
+}
+
+/// What the per-user ask says when its elevated launch fails with `code` (`ShellExecuteExW`'s
+/// last error, popped into `$R9`): the launch's `${If} $R7 <> 0` chain and the outcome chain,
+/// run as written, with `$R6` seeded 1 and `$R8` "not run", as the macro seeds them. The
+/// `--adopt` mapping between them leaves `$R6` alone here: 99 is -1, `${CaseElse}`, outcome 1,
+/// which `every_exit_code_of_adopt_has_its_outcome` holds.
+fn says_after_a_failed_launch(code: u32) -> Vec<String> {
+    let admin = admin_code();
+    let nodes = parse_all(&macro_body(&admin, ASK)[1..]);
+    let launch = chain(&nodes, "If $R7 <> 0").expect("the launch's chain");
+    let outcome = chain(&nodes, "If $R6 = 0").expect("the outcome chain");
+    let mut machine = Machine::new(defines(&admin), None);
+    machine.set_var("$R6", "1");
+    machine.set_var("$R7", "0");
+    machine.set_var("$R8", "99");
+    machine.set_var("$R9", &code.to_string());
+    machine.run(std::slice::from_ref(launch));
+    machine.run(std::slice::from_ref(outcome));
+    machine.said
+}
+
+#[test]
+fn a_failed_launch_says_blocked_declined_or_failed_by_its_code() {
+    let refused = |code: u32| format!("DetailPrint Windows refused the elevation (error {code})");
+    // 1260, the VM's measured code for a policy-refused elevation (a standard user with
+    // ConsentPromptBehaviorUser 0), and 5 under other UAC settings: adminCopyBlocked.
+    for code in [1260, 5] {
+        assert_eq!(
+            says_after_a_failed_launch(code),
+            [
+                refused(code),
+                "DetailPrint $(adminCopyBlocked)".to_owned(),
+                "MessageBox $(adminCopyBlocked)".to_owned(),
+            ],
+            "{code}"
+        );
+    }
+    // 1223, a person's No: adminCopyDeclined, and no code line.
+    assert_eq!(
+        says_after_a_failed_launch(1223),
+        [
+            "DetailPrint $(adminCopyDeclined)",
+            "MessageBox $(adminCopyDeclined)"
+        ]
+    );
+    // Anything else: adminCopyFailed, with its code.
+    for code in [2, 1155, 1261] {
+        assert_eq!(
+            says_after_a_failed_launch(code),
+            [
+                refused(code),
+                "DetailPrint $(adminCopyFailed)".to_owned(),
+                "MessageBox $(adminCopyFailed)".to_owned(),
+            ],
+            "{code}"
+        );
+    }
+    // Outcome 9 keeps --adopt's code out of it.
+    let admin = admin_code();
+    line_with(macro_body(&admin, ASK), &["${AndIf} $R6 <> 9"]);
 }
 
 #[test]
@@ -283,6 +363,13 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
              refused when Windows asked. Clauseo works without it. To set it up, run this \
              installer again and choose Yes. If Windows asks for an administrator's password, ask \
              whoever looks after this computer to enter it.",
+        ),
+        (
+            "adminCopyBlocked",
+            "Clauseo is installed, but the Safe workspace isn't set up, because your Windows \
+             account isn't allowed to approve this change. To set it up, ask whoever looks after \
+             this computer to run this installer with an administrator account, or to install \
+             Clauseo for all users.",
         ),
         (
             "adminCopyFailed",

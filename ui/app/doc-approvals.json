@@ -13,7 +13,7 @@
   },
   "crates/desktop/windows/nsis/English.nsh": {
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-08",
     "by": "stage F (provisional; Rohan batch review)",
     "pr": 498,
     "title": "Messages the Windows installer and uninstaller show",
@@ -34,6 +34,7 @@
       "adminCopyDone",
       "adminCopyDeclined",
       "adminCopyFailed",
+      "adminCopyBlocked",
       "adminCopyOtherAccount",
       "adminCopyMachineFailed",
       "adminCopyNewerKept",
@@ -49,7 +50,7 @@
   },
   "crates/desktop/windows/nsis/Hindi.nsh": {
     "status": "provisional",
-    "at": "2026-11-07",
+    "at": "2026-11-08",
     "by": "app thread (provisional Hindi; Rohan batch review)",
     "pr": 651,
     "title": "Messages the Windows installer and uninstaller show, in Hindi"

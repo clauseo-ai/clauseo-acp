@@ -10,8 +10,9 @@
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
 ; (removeSkippedSilent, 2026-11-07); then the two drafts about a set-up program Windows security
 ; removed (removeExeMissing, setupExeRemoved, 2026-11-07), the draft for an admin copy the
-; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the eleven the installer shows
-; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07), then the one the
+; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the twelve the installer shows
+; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07; adminCopyBlocked
+; 2026-11-08), then the one the
 ; per-machine installer shows when it can't make its protected temporary folder
 ; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07), and
 ; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07).
@@ -71,7 +72,10 @@ LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Cla
 ; adminCopyWorking and adminCopyDone: details-list lines while the set-up runs (it can take a few
 ; minutes) and once it is done.
 ; adminCopyDeclined: the prompt was declined; for a standard user, whoever looks after the
-; computer types their password into it. adminCopyFailed: the set-up ran and failed (or couldn't
+; computer types their password into it. adminCopyBlocked: Windows refused the elevation outright
+; (error 1260, or 5 under some UAC settings), as for a standard user whom this computer's settings
+; give no prompt to approve; not a person's No. Provisional (app thread, 2026-11-08).
+; adminCopyFailed: the set-up ran and failed (or couldn't
 ; start). adminCopyOtherAccount: another Windows account on this computer already has tier B.
 ; Each a box and a details line, per-user installs.
 ; adminCopyMachineFailed: the per-machine installer's set-up failed; a box interactively, a
@@ -86,6 +90,7 @@ LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to se
 LangString adminCopyWorking ${LANG_ENGLISH} "Setting up the Safe workspace. This can take a few minutes."
 LangString adminCopyDone ${LANG_ENGLISH} "The Safe workspace is set up."
 LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because permission was refused when Windows asked. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
+LangString adminCopyBlocked ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because your Windows account isn't allowed to approve this change. To set it up, ask whoever looks after this computer to run this installer with an administrator account, or to install Clauseo for all users."
 LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
 LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
 LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
