@@ -30,7 +30,7 @@ use windows::Win32::System::JobObjects::{
 use windows::core::PCWSTR;
 
 pub(crate) use child::{Child, ChildStderr, ChildStdin};
-pub(crate) use spawn::{Io, Launch};
+pub(crate) use spawn::{Io, Launch, windows_dirs};
 
 /// The exit code the job's end gives its processes.
 const TERMINATED: u32 = 1;

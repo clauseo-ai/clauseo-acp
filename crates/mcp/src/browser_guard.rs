@@ -92,6 +92,18 @@ struct Command {
     child_args: Vec<OsString>,
 }
 
+/// The Windows folders the child's environment defaults to (`job/spawn.rs`); none elsewhere.
+#[cfg(windows)]
+fn windows_dirs() -> env::WindowsDirs {
+    job::windows_dirs()
+}
+
+/// The Windows folders the child's environment defaults to: none off Windows.
+#[cfg(not(windows))]
+fn windows_dirs() -> env::WindowsDirs {
+    env::WindowsDirs::default()
+}
+
 /// Runs the guard with the arguments after `browser-guard`. Returns agent-browser's exit code
 /// (1 when a signal killed it), or a [`Failure`].
 pub fn run(args: &[OsString]) -> Result<i32, Failure> {
@@ -101,12 +113,16 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {reason}\n{USAGE}"),
     })?;
-    let env = env::build(&env::Source::from_process(), env::Os::CURRENT, &command.cwd).map_err(
-        |error| Failure {
-            code: EXIT_USAGE,
-            message: format!("clauseo-mcp browser-guard: {error}"),
-        },
-    )?;
+    let env = env::build(
+        &env::Source::from_process(),
+        env::Os::CURRENT,
+        &command.cwd,
+        &windows_dirs(),
+    )
+    .map_err(|error| Failure {
+        code: EXIT_USAGE,
+        message: format!("clauseo-mcp browser-guard: {error}"),
+    })?;
     #[cfg(unix)]
     {
         let dir = env.get(env::SOCKET_DIR).map_or(Path::new(""), Path::new);
