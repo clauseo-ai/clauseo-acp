@@ -1,5 +1,5 @@
-//! The one walk of the matter per launch: links that lead outside it, and every `.git` and other
-//! [`PROTECTED_AT_ANY_DEPTH`] name in it.
+//! The one walk of the matter per launch: links that lead outside it, and every `.git`, other
+//! [`PROTECTED_AT_ANY_DEPTH`] name and repository-shaped folder in it.
 
 use std::collections::BTreeMap;
 use std::fs::{self, FileType};
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::policy::{same, under};
-use crate::{Error, PROTECTED_AT_ANY_DEPTH};
+use crate::{Error, PROTECTED_AT_ANY_DEPTH, strip_hfs_ignorables};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -50,6 +50,7 @@ pub struct MatterScan {
     links: Vec<LinkFinding>,
     git: Vec<PathBuf>,
     git_dirs: Vec<PathBuf>,
+    bare: Vec<PathBuf>,
     nested: Vec<PathBuf>,
     /// Files with more than one name, every name of which is in the matter: each group's
     /// names, sorted. Not findings; the policy checks that no group joins a read-only name
@@ -62,6 +63,7 @@ pub(crate) struct ScanParts {
     pub(crate) links: Vec<LinkFinding>,
     pub(crate) git: Vec<PathBuf>,
     pub(crate) git_dirs: Vec<PathBuf>,
+    pub(crate) bare: Vec<PathBuf>,
     pub(crate) nested: Vec<PathBuf>,
     pub(crate) linked: Vec<Vec<PathBuf>>,
 }
@@ -86,6 +88,13 @@ impl MatterScan {
         &self.git_dirs
     }
 
+    /// The repository-shaped folders outside any `.git`, sorted: each holds a `HEAD` file and
+    /// `objects` and `refs` folders, which git's discovery takes for a bare repository (no
+    /// `.git` name involved). One stat of each folder per `HEAD` the walk lists.
+    pub fn bare_repos(&self) -> &[PathBuf] {
+        &self.bare
+    }
+
     /// Every `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md` in the matter at any depth, root
     /// included, in any letter case (the other [`PROTECTED_AT_ANY_DEPTH`] names), sorted: a
     /// folder, a file, or a link to something in the matter. Found by name in the listings the
@@ -107,6 +116,7 @@ impl MatterScan {
             links: self.links,
             git: self.git,
             git_dirs: self.git_dirs,
+            bare: self.bare,
             nested: self.nested,
             linked: self.linked,
         }
@@ -207,6 +217,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git.sort();
     scan.git_dirs.sort();
     scan.git_dirs.dedup();
+    scan.bare.sort();
     scan.nested.sort();
     Ok(scan)
 }
@@ -250,7 +261,25 @@ impl Walk {
                     self.scan.git_dirs.push(dir);
                 }
             }
+            if name
+                .to_str()
+                .is_some_and(|n| strip_hfs_ignorables(n).eq_ignore_ascii_case("HEAD"))
+            {
+                self.bare_repo(&path);
+            }
             self.hard_link(path, entry);
+        }
+    }
+
+    /// Lists the folder holding the `HEAD` file at `head` if it has `objects` and `refs`
+    /// folders too: a bare repository's layout.
+    fn bare_repo(&mut self, head: &Path) {
+        let Some(folder) = head.parent() else {
+            return;
+        };
+        let dir = |name: &str| fs::metadata(folder.join(name)).is_ok_and(|m| m.is_dir());
+        if dir("objects") && dir("refs") {
+            self.scan.bare.push(folder.to_owned());
         }
     }
 

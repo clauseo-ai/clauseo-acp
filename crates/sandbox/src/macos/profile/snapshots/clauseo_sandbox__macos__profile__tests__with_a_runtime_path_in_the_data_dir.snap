@@ -225,7 +225,11 @@ expression: w.render(&policy)
 ; No new .git, folder or file, at any depth, in any letter case: not made, not
 ; renamed onto (Seatbelt checks a rename's destination path).
 (deny file-write*
-  (require-all (subpath (param "MATTER")) (regex #"/\.[gG][iI][tT](/|$)"))
+  (require-all (subpath (param "MATTER")) (regex #"/((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?\.((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[gG]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[iI]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[tT]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?(/|$)"))
+  (with message "clauseo-4242-7"))
+; No HEAD, the file that makes a folder with objects/ and refs/ a bare repo.
+(deny file-write*
+  (require-all (subpath (param "MATTER")) (regex #"/((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[hH]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[eE]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[aA]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?[dD]((‌|‍|‎|‏|‪|‫|‬|‭|‮|⁪|⁫|⁬|⁭|⁮|⁯|﻿)+)?$"))
   (with message "clauseo-4242-7"))
 
 ; Hidden paths: the data dir, other matters and state folders, refused folders.

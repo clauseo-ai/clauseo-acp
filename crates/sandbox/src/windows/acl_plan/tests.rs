@@ -287,6 +287,29 @@ fn read_only_names_get_deny_write_for_the_pool_user() {
     assert_eq!(mask & 0x1, 0);
 }
 
+/// A repository-shaped folder the launch walk finds (`HEAD`, `objects/`, `refs/`, no `.git`
+/// name) gets the same whole-tree deny of writes as an existing `.git`.
+#[test]
+fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
+    let w = World::new("plan-bare");
+    w.dir
+        .file("matter/precedents.git/HEAD", "ref: refs/heads/main\n");
+    w.dir.dir("matter/precedents.git/objects");
+    w.dir.dir("matter/precedents.git/refs");
+    let policy = w.full_policy();
+    let grants = grants_for(&w, &policy, &sids());
+    let deny = |name: &str| {
+        let path = w.canonical("matter").join(name);
+        grants
+            .iter()
+            .find(|g| g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == USER_SID)
+            .map(|g| (g.inherit, g.kind))
+    };
+    let want = Some((Inherit::Tree, PathKind::ReadOnlyInMatter));
+    assert_eq!(deny(".git"), want);
+    assert_eq!(deny("precedents.git"), want);
+}
+
 #[test]
 fn modify_never_gives_delete_child_or_permission_changes() {
     // Without these, the agent can't strip a deny, nor delete a protected name through its
