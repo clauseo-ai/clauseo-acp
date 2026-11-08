@@ -32,6 +32,8 @@ const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Profil
 /// The redirects' key, under a user's hive root.
 const SHELL_FOLDERS: &str =
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
+/// WSL's distribution registrations, under a user's hive root.
+const LXSS: &str = r"Software\Microsoft\Windows\CurrentVersion\Lxss";
 /// `REG_APP_HIVE_OPEN_READ_ONLY` (`REG_OPEN_READ_ONLY`, winnt.h), which the `windows` crate
 /// lacks: the app hive is opened for reading only, so the read writes nothing to the user's
 /// `NTUSER.DAT`. Not verified on a VM that `RegLoadAppKeyW` takes it; a load it refuses is a
@@ -79,11 +81,9 @@ fn open(root: HKEY, path: &str) -> Result<Option<Key>, Failed> {
     Ok(present("RegOpenKeyExW", code)?.then_some(Key(opened)))
 }
 
-/// Every SID `ProfileList` lists; a subkey whose name isn't a SID is passed over.
-pub(super) fn profile_sids() -> Result<Vec<Sid>, Failed> {
-    let key = open(HKEY_LOCAL_MACHINE, PROFILE_LIST)?
-        .ok_or_else(|| "ProfileList isn't there".to_owned())?;
-    let mut sids = Vec::new();
+/// The names of `key`'s subkeys.
+fn subkeys(key: &Key) -> Result<Vec<String>, Failed> {
+    let mut names = Vec::new();
     for index in 0u32.. {
         let mut name = [0u16; 256];
         let mut len = 256u32;
@@ -105,16 +105,35 @@ pub(super) fn profile_sids() -> Result<Vec<Sid>, Failed> {
             break;
         }
         if code != ERROR_SUCCESS {
-            return Err(failed("RegEnumKeyExW (ProfileList)", code));
+            return Err(failed("RegEnumKeyExW", code));
         }
         let units = name
             .get(..usize::try_from(len).unwrap_or(0))
             .unwrap_or_default();
-        if let Ok(sid) = Sid::parse(&String::from_utf16_lossy(units)) {
-            sids.push(sid);
-        }
+        names.push(String::from_utf16_lossy(units));
     }
-    Ok(sids)
+    Ok(names)
+}
+
+/// Every SID `ProfileList` lists; a subkey whose name isn't a SID is passed over.
+pub(super) fn profile_sids() -> Result<Vec<Sid>, Failed> {
+    let key = open(HKEY_LOCAL_MACHINE, PROFILE_LIST)?
+        .ok_or_else(|| "ProfileList isn't there".to_owned())?;
+    let names = subkeys(&key)?;
+    Ok(names
+        .iter()
+        .filter_map(|name| Sid::parse(name).ok())
+        .collect())
+}
+
+/// Whether the pool user `user`'s loaded hive lists a WSL distribution under `Lxss`, as
+/// [`super::VmStopper::lxss_registered`] says. A hive that isn't loaded isn't loaded here.
+pub(super) fn lxss_registered(user: &Sid) -> Result<bool, Failed> {
+    let path = format!(r"{user}\{LXSS}");
+    let Some(key) = open(HKEY_USERS, &path)? else {
+        return Ok(false);
+    };
+    Ok(!subkeys(&key)?.is_empty())
 }
 
 /// Whether `user`'s profile holds `temp\<id>` under its `Local AppData`, as

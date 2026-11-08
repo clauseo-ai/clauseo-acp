@@ -120,6 +120,50 @@ impl VmStopper for WindowsStopper {
         Ok(true)
     }
 
+    fn temp_vm_folder(&mut self, user: &Sid) -> Result<bool, Failed> {
+        let profile = profile_of(user)
+            .map_err(|_error| "a pool user's ProfileList entry couldn't be read".to_owned())?;
+        let Some(profile) = profile else {
+            return Ok(false);
+        };
+        // Each part read without following a link, as in `vm_folder`.
+        let mut at = profile.path;
+        for next in [None, Some("AppData"), Some("Local"), Some("temp")] {
+            if let Some(part) = next {
+                at.push(part);
+            }
+            match found(&at)? {
+                Found::Missing => return Ok(false),
+                Found::Folder => {}
+                Found::File | Found::Link => {
+                    return Err(
+                        "a link, or a file where a folder belongs, is on the way to a \
+                                pool user's temp folder"
+                            .to_owned(),
+                    );
+                }
+            }
+        }
+        let entries = std::fs::read_dir(&at).map_err(|error| {
+            let code = error.raw_os_error().unwrap_or(0);
+            format!("a pool user's temp folder couldn't be listed ({code})")
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                let code = error.raw_os_error().unwrap_or(0);
+                format!("a pool user's temp folder couldn't be listed ({code})")
+            })?;
+            if entry.file_name().to_str().and_then(VmId::parse).is_some() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn lxss_registered(&mut self, user: &Sid) -> Result<bool, Failed> {
+        windows_profiles::lxss_registered(user)
+    }
+
     fn non_pool_vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed> {
         windows_profiles::non_pool_vm_folder(user, id)
     }

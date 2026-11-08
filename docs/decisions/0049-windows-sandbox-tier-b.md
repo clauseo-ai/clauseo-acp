@@ -2167,8 +2167,25 @@ That folder can't show a pool user's VM is absent. WSL finds `%LOCALAPPDATA%` wi
 `SHGetKnownFolderPath(FOLDERID_LocalAppData, userToken)` (`filesystem.cpp`), which follows the
 user's own `HKCU\...\User Shell Folders`, and a folder it fails to make only logs and starts the
 VM anyway (`WslCoreVm.cpp:145-152`), so a pool user could redirect its folder, or deny itself the
-right to make it, and keep its VM out of a walk of its profile. So the profiles no pool user can
-write are read first, the lawyer's first (`setup/stop/vms.rs`, `stop_vms`):
+right to make it, and keep its VM out of a walk of its profile.
+
+**The step runs only on evidence** that a pool user started WSL (`vms::evidence`, recorded in the
+stop's state before any process is stopped): a pool user's profile holds
+`AppData\Local\temp\<GUID>` (read from the profile down without following a link), its loaded
+hive holds a WSL distribution registration (a subkey of
+`HKU\<poolSID>\Software\Microsoft\Windows\CurrentVersion\Lxss`), or a pass's snapshot saw a
+process of a pool SID that is WSL's (`wsl.exe`, `wslhost.exe`, `wslrelay.exe`, `wslg.exe`, or a
+WSL 1 pico process; each process's image is read for this, and the pass records it before it
+stops anything, as the process is gone after). A read of the profile or the hive that fails
+counts as evidence (a pool user may make its own profile unreadable). With none, the step is
+skipped whole: HCS is asked nothing (`computecore.dll` isn't loaded), nothing is ended, and the
+log line says "WSL VM step skipped: no pool WSL evidence". An accepted residual: the WSL 2/HCS
+termination is verified only by the fake tests and review, as the GCP VMs have no Hyper-V. The
+gate keeps it from running on a real machine unless a pool user demonstrably started WSL, which
+the deny should prevent, so in the normal case a mapping mistake can never end the lawyer's VMs.
+
+With evidence, the profiles no pool user can write are read first, the lawyer's first
+(`setup/stop/vms.rs`, `stop_vms`):
 
 - **the lawyer's, or another non-pool account's**: the lawyer's (`OwnerSid`) profile, then every
   other profile `ProfileList` lists that isn't a pool user's (`windows_profiles.rs`), holds

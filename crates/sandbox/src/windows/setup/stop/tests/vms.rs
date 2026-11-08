@@ -40,6 +40,14 @@ pub(super) struct FakeVms {
     pub(super) hang: Vec<String>,
     /// The folder reads, as (user's rid, id).
     pub(super) reads: usize,
+    /// Pool users whose `AppData\Local\temp` holds a GUID-named folder (evidence (a)).
+    pub(super) temp_guids: Vec<Sid>,
+    /// Pool users whose loaded hive lists a WSL distribution (evidence (c)).
+    pub(super) lxss: Vec<Sid>,
+    /// HCS calls: lists and terminations.
+    pub(super) hcs_calls: usize,
+    /// The snapshots taken when each evidence read (a) or (c) was made.
+    pub(super) evidence_reads: Vec<usize>,
 }
 
 impl Default for FakeVms {
@@ -58,13 +66,31 @@ impl Default for FakeVms {
             refuse: Vec::new(),
             hang: Vec::new(),
             reads: 0,
+            temp_guids: Vec::new(),
+            lxss: Vec::new(),
+            hcs_calls: 0,
+            evidence_reads: Vec::new(),
         }
     }
 }
 
 impl VmStopper for Fake {
     fn compute_systems(&mut self) -> Result<Option<Vec<String>>, Failed> {
+        self.vms.hcs_calls += 1;
         self.vms.systems.clone()
+    }
+
+    fn temp_vm_folder(&mut self, user: &Sid) -> Result<bool, Failed> {
+        self.vms.evidence_reads.push(self.taken);
+        if self.vms.unreadable.contains(user) {
+            return Err("a pool user's temp folder couldn't be listed (5)".to_owned());
+        }
+        Ok(self.vms.temp_guids.contains(user))
+    }
+
+    fn lxss_registered(&mut self, user: &Sid) -> Result<bool, Failed> {
+        self.vms.evidence_reads.push(self.taken);
+        Ok(self.vms.lxss.contains(user))
     }
 
     fn wsl_installed(&mut self) -> bool {
@@ -112,6 +138,7 @@ impl VmStopper for Fake {
     }
 
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed> {
+        self.vms.hcs_calls += 1;
         self.waits.push(wait);
         let id = id.as_str().to_owned();
         if self.vms.hang.contains(&id) {
@@ -135,6 +162,8 @@ fn with_vms(systems: &[&str]) -> Fake {
     fake.vms.systems = Ok(Some(systems));
     fake.vms.folders = vec![(sid(1011), POOL_VM.to_owned())];
     fake.vms.owner_folders = vec![LAWYER_VM.to_owned()];
+    // 1011's VM folder is evidence that a pool user started WSL.
+    fake.vms.temp_guids = vec![sid(1011)];
     fake
 }
 
@@ -444,5 +473,87 @@ fn the_lawyers_local_app_data_redirect_is_expanded_against_its_profile_only() {
         "",
     ] {
         assert_eq!(expanded(refused), None, "{refused}");
+    }
+}
+
+/// A pool user's WSL process as the snapshot sees it.
+fn wsl_process(pid: u32, user: u32) -> Process {
+    Process {
+        image: Image::Path(r"C:\Program Files\WSL\wslhost.exe".to_owned()),
+        wsl: true,
+        ..seen(pid, Some(sid(user)))
+    }
+}
+
+#[test]
+fn with_no_pool_wsl_evidence_hcs_is_never_asked_and_nothing_is_ended() {
+    let mut fake = with_vms(&[POOL_VM, HIDDEN_VM]);
+    fake.vms.temp_guids.clear();
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(fake.vms.hcs_calls, 0);
+    assert_eq!(fake.vms.reads + fake.vms.owner_reads, 0);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("WSL VM step skipped: no pool WSL evidence"),
+        "{line}"
+    );
+    // The lawyer's own WSL process is no evidence; neither is a pool user's other process.
+    let mut fake = with_vms(&[POOL_VM]);
+    fake.vms.temp_guids.clear();
+    let lawyer = Process {
+        wsl: true,
+        ..seen(12, Some(Sid::parse(OWNER).unwrap()))
+    };
+    fake.snapshots = vec![Ok(vec![lawyer, seen(13, Some(sid(1010)))]), Ok(Vec::new())];
+    stop(&mut fake);
+    assert_eq!(fake.vms.hcs_calls, 0);
+}
+
+#[test]
+fn each_kind_of_evidence_starts_the_step_and_is_recorded_before_the_kill_pass() {
+    // (a) a GUID folder in a pool user's temp, (c) a distro in its hive: read before the
+    // first snapshot.
+    for kind in ["temp", "lxss"] {
+        let mut fake = with_vms(&[POOL_VM]);
+        fake.vms.temp_guids.clear();
+        if kind == "lxss" {
+            fake.vms.lxss = vec![sid(1010)];
+        } else {
+            fake.vms.temp_guids = vec![sid(1010)];
+        }
+        assert_eq!(stop(&mut fake), StopExit::Done, "{kind}");
+        assert_eq!(ended(&fake), [POOL_VM], "{kind}");
+        let first = fake.done.iter().position(|done| done == "snapshot");
+        let read = fake
+            .done
+            .iter()
+            .position(|done| done.starts_with("evidence"));
+        assert!(read < first, "{kind}: {:?}", fake.done);
+    }
+    // A read that fails counts as evidence.
+    let mut fake = with_vms(&[POOL_VM]);
+    fake.vms.temp_guids.clear();
+    fake.vms.unreadable = vec![sid(1010)];
+    stop(&mut fake);
+    assert!(fake.vms.hcs_calls > 0);
+    // (b) a pool user's WSL process, seen by the first snapshot and gone after the kill pass:
+    // the step still runs.
+    let mut fake = with_vms(&[POOL_VM]);
+    fake.vms.temp_guids.clear();
+    fake.snapshots = vec![Ok(vec![wsl_process(21, 1011)]), Ok(Vec::new())];
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(fake.stopped(), [21]);
+    assert_eq!(ended(&fake), [POOL_VM]);
+    // A pico (subsystem) process is WSL's too, as are WSL's exes in any case.
+    assert!(wsl_image(&Image::Subsystem));
+    assert!(wsl_image(&Image::Path(r"C:\x\WSLRelay.EXE".to_owned())));
+    assert!(wsl_image(&Image::Path("wslg.exe".to_owned())));
+    for other in [
+        Image::Missing,
+        Image::Unread,
+        Image::Path("wsl.exe.bak".to_owned()),
+    ] {
+        assert!(!wsl_image(&other), "{other:?}");
     }
 }
