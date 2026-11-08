@@ -11,24 +11,6 @@ pub const SCHED_S_TASK_HAS_NOT_RUN: i32 = 0x0004_1303;
 /// `SCHED_S_TASK_RUNNING`: the task's last result while a run is going on.
 pub const SCHED_S_TASK_RUNNING: i32 = 0x0004_1301;
 
-/// Every [`RefreshExit`], in code order, for reading a code back.
-const EXITS: [RefreshExit; 14] = [
-    RefreshExit::Done,
-    RefreshExit::NotAllowed,
-    RefreshExit::NoRecord,
-    RefreshExit::SourceRefused,
-    RefreshExit::SignatureRefused,
-    RefreshExit::PlaceholderKey,
-    RefreshExit::StagingFailed,
-    RefreshExit::ReplaceFailed,
-    RefreshExit::RecordNotWritten,
-    RefreshExit::Downgrade,
-    RefreshExit::OutsideProfile,
-    RefreshExit::WrongMachine,
-    RefreshExit::FolderBusy,
-    RefreshExit::LockHeld,
-];
-
 /// The task's last run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LastRun {
@@ -65,7 +47,7 @@ pub fn last_run(code: i32, at: f64) -> LastRun {
 
 /// The [`RefreshExit`] whose [`RefreshExit::as_code`] is `code`, if any.
 pub fn refresh_exit(code: i32) -> Option<RefreshExit> {
-    EXITS
+    RefreshExit::ALL
         .into_iter()
         .find(|exit| i32::from(exit.as_code()) == code)
 }
@@ -196,7 +178,7 @@ mod tests {
 
     #[test]
     fn every_exit_reads_back_from_its_code() {
-        for exit in EXITS {
+        for exit in RefreshExit::ALL {
             assert_eq!(refresh_exit(i32::from(exit.as_code())), Some(exit));
             assert_eq!(format!("{exit:?}"), exit_name(exit));
         }
