@@ -11,10 +11,19 @@
 //!   build. The e2e and marks builds deny `main` in window-state ([`state_denylist`]), so they
 //!   neither restore nor save the real app's state. Every build denies `settings`: it opens at
 //!   its own size, centred, each time.
-//! - The first frame is painted in the room's ground, night or day as the OS says
-//!   ([`paint_first_frame`]), so the webview is never white before the page draws.
+//! - The first frame is the room's ground, night or day as the OS says, so the window is never
+//!   white before the page draws. On Windows the builder takes the ground before the window
+//!   exists ([`with_ground`]): the window and the webview open in it, through `WebView2`'s start,
+//!   which can take seconds after a reboot. The theme is one registry read
+//!   (`windows_theme.rs`), never the lawyer's Settings choice, which only the host knows later;
+//!   the page's own first paint (`ui/app/index.html`) follows the OS too until the display is
+//!   set. Elsewhere the window takes the ground once built ([`paint_first_frame`]), which Windows
+//!   does as well, a no-op when the theme agrees.
 
-use tauri::{AppHandle, Runtime, Theme, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow, WebviewWindowBuilder};
+
+#[cfg(windows)]
+mod windows_theme;
 
 #[cfg(test)]
 mod tests;
@@ -108,12 +117,26 @@ pub(crate) const fn ground(dark: bool) -> (u8, u8, u8) {
     if dark { NIGHT_GROUND } else { DAY_GROUND }
 }
 
+/// The ground as a Tauri colour, opaque.
+const fn colour((r, g, b): (u8, u8, u8)) -> tauri::window::Color {
+    tauri::window::Color(r, g, b, 255)
+}
+
+/// `builder` with the ground of Windows' app theme as the window's and the webview's background,
+/// from their first frame. Elsewhere `builder` as it is: the theme cannot be read before the
+/// window without a cost, and [`paint_first_frame`] paints it once built.
+pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    #[cfg(windows)]
+    let builder = builder.background_color(colour(ground(windows_theme::apps_dark())));
+    builder
+}
+
 /// Paints the window's background in the ground of the OS theme, so the first frame is not
 /// white. The day ground when the theme cannot be read.
 pub(crate) fn paint_first_frame<R: Runtime>(window: &WebviewWindow<R>) {
     let dark = matches!(window.theme(), Ok(Theme::Dark));
-    let (r, g, b) = ground(dark);
-    let color = tauri::window::Color(r, g, b, 255);
     // Best effort: a refused colour leaves the first frame white, as it was before.
-    let _refused = window.set_background_color(Some(color));
+    let _refused = window.set_background_color(Some(colour(ground(dark))));
 }

@@ -52,12 +52,14 @@ test("ui/components writes no HTML strings and adds no <style> at runtime", () =
   expect(found).toEqual([]);
 });
 
-// The pages the app ships (vite.config.ts's PAGES): the room's and the settings window's.
+// The pages the app ships (vite.config.ts's PAGES): the room's and the settings window's. index.html's one <style>, the
+// first paint before the app's CSS, is the exception below.
 test.each(["index.html", "settings.html"])(
-  "the app's page %s has no inline script or style",
+  "the app's page %s has no inline script or style attribute, and no <style> but the first paint's",
   (page) => {
     const html = readFileSync(new URL(`../${page}`, import.meta.url), "utf8");
-    expect(html).not.toMatch(/<style|style=/);
+    expect(html).not.toMatch(/style=/);
+    expect([...html.matchAll(/<style/g)].length).toBe(page === "index.html" ? 1 : 0);
     const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)];
     expect(scripts.length).toBe(1);
     for (const m of scripts) {
@@ -72,4 +74,53 @@ test("the pages checked for inline script or style are every page the build make
     "index.html",
     "settings.html",
   ]);
+});
+
+// index.html's first paint: one inline <style>. Tauri's header allows it by the nonce Tauri adds to the element and to
+// the header's style-src when it serves the page (tauri-utils html.rs, inject_nonce_token; tauri manager/mod.rs,
+// replace_csp_nonce), unless the config turns asset CSP modification off. The page's meta CSP allows it by its hash
+// (vite.config.ts, cspMeta; vite-config.test.ts pins it).
+test("index.html's inline <style> is allowed by Tauri's nonce, which the config leaves on", () => {
+  const security: Record<string, unknown> = tauriConf.app.security;
+  expect(security["dangerousDisableAssetCspModification"]).toBeUndefined();
+});
+
+// The first paint's mark is the lockup's comma (ui/components lockup.tsx), its path as drawn there, and nothing else.
+test("index.html's first mark is the lockup's comma, no text, no animation", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const lockup = readFileSync(
+    new URL("../../components/src/clauseo/lockup.tsx", import.meta.url),
+    "utf8",
+  );
+  const comma = /const COMMA =\s*"([^"]+)"/.exec(lockup)?.[1];
+  const paths = [...html.matchAll(/<path\s+d="([^"]+)"/g)].map((m) => m[1]);
+  expect(comma).toBeDefined();
+  expect(paths).toEqual([comma]);
+  expect(html).not.toMatch(/animation|@keyframes|<text/);
+  const root = /<div id="root">([\s\S]*?)<\/div>\s*<script/.exec(html)?.[1] ?? "";
+  expect(root).toContain('id="first-mark"');
+});
+
+// Its colours are the tokens' hex comments: --ground behind, --ground-press for the comma, day then night.
+test("index.html's first paint takes --ground and --ground-press from tokens-colour.css", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8").toLowerCase();
+  const tokens = readFileSync(
+    new URL("../../components/src/styles/tokens-colour.css", import.meta.url),
+    "utf8",
+  );
+  const hexes = (name: string) =>
+    [...tokens.matchAll(new RegExp(`^\\s*--${name}:[^;]*;\\s*/\\* (#[0-9A-Fa-f]{6})`, "gm"))].map(
+      (m) => m[1]?.toLowerCase(),
+    );
+  const [dayGround, nightGround] = hexes("ground");
+  const [dayPress, nightPress] = hexes("ground-press");
+  for (const hex of [dayGround, nightGround, dayPress, nightPress]) {
+    expect(hex).toBeDefined();
+    expect(html).toContain(`${hex};`);
+  }
+  const sorted = (hexes: (string | undefined)[]) =>
+    hexes.map(String).sort((x, y) => x.localeCompare(y));
+  expect(sorted(html.match(/#[0-9a-f]{6}/g) ?? [])).toEqual(
+    sorted([dayGround, nightGround, dayPress, nightPress, nightPress]),
+  );
 });

@@ -1,6 +1,7 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin, type ViteBuilder } from "vite";
 import { configDefaults } from "vitest/config";
@@ -66,14 +67,35 @@ function devCspHeader(): Plugin {
 
 /**
  * The production `csp` as a page's meta tag can carry it: without `frame-ancestors`, which a meta tag may not hold
- * (browsers ignore it there and log a warning). Everything else unchanged.
+ * (browsers ignore it there and log a warning), and with `styles`, the hash sources of the page's own inline
+ * <style> elements ([inlineStyleHashes]), added to `style-src`. Everything else unchanged.
  */
-export function metaCsp(csp: string): string {
+export function metaCsp(csp: string, styles: string[] = []): string {
   return csp
     .split(";")
     .map((directive) => directive.trim())
     .filter((directive) => directive.length > 0 && directive.split(/\s+/)[0] !== "frame-ancestors")
+    .map((directive) =>
+      styles.length > 0 && directive.split(/\s+/)[0] === "style-src"
+        ? [directive, ...styles].join(" ")
+        : directive,
+    )
     .join("; ");
+}
+
+/**
+ * The CSP hash source (`'sha256-…'`) of each inline <style> in `html`, its text as built. index.html's first paint
+ * is the only one. Tauri's header allows it by the nonce it adds when it serves the page; the meta tag, which Tauri
+ * leaves as it is, needs exactly this hash.
+ */
+export function inlineStyleHashes(html: string): string[] {
+  return [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => {
+    const hex = createHash("sha256")
+      .update(new TextEncoder().encode(m[1] ?? ""))
+      .digest("hex");
+    const bytes = (hex.match(/../g) ?? []).map((pair) => Number.parseInt(pair, 16));
+    return `'sha256-${btoa(String.fromCharCode(...bytes))}'`;
+  });
 }
 
 /** A page's `<meta charset>`, which the HTML prescan must find in the page's first 1024 bytes. */
@@ -86,11 +108,13 @@ const attr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "
  * The production CSP from tauri.conf.json (its one home), less `frame-ancestors`, as a built page's first element after
  * its `<meta charset>` (which stays first, inside the prescan's 1024 bytes) and so before any script, style or link, so
  * a page served without Tauri's header (`vite preview`, the WebKit probe) runs under the same policy and a runtime
- * <style>, a style attribute or an HTML string write shows up as a violation. Build only: the dev server sends its own
+ * <style>, a style attribute or an HTML string write shows up as a violation. Its style-src adds the hash of each of the
+ * page's own inline <style> elements as built ([inlineStyleHashes]), and nothing else. Build only: the dev server sends its own
  * looser policy as a header (devCspHeader).
  */
 export function cspMeta(): Plugin {
-  const tag = `<meta http-equiv="Content-Security-Policy" content="${attr(metaCsp(tauriConf.app.security.csp))}">`;
+  const tag = (html: string) =>
+    `<meta http-equiv="Content-Security-Policy" content="${attr(metaCsp(tauriConf.app.security.csp, inlineStyleHashes(html)))}">`;
   return {
     name: "clauseo-csp-meta",
     apply: "build",
@@ -101,7 +125,7 @@ export function cspMeta(): Plugin {
         if (charset === null)
           throw new Error("the page has no <meta charset> for the CSP meta to follow");
         const at = charset.index + charset[0].length;
-        return `${html.slice(0, at)}\n    ${tag}${html.slice(at)}`;
+        return `${html.slice(0, at)}\n    ${tag(html)}${html.slice(at)}`;
       },
     },
   };
