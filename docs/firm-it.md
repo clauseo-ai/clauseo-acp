@@ -369,35 +369,6 @@ commands under "Intune (Win32 app)" above, and give back a folder a sandbox user
 `sandbox` folder in their data folder stays as it is; keep its `set-aside` folder, which holds
 files the sandbox set aside from a matter.
 
-### If the SandboxStop task ends with 48
-
-The SYSTEM task `\Clauseo\SandboxStop` stops the sandbox users' processes. Exit 48 means it found
-a process it couldn't identify, or one it couldn't stop. Nothing is lost: every sandbox user is
-reset before it is used again. Its Application Event Log line names each such process's image
-file (`unknown images: ...`), by file name only. A security product that hides its processes'
-tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
-gives.
-
-### If the SandboxSweep task ends with 56 or 57
-
-The SYSTEM task `\Clauseo\SandboxSweep` runs at the end of every sandboxed session. It deletes the
-sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 56 means a
-scheduled task on the machine couldn't be read or deleted, or a Task Scheduler folder couldn't be
-listed. Exit 57 means a sandbox user's BITS job couldn't be cancelled. Either way the run isn't
-recorded as complete, so the next sandboxed launch asks for another run and waits up to 15 seconds
-for it; if that run fails too, the launch is refused with "the sandbox's clean-up after an earlier
-session isn't finished". The task's Application Event Log line gives counts only, never task names.
-A task whose "run as" account is a domain account that can't be found (no domain controller is
-reachable) doesn't cause 56: it is skipped and counted as "skipped" in that line. A "run as"
-account that can't be found and isn't another domain's (a deleted local account, say) does, and is
-counted as "unresolved"; so does a task with no "run as" account ("with no user or group"). A task
-whose definition the SYSTEM account can't read is read from its file under
-`C:\Windows\System32\Tasks`; it is skipped when that file names someone other than a sandbox
-user, and counted as "skipped, not the pool's by their task file". The usual cause of 56 on every
-run is a task that can't be read either way, or one of those. Look in Task Scheduler for tasks that won't open or whose account is gone, and fix or
-delete them; the next run then ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
-set-up held its lock; the next launch asks again.
-
 ### If Defender quarantines a Clauseo file
 
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
@@ -996,7 +967,211 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 `sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
 `sandbox\set-aside`: those are files set aside from a matter.
 
-Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
+Removing the protection also removes its network filters and firewall rules: see
+[section 11](#11-windows-protection-the-admin-copy-its-tasks-and-its-network-rules).
+
+## 11. Windows protection: the admin copy, its tasks and its network rules
+
+What Clauseo's Windows protection (tier B) puts on a computer besides the sandbox users: the admin
+copy of its set-up program, the registry values that describe it, two SYSTEM tasks and the network
+rules for the sandbox users. To remove all of it, see section 1 (`--remove`) or, when the set-up
+program is gone,
+[Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
+
+### The admin copy
+
+`clauseo-sandbox-setup.exe` sets up and removes the protection, and needs administrator rights to
+do it. Clauseo never runs the copy beside `Clauseo.exe`: in a per-user install, that folder is one
+the lawyer's own programs can change. It runs only the admin copy:
+
+`C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe`
+
+- **Per-user install:** the installer writes it after the one UAC prompt at the end of an
+  interactive install (section 1). A silent per-user install skips it and exits 22.
+- **Per-machine install:** the installer writes it on every install and update.
+
+The `Sandbox` folder and the file are owned by Administrators. SYSTEM and Administrators have full
+control; Users can read and run the file. No one else can change either. The folder holds only the
+copy, its `.sig` file and a `staging` folder that only SYSTEM can open. Don't put anything else
+there.
+
+Before each elevated start, and before each protected agent starts, Clauseo checks three things:
+
+1. the copy is there, as a plain file, not a link;
+2. the copy, `Sandbox`, `Clauseo`, `C:\Program Files` and every folder up to the drive's root are
+   owned by SYSTEM, Administrators or TrustedInstaller, and no one else can change them (nothing
+   else may sit in `Sandbox`);
+3. the copy's SHA-256 is the one recorded in `AdminCopySha256` (below).
+
+If a check fails, Clauseo doesn't run the copy, and Safe workspace says why. Put the folder's
+permissions back, or run the Clauseo installer again. If Windows security removed the copy, see
+[section 10](#10-if-windows-security-removed-clauseos-set-up-program).
+
+### The values under `HKLM\SOFTWARE\Clauseo\Sandbox`
+
+Clauseo's set-up program and its two tasks write these values. **Don't edit, add or delete any of
+them.** Clauseo checks them before it runs anything elevated: a changed value turns the protection
+off, or stops a removal from finishing. To remove them, remove the protection (section 1). The key
+gives SYSTEM and Administrators full control and Users read access.
+
+| Value | Type | What it is |
+|---|---|---|
+| `OwnerSid` | `REG_SZ` | The SID of the Windows user who set the protection up (the lawyer). One owner per computer |
+| `GroupSid` | `REG_SZ` | The SID of the group `ClauseoSandboxUsers` |
+| `PoolSids` | `REG_MULTI_SZ` | The SIDs of the sandbox users, `ClauseoSb01` to `ClauseoSb32` |
+| `DataDir` | `REG_SZ` | The owner's Clauseo data folder |
+| `Removing` | `REG_DWORD` | 1 once a removal has started. If it stays, a removal stopped partway; the next `--remove` finishes it |
+| `ResetSids` | `REG_MULTI_SZ` | The sandbox users the stop task found running. The next set-up deletes and remakes each one's profile before it is used again |
+| `StopNext` | `REG_QWORD` | The number the next run of the stop task takes (a counter) |
+| `StopSequence` | `REG_QWORD` | The number of the last run of the stop task that ended 0 |
+| `StopCompleted` | `REG_QWORD` | When that run's last clean check began, as a Windows `FILETIME` (UTC). For diagnosis only |
+| `AdminCopySha256` | `REG_SZ` | The admin copy's SHA-256, 64 lowercase hex digits |
+| `AdminCopyVersion` | `REG_SZ` | The admin copy's version, which is Clauseo's version |
+| `AdminCopyOwner` | `REG_SZ` | Whose install placed the admin copy: `machine` for a per-machine install, otherwise the lawyer's SID |
+| `UserInstallDir` | `REG_SZ` | The install folder the admin copy came from. The refresh task looks for updates there |
+
+The first nine belong to the set-up. Removing Safe workspace from inside Clauseo deletes them, but
+keeps the admin copy, the last four values and the tasks (on a per-machine install it deletes
+`\Clauseo\SandboxStop` too), so the lawyer can set it up again without the installer. Uninstalling
+deletes everything here, then the key once it is empty.
+
+### The two SYSTEM tasks
+
+Both tasks live in the Task Scheduler folder `\Clauseo`, run as SYSTEM, run the admin copy with
+one fixed argument, and never run twice at once.
+
+| Task | Starts | Does | Time limit |
+|---|---|---|---|
+| `\Clauseo\SandboxRefresh` (`--refresh`) | At the owner's sign-in, and on demand | Keeps the admin copy current after a per-user install updates itself | 5 minutes |
+| `\Clauseo\SandboxStop` (`--stop`) | On demand only | Stops every process of the sandbox users | 2 minutes |
+
+**Who can do what.** Administrators own the folder `\Clauseo` and both tasks. SYSTEM and
+Administrators have full control. The owner (the lawyer) has read and execute (`FRFX`): they can
+start a task and end a running one, but can't change or delete it. An ended refresh keeps the old
+copy; an ended stop doesn't count as a finished one. If someone other than an administrator made a
+`\Clauseo` folder first, the set-up deletes it, with everything in it, and makes it again.
+
+**Which installs have them.** A per-user install registers both. A per-machine install never
+updates itself, so it has no refresh task: you update it. Its stop task is registered when the
+lawyer sets up Safe workspace, and again at each set-up after that.
+
+**The refresh task** (`--refresh`) reads `clauseo-sandbox-setup.exe` and its `.sig` file from
+`UserInstallDir`, copies the program into `staging`, checks the staged copy against its update
+signature (the `.sig` file) and the key built into the admin copy, and checks that it is for the
+same processor and not an older version.
+Only then does it replace the admin copy, and write `AdminCopyVersion` and `AdminCopySha256`. It
+never writes to the install folder. Its exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | The admin copy is current: replaced, already current, or its values written |
+| 32 | Not run as SYSTEM, or not run from the admin copy's path |
+| 33 | The key can't be read, or lacks a usable `AdminCopyOwner`, `UserInstallDir` or `AdminCopyVersion` |
+| 34 | The new program or its `.sig` was refused: missing, behind a link, not a plain file, too large or unreadable |
+| 35 | The new program's update signature was refused |
+| 36 | This build has no update key; nothing was read |
+| 37 | The `staging` folder or the copy in it couldn't be made, read back or secured |
+| 38 | The admin copy couldn't be replaced; the old copy is still in place |
+| 39 | The new copy is in place, but its version or hash couldn't be written. Clauseo refuses the copy until the next run writes them |
+| 40 | The new program is older than `AdminCopyVersion`, or the same version with other contents, or its version can't be read |
+| 41 | `UserInstallDir` isn't inside the owner's profile (for `machine`, isn't a folder only administrators can change) |
+| 42 | The new program is for another processor type |
+| 43 | Something held the `Sandbox` folder open, so nothing moved |
+| 44 | A set-up, `--adopt` or removal was running; nothing was read or changed |
+
+**The stop task** (`--stop`) reads the sandbox users from `PoolSids`, and checks each is a
+`ClauseoSbNN` account on this computer. It stops every process of theirs, whatever the process's
+own permissions say, and cancels every BITS job they own. It adds each user it found to
+`ResetSids`, and on success writes `StopCompleted` and `StopSequence`. It never stops the owner's
+processes. Its exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Every sandbox user's process was stopped (or none ran), their BITS jobs cancelled, the users marked and the success record written |
+| 45 | Not run as SYSTEM, or not run from the admin copy's path; nothing was stopped |
+| 46 | The key can't be read, or its `PoolSids`, `OwnerSid` or `StopNext` is malformed; nothing was stopped |
+| 47 | A SID in `PoolSids` isn't a sandbox user's; nothing was stopped |
+| 48 | A process or BITS job was left, or couldn't be identified (see [below](#if-the-sandboxstop-task-ends-with-48)) |
+| 49 | The processes were stopped, but the users couldn't be marked in `ResetSids`, or the success record couldn't be written |
+| 50 | The run couldn't take its number from `StopNext`; nothing was stopped |
+
+Task Scheduler shows the last result in hexadecimal: 0x20 is 32, 0x30 is 48 and 0x32 is 50.
+
+**Logs, and what to send support.** Each run writes one line to the Windows Application log,
+source `Clauseo Sandbox`, event ID 1: an error when it failed, information otherwise. The refresh
+task's line names no user path beyond the install folder; the stop task's gives counts, plus image
+file names after a 48. Send Clauseo support the task's name, its exit code and that line, with the
+Clauseo version.
+
+**Removal.** Uninstalling Clauseo runs `clauseo-sandbox-setup.exe --remove --uninstall` (per
+machine, `--remove --uninstall --per-machine`), which deletes both tasks after the four admin-copy
+values and before the admin folder. Don't delete or change the tasks yourself.
+
+### If the SandboxStop task ends with 48
+
+The SYSTEM task `\Clauseo\SandboxStop` stops the sandbox users' processes. Exit 48 means it found
+a process it couldn't identify, or one it couldn't stop. Nothing is lost: every sandbox user is
+reset before it is used again. Its Application Event Log line names each such process's image
+file (`unknown images: ...`), by file name only. A security product that hides its processes'
+tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
+gives.
+
+### If the SandboxSweep task ends with 56 or 57
+
+The SYSTEM task `\Clauseo\SandboxSweep` runs at the end of every sandboxed session. It deletes the
+sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 56 means a
+scheduled task on the machine couldn't be read or deleted, or a Task Scheduler folder couldn't be
+listed. Exit 57 means a sandbox user's BITS job couldn't be cancelled. Either way the run isn't
+recorded as complete, so the next sandboxed launch asks for another run and waits up to 15 seconds
+for it; if that run fails too, the launch is refused with "the sandbox's clean-up after an earlier
+session isn't finished". The task's Application Event Log line gives counts only, never task names.
+A task whose "run as" account is a domain account that can't be found (no domain controller is
+reachable) doesn't cause 56: it is skipped and counted as "skipped" in that line. A "run as"
+account that can't be found and isn't another domain's (a deleted local account, say) does, and is
+counted as "unresolved"; so does a task with no "run as" account ("with no user or group"). A task
+whose definition the SYSTEM account can't read is read from its file under
+`C:\Windows\System32\Tasks`; it is skipped when that file names someone other than a sandbox
+user, and counted as "skipped, not the pool's by their task file". The usual cause of 56 on every
+run is a task that can't be read either way, or one of those. Look in Task Scheduler for tasks that won't open or whose account is gone, and fix or
+delete them; the next run then ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
+set-up held its lock; the next launch asks again.
+
+### Network rules for the sandbox users
+
+The set-up blocks the sandbox users' network traffic with Windows Filtering Platform (WFP) filters.
+The one exception is a permit, per sandbox user, to `127.0.0.1` over TCP on ports 46100 to 46199,
+where Clauseo's own proxy listens for that launch. Each listener there demands a secret given to
+its own launch only. In practice:
+
+- **Agents reach the internet only through Clauseo's proxy.** It runs as part of Clauseo, as the
+  signed-in lawyer, not as a sandbox user, and lets through only the hosts Clauseo allows
+  (section 7).
+- **Your firm's outbound firewall and proxy rules still apply**, to Clauseo's proxy rather than to
+  the sandbox users. It chains to your firm's proxy (section 7). Rules that name the sandbox users
+  aren't needed.
+- Direct DNS (port 53) and ICMP are blocked. Windows' own services still resolve names for them,
+  as the DNS Client service does for every program.
+
+The set-up also adds four Windows Firewall rules for the same users, as a second layer:
+`clauseo_sandbox_block_outbound`, `clauseo_sandbox_block_inbound`,
+`clauseo_sandbox_block_loopback_udp` and `clauseo_sandbox_block_loopback_tcp`. If Group Policy keeps
+local firewall rules from applying, or Windows Firewall is off, the WFP filters still enforce, and
+the set-up logs it; you can add the same rules by Group Policy, or allow local rules
+(`AllowLocalPolicyMerge`). If the Base Filtering Engine service (BFE) isn't running, the set-up
+fails: set it to start automatically.
+
+**How to recognise them.** All of Clauseo's WFP objects are named `Clauseo sandbox`: the provider
+`{a5170842-1321-4b98-aa1e-e79c132f1c10}`, the sublayer `{91037008-b7c9-4530-b42e-287700239f22}`
+and the filters in it. `netsh wfp show filters` lists them.
+
+**Don't delete or change them.** Nothing else may sit in Clauseo's sublayer: the set-up deletes
+any filter it didn't write. Before each protected agent starts, Clauseo checks that the filters
+are exactly the set-up's and cover that agent's sandbox user. If they don't, the agent doesn't
+start, rather than run unfiltered. That refusal is `NetworkUnfiltered` in Clauseo's logs: the
+filters are missing, changed or unreadable, or the ports 46100 to 46199 are taken (by Windows'
+dynamic port range, a reserved range such as Hyper-V's, or another program's listener). "Set up
+protection again" in Clauseo (one Windows prompt) rewrites the filters. Removing the protection (section 1)
+deletes the filters, the sublayer, the provider and the firewall rules.
 
 ## Later
 
