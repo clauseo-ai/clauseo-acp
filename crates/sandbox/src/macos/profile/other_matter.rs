@@ -25,13 +25,16 @@ pub(super) fn refused_regex() -> String {
                     if !c.is_ascii_alphabetic() {
                         return c.to_string();
                     }
-                    let spellings = ascii_fold::spellings(c);
-                    let (ascii, beyond) = spellings.split_at(2);
-                    let class = format!("[{}{}]", ascii[0], ascii[1]);
+                    let lower = c.to_ascii_lowercase();
+                    let class = format!("[{lower}{}]", lower.to_ascii_uppercase());
+                    let beyond: Vec<String> = ascii_fold::spellings(c)
+                        .into_iter()
+                        .filter(|s| !s.is_ascii())
+                        .map(String::from)
+                        .collect();
                     if beyond.is_empty() {
                         class
                     } else {
-                        let beyond: Vec<String> = beyond.iter().map(char::to_string).collect();
                         format!("({class}|{})", beyond.join("|"))
                     }
                 })
