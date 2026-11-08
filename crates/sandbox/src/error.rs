@@ -112,6 +112,13 @@ pub enum Error {
     /// written, and the caller shows the cause rather than run on a weaker tier in silence.
     #[error("the sandbox can't run: {0}")]
     Blocked(crate::Blocked),
+    /// Windows tier B found an earlier session's unclean-session marker still awaiting a sweep
+    /// of the pool users' scheduled tasks and BITS jobs, asked for one, and it didn't complete
+    /// within 15 s, or the markers or the record's sequence couldn't be read
+    /// (`windows::runner::unclean`, from `windows::clean_close::check_launch`). Nothing was
+    /// planned or written; a later launch checks again. Its message names no path.
+    #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
+    UncleanSession(String),
 }
 
 impl Error {
@@ -132,7 +139,8 @@ impl Error {
             | Error::SetAside { .. }
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
-            | Error::ProtectedLink { .. } => None,
+            | Error::ProtectedLink { .. }
+            | Error::UncleanSession(_) => None,
         }
     }
 
@@ -155,6 +163,7 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
+            | Error::UncleanSession(_)
             | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,

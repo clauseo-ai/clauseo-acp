@@ -57,7 +57,7 @@ mod record;
 #[cfg(windows)]
 pub use check::check_launch;
 #[cfg(test)]
-pub(crate) use check::check_launch_with;
+pub(crate) use check::{check_launch_awaiting, check_launch_with};
 #[cfg(any(windows, test))]
 pub use close::{Closed, Cursor, NotWritten, session_cursor, write_clean_close};
 pub(crate) use inputs::WalkInputs;

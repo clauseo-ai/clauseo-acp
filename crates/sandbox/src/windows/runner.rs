@@ -112,6 +112,10 @@ pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+#[cfg(any(windows, test))]
+pub use unclean::StartUp;
+#[cfg(windows)]
+pub use unclean::os::start_up_requests;
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
 /// pool users (S15 `PR8`).
