@@ -293,8 +293,21 @@ pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
 }
 
 /// [`lock_down`] on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
-/// and `FILE_READ_ATTRIBUTES`).
+/// and `FILE_READ_ATTRIBUTES`). A file with more than one name (a hard link, whose other name
+/// may be anywhere on the volume and would get the same owner and DACL) is refused, never
+/// locked: the lock-down then fails, and a removal leaves the admin copy (exit 10).
 pub(super) fn lock_handle(handle: HANDLE, folder: bool) -> io::Result<()> {
+    if !folder {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the handle is open for the call; `info` is a live, writable struct.
+        unsafe { GetFileInformationByHandle(handle, &raw mut info) }
+            .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+        if info.nNumberOfLinks != 1 {
+            return Err(io::Error::other(
+                "a file in the admin folder has more than one name; it is left as it is",
+            ));
+        }
+    }
     let sddl = if folder {
         LOCKED_FOLDER_SDDL
     } else {
