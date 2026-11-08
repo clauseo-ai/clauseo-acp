@@ -114,7 +114,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
     let link_folders = fit_budget(&links, &link_targets, &matter, &working_trees)?;
 
-    Ok(Policy {
+    let policy = Policy {
         matter,
         state,
         tmpdir,
@@ -140,7 +140,9 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_targets,
         link_folders,
         read_only_in_matter,
-    })
+    };
+    check_runtime_not_writable(&policy)?;
+    Ok(policy)
 }
 
 /// `extra` added to `links`, each unless a finding already there names its path: `found` holds
@@ -342,6 +344,45 @@ fn run_shaped(tmpdir: &Path) -> bool {
 /// are allowed again after the hidden paths and the matter's read-only rules, so one may not be
 /// `/` or equal or hold the home folder, the matter or a hidden path. Inside a hidden path is
 /// fine: that is why they are allowed again.
+/// A runtime path may not be inside a place the agent writes: with
+/// [`Policy::native_code_deny`] on, nothing there maps as code, so the runtime would fail at
+/// start with only a dyld error to show for it.
+fn check_runtime_not_writable(policy: &Policy) -> Result<(), Error> {
+    let mut writable: Vec<(&Path, &str)> = vec![
+        (policy.matter(), "the matter"),
+        (policy.state(), "the state folder"),
+    ];
+    let optional = [
+        (policy.session_tmpdir(), "the session temp folder"),
+        (policy.notes(), "the notes folder"),
+        (policy.credential_link(), "the credential link"),
+        (policy.browser_socket_dir(), "the browser socket folder"),
+    ];
+    writable.extend(
+        optional
+            .into_iter()
+            .filter_map(|(p, what)| Some((p?, what))),
+    );
+    for p in policy.runtime() {
+        let found = writable.iter().find(|(w, _)| under(p, w)).copied();
+        let found = found.or_else(|| {
+            let store = policy.claude_store().filter(|store| store.covers(p))?;
+            Some((
+                store.dir.as_path(),
+                "the Claude store's names and lock folders",
+            ))
+        });
+        if let Some((folder, what)) = found {
+            return refuse(format!(
+                "a runtime path may not be inside {what}, where the agent writes: {} is in {}",
+                p.display(),
+                folder.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_reallowed(
     p: &Path,
     what: &str,

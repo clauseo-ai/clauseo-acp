@@ -202,3 +202,68 @@ fn a_nested_claude_md_and_claude_local_md_are_read_only() {
         PathClass::Outside
     );
 }
+
+/// A runtime inside a place the agent writes would fail to start with
+/// `Policy::native_code_deny` on (nothing there maps as code), so the build refuses it, naming
+/// the runtime and the folder, whether the switch is on or off. (A runtime equal to the matter
+/// gets the older refusal, above.)
+#[test]
+fn a_runtime_inside_a_writable_folder_is_refused() {
+    let w = World::new("runtime-writable");
+    for dir in [
+        "matter/node",
+        "state/bin",
+        "data/agent-state/m1/notes/tool",
+        "data/run/s1/tmp/py",
+        "home/.claude/.storage-write.lock",
+    ] {
+        w.dir.dir(dir);
+    }
+    let notes = w.at("data/agent-state/m1/notes");
+    let tmp = "data/run/s1/tmp";
+    let cases = [
+        (w.builder(), "matter/node", "matter", "the matter"),
+        (w.builder(), "state/bin", "state", "the state folder"),
+        (
+            w.builder().notes(&notes),
+            "data/agent-state/m1/notes/tool",
+            "data/agent-state/m1/notes",
+            "the notes folder",
+        ),
+        (
+            w.builder().tmpdir(w.at(tmp)),
+            "data/run/s1/tmp/py",
+            tmp,
+            "the session temp folder",
+        ),
+        (
+            w.builder().claude_store(w.at("home/.claude")),
+            "home/.claude/.storage-write.lock",
+            "home/.claude",
+            "the Claude store",
+        ),
+    ];
+    for (builder, runtime, folder, what) in cases {
+        for on in [false, true] {
+            let built = builder
+                .clone()
+                .native_code_deny(on)
+                .runtime(w.at(runtime))
+                .build();
+            let Err(Error::Policy(message)) = built else {
+                panic!("{runtime} (switch {on}) was not refused: {built:?}");
+            };
+            assert!(message.contains(what), "{message}");
+            let runtime = canon(&w.at(runtime)).display().to_string();
+            assert!(
+                message.contains(&format!(": {runtime} is in ")),
+                "{message}"
+            );
+            let folder = canon(&w.at(folder)).display().to_string();
+            assert!(message.ends_with(&format!(" is in {folder}")), "{message}");
+        }
+    }
+    let outside = w.dir.dir("runtime/node");
+    let policy = w.builder().native_code_deny(true).runtime(&outside).build();
+    assert!(policy.is_ok(), "{policy:?}");
+}
