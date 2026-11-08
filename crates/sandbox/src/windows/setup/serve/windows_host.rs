@@ -32,6 +32,19 @@ pub(crate) fn run() -> ServeExit {
     super::run(&mut host, |sddl| WindowsPipe::create(PIPE_NAME, sddl))
 }
 
+/// Why the record (or the group it names) couldn't be read, for the log and the reply: the
+/// Windows call and its code, or a fixed line. Never the error's own words, which may hold the
+/// registry's text as it was found.
+fn unread(error: &MachineError) -> String {
+    match error {
+        MachineError::Os { call, code } => format!("{call} failed (error {code})"),
+        MachineError::LockHeld
+        | MachineError::Unsupported(_)
+        | MachineError::Other(_)
+        | MachineError::ProfileChanged(_) => "a value that isn't well formed".to_owned(),
+    }
+}
+
 /// The machine the server reads and sets up, with the names `names`.
 pub(crate) struct WindowsHost {
     names: Names,
@@ -66,12 +79,12 @@ impl Host for WindowsHost {
 
     fn gate(&mut self) -> Result<Gate, String> {
         let key = &self.names.record_key;
-        let pool = record_write::read(key).map_err(|error| error.to_string())?;
+        let pool = record_write::read(key).map_err(|error| unread(&error))?;
         let (copy_owner, _version) =
-            record_write::read_admin(key).map_err(|error| error.to_string())?;
+            record_write::read_admin(key).map_err(|error| unread(&error))?;
         let mut groups: Vec<Sid> = pool.iter().map(|record| record.group.clone()).collect();
         if let Some(named) =
-            sid_of(&self.names.group, Kind::Group).map_err(|error| error.to_string())?
+            sid_of(&self.names.group, Kind::Group).map_err(|error| unread(&error))?
             && !groups.contains(&named)
         {
             groups.push(named);
@@ -126,5 +139,21 @@ impl Host for WindowsHost {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_record_is_logged_by_call_and_code_never_by_its_text() {
+        let os = MachineError::Os {
+            call: "RegGetValueW",
+            code: 13,
+        };
+        assert_eq!(unread(&os), "RegGetValueW failed (error 13)");
+        let found = MachineError::Other("not a SID: \"x\r\nforged line\"".to_owned());
+        assert_eq!(unread(&found), "a value that isn't well formed");
     }
 }
