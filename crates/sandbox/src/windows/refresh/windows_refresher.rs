@@ -312,6 +312,14 @@ impl Refresher for WindowsRefresher {
         event_log(error, line);
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "--wsl-deny's re-check waits, in the SYSTEM task's own process"
+    )]
+    fn pause(&mut self, time: std::time::Duration) {
+        std::thread::sleep(time);
+    }
+
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
         // No group, or a removal under way: nothing is owed, and nothing is put back that a
         // removal is taking off.

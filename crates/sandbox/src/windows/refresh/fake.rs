@@ -56,6 +56,10 @@ pub(super) struct Fake {
     pub(super) logs: Vec<(bool, String)>,
     /// What `reapply_wsl` gives.
     pub(super) wsl: Result<Option<String>, Failed>,
+    /// What each `reapply_wsl` gives in turn, before `wsl` once it is empty.
+    pub(super) wsl_passes: Vec<Result<Option<String>, Failed>>,
+    /// The waits `pause` was asked for.
+    pub(super) paused: Vec<std::time::Duration>,
     /// What `upgrade_wsl` gives.
     pub(super) upgrade: WslUpgraded,
     /// What `pool_busy` gives.
@@ -108,6 +112,8 @@ impl Fake {
             logs: Vec::new(),
             staging: Staging::Absent,
             wsl: Ok(None),
+            wsl_passes: Vec::new(),
+            paused: Vec::new(),
             upgrade: WslUpgraded::NotPending,
             pool_busy: Ok(false),
         }
@@ -298,7 +304,15 @@ impl Refresher for Fake {
     }
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
         self.calls.push("reapply_wsl");
-        self.wsl.clone()
+        if self.wsl_passes.is_empty() {
+            self.wsl.clone()
+        } else {
+            self.wsl_passes.remove(0)
+        }
+    }
+    fn pause(&mut self, time: std::time::Duration) {
+        self.calls.push("pause");
+        self.paused.push(time);
     }
 }
 
