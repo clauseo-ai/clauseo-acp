@@ -7,6 +7,11 @@
 //! it (`set_aside::not_yours`), so a squatter's folder stays theirs until `SYSTEM` sets it
 //! aside by its handle (`heal.rs`, [`heal_drive_folders`]).
 
+#![expect(
+    unsafe_code,
+    reason = "the drive folder made with its DACL in place, and its volume's flags read"
+)]
+
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::path::Path;
