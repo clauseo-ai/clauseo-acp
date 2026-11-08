@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::resolve::drive_form;
 #[cfg(unix)]
-use super::resolve::resolve_all;
+use super::resolve::{Disk, Found, resolve_all};
 use super::tests::{check, layout, text};
 use super::{LaunchDeny, claude_deny_rules, rule_path};
 #[cfg(unix)]
@@ -135,9 +135,11 @@ fn a_tilde_user_path_is_taken_from_a_home_not_the_working_folder() {
     #[cfg(unix)]
     if let Ok(Some(me)) = nix::unistd::User::from_uid(nix::unistd::getuid()) {
         let cwd = root.join("matter");
-        let found = resolve_all(Path::new(&format!("~{}/q", me.name)), &cwd, Some(root));
+        let net = crate::network_paths::NetEnv::current();
+        let tilde = format!("~{}/q", me.name);
+        let found = resolve_all(Path::new(&tilde), &cwd, Some(root), &Disk::real(&net));
         let home = dunce::canonicalize(&me.dir).unwrap_or(me.dir);
-        assert_eq!(found, [Some(home.join("q"))]);
+        assert_eq!(found, [Found::Path(home.join("q"))]);
     }
 }
 

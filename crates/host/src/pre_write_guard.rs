@@ -154,6 +154,7 @@
 mod ask;
 mod codex;
 mod names;
+mod reach;
 mod shell;
 mod timings;
 mod words;
@@ -168,6 +169,7 @@ use serde_json::Value;
 use codex::{has_codex_part, in_codex_folder, patch_targets};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
+use reach::Reach;
 pub(crate) use shell::script as shell_script;
 use shell::{resolutions, shell_targets};
 pub(crate) use words::Escape;
@@ -346,12 +348,13 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         .or_else(|| cwd.clone())
         .ok_or(Ignored::NoFolder)?;
     let base = cwd.unwrap_or_else(|| folder.clone());
+    let reach = Reach::new(&folder);
     let tool = hook
         .get("tool_name")
         .and_then(Value::as_str)
         .ok_or(Ignored::NoTool)?;
     let input = hook.get("tool_input").ok_or(Ignored::NoTool)?;
-    let Some(targets) = targets(tool, input, &base)? else {
+    let Some(targets) = targets(tool, input, &base, &reach)? else {
         return Ok(None);
     };
     timings::mark("targets");
@@ -359,7 +362,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
             .iter()
-            .any(|path| in_codex_folder(&folder, &base, path)),
+            .any(|path| in_codex_folder(&folder, &base, path, &reach)),
         Targets::Shell {
             patch, names_codex, ..
         } => {
@@ -373,7 +376,8 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
     let held_at = |paths: &[PathBuf]| {
         paths
             .iter()
-            .flat_map(|path| resolutions(&base.join(path)))
+            .flat_map(|path| resolutions(&base.join(path), &reach))
+            .filter(|path| reach.may_touch(path))
             .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
             .map(|(path, _)| path)
     };
@@ -408,7 +412,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             }
             timings::mark("resolve");
             Ok(names::shell_refusal(
-                text, line, *escape, &folder, found, &hits,
+                text, line, *escape, &folder, found, &hits, &reach,
             ))
         }
     }
@@ -437,7 +441,12 @@ enum Targets {
 /// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
 /// check; a shell command's words are files when they exist, taken from `base`. A checked tool
 /// whose input lacks the field its paths come from is ignored.
-fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ignored> {
+fn targets(
+    tool: &str,
+    input: &Value,
+    base: &Path,
+    reach: &Reach,
+) -> Result<Option<Targets>, Ignored> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let targets = match tool {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
@@ -449,8 +458,8 @@ fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ig
                 return Err(Ignored::Shape("file_path, notebook_path or command string"));
             }
         }
-        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash)?,
-        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick)?,
+        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash, reach)?,
+        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick, reach)?,
         _ => return Ok(None),
     };
     Ok(Some(targets))
@@ -464,9 +473,10 @@ const MAX_RESOLVED: usize = 4096;
 /// whole path canonicalised, else its parent with the name added, else the deepest existing
 /// prefix found by halving (a prefix of an existing one exists), canonicalised once, so a long
 /// path costs a few `stat`s, not one per part. A path over [`MAX_RESOLVED`] bytes, or one whose
-/// folder does not canonicalise, is only normalised by its text ([`lexical`]).
-fn existing_resolved(path: &Path) -> PathBuf {
-    if path.as_os_str().len() > MAX_RESOLVED {
+/// folder does not canonicalise, is only normalised by its text ([`lexical`]), and so is one
+/// that is or leads to a network location ([`Reach::may_touch`]), never touched.
+fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
+    if path.as_os_str().len() > MAX_RESOLVED || !reach.may_touch(path) {
         return lexical(path);
     }
     if let Ok(found) = dunce::canonicalize(path) {

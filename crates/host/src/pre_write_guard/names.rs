@@ -491,6 +491,7 @@ pub(super) fn shell_refusal(
     folder: &Path,
     found: Option<MatterPath>,
     hits: &[String],
+    reach: &super::Reach,
 ) -> Option<Refusal> {
     let held = held_files(folder);
     super::timings::mark("walk");
@@ -514,7 +515,7 @@ pub(super) fn shell_refusal(
         Some(file) => file.state.set(State::Held),
         None => names_held.push(Held::new(path.clone())),
     }
-    (!read_only(line, escape, &names_held, hits, folder)).then_some(Refusal::HeldOpen(path))
+    (!read_only(line, escape, &names_held, hits, folder, reach)).then_some(Refusal::HeldOpen(path))
 }
 
 /// A program word's name: its last path part, lower case, without `.exe`.

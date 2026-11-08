@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::network_paths::fold_name;
+
 use crate::pre_write_guard::{Escape, shell_script};
 
 /// The tokens of a shell command line that may be paths: each word ([`segments`]), and of a
@@ -280,22 +282,31 @@ fn link_targets(words: &[String]) -> Vec<PathBuf> {
 }
 
 /// The paths in `word` that start where one of `needles` (the data folder's text, matched in
-/// ASCII case when `insensitive`) does, a leading `$HOME` or `${HOME}` made `~`, each
-/// running to the next quote, blank, bracket, `,` or `;`, or the word's end.
+/// any case, folded as [`fold_name`] does, when `insensitive`) does, a leading `$HOME` or
+/// `${HOME}` made `~`, each running to the next quote, blank, bracket, `,` or `;`, or the
+/// word's end.
 pub(crate) fn embedded_paths(word: &str, needles: &[String], insensitive: bool) -> Vec<PathBuf> {
     let fold = |text: &str| {
         if insensitive {
-            text.to_ascii_lowercase()
+            fold_name(text)
         } else {
             text.to_owned()
         }
     };
-    let haystack = fold(word);
+    // The word folded, and for each byte of it the start of the character of `word` it came
+    // from: folding may change a character's length (`K` is three bytes, `k` one).
+    let mut haystack = String::with_capacity(word.len());
+    let mut origin: Vec<usize> = Vec::with_capacity(word.len());
+    for (at, c) in word.char_indices() {
+        let folded = fold(c.encode_utf8(&mut [0; 4]));
+        origin.extend(std::iter::repeat_n(at, folded.len()));
+        haystack.push_str(&folded);
+    }
     let mut out = Vec::new();
     for needle in needles.iter().filter(|needle| !needle.is_empty()) {
         let needle = fold(needle);
         for (start, _) in haystack.match_indices(&needle) {
-            // ASCII folding keeps every byte where it was, so `start` is a boundary in `word`.
+            let start = origin.get(start).copied().unwrap_or(word.len());
             let tail = home_as_tilde(word.get(start..).unwrap_or_default());
             let path = tail
                 .split(|c: char| c.is_whitespace() || "'\"()[]{},;<>|&`".contains(c))
