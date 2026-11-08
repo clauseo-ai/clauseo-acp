@@ -192,6 +192,26 @@ fn a_symlink_head_makes_a_repository_shaped_folder() {
     assert_eq!(scan.bare_repos(), [matter.join("r")]);
 }
 
+/// `objects` and `refs` as symbolic links to folders count as folders: git follows them, and
+/// so does the shape check (`fs::metadata` on each entry).
+#[cfg(unix)]
+#[test]
+fn objects_and_refs_linked_to_folders_make_a_repository_shaped_folder() {
+    let dir = TempDir::new("links-bare-linked-parts");
+    dir.dir("matter/store/objects");
+    dir.dir("matter/store/refs");
+    dir.file("matter/r/HEAD", "ref: refs/heads/main\n");
+    dir.symlink("matter/r/objects", Path::new("../store/objects"));
+    dir.symlink("matter/r/refs", Path::new("../store/refs"));
+    dir.file("matter/f/HEAD", "ref: refs/heads/main\n");
+    dir.file("matter/f/target", "a file\n");
+    dir.symlink("matter/f/objects", Path::new("target"));
+    dir.symlink("matter/f/refs", Path::new("target"));
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(scan.bare_repos(), [matter.join("r")]);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_git_link_to_a_folder_in_the_matter_names_that_folder() {
