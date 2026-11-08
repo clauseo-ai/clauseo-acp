@@ -14,12 +14,13 @@ use std::time::Duration;
 use clauseo_blocklist::{BlockList, Current, Generated, Header, parse_plain};
 use clauseo_host::{AppSubscription, BlockListSeams, BlockListUpdate, EgressProxy, SessionKey};
 use clauseo_protocol::{BlockedSiteId, HostEvent, Principal, SiteTag};
-use clauseo_sandbox::{ProxyConfig, ProxyHandle, Upstream, start_proxy};
+use clauseo_sandbox::{Denial, DenialSink, ProxyConfig, ProxyHandle, Upstream, start_proxy};
+use futures::StreamExt as _;
 use serde_json::json;
 
 use crate::egress::claude_then;
 use crate::profile_rig::{CLAUDE, Hook, Wired, browser_server, turn};
-use crate::settings::ready;
+use crate::settings::decode;
 use crate::support::{Dir, Running, wait};
 
 /// Both are seed sites, so the session's allowlist lets them through when no list names them.
@@ -69,9 +70,11 @@ fn read_head(stream: &mut TcpStream) -> String {
 }
 
 /// The real proxy (`start_proxy`) with the host's config, only its upstream pointed at the
-/// local [`upstream`]. Each open checks the config's list is `block`'s (or empty, with none).
+/// local [`upstream`]. Each open checks the config's list is `block`'s (or empty, with none),
+/// and keeps the session's sink for [`RealProxy::barrier`].
 struct RealProxy {
     open: Mutex<BTreeMap<SessionKey, ProxyHandle>>,
+    sinks: Mutex<Vec<Arc<dyn DenialSink>>>,
     upstream: url::Url,
     block: Option<Arc<Current>>,
 }
@@ -87,6 +90,7 @@ impl EgressProxy for RealProxy {
             None => assert!(config.block.get().is_unloaded(), "a list without seams"),
         }
         config.upstream = Upstream::Fixed(self.upstream.clone());
+        self.sinks.lock().unwrap().push(Arc::clone(&config.denials));
         let handle = start_proxy(config)?;
         self.open.lock().unwrap().insert(session, handle);
         Ok(())
@@ -106,6 +110,21 @@ impl EgressProxy for RealProxy {
 }
 
 impl RealProxy {
+    /// Reports a refusal of `host` straight to the one session's sink, as the proxy would: a
+    /// positive barrier. Its notice comes after any the proxy's sink posted before it, since
+    /// both go down the same actor channel in order.
+    fn barrier(&self, host: &str) {
+        let sinks = self.sinks.lock().unwrap();
+        assert_eq!(sinks.len(), 1, "one session");
+        sinks[0].denied(Denial::Blocked {
+            host: host.to_owned(),
+            port: 443,
+            listed: host.to_owned(),
+            tag: clauseo_blocklist::Tag::Phishing,
+            generated: Generated::parse(FIRST).unwrap(),
+        });
+    }
+
     /// The one open session's browser port.
     fn port(&self) -> u16 {
         let open = self.open.lock().unwrap();
@@ -170,53 +189,56 @@ fn session(dir: &Dir, proxy: &Arc<RealProxy>) -> (Running, AppSubscription) {
     (host, sub)
 }
 
-/// The `SiteBlocked` notices so far: id, host and count.
-fn notices(host: &Running, sub: &mut AppSubscription) -> Vec<(BlockedSiteId, String, u32)> {
-    host.settle();
-    ready(sub)
-        .into_iter()
-        .filter_map(|event| match event {
-            HostEvent::SiteBlocked {
-                block_id,
-                thread,
-                host,
-                tag,
-                count,
-                ..
-            } => {
-                assert!(thread.is_some());
-                assert_eq!(tag, SiteTag::Phishing);
-                Some((block_id, host, count))
-            }
-            _ => None,
-        })
-        .collect()
+/// The next `SiteBlocked` notice on `sub` (id, host, count), waited for up to the watchdog;
+/// any other event is skipped.
+fn next_notice(sub: &mut AppSubscription) -> (BlockedSiteId, String, u32) {
+    loop {
+        let item = wait("a SiteBlocked notice", sub.next()).expect("the app stream ended");
+        if let HostEvent::SiteBlocked {
+            block_id,
+            thread,
+            host,
+            tag,
+            count,
+            ..
+        } = decode(&item)
+        {
+            assert!(thread.is_some());
+            assert_eq!(tag, SiteTag::Phishing);
+            return (block_id, host, count);
+        }
+    }
 }
 
 fn real_proxy(block: Option<Arc<Current>>) -> Arc<RealProxy> {
     Arc::new(RealProxy {
         open: Mutex::new(BTreeMap::new()),
+        sinks: Mutex::new(Vec::new()),
         upstream: upstream(),
         block,
     })
 }
 
 /// A listed site is refused through the session's proxy, and each refusal is told once: the
-/// same notice re-sent with its count one higher. A site not on the list passes.
+/// same notice re-sent with its count one higher. A site not on the list passes, with no notice:
+/// the next notice after it is a later refusal's.
 #[test]
 fn a_listed_site_is_refused_and_told_once_per_refusal_and_others_pass() {
     let dir = Dir::new("egress_block_listed", &[]);
     let proxy = real_proxy(Some(Arc::new(Current::new(list(FIRST, &[LISTED])))));
     let (host, mut sub) = session(&dir, &proxy);
     assert_eq!(proxy.connect(LISTED), 403);
-    let first = notices(&host, &mut sub);
-    assert_eq!(first.len(), 1, "{first:?}");
-    assert_eq!((first[0].1.as_str(), first[0].2), (LISTED, 1));
+    let (id, site, count) = next_notice(&mut sub);
+    assert_eq!((site.as_str(), count), (LISTED, 1));
     assert_eq!(proxy.connect(LISTED), 403);
-    let second = notices(&host, &mut sub);
-    assert_eq!(second, [(first[0].0, LISTED.to_owned(), 2)]);
+    assert_eq!(next_notice(&mut sub), (id, LISTED.to_owned(), 2));
     assert_eq!(proxy.connect(LATER), 200, "not on the list");
-    assert_eq!(notices(&host, &mut sub), []);
+    assert_eq!(proxy.connect(LISTED), 403, "the barrier");
+    assert_eq!(
+        next_notice(&mut sub),
+        (id, LISTED.to_owned(), 3),
+        "no notice for the unlisted site came first"
+    );
     host.shutdown();
 }
 
@@ -231,13 +253,17 @@ fn a_list_swap_reaches_the_next_connection() {
     assert_eq!(proxy.connect(LATER), 200);
     assert!(current.offer(list(SECOND, &[LISTED, LATER]), None));
     assert_eq!(proxy.connect(LATER), 403);
-    let told = notices(&host, &mut sub);
-    assert_eq!(told.len(), 1, "{told:?}");
-    assert_eq!((told[0].1.as_str(), told[0].2), (LATER, 1));
+    let (_id, site, count) = next_notice(&mut sub);
+    assert_eq!(
+        (site.as_str(), count),
+        (LATER, 1),
+        "the first notice is the swap's"
+    );
     host.shutdown();
 }
 
-/// With no block-list seams the proxy gets an empty list (checked at open) and refuses nothing.
+/// With no block-list seams the proxy gets an empty list (checked at open) and refuses nothing:
+/// the first notice is the barrier's, reported to the session's sink after both connections.
 #[test]
 fn without_seams_nothing_is_refused() {
     let dir = Dir::new("egress_block_none", &[]);
@@ -245,6 +271,8 @@ fn without_seams_nothing_is_refused() {
     let (host, mut sub) = session(&dir, &proxy);
     assert_eq!(proxy.connect(LISTED), 200);
     assert_eq!(proxy.connect(LATER), 200);
-    assert_eq!(notices(&host, &mut sub), []);
+    proxy.barrier("barrier.example");
+    let (_id, site, count) = next_notice(&mut sub);
+    assert_eq!((site.as_str(), count), ("barrier.example", 1));
     host.shutdown();
 }
