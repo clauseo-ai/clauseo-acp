@@ -58,6 +58,9 @@ pub trait WslRead {
     ///
     /// [`PACKAGE_NAME`]: super::PACKAGE_NAME
     fn wsl_packages(&self) -> Result<Vec<String>, WslError>;
+    /// The same full names under the calling user's (the lawyer's)
+    /// `HKCU\Software\Classes\PackagedCom\Package`: a package registered for that user only.
+    fn user_wsl_packages(&self) -> Result<Vec<String>, WslError>;
     /// The pool group's SID, as the machine's record names it (`GroupSid`); `None` when it is
     /// missing or isn't a SID.
     fn group(&self) -> Option<Sid>;

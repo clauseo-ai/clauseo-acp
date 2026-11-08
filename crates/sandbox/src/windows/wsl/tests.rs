@@ -473,6 +473,38 @@ fn a_pending_wsl_upgrade_refuses_the_launch_as_wsls_installer_judges_it() {
 }
 
 #[test]
+fn a_package_registered_for_the_lawyer_only_is_wsl_present_with_no_pending_upgrade() {
+    let alone = || FakeWsl {
+        group: Some(group()),
+        record: Some(WslRecord::default()),
+        user_packages: vec![package("3.0.3.0")],
+        ..FakeWsl::default()
+    };
+    // No service, no class, no machine-wide package: the lawyer's own registration is WSL.
+    assert_eq!(upgrade(&alone()), Upgrade::LawyerOnly);
+    assert_eq!(check(&alone()), Ok(Found::Denied(0)));
+    // With the lifted WSL, an MSI older than it is no upgrade a pool user can start.
+    let mut fake = FakeWsl::lifted();
+    apply(&mut fake, &group()).unwrap();
+    fake.user_packages = vec![package("3.0.3.0")];
+    fake.msi_version = Some("2.0.0".to_owned());
+    assert_eq!(check(&fake), Ok(Found::Denied(2)));
+    // A machine-wide registration is still read first, and decides.
+    fake.packages = vec![package("3.0.3.0")];
+    assert_eq!(check(&fake), Err(Blocked::WslUpgradePending));
+    // The lawyer's registrations unreadable: can't be judged.
+    let mut fake = alone();
+    fake.fail.push("user packages".to_owned());
+    assert_eq!(upgrade(&fake), Upgrade::Unreadable);
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    // Neither: no package.
+    let mut fake = alone();
+    fake.user_packages.clear();
+    assert_eq!(upgrade(&fake), Upgrade::NoPackage);
+    assert_eq!(check(&fake), Ok(Found::NoWsl));
+}
+
+#[test]
 fn a_version_is_three_or_four_numbers_and_compares_on_the_first_three() {
     assert_eq!(version("2.6.1"), Some((2, 6, 1)));
     assert_eq!(version("2.6.1.0"), Some((2, 6, 1)));

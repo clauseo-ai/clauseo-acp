@@ -58,6 +58,8 @@ pub(crate) struct FakeWsl {
     pub(super) packaged: bool,
     /// The WSL package's packaged-COM full names (`wsl_packages`).
     pub(super) packages: Vec<String>,
+    /// The same, registered for the lawyer only (`user_wsl_packages`).
+    pub(super) user_packages: Vec<String>,
     /// The MSI's recorded `Version`.
     pub(super) msi_version: Option<String>,
     pub(super) group: Option<Sid>,
@@ -170,6 +172,11 @@ impl WslRead for FakeWsl {
         Ok(self.packages.clone())
     }
 
+    fn user_wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        self.failing("user packages")?;
+        Ok(self.user_packages.clone())
+    }
+
     fn group(&self) -> Option<Sid> {
         self.group.clone()
     }
@@ -258,6 +265,10 @@ impl WslRead for NoWsl {
     }
 
     fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        Ok(Vec::new())
+    }
+
+    fn user_wsl_packages(&self) -> Result<Vec<String>, WslError> {
         Ok(Vec::new())
     }
 

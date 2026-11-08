@@ -66,7 +66,8 @@ pub enum Found {
 ///   runs WSL2's VMs too, from Windows 10 2004 on; so is a package or MSI version that can't
 ///   be read or parsed ([`Upgrade::Unreadable`]);
 /// - else a pending upgrade ([`Upgrade::Pending`]: the MSI missing or older than the package)
-///   is [`Blocked::WslUpgradePending`].
+///   is [`Blocked::WslUpgradePending`]; a package registered for the lawyer only
+///   ([`Upgrade::LawyerOnly`]) is WSL present, with no upgrade a pool user could start.
 ///
 /// With no WSL nothing is refused. A record with no group names no deny, so every target is
 /// missing one.
