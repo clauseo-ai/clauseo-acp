@@ -1,5 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(target_os = "macos")]
 use super::names::{GIT_NAME_REGEX, HEAD_REGEX};
 use super::*;
 use crate::test_support::TempDir;
