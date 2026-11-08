@@ -816,6 +816,46 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
+  "U3-err-sandbox.pool_full": {
+    "en": "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
+    "hi": "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
+  "U3-err-sandbox.pool_owned": {
+    "en": "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Your firm manages file ownership on this computer.",
+    "hi": "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर पर फ़ाइलों का स्वामित्व आपकी फ़र्म प्रबंधित करती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
+  "U3-err-sandbox.cant_label": {
+    "en": "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. Ask again to try once more.",
+    "hi": "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। एक बार और कोशिश करने के लिए फिर से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
+  "U3-err-sandbox.removing": {
+    "en": "The Safe workspace is being removed from this computer. Try again once that's finished.",
+    "hi": "इस कंप्यूटर से सुरक्षित कार्यक्षेत्र हटाया जा रहा है। उसके पूरा होने के बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+  },
   "U3-err-blocklist.override_off": {
     "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
     "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",

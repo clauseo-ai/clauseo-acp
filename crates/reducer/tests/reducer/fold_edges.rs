@@ -31,6 +31,7 @@ fn turn_ended_of_unstarted_turn_drops_its_files_and_failure() {
         turn,
         code: ErrorCode::ALL[0],
         detail: None,
+        at: None,
     };
     log.push(failed).unwrap();
     let mut state = fold(log.events());

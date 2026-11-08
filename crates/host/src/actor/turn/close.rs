@@ -153,6 +153,7 @@ impl TurnClose {
                     turn,
                     code: *code,
                     detail,
+                    at: None,
                 },
             )?;
         }

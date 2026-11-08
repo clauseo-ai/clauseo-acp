@@ -29,7 +29,6 @@ use super::Actor;
 use super::commands::CommandCtx;
 use super::input::Input;
 use crate::error::Error;
-use crate::matter_worker::matter_settings;
 
 /// The least time between two progress events of a scan.
 pub(crate) const THROTTLE: Duration = Duration::from_millis(250);
@@ -189,7 +188,7 @@ fn start(actor: &mut Actor, ctx: &CommandCtx, folder: FolderRefId) -> Result<(),
         // The same refusals import makes: the configured folders here, the data folder and
         // the matters root through the settings.
         refused: actor.refused_folders.clone(),
-        settings: matter_settings(actor.effective.data_dir()),
+        settings: super::matters::settings_of(actor),
         walk: Arc::clone(&actor.scan_walk),
         cancel: Arc::clone(&cancel),
         latest: Arc::clone(&latest),

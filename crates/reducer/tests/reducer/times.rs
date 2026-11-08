@@ -248,6 +248,7 @@ fn a_step_shows_when_its_turn_ended_and_a_turn_that_never_ended_has_no_step() {
         turn,
         code: ErrorCode::ALL[0],
         detail: None,
+        at: None,
     };
     log.push(failed).unwrap();
     // The undo updates the step; its time stays the end's, the undo's is on its marker.

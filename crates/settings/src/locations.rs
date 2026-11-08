@@ -62,6 +62,11 @@ pub trait PlatformDirs {
     fn home(&self) -> Option<PathBuf>;
     /// A Windows known folder. `None` on other OSes, and for a folder this machine lacks.
     fn known_folder(&self, folder: KnownFolder) -> Option<PathBuf>;
+    /// The lawyer's own Codex folder when they moved it (`CODEX_HOME`, absolute only): Codex's
+    /// logins and settings, refused as a matter folder like `~/.codex`. `None` by default.
+    fn codex_home(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// The Windows known folders [`Locations::resolve`], [`crate::refused_folders`] and the policy

@@ -17,6 +17,7 @@ mod cancel;
 pub(super) mod case_law;
 mod close;
 mod end;
+mod exit_wait;
 mod failure;
 mod forced_mode;
 mod idle;
@@ -39,6 +40,7 @@ mod steps;
 mod text;
 mod undo;
 pub(crate) mod undo_preview;
+mod unprotected;
 mod updates;
 pub(crate) mod wide;
 mod withheld;
@@ -47,8 +49,8 @@ mod writer;
 use std::collections::VecDeque;
 
 use clauseo_protocol::{
-    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
-    MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, MatterId,
+    MatterPath, StreamId, ThreadId, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -78,8 +80,10 @@ pub(crate) use restore::{
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
 pub(crate) use state::busy;
+use state::{End, LimitMark, TurnPhase};
+pub(crate) use unprotected::protection_changed;
 pub(crate) use writer::{
-    hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
+    agents_gone, hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
@@ -206,8 +210,13 @@ struct Current {
     store_failed: Option<ErrorCode>,
     /// The agent exited before the prompt went out; logged last, after `TurnEnded`.
     detach: Option<DetachReason>,
+    /// Its agent's process left the Safe workspace (`agents/ended.rs`): however it ends, it ends
+    /// `LeftSafeWorkspace` with no `TurnFailed`, and it never goes back to the queue.
+    workspace: state::Workspace,
     /// A Codex prompt failed with a JSON-RPC error: the turn's end waits for a limits read.
     limit_read: Option<end::LimitRead>,
+    /// The turn's end waits for its agent's exit report (`exit_wait.rs`).
+    exit_wait: exit_wait::ExitWait,
     /// When it became the current turn, on the host's monotonic clock: the usage counts'
     /// `answer_ended.took` runs from here to `end::finish`.
     started: std::time::Duration,
@@ -221,45 +230,6 @@ struct Current {
 /// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
 /// taken, and when it failed.
 type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
-
-/// Where a current turn is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TurnPhase {
-    /// Its `UserMessage` commit is in flight.
-    Accepting,
-    /// Its agent is launching (step 2).
-    Launching,
-    /// It waits for its matter's writer (step 3).
-    Queued,
-    /// Its before-turn checkpoint runs (step 4).
-    Checkpointing,
-    /// Its `TurnStarted` commit is in flight; the prompt goes out once it is durable.
-    Starting,
-    /// Its prompt is in flight (step 5).
-    Prompting,
-    /// The cancel fallback fired: the agent is being stopped.
-    FallbackStop,
-    /// Steps 6 to 8.
-    Ending,
-}
-
-/// A limit signal that stops the turn at the limit.
-#[derive(Debug, Clone)]
-struct LimitMark {
-    window: Option<String>,
-    resets_at: Option<Timestamp>,
-    reason: LimitStopReason,
-}
-
-/// How a turn ends.
-#[derive(Debug, Clone)]
-struct End {
-    stop: clauseo_protocol::StopReason,
-    failure: Option<(ErrorCode, Option<String>)>,
-    expiry: clauseo_protocol::ExpiryReason,
-    /// Logged after `TurnEnded`: the agent exited during the turn.
-    detach: Option<clauseo_protocol::DetachReason>,
-}
 
 /// What a turn commit continues with once its result is back.
 #[derive(Debug)]
@@ -317,6 +287,8 @@ enum TimerKind {
     Rate,
     Cancel(TurnId),
     LimitRead(TurnId),
+    /// The wait of `turn`'s end for its agent's exit report is over (`exit_wait.rs`).
+    ExitWait(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
     /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
@@ -398,6 +370,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
+        TimerKind::ExitWait(turn) => exit_wait::on_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
         TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
     }
@@ -517,6 +490,7 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
 /// limit is logged. The actor closes the store once [`busy`] is false and commits returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
+    exit_wait::stop_all(actor);
     came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);

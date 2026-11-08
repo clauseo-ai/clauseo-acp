@@ -23,6 +23,7 @@ pub(crate) struct ConfigParts {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
+    pub(crate) refused_trees: Vec<PathBuf>,
     /// The default matters folder's late answer (`with_documents_later`), if it comes late.
     pub(crate) documents: Option<crate::actor::documents::Later>,
     pub(crate) home_folder: Option<PathBuf>,
@@ -60,6 +61,7 @@ impl From<HostConfig> for ConfigParts {
             launcher: config.launcher,
             profile: config.profile,
             refused_folders: config.refused_folders,
+            refused_trees: config.refused_trees,
             documents: config.documents,
             home_folder: config.home_folder,
             clock: config.clock,
@@ -94,4 +96,18 @@ pub(crate) struct UpdateSeams {
     /// The store's close reports a failure once it has closed (`with_failing_close`).
     #[cfg(feature = "test-support")]
     pub(crate) fail_close: bool,
+}
+
+impl Default for UpdateSeams {
+    /// No updater, a clock seed, and this crate's version: only a caller that knows the app's
+    /// version (desktop) can do better.
+    fn default() -> Self {
+        Self {
+            updater: Arc::new(crate::update::NoUpdater),
+            jitter_seed: None,
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            #[cfg(feature = "test-support")]
+            fail_close: false,
+        }
+    }
 }

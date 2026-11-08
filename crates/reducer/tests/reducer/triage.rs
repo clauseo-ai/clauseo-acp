@@ -110,6 +110,7 @@ fn triggers(log: &mut Log, turn: TurnId) -> Vec<(&'static str, DomainEvent)> {
                 turn,
                 code: ErrorCode::ALL[0],
                 detail: None,
+                at: None,
             }
             .into(),
         ),
@@ -217,7 +218,7 @@ fn other_events_leave_snooze_and_done() {
 
 #[test]
 fn snooze_and_done_survive_a_snapshot_at_this_schema() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 11);
+    assert_eq!(REDUCER_SCHEMA_VERSION, 12);
     let (_, state, _) = snoozed_and_done(7);
     let bytes = Snapshot::of(&state).to_bytes().unwrap();
     let read = Snapshot::from_bytes(&bytes).unwrap().into_state().unwrap();

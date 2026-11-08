@@ -248,6 +248,7 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
             turn,
             code: super::sign_in::code_of(actor, error.code(), &error.to_string()),
             detail: Some(error.detail()),
+            at: None,
         };
         end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         return;
@@ -265,6 +266,14 @@ pub(super) fn end_unstarted(
     stop: StopReason,
     checkpoint: Option<(MatterId, TurnCheckpoint)>,
 ) {
+    // A turn whose agent left the Safe workspace ends `LeftSafeWorkspace`, with no `TurnFailed`.
+    let escaped = current(actor, thread)
+        .is_some_and(|current| current.workspace == super::state::Workspace::Left);
+    let (stop, failed) = if escaped {
+        (StopReason::LeftSafeWorkspace, None)
+    } else {
+        (stop, failed)
+    };
     let mut close = TurnClose::new(turn, stop);
     close.failure = failed.map(|failed| (failed.code, failed.detail));
     close.detach = current(actor, thread).and_then(|current| current.detach.take());
@@ -342,6 +351,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                at: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
             return;
@@ -352,6 +362,7 @@ pub(super) fn on_before_turn(
             turn,
             code,
             detail: Some(STORE_DETAIL.to_owned()),
+            at: None,
         };
         let checkpoint = Some((matter, checkpoint));
         end_unstarted(
@@ -400,6 +411,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                at: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         }

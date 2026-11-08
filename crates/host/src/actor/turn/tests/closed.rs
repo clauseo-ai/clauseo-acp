@@ -27,6 +27,25 @@ const EXIT_AFTER_ANSWER: &str = r#"{"expect":{"method":"session/prompt","as":"p1
 {"exit":{"code":1}}
 "#;
 
+/// Whether `thread`'s turn has ended and its commits returned. The `Ended` is held, so a close
+/// waiting for it (`exit_wait.rs`) waits out its bound: the clock passes it.
+fn closed_past_the_exit_wait(
+    clock: &crate::ManualClock,
+    thread: clauseo_protocol::ThreadId,
+) -> impl FnMut(&mut crate::actor::Actor) -> bool {
+    move |actor| {
+        let state = &actor.threads[&thread].turn;
+        if state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.exit_wait.holds_checkpoint())
+        {
+            clock.advance(crate::actor::turn::exit_wait::EXIT_WAIT);
+        }
+        state.current.is_none() && actor.work.commits == 0
+    }
+}
+
 /// An agent's `Ended`, the input the tests hold back.
 fn ended(_: &crate::actor::Actor, input: &Input) -> bool {
     matches!(
@@ -118,9 +137,12 @@ fn a_prompt_between_a_closed_answer_and_a_late_end_starts_a_new_agent() {
 fn closed_answer_then_prompt(mut rig: Rig, pause: Duration) {
     let thread = rig.thread();
     let first = send_prompt(&mut rig, 10, thread);
-    rig.run_holding("the first turn's end", ended, |actor| {
-        actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
-    });
+    let clock = rig.clock.clone();
+    rig.run_holding(
+        "the first turn's end",
+        ended,
+        closed_past_the_exit_wait(&clock, thread),
+    );
     if rig.held.is_empty() {
         rig.hold_next("the agent's end", ended);
     }
@@ -156,9 +178,12 @@ fn a_prompt_after_an_idle_agent_s_connection_ended_starts_a_new_agent() {
     let first = send_prompt(&mut rig, 10, thread);
     // `Ended` comes once the event forwarder saw the channel close, so once it is held the
     // connection is known gone.
-    rig.run_holding("the first turn's end and the agent's", ended, |actor| {
-        actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
-    });
+    let clock = rig.clock.clone();
+    rig.run_holding(
+        "the first turn's end and the agent's",
+        ended,
+        closed_past_the_exit_wait(&clock, thread),
+    );
     if rig.held.is_empty() {
         rig.hold_next("the agent's end", ended);
     }

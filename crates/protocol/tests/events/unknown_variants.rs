@@ -114,7 +114,8 @@ fn permission_about() {
 #[test]
 fn stop_reason() {
     use StopReason::{
-        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+        AtLimit, Cancelled, EndTurn, Failed, LeftSafeWorkspace, MaxTokens, MaxTurnRequests,
+        NotAllowed, Refusal,
     };
     let cases = [
         (EndTurn, "end_turn"),
@@ -125,6 +126,7 @@ fn stop_reason() {
         (NotAllowed, "not_allowed"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
+        (LeftSafeWorkspace, "left_safe_workspace"),
     ];
     unit_enum(&StopReason::ALL, &cases, StopReason::Unknown);
     let names: Vec<_> = StopReason::ALL
@@ -553,12 +555,14 @@ fn turn_failed_keeps_a_newer_code_in_detail() {
             turn: turn_id(3),
             code,
             detail: detail.map(str::to_owned),
+            at: None,
         };
         // The wire form: a known code, then its text replaced by the code under test.
         let written = TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::Internal,
             detail: wire_detail.map(str::to_owned),
+            at: None,
         };
         let mut json: serde_json::Value = serde_json::to_value(&written).unwrap();
         json["code"] = wire_code.into();

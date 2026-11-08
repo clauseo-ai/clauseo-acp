@@ -16,6 +16,7 @@
 //! meanwhile, so a cancel, an agent's exit (its detach joins the end) or a commit failure
 //! changes nothing but what that commit holds, and shutdown decides at once.
 
+use clauseo_limits::LimitHit;
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     AgentKind, CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FileChange,
@@ -152,6 +153,9 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         return;
     }
     current.phase = TurnPhase::Ending;
+    if current.workspace == super::state::Workspace::Left {
+        end = End::left_safe_workspace(end.detach.take());
+    }
     if let Some(call) = current.prompt_call.take() {
         call.abort();
     }
@@ -265,6 +269,13 @@ pub(super) fn on_after_turn(
         read.held = Some(result);
         return;
     }
+    // An exit that is due joins the end: the close waits for it, bounded (`exit_wait.rs`).
+    let Some(result) = super::exit_wait::hold(actor, thread, turn, result) else {
+        return;
+    };
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     let fallback = current.limit_read.take().is_some();
     let mut end = current
         .end
@@ -274,23 +285,11 @@ pub(super) fn on_after_turn(
     let store_failed = current.store_failed;
     end.store_failed(store_failed);
     let mut limit = current.limit.take();
-    if fallback && store_failed.is_none() {
-        // The read decides: at the limit, the prompt's failure was the limit.
-        if let Some(hit) = limits::at_limit(actor, AgentKind::Codex) {
-            end.stop = StopReason::EndTurn;
-            end.failure = None;
-            limit = Some(LimitMark {
-                window: hit.window,
-                resets_at: hit.resets_at,
-                reason: hit.reason,
-            });
-        }
-    }
-    // A turn stopped at its limit stays `AtLimit` when only its checkpoint fails.
-    let stop = match (&limit, end.stop, &end.failure) {
-        (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
-        (_, stop, _) => stop,
-    };
+    // The read decides: at the limit, the prompt's failure was the limit.
+    let hit = (fallback && store_failed.is_none())
+        .then(|| limits::at_limit(actor, AgentKind::Codex))
+        .flatten();
+    let stop = close_stop(&mut end, &mut limit, hit);
     let mut close = TurnClose::new(turn, stop);
     // Expiries step 6 could not log (its commit failed, the stream rolled back).
     close.expiries = Expiries::Pending(end.expiry);
@@ -314,6 +313,33 @@ pub(super) fn on_after_turn(
     });
     failure::closing_sent(actor, thread, &close, logged);
     finish(actor, thread);
+}
+
+/// The stop a turn ending as `end` closes with, `hit` being the Codex fallback's limits read at
+/// the limit: that read makes the prompt's failure the limit, and a turn stopped at its limit
+/// stays `AtLimit` when only its checkpoint fails. A turn that left the Safe workspace keeps
+/// `LeftSafeWorkspace`: no limit signal or read overwrites it.
+pub(super) fn close_stop(
+    end: &mut End,
+    limit: &mut Option<LimitMark>,
+    hit: Option<LimitHit>,
+) -> StopReason {
+    if end.stop == StopReason::LeftSafeWorkspace {
+        return end.stop;
+    }
+    if let Some(hit) = hit {
+        end.stop = StopReason::EndTurn;
+        end.failure = None;
+        *limit = Some(LimitMark {
+            window: hit.window,
+            resets_at: hit.resets_at,
+            reason: hit.reason,
+        });
+    }
+    match (&*limit, end.stop, &end.failure) {
+        (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
+        (_, stop, _) => stop,
+    }
 }
 
 /// `TurnEnded` for `limits`, with `read_now` for a stop at the limit. A stop with no reset time
@@ -466,6 +492,8 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     if host_stopping(actor) {
         agents::stop(actor, thread);
     }
+    // Launches refused since it launched unprotected: its agent stops (`unprotected.rs`).
+    super::unprotected::turn_ended(actor, thread);
     actor.release(StreamId::Thread(thread));
 }
 

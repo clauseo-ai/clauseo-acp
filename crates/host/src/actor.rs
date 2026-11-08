@@ -143,6 +143,9 @@ pub(crate) struct Actor {
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
     pub(crate) turn_path: turn::wide::TurnPath,
     pub(crate) refused_folders: Vec<PathBuf>,
+    /// Folders refused with everything inside them (`HostConfig::with_refused_trees`), beside
+    /// the data folder: `matters::settings_of`.
+    pub(crate) refused_trees: Vec<PathBuf>,
     /// The default matters folder's late answer (`documents.rs`).
     pub(crate) documents: documents::DocumentsWait,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
@@ -242,7 +245,8 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
     let (exit, exited) = futures::channel::oneshot::channel::<HostExit>();
     let post = internal.clone();
     // The first detection, here on the calling thread: never on the actor (`protection.rs`).
-    let config = (protection::observe(config.sandbox()), config);
+    let first = protection::observe(config.sandbox(), config.effective.data_dir());
+    let config = (first, config);
     let thread = thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || run(config, request_rx, (post, internal_rx), ready, exit))
@@ -287,6 +291,7 @@ fn run(
             }
         };
         allowed::start(&mut actor, allowed_sites);
+        protection::forget::start(&mut actor);
         startup::begin_startup(&mut actor);
         // Stops when this block ends, however it ends (`blocklist.rs`).
         let _blocklist = blocklist.and_then(|start| {
@@ -507,6 +512,7 @@ impl Actor {
             Input::Connector(input) => connectors::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
+            Input::SandboxForget(input) => protection::forget::on_input(self, *input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -521,6 +527,7 @@ impl Actor {
             || turn::busy(self)
             || browser_install::busy(self)
             || allowed::busy(self)
+            || protection::forget::busy(self)
             || update::busy(self)
             || scratch::holds(self)
             || matters::probe::stop_held(self)

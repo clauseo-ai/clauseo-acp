@@ -21,7 +21,7 @@ use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
-use crate::update::{NoUpdater, Updater};
+use crate::update::Updater;
 
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
@@ -53,6 +53,7 @@ pub struct HostConfig {
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
+    refused_trees: Vec<PathBuf>,
     documents: Option<crate::actor::documents::Later>,
     home_folder: Option<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
@@ -91,6 +92,7 @@ impl HostConfig {
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),
+            refused_trees: Vec::new(),
             documents: None,
             home_folder: SystemDirs.home(),
             clock: Arc::new(SystemClock),
@@ -108,14 +110,7 @@ impl HostConfig {
             folder_probes: crate::actor::FolderProbes::default(),
             counts: None,
             search: SearchSeams::default(),
-            update: UpdateSeams {
-                updater: Arc::new(NoUpdater),
-                jitter_seed: None,
-                // Only a caller that knows the app's version (desktop) can do better.
-                app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                #[cfg(feature = "test-support")]
-                fail_close: false,
-            },
+            update: UpdateSeams::default(),
             idle: IdleStop::default(),
             sandbox: None,
         }
@@ -131,8 +126,8 @@ impl HostConfig {
         self
     }
 
-    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
-    /// The host checks and downloads through it on its own pool (decision record 0037).
+    /// The updater (default: [`crate::update::NoUpdater`], a package manages it). The host
+    /// checks and downloads through it on its own pool (decision record 0037).
     pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
         self.update.updater = updater;
         self
@@ -163,6 +158,13 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// Folders a lawyer may not pick as a matter, nor any folder inside them, from
+    /// `clauseo_settings::refused_trees` (default: none). The host adds its data folder.
+    pub fn with_refused_trees(mut self, trees: Vec<PathBuf>) -> Self {
+        self.refused_trees = trees;
         self
     }
 

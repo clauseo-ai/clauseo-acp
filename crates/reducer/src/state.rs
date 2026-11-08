@@ -9,8 +9,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use clauseo_protocol::{
     CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
-    MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus, ViewEntry, utf16_len,
+    MatterHeaderEntry, MatterId, MatterPath, MessageId, PermissionRequestId, PermissionState, Seq,
+    SkippedFile, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus,
+    ViewEntry, utf16_len,
 };
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +95,14 @@ pub(crate) struct TurnFiles {
     pub(crate) skipped: Vec<SkippedFile>,
 }
 
+/// A `TurnFailed` of a turn that has not ended, until its `TurnEnded` makes the step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TurnFailure {
+    pub(crate) code: ErrorCode,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub(crate) at: Option<MatterPath>,
+}
+
 /// A thread's folded state: its header, its transcript entries, and what the fold needs to
 /// know about the turn in progress.
 ///
@@ -115,8 +124,8 @@ pub struct ThreadState {
     pub(crate) after_turn: Option<ThreadStatus>,
     /// `FilesChanged` of turns that have not ended.
     pub(crate) files: BTreeMap<TurnId, TurnFiles>,
-    /// `TurnFailed` codes of turns that have not ended.
-    pub(crate) failures: BTreeMap<TurnId, ErrorCode>,
+    /// `TurnFailed` codes (and items) of turns that have not ended.
+    pub(crate) failures: BTreeMap<TurnId, TurnFailure>,
     pub(crate) index: Index,
 }
 

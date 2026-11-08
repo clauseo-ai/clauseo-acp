@@ -103,13 +103,6 @@ pub fn file_changes() -> Vec<FileChange> {
 /// no example opens a page with, and the stop reasons no example turn ends with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
-        TurnEnded {
-            turn: turn_id(3),
-            stop: StopReason::NotAllowed,
-            usage: None,
-            checkpoint_after: Some(checkpoint_id(14)),
-        }
-        .into(),
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,
@@ -125,18 +118,11 @@ pub fn later_variants() -> Vec<DomainEvent> {
             by: DoneBy::Lawyer,
         }
         .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::SettingsLocked,
-            detail: Some("ui.theme is set by policy".to_owned()),
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterCodexFolder,
-            detail: Some("the matter folder holds a .codex folder".to_owned()),
-        }
-        .into(),
+        later::failed(ErrorCode::SettingsLocked, "ui.theme is set by policy"),
+        later::failed(
+            ErrorCode::MatterCodexFolder,
+            "the matter folder holds a .codex folder",
+        ),
         PageVisited::new(
             turn_id(3),
             tool_call_id(4),
@@ -157,54 +143,63 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsDrive,
             detail: Some("/ is a drive root".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsHome,
             detail: Some("the home folder".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsSystem,
             detail: Some("/usr is a system folder".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderUnreadable,
             detail: Some("permission denied".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsMatter,
             detail: Some("already a matter".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderInMattersRoot,
             detail: Some("inside the data folder".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderNetwork,
             detail: Some("on a network drive".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderNoPermissions,
             detail: Some("no file permissions".to_owned()),
+            at: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::AgentGuardMissing,
             detail: Some("the guard hook has no program".to_owned()),
+            at: None,
         }
         .into(),
         // Never a turn's failure in practice (the updater's code); here for the corpus.
@@ -212,11 +207,13 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::UpdateFailed,
             detail: Some("the signature did not verify".to_owned()),
+            at: None,
         }
         .into(),
     ]
     .into_iter()
     .chain(later::failures_then_case_law())
+    .chain(later::stops())
     .chain(setup::turns())
     .chain(later::notices())
     .collect()
@@ -422,6 +419,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
             turn,
             code: ErrorCode::AgentExited,
             detail: None,
+            at: None,
         }
         .into(),
         TurnStoppedAtLimit {

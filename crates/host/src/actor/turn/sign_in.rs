@@ -150,9 +150,10 @@ pub(super) fn stop_for(actor: &Actor, thread: ThreadId) -> Option<StopFor> {
 
 /// Why a launch of `thread`'s agent may not start: `stop_agents` holds it, so what waits fails
 /// with `agent.auth_required` and a turn goes back held for the sign-in; or desktop refuses
-/// its new launches (`set_launch_refused`), so a turn fails with desktop's code; or
-/// `sandbox.required` is on with no working sandbox (`protection::refusal`), so a turn fails
-/// with `sandbox.setup_required` or `sandbox.required`.
+/// its new launches (`set_launch_refused`), so a turn fails with desktop's code; or this
+/// computer's protection refuses it (`protection::refusal`: a blocked sandbox or a pool that
+/// can't give a user, whatever the settings say, or `sandbox.required` with no working sandbox),
+/// so a turn fails with that refusal's code.
 pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     if holds(actor, thread) {
         return Some(Error::refused(
@@ -160,7 +161,7 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
             "the agent starts again once its sign-in has changed",
         ));
     }
-    // `sandbox.required` with no working sandbox (decision record 0051), before the agent's
+    // The protection's refusal (decision record 0051, R17 PR-E), before the agent's
     // lookup below, whose early return must never skip it. (That return is not reached from a
     // launch, which always names a known thread.) The hold above goes first: it refuses too,
     // and a held turn waits for the sign-in rather than failing.
@@ -243,6 +244,10 @@ pub(super) fn requeue_of(
     stopped: Option<TurnId>,
     close: &TurnClose,
 ) -> Option<Requeue> {
+    // A turn that left the Safe workspace is never queued again (`agents/ended.rs`).
+    if close.stop == StopReason::LeftSafeWorkspace {
+        return None;
+    }
     let failed = close
         .failure
         .as_ref()

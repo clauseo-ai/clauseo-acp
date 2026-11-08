@@ -1,7 +1,7 @@
 //! Recording fakes of the sandbox seam (decision record 0051, R17 PR-B1): a set-up with a
-//! scripted `state()` sequence and scripted `run()` and `remove()` outcomes, whose `run()` can
-//! block until the test releases it, and a detection with a scripted sequence. Each sequence
-//! repeats its last value once the earlier ones are used.
+//! scripted `state()` sequence and scripted `run()`, `remove()` and `forget_matter()` outcomes,
+//! one of which can block until the test releases it, and a detection with a scripted sequence.
+//! Each sequence repeats its last value once the earlier ones are used.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -44,6 +44,7 @@ pub(crate) struct FakeSetup {
     states: Script<SetupState>,
     runs: Script<Result<(), SetupError>>,
     removes: Script<Result<(), SetupError>>,
+    forgets: Script<Result<(), SetupError>>,
     /// Which call waits at the gate, and its ends.
     gated: Gated,
     gate: Option<Arc<GateEnds>>,
@@ -51,6 +52,8 @@ pub(crate) struct FakeSetup {
     panics: bool,
     pub(crate) run_calls: AtomicUsize,
     pub(crate) remove_calls: AtomicUsize,
+    /// The matters `forget_matter()` was called for, and the names of the threads it ran on.
+    pub(crate) forgotten: Mutex<Vec<(clauseo_protocol::MatterId, String)>>,
     /// The names of the threads `state()`, `run()` and `remove()` were called on.
     pub(crate) threads: Mutex<Vec<String>>,
 }
@@ -67,6 +70,8 @@ pub(crate) enum Gated {
     Run,
     /// `remove()`.
     Remove,
+    /// `forget_matter()`, once it has noted its call.
+    Forget,
     /// Every detection after the first (start-up's).
     Detect,
 }
@@ -109,8 +114,15 @@ impl SandboxSetup for FakeSetup {
         self.runs.next()
     }
 
-    fn forget_matter(&self, _matter: &clauseo_protocol::MatterId) -> Result<(), SetupError> {
-        Ok(())
+    fn forget_matter(&self, matter: &clauseo_protocol::MatterId) -> Result<(), SetupError> {
+        let name = std::thread::current().name().unwrap_or("").to_owned();
+        self.forgotten.lock().unwrap().push((*matter, name));
+        if self.gated == Gated::Forget
+            && let Some(gate) = &self.gate
+        {
+            pass(gate);
+        }
+        self.forgets.next()
     }
 
     fn remove(&self) -> Result<(), SetupError> {
@@ -131,18 +143,21 @@ pub(crate) struct Plan {
     pub(crate) states: Vec<SetupState>,
     pub(crate) runs: Vec<Result<(), SetupError>>,
     pub(crate) removes: Vec<Result<(), SetupError>>,
+    pub(crate) forgets: Vec<Result<(), SetupError>>,
     pub(crate) gated: Gated,
     pub(crate) panics: bool,
 }
 
 impl Plan {
-    /// Detected as `detections`, the set-up in `states`; every run and removal succeeds, at once.
+    /// Detected as `detections`, the set-up in `states`; every run, removal and forget succeeds,
+    /// at once.
     pub(crate) fn new(detections: Vec<Detection>, states: Vec<SetupState>) -> Self {
         Self {
             detections,
             states,
             runs: vec![Ok(())],
             removes: vec![Ok(())],
+            forgets: vec![Ok(())],
             gated: Gated::No,
             panics: false,
         }
@@ -172,11 +187,13 @@ pub(crate) fn rig(plan: Plan) -> Rig {
         states: Script::new(plan.states),
         runs: Script::new(plan.runs),
         removes: Script::new(plan.removes),
+        forgets: Script::new(plan.forgets),
         gated: plan.gated,
         gate: gate.clone(),
         panics: plan.panics,
         run_calls: AtomicUsize::new(0),
         remove_calls: AtomicUsize::new(0),
+        forgotten: Mutex::new(Vec::new()),
         threads: Mutex::new(Vec::new()),
     });
     let script = Arc::new(Script::new(plan.detections));

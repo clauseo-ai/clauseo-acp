@@ -10,7 +10,7 @@ use std::sync::Arc;
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
-    MessageId, PermissionRequestId, ThreadId, TurnId,
+    MessageId, PermissionRequestId, ProtectionTier, ThreadId, TurnId,
 };
 
 use clauseo_process::TreeWatch;
@@ -32,7 +32,7 @@ use crate::sent::SentView;
 mod ended;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+pub(super) use ended::{exit_due, hold_stop, idle_stop, launch_failed, log_detach, on_ended, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -115,6 +115,8 @@ pub(super) struct Agent {
     pub(super) denied_data_folder: u32,
     /// Its idle clock and config calls in flight (`idle.rs`).
     pub(super) idle: super::idle::Mark,
+    /// The computer's tier at its launch: only under tier B is an exit the sandbox runner's.
+    pub(super) tier: Option<ProtectionTier>,
 }
 
 /// What a Codex agent's launch recorded.
@@ -247,6 +249,7 @@ pub(super) fn launch_now(
         plan_notes,
         denied_data_folder: 0,
         idle: super::idle::Mark::default(),
+        tier: super::super::protection::tier(actor),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -582,19 +585,5 @@ fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &
             let error = Error::refused(error.code(), error.to_string());
             actor.finish_command(ctx.id, Err(error));
         }
-    }
-}
-
-/// The launch failed after the agent started: stop it and fail what waits for it.
-pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    let waiting = std::mem::take(&mut agent.waiting);
-    for item in waiting {
-        fail_waiting(actor, thread, &item, error);
     }
 }

@@ -1704,6 +1704,14 @@ export type ErrorCode =
 "blocklist.allow_not_saved" | 
 /** The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. */
 "blocklist.revoke_not_saved" | 
+/** Every agent user of the Windows sandbox's pool on this computer is held by another matter, so no agent was started here; the same launch works once another matter frees one. */
+"sandbox.pool_full" | 
+/** A Windows sandbox user still owns an item in this matter's folder because handing it back failed, so no agent was started here; an administrator's reclaim, or IT, fixes it. The item is in TurnFailed's at, never in the detail. */
+"sandbox.pool_owned" | 
+/** The Windows sandbox could not give a folder in this matter the label it needs (no right to change its owner), so no agent was started here; IT fixes it. The kind is in the detail, the item in TurnFailed's at. */
+"sandbox.cant_label" | 
+/** The sandbox's set-up is being removed from this computer, so no agent was started; the same launch works once the removal ends. */
+"sandbox.removing" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -3479,12 +3487,16 @@ export type Motion =
 
 /**
  *  Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
- *  `Unknown`. What follows depends on `sandbox.required` (decision record 0051): when it is
- *  false, any cause runs the agents at tier C, in the ask modes (auto only when
+ *  `Unknown`. Six causes refuse `CreateThread` and a turn's launch whatever
+ *  `sandbox.required` or `sandbox.allow_unprotected_auto` say, as a computer whose sandbox
+ *  is set up but can't be used now, or is broken (R17 PR-E, fail closed): `Blocked`,
+ *  `OtherAccount`, `SetUpFailed` and `Unknown` with `sandbox.blocked`, `PoolFull` with
+ *  `sandbox.pool_full` and `PoolOwned` with `sandbox.pool_owned`. The rest, a sandbox not
+ *  set up at all or switched off, depend on `sandbox.required` (decision record 0051): when
+ *  it is false they run the agents at tier C, in the ask modes (auto only when
  *  `sandbox.allow_unprotected_auto` is true), with no refusal; when it is true, there is
  *  never a silent fallback: `NeedsSetUp` and `SetUpRefused`, which the set-up fixes, refuse
- *  `CreateThread` and a turn's launch with `sandbox.setup_required`, and every other cause
- *  (`Unknown` included) with `sandbox.required`.
+ *  with `sandbox.setup_required`, `Unsupported` and `SwitchedOff` with `sandbox.required`.
  */
 export type NotProtectedCause = 
 /**
@@ -3495,7 +3507,7 @@ export type NotProtectedCause =
 ({ unsupported: {
 	/**  Which case. */
 	why: UnsupportedWhy,
-} }) & { pool_full?: never; switched_off?: never } | 
+} }) & { blocked?: never; pool_full?: never; switched_off?: never } | 
 /**
  *  The sandbox needs a one-time set-up with an administrator's consent, not done yet.
  *  Tier C when `sandbox.required` is false; `sandbox.setup_required` when it is true.
@@ -3506,14 +3518,20 @@ export type NotProtectedCause =
  *  refused to raise it.
  */
 "set_up_refused" | 
-/**  The set-up, or the check that the sandbox works, failed. */
+/**
+ *  The set-up, or the check that the sandbox works, failed: no agent starts on this
+ *  computer whatever either setting says, `sandbox.blocked`, until a set-up repairs it.
+ */
 "set_up_failed" | 
 /**
  *  Every agent user of the set-up pool is taken, so this matter has no sandbox until one
- *  is free. Counts only, never an account name or a SID.
+ *  is free. Counts only, never an account name or a SID; the host passes the sandbox's
+ *  numbers through unchanged. `size` and `needs_reset` count the Safe workspace's
+ *  places: today a place is a pool user (at most 32); after stage C's slot groups, a
+ *  2-user slot (at most 32 slots, of 64 users).
  */
 ({ pool_full: {
-	/**  The pool's users in all. */
+	/**  The places in all. */
 	size: number,
 	/**  Users held by another live matter's open session. */
 	open: number,
@@ -3523,12 +3541,48 @@ export type NotProtectedCause =
 	owed: number,
 	/**  Users that still own set-aside items. */
 	set_aside: number,
-} }) & { switched_off?: never; unsupported?: never } | 
+	/**
+	 *  Places whose hand-back failed for good, so only a reset (an administrator's
+	 *  "Free up protected spaces") frees them; with `why` `no_free_slot`. Missing from
+	 *  an older host: 0.
+	 */
+	needs_reset?: number,
+	/**
+	 *  Why no user could be given, when the host knows; left out when not (an older
+	 *  host, or one before the sandbox names it).
+	 */
+	why?: PoolFullWhy,
+} }) & { blocked?: never; switched_off?: never; unsupported?: never } | 
 /**  The lawyer switched protection off for the matter at `at`. */
 ({ switched_off: {
 	/**  When. */
 	at: Timestamp,
-} }) & { pool_full?: never; unsupported?: never } | 
+} }) & { blocked?: never; pool_full?: never; unsupported?: never } | 
+/**
+ *  A setting or tool only whoever looks after the computer can change blocks the
+ *  sandbox (decision record 0049), so no agent starts on this computer, whatever
+ *  `sandbox.required` or `sandbox.allow_unprotected_auto` say: `sandbox.blocked`.
+ */
+({ blocked: {
+	/**
+	 *  Which block, as the sandbox names it (`logon_right`, `policy`,
+	 *  `admin_copy_missing`, `admin_copy_changed`, `admin_copy_unsafe`,
+	 *  `tool_missing`, ...): an open set, passed through; never `other_account`,
+	 *  which is `OtherAccount`.
+	 */
+	reason: string,
+} }) & { pool_full?: never; switched_off?: never; unsupported?: never } | 
+/**
+ *  Another Windows account on this computer owns the sandbox's set-up (one owner per
+ *  computer), so no agent starts for this one, whatever either setting says:
+ *  `sandbox.blocked`.
+ */
+"other_account" | 
+/**
+ *  A sandbox user still owns an item in this matter's folder, because its hand-back
+ *  failed, so no agent starts in it: `sandbox.pool_owned`.
+ */
+"pool_owned" | 
 /**  A cause from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
@@ -4106,6 +4160,21 @@ export type Platform =
 "linux";
 
 /**
+ *  Why the sandbox's pool could give this matter no user (`NotProtectedCause::PoolFull`).
+ *  A value from a newer Clauseo decodes to `Unknown`; values are only added at the end.
+ */
+export type PoolFullWhy = 
+/**
+ *  Every slot is held by a matter with an open session, so none can be reclaimed.
+ *  `needs_reset` counts the users only a reset frees.
+ */
+"no_free_slot" | 
+/**  This matter already has two conversations running, the most a matter's slot serves. */
+"matter_sessions_full" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
  *  Who made a call or an answer. Only the local desktop exists now; scopes come with the
  *  phone, whose principal may carry data, so a kind from a newer Clauseo decodes to
  *  `Unknown`.
@@ -4185,8 +4254,9 @@ export type Protection =
 } }) & { not_protected?: never } | 
 /**
  *  No sandbox for `cause`. Under `sandbox.required` false, the agents run at tier C in
- *  the ask modes (auto only when `sandbox.allow_unprotected_auto` is true); under
- *  `sandbox.required` true, no agent starts (`NotProtectedCause` gives which code).
+ *  the ask modes (auto only when `sandbox.allow_unprotected_auto` is true), except for
+ *  the causes that refuse whatever the settings say; under `sandbox.required` true, no
+ *  agent starts (`NotProtectedCause` gives which code).
  */
 ({ not_protected: {
 	/**  Why. */
@@ -4240,6 +4310,11 @@ export type ProtectionView = {
 	 *  user owns it). Missing from an older host: `false`.
 	 */
 	retry_asks_admin?: boolean,
+	/**
+	 *  When this computer's sandbox set-up finished, when the host knows it (Windows' tier B);
+	 *  left out when not.
+	 */
+	set_up_at?: Timestamp,
 };
 
 /**
@@ -5132,6 +5207,8 @@ export type StepEntry = {
 	stop: StopReason,
 	/**  The code of the `TurnFailed` before it, when it failed. */
 	failure?: ErrorCode,
+	/**  The item in the matter's folder that `TurnFailed` named (its `at`), when it named one. */
+	failure_at?: MatterPath,
 	/**  The files it changed (from its `FilesChanged`; empty when none changed). */
 	files: FileChange[],
 	/**  The files it changed but did not version. */
@@ -5162,8 +5239,8 @@ export type StepUndone = {
 };
 
 /**
- *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
- *  `Failed`.
+ *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit`,
+ *  `Failed` and `LeftSafeWorkspace`.
  */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
@@ -5187,6 +5264,13 @@ export type StopReason =
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */
 "failed" | 
+/**
+ *  Part of the agent tried to run outside the Safe workspace (Windows' tier B: the
+ *  sandbox runner's Escapee exit), so the host stopped its session. No `TurnFailed`
+ *  comes with it and nothing retries it; the lawyer's next turn is a normal launch.
+ *  Every rule treats it as `Cancelled` (the queue holds).
+ */
+"left_safe_workspace" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -5866,6 +5950,11 @@ export type TurnFailed = {
 	 *  may carry an unknown code in front, so it can be longer.
 	 */
 	detail?: string,
+	/**
+	 *  The item in the matter's folder a refusal names (a tier-B `sandbox.pool_owned` or
+	 *  `sandbox.cant_label`), for the app to show where; never in `detail`. Left out when none.
+	 */
+	at?: MatterPath,
 };
 
 /**

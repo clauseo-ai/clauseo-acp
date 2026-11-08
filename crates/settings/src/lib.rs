@@ -138,7 +138,7 @@ mod update;
 mod user;
 mod warning;
 
-pub use dirs::refused_folders;
+pub use dirs::{refused_folders, refused_trees};
 pub use effective::{Effective, EntryWrite};
 pub use error::Error;
 pub use files::{Files, SystemFiles};

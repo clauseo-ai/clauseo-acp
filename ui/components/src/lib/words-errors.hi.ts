@@ -139,6 +139,19 @@ export const HI = {
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
   "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.":
     "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र का इस्तेमाल नहीं कर सकता: कोई Windows सेटिंग या सुरक्षा सॉफ़्टवेयर इसे रोक रहा है, इसलिए कुछ भी शुरू नहीं हुआ। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
+  // provisional (stage E, app thread's words for copy review): the pool's refusal, moved from
+  // words-protection.hi.ts
+  "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.":
+    "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+  // pool_owned without TurnFailed.at; the {where} version is in words-errors-where.ts (#713)
+  "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Your firm manages file ownership on this computer.":
+    "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर पर फ़ाइलों का स्वामित्व आपकी फ़र्म प्रबंधित करती है।",
+  // provisional (stage E, app thread's words for copy review)
+  "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. Ask again to try once more.":
+    "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। एक बार और कोशिश करने के लिए फिर से पूछें।",
+  // provisional (stage E, app thread's words for copy review)
+  "The Safe workspace is being removed from this computer. Try again once that's finished.":
+    "इस कंप्यूटर से सुरक्षित कार्यक्षेत्र हटाया जा रहा है। उसके पूरा होने के बाद फिर से प्रयास करें।",
   "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.":
     "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
   "This notice has expired. Open the site again, then allow it from the new notice.":

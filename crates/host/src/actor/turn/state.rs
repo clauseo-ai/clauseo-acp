@@ -1,12 +1,62 @@
-//! The constructors of a turn's in-memory state: a new current turn, and the ways a turn ends;
-//! and whether start-up or shutdown waits for the turn path.
+//! A turn's in-memory state: where a current turn is, how it ends, the constructors of a new
+//! current turn and of the ways a turn ends; and whether start-up or shutdown waits for the turn
+//! path.
 
 use clauseo_protocol::{
-    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MessageId, StopReason, TurnId,
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, LimitStopReason, MessageId, StopReason,
+    Timestamp, TurnId,
 };
 
 use super::super::{Actor, HostPhase};
-use super::{Current, End, TurnPhase, host_stopping, key_retry};
+use super::{Current, host_stopping, key_retry};
+
+/// Where a current turn is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TurnPhase {
+    /// Its `UserMessage` commit is in flight.
+    Accepting,
+    /// Its agent is launching (step 2).
+    Launching,
+    /// It waits for its matter's writer (step 3).
+    Queued,
+    /// Its before-turn checkpoint runs (step 4).
+    Checkpointing,
+    /// Its `TurnStarted` commit is in flight; the prompt goes out once it is durable.
+    Starting,
+    /// Its prompt is in flight (step 5).
+    Prompting,
+    /// The cancel fallback fired: the agent is being stopped.
+    FallbackStop,
+    /// Steps 6 to 8.
+    Ending,
+}
+
+/// Whether a turn's agent's process stayed in the Safe workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Workspace {
+    /// It did, or it ran without the sandbox runner.
+    Inside,
+    /// It ended with the sandbox runner's Escapee exit (`agents/ended.rs`).
+    Left,
+}
+
+/// A limit signal that stops the turn at the limit.
+#[derive(Debug, Clone)]
+pub(super) struct LimitMark {
+    pub(super) window: Option<String>,
+    pub(super) resets_at: Option<Timestamp>,
+    pub(super) reason: LimitStopReason,
+}
+
+/// How a turn ends.
+#[derive(Debug, Clone)]
+pub(super) struct End {
+    pub(super) stop: StopReason,
+    pub(super) failure: Option<(ErrorCode, Option<String>)>,
+    pub(super) expiry: ExpiryReason,
+    /// Logged after `TurnEnded`: the agent exited during the turn.
+    pub(super) detach: Option<DetachReason>,
+}
 
 /// The detail of a `TurnFailed` logged because a commit of the turn failed.
 pub(super) const STORE_DETAIL: &str = "a commit of the turn failed";
@@ -18,6 +68,18 @@ impl End {
             stop: StopReason::Cancelled,
             failure: None,
             expiry: ExpiryReason::TurnEnded,
+            detach,
+        }
+    }
+
+    /// A turn whose agent's process left the Safe workspace (the sandbox runner's Escapee exit,
+    /// `agents/ended.rs`): `LeftSafeWorkspace`, with no `TurnFailed`; its asks expire as for
+    /// an agent that exited.
+    pub(super) fn left_safe_workspace(detach: Option<DetachReason>) -> Self {
+        Self {
+            stop: StopReason::LeftSafeWorkspace,
+            failure: None,
+            expiry: ExpiryReason::AgentExited,
             detach,
         }
     }
@@ -80,7 +142,9 @@ impl Current {
             abort: false,
             store_failed: None,
             detach: None,
+            workspace: Workspace::Inside,
             limit_read: None,
+            exit_wait: super::exit_wait::ExitWait::default(),
             started,
             first_words: None,
             withheld: super::withheld::Withheld::default(),

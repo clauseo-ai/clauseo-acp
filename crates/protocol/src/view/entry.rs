@@ -389,6 +389,9 @@ pub struct StepEntry {
     /// The code of the `TurnFailed` before it, when it failed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub failure: Option<ErrorCode>,
+    /// The item in the matter's folder that `TurnFailed` named (its `at`), when it named one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub failure_at: Option<MatterPath>,
     /// The files it changed (from its `FilesChanged`; empty when none changed).
     pub files: Vec<FileChange>,
     /// The files it changed but did not version.

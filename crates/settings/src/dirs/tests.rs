@@ -1,4 +1,4 @@
-use super::{LINUX_SYSTEM, MACOS_SYSTEM, refused_folders, refused_for};
+use super::{LINUX_SYSTEM, MACOS_SYSTEM, refused_folders, refused_for, refused_trees};
 use crate::locations::{KnownFolder, Os};
 use crate::testing::FakeDirs;
 use std::path::PathBuf;
@@ -37,9 +37,44 @@ fn refused_folders_include_home_dot_folders() {
             "/Users/ada/.ssh",
             "/Users/ada/.gnupg",
             "/Users/ada/.aws",
+            "/Users/ada/.codex",
         ]);
-        assert_eq!(refused.get(1..7), Some(dot.as_slice()), "{os:?}");
+        assert_eq!(refused.get(1..8), Some(dot.as_slice()), "{os:?}");
     }
+}
+
+/// R17 PR-E: the folder `CODEX_HOME` names is refused like `~/.codex`, on every OS.
+#[test]
+fn the_codex_home_is_refused_where_codex_home_moved_it() {
+    for os in [Os::Windows, Os::Mac, Os::Linux] {
+        let dirs = FakeDirs {
+            codex_home: Some(PathBuf::from("/Volumes/Work/codex")),
+            ..with_home()
+        };
+        let refused = refused_for(os, &dirs);
+        assert_eq!(
+            refused.get(8),
+            Some(&PathBuf::from("/Volumes/Work/codex")),
+            "{os:?}"
+        );
+        assert!(!refused_for(os, &with_home()).contains(&PathBuf::from("/Volumes/Work/codex")));
+    }
+}
+
+/// R17 PR-E: `~/.codex` and the folder `CODEX_HOME` names are refused trees too: every folder
+/// inside them is refused, not only the folder itself.
+#[test]
+fn the_codex_folders_are_refused_trees() {
+    assert_eq!(refused_trees(&with_home()), paths(&["/Users/ada/.codex"]));
+    let dirs = FakeDirs {
+        codex_home: Some(PathBuf::from("/Volumes/Work/codex")),
+        ..with_home()
+    };
+    assert_eq!(
+        refused_trees(&dirs),
+        paths(&["/Users/ada/.codex", "/Volumes/Work/codex"])
+    );
+    assert_eq!(refused_trees(&FakeDirs::default()), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -47,7 +82,7 @@ fn macos_refuses_library_and_the_system_folders() {
     let refused = refused_for(Os::Mac, &with_home());
     let mut expected = vec![PathBuf::from("/Users/ada/Library")];
     expected.extend(paths(&MACOS_SYSTEM));
-    assert_eq!(refused.get(7..), Some(expected.as_slice()));
+    assert_eq!(refused.get(8..), Some(expected.as_slice()));
     assert!(refused.contains(&PathBuf::from("/System")));
     assert!(refused.contains(&PathBuf::from("/Volumes")));
 }
@@ -55,7 +90,7 @@ fn macos_refuses_library_and_the_system_folders() {
 #[test]
 fn linux_refuses_the_system_folders() {
     let refused = refused_for(Os::Linux, &with_home());
-    assert_eq!(refused.get(7..), Some(paths(&LINUX_SYSTEM).as_slice()));
+    assert_eq!(refused.get(8..), Some(paths(&LINUX_SYSTEM).as_slice()));
     assert!(refused.contains(&PathBuf::from("/proc")));
 }
 
@@ -63,6 +98,7 @@ fn linux_refuses_the_system_folders() {
 fn windows_refuses_its_known_folders_default_and_the_drive_root_folders() {
     let dirs = FakeDirs {
         home: Some(PathBuf::from("/C/Users/ada")),
+        codex_home: None,
         known: vec![
             (
                 KnownFolder::RoamingAppData,
@@ -100,7 +136,7 @@ fn windows_refuses_its_known_folders_default_and_the_drive_root_folders() {
         "/$Recycle.Bin",
         "/System Volume Information",
     ]);
-    assert_eq!(refused.get(7..), Some(expected.as_slice()));
+    assert_eq!(refused.get(8..), Some(expected.as_slice()));
 }
 
 #[test]
