@@ -20,6 +20,7 @@ use crate::clock::{Clock as _, ManualClock};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
+mod pins;
 mod server;
 use server::{Reply, Server};
 
@@ -75,6 +76,8 @@ struct Rig {
     dir: TempDir,
     current: Arc<Current>,
     server: Server,
+    /// The browser pins' server, apart so the block list's requests are counted alone.
+    pins_server: Server,
     live: Live,
     clock: ManualClock,
 }
@@ -85,6 +88,7 @@ impl Rig {
             dir: TempDir::new(&format!("blocklist-{test}")),
             current: Arc::new(Current::default()),
             server: Server::start(),
+            pins_server: Server::start(),
             live: Live::new(on()),
             clock: ManualClock::new(at("2026-11-07T13:00:00Z")),
         }
@@ -134,7 +138,23 @@ impl Rig {
     fn updater(&self, update: BlockListUpdate) -> Updater {
         let seams = BlockListSeams::new(Arc::clone(&self.current), Some(self.bundled()), update);
         let clock = Arc::new(self.clock.clone());
-        Updater::new(seams, &self.data_dir(), self.live.clone(), clock)
+        Updater::new(
+            seams,
+            &self.data_dir(),
+            self.live.clone(),
+            clock,
+            self.pins(),
+        )
+    }
+
+    /// The browser pins on [`Self::pins_server`], key A, the bundled copy in `pins-bundled`.
+    fn pins(&self) -> crate::browser::pins::BrowserPins {
+        crate::browser::pins::BrowserPins {
+            bundled: Some(self.dir.path().join("pins-bundled")),
+            manifest_url: self.pins_server.url("/pins.json"),
+            signature_url: self.pins_server.url("/pins.json.minisig"),
+            keys: vec![key_a()],
+        }
     }
 
     /// The time of the list in use.

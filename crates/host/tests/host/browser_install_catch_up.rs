@@ -74,8 +74,9 @@ fn a_lagged_subscriber_hears_how_the_download_ended() {
     let dir = Dir::new("browser_install_lagged", &[]);
     let (tools, handles) = Fake::new(true);
     let found = roots(&dir);
+    let pins = super::pins(&dir);
     let host = dir.start_with(0, move |config: HostConfig| {
-        config
+        pins.apply(config)
             .with_browser_install_tools(tools)
             .with_chrome_roots(found)
             .with_app_subscription_capacity(1)
@@ -123,8 +124,9 @@ fn a_new_subscriber_hears_where_the_download_stands() {
     let dir = Dir::new("browser_install_fresh", &[]);
     let (tools, handles) = Fake::new(true);
     let found = roots(&dir);
+    let pins = super::pins(&dir);
     let host = dir.start_with(0, move |config: HostConfig| {
-        config
+        pins.apply(config)
             .with_browser_install_tools(tools)
             .with_chrome_roots(found)
     });

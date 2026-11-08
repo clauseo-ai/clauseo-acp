@@ -24,6 +24,12 @@ export const HI = {
   // Clauseo couldn't read that browser policy, so no browser starts until it can
   // (provisional Hindi, app track final)
   "Couldn't check browser settings": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
+  // the Chrome Clauseo downloaded is too old to use; the row offers the download
+  // (provisional Hindi, app track final)
+  "Needs a newer Chrome": "नया Chrome चाहिए",
+  // Clauseo has no verified list of Chrome versions, so it can't check its Chrome; no download helps
+  // (provisional Hindi, app track final)
+  "Couldn't check Chrome's version": "Chrome के संस्करण की जाँच नहीं हो सकी",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

@@ -65,6 +65,7 @@ fn state(reason: Option<ToolsUnavailableReason>) -> ToolState {
         availability: reason.map_or(ToolAvailability::Available, |reason| {
             ToolAvailability::Unavailable { reason }
         }),
+        notice: None,
     }
 }
 

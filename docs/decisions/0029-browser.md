@@ -1033,10 +1033,31 @@ order:
    with the binary where the zip puts it: `chrome-mac-arm64/Google Chrome for
    Testing.app/Contents/MacOS/Google Chrome for Testing` (and `chrome-mac-x64/...`),
    `chrome-win64\chrome.exe`. A version folder without its binary is passed over. Skipped on
-   Windows ARM64. `<app data>` is the host's data folder.
+   Windows ARM64. `<app data>` is the host's data folder. The version found is judged against
+   the browser pins (below); one that fails drops the entry with its own reason, and the search
+   does not fall back to a lower folder.
 4. Otherwise none: `BrowserNotInstalled`.
 
 The download that fills step 3 is the next section.
+
+**Staleness (amended 2026-11-08, PR A).** Steps 1 and 2 are never judged by the browser pins: an
+installed Chrome or Edge is the firm's to update, and behaves as before. A Chrome for Testing from
+step 3 is judged against the newest verified browser pins (the next section, "The browser
+pins"), which the prep reads from disk at each launch:
+
+- `major(found) + 1 < major(pins' stable.version)` (pins at 157: 156 is taken, 155 is not): the
+  entry drops with `BrowserOutOfDate`, and the app offers the download, which fetches the pinned
+  version into its own folder; the next launch picks it as the highest.
+- No verified pins at all, bundled or cached: the entry drops with `BrowserListUnavailable`. The
+  Chrome for Testing on disk is not trusted unjudged.
+- Taken, but the newest verified pins' `published` is more than 14 days before now: the browser
+  stays available, and the session's header `ToolState` carries `notice: BrowserListOld`
+  (`ToolNotice`, an open enum `{ BrowserListOld, Unknown }` in `protocol/src/view/tools.rs`;
+  `ToolState::notice` is optional, serde default, skipped when `None`).
+
+Both reasons are `ToolsUnavailableReason` variants and ride the prep's existing block path
+(`Prepared::policy_block`, then `run.browser_blocked`, then `blocked_by_policy` in
+`agent/loads/browser.rs`), as `BrowserBlockedByPolicy` does.
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
 counts when it is a regular file, following links (an installed Chrome may be one). In
@@ -1127,10 +1148,105 @@ and agent-browser (its `--agent-browser` argument) are files. A development buil
 agent-browser: a missing one leaves the browser out with `BrowserNotInstalled` and a log line
 naming the file, and claims nothing.
 
+#### The browser pins (amended 2026-11-08, PR A)
+
+Amended 2026-11-08 (PR A): the download no longer takes whatever Stable Google's
+`last-known-good-versions-with-downloads.json` names, with no hash. It takes the one version a
+manifest signed by Clauseo pins, and checks the zip's size and sha256 against it. The version
+list, `VERSIONS_URL`, `InstallTools::fetch_versions`, `manifest::stable_download` and
+`check_versions_url` are gone.
+
+**Where.** Two constant URLs, never configurable:
+`https://github.com/clauseo-ai/browser-pins/releases/download/current/browser-pins-v1.json` and
+the same with `.minisig`. `github.com` answers 302 to `release-assets.githubusercontent.com`
+(`objects.githubusercontent.com` before). Both are fetched as the block list is
+(`blocklist/fetch.rs`, decision 0053): redirects followed by hand, to those two hosts only, https
+only; through `network.upstream_proxy` when set, else the system's proxy; TLS on the OS's store.
+
+**Format.** UTF-8 JSON:
+
+```json
+{
+  "schema": 1,
+  "published": "2026-11-08T00:00:00Z",
+  "stable": {
+    "version": "157.0.8103.38",
+    "downloads": {
+      "chrome": {
+        "win64": {"sha256": "<64 lowercase hex>", "size": <bytes>},
+        "mac-arm64": {"sha256": "<64 lowercase hex>", "size": <bytes>},
+        "mac-x64": {"sha256": "<64 lowercase hex>", "size": <bytes>},
+        "linux64": {"sha256": "<64 lowercase hex>", "size": <bytes>}
+      },
+      "chrome-headless-shell": {
+        "win64": {"sha256": "<64 lowercase hex>", "size": <bytes>},
+        "...": {}
+      }
+    }
+  }
+}
+```
+
+`schema` other than 1 is refused; unknown fields are ignored. `published` is RFC 3339 UTC to
+the second, parsed and compared as the block list's `clauseo_blocklist::Generated`. `version` must
+be dotted digits (`manifest::check_version`, 32 bytes at most). Each pin's `sha256` is exactly 64
+lowercase hex characters, and its `size` above 0 and at most 400 MiB (419430400, curl's former
+cap). A platform with no pin is `unsupported` at download. `chrome-headless-shell` is pinned too,
+for a later use; nothing in this PR reads it. The manifest names no URL.
+
+**Signature.** minisign over the exact JSON bytes, checked by the block list's code
+(`clauseo_blocklist::verify`, whose signature-and-key part is a public function returning the
+trusted comment; the block list keeps its own comment parse). The keys are not the block list's:
+two compiled-in constants, `PINS_KEY_CURRENT` and `PINS_KEY_NEXT` (`PINS_PUBLIC_KEYS`), and a
+signature by either verifies, so a key rotation needs no emergency release. They are stage F's,
+published in `clauseo-ai/browser-pins` as `minisign.pub` (current) and `minisign-next.pub` (next):
+
+```
+PINS_KEY_CURRENT  RWSzpZVjE2pJxXIEKdv4mCU35RlDGmGauNo8xYF4ZGw444xd0UPkSd7M
+PINS_KEY_NEXT     RWQX8RqVRHxVuCarDaYD7ELbrODzRuomq6MPX9A86EtrMiPrI4XyGdys
+```
+
+Stage F's CI signs each manifest. A rotation ships a release whose current is the old next and
+whose next is new. The trusted comment must be exactly
+
+```
+clauseo-browser-pins v1 published=<RFC3339> version=<version> run=<digits>
+```
+
+with `published` equal, byte for byte, to the body's `published`, and `version` to the body's
+`stable.version`; else refused. `run` is required, ASCII digits, non-empty and bounded; it is kept
+for logs and never interpreted. Tests: a manifest signed by the current test key and one signed by
+the next are taken, and one signed by an unknown key is refused.
+
+**Copies and no rollback.** The host reads a bundled pair,
+`<resource_dir>/browser-pins/browser-pins-v1.json` and `.minisig`, when present (the desktop
+passes the folder in, as it does the block list's). Release builds do not bundle one yet
+(`crates/desktop/release/blocklist.conf.json` bundles only the block list); that is a follow-up
+once stage F publishes the first signed manifest. Until then a fresh install needs one successful
+fetch from `github.com` before the download, or a downloaded Chrome for Testing, works, and fails
+closed otherwise. The cached pair is `<data_dir>/browser-pins/browser-pins-v1.json`
+and `.minisig`, written as the block list's pair (`write::replace_private_file`, the body first,
+the signature last, then the folder synced). A candidate, fetched, cached or bundled, is taken only
+if it verifies, its `published` is not older and its `stable.version` is not lower than the newest
+verified pins the app has; one dated more than a day ahead of the host's clock is set aside, as
+for the block list. The app uses the newer verified of the bundled and the cached pair, and fails
+closed (`list_unavailable` at download, `BrowserListUnavailable` at launch) only when neither
+verifies.
+
+**Refresh.** Each round of the `clauseo-blocklist` thread (decision 0053: at start, then every 6
+hours) also fetches the pair, verifies it, applies the rule above and stores it. It does so
+whatever `network.unsafe_site_list_updates` says, which is about the block list alone, and honours
+`network.upstream_proxy`. A failed fetch keeps what is on disk. Readers (the launch prep, the
+download thread) read the newest verified pair from disk each time, a small JSON and one ed25519
+check, so there is no shared state to keep in step. A stored pair that fails its signature is read
+once more before it is set aside: the refresh may have been between writing the body and the
+signature.
+
 #### The Chrome for Testing download (`host/src/browser/install.rs`, part 3)
 
 agent-browser's own `install` writes under the home folder, which Clauseo cannot move on
-Windows, so the host downloads Chrome for Testing itself, once the lawyer agreed.
+Windows, so the host downloads Chrome for Testing itself, once the lawyer agreed. Since PR A it
+downloads only the version the browser pins name, checked against their size and sha256.
 
 **Wire.** `HostCommand::InstallBrowser {}` starts it and answers `Done` at once; while one runs
 it answers `Done` and does nothing (no second download), except while a cancelled one is still
@@ -1140,7 +1256,8 @@ ending: then a new download starts once its `Failed { cancelled }` is out. `Host
 four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
 `Failed { code, message }`. The app's copy keys on `code` (`BrowserInstallFailure`, an open
 enum: `network`, `size_mismatch`, `disk_space`, `host_refused`, `signature`, `unpack`,
-`unsupported`, `cancelled`); `message` is for the log. The latest state goes into every app catch-up:
+`unsupported`, `cancelled`, and since PR A `list_unavailable` and `hash_mismatch`); `message` is
+for the log. The latest state goes into every app catch-up:
 the running download's last step, or the last download's end until the next one starts. So a
 window that lagged, resubscribed after a pause or the watchdog, or reloaded hears where the
 download stands, its end included. The desktop bridge admits both commands from the main window only, and only main's app
@@ -1154,14 +1271,18 @@ feed carries the event (0012, 0028).
 2. `<app data>/browsers/` is made (0700, through no link). Under 1 GB free there
    (`statvfs` on macOS, `GetDiskFreeSpaceExW` on Windows): `disk_space`. A failed read only
    warns.
-3. The version list, at most 1 MiB. Its URL must be `https://googlechromelabs.github.io/...`.
-   Stable's `version` must be dotted digits (32 bytes at most), and the `chrome` URL for the
-   platform must equal, byte for byte,
-   `https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`.
-   Else `host_refused`, before anything downloads. The list has no hash (checked 2026-11-02),
-   so integrity is HTTPS to Google's host plus the size check.
-4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`. Its size must equal
-   the final response's `Content-Length`; a response without one fails too (`size_mismatch`).
+3. The newest verified browser pins, read from disk (bundled or cached, "The browser pins");
+   none: `list_unavailable`, before anything downloads. Their `chrome` pin for the platform;
+   none: `unsupported`. The URL is never taken from the manifest: it is the fixed template
+   `https://storage.googleapis.com/chrome-for-testing-public/{version}/{platform}/{name}-{platform}.zip`,
+   with the pins' `stable.version` and `name` `chrome` (the code takes the name as a parameter,
+   for the later `chrome-headless-shell` caller).
+4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`, with curl's
+   `--max-filesize` set to the pin's `size`. Its size must equal both the final response's
+   `Content-Length` and the pin's `size`; a response without `Content-Length` fails too
+   (`size_mismatch`). Then its sha256 must equal the pin's `sha256`, else `hash_mismatch`.
+   Like every failure, either removes the working folder, so a zip that does not match is
+   deleted before anything is unpacked.
 5. Unpacking (`Unpacking`): first the zip's entry names are read in Rust, from the central
    directory and each local header (zip64 included). Refused: absolute names, `:` (drives and
    streams), `\`, `..`, `.` and empty segments (a folder entry's trailing `/` aside), segments
@@ -1192,28 +1313,32 @@ download waits for it.
 `/usr/bin/codesign` on macOS; `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
 Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::spawn_in_tree`. curl
 gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
---location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
+--location --max-redirs 0 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`), then `--max-filesize
+<pin size>`.
 `--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
-47, `host_refused` (a retry would meet the same redirect). HTTPS to Google's host is the whole
-integrity check while the signature does not enforce, so a redirect to another https host
-must not replace it; neither URL redirects today (checked 2026-11-04). curl's exit 63 (over
-the 400 MiB cap) is `size_mismatch`, any other failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+47, `host_refused` (a retry would meet the same redirect); the template URL does not redirect
+today (checked 2026-11-04). The pins' size and sha256 are now the integrity check, HTTPS to
+Google's host a second one. curl's exit 63 (over the pin's size) is `size_mismatch`, any other
+failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
 `InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
 
 **Signature.** macOS: `codesign --verify --deep --strict` on the app bundle, then `codesign -dv`
 must show `TeamIdentifier=EQHXZ8M8AV` (Google). Windows: `WinVerifyTrust` (Authenticode) on
 `chrome.exe`, without fetching revocation. The result is logged; it fails the download
 (`signature`) only while `SIGNATURE_REQUIRED_MAC` or `SIGNATURE_REQUIRED_WINDOWS` is true. Both
-are false: nobody has checked here whether Chrome for Testing is signed. The by-hand check below
-decides, and a later PR flips the constant.
+are false. On Windows it stays false: Chrome for Testing's `chrome.exe` and its DLLs are not
+Authenticode signed (checked 2026-11-08 on 157.0.8103.38), so firms enforcing Smart App Control
+or WDAC allow it by hash or path (`docs/firm-it.md`). On macOS nobody has checked here yet; the
+by-hand check below decides, and a later PR may flip that constant.
 
 **Quarantine.** curl sets no `com.apple.quarantine` attribute, so Gatekeeper does not check the
-download when Chrome starts. HTTPS to Google's host, the size check, and the logged `codesign`
-result are the checks today.
+download when Chrome starts. The pins' size and sha256, HTTPS to Google's host, and the logged
+`codesign` result are the checks.
 
 **By hand.** On a Mac (arm64 and Intel) and on Windows x64:
 `cargo test -p clauseo-host --lib real_download -- --ignored --nocapture` downloads the real zip
-into a temporary folder. Record what it logs, then run `codesign -dv --verbose=4` on the app, or
+into a temporary folder (since PR A, the version the verified pins name). Record what it logs,
+then run `codesign -dv --verbose=4` on the app, or
 `Get-AuthenticodeSignature` on `chrome.exe`, and note whether it passes.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
@@ -1622,7 +1747,9 @@ The download (part 3):
   process group leader in between; not tested.
 - The Chrome for Testing download with the real tools: run only through fakes on Linux. Not
   run: curl, `ditto` or `tar`, `codesign` and `WinVerifyTrust`, the free-space reads, and
-  whether Chrome for Testing is signed (the by-hand steps above). The Windows code
+  whether Chrome for Testing is signed on macOS (the by-hand steps above; on Windows it is not,
+  checked 2026-11-08). The browser pins' fetch and signature check against the real
+  `clauseo-ai/browser-pins` release are not run here either (PR A). The Windows code
   (`install/windows.rs`) was checked with clippy for `x86_64-pc-windows-msvc` in a crate of its own.
 
 - G17's Windows fixes: the logon fix ran on the Windows VM at e609c223 (60 launches of Chrome

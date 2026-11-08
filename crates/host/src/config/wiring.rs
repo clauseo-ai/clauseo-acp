@@ -11,6 +11,7 @@ use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
+use crate::browser::pins::BrowserPins;
 use crate::browser::rd_policy::RdPolicy;
 
 use super::EgressProxy;
@@ -52,6 +53,10 @@ pub(crate) struct LaunchWiring {
     pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
     /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
     pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
+    /// Where the signed browser pins come from (`BrowserPins::apply`): the bundled copy's
+    /// folder, the release's URLs and keys. The launch prep and the download read them; the
+    /// block list's thread fetches them.
+    pub(crate) browser_pins: BrowserPins,
     /// The sign-in hook, the sign-in-again test, and the host's sign-in state.
     pub(crate) sign_in: SignIn,
     /// Run between a skill pack's two reads, for tests (`actor/settings/packs.rs`).
@@ -93,6 +98,7 @@ impl Default for LaunchWiring {
             browser_socket_root: None,
             inherited_env: None,
             install_tools: None,
+            browser_pins: BrowserPins::default(),
             sign_in: SignIn::default(),
             pack_read_hook: None,
             relays: None,
@@ -119,6 +125,7 @@ impl std::fmt::Debug for LaunchWiring {
             // Names and values stay out: the environment holds secrets.
             .field("inherited_env", &self.inherited_env.is_some())
             .field("install_tools", &self.install_tools.is_some())
+            .field("browser_pins", &self.browser_pins)
             .field("sign_in", &self.sign_in)
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)

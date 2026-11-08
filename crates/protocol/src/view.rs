@@ -27,7 +27,7 @@ pub use entry::{
     ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
 };
 pub use hold::QueueHoldReason;
-pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
+pub use tools::{ClauseoTool, ToolAvailability, ToolNotice, ToolState, ToolsUnavailableReason};
 
 enum_with_names! {
     /// Where a thread stands, for the sidebar dot and the header. `NeedsYou` means a permission or

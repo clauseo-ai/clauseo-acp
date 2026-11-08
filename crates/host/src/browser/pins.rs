@@ -1,0 +1,366 @@
+//! The signed browser pins: which Chrome for Testing version Clauseo downloads, and each zip's
+//! sha256 and size, published by stage F as a JSON manifest with a minisign signature
+//! (`browser-pins-v1.json` and its `.minisig`, [`PINS_URL`]).
+//!
+//! - Signature: minisign over the exact JSON bytes, checked by the block list's code
+//!   (`clauseo_blocklist::trusted_comment`) against the pins' own keys ([`PINS_PUBLIC_KEYS`]:
+//!   the current key and the next one, so a rotation needs no emergency release). The trusted
+//!   comment is exactly `clauseo-browser-pins v1 published=<RFC 3339> version=<version>
+//!   run=<digits>`, and its `published` and `version` must equal the body's (`parse.rs`).
+//! - Body: `schema` 1 (anything else is refused), `published`, and `stable` with a `version`
+//!   of dotted digits and `downloads.<name>.<platform>` = `{sha256, size}`: 64 lowercase hex
+//!   digits, and 1 to [`MAX_ZIP_BYTES`] bytes. Fields it does not know are ignored. No URL is
+//!   read from it: the zip's URL comes from a fixed template (`install::manifest::zip_url`).
+//! - Where: the copy the app ships (`<resource dir>/browser-pins/`, which the desktop passes in,
+//!   [`BrowserPins::bundled`]) and the one the `clauseo-blocklist` thread fetched and stored
+//!   (`<data dir>/browser-pins/`, `blocklist/updater/pins.rs`). Readers (the launch prep, the
+//!   download's thread) read both from disk each time ([`PinsSource::newest`]) and use the
+//!   newer that verifies; with neither, the downloaded Chrome for Testing is refused
+//!   (`BrowserListUnavailable`) and the download too (`list_unavailable`).
+//! - No rollback ([`accept`]): a fetched manifest is stored only when it is published later
+//!   than the newest the app has and pins no lower version. One dated over a day ahead of the
+//!   host clock is set aside, as the block list's is.
+
+use std::collections::BTreeMap;
+use std::io::{self, Read as _};
+use std::path::{Path, PathBuf};
+
+use clauseo_blocklist::Generated;
+use clauseo_protocol::{Timestamp, ToolNotice};
+
+use crate::blocklist::DAY;
+use crate::write;
+
+mod parse;
+
+pub use parse::PinsError;
+
+/// The current key's minisign public key file (key id C5496A136395A5B3), as in
+/// `clauseo-ai/browser-pins`'s `minisign.pub`. The secret key is only in that repo's secrets.
+pub const PINS_KEY_CURRENT: &str = include_str!("../../keys/browser-pins/minisign.pub");
+
+/// The next key's minisign public key file (key id B8557C44951AF117), as in
+/// `clauseo-ai/browser-pins`'s `minisign-next.pub`: shipped before the publisher switches to it.
+pub const PINS_KEY_NEXT: &str = include_str!("../../keys/browser-pins/minisign-next.pub");
+
+/// Every key a browser pins manifest may be signed with. Not the block list's keys.
+pub const PINS_PUBLIC_KEYS: &[&str] = &[PINS_KEY_CURRENT, PINS_KEY_NEXT];
+
+/// The published manifest; its signature is beside it with `.minisig` added.
+pub const PINS_URL: &str =
+    "https://github.com/clauseo-ai/browser-pins/releases/download/current/browser-pins-v1.json";
+
+/// The folder holding a manifest and its signature: under the data folder (the stored copy)
+/// and under the app's resource folder (the bundled copy).
+pub const PINS_FOLDER: &str = "browser-pins";
+
+/// The manifest's file name, as published and as stored.
+pub const MANIFEST_FILE: &str = "browser-pins-v1.json";
+
+/// Its signature's file name.
+pub const SIGNATURE_FILE: &str = "browser-pins-v1.json.minisig";
+
+/// The largest manifest read, fetched or from disk: a real one is about 2 KB.
+pub const MAX_MANIFEST: u64 = 64 * 1024;
+
+/// The largest zip a pin may name, and so the most a download reads: 400 MiB.
+pub const MAX_ZIP_BYTES: u64 = 400 * 1024 * 1024;
+
+/// The download name of Chrome for Testing's full browser in the manifest and its zip's URL.
+pub const DOWNLOAD_CHROME: &str = "chrome";
+
+/// How old the newest manifest may be before the downloaded browser carries
+/// [`ToolNotice::BrowserListOld`].
+pub const LIST_OLD_AFTER_SECONDS: i64 = 14 * DAY;
+
+/// One zip's pin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pin {
+    /// Its sha256: 64 lowercase hex digits.
+    pub sha256: String,
+    /// Its size in bytes, 1 to [`MAX_ZIP_BYTES`].
+    pub size: u64,
+}
+
+/// A manifest that verified: its signature, its trusted comment and its body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pins {
+    published: Generated,
+    version: String,
+    /// `version` as numbers, for comparing.
+    numbers: Vec<u64>,
+    run: String,
+    downloads: BTreeMap<String, BTreeMap<String, Pin>>,
+}
+
+impl Pins {
+    /// When stage F published it.
+    pub fn published(&self) -> Generated {
+        self.published
+    }
+
+    /// The Chrome for Testing version it pins (Stable), dotted digits.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// The pinned version's major number.
+    pub fn major(&self) -> u64 {
+        self.numbers.first().copied().unwrap_or_default()
+    }
+
+    /// The publishing run's number from the trusted comment: for the log only, never read.
+    pub fn run(&self) -> &str {
+        &self.run
+    }
+
+    /// The pin of download `name` (such as [`DOWNLOAD_CHROME`]) for Chrome for Testing's
+    /// `platform` (`win64`, `mac-arm64`, ...), if the manifest has one.
+    pub fn pin(&self, name: &str, platform: &str) -> Option<&Pin> {
+        self.downloads.get(name)?.get(platform)
+    }
+
+    /// Verifies `minisig` over the exact bytes of `body` against `keys` (key files or bare
+    /// key lines) and reads it (`parse.rs`): the manifest, or why it was refused.
+    pub fn verify(body: &[u8], minisig: &[u8], keys: &[&str]) -> Result<Pins, PinsError> {
+        parse::verify(body, minisig, keys)
+    }
+
+    /// Whether it is dated more than a day ahead of `now`.
+    pub fn is_ahead_of(&self, now: Timestamp) -> bool {
+        self.published.unix_seconds() > seconds(now) + DAY
+    }
+
+    /// Pins made in a test, without a signature.
+    #[cfg(test)]
+    pub(crate) fn for_tests(published: &str, version: &str, pins: &[(&str, &str, Pin)]) -> Pins {
+        let mut downloads: BTreeMap<String, BTreeMap<String, Pin>> = BTreeMap::new();
+        for (name, platform, pin) in pins {
+            downloads
+                .entry((*name).to_owned())
+                .or_default()
+                .insert((*platform).to_owned(), pin.clone());
+        }
+        Pins {
+            published: Generated::parse(published).unwrap(),
+            version: version.to_owned(),
+            numbers: crate::browser::chrome::version(version).unwrap(),
+            run: "1".to_owned(),
+            downloads,
+        }
+    }
+}
+
+/// The no-rollback rule: may `candidate` replace `best`, the newest verified manifest the app
+/// has (`None`: none)? Only when it is published later and pins no lower version. An equal
+/// time is the same manifest: no change.
+pub fn accept(candidate: &Pins, best: Option<&Pins>) -> bool {
+    best.is_none_or(|best| {
+        candidate.published > best.published && candidate.numbers >= best.numbers
+    })
+}
+
+/// The newer of two verified manifests: the higher version, then the later date. So the
+/// version in use never goes down, whichever of the two copies is dated later.
+fn newer(a: Pins, b: Pins) -> Pins {
+    if (&b.numbers, b.published) > (&a.numbers, a.published) {
+        b
+    } else {
+        a
+    }
+}
+
+/// The notice of a browser that is a Chrome for Testing Clauseo downloaded, judged by the
+/// newest manifest's `published`: [`ToolNotice::BrowserListOld`] when that is over 14 days
+/// before `now`.
+pub fn notice(published: Generated, now: Timestamp) -> Option<ToolNotice> {
+    (seconds(now) - published.unix_seconds() > LIST_OLD_AFTER_SECONDS)
+        .then_some(ToolNotice::BrowserListOld)
+}
+
+/// `now` in Unix seconds.
+fn seconds(now: Timestamp) -> i64 {
+    now.as_millis() / 1000
+}
+
+/// Where the browser pins come from: the bundled copy's folder, the release's URLs and the
+/// keys. In the host's config (`BrowserPins::apply`); the default is the release's with no
+/// bundled copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserPins {
+    /// The folder of the copy the app ships (`MANIFEST_FILE` and `SIGNATURE_FILE`), if any:
+    /// `<resource dir>/browser-pins/` in a release build.
+    pub bundled: Option<PathBuf>,
+    /// The manifest's URL.
+    pub manifest_url: String,
+    /// The signature's URL.
+    pub signature_url: String,
+    /// The minisign keys (key files or bare key lines) a manifest may be signed with.
+    pub keys: Vec<String>,
+}
+
+impl Default for BrowserPins {
+    fn default() -> Self {
+        Self::release(None)
+    }
+}
+
+impl BrowserPins {
+    /// The release's: [`PINS_URL`] and its `.minisig`, [`PINS_PUBLIC_KEYS`], with `bundled`.
+    /// The fetch follows the block list's rules: redirects by hand to the release hosts,
+    /// `https` only, `network.upstream_proxy` else the system's proxy.
+    pub fn release(bundled: Option<PathBuf>) -> Self {
+        Self {
+            bundled,
+            manifest_url: PINS_URL.to_owned(),
+            signature_url: format!("{PINS_URL}.minisig"),
+            keys: PINS_PUBLIC_KEYS
+                .iter()
+                .map(|key| (*key).to_owned())
+                .collect(),
+        }
+    }
+
+    /// `config` with these pins. Kept here, not as a `HostConfig` builder, so `config.rs`
+    /// stays within 600 lines.
+    pub fn apply(self, mut config: crate::HostConfig) -> crate::HostConfig {
+        config.wiring.browser_pins = self;
+        config
+    }
+
+    /// The readers' view, with the stored copy under `data_dir`.
+    pub(crate) fn source(&self, data_dir: &Path) -> PinsSource {
+        PinsSource {
+            bundled: self.bundled.clone(),
+            stored: data_dir.join(PINS_FOLDER),
+            keys: self.keys.clone(),
+        }
+    }
+}
+
+/// The two copies a reader looks at, and the keys. File system calls: off the actor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinsSource {
+    /// The bundled copy's folder, if any.
+    pub bundled: Option<PathBuf>,
+    /// The stored copy's folder, `<data dir>/browser-pins/`.
+    pub stored: PathBuf,
+    /// The keys.
+    pub keys: Vec<String>,
+}
+
+impl PinsSource {
+    /// The newer verified of the bundled and the stored copy, each set aside when dated over a
+    /// day ahead of `now`; `None` when neither verifies. A refused copy is logged.
+    pub fn newest(&self, now: Timestamp) -> Option<Pins> {
+        let bundled = self
+            .bundled
+            .as_deref()
+            .and_then(|folder| self.read(folder, "bundled", now));
+        let stored = self.read(&self.stored, "stored", now);
+        match (bundled, stored) {
+            (Some(bundled), Some(stored)) => Some(newer(bundled, stored)),
+            (bundled, stored) => bundled.or(stored),
+        }
+    }
+
+    /// The verified copy in `folder`, or `None` (logged when its files are there but refused).
+    fn read(&self, folder: &Path, which: &'static str, now: Timestamp) -> Option<Pins> {
+        self.read_with(which, now, &mut || read_pair(folder))
+    }
+
+    /// [`Self::read`] with the pair read by `load`. A signature that does not verify is read
+    /// again once: a store replaces the manifest, then its signature, so a read between the two
+    /// sees the new manifest beside the old signature.
+    fn read_with(
+        &self,
+        which: &'static str,
+        now: Timestamp,
+        load: &mut dyn FnMut() -> io::Result<(Vec<u8>, Vec<u8>)>,
+    ) -> Option<Pins> {
+        let mut verified = self.verify_pair(which, load())?;
+        if matches!(
+            verified,
+            Err(PinsError::Signature(clauseo_blocklist::Error::Signature))
+        ) {
+            verified = self.verify_pair(which, load())?;
+        }
+        match verified {
+            Ok(pins) if pins.is_ahead_of(now) => {
+                tracing::warn!(
+                    which,
+                    published = pins.published.as_str(),
+                    "a browser pins copy is dated over a day ahead of this computer's clock; set \
+                     aside"
+                );
+                None
+            }
+            Ok(pins) => Some(pins),
+            Err(error) => {
+                tracing::warn!(which, %error, "a browser pins copy was refused");
+                None
+            }
+        }
+    }
+
+    /// The check of one read pair; `None` when its files are missing or unreadable (logged).
+    fn verify_pair(
+        &self,
+        which: &'static str,
+        pair: io::Result<(Vec<u8>, Vec<u8>)>,
+    ) -> Option<Result<Pins, PinsError>> {
+        let (body, signature) = match pair {
+            Ok(pair) => pair,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+            Err(error) => {
+                tracing::warn!(which, kind = ?error.kind(), "a browser pins copy is unreadable");
+                return None;
+            }
+        };
+        let keys: Vec<&str> = self.keys.iter().map(String::as_str).collect();
+        Some(Pins::verify(&body, &signature, &keys))
+    }
+}
+
+/// The manifest and the signature in `folder`, each within its size cap.
+fn read_pair(folder: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let body = read_capped(&folder.join(MANIFEST_FILE), MAX_MANIFEST)?;
+    let signature = read_capped(
+        &folder.join(SIGNATURE_FILE),
+        u64::try_from(clauseo_blocklist::MAX_SIGNATURE).unwrap_or(u64::MAX),
+    )?;
+    Ok((body, signature))
+}
+
+/// Reads `path`, failing (`InvalidData`) when it holds more than `cap` bytes.
+fn read_capped(path: &Path, cap: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "over the size cap",
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Stores a manifest and its signature in `folder` (created if missing), as the block list's
+/// pair: each file replaced atomically, the manifest first and its signature last, then the
+/// folder synced. A crash between the two leaves a pair that fails verification, so readers
+/// fall back to the bundled copy until the next fetch writes a good pair.
+pub(crate) fn store(folder: &Path, body: &[u8], signature: &[u8]) -> io::Result<()> {
+    write::create_dir_all(folder)?;
+    let manifest = folder.join(MANIFEST_FILE);
+    let minisig = folder.join(SIGNATURE_FILE);
+    write::sweep_temp_files(&manifest);
+    write::sweep_temp_files(&minisig);
+    write::replace_private_file(&manifest, body)?;
+    write::replace_private_file(&minisig, signature)?;
+    write::sync_dir(folder)
+}
+
+#[cfg(test)]
+pub(crate) mod tests;

@@ -6,14 +6,18 @@
 //! [`BrowserInstallState`] as it goes. In order:
 //! 1. The machine: macOS (arm64, x64) or Windows x64 only; elsewhere `unsupported`.
 //! 2. The disk: about 1 GB free in `<app data>/browsers` ([`MIN_FREE_BYTES`]), else `disk_space`.
-//! 3. The version list ([`VERSIONS_URL`]), and from it Stable's `chrome` zip for this platform
-//!    ([`manifest`]): a version of dotted digits and the one URL Google's layout gives it, else
-//!    `host_refused`, all before any download.
-//! 4. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress; its size
-//!    must equal the response's `Content-Length`, else `size_mismatch`.
-//! 5. Unpacking: every entry name in the zip's directory is checked first ([`archive`]), then the
-//!    system tool unpacks into `.partial-…/chrome/`, then the result is walked: every entry must
-//!    sit inside, and no link may lead out. Else `unpack`.
+//! 3. The signed browser pins (`super::pins`), which the caller read from disk: none that
+//!    verifies is `list_unavailable`. From them the `chrome` pin for this platform (none is
+//!    `unsupported`), and the zip's URL from the fixed template only ([`manifest::zip_url`]):
+//!    the pinned version (dotted digits, checked again), this platform's fixed name and the
+//!    fixed download name. No URL or host is ever read from the pins.
+//! 4. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress, curl capped
+//!    at the pin's size; its size must equal the response's `Content-Length` and the pin's size,
+//!    else `size_mismatch`; then its sha256 must equal the pin's, else `hash_mismatch`. Both
+//!    run on the finished file before anything reads the zip's content.
+//! 5. Unpacking: every entry name in the zip's directory is checked first ([`archive`]; on
+//!    Windows no link entry at all), then the system tool unpacks into `.partial-…/chrome/`, then
+//!    the result is walked: every entry must sit inside, and no link may lead out. Else `unpack`.
 //! 6. The code signature, checked and logged; it fails the download only while
 //!    [`signature_required`] says so.
 //! 7. `chrome/` is renamed to `browsers/chrome-<version>/`, walked again there, and the rest of
@@ -23,6 +27,7 @@
 //! stopping) ends the running tool at once. The tools themselves sit behind [`InstallTools`]:
 //! production uses curl, ditto or tar and the OS's signature check ([`system`]); tests use fakes.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clauseo_protocol::{BrowserInstallFailure, BrowserInstallState, Count};
 
 use super::chrome::{BROWSERS_DIR, CFT_PREFIX, Platform};
+use super::pins::Pins;
 use crate::write;
 
 pub mod archive;
@@ -39,9 +45,6 @@ pub mod system;
 mod windows;
 
 pub use system::SystemTools;
-
-/// The version list the download starts from, the source agent-browser's own `install` uses.
-pub const VERSIONS_URL: &str = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 
 /// The free space the download needs in the app data folder: the zip (about 200 MB) and what it
 /// unpacks to (about 400 MB), side by side, with room to spare.
@@ -143,17 +146,15 @@ pub trait InstallTools: Send + Sync {
     /// The bytes free to this user on the volume that holds `folder`.
     fn free_bytes(&self, folder: &Path) -> std::io::Result<u64>;
 
-    /// The body of `url`, the version list (at most 1 MiB). `work` is a folder the call may
-    /// use as its working folder.
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure>;
-
-    /// Downloads `url` into the new file `zip`, calling `progress(bytes, total)` as it goes, at
-    /// most about four times a second. Returns the response's `Content-Length`, `None` without
-    /// one; the caller compares it with the file.
+    /// Downloads `url` into the new file `zip`, reading at most `max_bytes` (the pin's size),
+    /// calling `progress(bytes, total)` as it goes, at most about four times a second. Returns
+    /// the response's `Content-Length`, `None` without one; the caller compares it with the
+    /// file.
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure>;
@@ -182,10 +183,13 @@ pub struct Job {
     pub random: String,
 }
 
-/// Runs the download, reporting `Downloading` and `Unpacking` to `report`, and returns the folder
-/// it made, `browsers/chrome-<version>/`. On every failure the working folder is gone.
+/// Runs the download of the version `pins` gives (the newest verified browser pins, read by the
+/// caller off the actor; `None`: none verifies, `list_unavailable`), reporting `Downloading`
+/// and `Unpacking` to `report`, and returns the folder it made, `browsers/chrome-<version>/`.
+/// On every failure the working folder is gone.
 pub fn run(
     job: &Job,
+    pins: Option<&Pins>,
     tools: &dyn InstallTools,
     cancel: &Cancel,
     report: &mut dyn FnMut(BrowserInstallState),
@@ -216,10 +220,11 @@ pub fn run(
         }
     }
     cancel.check()?;
-    manifest::check_versions_url(VERSIONS_URL)?;
-    let body = tools.fetch_versions(VERSIONS_URL, &browsers, cancel)?;
-    let download = manifest::stable_download(&body, platform)?;
-    cancel.check()?;
+    let download = manifest::pinned_download(pins, platform)?;
+    tracing::info!(
+        version = download.version.as_str(),
+        "downloading the pinned Chrome for Testing"
+    );
     let partial = browsers.join(format!(
         "{PARTIAL_PREFIX}{}-{}",
         download.version, job.random
@@ -250,11 +255,14 @@ fn in_partial(
             total: Count::clamped(total),
         });
     };
-    let length = tools.download(&download.url, &zip, cancel, &mut progress)?;
-    check_size(&zip, length)?;
+    let length = tools.download(&download.url, &zip, download.size, cancel, &mut progress)?;
+    // The finished file against the pin, before anything reads what the zip holds.
+    check_size(&zip, length, download.size)?;
+    cancel.check()?;
+    check_hash(&zip, &download.sha256)?;
     cancel.check()?;
     report(BrowserInstallState::Unpacking);
-    archive::check_zip(&zip)?;
+    archive::check_zip(&zip, archive::links_allowed(job.platform))?;
     let unpacked = partial.join(UNPACKED_NAME);
     write::create_private_dir(&unpacked)
         .map_err(|error| Failure::io("making the unpack folder", &error))?;
@@ -296,11 +304,17 @@ fn in_partial(
     Ok(target)
 }
 
-/// The zip's size against the response's `Content-Length`.
-fn check_size(zip: &Path, length: Option<u64>) -> Result<(), Failure> {
+/// The zip's size against the response's `Content-Length` and the pin's size.
+fn check_size(zip: &Path, length: Option<u64>, pinned: u64) -> Result<(), Failure> {
     let size = std::fs::symlink_metadata(zip)
         .map_err(|error| Failure::io("reading the zip's size", &error))?
         .len();
+    if size != pinned {
+        return Err(Failure::new(
+            BrowserInstallFailure::SizeMismatch,
+            format!("the zip is {size} bytes, its pin {pinned}"),
+        ));
+    }
     match length {
         Some(length) if length == size => Ok(()),
         Some(length) => Err(Failure::new(
@@ -311,6 +325,43 @@ fn check_size(zip: &Path, length: Option<u64>) -> Result<(), Failure> {
             BrowserInstallFailure::SizeMismatch,
             "the response had no Content-Length",
         )),
+    }
+}
+
+/// The zip's sha256 against the pin's (64 lowercase hex digits): `hash_mismatch` when they
+/// differ. The caller's working folder, zip and all, is removed on that failure as on any.
+fn check_hash(zip: &Path, pinned: &str) -> Result<(), Failure> {
+    let digest =
+        sha256_file(zip).map_err(|error| Failure::io("reading the zip to hash it", &error))?;
+    let hex = digest
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _infallible = write!(hex, "{byte:02x}");
+            hex
+        });
+    if hex == pinned {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            BrowserInstallFailure::HashMismatch,
+            format!("the zip's sha256 is {hex}, its pin {pinned}"),
+        ))
+    }
+}
+
+/// The sha256 of the file at `path`, read in 64 KiB pieces.
+fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    use sha2::Digest as _;
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        let Some(piece) = buffer.get(..read).filter(|piece| !piece.is_empty()) else {
+            return Ok(hasher.finalize().into());
+        };
+        hasher.update(piece);
     }
 }
 

@@ -84,6 +84,7 @@ pub(crate) fn hook_servers(
     let state = ToolState {
         tool: ClauseoTool::CaseLaw,
         availability,
+        notice: None,
     };
     (rest, entry, Some(state))
 }

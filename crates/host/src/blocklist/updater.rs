@@ -1,5 +1,6 @@
 //! The work of the `clauseo-blocklist` thread, one step at a time so tests drive it: the
-//! start-up load ([`Updater::load_at_start`]) and one fetch round ([`Updater::run_once`]).
+//! start-up load ([`Updater::load_at_start`]) and one fetch round ([`Updater::run_once`]),
+//! which fetches the browser pins too (`pins.rs`).
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,12 @@ use clauseo_sandbox::Upstream;
 use super::disk::{self, Pair};
 use super::fetch::{self, Clients, Failure, fetch};
 use super::{BlockListSeams, BlockListUpdate, DAY, Live, block_list_is_stale};
+use crate::browser::pins::{BrowserPins, PinsSource};
 use crate::clock::Clock;
+
+mod pins;
+
+pub(crate) use pins::PinsRound;
 
 /// The folder under the data folder holding the stored pair.
 const STORE_FOLDER: &str = "blocklist";
@@ -59,18 +65,26 @@ pub(crate) struct Updater {
     off_noted: Cell<bool>,
     /// When (Unix seconds) "the list is stale" was last logged.
     stale_noted: Cell<Option<i64>>,
+    /// The browser pins' URLs and keys.
+    pins: BrowserPins,
+    /// Where the browser pins are read from and stored (`<data dir>/browser-pins/`).
+    pins_source: PinsSource,
 }
 
 impl Updater {
-    /// The updater of `seams`, storing under `data_dir`, reading `live` each round.
+    /// The updater of `seams` and `pins`, storing under `data_dir`, reading `live` each round.
     pub(crate) fn new(
         seams: BlockListSeams,
         data_dir: &Path,
         live: Live,
         clock: Arc<dyn Clock>,
+        pins: BrowserPins,
     ) -> Self {
         let clients = Clients::new(seams.update.https_only);
+        let pins_source = pins.source(data_dir);
         Self {
+            pins,
+            pins_source,
             current: seams.current,
             bundled_folder: seams.bundled,
             store_folder: data_dir.join(STORE_FOLDER),
@@ -156,10 +170,22 @@ impl Updater {
     /// the host has stopped (an app data deletion may follow), the round writes nothing. What
     /// remains: a GET in flight when the host stops runs on until it ends or times out (60 s for
     /// the signature, [`LIST_TIMEOUT`] for the list), and then the round ends unwritten.
+    ///
+    /// Then, unless the host stopped, the browser pins' round ([`Self::refresh_pins`]), whether
+    /// block list updates are on or off: that setting is about the block list only.
     pub(crate) fn run_once(&self, stopped: &dyn Fn() -> bool) -> Round {
         let round = self.round(stopped);
         self.note_stale();
+        if round != Round::Stopped {
+            self.refresh_pins(stopped);
+        }
         round
+    }
+
+    /// One browser pins round (`pins.rs`). `stopped` is asked once both files are in, before
+    /// anything is written.
+    pub(crate) fn refresh_pins(&self, stopped: &dyn Fn() -> bool) -> PinsRound {
+        pins::refresh(self, stopped)
     }
 
     /// [`Self::run_once`] but the stale check.

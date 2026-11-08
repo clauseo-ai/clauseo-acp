@@ -35,6 +35,8 @@ const BROWSER: BrowserState[] = [
   "browser_not_installed",
   "browser_blocked_by_policy",
   "browser_policy_unreadable",
+  "browser_out_of_date",
+  "browser_list_unavailable",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -101,6 +103,8 @@ test("each glyph's state: on as drawn, the firm's lock for locked off, managed b
     browser_blocked_by_policy: "locked",
     // not read is no firm's lock
     browser_policy_unreadable: "off",
+    browser_out_of_date: "off",
+    browser_list_unavailable: "off",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -128,6 +132,35 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   expect(label(null, "browser_policy_unreadable")).toBe(
     "Browser: off, couldn't check browser settings.",
   );
+  // Chrome keeps its capital mid-sentence
+  expect(label(null, "browser_out_of_date")).toBe("Browser: off, needs a newer Chrome.");
+  expect(label(null, "browser_list_unavailable")).toBe(
+    "Browser: off, couldn't check Chrome's version.",
+  );
+  // a notice is the popover's alone: the line says only on
+  expect(
+    toolsLabel("en", [{ tool: "browser", state: "available", notice: "browser_list_old" }]),
+  ).toBe("Browser: on.");
+});
+
+test("knownTools keeps a browser's notice only while it is on, and one it doesn't know is left out", () => {
+  const on = { tool: "browser", availability: "available" } as const;
+  expect(knownTools([{ ...on, notice: "browser_list_old" } as never])).toEqual([
+    { tool: "browser", state: "available", notice: "browser_list_old" },
+  ]);
+  expect(knownTools([{ ...on, notice: "a_newer_notice" } as never])).toEqual([
+    { tool: "browser", state: "available" },
+  ]);
+  expect(knownTools([on])).toEqual([{ tool: "browser", state: "available" }]);
+  expect(
+    knownTools([
+      {
+        tool: "browser",
+        availability: avail("browser_out_of_date"),
+        notice: "browser_list_old",
+      } as never,
+    ]),
+  ).toEqual([{ tool: "browser", state: "browser_out_of_date" }]);
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
@@ -135,6 +168,15 @@ test("sameTools reads two lists the same only when every tool and state match", 
   expect(sameTools(a, [{ tool: "browser", state: "off" }])).toBe(true);
   expect(sameTools(a, [{ tool: "browser", state: "no_proxy" }])).toBe(false);
   expect(sameTools(a, [])).toBe(false);
+  // a notice that comes or goes is a change
+  const on: KnownTool[] = [{ tool: "browser", state: "available" }];
+  const noticed: KnownTool[] = [
+    { tool: "browser", state: "available", notice: "browser_list_old" },
+  ];
+  expect(sameTools(on, noticed)).toBe(false);
+  expect(
+    sameTools(noticed, [{ tool: "browser", state: "available", notice: "browser_list_old" }]),
+  ).toBe(true);
 });
 
 const POLICY =
@@ -142,6 +184,10 @@ const POLICY =
 const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
+const NO_LIST =
+  "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. " +
+  "It keeps trying on its own.";
+const LIST_OLD = "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
@@ -159,10 +205,13 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     browser_not_installed: "Needs Chrome",
     browser_blocked_by_policy: "Blocked by your firm",
     browser_policy_unreadable: "Couldn't check browser settings",
+    browser_out_of_date: "Needs a newer Chrome",
+    browser_list_unavailable: "Couldn't check Chrome's version",
   };
   const notes: Record<string, string> = {
     browser_blocked_by_policy: POLICY,
     browser_policy_unreadable: UNREADABLE,
+    browser_list_unavailable: NO_LIST,
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -181,7 +230,7 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       // In Settings sits in the chip's row
       beside: tool.state === "off",
       reasonTip: null,
-      // the firm's policy, or a policy not read, says it in full
+      // the firm's policy, a policy not read, or a version not checked, says it in full
       note: notes[tool.state] ?? null,
       settings: tool.state === "off",
       download: null,
@@ -257,6 +306,8 @@ const FAILED: Record<InstallFailCode, string> = {
   network: "Connection dropped",
   size_mismatch: "File didn't match",
   signature: "File didn't match",
+  hash_mismatch: "File didn't match",
+  list_unavailable: "Not ready to download yet",
   disk_space: `Needs 1${NB}GB free`,
   host_refused: "Network blocked it",
   unpack: "Couldn't unpack",
@@ -453,6 +504,76 @@ test("a browser policy Clauseo couldn't check offers no download either, and say
       "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
       "अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
   });
+});
+
+test("a Chrome too old to use offers the download, as no Chrome does, in every download state", () => {
+  const old: KnownTool = { tool: "browser", state: "browser_out_of_date" };
+  expect(words(old, { install: offer })).toMatchObject({
+    glyph: "off",
+    reason: "Needs a newer Chrome",
+    note: null,
+    settings: false,
+    download: {
+      kind: "offer",
+      button: "Download Chrome",
+      size: `200${NB}MB`,
+      tip: `From Google, once. Needs 1${NB}GB free.`,
+    },
+  });
+  for (const install of [
+    offer,
+    { progress: { downloading: { bytes: 1e6, total: 200e6 } } },
+    { progress: "unpacking" },
+    { progress: "done" },
+    { progress: { failed: { code: "hash_mismatch", message: "" } } },
+    { progress: { failed: { code: "list_unavailable", message: "" } } },
+  ] as BrowserInstall[])
+    expect(words(old, { install }).download).toEqual(missing(install).download);
+  // once the new Chrome is in, what it is ready for
+  expect(words(old, { install: { progress: "done" } })).toMatchObject({
+    reason: "Ready for new conversations",
+    reasonTip: "The browser comes with your next conversation.",
+  });
+  expect(toolRow("hi", old, ROOM).reason).toBe("नया Chrome चाहिए");
+});
+
+test("with no list of Chrome versions, no download in any download state, and the reason in full", () => {
+  const noList: KnownTool = { tool: "browser", state: "browser_list_unavailable" };
+  for (const install of [null, offer, { progress: "done" }] as (BrowserInstall | null)[])
+    expect(words(noList, { install })).toMatchObject({
+      glyph: "off",
+      reason: "Couldn't check Chrome's version",
+      reasonTip: null,
+      note: NO_LIST,
+      settings: false,
+      download: null,
+    });
+  expect(toolRow("hi", noList, ROOM)).toMatchObject({
+    reason: "Chrome के संस्करण की जाँच नहीं हो सकी",
+    note:
+      "Clauseo यह जाँच नहीं कर सका कि उसका Chrome अप-टू-डेट है या नहीं, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+      "वह अपने आप कोशिश करता रहेगा।",
+  });
+});
+
+test("a browser that is on with an old list of Chrome versions stays on, its notice a muted line", () => {
+  const noticed: KnownTool = { tool: "browser", state: "available", notice: "browser_list_old" };
+  expect(words(noticed, { install: offer })).toEqual({
+    tool: "browser",
+    glyph: "on",
+    name: "Browser",
+    on: true,
+    chip: "On",
+    reason: null,
+    beside: false,
+    reasonTip: null,
+    note: LIST_OLD,
+    settings: false,
+    download: null,
+  });
+  expect(toolRow("hi", noticed, ROOM).note).toBe(
+    "Clauseo ने कुछ समय से नए Chrome की जाँच नहीं की है। ब्राउज़र अब भी काम करता है।",
+  );
 });
 
 test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand name's capital", () => {

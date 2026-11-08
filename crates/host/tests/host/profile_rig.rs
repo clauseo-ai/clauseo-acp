@@ -454,5 +454,6 @@ pub(crate) fn tool(tool: ClauseoTool, reason: Option<ToolsUnavailableReason>) ->
             Some(reason) => ToolAvailability::Unavailable { reason },
             None => ToolAvailability::Available,
         },
+        notice: None,
     }
 }

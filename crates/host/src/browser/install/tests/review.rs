@@ -26,7 +26,7 @@ fn check(entries: &[ZipEntry<'_>]) -> Result<(), Failure> {
     let dir = TempDir::new("cft-review-names");
     let path = dir.path().join("t.zip");
     write::write_file(&path, &zip(entries)).unwrap();
-    archive::check_zip(&path)
+    archive::check_zip(&path, true)
 }
 
 /// A link entry `name` to `target`, as a Unix zip writes one.
@@ -71,7 +71,7 @@ fn entries_under_a_link_spelled_differently_are_refused() {
     bytes[at] = 19;
     let dir = TempDir::new("cft-review-osx");
     write::write_file(&dir.path().join("t.zip"), &bytes).unwrap();
-    assert!(archive::check_zip(&dir.path().join("t.zip")).is_err());
+    assert!(archive::check_zip(&dir.path().join("t.zip"), true).is_err());
 }
 
 /// A Windows 8.3 short name (`ABCDEF~1` for `abcdefghij`) spells a path under a link another
@@ -138,20 +138,28 @@ fn a_link_back_in_by_the_unpack_folders_name_is_refused() {
 }
 
 /// Redirects are pinned: `--max-redirs 0` (tightening the agreed 3), so a redirect fails as
-/// `network`. The zip download's whole argument list, in order.
+/// `host_refused`. The zip download's whole argument list, in order, its size cap the pin's.
 #[test]
 fn the_download_pins_redirects_and_names_its_files() {
     let args = download_args(
         "https://storage.googleapis.com/z.zip",
         Path::new("/w/headers.txt"),
         Path::new("/w/chrome.zip"),
+        1234,
     );
     let mut expected: Vec<OsString> = ["-q", "--silent", "--show-error"]
         .into_iter()
         .chain(CURL_FLAGS)
         .map(OsString::from)
         .collect();
-    for arg in ["-D", "/w/headers.txt", "-o", "/w/chrome.zip"] {
+    for arg in [
+        "--max-filesize",
+        "1234",
+        "-D",
+        "/w/headers.txt",
+        "-o",
+        "/w/chrome.zip",
+    ] {
         expected.push(arg.into());
     }
     expected.push("https://storage.googleapis.com/z.zip".into());
@@ -162,6 +170,8 @@ fn the_download_pins_redirects_and_names_its_files() {
         .unwrap();
     assert_eq!(CURL_FLAGS.get(redirs + 1), Some(&"0"));
     assert!(CURL_FLAGS.contains(&"--location"));
+    // The size cap is the pin's, given per download: no fixed one in the shared flags.
+    assert!(!CURL_FLAGS.contains(&"--max-filesize"));
 }
 
 /// Nit: a link at `browsers` is not followed by the sweep, so its target's `.partial-*` stays.

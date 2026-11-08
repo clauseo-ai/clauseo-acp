@@ -1,7 +1,8 @@
 // The tool line's reading of the open thread's header: which of Clauseo's own tools the conversation has, the state
 // each glyph shows, and the words that say it, as the line's accessible name and tooltip. A tool this version
 // doesn't know, an availability it can't read, or a reason it has no words for says nothing: it is left out, and with
-// nothing left the line has no tool segment.
+// nothing left the line has no tool segment. A notice on a tool that is on (the browser's list of Chrome versions is
+// old) rides along for the popover's row; one this version doesn't know is left out, the tool kept.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
 import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
@@ -20,12 +21,18 @@ export type BrowserState =
   | "too_many_browsers"
   | "browser_not_installed"
   | "browser_blocked_by_policy"
-  | "browser_policy_unreadable";
+  | "browser_policy_unreadable"
+  | "browser_out_of_date"
+  | "browser_list_unavailable";
+
+/** A note on a tool that is on, which takes nothing away from it: the newest list of Chrome versions Clauseo has is
+ * old, so a newer Chrome may be out. */
+export type BrowserNotice = "browser_list_old";
 
 /** One tool the line can speak for. */
 export type KnownTool =
   | { tool: "web_search"; state: WebState }
-  | { tool: "browser"; state: BrowserState };
+  | { tool: "browser"; state: BrowserState; notice?: BrowserNotice };
 
 const WEB: ReadonlySet<string> = new Set<WebState>([
   "off",
@@ -41,7 +48,19 @@ const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "browser_not_installed",
   "browser_blocked_by_policy",
   "browser_policy_unreadable",
+  "browser_out_of_date",
+  "browser_list_unavailable",
 ]);
+const BROWSER_NOTICES: ReadonlySet<string> = new Set<BrowserNotice>(["browser_list_old"]);
+
+/** A browser that is on's notice, or null: none, one this version doesn't know, or the browser off. */
+function noticeOf(t: ToolState, state: string): BrowserNotice | null {
+  if (state !== "available") return null;
+  const notice: unknown = (t as { notice?: unknown }).notice;
+  return typeof notice === "string" && BROWSER_NOTICES.has(notice)
+    ? (notice as BrowserNotice)
+    : null;
+}
 
 /** The state of a tool, or null where it says nothing: an availability string it doesn't know, a reason it doesn't
  * know or has no words for on that tool. */
@@ -65,7 +84,13 @@ export function knownTools(tools: readonly ToolState[] | undefined): KnownTool[]
       if (state !== null) web = { tool: "web_search", state: state as WebState };
     } else if (t.tool === "browser" && browser === null) {
       const state = stateOf(t.availability, BROWSER);
-      if (state !== null) browser = { tool: "browser", state: state as BrowserState };
+      if (state !== null) {
+        const notice = noticeOf(t, state);
+        browser =
+          notice === null
+            ? { tool: "browser", state: state as BrowserState }
+            : { tool: "browser", state: state as BrowserState, notice };
+      }
     }
   }
   return [web, browser].filter((t): t is KnownTool => t !== null);
@@ -93,6 +118,8 @@ const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey
   browser_not_installed: "Needs Chrome",
   browser_blocked_by_policy: "Blocked by your firm",
   browser_policy_unreadable: "Couldn't check browser settings",
+  browser_out_of_date: "Needs a newer Chrome",
+  browser_list_unavailable: "Couldn't check Chrome's version",
 };
 
 /** Why a tool is off, in a few words; null while it's on. */
@@ -126,9 +153,22 @@ export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | nu
     .join(" ");
 }
 
+/** A tool's notice, or null. */
+export const noticeOfTool = (t: KnownTool): BrowserNotice | null =>
+  t.tool === "browser" ? (t.notice ?? null) : null;
+
 /** The same tools, read the same: a header that changes for its status or usage keeps its tools' array. */
 export function sameTools(a: readonly KnownTool[], b: readonly KnownTool[]): boolean {
   return (
-    a.length === b.length && a.every((t, i) => t.tool === b[i]?.tool && t.state === b[i]?.state)
+    a.length === b.length &&
+    a.every((t, i) => {
+      const u = b[i];
+      return (
+        u !== undefined &&
+        t.tool === u.tool &&
+        t.state === u.state &&
+        noticeOfTool(t) === noticeOfTool(u)
+      );
+    })
   );
 }

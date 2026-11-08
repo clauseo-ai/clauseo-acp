@@ -8,8 +8,14 @@
 //! separator), a control character, a name that is not ASCII, a name twice (ignoring ASCII
 //! case, as macOS and Windows do), a Unicode-path extra field naming something else, and any
 //! entry under an entry that is a symbolic link (writing through it would leave the folder).
-//! The walk then refuses any link whose target is absolute or, resolved, leaves the folder,
-//! and anything that is not a file, a folder or a link.
+//! On Windows (`links_allowed` false, [`links_allowed`]) any symbolic link entry at all is
+//! refused before `tar.exe` runs, so no reparse point is ever made from a zip entry: Chrome for
+//! Testing's Windows zips hold none. On macOS links are allowed, as the app bundle needs them
+//! (`Foo.framework/Versions/Current -> A`), and are checked once unpacked.
+//!
+//! The walk ([`check_tree`]) then refuses any link whose target is absolute, climbs above its
+//! folder (read as text), or, resolved, leaves the folder, and anything that is not a file, a
+//! folder or a link. Any refusal refuses the whole zip, and the caller removes `.partial-…`.
 
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -19,6 +25,7 @@ use std::path::{Component, Path};
 use clauseo_protocol::BrowserInstallFailure;
 
 use super::{Failure, PARTIAL_PREFIX};
+use crate::browser::chrome::Platform;
 use crate::write;
 
 /// The most entries a zip may hold: Chrome for Testing's hold a few hundred.
@@ -211,9 +218,18 @@ fn is_symlink(made_by: u16, external: u32) -> bool {
     matches!(made_by >> 8, 3 | 19) && (external >> 16) & 0o170_000 == 0o120_000
 }
 
+/// Whether a zip for `platform` may hold symbolic link entries: not on Windows, where
+/// unpacking one would make a reparse point.
+pub fn links_allowed(platform: Platform) -> bool {
+    match platform {
+        Platform::WindowsX64 | Platform::WindowsArm64 => false,
+        Platform::MacArm64 | Platform::MacX64 | Platform::Linux | Platform::Other => true,
+    }
+}
+
 /// Checks every entry name in the zip at `path`, in its central directory and its local
-/// headers, before anything is unpacked.
-pub fn check_zip(path: &Path) -> Result<(), Failure> {
+/// headers, before anything is unpacked. Without `links_allowed` any link entry is refused.
+pub fn check_zip(path: &Path, links_allowed: bool) -> Result<(), Failure> {
     let mut file = File::open(path).map_err(|error| bad(format!("opening the zip: {error}")))?;
     let len = file
         .metadata()
@@ -254,6 +270,11 @@ pub fn check_zip(path: &Path) -> Result<(), Failure> {
             return Err(bad(format!("the zip holds {name:?} twice")));
         }
         if is_symlink(made_by, external) {
+            if !links_allowed {
+                return Err(bad(format!(
+                    "{name:?} is a link, and a zip for Windows may hold none"
+                )));
+            }
             links.push(folded);
         }
         let local = if local == u32::MAX {

@@ -3,10 +3,11 @@
 //! posts each state back here, where it goes to every app subscriber as
 //! `HostEvent::BrowserInstall`. The actor never waits on it.
 //!
-//! - `InstallBrowser` starts the thread and answers `Done`; while one runs it answers `Done` and
-//!   does nothing, since the running one's events already tell the app. While a cancelled one is
-//!   still ending, it answers `Done` and a new download starts once that one's `Failed` is out.
-//!   Neither command stores a receipt.
+//! - `InstallBrowser` starts the thread and answers `Done`; the thread reads the newest verified
+//!   browser pins from disk (`browser::pins`) and downloads the version they pin. While one runs
+//!   it answers `Done` and does nothing, since the running one's events already tell the app.
+//!   While a cancelled one is still ending, it answers `Done` and a new download starts once that
+//!   one's `Failed` is out. Neither command stores a receipt.
 //! - `CancelBrowserInstall` sets the running download's [`Cancel`]; with none running it does
 //!   nothing.
 //! - The latest state goes into every app catch-up (`current`), so a window that lagged,
@@ -132,6 +133,9 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         random: uuid::Uuid::now_v7().simple().to_string(),
     };
     let cancel = Cancel::new();
+    // The pins are read on the thread, off the actor; the time is the host clock's now.
+    let pins = actor.wiring.browser_pins.source(actor.effective.data_dir());
+    let now = actor.clock.now().wall;
     let tools = Arc::clone(&actor.browser_install.tools);
     let sweep = actor.browser_install.sweep.take();
     let post = actor.post.clone();
@@ -146,7 +150,14 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
             let mut report = |state| {
                 let _gone = post.try_send(Input::BrowserInstall(state));
             };
-            let result = install::run(&job, tools.as_ref(), &thread_cancel, &mut report);
+            let pins = pins.newest(now);
+            let result = install::run(
+                &job,
+                pins.as_ref(),
+                tools.as_ref(),
+                &thread_cancel,
+                &mut report,
+            );
             last.send(result);
         })
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;
