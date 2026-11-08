@@ -123,8 +123,9 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   delete by hand when something could not be deleted and nothing was kept.
 - Where Clauseo's Windows protection was set up (task S15), uninstalling first removes it, elevated
   (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
-  their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
-  access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
+  their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox`, the
+  WFP filters and firewall rules ([Loopback ports on Windows](#loopback-ports-on-windows)) and
+  the access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
   and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. A
   silent per-user uninstall (`/S`) asks for nothing, so it leaves the protection in place and
   keeps the `sandbox` folder, saying so in its details list. To remove the protection, reinstall
@@ -221,8 +222,9 @@ They remove what the set-up makes:
   `HKLM\SOFTWARE\Clauseo\Clauseo` stays beside it. After a per-user install, `HKLM\SOFTWARE\Clauseo`
   is left empty, and you can delete it once you have checked that it is.
 
-Clauseo makes no firewall or WFP rules yet; they come in a later version, and this page will
-name them then.
+Clauseo's set-up also adds WFP filters and Windows Firewall rules for the sandbox users (see
+[Loopback ports on Windows](#loopback-ports-on-windows)). `--remove` deletes them; the block
+below doesn't.
 
 Collect the SIDs before deleting anything: once a user is deleted, its name no longer leads to its
 SID, and its profile can only be found by SID. The key's `PoolSids` lists the users' SIDs too, so
@@ -842,6 +844,28 @@ Coming:
   ([openai/codex#55668](https://github.com/openai/codex/issues/55668)); remove it, or point it
   at a full root bundle.
 
+### Loopback ports on Windows
+
+Clauseo allows its AI tools' browser to reach only its own ports on this computer. With the
+Windows protection (tier B), each sandbox user (`ClauseoSb01` to `ClauseoSb32`) gets its own
+small set of loopback ports, and Windows' filtering (WFP) lets no other sandbox user reach or
+listen on them. What IT needs to know:
+- TCP ports 46100-46611 and 65024-65279 are reserved for Clauseo's sandbox users. Don't give them
+  to other software as fixed ports.
+- Windows' dynamic port range must stay at its default start, 49152, so it doesn't overlap
+  46100-46611. `netsh int ipv4 set dynamicport tcp start=49152 num=16384` restores the default.
+  If it overlaps, or Hyper-V, WSL or Docker reserves ports in 46100-46611, Clauseo doesn't set up
+  the protection and names the cause. 65024-65279 is inside the dynamic range on purpose; a port
+  there that Windows has lent to another program only turns the AI tools' browser off for that
+  run.
+- A Windows Firewall rule, `clauseo_sandbox_block_loopback_tcp` ("Clauseo sandbox - Block
+  Loopback TCP Outside 46100-46611 and 65024-65279"), blocks loopback TCP outside those ranges
+  for the sandbox users. Three more `clauseo_sandbox_` rules block their network traffic that
+  isn't loopback, both ways, and their loopback UDP. WFP does the same and more on its own; if
+  Group Policy keeps local firewall rules from applying, add the same rules there.
+- Removing the protection (`clauseo-sandbox-setup.exe --remove`) deletes the WFP filters and
+  the firewall rules.
+
 ## 8. Claude's personal skills
 
 A lawyer's personal claude.ai skills don't appear in Clauseo sessions. Clauseo runs Claude Code
@@ -970,7 +994,9 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 `sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
 `sandbox\set-aside`: those are files set aside from a matter.
 
-Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
+Removing the protection by hand leaves Clauseo's WFP filters and firewall rules on the computer
+([Loopback ports on Windows](#loopback-ports-on-windows)). Restoring the set-up program and
+running `--remove` deletes them.
 
 ## Later
 
