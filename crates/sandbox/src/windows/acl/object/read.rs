@@ -6,23 +6,25 @@
 use std::io;
 
 use windows::Win32::Storage::FileSystem::{
-    FILE_READ_ATTRIBUTES, FILE_READ_DATA, READ_CONTROL, ReadFile, SYNCHRONIZE,
+    FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_MODE, READ_CONTROL, ReadFile, SYNCHRONIZE,
 };
 
-use super::{Object, open_at, os_error};
+use super::{Object, open_at_sharing, os_error};
 
-/// The plain file `name` in `folder`, opened relative to its handle ([`open_at`], never through
-/// a link) for reading, and read whole, with the parts of its security descriptor `info` asks
-/// for read first (empty when `info` is 0); `None` when it is missing. A reparse point, a
+/// The plain file `name` in `folder`, opened relative to its handle ([`open_at_sharing`], never
+/// through a link, sharing `share` alone) for reading, and read whole, with the parts of its
+/// security descriptor `info` asks for read first (empty when `info` is 0); `None` when it is
+/// missing. A reparse point, a
 /// folder, a file with another name, or one over `cap` bytes is refused.
 pub(super) fn read_child(
     folder: &Object,
     name: &[u16],
     cap: usize,
     info: u32,
+    share: FILE_SHARE_MODE,
 ) -> io::Result<Option<(Vec<u8>, Vec<u8>)>> {
     let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0;
-    let handle = match open_at(&folder.handle, name, access, true) {
+    let handle = match open_at_sharing(&folder.handle, name, access, true, share) {
         Ok(handle) => handle,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
