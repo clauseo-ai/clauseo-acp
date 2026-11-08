@@ -102,8 +102,10 @@ pub(crate) fn pause() {
     drop(Condvar::new().wait_timeout(guard, Duration::from_millis(10)));
 }
 
-/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s.
-const PATIENCE: u32 = 3000;
+/// How many [`pause`]s a wait for another thread may take before the test fails: 30 s. On
+/// Windows a pause takes a timer tick (about 15.6 ms), so 1200 of them (about 19 s) keep a wait
+/// that never ends failing with its own message before nextest's 30 s timeout.
+const PATIENCE: u32 = if cfg!(windows) { 1200 } else { 3000 };
 
 /// One wait the code under test armed.
 struct Wait {
