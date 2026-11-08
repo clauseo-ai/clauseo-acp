@@ -72,6 +72,9 @@ pub trait Removal {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Takes "Deny log on through Remote Desktop Services" (`SeDenyRemoteInteractiveLogonRight`)
+    /// off the group `group` (`LsaRemoveAccountRights`, this right only); not held is `Ok`.
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// Runs `f` with the calling thread acting as [`Removal::invoker`] (`Owner::run_as`), with
     /// the token [`Removal::can_act_as_owner`] names, then as itself again; called again inside
     /// `f`, runs `f` as it is. No invoker, or a failed impersonation, is the `Err`, and `f`

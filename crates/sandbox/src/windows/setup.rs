@@ -10,7 +10,9 @@
 //! 2. preflight: the Secondary Logon service is not disabled, and local policy doesn't refuse
 //!    `Users` the interactive logon right; either fails with a named cause before any account
 //!    exists;
-//! 3. the group `ClauseoSandboxUsers`: made, or adopted only when its SID is the record's;
+//! 3. the group `ClauseoSandboxUsers`: made, or adopted only when its SID is the record's; then,
+//!    every run, granted "Deny log on through Remote Desktop Services", so no pool user can sign
+//!    in over Remote Desktop (a rollback that deletes the group takes the right off first);
 //! 4. per new user: a free name (an account outside the record with a pool name is skipped,
 //!    never adopted, D-B5), a random password, the account, its groups, hidden from the sign-in
 //!    screen;
@@ -129,6 +131,9 @@ pub mod registered;
 pub mod remove;
 mod resets;
 pub mod result_file;
+#[cfg(test)]
+#[cfg(windows)]
+mod rights_tests;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;

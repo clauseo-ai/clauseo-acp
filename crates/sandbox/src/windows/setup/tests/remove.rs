@@ -25,7 +25,7 @@ fn other() -> Sid {
 }
 
 /// The calls of a full removal of [`pool`]'s eight users by its owner, with no ledger, in order.
-fn full_removal() -> Vec<String> {
+pub(super) fn full_removal() -> Vec<String> {
     let users = 1..=MIN_FREE_AFTER_RUN;
     let strays: Vec<String> = users.clone().map(|n| format!("100{n}")).collect();
     let mut lines: Vec<String> = [
@@ -61,6 +61,7 @@ fn full_removal() -> Vec<String> {
             "owners_ledger",
             "group",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
             "delete_record",
             "unlock",
@@ -259,6 +260,7 @@ fn the_steps_are_named_by_what_failed() {
         "remove" | "walk" => RemoveStep::LocalLow,
         "owners_ledger" => RemoveStep::Ledger,
         "group" | "group_members" | "delete_group" => RemoveStep::Group,
+        "remove_remote_logon_deny" => RemoveStep::RemoteLogon,
         "delete_record" => RemoveStep::Record,
         other => panic!("no step for {other}"),
     };
