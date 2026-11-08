@@ -280,26 +280,29 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         (
             "adminCopyDeclined",
             "Clauseo is installed, but the Safe workspace isn't set up, because permission was \
-             refused when Windows asked. Clauseo works without it. To set it up, run this \
-             installer again and choose Yes. If Windows asks for an administrator's password, ask \
-             whoever looks after this computer to enter it.",
+             refused when Windows asked. Until it's set up, Clauseo can open your matters but \
+             won't start Claude or ChatGPT. To set it up, run this installer again and choose Yes. \
+             If Windows asks for an administrator's password, ask whoever looks after this \
+             computer to enter it.",
         ),
         (
             "adminCopyFailed",
-            "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works \
-             without it. Run this installer again to try once more. If it still isn't set up, ask \
-             whoever looks after this computer.",
+            "Clauseo is installed, but the Safe workspace couldn't be set up. Until it's set up, \
+             Clauseo can open your matters but won't start Claude or ChatGPT. Run this installer \
+             again to try once more. If it still isn't set up, ask whoever looks after this \
+             computer.",
         ),
         (
             "adminCopyOtherAccount",
             "Clauseo is installed, but the Safe workspace isn't set up, because another Windows \
-             account on this computer already has it. Clauseo works without it.",
+             account on this computer already has it. Until it's set up, Clauseo can open your \
+             matters but won't start Claude or ChatGPT. Ask whoever looks after this computer.",
         ),
         (
             "adminCopyMachineFailed",
             "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. \
-             Clauseo works without it. Whoever looks after this computer can run this installer \
-             again to set it up.",
+             Until it's set up, Clauseo can open your matters but won't start Claude or ChatGPT. \
+             Whoever looks after this computer can run this installer again to set it up.",
         ),
         (
             "adminCopyNewerKept",
