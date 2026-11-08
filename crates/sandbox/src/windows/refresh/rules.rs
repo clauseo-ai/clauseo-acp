@@ -184,6 +184,27 @@ pub const TEARDOWN: [Teardown; 6] = [
     Teardown::AdminFolder,
 ];
 
+/// One step of taking a registered `\Clauseo` task down (`task::unregister_task`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retire {
+    /// `IRegisteredTask::put_Enabled(false)`: no start lands from here on.
+    Disable,
+    /// `IRegisteredTask::Stop`: its running instance ended, as deleting a task leaves its run
+    /// going, which for the set-up task would set up a pool the removal is taking down.
+    Stop,
+    /// `ITaskFolder::DeleteTask`.
+    Delete,
+}
+
+/// The order every `\Clauseo` task is taken down in: disabled, then stopped, then deleted.
+/// Stopped first, a start could land between the stop and the delete and run on.
+pub const RETIRE: [Retire; 3] = [Retire::Disable, Retire::Stop, Retire::Delete];
+
+/// Takes a task down by `step`, each of [`RETIRE`] in order; the first failure ends it.
+pub fn retire<E>(mut step: impl FnMut(Retire) -> Result<(), E>) -> Result<(), E> {
+    RETIRE.into_iter().try_for_each(&mut step)
+}
+
 /// The descriptor of every task in [`TASKS`] (and of the set-up task, per user): owned by
 /// Administrators; protected; SYSTEM and Administrators full control; the record owner `owner`
 /// read and execute (`FRFX`). Starting a task needs execute access: as the owner,

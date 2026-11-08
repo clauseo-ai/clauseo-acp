@@ -1986,9 +1986,11 @@ member can start the task but is served nothing. Plain
 per-user `--adopt` doesn't register it. Every elevated set-up (the prompt's `--set-up`,
 `--adopt`'s) registers it again when it is missing or its definition differs
 (`refresh::ensure_task`, `Machine::ensure_set_up_task`), so a lawyer whose task was deleted meets
-the prompt once; the task's own run doesn't register itself. `--remove --uninstall` deletes it first among the tasks
-(`refresh::TEARDOWN`), ending a running instance; the app's `--remove` keeps it, so the owner
-can set up again with no admin.
+the prompt once; the task's own run doesn't register itself. `--remove --uninstall` takes it down
+first among the tasks (`refresh::TEARDOWN`). Every `\Clauseo` task goes the same way
+(`refresh::RETIRE`): disabled, then its running instance stopped, then deleted, so no start
+lands between the stop and the delete. The app's `--remove` keeps it, so the owner can set up
+again with no admin.
 
 **The folder.** `\Clauseo` has a fixed descriptor of its own,
 `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)` (`refresh::FOLDER_SDDL`). Before, each

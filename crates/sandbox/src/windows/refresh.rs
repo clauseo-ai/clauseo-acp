@@ -112,10 +112,10 @@ pub(crate) mod windows_tests;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, FOLDER_SDDL, INSTANCES_IGNORE_NEW, INSTANCES_QUEUE, REFRESH_ARG, Registered,
-    SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, Starters,
-    SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex, inside_profile, not_registered,
-    same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, FOLDER_SDDL, INSTANCES_IGNORE_NEW, INSTANCES_QUEUE, REFRESH_ARG, RETIRE,
+    Registered, Retire, SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL, STOP_ARG,
+    STOP_EXECUTION_LIMIT, Starters, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
+    inside_profile, not_registered, retire, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]

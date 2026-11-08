@@ -46,7 +46,7 @@ use windows::core::{BSTR, Interface};
 use super::last_run::{LastRun, last_run};
 use super::task_scheduler::folder;
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
-use super::{Starters, SystemTask, action_path};
+use super::{Retire, Starters, SystemTask, action_path};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
@@ -241,11 +241,12 @@ pub(super) fn register_in(
     Ok(())
 }
 
-/// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
-/// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop task. The set-up task's running instance is
-/// ended first: deleting a task leaves its run going, which would set up a pool the removal
-/// is taking down.
+/// Takes `task` down in [`RETIRE`](super::RETIRE)'s order (disabled, then its running instance
+/// stopped, then deleted), then deletes the folder `\Clauseo` if nothing else is in it. A task
+/// or folder that isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task,
+/// and a per-machine install's `--remove` for the stop task. Disabled first, no start lands
+/// between the stop and the delete; stopped before the delete, as deleting a task leaves its
+/// run going, which for the set-up task would set up a pool the removal is taking down.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
@@ -255,22 +256,22 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
         Err(error) if missing(&error) => return Ok(()),
         Err(error) => return Err(com("ITaskService::GetFolder")(error)),
     };
-    if task == SystemTask::SetUp {
-        // SAFETY: a live folder and a BSTR that outlives the call.
-        match unsafe { folder.GetTask(&BSTR::from(task.name())) } {
-            Ok(registered) => {
-                // SAFETY: a live task; flags 0.
-                unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop"))?;
-            }
-            Err(error) if missing(&error) => {}
-            Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
-        }
-    }
-    // SAFETY: a live folder and a BSTR; flags 0.
-    match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
-        Ok(()) => {}
+    // SAFETY: a live folder and a BSTR that outlives the call.
+    match unsafe { folder.GetTask(&BSTR::from(task.name())) } {
+        Ok(registered) => super::retire(|step| match step {
+            // SAFETY: a live task.
+            Retire::Disable => unsafe { registered.SetEnabled(VARIANT_BOOL::from(false)) }
+                .map_err(com("IRegisteredTask::SetEnabled")),
+            // SAFETY: a live task; flags 0.
+            Retire::Stop => unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop")),
+            // SAFETY: a live folder and a BSTR; flags 0.
+            Retire::Delete => match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
+                Err(error) if !missing(&error) => Err(com("ITaskFolder::DeleteTask")(error)),
+                _deleted_or_gone => Ok(()),
+            },
+        })?,
         Err(error) if missing(&error) => {}
-        Err(error) => return Err(com("ITaskFolder::DeleteTask")(error)),
+        Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
     }
     // SAFETY: as above, on the root folder.
     let root =

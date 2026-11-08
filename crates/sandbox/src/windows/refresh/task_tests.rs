@@ -233,3 +233,34 @@ fn a_fresh_registration_is_current_and_any_change_to_its_definition_is_not() {
     }
     assert_eq!((INSTANCES_QUEUE, INSTANCES_IGNORE_NEW), (1, 2));
 }
+
+#[test]
+fn every_task_is_disabled_then_stopped_then_deleted() {
+    assert_eq!(RETIRE, [Retire::Disable, Retire::Stop, Retire::Delete]);
+    // The fake task: each step taken, in order, and the one that fails.
+    let take_down = |failing: Option<Retire>| {
+        let mut taken = Vec::new();
+        let done = retire(|step| {
+            taken.push(step);
+            if Some(step) == failing {
+                Err(step)
+            } else {
+                Ok(())
+            }
+        });
+        (taken, done)
+    };
+    assert_eq!(
+        take_down(None),
+        (vec![Retire::Disable, Retire::Stop, Retire::Delete], Ok(()))
+    );
+    // A task that can't be disabled is neither stopped nor deleted: the removal fails there.
+    assert_eq!(
+        take_down(Some(Retire::Disable)),
+        (vec![Retire::Disable], Err(Retire::Disable))
+    );
+    assert_eq!(
+        take_down(Some(Retire::Stop)),
+        (vec![Retire::Disable, Retire::Stop], Err(Retire::Stop))
+    );
+}
