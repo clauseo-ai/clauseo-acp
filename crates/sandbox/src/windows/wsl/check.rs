@@ -59,7 +59,7 @@ pub enum Found {
 /// - a target whose value is missing (or whose key is), or whose deny for the record's group
 ///   is missing or comes after an allow, is [`Blocked::WslDenyMissing`];
 /// - else a target that can't be read or parsed, a class of [`CLASSES`] with no `AppID`,
-///   targets that can't be listed, or a packaged registration of `LxssUserSession` is
+///   targets that can't be listed, or a packaged registration of any of [`CLASSES`] is
 ///   [`Blocked::WslDenyUnverifiable`], whichever WSL is here: the inbox one (`LxssManager`)
 ///   runs WSL2's VMs too, from Windows 10 2004 on.
 ///

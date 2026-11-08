@@ -901,10 +901,11 @@ Before each Safe workspace launch, Clauseo checks the deny, and refuses the laun
   deny, or has it after an allow entry. Signing out and in again (or running the task:
   `schtasks /run /tn \Clauseo\SandboxRefresh` as an administrator) puts it back.
 - **`wsl_deny_unverifiable`**: WSL is on the computer (the Store or MSI WSL's `WSLService`, or
-  Windows' own `LxssManager`, which also runs WSL2 VMs) and Clauseo can't check the deny: a launch permission can't be read or isn't a valid descriptor, a WSL class names
-  no AppID, or WSL's class is registered as packaged COM
-  (`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a
-  WSL from before 2.0). Repairing or updating WSL (`wsl --update`) usually fixes it.
+  Windows' own `LxssManager`, which also runs WSL2 VMs) and Clauseo can't check the deny: a launch
+  permission can't be read or isn't a valid descriptor, a WSL class names no AppID, or a WSL class
+  is registered as packaged COM (under `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex`, such as
+  `{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a WSL from before 2.0). Repairing or updating
+  WSL (`wsl --update`) usually fixes it.
 
 With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)
 takes the deny off before it deletes the group. If you clear a leftover sandbox by hand
