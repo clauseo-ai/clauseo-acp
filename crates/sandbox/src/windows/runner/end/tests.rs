@@ -106,8 +106,20 @@ const NOT_REQUESTED: [&str; 4] = [
      sweep failed (5))",
 ];
 
+/// A grace the agent's stdin close always beats, so it bounds only a close that never comes; the
+/// fake clock says when the grace has run out.
+const LONG: Duration = Duration::from_secs(30);
+
 /// A grace the tests can wait out.
 const SHORT: Duration = Duration::from_millis(50);
+
+/// A recording fake whose clock reads `readings` in turn.
+fn clocked(readings: &[Duration]) -> Record {
+    Record {
+        readings: Mutex::new(readings.iter().copied().collect()),
+        ..Record::default()
+    }
+}
 
 /// `want` as owned lines.
 fn lines(want: &[&str]) -> Vec<String> {
@@ -145,8 +157,11 @@ fn a_job_that_doesnt_empty_still_requests_the_sweep_on_every_path() {
         assert_eq!(end.steps().settled(), [awaiting], "{path:?}");
     }
     // The host's stdin end: the agent's stdin closes, its grace runs out, the request all the same.
-    let end = SessionEnd::new(not_empty());
-    relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
+    let end = SessionEnd::new(Record {
+        fail: Some("empty job"),
+        ..clocked(&[Duration::ZERO, LONG])
+    });
+    relay_stdin(&b"request\n"[..], io::sink(), &end, LONG, |_| {
         end.steps().log("agent stdin closed");
     });
     let mut want = lines(&["log agent stdin closed"]);
@@ -308,8 +323,8 @@ fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output(
 
 #[test]
 fn stdin_ending_with_the_agent_not_finishing_ends_the_job_then_requests_the_sweep() {
-    let end = SessionEnd::new(Record::default());
-    relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
+    let end = SessionEnd::new(clocked(&[Duration::ZERO, LONG]));
+    relay_stdin(&b"request\n"[..], io::sink(), &end, LONG, |_| {
         end.steps().log("agent stdin closed");
     });
     // The grace ran out: the job ended and emptied, then the request, all on this path.
