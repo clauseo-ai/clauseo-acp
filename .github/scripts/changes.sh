@@ -75,6 +75,8 @@ classify() {
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
     ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
     ui/app/src/review/registry-h11.tsx | ui/package.json) ui=true app=true rust=true ;;
+    # The native dialogs' review page: dialogs/words and webview2 tests check it matches their tables.
+    ui/app/src/review/registry-nd.tsx) ui=true app=true rust=true ;;
     docs/firm-it.md) rust=true ;;
     ui/app/doc-approvals.json) ui=true app=true rust=true ;;
     # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
