@@ -2242,12 +2242,15 @@ named in `%ProgramData%\Clauseo\Sandbox\sweep-admin.log` alone, so an administra
 what blocks launches (`sweep::log_path`, `sweep/windows_sweeper/admin_log.rs`). The
 Application log is where the sweep's line went before, and its DACL lets every local user
 read it, so it can't hold them. `%ProgramData%` is the known folder, never the environment.
-Each of `Clauseo` and `Sandbox` is made, when missing, with
-`O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`, then opened without following a reparse point
+`Clauseo` is made, when missing, as the installer makes it (`hooks.nsh`'s
+`O:BAG:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)`: the app reads a firm's
+`policy.json` there), and `Sandbox` with `O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Each is opened without following a reparse point
 and refused unless a folder that only SYSTEM, Administrators or TrustedInstaller may change
 (`admin_copy::level_safe`): a standard user may make folders in `%ProgramData%`, and one
 that made `Clauseo` first keeps the paths from being written (the line says so), never
-redirects them. The file is made with `O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)`, opened for append
+redirects them. Elevated tests (not run yet):
+`elevated_the_admin_log_writer_refuses_a_squatted_clauseo_folder_and_writes_nothing` and
+`elevated_the_admin_log_writer_refuses_a_sandbox_folder_that_is_a_junction`. The file is made with `O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)`, opened for append
 without following a reparse point, and refused unless a plain file with one link whose owner
 is SYSTEM or Administrators and whose protected DACL allows only those two. Each line starts
 with the UTC time; a line that would take the file past 256 KiB first moves it to

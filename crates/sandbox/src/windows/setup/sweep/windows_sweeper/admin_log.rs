@@ -3,7 +3,8 @@
 //! no longer names. The file is `%ProgramData%\Clauseo\Sandbox\sweep-admin.log`, `%ProgramData%`
 //! as Windows knows it (`FOLDERID_ProgramData`), never from the environment.
 //!
-//! Each folder below `%ProgramData%` is made with [`ADMIN_FOLDER_SDDL`] when missing, then
+//! `Clauseo` is made, when missing, as the installer makes it ([`CLAUSEO_FOLDER_SDDL`], Users
+//! may read it) and `Sandbox` with [`ADMIN_FOLDER_SDDL`]; each is then
 //! opened without following a reparse point (one, or a file, is refused) and its owner and DACL
 //! read through that handle: they must let only SYSTEM, Administrators or `TrustedInstaller`
 //! change it (`admin_copy::level_safe`). A standard user may make folders in `%ProgramData%`,
@@ -14,6 +15,8 @@
 //! `sweep-admin.log.1`, replacing the one there. Each line starts with the UTC time.
 //!
 //! [`Sweeper::admin_log`]: super::super::Sweeper::admin_log
+//! [`CLAUSEO_FOLDER_SDDL`]: super::super::log_path::CLAUSEO_FOLDER_SDDL
+//! [`ADMIN_FOLDER_SDDL`]: super::super::log_path::ADMIN_FOLDER_SDDL
 #![expect(
     unsafe_code,
     reason = "the file, folder, security and clock calls that write the admin-only log"
@@ -42,8 +45,7 @@ use windows::core::HSTRING;
 
 use super::super::Failed;
 use super::super::log_path::{
-    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_DIR, ADMIN_LOG_NAME, ADMIN_LOG_SDDL, admin_only,
-    rotates,
+    ADMIN_LOG_CAP, ADMIN_LOG_FOLDERS, ADMIN_LOG_NAME, ADMIN_LOG_SDDL, admin_only, rotates,
 };
 use crate::windows::admin_copy::level_safe;
 use crate::windows::setup::ffi::program_data;
@@ -58,9 +60,9 @@ pub(crate) fn append(line: &str) -> Result<(), Failed> {
 /// [`append`] below `base` instead of `%ProgramData%`: the elevated test's own folder.
 pub(crate) fn append_in(base: &Path, line: &str) -> Result<(), Failed> {
     let mut folder = base.to_path_buf();
-    for part in ADMIN_LOG_DIR {
+    for (part, sddl) in ADMIN_LOG_FOLDERS {
         folder.push(part);
-        admin_folder(&folder)?;
+        admin_folder(&folder, sddl)?;
     }
     let log = folder.join(ADMIN_LOG_NAME);
     let text = format!("{} {line}\r\n", stamp());
@@ -75,11 +77,11 @@ pub(crate) fn append_in(base: &Path, line: &str) -> Result<(), Failed> {
         .map_err(|error| format!("the admin-only log couldn't be written ({error})"))
 }
 
-/// Makes the folder `path` with [`ADMIN_FOLDER_SDDL`] when missing, then refuses it unless it
+/// Makes the folder `path` with `sddl` when missing, then refuses it unless it
 /// is a folder, not a reparse point, that only SYSTEM, Administrators or `TrustedInstaller` may
 /// change.
-fn admin_folder(path: &Path) -> Result<(), Failed> {
-    let descriptor = Descriptor::from_sddl(ADMIN_FOLDER_SDDL).map_err(|error| error.to_string())?;
+fn admin_folder(path: &Path, sddl: &str) -> Result<(), Failed> {
+    let descriptor = Descriptor::from_sddl(sddl).map_err(|error| error.to_string())?;
     let attributes = attributes(&descriptor);
     let name = HSTRING::from(path.as_os_str());
     // SAFETY: `name` is NUL-terminated and `attributes` points at a live descriptor; both
