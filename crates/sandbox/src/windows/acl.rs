@@ -487,7 +487,10 @@ fn check_target(target: &Object, grant: &Grant) -> Result<(), ApplyFailure> {
         return Err(ApplyFailure::Changed);
     }
     if grant.rights().is_deny()
-        && matches!(grant.inherit(), Inherit::Tree | Inherit::Below)
+        && matches!(
+            grant.inherit(),
+            Inherit::Tree | Inherit::Below | Inherit::FilesBelow
+        )
         && target
             .is_volume_root()
             .map_err(|e| ApplyFailure::Io(e.kind()))?

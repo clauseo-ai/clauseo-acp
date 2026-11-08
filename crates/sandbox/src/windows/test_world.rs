@@ -120,6 +120,11 @@ impl World {
     /// notes, a credential link, a read-only path in the state folder, Clauseo's Claude home,
     /// runtime, read and allowed paths.
     pub(super) fn full_policy(&self) -> Policy {
+        self.full_builder().build().unwrap()
+    }
+
+    /// [`World::full_policy`]'s builder, for a test that adds to it.
+    pub(super) fn full_builder(&self) -> PolicyBuilder {
         self.dir.file("matter/.git/HEAD", "ref: refs/heads/main\n");
         self.dir
             .file("matter/.codex/config.toml", "model = \"x\"\n");
@@ -136,8 +141,6 @@ impl World {
             .read(self.at("elsewhere"))
             .allowed_folder(self.at("elsewhere/Precedents"))
             .over_cap([big])
-            .build()
-            .unwrap()
     }
 
     /// `path` relative to the temp folder, written with `/`, so snapshots match on every OS.

@@ -56,6 +56,7 @@ fn who(sid: &Sid) -> &'static str {
         MATTER_SID => "matter",
         GROUP_SID => "group",
         LOW_LABEL_SID => "low",
+        OWNER_RIGHTS_SID => "owner-rights",
         s if s == OTHER_POOL_SIDS[0] => "other-pool-1",
         s if s == OTHER_POOL_SIDS[1] => "other-pool-2",
         _ => "?",
@@ -498,3 +499,5 @@ fn the_session_temp_folder_gets_modify_and_the_low_label_and_its_parents_nothing
 
 /// The profile, the sandbox records and the data folder's allow list.
 mod data;
+/// The guard on what the pool writes, behind `Policy::native_code_deny`.
+mod guard;

@@ -19,6 +19,8 @@ pub(crate) fn is_our_label(label: &Label, inherit: Inherit) -> bool {
         Inherit::FilesInFolder => &[0xd],
         // Object and container inherit, inherit only: what is below a folder.
         Inherit::Below => &[0xb],
+        // Object inherit, inherit only: the files below a folder.
+        Inherit::FilesBelow => &[0x9],
     };
     label.level == LOW
         && label.mask == Rights::LowLabel.mask()
