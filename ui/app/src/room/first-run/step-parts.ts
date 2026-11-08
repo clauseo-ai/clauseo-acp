@@ -28,10 +28,10 @@ export type StepParts = Pick<
 
 /** The step's words: the first run's own, and protection's from the chunk. */
 export const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
-  ask: fl(lang, "Windows asks once for permission to set up the Safe workspace."),
+  ask: fl(lang, "Windows asks once more for permission, to finish setting up the Safe workspace."),
   unknown: pw(
     lang,
-    "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "Windows will ask to let Clauseo finish setting up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
   ),
   setUp: pw(lang, "Set up the Safe workspace"),
   waiting: pw(lang, "Choose Yes in the window Windows shows."),

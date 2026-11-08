@@ -10,6 +10,7 @@
 // after it, once.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
+import { loadHindi } from "@clauseo/components/lib/words-core.ts";
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { APP_VERSION } from "../../settings/version.ts";
 import { installerPage } from "../protection/installer.ts";
@@ -72,7 +73,7 @@ const PAPER = { path: "Plaint.pdf", file: "file-1", size: 1000 } as unknown as P
 type Answer = { resolve: () => void; reject: (e: unknown) => void };
 
 /** The room over the setup, papers and protection wires on Windows; the protection commands wait for the test. */
-async function mount(protection: FakeProtectionHost | undefined) {
+async function mount(protection: FakeProtectionHost | undefined, language: "en" | "hi" = "en") {
   let matters: MatterSummary[] = [];
   let made: ThreadSummary[] = [];
   const fake: FakeHost = {
@@ -119,7 +120,7 @@ async function mount(protection: FakeProtectionHost | undefined) {
     ...(protection === undefined ? {} : { protection }),
   };
   const transport: FakeTransport = new FakeTransport(fake);
-  connectRoom(transport, { language: "en" });
+  connectRoom(transport, { language });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -225,12 +226,12 @@ test("needs_set_up with retry_asks_admin true (the admin copy there, after an in
   await signInNow(t);
   expect(step()?.dataset["state"]).toBe("ask");
   expect(step()?.textContent).toContain(
-    fl("en", "Windows asks once for permission to set up the Safe workspace."),
+    fl("en", "Windows asks once more for permission, to finish setting up the Safe workspace."),
   );
   expect(step()?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo finish setting up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   );
   expect(byId("protection-repair")).toBeNull();
@@ -249,6 +250,22 @@ test("needs_set_up with retry_asks_admin true (the admin copy there, after an in
   expect(step()).toBeNull();
   expect(reads(t)).toBe(1);
 });
+
+test.each([
+  ["en", "Windows asks once more for permission, to finish setting up the Safe workspace."],
+  ["hi", "सुरक्षित कार्यक्षेत्र की तैयारी पूरी करने के लिए Windows एक बार और अनुमति माँगता है।"],
+] as const)(
+  "the first run's step says, in %s, that Windows asks once more to finish the set-up",
+  async (lang, line) => {
+    await loadHindi();
+    const s = scripted(PROT.needs, { retry_asks_admin: true } as Partial<ProtectionView>);
+    const t = await mount(s.host, lang);
+    await signInNow(t);
+    expect(step()?.dataset["state"]).toBe("ask");
+    expect(step()?.textContent).toContain(line);
+    expect(step()?.textContent).not.toContain("Windows asks once for permission to set up");
+  },
+);
 
 test("any other block: no step; the room's line and note say it", async () => {
   const t = await mount({ view: () => view(PROT.policy) });

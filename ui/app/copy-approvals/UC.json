@@ -45,16 +45,28 @@
     "by": "design"
   },
   "UC-10": {
-    "en": "Windows asks once for permission to set up the Safe workspace.",
-    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
+    "en": "Windows asks once more for permission, to finish setting up the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र की तैयारी पूरी करने के लिए Windows एक बार और अनुमति माँगता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (Design A: the installer only adds the program)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app copy (Design A: the installer only adds the program)",
+    "note": "The first run's Safe workspace step, the line above Windows' prompt. Changed from \"Windows asks once for permission to set up the Safe workspace.\": the installer only adds the program now, so the app finishes the set-up. Settings doesn't use the old line."
   },
   "UC-11": {
+    "en": "Windows will ask to let Clauseo finish setting up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र की तैयारी पूरी करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (Design A: the installer only adds the program)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy (Design A: the installer only adds the program)",
+    "note": "The first run's Safe workspace step, the Unknown publisher line. Changed from the set-up wording to \"finish setting up\", as UC-10. Settings' and the room's confirm keep the old wording (UC-17)."
+  },
+  "UC-17": {
     "en": "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     "hi": "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
     "hi_status": "provisional",
@@ -62,7 +74,8 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)",
+    "note": "Settings' and the room's set-up confirm, the Windows wording as it was. Split from UC-11 when the first run's step got its own words (the installer only adds the program); the dates and author are UC-11's original approval."
   },
   "UC-12": {
     "en": "Set up the Safe workspace",

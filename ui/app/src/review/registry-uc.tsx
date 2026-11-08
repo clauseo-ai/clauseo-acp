@@ -217,11 +217,14 @@ export const UC: Entry[] = [
     { protection: P.off },
   ),
   room("UC-06", toolbarWords("Not protected"), "room/protection-mark", { protection: P.refused }),
-  first("UC-10", fw("Windows asks once for permission to set up the Safe workspace.")),
+  first(
+    "UC-10",
+    fw("Windows asks once more for permission, to finish setting up the Safe workspace."),
+  ),
   first(
     "UC-11",
     pw(
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo finish setting up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   ),
   room("UC-12", pw("Set up the Safe workspace"), "room/np-note", {
@@ -348,6 +351,15 @@ export const UC: Entry[] = [
     protection: P.needs,
     press: [LINE, SETUP],
   }),
+  // Settings' and the room's set-up confirm keep the set-up's wording (the app sets up the Safe workspace there)
+  room(
+    "UC-17",
+    pw(
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    ),
+    "room/protection-confirm",
+    { protection: P.needs, press: [LINE, SETUP] },
+  ),
   settings("UC-41", pw("Remove the Safe workspace from this computer?"), held(P.b), [
     '[data-testid="protection-remove"]',
   ]),

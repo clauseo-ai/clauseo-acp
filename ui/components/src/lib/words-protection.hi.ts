@@ -16,6 +16,9 @@ export const HI = {
   "Set up the Safe workspace?": "सुरक्षित कार्यक्षेत्र तैयार करें?",
   "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
     "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+  // the first run's step (UC-11): the installer only adds the program, so the app finishes the set-up
+  "Windows will ask to let Clauseo finish setting up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
+    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र की तैयारी पूरी करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
   // Add room's confirm (UC-94, UC-95)
   "Add room": "जगह जोड़ें",
   "Add room for 4 more?": "4 और के लिए जगह जोड़ें?",
