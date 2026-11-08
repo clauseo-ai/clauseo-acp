@@ -98,6 +98,8 @@ mod spawn;
 mod start;
 #[cfg(any(windows, test))]
 mod sweep;
+#[cfg(any(windows, test))]
+pub mod unclean;
 
 pub use env::agent_env;
 #[cfg(windows)]
@@ -433,10 +435,15 @@ pub enum RunExit {
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// F4: a marker of this pool user's (or one that names none, or can't be read) awaits a stop
+    /// that hasn't completed: a session a sweep found an escapee in, or one whose outer died
+    /// (`unclean::logon_check`). The outer requested `\Clauseo\SandboxStop` and refuses the
+    /// launch before its own marker or any logon; a launch once the stop completed goes ahead.
+    AwaitingStop,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 19] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -455,6 +462,7 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::AwaitingStop,
     ];
 
     /// The exit code.
@@ -496,7 +504,8 @@ impl RunExit {
             | RunExit::DllSearch
             | RunExit::Escapee
             | RunExit::PoolStop
-            | RunExit::MarkerUnwritable => None,
+            | RunExit::MarkerUnwritable
+            | RunExit::AwaitingStop => None,
         }
     }
 }
