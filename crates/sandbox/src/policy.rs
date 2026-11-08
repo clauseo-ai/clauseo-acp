@@ -261,16 +261,19 @@ impl Policy {
         &self.hidden
     }
 
-    /// The folder the macOS git watch sets aside into ([`PolicyBuilder::git_set_aside`]),
-    /// denied whole by the profile.
+    /// The git watch's set-aside folder ([`PolicyBuilder::git_set_aside`]), denied whole.
     pub fn git_set_aside(&self) -> Option<&Path> {
         self.git.set_aside.as_deref()
     }
 
-    /// The `.clauseo` folder at the root of the matter's volume when that is a local volume
-    /// other than [`Policy::git_set_aside`]'s: the git watch sets aside into it there.
+    /// The git watch's `.clauseo` folder on the matter's volume, when not the data dir's volume.
     pub fn volume_set_aside(&self) -> Option<&Path> {
         self.git.volume.as_deref()
+    }
+
+    /// How the git watch watches the matter ([`MatterWatch`](crate::MatterWatch)).
+    pub fn matter_watch(&self) -> git_aside::MatterWatch {
+        self.git.matter_watch
     }
 
     /// The loopback ports the agent may connect out to (the proxy's listeners, the connector

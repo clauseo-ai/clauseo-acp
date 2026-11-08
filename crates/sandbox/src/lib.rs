@@ -195,6 +195,7 @@ pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 pub use macos::SeatbeltProfile;
 #[cfg(target_os = "macos")]
 pub use macos::{SeatbeltLauncher, git_watch_quit, git_watch_start_up};
+pub use policy::git_aside::MatterWatch;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
     INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,

@@ -1,6 +1,7 @@
 //! The macOS git watch's places in the policy (decision record 0038): the set-aside folders
 //! (the data dir's, and a `.clauseo` folder at the root of the matter's volume when that is
-//! another volume) and the targets of the matter's launch `commondir` files.
+//! another volume), the targets of the matter's launch `commondir` files, and whether the
+//! watch's stream can watch the matter's volume (`git_aside/volume.rs`).
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -9,6 +10,12 @@ use super::build::{beneath_existing, refuse};
 use super::{PathRule, Policy, under};
 use crate::Error;
 use crate::policy::opens_as;
+
+mod volume;
+
+pub use volume::MatterWatch;
+#[cfg(test)]
+pub(crate) use volume::{Volume, fake_volume};
 
 #[cfg(target_os = "macos")]
 /// The folder at the root of another volume that the git watch sets aside into there.
@@ -60,6 +67,8 @@ pub(crate) struct GitPlaces {
     pub(crate) volume: Option<PathBuf>,
     /// The launch repositories' `commondir` targets outside every read-only rule.
     pub(crate) commondir: Vec<CommonDir>,
+    /// Whether the watch's stream can watch the matter's volume.
+    pub(crate) matter_watch: MatterWatch,
 }
 
 /// The places from the builder's set-aside folder, canonical (it need not exist); the rest is
@@ -84,6 +93,7 @@ pub(super) fn finish(policy: Policy) -> Result<Policy, Error> {
         let reach = reach(&policy);
         policy.git.volume = volume_set_aside(policy.matter(), policy.git_set_aside(), &reach)?;
     }
+    policy.git.matter_watch = volume::matter_watch(&policy)?;
     Ok(policy)
 }
 
