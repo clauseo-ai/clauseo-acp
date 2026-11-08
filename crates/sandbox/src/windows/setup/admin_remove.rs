@@ -17,6 +17,9 @@
 //! would put its new copy there and lose it at boot. Run from anywhere else (a test, a VM
 //! harness), the copy and the folder are deleted at once.
 //!
+//! The last step also deletes `%ProgramFiles%\Clauseo\installer-temp`, where earlier installers
+//! made their plug-in folders, only when empty ([`clear_old_installer_temp`]).
+//!
 //! A step that fails stops the teardown and is named ([`CopyLeft`]): `exe::run_remove` logs
 //! it to the Event Log and exits `AdminCopyLeft`.
 #![expect(unsafe_code, reason = "FFI to MoveFileExW")]
@@ -41,6 +44,9 @@ use crate::windows::admin_copy::take_back::remove_taking_back;
 use crate::windows::admin_copy::take_back_os::NtfsLockDown;
 use crate::windows::admin_copy::{self, Found, os, same_path};
 use crate::windows::refresh::{self, SystemTask, TEARDOWN, Teardown};
+
+/// The folder in `%ProgramFiles%\Clauseo` where earlier installers made their plug-in folders.
+const OLD_INSTALLER_TEMP: &str = "installer-temp";
 
 /// Deletes the admin copy as the module says, step by step in [`TEARDOWN`]'s order. The
 /// record's values first: a failure there stops before any task or file is touched. A step
@@ -88,6 +94,7 @@ fn remove_admin_folder() -> Result<(), MachineError> {
     let exe = admin_copy::admin_exe(&program_files);
     let running = std::env::current_exe().is_ok_and(|running| same_path(&running, &exe));
     let app = program_files.join(admin_copy::ADMIN_DIR[0]);
+    clear_old_installer_temp(&app);
     let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
     let mut schedule = delete_at_restart;
     let mut fs = Restart {
@@ -95,6 +102,13 @@ fn remove_admin_folder() -> Result<(), MachineError> {
         schedule: &mut schedule,
     };
     clear(&dir, &exe, running, &app, &mut fs).map_err(|e| other(&e))
+}
+
+/// Deletes `app`'s (`%ProgramFiles%\Clauseo`) [`OLD_INSTALLER_TEMP`], earlier installers' plug-in
+/// parent, when empty. Never recursive, so an older installer running meanwhile keeps its
+/// folder, and a link there goes as itself, never its target; a failure changes nothing.
+pub(super) fn clear_old_installer_temp(app: &Path) {
+    drop(std::fs::remove_dir(app.join(OLD_INSTALLER_TEMP)));
 }
 
 /// How [`clear`] parks the running copy: the rename, and the delete at restart.
