@@ -17,6 +17,8 @@ pub(super) enum KeyEvent {
     Rewrite,
     /// A change that leaves the deny as it is (another `AppID`'s key, say).
     Touch,
+    /// WSL is uninstalled: its keys are gone, and nothing names them any more.
+    Uninstall,
 }
 
 /// WSL's `AppID` keys, when a test models them; `reapply_wsl` then reads and writes them.
@@ -29,6 +31,8 @@ pub(super) struct Keys {
     pub(super) mid_read: Vec<(Duration, KeyEvent)>,
     pub(super) present: bool,
     pub(super) denied: bool,
+    /// WSL is uninstalled: a pass finds no targets.
+    pub(super) uninstalled: bool,
     /// Since when a rewrite has left the deny off.
     off_since: Option<Duration>,
     /// How long each rewrite left the deny off, once a pass put it back.
@@ -43,6 +47,7 @@ impl Keys {
             mid_read: Vec::new(),
             present: true,
             denied: true,
+            uninstalled: false,
             off_since: None,
             off: Vec::new(),
         }
@@ -58,6 +63,10 @@ impl Keys {
                 self.off_since.get_or_insert(at);
             }
             KeyEvent::Touch => {}
+            KeyEvent::Uninstall => {
+                (self.present, self.denied, self.off_since) = (false, false, None);
+                self.uninstalled = true;
+            }
         }
     }
 }
@@ -124,7 +133,9 @@ impl FakeWatch {
         let clock = self.clock;
         self.passes.push(clock);
         let keys = self.keys.as_mut()?;
-        let outcome = if !keys.present {
+        let outcome = if keys.uninstalled {
+            Ok(None)
+        } else if !keys.present {
             Err(
                 "{370121D2-AA7E-4608-A86D-0BBAB9DA1A60}: a WSL class names this AppID, whose \
                  key isn't there"
@@ -203,6 +214,15 @@ impl WslWatch for Fake {
     fn recorded_key_missing(&mut self) -> Result<bool, Failed> {
         self.calls.push("recorded_key_missing");
         Ok(self.watch.keys.as_ref().is_some_and(|keys| !keys.present))
+    }
+
+    fn wsl_present(&mut self) -> bool {
+        self.calls.push("wsl_present");
+        !self
+            .watch
+            .keys
+            .as_ref()
+            .is_some_and(|keys| keys.uninstalled)
     }
 
     fn installer(&mut self) -> Installer {

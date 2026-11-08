@@ -2092,16 +2092,19 @@ re-arms and passes. While Windows Installer's `InProgress` is there, and until i
 user's per-user MSI can hold the run up to its budget: bounded, and it only re-checks the deny,
 never weakens it. `InProgress` is read at two paths not yet confirmed on a VM, so the run also holds
 while any AppID the record lists (`WslDenyAppIds`) has no key: such a pass never counts as verified,
-and WSL's keys-absent window keeps the run either way. The `_MSIExecute` mutex is a hint only,
+and WSL's keys-absent window keeps the run either way. That hold applies only while WSL is present
+(`wsl::inspect` isn't `NoWsl`): an uninstalled WSL's AppIDs stay in the record with their keys gone
+for good, so they hold nothing, logged once at information ("WSL not installed; recorded AppIDs not
+held"), and a later installer event costs no 330 s run. The `_MSIExecute` mutex is a hint only,
 logged when held with no `InProgress`, since anyone with a global-object right can hold it and it
 outlives an install. It ends once the floor is done, `InProgress` has been gone 3 s and a pass
 verifies every target; one that doesn't is retried every 5 s after an install (a run that saw none
 ends after the floor, as before). Its own budget, 330 s, ends it whatever it waits for, 30 s inside
 the task's 6 minutes (`PT6M`), and no pass starts that its 1 s gap and 10 s lock wait could carry
 past the budget; a stop there with the deny unverified is an error line, one with an install still
-running information. A failure that repeats is logged once while it repeats. It does nothing
-else: no admin-copy step, no record read beyond the phase's own and `WslDenyAppIds`, and
-never WSL's upgrade. The event trigger is on this task alone because anyone who can log on can
+running information. A failure that repeats is logged once while it repeats. It does nothing else:
+no admin-copy step, no record read beyond the phase's own and `WslDenyAppIds`, and never WSL's
+upgrade. The event trigger is on this task alone because anyone who can log on can
 fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user can forge an
 `MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM. Here a
 forged event gains no more than a re-applied deny, and a forged burst gives one run at a time,

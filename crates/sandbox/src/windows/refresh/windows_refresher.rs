@@ -361,6 +361,11 @@ impl WslWatch for WindowsRefresher {
         windows_watch::installer()
     }
 
+    fn wsl_present(&mut self) -> bool {
+        let found = wsl::inspect(&wsl::WindowsWsl::reader());
+        !matches!(found, Ok(wsl::Found::NoWsl))
+    }
+
     fn recorded_key_missing(&mut self) -> Result<bool, Failed> {
         use crate::windows::wsl::{WslRead as _, WslWrite as _};
         let reg = wsl::WindowsWsl::writer(RECORD_KEY);

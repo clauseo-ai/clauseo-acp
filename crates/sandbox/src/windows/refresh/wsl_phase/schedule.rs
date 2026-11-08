@@ -19,7 +19,9 @@
 //!   re-checking the deny, never weakening it. `InProgress` is read at two paths, neither
 //!   confirmed on a VM, so the run also holds while any `AppID` the record lists
 //!   (`WslDenyAppIds`) has no key ([`WslWatch::recorded_key_missing`]): such a pass is never
-//!   verified, and WSL's keys-absent window keeps the run whatever `InProgress` says.
+//!   verified, and WSL's keys-absent window keeps the run whatever `InProgress` says. Only
+//!   while WSL is present ([`WslWatch::wsl_present`]): once it is uninstalled, its `AppID`s stay
+//!   in the record and their keys are gone for good, so they hold nothing (logged once).
 //!   Windows Installer's `_MSIExecute` mutex is a hint only, never a hold: it can be held by a
 //!   process that isn't an install, and stays after one. It is logged when held with no
 //!   `InProgress`, so a VM run shows the two disagree.
@@ -81,6 +83,9 @@ pub trait WslWatch: Refresher {
     /// `HKLM\SOFTWARE\Classes\AppID`. A read that fails is the error, which holds as a missing
     /// key does.
     fn recorded_key_missing(&mut self) -> Result<bool, Failed>;
+    /// Whether WSL is present (`wsl::inspect` gives anything but `NoWsl`, a read that fails
+    /// included); asked only when a recorded key is missing.
+    fn wsl_present(&mut self) -> bool;
 }
 
 /// The run's state between its passes; times are since its start.
@@ -94,6 +99,8 @@ struct Schedule {
     idle_since: Option<Duration>,
     /// When the mutex was first seen with no `InProgress`.
     hint_only: Option<Duration>,
+    /// When a recorded key was first found missing with WSL not installed.
+    no_wsl: Option<Duration>,
     last_pass: Duration,
     verified: bool,
     /// Whether the notification is armed and re-armed; once arming fails, the timed passes go
@@ -112,6 +119,7 @@ pub(super) fn passes<F: WslWatch>(fs: &mut F) {
         held: false,
         idle_since: None,
         hint_only: None,
+        no_wsl: None,
         last_pass: Duration::ZERO,
         verified: false,
         watching: true,
@@ -260,7 +268,14 @@ impl Schedule {
         self.last_pass = at;
         // A recorded AppID with no key is never verified, and holds the run (WSL's installer
         // deletes the keys, then writes them back ~16 s later).
-        let missing = fs.recorded_key_missing().unwrap_or(true);
+        let mut missing = fs.recorded_key_missing().unwrap_or(true);
+        // With WSL uninstalled, its recorded AppIDs' keys never come back: no hold.
+        if missing && !fs.wsl_present() {
+            missing = false;
+            if self.no_wsl.replace(at).is_none() {
+                fs.log(false, "WSL not installed; recorded AppIDs not held");
+            }
+        }
         self.held |= missing;
         self.verified = pass.verified && !missing;
         let Some((error, line)) = pass.line else {

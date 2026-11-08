@@ -104,6 +104,34 @@ fn with_no_in_progress_a_recorded_key_missing_holds_the_run_past_the_rewrite() {
     assert_eq!(keys.off, [WSL_WAKE_SETTLE]);
     assert_eq!(machine.watch.clock, secs(21.25));
     assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
+    // WSL still present: the hold asked, and stayed.
+    assert!(machine.calls.contains(&"wsl_present"));
+    assert!(
+        machine
+            .logs
+            .iter()
+            .all(|(_, line)| !line.contains("not installed"))
+    );
+}
+
+#[test]
+fn with_wsl_uninstalled_its_recorded_app_ids_missing_hold_nothing() {
+    // WSL uninstalled 5 s in: its AppIDs stay in the record, their keys gone for good.
+    let mut machine = machine_with_keys(vec![(secs(5.0), KeyEvent::Uninstall)]);
+    run(&mut machine);
+    assert_eq!(machine.watch.clock, secs(20.0));
+    // The uninstall's wake at 5.25 s takes the 5 s floor pass's place.
+    assert_eq!(
+        machine.watch.passes,
+        [0.0, 5.25, 10.0, 15.0, 20.0].map(secs)
+    );
+    assert_eq!(errors(&machine), 0, "{:?}", machine.logs);
+    let held = machine
+        .logs
+        .iter()
+        .filter(|(_, line)| line == "WSL not installed; recorded AppIDs not held")
+        .count();
+    assert_eq!(held, 1, "{:?}", machine.logs);
 }
 
 #[test]
