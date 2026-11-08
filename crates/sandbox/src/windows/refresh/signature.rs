@@ -46,7 +46,7 @@ pub enum SignatureError {
     #[error("the signature doesn't verify")]
     Invalid,
     /// The trusted comment names another file, or none.
-    #[error("the signature is for another file than {SIGNED_FILE}")]
+    #[error("the signature is for another file than the one checked")]
     WrongFile,
     /// The trusted comment has a field with no `:`, or a key given twice.
     #[error("the signature's trusted comment is malformed: {0}")]
@@ -74,6 +74,17 @@ pub struct Signed {
 /// Checks that `sig_file` (the `.sig`'s bytes) is a valid signature of `exe` by `key` (Tauri's
 /// base64 of a minisign public key), for [`SIGNED_FILE`], and returns its signed version.
 pub fn verify(exe: &[u8], sig_file: &[u8], key: &str) -> Result<Signed, SignatureError> {
+    verify_file(exe, sig_file, key, SIGNED_FILE)
+}
+
+/// [`verify`] for the file named `file` in the trusted comment: the Git Bash stub's source,
+/// `clauseo-sandbox-run.exe`, is held to the same key and rules (`git_tree::stub`).
+pub fn verify_file(
+    exe: &[u8],
+    sig_file: &[u8],
+    key: &str,
+    file: &str,
+) -> Result<Signed, SignatureError> {
     let id = key_id(key).map_err(SignatureError::BadKey)?;
     if id == PLACEHOLDER_KEY_ID {
         return Err(SignatureError::PlaceholderKey);
@@ -105,7 +116,7 @@ pub fn verify(exe: &[u8], sig_file: &[u8], key: &str) -> Result<Signed, Signatur
     // Only now is the trusted comment the signer's: the global signature verified above covers
     // it, and nothing before this line reads it.
     let fields = fields(signature.trusted_comment())?;
-    if fields.get("file") != Some(&SIGNED_FILE) {
+    if fields.get("file") != Some(&file) {
         return Err(SignatureError::WrongFile);
     }
     match fields.get("version") {

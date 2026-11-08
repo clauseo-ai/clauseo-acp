@@ -236,14 +236,23 @@ impl TreeFs for WindowsTrees {
         delete::delete_at_reboot(path)
     }
 
-    fn place_file(
+    fn read_signed(&mut self, from: &Path) -> Result<(Vec<u8>, Vec<u8>), Refused> {
+        stub::read_signed(from)
+    }
+
+    fn place_bytes(
         &mut self,
-        from: &Path,
+        bytes: &[u8],
         dir: &Path,
         temp: &str,
         name: &str,
+        aside: &str,
     ) -> Result<(), Refused> {
-        stub::place_file(from, dir, temp, name)
+        stub::place_bytes(bytes, dir, temp, name, aside)
+    }
+
+    fn updater_key(&self) -> String {
+        crate::windows::refresh::UPDATER_KEY.to_owned()
     }
 
     fn unique(&mut self) -> String {

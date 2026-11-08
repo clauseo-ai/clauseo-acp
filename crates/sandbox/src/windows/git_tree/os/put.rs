@@ -257,8 +257,29 @@ pub(super) fn copy_data(source: &Handle, target: &Handle) -> io::Result<u64> {
     }
 }
 
+/// What `source` holds from where it is, refused past `cap` bytes.
+pub(super) fn read_all(source: &Handle, cap: u64) -> io::Result<Vec<u8>> {
+    let mut buffer = vec![0_u8; CHUNK];
+    let mut all = Vec::new();
+    loop {
+        let mut read = 0_u32;
+        // SAFETY: the handle is open for synchronous reads with FILE_READ_DATA; `buffer` is a
+        // live, writable slice and `read` a live out-pointer.
+        unsafe { ReadFile(source.0, Some(&mut buffer), Some(&raw mut read), None) }
+            .map_err(|error| os_error(&error))?;
+        if read == 0 {
+            return Ok(all);
+        }
+        let read = usize::try_from(read).map_err(io::Error::other)?;
+        all.extend_from_slice(buffer.get(..read).unwrap_or_default());
+        if u64::try_from(all.len()).unwrap_or(u64::MAX) > cap {
+            return Err(io::Error::other("larger than its cap"));
+        }
+    }
+}
+
 /// Writes all of `bytes` to `target` from where it is.
-fn write_all(target: &Handle, mut bytes: &[u8]) -> io::Result<()> {
+pub(super) fn write_all(target: &Handle, mut bytes: &[u8]) -> io::Result<()> {
     while !bytes.is_empty() {
         let mut written = 0_u32;
         // SAFETY: the handle is open for synchronous writes with FILE_WRITE_DATA; `bytes` is a

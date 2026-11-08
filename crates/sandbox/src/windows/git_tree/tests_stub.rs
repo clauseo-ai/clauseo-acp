@@ -1,6 +1,6 @@
 //! The Git Bash stub against the fake: the set-up places `git\_off\bash.exe`, the refresh and
 //! retirement keep it, `--adopt` checks it, the removal deletes it, and a failure to place it
-//! never fails the set-up.
+//! never fails the set-up; only a runner signed with the updater key is ever copied.
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +11,7 @@ use super::{
     OFF_DIR, Owner, Recorded, STUB_NAME, Unavailable, check_adopted, ensure, ensure_with, off_sddl,
     remove,
 };
+use crate::windows::refresh::test_signer::{TestKey, comment};
 
 /// The install folder's runner.
 const RUNNER: &str = r"C:\Users\lawyer\App\clauseo-sandbox-run.exe";
@@ -25,12 +26,30 @@ fn stub() -> PathBuf {
     git().join(OFF_DIR).join(STUB_NAME)
 }
 
-/// A machine with the runner in the lawyer's install folder.
+/// The runner's bytes.
+const IMAGE: &[u8] = b"MZ the runner";
+
+/// A machine with the runner in the lawyer's install folder, signed with the updater key.
 fn with_runner() -> FakeTrees {
+    let key = TestKey::new(0x1234);
     let mut fake = FakeTrees::new();
     fake.folders(r"C:\Users\lawyer\App");
     fake.new_file(RUNNER);
+    fake.new_file(&format!("{RUNNER}.sig"));
+    fake.key = key.public();
+    sign(&mut fake, &key, "clauseo-sandbox-run.exe", IMAGE);
     fake
+}
+
+/// `image` as the runner, with a `.sig` by `key` naming `file`.
+fn sign(fake: &mut FakeTrees, key: &TestKey, file: &str, image: &[u8]) {
+    let sig = key.sign(image, &comment(file, "1.2.3"));
+    fake.bytes.insert(key_of(RUNNER), image.to_vec());
+    fake.bytes.insert(key_of(&format!("{RUNNER}.sig")), sig);
+}
+
+fn key_of(path: &str) -> String {
+    key(Path::new(path))
 }
 
 /// A set-up's run: the trees, and the stub from [`RUNNER`].
@@ -76,7 +95,62 @@ fn a_second_set_up_replaces_the_stub_and_deletes_what_else_is_in_its_folder() {
         first,
         "the current runner's copy"
     );
-    assert_eq!(fake.below(&git().join(OFF_DIR)), [STUB_NAME.to_lowercase()]);
+    let below = fake.below(&git().join(OFF_DIR));
+    assert_eq!(below.len(), 2, "{below:?}");
+    assert!(below.contains(&STUB_NAME.to_lowercase()));
+    assert!(
+        below.iter().any(|name| Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("old"))),
+        "the old stub set aside, as a running one must be: {below:?}"
+    );
+    fake.in_use.insert(key(&stub()));
+    set_up(&mut fake);
+    assert_eq!(
+        fake.bytes.get(&key(&stub())).map(Vec::as_slice),
+        Some(IMAGE),
+        "placed though the old one runs"
+    );
+}
+
+#[test]
+fn only_a_runner_signed_with_the_updater_key_is_copied() {
+    let other = TestKey::new(0x9999);
+    let plants: [fn(&mut FakeTrees, &TestKey); 5] = [
+        |f, other| sign(f, other, "clauseo-sandbox-run.exe", IMAGE),
+        |f, _| {
+            let key = TestKey::new(0x1234);
+            f.key = key.public();
+            sign(f, &key, "clauseo-sandbox-setup.exe", IMAGE);
+        },
+        |f, _| {
+            f.bytes.insert(key_of(RUNNER), b"MZ planted".to_vec());
+        },
+        |f, _| {
+            f.bytes
+                .insert(key_of(&format!("{RUNNER}.sig")), b"garbage".to_vec());
+        },
+        |f, _| {
+            f.nodes.remove(&key_of(&format!("{RUNNER}.sig")));
+        },
+    ];
+    for (n, plant) in plants.iter().enumerate() {
+        let mut fake = with_runner();
+        plant(&mut fake, &other);
+        let out = set_up(&mut fake);
+        assert!(
+            matches!(out[0].1, Recorded::Tree(_)),
+            "{n}: the set-up goes on"
+        );
+        assert!(fake.node(&stub()).is_none(), "{n}: never copied");
+        assert_eq!(fake.count("place_file"), 0, "{n}");
+    }
+    let mut fake = with_runner();
+    set_up(&mut fake);
+    assert_eq!(
+        fake.bytes.get(&key(&stub())).map(Vec::as_slice),
+        Some(IMAGE)
+    );
 }
 
 #[test]
