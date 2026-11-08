@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization as _;
 
 pub(crate) use ascii_fold::name_folds_to;
-pub(crate) use no_follow::{Access, Kind, WalkedPath, held_open_walked, open_no_follow, open_path};
+pub(crate) use no_follow::{Access, Kind, WalkedPath, held_open_walked, open_no_follow};
 pub(crate) use share::{touchable, under_share_matter};
 pub(crate) use windows_names::refused_windows_name;
 

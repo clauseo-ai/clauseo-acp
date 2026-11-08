@@ -132,7 +132,8 @@ pub(crate) fn drive_is_local(letter: char, query: &dyn Fn(char) -> Option<String
 /// the local volume's device (`\Device\HarddiskVolume3`) and the names to walk from its root, a
 /// `subst`'s folders first (`X:` → `\??\D:\a` → `\Device\HarddiskVolume1` gives that device
 /// and `a`), so the open never asks the drive letter again. `None` when the drive is not local
-/// by [`drive_is_local`]'s rules.
+/// by [`drive_is_local`]'s rules, or when a name it derives is empty, `.` or `..` (a doubled
+/// separator, say: NT would refuse it too; this never hands one on).
 #[cfg(any(windows, test))]
 pub(crate) fn volume_of(
     letter: char,
@@ -146,25 +147,33 @@ pub(crate) fn volume_of(
         let target = query(letter)?;
         if drive_target_is_local(&target) {
             // `\Device\Name`, any further names walked like the rest.
-            let mut parts = target.split('\\').filter(|part| !part.is_empty());
+            let mut parts = plain_names(&target)?.into_iter();
             let device = format!("\\{}\\{}", parts.next()?, parts.next()?);
-            let mut found: Vec<String> = parts.map(str::to_owned).collect();
+            let mut found: Vec<String> = parts.collect();
             found.append(&mut names);
             return Some((device, found));
         }
         let next = subst_drive(&target)?;
-        let mut found: Vec<String> = target
-            .get(r"\??\X:".len()..)
-            .unwrap_or_default()
-            .split('\\')
-            .filter(|part| !part.is_empty())
-            .map(str::to_owned)
-            .collect();
+        let mut found = plain_names(target.get(r"\??\X:".len()..).unwrap_or_default())?;
         found.append(&mut names);
         names = found;
         letter = next;
     }
     None
+}
+
+/// The names of `text` between its separators, one leading and one trailing `\` dropped; `None`
+/// when one is empty, `.` or `..`.
+#[cfg(any(windows, test))]
+fn plain_names(text: &str) -> Option<Vec<String>> {
+    let text = text.strip_prefix('\\').unwrap_or(text);
+    if text.is_empty() {
+        return Some(Vec::new());
+    }
+    let text = text.strip_suffix('\\').unwrap_or(text);
+    text.split('\\')
+        .map(|name| (!name.is_empty() && name != "." && name != "..").then(|| name.to_owned()))
+        .collect()
 }
 
 /// The drive a `subst` target `\??\X:\…` (or `\??\X:`) names, upper case.
@@ -334,6 +343,39 @@ mod tests {
         assert_eq!(
             volume_of('Q', &deep),
             (Some((r"\Device\HarddiskVolume1".to_owned(), names(&["x", "y"]))))
+        );
+        // A name it derives that is empty, `.` or `..` refuses the drive, never handed on.
+        for target in [
+            r"\Device\HarddiskVolume1\..\x",
+            r"\Device\HarddiskVolume1\x\\y",
+            r"\Device\.\HarddiskVolume1",
+            r"\??\C:\a\..\b",
+            r"\??\C:\.\b",
+            r"\??\C:\a\\b",
+            r"\??\C:\\",
+        ] {
+            let answer = |letter: char| {
+                Some(if letter == 'C' {
+                    r"\Device\HarddiskVolume3".to_owned()
+                } else {
+                    target.to_owned()
+                })
+            };
+            assert_eq!(volume_of('Q', &answer), None, "{target}");
+        }
+        let trailing = |letter: char| {
+            Some(
+                if letter == 'C' {
+                    r"\Device\HarddiskVolume3"
+                } else {
+                    r"\??\C:\a\"
+                }
+                .to_owned(),
+            )
+        };
+        assert_eq!(
+            volume_of('Q', &trailing),
+            Some((r"\Device\HarddiskVolume3".to_owned(), names(&["a"])))
         );
     }
 }

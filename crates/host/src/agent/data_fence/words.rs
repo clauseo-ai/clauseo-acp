@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 const FOLDER_VARS: [&str; 2] = ["APPDATA", "LOCALAPPDATA"];
 
 /// The most mixes of long and short names [`mixed_spellings`] makes (four names with a short
-/// form of their own); past it only the all-long and all-short spellings are searched.
+/// form of their own); past it the all-long and all-short spellings are searched, and any `~digit`
+/// name next to the data folder's names ([`tilde_tails`]).
 const MAX_MIXED: usize = 16;
 
 /// What the data folder's spellings are made from.
@@ -91,8 +92,9 @@ pub(super) fn needles(spellings: &Spellings<'_>) -> Vec<String> {
 /// shortens each name on its own, so the two have the same names one for one): the all-long and
 /// all-short ones and each mix, as Windows opens `C:\Users\JONATH~1\AppData\Roaming\Clauseo` and
 /// `C:\Users\Jonathan\APPDAT~1\Roaming\Clauseo` alike. A name whose short form is the same (ASCII
-/// case aside) gives one choice. Only `short` when the two don't pair up name for name, and only
-/// the all-long and all-short ones past [`MAX_MIXED`] mixes.
+/// case aside) gives one choice. Only `short` when the two don't pair up name for name; past
+/// [`MAX_MIXED`] mixes the all-long and all-short ones and [`tilde_tails`], which match every mix
+/// and more (a deny's search strings: over-matching is its safe side).
 fn mixed_spellings(long: &Path, short: &Path, windows: bool) -> Vec<PathBuf> {
     let (Some(long), Some(short)) = (long.to_str(), short.to_str()) else {
         return vec![short.to_path_buf()];
@@ -119,10 +121,12 @@ fn mixed_spellings(long: &Path, short: &Path, windows: bool) -> Vec<PathBuf> {
     let count = choices
         .iter()
         .try_fold(1_usize, |count, names| count.checked_mul(names.len()));
-    if count.is_none_or(|count| count > MAX_MIXED) {
-        return vec![PathBuf::from(long), PathBuf::from(short)];
-    }
     let joiner = if windows { "\\" } else { "/" };
+    if count.is_none_or(|count| count > MAX_MIXED) {
+        let mut spellings = vec![PathBuf::from(long), PathBuf::from(short)];
+        spellings.extend(tilde_tails(&choices, joiner).into_iter().map(PathBuf::from));
+        return spellings;
+    }
     let mut spellings: Vec<Vec<&str>> = vec![Vec::new()];
     for names in &choices {
         spellings = spellings
@@ -140,6 +144,48 @@ fn mixed_spellings(long: &Path, short: &Path, windows: bool) -> Vec<PathBuf> {
         .into_iter()
         .map(|names| PathBuf::from(names.join(joiner)))
         .collect()
+}
+
+/// Past [`MAX_MIXED`]: for each name with a short form, that name as any `~digit` name followed
+/// by the long names after it (its own short name, and `~1` to `~9` with its extension: the end
+/// of any short name), or, for the last name, preceded by the name before it in either form (its
+/// own short name, and its stem with `~1` to `~9` and its extension: a whole name, since the
+/// search is by substring). Every mix holds one: the last name it spells short is followed by long
+/// names only. Over-matching (`~3\Roaming\Clauseo` after any folder) is a deny's safe side; a
+/// lone `~1` is never searched.
+fn tilde_tails(choices: &[Vec<&str>], joiner: &str) -> Vec<String> {
+    let mut tails = Vec::new();
+    for (at, names) in choices.iter().enumerate() {
+        let [_, short] = names.as_slice() else {
+            continue;
+        };
+        let rest: Vec<&str> = choices
+            .get(at + 1..)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|names| names.first().copied())
+            .collect();
+        let mut forms = vec![(*short).to_owned()];
+        if let Some((stem, after)) = short.rsplit_once('~') {
+            let ext = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            if ext.len() < after.len() {
+                let stem = if rest.is_empty() { stem } else { "" };
+                forms.extend((1..=9).map(|digit| format!("{stem}~{digit}{ext}")));
+            }
+        }
+        if rest.is_empty() {
+            let Some(before) = at.checked_sub(1).and_then(|before| choices.get(before)) else {
+                continue;
+            };
+            for prefix in before {
+                tails.extend(forms.iter().map(|form| format!("{prefix}{joiner}{form}")));
+            }
+        } else {
+            let rest = rest.join(joiner);
+            tails.extend(forms.iter().map(|form| format!("{form}{joiner}{rest}")));
+        }
+    }
+    tails
 }
 
 /// The rest of `text` after `root`, by whole names, separators trimmed: with Windows' rules

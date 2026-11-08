@@ -1,10 +1,13 @@
 //! The no-follow open on Linux and macOS, through `rustix`'s safe calls: no `unsafe` here.
 //!
-//! Linux opens the whole path at once with `openat2` and `RESOLVE_NO_SYMLINKS |
-//! RESOLVE_NO_MAGICLINKS` (any link on it fails with `ELOOP`). A kernel without `openat2`
-//! (before 5.6: `ENOSYS`, remembered) and macOS go name by name: each folder `openat` from the
-//! last with `O_NOFOLLOW | O_DIRECTORY`, the last name `O_NOFOLLOW`, and each one `fstat`ed, so a
-//! link (which `O_PATH | O_NOFOLLOW` would hand back as itself) refuses too.
+//! The whole path is opened in one call that follows no link on it (any link fails with
+//! `ELOOP`): on Linux `openat2` with `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, on macOS
+//! `open` with `O_NOFOLLOW_ANY` (macOS 11; the app needs 13, so its fallback is defensive only).
+//! When that call is missing it goes name by name, remembered: on Linux a kernel before 5.6
+//! (`ENOSYS`) or a seccomp sandbox that forbids `openat2` (`EPERM`, older Docker), on macOS
+//! `EINVAL` or `ENOTSUP`. Name by name, each folder is `openat` from the last with
+//! `O_NOFOLLOW | O_DIRECTORY`, the last name `O_NOFOLLOW`, and each one `fstat`ed, so a link
+//! (which `O_PATH | O_NOFOLLOW` would hand back as itself) refuses too: as safe, only slower.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
@@ -12,7 +15,7 @@ use std::io;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Component, Path, PathBuf};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustix::fs::{AtFlags, CWD, FileType, Mode, OFlags, Stat};
@@ -25,9 +28,18 @@ use crate::network_paths::resolve::Entry;
 #[derive(Debug)]
 pub(super) struct Handle(OwnedFd);
 
-/// Set once `openat2` answered `ENOSYS`: every later open goes name by name.
+/// Set once the one-call open answered that it is missing ([`MISSING`]): every later open goes
+/// name by name.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static NO_WHOLE: AtomicBool = AtomicBool::new(false);
+
+/// The answers that say the one-call open is missing here, not that the path is refused: Linux's
+/// `ENOSYS` (no `openat2`) and `EPERM` (a seccomp filter forbids it).
 #[cfg(target_os = "linux")]
-static NO_OPENAT2: AtomicBool = AtomicBool::new(false);
+const MISSING: [Errno; 2] = [Errno::NOSYS, Errno::PERM];
+/// macOS's: `EINVAL` or `ENOTSUP` for an `O_NOFOLLOW_ANY` the system does not know.
+#[cfg(target_os = "macos")]
+const MISSING: [Errno; 2] = [Errno::INVAL, Errno::NOTSUP];
 
 /// The flags a folder on the way is opened with: a handle to walk from, nothing read.
 #[cfg(target_os = "linux")]
@@ -62,7 +74,7 @@ fn flags(access: Access) -> OFlags {
 pub(super) fn open_path(path: &Path, access: Access) -> io::Result<Handle> {
     #[cfg(target_os = "linux")]
     {
-        open_linux(path, access, &|path, flags| {
+        open_whole(path, access, &|path, flags| {
             rustix::fs::openat2(
                 CWD,
                 path,
@@ -72,42 +84,56 @@ pub(super) fn open_path(path: &Path, access: Access) -> io::Result<Handle> {
             )
         })
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        open_whole(path, access, &|path, flags| {
+            rustix::fs::openat(CWD, path, flags | OFlags::NOFOLLOW_ANY, Mode::empty())
+        })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         by_name(path, access).map(Handle)
     }
 }
 
-/// `openat2` as [`open_path`] calls it: the path and the open flags, the resolve flags its own.
-#[cfg(target_os = "linux")]
-pub(super) type Openat2 = dyn Fn(&Path, OFlags) -> rustix::io::Result<OwnedFd>;
+/// The one-call open as [`open_path`] calls it (`openat2` on Linux, `open` with
+/// `O_NOFOLLOW_ANY` on macOS): the path and the open flags, its no-follow flags its own.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) type Whole = dyn Fn(&Path, OFlags) -> rustix::io::Result<OwnedFd>;
 
-/// Linux's open: `openat2` (`whole`, a seam for the tests), or name by name once it answered
-/// `ENOSYS`. Never a plain open.
-#[cfg(target_os = "linux")]
-pub(super) fn open_linux(path: &Path, access: Access, whole: &Openat2) -> io::Result<Handle> {
+/// The open: `whole` (a seam for the tests), or name by name once it answered that it is
+/// missing ([`MISSING`], remembered). Never a plain open.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn open_whole(path: &Path, access: Access, whole: &Whole) -> io::Result<Handle> {
     plain_absolute(path)?;
-    if !NO_OPENAT2.load(Ordering::Relaxed) {
+    if !NO_WHOLE.load(Ordering::Relaxed) {
         match whole(path, flags(access)) {
             Ok(fd) => return checked(fd, access).map(Handle),
-            Err(Errno::NOSYS) => NO_OPENAT2.store(true, Ordering::Relaxed),
             Err(Errno::LOOP) => return Err(link_on_the_way()),
+            Err(errno) if MISSING.contains(&errno) => {
+                tracing::debug!(
+                    kind = "no_follow_name_by_name",
+                    errno = errno.raw_os_error(),
+                    "the one-call no-follow open is missing; going name by name"
+                );
+                NO_WHOLE.store(true, Ordering::Relaxed);
+            }
             Err(errno) => return Err(errno.into()),
         }
     }
     by_name(path, access).map(Handle)
 }
 
-/// Whether the kernel lacked `openat2` once (the tests' check that the fallback ran).
+/// Whether the one-call open was found missing (the tests' check that the fallback ran).
 #[cfg(all(test, target_os = "linux"))]
 pub(super) fn fell_back() -> bool {
-    NO_OPENAT2.load(Ordering::Relaxed)
+    NO_WHOLE.load(Ordering::Relaxed)
 }
 
-/// Lets the next open try `openat2` again (tests).
+/// Lets the next open try the one-call open again (tests).
 #[cfg(all(test, target_os = "linux"))]
 pub(super) fn reset_fallback() {
-    NO_OPENAT2.store(false, Ordering::Relaxed);
+    NO_WHOLE.store(false, Ordering::Relaxed);
 }
 
 /// An error unless `path` is absolute with only plain names after its root (the walk's result

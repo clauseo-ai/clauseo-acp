@@ -232,11 +232,75 @@ fn an_unpaired_or_huge_short_name_still_searches_the_all_short_spelling() {
     let huge = search(long, short);
     assert!(huge.iter().any(|n| n == short));
     assert!(huge.iter().any(|n| n == long));
-    assert!(huge.len() <= 2, "{huge:?}");
+    // Past sixteen mixes, the `~digit` tails (ten forms for each of five names), not 32 mixes.
+    assert_eq!(huge.len(), 2 + 5 * 10, "{huge:?}");
     // Four names with a short form: every mix (sixteen).
     let four = search(
         r"C:\Aaaaaaaaa\Bbbbbbbbb\Ccccccccc\Ddddddddd\Clauseo",
         r"C:\AAAAAA~1\BBBBBB~1\CCCCCC~1\DDDDDD~1\Clauseo",
     );
     assert_eq!(four.len(), 16, "{four:?}");
+}
+
+/// Five names with a short form (32 mixes, past the cap of sixteen): every mix is still found,
+/// through any `~digit` name next to the data folder's names, the last one included; another
+/// `~digit` there is found too (over-matching is a deny's safe side), and a lone `~1` elsewhere
+/// is not.
+#[test]
+fn past_sixteen_mixes_any_tilde_digit_name_next_to_the_data_folders_names_is_found() {
+    let none = |_: &str| None;
+    let longs = [
+        "Jonathan Smith",
+        "AppData Local",
+        "Roaming Data",
+        "Clauseo Desktop",
+        "Profile.Files",
+    ];
+    let shorts = [
+        "JONATH~1",
+        "APPDAT~1",
+        "ROAMIN~1",
+        "CLAUSE~1",
+        "PROFIL~1.FIL",
+    ];
+    let data = format!(r"C:\Users\{}", longs.join("\\"));
+    let short = format!(r"C:\Users\{}", shorts.join("\\"));
+    let needles = needles(&Spellings {
+        paths: [Path::new(&data), Path::new(&data)],
+        short: Some(PathBuf::from(&short)),
+        home: None,
+        var: &none,
+        windows: true,
+    });
+    let want = PathBuf::from(format!(r"{data}\state.sqlite"));
+    let hit = |word: &str| {
+        found(&format!("type \"{word}\""), &needles, &data)
+            .iter()
+            .any(|path| one_separator(path) == want)
+    };
+    for mix in 0_u32..32 {
+        let names: Vec<&str> = (0..5)
+            .map(|at| {
+                if mix & (1 << at) == 0 {
+                    longs[at]
+                } else {
+                    shorts[at]
+                }
+            })
+            .collect();
+        let word = format!(r"C:\Users\{}\state.sqlite", names.join("\\"));
+        assert!(hit(&word), "{word}");
+    }
+    for word in [
+        r"C:\Users\JONATH~2\AppData Local\Roaming Data\Clauseo Desktop\Profile.Files\state.sqlite",
+        r"C:\Users\Jonathan Smith\AppData Local\Roaming Data\Clauseo Desktop\PROFIL~3.FIL\state.sqlite",
+    ] {
+        assert!(hit(word), "{word}");
+    }
+    assert!(!hit(r"C:\PROGRA~1\state.sqlite"));
+    assert!(
+        !needles
+            .iter()
+            .any(|needle| needle.starts_with('~') && !needle.contains('\\'))
+    );
 }

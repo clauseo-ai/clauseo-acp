@@ -26,6 +26,11 @@ impl Reach {
         }
     }
 
+    /// The network rules.
+    pub(super) fn net(&self) -> &NetEnv {
+        &self.net
+    }
+
     /// Where `path` (absolute) leads, when the guard may stat, resolve or open it: the walked
     /// path, which the guard uses from then on and never resolves the agent's text again
     /// ([`touchable`]), and opens only with no link followed

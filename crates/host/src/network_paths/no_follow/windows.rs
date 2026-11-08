@@ -5,6 +5,11 @@
 //! is not a known local kind ([`local_reparse_tag`]). The open takes `FILE_OPEN_REPARSE_POINT`
 //! (a reparse point is opened as itself, never followed) and its attributes are read again
 //! from the handle, so a swap between the listing and the open refuses too.
+//!
+//! A folder on the way is opened for its attributes only (`FILE_READ_ATTRIBUTES`): a relative open
+//! needs no right on the folder it starts from, and passing through needs none either with the
+//! bypass-traverse privilege every user has. Its listing takes a fresh handle with list rights;
+//! where the user may not list it, the name is opened as itself instead ([`Handle::listed`]).
 #![expect(
     unsafe_code,
     reason = "FFI to NtCreateFile, NtQueryDirectoryFile, DeviceIoControl, \
@@ -72,7 +77,8 @@ fn rights(
     let all = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     match access {
         Access::Look => (FILE_READ_ATTRIBUTES, all, NTCREATEFILE_CREATE_OPTIONS(0)),
-        Access::Folder | Access::List => (
+        Access::Folder => (FILE_READ_ATTRIBUTES, all, FILE_DIRECTORY_FILE),
+        Access::List => (
             FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
             all,
             FILE_DIRECTORY_FILE,
@@ -95,7 +101,7 @@ fn nt_error(status: NTSTATUS) -> io::Error {
 }
 
 /// An `io::Error` for a failed Win32 call, as its Win32 code.
-fn win_error(error: &windows::core::Error) -> io::Error {
+pub(super) fn win_error(error: &windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
 }
 
@@ -207,11 +213,11 @@ pub(super) fn open_path(path: &Path, access: Access) -> io::Result<Handle> {
         opened.refuse_reparse(Last::Refuse)?;
         return Ok(opened);
     };
-    let (list, share, folder) = rights(Access::List);
-    let mut at = Handle(nt_open(None, &root, list, share, folder)?);
+    let (on_the_way, share, folder) = rights(Access::Folder);
+    let mut at = Handle(nt_open(None, &root, on_the_way, share, folder)?);
     at.refuse_reparse(Last::Refuse)?;
     for name in folders {
-        at = at.open_child(name, Access::List, Last::Refuse)?;
+        at = at.open_child(name, Access::Folder, Last::Refuse)?;
     }
     at.open_child(last, access, Last::Refuse)
 }
@@ -222,8 +228,15 @@ fn not_local() -> io::Error {
 }
 
 impl Handle {
+    /// A handle opened elsewhere (a share matter's root, `super::windows_share`).
+    pub(super) fn from_owned(handle: OwnedHandle) -> Self {
+        Self(handle)
+    }
+
     /// The listing entry `name` of this folder, read on a fresh handle to it (a handle's
     /// listing keeps the pattern of its first query): nothing opened but the folder itself.
+    /// When this user may not list the folder (the fresh handle's open is denied), the name is
+    /// opened as itself instead ([`Self::attributes_by_open`]).
     fn listed(&self, name: &OsStr) -> io::Result<EntryInfo> {
         match self.listed_by_query(name) {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
@@ -235,8 +248,9 @@ impl Handle {
 
     /// [`Self::listed`] for a folder this user may pass through but not list (only a stat
     /// needed that before): the entry opened as itself (`FILE_OPEN_REPARSE_POINT`, attributes
-    /// only, never followed) and its attributes and tag read from that handle. A local path under
-    /// such a folder stays usable.
+    /// only, never followed) and its attributes and tag read from that handle, which
+    /// [`Self::open_child`] checks again on the handle it opens. A local path under such a folder
+    /// stays usable; the entry's own access list must grant reading its attributes.
     fn attributes_by_open(&self, name: &OsStr) -> io::Result<EntryInfo> {
         let wide = wide_name(name)?;
         let (rights, share, options) = rights(Access::Look);
