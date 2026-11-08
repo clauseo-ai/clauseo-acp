@@ -1,21 +1,34 @@
 //! Who may own the folders a removal reads or changes, decided here once for the real machine
 //! (`windows_removal`) and the tests' fake alike: the record's data folder, its `sandbox`
-//! folder, and each matter folder an administrator takes entries off for an absent owner. Each
-//! is held to the rule the sandbox folder is made and repaired by (`sids::owner_allowed`): the
-//! record's owner, Administrators or SYSTEM, since an elevated process makes Administrators the
-//! owner of what it creates (the built-in Administrator, or UAC off). Anyone else (a pool user,
-//! another account, Everyone) could have planted what is read there, so it is refused. Causes
-//! name the kind of folder, never a path or a SID.
+//! folder, and each matter folder an administrator takes entries off for an absent owner. The
+//! data folder is held to set-up's rule (the owner, or Administrators for an owner in
+//! Administrators); the others to the rule the sandbox folder is made and repaired by
+//! (`sids::owner_allowed`): the record's owner, Administrators or SYSTEM, since an elevated
+//! process makes Administrators the owner of what it creates (the built-in Administrator, or
+//! UAC off). Anyone else (a pool user, another account, Everyone) could have planted what is
+//! read there, so it is refused. Causes name the kind of folder, never a path or a SID.
 
+#[cfg(any(windows, test))]
 use super::super::machine::MachineError;
-use crate::windows::sids::{Sid, owner_allowed};
+#[cfg(any(windows, test))]
+use crate::windows::sids::{Sid, data_dir_owner_allowed, owner_allowed};
 
-/// Whether `found` may own the record's data folder for its `owner`.
-pub(in crate::windows::setup) fn data_folder(found: &Sid, owner: &Sid) -> Result<(), MachineError> {
-    held(owner_allowed(found, owner), "the record's data folder")
+/// Whether `found` may own the record's data folder for its `owner`: the rule set-up holds it
+/// to (`sids::data_dir_owner_allowed`), the owner, or Administrators for an owner in
+/// Administrators (`owner_in_admins`, asked only then). Never SYSTEM: the folder is the
+/// owner's, which only an elevated app (an administrator's) makes Administrators'.
+#[cfg(any(windows, test))]
+pub(in crate::windows::setup) fn data_folder(
+    found: &Sid,
+    owner: &Sid,
+    owner_in_admins: impl FnOnce() -> bool,
+) -> Result<(), MachineError> {
+    let allowed = data_dir_owner_allowed(found, owner, || Ok::<_, ()>(owner_in_admins()));
+    held(allowed, "the record's data folder")
 }
 
 /// Whether `found` may own the data folder's `sandbox` folder for the record's `owner`.
+#[cfg(any(windows, test))]
 pub(in crate::windows::setup) fn sandbox_folder(
     found: &Sid,
     owner: &Sid,
@@ -35,6 +48,7 @@ pub enum FolderOwner {
 /// Whether `found` may own a matter folder an administrator takes entries off for `owner`,
 /// and which of the allowed owners it is. On an [`FolderOwner::Elevated`] folder only the pool's
 /// entries come off; the Low label too only for an owner in Administrators ([`label_off`]).
+#[cfg(any(windows, test))]
 pub(in crate::windows::setup) fn matter_folder(
     found: &Sid,
     owner: &Sid,
@@ -59,6 +73,7 @@ pub(in crate::windows::setup) fn label_off(
     folder == FolderOwner::Owners || owner_in_admins()
 }
 
+#[cfg(any(windows, test))]
 fn held(allowed: bool, what: &str) -> Result<(), MachineError> {
     if allowed {
         Ok(())
@@ -75,10 +90,11 @@ mod tests {
     const POOL_USER: &str = "S-1-5-21-1000000001-1000000002-1000000003-1042";
     const OTHER_USER: &str = "S-1-5-21-2000000001-2000000002-2000000003-1001";
 
+    /// Each rule's answer for `found`, the owner a standard user.
     fn each(found: &str) -> [bool; 3] {
         let (found, owner) = (Sid::parse(found).unwrap(), Sid::parse(OWNER).unwrap());
         [
-            data_folder(&found, &owner).is_ok(),
+            data_folder(&found, &owner, || false).is_ok(),
             sandbox_folder(&found, &owner).is_ok(),
             matter_folder(&found, &owner).is_ok(),
         ]
@@ -106,13 +122,26 @@ mod tests {
     }
 
     #[test]
-    fn administrators_may_own_each_folder() {
-        assert_eq!(each("S-1-5-32-544"), [true; 3]);
+    fn administrators_may_own_the_sandbox_and_matter_folders() {
+        assert_eq!(each("S-1-5-32-544"), [false, true, true]);
     }
 
     #[test]
-    fn system_may_own_each_folder() {
-        assert_eq!(each("S-1-5-18"), [true; 3]);
+    fn administrators_may_own_the_data_folder_only_of_an_owner_in_administrators() {
+        let (admins, owner) = (
+            Sid::parse("S-1-5-32-544").unwrap(),
+            Sid::parse(OWNER).unwrap(),
+        );
+        assert!(data_folder(&admins, &owner, || true).is_ok());
+        assert!(data_folder(&admins, &owner, || false).is_err());
+        assert!(data_folder(&owner, &owner, || panic!("not asked")).is_ok());
+    }
+
+    #[test]
+    fn system_may_own_the_sandbox_and_matter_folders_but_not_the_data_folder() {
+        assert_eq!(each("S-1-5-18"), [false, true, true]);
+        let (system, owner) = (Sid::parse("S-1-5-18").unwrap(), Sid::parse(OWNER).unwrap());
+        assert!(data_folder(&system, &owner, || true).is_err());
     }
 
     #[test]

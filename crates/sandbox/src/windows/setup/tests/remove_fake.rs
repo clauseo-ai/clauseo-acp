@@ -165,7 +165,7 @@ impl Remover {
         }
         let owner = Sid::parse(OWNER).unwrap();
         let [folder, sandbox] = &self.data_dir_owners;
-        owners::data_folder(folder, &owner)?;
+        owners::data_folder(folder, &owner, || self.admins.contains(&owner))?;
         owners::sandbox_folder(sandbox, &owner)?;
         let path = ledger_path(data_dir);
         Ok(path.exists().then_some(path))
