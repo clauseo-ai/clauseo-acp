@@ -581,7 +581,12 @@ jobs:
       # signed before it. The same identity and options as the bundler's own codesign (--force,
       # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
       # timestamp, which an ad hoc signature cannot take.
-      - name: Bundle the .app and the DMG, and sign the updater archive
+      # After the bundle, both legs' bundler names the updater archive Clauseo.app.tar.gz, and its
+      # .sig's trusted comment says file:Clauseo.app.tar.gz, so the step renames it to the published
+      # Clauseo_<version>_<arch>.app.tar.gz, drops the bundler's .sig and signs it again, as
+      # sign-windows signs the installer: the trusted comment's file: then carries the arch, which
+      # the app's updater checks (#728).
+      - name: Bundle the .app and the DMG, and sign the updater archive under its arch name
         if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: "-"
@@ -609,6 +614,11 @@ jobs:
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
             --config release/release.conf.json --config release/blocklist.conf.json \
             --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
+          macos=$RELEASE_DIR/bundle/macos
+          tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
+          mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"
+          rm "$macos/Clauseo.app.tar.gz.sig"
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"
 
       # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
       # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
@@ -640,8 +650,7 @@ jobs:
           echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(signed); the .app verifies --deep --strict" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
-      # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
-      # archive, which both macOS legs call Clauseo.app.tar.gz).
+      # Each leg's assets, under the names latest-json.mjs lists.
       - name: Collect this leg's assets
         if: runner.os != 'Windows'
         run: |
@@ -650,7 +659,8 @@ jobs:
           bundle=$RELEASE_DIR/bundle
           if [ "$RUNNER_OS" = macOS ]; then
             cp "$bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg" "$OUT/"
-            cp "$bundle/macos/Clauseo.app.tar.gz" "$bundle/macos/Clauseo.app.tar.gz.sig" "$OUT/"
+            tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
+            cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/"
           else
             cp "$bundle/deb/Clauseo_${VERSION}_amd64.deb" "$bundle/rpm/Clauseo-${VERSION}-1.x86_64.rpm" "$OUT/"
           fi
@@ -661,6 +671,15 @@ jobs:
         with:
           name: release-${{ matrix.target }}
           path: ${{ env.OUT }}
+          if-no-files-found: error
+
+      # A dry run's throwaway public key, for assemble to check this leg's archive signature with.
+      # Never on a Release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.signs && env.MODE == 'dry'
+        with:
+          name: dry-updater-pub-${{ matrix.target }}
+          path: ${{ runner.temp }}/dry-updater.key.pub
           if-no-files-found: error
 
       # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
@@ -1001,13 +1020,13 @@ jobs:
           node-version-file: ui/package.json
           package-manager-cache: false
 
-      # Each leg in a folder of its own: both macOS legs hold a Clauseo.app.tar.gz.
+      # Each leg in a folder of its own.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-*
           path: ${{ runner.temp }}/legs
 
-      # A dry run signs each Windows leg with that leg's throwaway key; a release or a test run
+      # A dry run signs each macOS and Windows leg with that leg's throwaway key; a release or a test run
       # takes its public key from the repo.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: env.MODE == 'dry'
@@ -1023,16 +1042,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
+          # The macOS legs sign their archive under its published, arch-named name. The bundler's
+          # Clauseo.app.tar.gz means a leg that did not, whose .sig binds no arch: refused.
           for leg in "$RUNNER_TEMP"/legs/release-*; do
-            case "$leg" in
-              *-aarch64-apple-darwin) arch=aarch64 ;;
-              *-x86_64-apple-darwin) arch=x64 ;;
-              *) arch="" ;;
-            esac
-            if [ -n "$arch" ]; then
-              mv "$leg/Clauseo.app.tar.gz" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz"
-              mv "$leg/Clauseo.app.tar.gz.sig" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz.sig"
-            fi
+            for old in Clauseo.app.tar.gz Clauseo.app.tar.gz.sig; do
+              [ ! -e "$leg/$old" ] ||
+                { echo "::error::$(basename "$leg") holds $old: the macOS archive must be signed as Clauseo_${VERSION}_<arch>.app.tar.gz"; exit 1; }
+            done
             mv "$leg"/* dist/
           done
           # A dry run publishes nothing; its URLs point at a tag that does not exist.
@@ -1119,6 +1135,22 @@ jobs:
             done
             diff "${listings[0]}" "${listings[1]}" ||
               { echo "::error::the x64 and arm64 $kind installers hold different files (above: < x64, > arm64)"; exit 1; }
+          done
+          # Each macOS archive signed for this version under its published name, which carries the
+          # arch (the trusted comment's file:), so the app's updater can bind it to its arch. A
+          # tier 2 leg that failed left no archive; latest-json.mjs has already required tier 1's.
+          for arch in aarch64 x64; do
+            case $arch in
+              aarch64) target=aarch64-apple-darwin ;;
+              x64) target=x86_64-apple-darwin ;;
+            esac
+            tarball=dist/Clauseo_${VERSION}_${arch}.app.tar.gz
+            [ -f "$tarball" ] || continue
+            pub=$RUNNER_TEMP/updater-$target.pub
+            updater_pub "$target" > "$pub" || true
+            [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $target in a $MODE run"; exit 1; }
+            node .github/scripts/latest-json.mjs --verify "$tarball" "$pub" "$(basename "$tarball")" "$VERSION" ||
+              { echo "::error::$(basename "$tarball").sig does not hold under the $MODE updater key for file:$(basename "$tarball"), version:$VERSION"; exit 1; }
           done
           {
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."

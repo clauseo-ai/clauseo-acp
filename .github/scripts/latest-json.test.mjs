@@ -159,6 +159,28 @@ test("a signature for another version, or for none, is refused", () => {
   assert.ok(none.includes("Clauseo_1.2.3_x64-setup.exe.sig: the signature's trusted comment holds no version:<v>"), none);
 });
 
+test("an updater asset signed under another name, as the bundler's Clauseo.app.tar.gz, is refused", () => {
+  const dir = release("1.2.3");
+  try {
+    for (const arch of ["aarch64", "x64"]) {
+      writeFileSync(join(dir, `Clauseo_1.2.3_${arch}.app.tar.gz.sig`), fakeSig("timestamp:1794112225\tfile:Clauseo.app.tar.gz\tversion:1.2.3"));
+    }
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE).problems, [
+      "Clauseo_1.2.3_aarch64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_aarch64.app.tar.gz",
+      "Clauseo_1.2.3_x64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_x64.app.tar.gz",
+    ]);
+    // The other arch's name is no better: the name binds the arch.
+    writeFileSync(join(dir, "Clauseo_1.2.3_aarch64.app.tar.gz.sig"), fakeSig("timestamp:1\tfile:Clauseo_1.2.3_x64.app.tar.gz\tversion:1.2.3"));
+    rmSync(join(dir, "Clauseo_1.2.3_x64.app.tar.gz"));
+    rmSync(join(dir, "Clauseo_1.2.3_x64.app.tar.gz.sig"));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE).problems, [
+      "Clauseo_1.2.3_aarch64.app.tar.gz.sig: the signature's trusted comment holds no file:Clauseo_1.2.3_aarch64.app.tar.gz",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a version that is not plain X.Y.Z is refused", () => {
   assert.ok(build("1.2.3-beta.1").problems.includes("version 1.2.3-beta.1 is not plain X.Y.Z"));
 });
@@ -674,6 +696,36 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
   }
+});
+
+test("release.yml signs each macOS archive under its arch name in the build and checks it in assemble", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const at = (commands, line, from = 0) => {
+    const index = commands.indexOf(line, from);
+    assert.notEqual(index, -1, line);
+    return index;
+  };
+  const build = jobCommands(text, "build");
+  const bundled = build.findIndex((line) => /\btauri bundle\b.*--bundles app,dmg/.test(line));
+  assert.notEqual(bundled, -1, "the macOS tauri bundle");
+  // In the bundle's step (the one that holds the key), after the bundle: rename, drop the
+  // bundler's .sig (file:Clauseo.app.tar.gz), sign again; then collect the re-signed pair.
+  const named = at(build, "tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz", bundled);
+  const moved = at(build, 'mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"', named);
+  const dropped = at(build, 'rm "$macos/Clauseo.app.tar.gz.sig"', moved);
+  const signed = at(build, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"', dropped);
+  const guard = build.lastIndexOf('[ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }', bundled);
+  assert.ok(guard !== -1 && build.slice(guard, signed).every((line) => !line.startsWith("- name:")), "the key guard is in the signing step");
+  const collected = at(build, 'cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/"', signed);
+  assert.ok(build.slice(signed, collected).some((line) => line.startsWith("- name: Collect")));
+  assert.ok(!build.some((line) => line.includes('cp "$bundle/macos/Clauseo.app.tar.gz')), "no bundler-named archive is collected");
+  // A dry run's macOS legs publish their throwaway public key for assemble.
+  assert.ok(build.includes("name: dry-updater-pub-${{ matrix.target }}"));
+  const assemble = jobCommands(text, "assemble");
+  assert.ok(!assemble.some((line) => /^mv .*Clauseo\.app\.tar\.gz/.test(line)), "assemble renames no archive");
+  at(assemble, "for old in Clauseo.app.tar.gz Clauseo.app.tar.gz.sig; do");
+  at(assemble, 'node .github/scripts/latest-json.mjs --verify "$tarball" "$pub" "$(basename "$tarball")" "$VERSION" ||');
+  at(assemble, "tarball=dist/Clauseo_${VERSION}_${arch}.app.tar.gz");
 });
 
 test("release.yml's build tells the sandbox's build.rs the mode and, for release and test, the updater key", () => {
