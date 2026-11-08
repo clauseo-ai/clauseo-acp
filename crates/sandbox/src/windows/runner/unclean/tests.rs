@@ -14,15 +14,20 @@ fn sid(text: &str) -> Sid {
     Sid::parse(text).unwrap()
 }
 
+/// A marker as the fake holds it: its pool user, its state (`None`: unreadable) and its install.
+type Held = (Option<Sid>, Option<MarkerState>, Option<String>);
+
 /// The fake: the markers by id, the record's numbers, and everything done.
 struct Fake {
-    markers: BTreeMap<String, (Option<Sid>, Option<MarkerState>)>,
+    markers: BTreeMap<String, Held>,
     done: Sequences,
     /// What each pause moves `done.sweep` to, in turn: a sweep run completing.
     sweeps: Vec<u64>,
     stop_next: u64,
     sweep_next: u64,
     pool: Vec<Sid>,
+    /// The record's `InstallId`; `Err` when it can't be read.
+    install: Result<Option<String>, String>,
     unreadable: bool,
     /// `SweepNext` can't be read.
     sweep_next_fails: bool,
@@ -38,6 +43,7 @@ impl Fake {
             stop_next: 5,
             sweep_next: 9,
             pool: vec![sid(POOL_A), sid(POOL_B)],
+            install: Ok(None),
             unreadable: false,
             sweep_next_fails: false,
             log: Vec::new(),
@@ -45,12 +51,19 @@ impl Fake {
     }
 
     fn marker(&mut self, id: &str, user: Option<&str>, state: Option<MarkerState>) {
-        self.markers.insert(id.to_owned(), (user.map(sid), state));
+        self.markers
+            .insert(id.to_owned(), (user.map(sid), state, None));
+    }
+
+    /// A marker written under the install id `install`.
+    fn installed(&mut self, id: &str, state: Option<MarkerState>, install: Option<&str>) {
+        let held = (Some(sid(POOL_A)), state, install.map(str::to_owned));
+        self.markers.insert(id.to_owned(), held);
     }
 
     /// The marker's state; `None` when it is gone or unreadable.
     fn state(&self, id: &str) -> Option<MarkerState> {
-        self.markers.get(id).and_then(|(_, state)| *state)
+        self.markers.get(id).and_then(|(_, state, _)| *state)
     }
 
     fn has(&self, id: &str) -> bool {
@@ -67,10 +80,11 @@ impl Markers for Fake {
         let sessions = self
             .markers
             .iter()
-            .map(|(id, (user, state))| UncleanSession {
+            .map(|(id, (user, state, install))| UncleanSession {
                 id: id.clone(),
                 pool_user: user.clone(),
                 state: *state,
+                install: state.and(install.clone()),
             });
         Ok(sessions.collect())
     }
@@ -94,9 +108,18 @@ impl Markers for Fake {
     fn pool(&mut self) -> Vec<Sid> {
         self.pool.clone()
     }
-    fn settle(&mut self, id: &str, pool_user: Option<&Sid>, state: MarkerState) -> io::Result<()> {
-        self.markers
-            .insert(id.to_owned(), (pool_user.cloned(), Some(state)));
+    fn install_id(&mut self) -> Result<Option<String>, String> {
+        self.install.clone()
+    }
+    fn settle(
+        &mut self,
+        id: &str,
+        pool_user: Option<&Sid>,
+        install: Option<&str>,
+        state: MarkerState,
+    ) -> io::Result<()> {
+        let held = (pool_user.cloned(), Some(state), install.map(str::to_owned));
+        self.markers.insert(id.to_owned(), held);
         Ok(())
     }
     fn remove(&mut self, id: &str) -> io::Result<()> {
@@ -164,6 +187,7 @@ fn f4_counts_this_pool_users_markers_and_those_naming_none() {
     fake.marker("x2", None, None);
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.markers.remove("x2");
+    fake.log.clear();
     // A marker awaiting only a sweep is the launch's to wait for, not F4's.
     fake.marker(
         "a2",
@@ -353,7 +377,7 @@ fn the_desktops_start_makes_dead_outers_markers_await_a_stop_and_asks_for_both()
     let read = MarkerState::AwaitingStop { stop: 5 };
     assert_eq!(fake.state("a1"), Some(read));
     // An unreadable one is written again, naming no pool user, so it counts for all.
-    assert_eq!(fake.markers["x1"], (None, Some(read)));
+    assert_eq!(fake.markers["x1"], (None, Some(read), None));
     assert!(!fake.has("b1"), "a clean one goes");
     assert_eq!(fake.state("b2"), Some(REMARKED));
     let want = StartUp {
@@ -376,4 +400,77 @@ fn the_desktops_start_makes_dead_outers_markers_await_a_stop_and_asks_for_both()
     );
     assert_eq!(start_up(&mut clean).unwrap(), StartUp::default());
     assert!(!clean.log.contains(&"stop".to_owned()));
+}
+
+#[test]
+fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
+    let mut fake = Fake::new();
+    fake.install = Ok(Some(INSTALL.to_owned()));
+    fake.marker("x1", None, None);
+    // An open one naming no pool user is no live session's either.
+    let open = (None, Some(MarkerState::Open), Some(INSTALL.to_owned()));
+    fake.markers.insert("x2".to_owned(), open);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert!(refused.contains("the stop was requested"), "{refused}");
+    // Both now await the stop that begins after this read, naming no pool user, under the
+    // current install: no longer a refusal for good.
+    let read = MarkerState::AwaitingStop { stop: 5 };
+    let held = (None, Some(read), Some(INSTALL.to_owned()));
+    assert_eq!(fake.markers["x1"], held);
+    assert_eq!(fake.markers["x2"], held);
+    assert_eq!(fake.asked("read StopNext"), 1);
+    // Refused until that stop completes, then the logon goes and they await a sweep.
+    fake.done.stop = 4;
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    fake.done.stop = 5;
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert_eq!(fake.state("x1"), Some(REMARKED));
+    assert_eq!(fake.state("x2"), Some(REMARKED));
+}
+
+const INSTALL: &str = "0123456789abcdef0123456789abcdef";
+const OLD_INSTALL: &str = "ffffffffffffffffffffffffffffffff";
+
+#[test]
+fn a_marker_of_another_install_is_stale_and_removed() {
+    let mut fake = Fake::new();
+    fake.install = Ok(Some(INSTALL.to_owned()));
+    // A removed install's escapee marker, a reinstall's counters starting again: it would
+    // refuse every logon until the new StopSequence reached its number.
+    let stuck = MarkerState::AwaitingStop { stop: 900 };
+    fake.installed("old", Some(stuck), Some(OLD_INSTALL));
+    // One from before the ids, after the reinstall wrote one.
+    fake.installed("none", Some(stuck), None);
+    fake.installed(
+        "ours",
+        Some(MarkerState::AwaitingSweep { sweep: 0 }),
+        Some(INSTALL),
+    );
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert!(!fake.has("old") && !fake.has("none"), "{:?}", fake.markers);
+    assert!(fake.has("ours"));
+    assert_eq!(fake.asked("stop"), 0);
+    // A marker the current install wrote isn't stale: it still refuses.
+    fake.installed("now", Some(stuck), Some(INSTALL));
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+}
+
+#[test]
+fn with_no_install_id_or_one_that_cant_be_read_no_marker_is_stale_by_it() {
+    let stuck = MarkerState::AwaitingStop { stop: 900 };
+    // An install from before the ids: its markers have none, and keep today's rule.
+    let mut old = Fake::new();
+    old.installed("a1", Some(stuck), None);
+    assert!(logon_check(&mut old, &sid(POOL_A)).is_err());
+    assert_eq!(old.state("a1"), Some(stuck));
+    // A marker with an id while the record has none: its install was removed.
+    old.installed("a2", Some(stuck), Some(OLD_INSTALL));
+    drop(logon_check(&mut old, &sid(POOL_A)));
+    assert!(!old.has("a2"));
+    // An id that can't be read makes nothing stale.
+    let mut unread = Fake::new();
+    unread.install = Err("RegGetValueW failed (5)".to_owned());
+    unread.installed("a3", Some(stuck), Some(OLD_INSTALL));
+    assert!(logon_check(&mut unread, &sid(POOL_A)).is_err());
+    assert!(unread.has("a3"));
 }

@@ -24,9 +24,9 @@ use super::MachineError;
 use super::lock::Descriptor;
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_OWED,
-    RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without,
-    sids_value,
+    CopyOwner, DATA_DIR, GROUP_SID, INSTALL_ID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
+    RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with,
+    resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -63,15 +63,40 @@ pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
 
 /// Writes `record` as `HKLM\<key>`'s values, making the key when it is missing, and sets the
 /// key's owner to Administrators and its DACL to [`RECORD_SDDL`]. A record whose pool holds its
-/// owner is refused before any write.
+/// owner is refused before any write. The first record of an install (no `OwnerSid` or
+/// `InstallId` before) gets a new `InstallId` too ([`record_values::INSTALL_ID`]); a record
+/// written over one, or an install from before the id, keeps what it has.
 pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineError> {
     let values =
         record_values::encode(record).map_err(|error| MachineError::Other(error.to_string()))?;
+    let first = read_texts(key, &[OWNER_SID, INSTALL_ID])?
+        .iter()
+        .all(Option::is_none);
     let opened = open_secured(key)?;
     for (name, value) in &values {
         set_value(&opened, name, value)?;
     }
+    if first {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random)
+            .map_err(|error| MachineError::Other(format!("the install id: {error}")))?;
+        let id = record_values::new_install_id(random);
+        set_value(&opened, INSTALL_ID, &RegValue::Sz(record_values::sz(&id)))?;
+    }
     Ok(())
+}
+
+/// The machine record's `InstallId`, as the lawyer reads it (the record grants Users read):
+/// `None` when it, or the key, is missing; one that isn't 32 lowercase hex is an error.
+pub(crate) fn read_record_install_id() -> Result<Option<String>, MachineError> {
+    let texts = read_texts(RECORD_KEY, &[INSTALL_ID])?;
+    match texts.into_iter().next().flatten() {
+        Some(id) if record_values::is_install_id(&id) => Ok(Some(id)),
+        Some(_) => Err(MachineError::Other(
+            "the record's InstallId is malformed".to_owned(),
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Writes `--adopt`'s values ([`ADMIN_VALUES`]) into `HKLM\<key>`, made and secured as
