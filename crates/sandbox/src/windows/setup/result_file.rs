@@ -57,16 +57,7 @@ impl SetupResult {
     /// The result of a set-up the engine ran.
     pub fn of(outcome: &Result<SetupReport, SetupFailure>) -> SetupResult {
         match outcome {
-            Ok(_) => SetupResult {
-                exit: SetupExit::Done.as_code(),
-                step: None,
-                cause: None,
-                blocked: None,
-                taken: None,
-                code: None,
-                kind: None,
-                at: None,
-            },
+            Ok(_) => SetupResult::done(),
             Err(failure) => SetupResult {
                 exit: failure.exit.as_code(),
                 step: Some(failure.step.to_string()),
@@ -77,6 +68,21 @@ impl SetupResult {
                 kind: None,
                 at: None,
             },
+        }
+    }
+
+    /// A run that ended `Done` with nothing to tell: also the set-up task's answer to a user
+    /// whose set-up is current, where nothing ran (`serve`).
+    pub fn done() -> SetupResult {
+        SetupResult {
+            exit: SetupExit::Done.as_code(),
+            step: None,
+            cause: None,
+            blocked: None,
+            taken: None,
+            code: None,
+            kind: None,
+            at: None,
         }
     }
 

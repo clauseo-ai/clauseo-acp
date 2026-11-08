@@ -129,6 +129,8 @@ mod resets;
 pub mod result_file;
 mod rollback;
 #[cfg(any(windows, test))]
+pub mod serve;
+#[cfg(any(windows, test))]
 mod shared;
 #[cfg(any(windows, test))]
 pub mod stop;

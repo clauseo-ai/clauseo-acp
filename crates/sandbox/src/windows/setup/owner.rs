@@ -25,6 +25,13 @@ mod token;
 
 #[cfg(windows)]
 pub(crate) use token::this_process;
+
+/// The user signed in to `session` (`WTSQueryUserToken`, LOCAL SYSTEM only): the set-up
+/// task's server checks the pipe's client is that user (`serve.rs`).
+#[cfg(windows)]
+pub(crate) fn session_user(session: u32) -> Result<crate::windows::sids::Sid, MachineError> {
+    token::Token::of_session(session)?.user()
+}
 #[cfg(all(windows, test))]
 pub(crate) use token::thread_has_token;
 
@@ -120,6 +127,30 @@ impl Owner {
             sid,
             token: outer_token,
         })
+    }
+
+    /// The user signed in to `session`, as the set-up task's server serves them (`serve.rs`):
+    /// that session's token (`WTSQueryUserToken`, which needs LOCAL SYSTEM's
+    /// `SeTcbPrivilege`), whose user must be `expected`, the pipe's client; lowered when it
+    /// holds more than a standard user's (an elevated administrator's session), as the installer's
+    /// unelevated outer process stands for the lawyer. Every write of the set-up into the user's
+    /// data folder, `secrets.bin`'s DPAPI blobs included, runs with this token.
+    pub fn of_session(
+        session: u32,
+        expected: &crate::windows::sids::Sid,
+    ) -> Result<Owner, MachineError> {
+        let token = token::Token::of_session(session)?;
+        let sid = token.user()?;
+        if sid != *expected {
+            return Err(MachineError::Other(
+                "the session's user isn't the one who asked".to_owned(),
+            ));
+        }
+        let owner = Owner { sid, token };
+        if owner.elevated()? {
+            return owner.lowered();
+        }
+        Ok(owner)
     }
 
     /// This process's own user as the owner: for tests, which have no parent to trust.

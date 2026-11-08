@@ -512,6 +512,8 @@ crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
 # it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
+crates/sandbox/src/windows/setup/serve/windows_pipe.rs - unsafe_code
+crates/sandbox/src/windows/setup/serve/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_bits.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
