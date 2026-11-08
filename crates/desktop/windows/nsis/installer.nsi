@@ -93,12 +93,29 @@ OutFile "${OUTFILE}"
 !define PLACEHOLDER_INSTALL_DIR "placeholder\${PRODUCTNAME}"
 InstallDir "${PLACEHOLDER_INSTALL_DIR}"
 
+; >>> clauseo: version-info
+; Clauseo's change to tauri-cli 2.12.2's template (decision 0035, "Stock installer pages"): the
+; installer's VERSIONINFO in full, as the sandbox's set-up exe has it (crates/sandbox/build.rs),
+; after Defender's machine-learning check took the per-user installer for malware with upstream's
+; thinner set. Upstream's six lines are here, FileDescription now naming the installer and its
+; mode, with CompanyName (MANUFACTURER is bundle.publisher), InternalName and OriginalFilename
+; added. NSIS refuses a key given twice, so the block stands in for the six lines instead of
+; adding to them. OUTFILE is the bundler's working name (nsis-output.exe, renamed after the
+; compile), so the two names are the product's.
 VIProductVersion "${VERSIONWITHBUILD}"
 VIAddVersionKey "ProductName" "${PRODUCTNAME}"
-VIAddVersionKey "FileDescription" "${PRODUCTNAME}"
+VIAddVersionKey "CompanyName" "${MANUFACTURER}"
+!if "${INSTALLMODE}" == "perMachine"
+  VIAddVersionKey "FileDescription" "${PRODUCTNAME} Setup (all users)"
+!else
+  VIAddVersionKey "FileDescription" "${PRODUCTNAME} Setup"
+!endif
 VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "InternalName" "${PRODUCTNAME} Setup"
+VIAddVersionKey "OriginalFilename" "${PRODUCTNAME} Setup"
+; <<< clauseo: version-info
 
 # additional plugins
 !addplugindir "${ADDITIONALPLUGINSPATH}"
