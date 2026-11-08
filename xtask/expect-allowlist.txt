@@ -566,6 +566,9 @@ crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
 crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
+crates/sandbox/src/windows/runner/job_tests.rs the_kill_on_close_job_holds_the_die_on_unhandled_exception_limit unsafe_code
+crates/sandbox/src/windows/runner/wer.rs - unsafe_code
+crates/sandbox/src/windows/runner/wer/tests.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code

@@ -2024,6 +2024,34 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+### Crash reporting (WER)
+
+Found on the VM: when a process in the agent's job crashes (msys bash and
+`chrome-headless-shell` both did), Windows Error Reporting starts `WerFault` as the desktop's
+owner, the lawyer, at Medium integrity, and it opens the crashed sandbox process from the
+lawyer's side to read its memory. That crosses the boundary: a crash the agent crafts makes a
+process with the lawyer's rights read memory the agent controls. Two controls close it.
+
+- **The job (main control).** The launch's one job (`runner/spawn.rs`, `JOB_LIMITS`, set by
+  `kill_on_close_job`) carries `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` next to
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. A process in it with an unhandled exception just ends,
+  and Windows never asks WER. The inner runner, the agent and everything the agent starts are in
+  this job, and it is the only job the runner makes: the end sweeper runs outside any job
+  ("The runner" above). `job_tests.rs` reads the flag back from a real job.
+- **The pool user's WER (backstop).** Before the agent starts, the inner runner, as the pool user
+  and so owning its `HKCU`, sets `Disabled` = 1 and `DontShowUI` = 1 (DWORDs) under
+  `HKCU\Software\Microsoft\Windows\Windows Error Reporting` (`runner/wer.rs`, step 2 of
+  `inner_flow.rs`). This also covers the end sweeper, which runs as the pool user outside the
+  job. Setting the values again changes nothing, and a failure is logged on `ctl` and the run goes
+  on. Windows reads `LocalDumps` only from `HKLM`, so there is no per-user `LocalDumps` key to set.
+  The inner runner does this, not the set-up's one logon per pool user (`setup/logon.rs`), because
+  each launch then sets it again: pools made before this change get it, and so does a profile
+  that was reset or rebuilt. The agent runs at Low integrity and can't write this Medium key, so
+  it can't turn WER back on.
+
+WER for the lawyer's own apps is unchanged: neither control touches the lawyer's `HKCU`, `HKLM`
+or any process outside the launch's job.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

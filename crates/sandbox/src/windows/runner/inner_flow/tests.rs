@@ -74,6 +74,9 @@ impl Inner for Record {
         self.done.push("clean".to_owned());
         self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values");
     }
+    fn quiet_wer(&mut self) {
+        self.done.push("quiet wer".to_owned());
+    }
     fn log(&mut self, line: &str) {
         self.lines.push((line.to_owned(), self.open));
     }
@@ -131,6 +134,7 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
         [
             "sweep before launch",
             "clean",
+            "quiet wer",
             "connect",
             "read launch",
             "start agent",

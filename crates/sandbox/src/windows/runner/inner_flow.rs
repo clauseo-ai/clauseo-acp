@@ -11,6 +11,9 @@
 //!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes, `Run` values and Startup
 //!    entries, the end sweeper's removal but for the two kinds reached over COM, which this runner
 //!    never starts. The backstop for an end sweeper that never ran. Its failure is logged;
+//!    Then it turns Windows Error Reporting off in the pool user's `HKCU` (`wer.rs`, decision
+//!    0049), so a crash of the agent or its children asks no `WerFault` as the lawyer; its failure
+//!    is logged (the job's `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` is the main control);
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping its own job's processes, which it
@@ -42,6 +45,8 @@ pub(crate) trait Inner {
     fn sweep(&mut self, point: Point) -> Result<(), SweepError>;
     /// Removes the leftovers (`leftovers::remove_all`), logging their counts.
     fn clean(&mut self);
+    /// Turns Windows Error Reporting off for this user (`wer::quiet`), logging a failure.
+    fn quiet_wer(&mut self);
     /// A line for the outer: held until `ctl` is open, then sent on it.
     fn log(&mut self, line: &str);
     /// A report for the outer that may come before `ctl` is open (`Escapee`): held until then,
@@ -68,7 +73,10 @@ pub(crate) trait Inner {
 pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
     let swept = inner.sweep(Point::Start);
     match &swept {
-        Ok(()) => inner.clean(),
+        Ok(()) => {
+            inner.clean();
+            inner.quiet_wer();
+        }
         Err(error) => escaped(inner, Point::Start, error),
     }
     if let Err(exit) = inner.connect() {
