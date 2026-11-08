@@ -135,6 +135,7 @@ mod quit_signals;
 mod rust_only;
 mod settings_window;
 mod setup;
+mod start_priority;
 mod startup;
 #[cfg(test)]
 mod test_support;

@@ -103,9 +103,14 @@ pub(crate) fn start_on_thread(
         .name("clauseo-host-start".to_owned())
         .spawn(move || {
             let began = crate::open::now();
+            // Below normal on Windows until the start ends, this thread and the start's others
+            // (start_priority.rs); the guard restores them however `run` ends.
+            let restore = crate::start_priority::restore_on_drop();
+            crate::start_priority::lower_current("clauseo-host-start");
             let started = run();
             let how = if started.is_ok() { "started" } else { "failed" };
             crate::chooser::trace::mark("host start ended", began, how);
+            drop(restore);
             start.finish(started);
         })?;
     // Not joined: the cell carries what it did.
@@ -146,6 +151,7 @@ pub(crate) fn documents_later(
     let spawned = std::thread::Builder::new()
         .name("clauseo-documents".into())
         .spawn(move || {
+            crate::start_priority::lower_current("clauseo-documents");
             let located = lookup(locations);
             let found = if located.default_matters_dir().is_some() {
                 "found"

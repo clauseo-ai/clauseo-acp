@@ -36,6 +36,8 @@ crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 # The UI language in HKCU for the installer and uninstaller: the registry calls.
 crates/desktop/src/ui_language/windows.rs - unsafe_code
+# The host start's threads below normal priority and back: the thread priority and handle calls.
+crates/desktop/src/start_priority/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.

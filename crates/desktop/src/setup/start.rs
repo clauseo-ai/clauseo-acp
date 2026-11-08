@@ -322,6 +322,8 @@ pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std:
 
 /// The setup thread's work.
 fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
+    // Below normal on Windows until the host's start ends (start_priority.rs).
+    crate::start_priority::lower_current("clauseo-setup");
     // The first route's wait counts from here (review L5). The OS's proxy lookups start now, on
     // the network thread, beside the keys' load and off the window's start path.
     let setup_start = SystemClock.monotonic();
