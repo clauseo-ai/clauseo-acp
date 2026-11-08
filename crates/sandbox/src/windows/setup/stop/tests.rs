@@ -11,6 +11,7 @@ use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUE
 
 mod completed;
 mod jobs;
+mod lock;
 mod record;
 mod sequence;
 mod users;
