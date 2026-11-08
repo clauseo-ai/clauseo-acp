@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use super::NetEnv;
 use super::resolve::{Disk, Walked, walk};
+use super::{NetEnv, refused_windows_name};
 
 /// Whether a path an agent named (absolute, or taken from the matter folder `matter`) may be
 /// handed to the file system: only when the network-safe walk vouches for it (no network
@@ -17,7 +17,10 @@ use super::resolve::{Disk, Walked, walk};
 pub(crate) fn may_touch(path: &Path, matter: &Path, disk: &Disk<'_>) -> bool {
     let joined = matter.join(path);
     let net = disk.net;
-    if under_share_matter(path, matter, net) || under_share_matter(&joined, matter, net) {
+    if refused_windows_name(path, net)
+        || under_share_matter(path, matter, net)
+        || under_share_matter(&joined, matter, net)
+    {
         return false;
     }
     !net.is_network(path) && matches!(walk(&joined, disk), Walked::Local(_))

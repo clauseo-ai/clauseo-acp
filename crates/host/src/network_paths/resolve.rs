@@ -36,6 +36,12 @@ pub(crate) trait Fs {
     fn entry(&self, path: &Path) -> io::Result<Entry>;
     /// The target a link at `path` names (`read_link`), which the system does not follow.
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
+    /// The identity of the local file or folder at `path` (its device or volume and its file
+    /// number), never following a link at it: asked only of a path the walk vouched for. `None`
+    /// when it can't be read.
+    fn identity(&self, _path: &Path) -> Option<(u64, u128)> {
+        None
+    }
 }
 
 /// The real disk.
@@ -44,10 +50,28 @@ pub(crate) struct RealFs;
 
 impl Fs for RealFs {
     fn entry(&self, path: &Path) -> io::Result<Entry> {
-        let kind = std::fs::symlink_metadata(path)?.file_type();
-        Ok(if kind.is_symlink() {
-            Entry::Link
-        } else if kind.is_dir() {
+        let meta = std::fs::symlink_metadata(path)?;
+        let kind = meta.file_type();
+        if kind.is_symlink() {
+            return Ok(Entry::Link);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt as _;
+            /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+            const REPARSE_POINT: u32 = 0x400;
+            // A reparse point that is not a link (DFS, Azure File Sync, a filter) may reach a
+            // server when it is opened: only a known local kind is walked.
+            if meta.file_attributes() & REPARSE_POINT != 0
+                && !super::windows::reparse_tag(path)
+                    .is_some_and(super::windows_names::local_reparse_tag)
+            {
+                return Err(io::Error::other(
+                    "a reparse point of a kind not known to be local",
+                ));
+            }
+        }
+        Ok(if kind.is_dir() {
             Entry::Dir
         } else {
             Entry::File
@@ -56,6 +80,24 @@ impl Fs for RealFs {
 
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
         std::fs::read_link(path)
+    }
+
+    fn identity(&self, path: &Path) -> Option<(u64, u128)> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            let meta = std::fs::symlink_metadata(path).ok()?;
+            Some((meta.dev(), u128::from(meta.ino())))
+        }
+        #[cfg(windows)]
+        {
+            super::windows::identity(path)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            None
+        }
     }
 }
 
@@ -168,13 +210,29 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
                             return Walked::Refused;
                         }
                     }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => at = next,
+                    Err(error) if no_such_name(&error) => at = next,
                     Err(_) => return Walked::Refused,
                 }
             }
         }
     }
     Walked::Local(at)
+}
+
+/// Whether `error` says the name is not there or can't be one: `NotFound`, or a name the system
+/// rejects (`InvalidFilename`; on Windows `ERROR_INVALID_NAME` and `ERROR_BAD_PATHNAME`, which a
+/// shell word with `*` or `?` or a URL's `:` gets). Nothing past such a name is opened, so the
+/// walk keeps it as written and still checks every later name.
+fn no_such_name(error: &io::Error) -> bool {
+    /// `ERROR_INVALID_NAME` and `ERROR_BAD_PATHNAME` (`winerror.h`).
+    const WINDOWS_BAD_NAME: [i32; 2] = [123, 161];
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::InvalidFilename
+    ) || (cfg!(windows)
+        && error
+            .raw_os_error()
+            .is_some_and(|code| WINDOWS_BAD_NAME.contains(&code)))
 }
 
 /// One part of a path still to walk.

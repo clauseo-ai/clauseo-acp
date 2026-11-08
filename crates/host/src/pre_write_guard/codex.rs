@@ -1,10 +1,11 @@
 //! The Codex side of the guard: a patch's targets, and the matter's `.codex` folder
 //! (clauseo-acp-private#184).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::{Reach, existing_resolved, lexical};
-use crate::network_paths::fold_name;
+use crate::network_paths::name_folds_to;
 
 /// Whether `path`, taken from `base`, is `<folder>/.codex` or lies under it, resolved
 /// canonically (never when it is or leads to a network location, [`Reach::may_touch`]) or
@@ -26,10 +27,10 @@ pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path, reach: &R
         .is_some_and(|first| first.as_os_str().to_str().is_some_and(is_codex))
 }
 
-/// Whether `name` is `.codex`, ignoring trailing dots and spaces and case, folded at least as
-/// broadly as the file system folds names ([`fold_name`]: a refusal, so over-matching is safe).
+/// Whether `name` is `.codex`, ignoring trailing dots and spaces and case, folded as a
+/// case-insensitive volume folds names ([`name_folds_to`]: a refusal, so over-matching is safe).
 fn is_codex(name: &str) -> bool {
-    fold_name(name.trim_end_matches(['.', ' '])) == ".codex"
+    name_folds_to(OsStr::new(name.trim_end_matches(['.', ' '])), ".codex")
 }
 
 /// Whether any part of `path`, split at `/` and `\\`, is `.codex` ([`is_codex`]).

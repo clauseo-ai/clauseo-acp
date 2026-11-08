@@ -41,7 +41,7 @@ use clauseo_protocol::MatterPath;
 use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, may_touch};
+use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, may_touch, refused_windows_name};
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 
@@ -261,31 +261,52 @@ impl FenceCheck {
         };
         let data = key(&real_data, insensitive);
         let own = self.own(&real_data, insensitive, disk);
+        // `<data>`'s identity and its folders' (device or volume and file number): a local path
+        // is in `<data>` when it or a folder above it is `<data>`, whatever its text.
+        let data_id = disk.fs.identity(&real_data);
+        let data_line: Vec<(u64, u128)> = real_data
+            .ancestors()
+            .filter_map(|folder| disk.fs.identity(folder))
+            .collect();
+        let in_data_by_identity = |path: &Path| {
+            data_id.is_some_and(|id| {
+                path.ancestors()
+                    .any(|folder| disk.fs.identity(folder) == Some(id))
+            })
+        };
         let inside = |found: &Found| match found {
             Found::Refused => true,
             Found::ShareMatter => false,
             Found::Path(path) => {
-                let path = key(path, insensitive);
-                path.starts_with(&data) && !own.iter().any(|folder| path.starts_with(folder))
+                let text = key(path, insensitive);
+                if text.starts_with(&data) {
+                    !own.iter().any(|folder| text.starts_with(folder))
+                } else {
+                    in_data_by_identity(path)
+                }
+            }
+        };
+        // An agent's text with a name Windows reads as another place is refused untouched.
+        let agent = |path: &PathBuf| {
+            if refused_windows_name(path, disk.net) {
+                vec![Found::Refused]
+            } else {
+                resolve::resolve_all(path, &self.cwd, home, disk)
             }
         };
         let embedded = self.embedded(&real_data, insensitive);
-        let reached = self.paths.iter().chain(&embedded).any(|path| {
-            resolve::resolve_all(path, &self.cwd, home, disk)
-                .iter()
-                .any(inside)
-        });
+        let reached = self
+            .paths
+            .iter()
+            .chain(&embedded)
+            .any(|path| agent(path).iter().any(inside));
         // A search from a folder that holds `<data>` (or is it) reaches all of it.
         let holds = |found: &Found| {
             inside(found)
-                || matches!(found, Found::Path(root) if data.starts_with(&key(root, insensitive)))
+                || matches!(found, Found::Path(root) if data.starts_with(&key(root, insensitive))
+                    || disk.fs.identity(root).is_some_and(|id| data_line.contains(&id)))
         };
-        reached
-            || self.roots.iter().any(|root| {
-                resolve::resolve_all(root, &self.cwd, home, disk)
-                    .iter()
-                    .any(holds)
-            })
+        reached || self.roots.iter().any(|root| agent(root).iter().any(holds))
     }
 
     /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.
@@ -407,6 +428,8 @@ mod input;
 mod launch;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(test)]
+mod network_forms_tests;
 #[cfg(test)]
 mod network_tests;
 mod resolve;
