@@ -61,15 +61,38 @@ only "holds the matter" stands for the brief's `Documents/Clauseo`.
 `.git` at any depth and the folder a `gitdir:` file names inside the matter; over-cap files.
 
 The agent can't create a `.git` (dir or file) anywhere in the matter: one it made would be
-lawyer-owned and run as the lawyer under the lawyer's git. One deny, like the `CLAUDE.md` rule
-below, requires `(subpath (param "MATTER"))` and the path-free regex `/\.[gG][iI][tT](/|$)`
-(a name `.git` in any letter case, last or above), on `file-write*`: it refuses `git init`,
-`mkdir`, a `gitdir:` file, links and renames onto the name (Seatbelt checks a rename's
-destination). Names that only contain it (`.gitignore`, `.github/`, `a.git`) stay writable.
-The same gap as `CLAUDE.md`'s: a folder that already holds a `.git`, made in `TMPDIR`, the
-state or notes folder, can be moved into the matter (checked on this Mac, and kept as the jail
-test `a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule`); a lawyer-side scan is
-the follow-up.
+lawyer-owned and run as the lawyer under the lawyer's git. Nor a `HEAD`: a folder holding
+`HEAD`, `objects/` and `refs/` is a bare repository to git's discovery (`safe.bareRepository`
+defaults to `all`), no `.git` name involved. Each is one deny on `file-write*`, like the
+`CLAUDE.md` rule below: `(subpath (param "MATTER"))` and a path-free regex, `.git` as any path
+name, `HEAD` as the last, each letter a two-case class. It refuses `git init`, `git clone`,
+`mkdir`, a `gitdir:` file, hard and symbolic links and renames onto the name (Seatbelt checks a
+rename's destination). Names that only contain it (`.gitignore`, `.github/`, `a.git`,
+`HEADER.md`, `ahead`) stay writable. The policy cost: agents can't clone or init a repository
+into a matter (`git worktree add`, submodules and git dependencies cloned into it fail too); they
+work in their own scratch or state folder.
+
+Case-insensitive HFS+ ignores U+200C to U+200F, U+202A to U+202E, U+206A to U+206F and U+FEFF
+when it compares names (TN1150), so `.g`, U+200C, `it` opens `.git` there. Both regexes allow
+an optional run of those code points before, between and after the letters, each as its literal
+UTF-8 sequence (a bracket range would range over bytes). The run is written `((...)+)?`: on this
+Mac Seatbelt read `(x|y)*` as one or more (`/\.g(x|y)*it$` did not match `.git`). Only names
+HFS+ would take for `.git` or `HEAD` are refused; Hindi and Persian names with ZWJ or ZWNJ stay
+writable (jail-tested), and a matter path holding them changes nothing. `strip_hfs_ignorables`,
+beside the policy's name fold, removes them before the fold for the watches' name checks.
+The `CLAUDE.md` regex and the root's protected names do not take the ignorables.
+
+At launch the walk that finds every `.git` also lists each repository-shaped folder outside one
+(a `HEAD` file, in any case, beside `objects` and `refs` folders: one stat each per `HEAD`
+listed). It is read-only with its whole tree, like a `.git`, on macOS and in the Windows ACL plan
+(a whole-tree DenyWrite). A matter whose root has that layout is read-only to the agent.
+
+What the name rules cannot see, covered by the lawyer-side watch (a follow-up): a folder that
+already holds a `.git` or a bare layout, made in `TMPDIR`, the state or notes folder, and moved
+into the matter (checked on this Mac, kept as the jail test
+`a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule`); a directory clonefile
+(`cp -c -R`) of such a folder into the matter; a symbolic link in the matter to a `.git` outside
+it.
 
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than

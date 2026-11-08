@@ -148,6 +148,38 @@ fn a_git_file_names_its_folder_inside_the_matter_only() {
     assert_eq!(scan.git_dirs(), [matter.join(".bare/worktrees/a")]);
 }
 
+/// A folder holding a `HEAD` file and `objects` and `refs` folders is a bare repository to git;
+/// a missing part, a `HEAD` folder or a layout inside a `.git` is not listed.
+#[test]
+fn repository_shaped_folders_are_listed() {
+    let dir = TempDir::new("links-bare");
+    for (folder, head) in [
+        ("matter/bare.git", "HEAD"),
+        ("matter/docs/old", "head"),
+        ("matter/hfs", "HE\u{200D}AD"),
+        ("matter/.git/modules/m", "HEAD"),
+    ] {
+        dir.file(&format!("{folder}/{head}"), "ref: refs/heads/main\n");
+        dir.dir(&format!("{folder}/objects"));
+        dir.dir(&format!("{folder}/refs"));
+    }
+    dir.file("matter/no-refs/HEAD", "ref: refs/heads/main\n");
+    dir.dir("matter/no-refs/objects");
+    dir.dir("matter/head-dir/HEAD");
+    dir.dir("matter/head-dir/objects");
+    dir.dir("matter/head-dir/refs");
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(
+        scan.bare_repos(),
+        [
+            matter.join("bare.git"),
+            matter.join("docs/old"),
+            matter.join("hfs")
+        ]
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_git_link_to_a_folder_in_the_matter_names_that_folder() {
