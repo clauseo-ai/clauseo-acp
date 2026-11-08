@@ -244,7 +244,9 @@ fn elevated_this_machines_unnamed_session_0_processes_are_system_ones() {
         return;
     }
     // The stop reads under SeDebugPrivilege; with nothing of a pool's running, a session-0
-    // process no source names must have a system image or none, or every run would end at 48.
+    // process no source names must have a system image (under the Windows or a Program Files
+    // folder, its file owned by SYSTEM, `TrustedInstaller` or Administrators) or none, or every
+    // run would end at 48.
     let mut stopper = WindowsStopper::new();
     let folders = stopper.system_folders();
     eprintln!("system folders: {folders:?}");

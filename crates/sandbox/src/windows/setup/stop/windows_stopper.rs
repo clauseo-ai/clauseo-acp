@@ -10,12 +10,18 @@
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use std::iter::once;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessImageFileName};
 use windows::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING, WAIT_OBJECT_0};
-use windows::Win32::Storage::FileSystem::READ_CONTROL;
+use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL,
+};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -32,13 +38,14 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{
     FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Windows,
 };
-use windows::core::PWSTR;
+use windows::core::{PCWSTR, PWSTR};
 
 use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
 
 use super::windows_bits::{self, Com};
 use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
-use crate::windows::acl::object::Handle;
+use crate::windows::acl::object::{Handle, kernel_security};
+use crate::windows::acl_bytes::owner_sid;
 use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, SetupMutex};
@@ -369,7 +376,8 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
 
 /// `handle`'s image, through query-limited access, which a protected process grants. The
 /// kernel's own name for it (`ProcessImageFileName`) first: empty for a minimal process, which
-/// has no image file. Then its Win32 path; one that can't be read is [`Image::Failed`].
+/// has no image file. Then its Win32 path, with its file's owner ([`file_owner`]); a path that
+/// can't be read is [`Image::Failed`].
 fn image_of(handle: &Handle) -> Image {
     // A UNICODE_STRING, then its text: room for the longest NT path.
     let mut buffer = vec![0u64; 8_200];
@@ -411,9 +419,41 @@ fn image_of(handle: &Handle) -> Image {
         .ok()
         .and_then(|length| path.get(..length));
     match (read, units) {
-        (Ok(()), Some(units)) if !units.is_empty() => Image::Path(String::from_utf16_lossy(units)),
+        (Ok(()), Some(units)) if !units.is_empty() => {
+            Image::Path(String::from_utf16_lossy(units), file_owner(units))
+        }
         _ => Image::Failed,
     }
+}
+
+/// The owner of the file at `path` (UTF-16, no NUL), opened as itself with `READ_CONTROL`,
+/// sharing everything, so a running image opens; `None` when it can't be opened or its owner
+/// read, or when it is a reparse point, which names another file's owner nothing.
+fn file_owner(path: &[u16]) -> Option<Sid> {
+    let name: Vec<u16> = path.iter().copied().chain(once(0)).collect();
+    // SAFETY: `name` is NUL-terminated and outlives the call; no security attributes or
+    // template are passed. The handle is owned by `Handle` at once.
+    let file = unsafe {
+        CreateFileW(
+            PCWSTR(name.as_ptr()),
+            READ_CONTROL.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .ok()?;
+    let file = Handle(file);
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is live; `info` is a live, writable struct.
+    unsafe { GetFileInformationByHandle(file.0, &raw mut info) }.ok()?;
+    if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return None;
+    }
+    let bytes = kernel_security(&file, OWNER_SECURITY_INFORMATION.0).ok()?;
+    owner_sid(&bytes)
 }
 
 /// The kernel's process list (`WTSEnumerateProcessesExW`, level 1, every session): each pid

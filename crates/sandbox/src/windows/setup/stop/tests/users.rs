@@ -185,9 +185,25 @@ pub(super) fn folders() -> Vec<String> {
     .to_vec()
 }
 
+/// `TrustedInstaller`, which owns the files Windows installs.
+const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+/// An image at `path` whose file `owner` owns (`None`: its owner couldn't be read).
+fn owned(path: &str, owner: Option<&str>) -> Image {
+    Image::Path(
+        path.to_owned(),
+        owner.map(|owner| Sid::parse(owner).unwrap()),
+    )
+}
+
+/// An image at `path` owned by `TrustedInstaller`, as Windows's own files are.
+fn installed(path: &str) -> Image {
+    owned(path, Some(TRUSTED_INSTALLER))
+}
+
 #[test]
 fn only_a_session_0_system_process_and_the_kernels_are_exempt_from_unknown() {
-    let protected = unopened(0, Image::Path(r"C:\Windows\System32\csrss.exe".to_owned()));
+    let protected = unopened(0, installed(r"C:\Windows\System32\csrss.exe"));
     let unknown_kernel = [0, 4, OWN_PID].map(|pid| process(pid, None, None, None));
     let mut seen = vec![protected];
     seen.extend(unknown_kernel);
@@ -202,7 +218,7 @@ fn only_a_session_0_system_process_and_the_kernels_are_exempt_from_unknown() {
 fn an_unopenable_process_in_an_interactive_session_is_unknown_and_marks_every_pool_user() {
     // A pool user's process started protected: it runs in the lawyer's session, and neither
     // the list, the token nor the owner names it. Its image doesn't matter.
-    let protected = unopened(1, Image::Path(r"C:\Windows\System32\csrss.exe".to_owned()));
+    let protected = unopened(1, installed(r"C:\Windows\System32\csrss.exe"));
     let (exit, fake) = run(vec![protected]);
     assert_eq!(exit, StopExit::NotStopped);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
@@ -212,9 +228,11 @@ fn an_unopenable_process_in_an_interactive_session_is_unknown_and_marks_every_po
 
 #[test]
 fn a_session_0_unopenable_process_is_exempt_only_with_a_system_image() {
-    let path = |path: &str| Image::Path(path.to_owned());
+    let path = installed;
     let exempt = [
         path(r"C:\Windows\System32\lsass.exe"),
+        owned(r"C:\Windows\System32\svchost.exe", Some("S-1-5-18")),
+        owned(r"C:\Windows\System32\a.exe", Some("S-1-5-32-544")),
         path(r"c:\program files\Windows Defender\MsMpEng.exe"),
         path(r"\\?\C:\Program Files (x86)\a\b.exe"),
         Image::Missing,
@@ -226,8 +244,15 @@ fn a_session_0_unopenable_process_is_exempt_only_with_a_system_image() {
     }
     // A signed binary copied where a user writes and started protected, by a pool user's
     // scheduled task (S4U) in session 0; a folder whose name only starts like a system one; a
-    // path out of the folder; one that couldn't be read, or wasn't; or no session listed.
+    // path out of the folder; one that couldn't be read, or wasn't; a file in a folder of
+    // Windows's that users write, owned by the pool user who put it there, or by anyone else
+    // but SYSTEM, `TrustedInstaller` or Administrators; an owner that couldn't be read (or a
+    // reparse point); or no session listed.
     let unknown = [
+        owned(r"C:\Windows\Temp\a.exe", Some("S-1-5-21-1-2-3-1010")),
+        owned(r"C:\Windows\Tasks\a.exe", Some(OWNER)),
+        owned(r"C:\Windows\System32\a.exe", Some("S-1-5-32-545")),
+        owned(r"C:\Windows\System32\lsass.exe", None),
         path(r"C:\Users\x\AppData\Local\a.exe"),
         path(r"C:\Windows2\a.exe"),
         path(r"C:\Windows \a.exe"),
@@ -252,7 +277,7 @@ fn a_session_0_unopenable_process_is_exempt_only_with_a_system_image() {
 
 #[test]
 fn system_image_matches_whole_components_of_the_folders_given() {
-    let image = Image::Path(r"C:\Windows\a.exe".to_owned());
+    let image = installed(r"C:\Windows\a.exe");
     assert!(system_image(&image, &[r"C:\Windows\".to_owned()]));
     assert!(system_image(&image, &[r"c:/windows".to_owned()]));
     assert!(!system_image(&image, &[r"C:\Win".to_owned()]));

@@ -4,6 +4,13 @@
 
 use crate::windows::sids::Sid;
 
+/// The owners a system image file may have: SYSTEM, `TrustedInstaller` and Administrators.
+const SYSTEM_OWNERS: [&str; 3] = [
+    "S-1-5-18",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    "S-1-5-32-544",
+];
+
 /// The idle process's pid.
 const IDLE_PID: u32 = 0;
 /// The System process's pid.
@@ -43,8 +50,9 @@ pub enum Image {
     /// Not read: no handle, or the token or the owner was read instead.
     #[default]
     Unread,
-    /// Its Win32 path (`QueryFullProcessImageNameW`).
-    Path(String),
+    /// Its Win32 path (`QueryFullProcessImageNameW`), with the image file's owner: `None`
+    /// when the file couldn't be opened or its owner read, or when it is a reparse point.
+    Path(String, Option<Sid>),
     /// It has no image file: a minimal process (System, Registry, Memory Compression, Secure
     /// System), which only the kernel makes.
     Missing,
@@ -53,14 +61,22 @@ pub enum Image {
 }
 
 /// Whether `image` is a system process's: one with no image file, or one whose image lies inside
-/// one of `folders` (the Windows and Program Files folders, from `SHGetKnownFolderPath`), which
-/// only administrators write. Paths are compared by whole components, ASCII case aside, with
-/// nothing trimmed: `C:\Windows2` and `C:\Windows ` aren't `C:\Windows`. A path that isn't a
-/// plain drive-letter path, or holds `..`, matches nothing.
+/// one of `folders` (the Windows and Program Files folders, from `SHGetKnownFolderPath`) and
+/// whose file is owned by SYSTEM, `TrustedInstaller` or Administrators. The owner matters because
+/// the Windows folder has subfolders any user writes (`Temp`, `Tasks`, `tracing`), where a
+/// file a pool user writes is that user's. Paths are compared by whole components, ASCII case
+/// aside, with nothing trimmed: `C:\Windows2` and `C:\Windows ` aren't `C:\Windows`. A path
+/// that isn't a plain drive-letter path, or holds `..`, matches nothing.
 pub fn system_image(image: &Image, folders: &[String]) -> bool {
     match image {
         Image::Missing => true,
-        Image::Path(path) => {
+        Image::Path(path, owner) => {
+            let system_owned = owner
+                .as_ref()
+                .is_some_and(|owner| SYSTEM_OWNERS.contains(&owner.as_str()));
+            if !system_owned {
+                return false;
+            }
             let Some(path) = components(path) else {
                 return false;
             };
