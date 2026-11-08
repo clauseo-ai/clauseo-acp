@@ -1,8 +1,11 @@
 //! The git watch in the outer runner (`git_watch.rs`): started on the matter's folder, and on its
 //! notes folder when the run can write one, before the inner runner starts, so it is armed
 //! before the agent runs, and stopped once the job is ended and empty at the session's end,
-//! after one last rescan. Its threads run as the outer does, as the lawyer. A thread that panics
-//! or ends before it is stopped ends the session: fail closed.
+//! after one last rescan. Its threads run as the outer does, as the lawyer. A watch that can't be
+//! armed refuses the launch, plainly. A thread that panics or ends before it is stopped ends the
+//! session: fail closed. Each watch has a watchdog thread (`git_watch::watchdog`) that ends the
+//! session when one check stays busy past the budget: a call blocked on an agent's oplock never
+//! leaves the matter unwatched while the agent runs.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -15,7 +18,7 @@ use clauseo_protocol::MatterId;
 
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Stop};
-use super::super::git_watch::{Cause, Changes, Guard, Session, watch};
+use super::super::git_watch::{Cause, Changes, Dog, Guard, Pulse, Session, watch, watchdog};
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
@@ -55,26 +58,36 @@ enum Folder {
     Other,
 }
 
-/// Starts a watch on `root` for `matter` and returns once it is armed or, when it can't be,
-/// has said so and gone over to rescans. Only a thread that can't be started fails.
+/// Why a watch didn't start.
+enum NotStarted {
+    /// Its thread couldn't be started.
+    Thread(io::Error),
+    /// The folder couldn't be watched.
+    Arm(io::Error),
+}
+
+/// Starts a watch on `root` for `matter`, and its watchdog, and returns once it is armed.
 fn start(
     (root, folder): (&Path, Folder),
     data_dir: &Path,
     matter: MatterId,
     end: &End,
     stop: &Arc<Stop>,
-) -> io::Result<mpsc::Receiver<()>> {
+) -> Result<mpsc::Receiver<()>, NotStarted> {
     let (armed, first_armed) = mpsc::channel();
     let (finished, done) = mpsc::channel();
+    let pulse = Arc::new(Pulse::default());
     let (root, data_dir, end, stop) = (
         root.to_owned(),
         data_dir.to_owned(),
         Arc::clone(end),
         Arc::clone(stop),
     );
+    let (dog_end, dog_stop, dog_pulse) = (Arc::clone(&end), Arc::clone(&stop), Arc::clone(&pulse));
     thread::Builder::new()
         .name("git-watch".to_owned())
         .spawn(move || {
+            let mut watching = false;
             let ran = catch_unwind(AssertUnwindSafe(|| {
                 let guard = OsGuard(match folder {
                     Folder::Matter => GitGuard::new(&root, &data_dir, &matter),
@@ -83,15 +96,23 @@ fn start(
                 let session = OsSession {
                     end: Arc::clone(&end),
                     stop: &stop,
+                    pulse: &pulse,
                 };
-                let first = DirWatch::arm(guard.0.root(), &stop);
-                let _sent = armed.send(());
-                watch(first, || DirWatch::arm(&root, &stop), &guard, &session);
+                match DirWatch::arm(guard.0.root(), &stop) {
+                    Ok(source) => {
+                        watching = true;
+                        let _sent = armed.send(Ok(()));
+                        watch(source, &guard, &session);
+                    }
+                    Err(error) => {
+                        let _sent = armed.send(Err(error));
+                    }
+                }
             }));
             // A watch ends only once stopped; one that panicked, or ended first, leaves the
-            // folder unwatched while the agent may still run.
+            // folder unwatched while the agent may still run. One never armed refused the launch.
             let stopped = stop.wait(Duration::ZERO);
-            if ran.is_err() || !stopped {
+            if ran.is_err() || (watching && !stopped) {
                 tracing::warn!(
                     panicked = ran.is_err(),
                     "the git watch ended before its stop"
@@ -103,10 +124,51 @@ fn start(
                 end.trigger(EndSignal::Failed);
             }
             let _sent = finished.send(());
-        })?;
+        })
+        .map_err(NotStarted::Thread)?;
     // The thread said it armed (or couldn't); a thread that ended first ends this wait too.
-    first_armed.recv().unwrap_or(());
+    match first_armed.recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return Err(NotStarted::Arm(error)),
+        Err(_) => {
+            return Err(NotStarted::Arm(io::Error::other(
+                "the watch's thread ended",
+            )));
+        }
+    }
+    let dog = OsDog {
+        end: dog_end,
+        stop: dog_stop,
+    };
+    thread::Builder::new()
+        .name("git-watchdog".to_owned())
+        .spawn(move || watchdog(&dog_pulse, &dog))
+        .map_err(NotStarted::Thread)?;
     Ok(done)
+}
+
+/// The watchdog's side of the session: the outer's end path, its stderr and the stop.
+struct OsDog {
+    end: End,
+    stop: Arc<Stop>,
+}
+
+impl Dog for OsDog {
+    fn wait(&self, wait: Duration) -> bool {
+        self.stop.wait(wait)
+    }
+
+    fn now(&self) -> Duration {
+        monotonic()
+    }
+
+    fn stall(&self, first: bool) {
+        if first {
+            say(&format!("clauseo-sandbox-run: {}", Cause::Stalled.notice()));
+        }
+        // As a panic's: the job ended and emptied, then the sweep task requested.
+        self.end.trigger(EndSignal::Failed);
+    }
 }
 
 /// The set-aside's live check, at the time of each call.
@@ -131,16 +193,21 @@ impl Guard for OsGuard {
     }
 }
 
-/// The session as the watch sees it: the outer's end path, its stderr and the stop.
+/// The session as the watch sees it: the outer's end path, its stderr, the stop and what it
+/// shares with its watchdog.
 struct OsSession<'a> {
     end: End,
     stop: &'a Stop,
+    pulse: &'a Pulse,
 }
 
 impl Session for OsSession<'_> {
-    fn end(&self) {
+    fn end(&self) -> bool {
         // Every end path's own: the job ended and emptied, then the sweep task requested.
+        // `trigger` returns once the job is ended and emptied; the end's own word on whether it
+        // is empty takes over once `End` gives it.
         self.end.trigger(EndSignal::Failed);
+        true
     }
 
     fn say(&self, line: &str) {
@@ -156,10 +223,19 @@ impl Session for OsSession<'_> {
     }
 
     fn now(&self) -> Duration {
-        static ORIGIN: OnceLock<Instant> = OnceLock::new();
-        let origin = *ORIGIN.get_or_init(clock);
-        clock().saturating_duration_since(origin)
+        monotonic()
     }
+
+    fn pulse(&self) -> &Pulse {
+        self.pulse
+    }
+}
+
+/// A monotonic reading since the first, shared by the watches and their watchdogs.
+fn monotonic() -> Duration {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    let origin = *ORIGIN.get_or_init(clock);
+    clock().saturating_duration_since(origin)
 }
 
 /// The time a set-aside's pass folder is named for.
@@ -192,8 +268,8 @@ fn pause(wait: Duration) {
 }
 
 /// Starts the watches on `message`'s matter folder and its notes folder, if any, and keeps them
-/// in `end`'s steps, for their [`stop_watch`](super::end::OsEnd::stop_watch). Only a thread
-/// that can't be started fails the launch.
+/// in `end`'s steps, for their [`stop_watch`](super::end::OsEnd::stop_watch). A folder that
+/// can't be watched refuses the launch, in plain words; so does a thread that can't be started.
 pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
     let stop = Arc::new(
         Stop::new().map_err(|error| Failure::new(RunExit::Spawn, os("the git watch", &error)))?,
@@ -216,12 +292,19 @@ pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
         );
         match started {
             Ok(finished) => done.push(finished),
-            Err(error) => {
+            Err(not) => {
                 // The watches already running stop with the failed launch.
                 end.steps().keep_watch(Running { stop, done });
                 return Err(Failure::new(
                     RunExit::Spawn,
-                    os("the git watch's thread", &error),
+                    match not {
+                        NotStarted::Thread(error) => os("the git watch's thread", &error),
+                        NotStarted::Arm(error) => format!(
+                            "Clauseo can't watch the matter's folder for changes, so it didn't \
+                             start the session ({})",
+                            os("the git watch", &error)
+                        ),
+                    },
                 ));
             }
         }

@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::os::{DirWatch, Stop};
-use super::{Changes, Guard, Session, watch};
+use super::{Changes, Guard, Pulse, Session, watch};
 use crate::windows::set_aside::tests::launch_matter_on_test_volume;
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
 use crate::windows::test_junction::set_mount_point;
@@ -42,11 +42,13 @@ impl Guard for TestGuard {
 struct TestSession<'a> {
     stop: &'a Stop,
     said: Arc<Mutex<Vec<String>>>,
+    pulse: Pulse,
 }
 
 impl Session for TestSession<'_> {
-    fn end(&self) {
+    fn end(&self) -> bool {
         self.said.lock().unwrap().push("end".to_owned());
+        true
     }
 
     fn say(&self, line: &str) {
@@ -61,6 +63,10 @@ impl Session for TestSession<'_> {
 
     fn now(&self) -> Duration {
         Duration::ZERO
+    }
+
+    fn pulse(&self) -> &Pulse {
+        &self.pulse
     }
 }
 
@@ -77,16 +83,11 @@ fn watched_while(root: &Path, data: &Path, act: impl FnOnce(), name: &str) -> (b
         let session = TestSession {
             stop: &thread_stop,
             said: thread_said,
+            pulse: Pulse::default(),
         };
-        let first = DirWatch::arm(&thread_root, &thread_stop);
-        assert!(first.is_ok(), "the watch arms");
+        let first = DirWatch::arm(&thread_root, &thread_stop).expect("the watch arms");
         armed.send(()).unwrap();
-        watch(
-            first,
-            || DirWatch::arm(&thread_root, &thread_stop),
-            &guard,
-            &session,
-        );
+        watch(first, &guard, &session);
     });
     first_armed.recv().unwrap();
     act();
@@ -113,10 +114,13 @@ fn a_folder_renamed_to_git_under_a_watched_matter_is_set_aside_within_two_second
 
     assert!(gone, "set aside within 2 s");
     let end = said.iter().position(|line| line == "end").unwrap();
+    // The lawyer's own folder, renamed by the agent: the lawyer's owner, read from the handle
+    // the move renamed, so the notice says how to put it back.
     let notice = said
         .iter()
-        .position(|line| line.contains("Clauseo stopped it and moved .git to "))
+        .position(|line| line.contains("Clauseo moved .git to "))
         .unwrap();
+    assert!(said[notice].contains("If you made it yourself, move it back"));
     assert!(end < notice, "the session ended first: {said:?}");
 }
 

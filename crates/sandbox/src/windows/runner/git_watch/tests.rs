@@ -1,8 +1,8 @@
 //! The watch's loop over fakes: what each kind of report does, kill first (the session ends
-//! before anything moves), the overflow's and the arm failure's rescans, what else ends the
-//! session (overflows in a row, a path gone again and again, a slow scan), the fail-closed
-//! retries and the last rescan. What a check moves is `set_aside/tests/live.rs`'s, over the
-//! set-aside's own volume.
+//! before anything moves), the overflow's rescans, what else ends the session (overflows in a
+//! row, items gone again and again, a slow scan, a broken watch), an end that can't confirm the
+//! job is empty, the fail-closed retries and the last rescan. What a check moves is
+//! `set_aside/tests/live.rs`'s, over the set-aside's own volume.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -12,15 +12,17 @@ use std::time::Duration;
 
 use super::records::{Layout, changes};
 use super::{
-    Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, RESCAN_EVERY, Session, Source,
-    denial_from_line, watch,
+    Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, Pulse, Session, Source, denial_from_line,
+    watch,
 };
 use crate::windows::SetAsideFailure;
 use crate::windows::set_aside::{Ending, Entry, Failed, Hooks, Moved, Reason};
 use crate::windows::test_world::matter_one;
 use crate::{Denial, SetAsideWhat};
 
+mod ends;
 mod notices;
+mod watchdog;
 
 /// The paths of what failed.
 fn paths(failed: &[Failed]) -> Vec<PathBuf> {
@@ -64,7 +66,8 @@ impl Log {
 
 /// A guard that moves every reported path ending in `.git` (the decision itself is
 /// `live.rs`'s), ending the session first as `live.rs` does; its moves fail for the paths in
-/// `stuck` until the session ended, and the paths in `gone` are gone each time.
+/// `stuck` until the session ended, the paths in `gone` are gone each time, and with the end
+/// unconfirmed each is left, as `live.rs` leaves it.
 struct FakeGuard<'a> {
     log: &'a Log,
     stuck: Vec<PathBuf>,
@@ -99,7 +102,10 @@ impl FakeGuard<'_> {
                 live.gone.push(path.clone());
                 continue;
             }
-            hooks.end(Ending::Found);
+            if !hooks.end(Ending::Found) {
+                live.left.push(path.clone());
+                continue;
+            }
             if self.stuck.contains(path) && !self.ended_twice() {
                 let failure = SetAsideFailure::Io(io::ErrorKind::ResourceBusy);
                 live.failed.push(Failed {
@@ -113,6 +119,7 @@ impl FakeGuard<'_> {
                     entry: entry(path),
                     path: path.clone(),
                     what: SetAsideWhat::GitRepository,
+                    by_agent: true,
                 });
             }
         }
@@ -142,16 +149,20 @@ impl Guard for FakeGuard<'_> {
     }
 }
 
-/// A session whose watch is stopped at its `stop_after`th pause.
+/// A session whose watch is stopped at its `stop_after`th pause, and whose end says the job is
+/// `empty` or not.
 struct FakeSession<'a> {
     log: &'a Log,
     stop_after: usize,
     pauses: RefCell<usize>,
+    empty: bool,
+    pulse: Pulse,
 }
 
 impl Session for FakeSession<'_> {
-    fn end(&self) {
+    fn end(&self) -> bool {
         self.log.push("end");
+        self.empty
     }
 
     fn say(&self, line: &str) {
@@ -165,8 +176,7 @@ impl Session for FakeSession<'_> {
         self.log.push(line);
     }
 
-    fn pause(&self, wait: Duration) -> bool {
-        assert_eq!(wait, RESCAN_EVERY);
+    fn pause(&self, _wait: Duration) -> bool {
         self.log.push("pause");
         *self.pauses.borrow_mut() += 1;
         *self.pauses.borrow() >= self.stop_after
@@ -179,6 +189,10 @@ impl Session for FakeSession<'_> {
     fn now(&self) -> Duration {
         Duration::ZERO
     }
+
+    fn pulse(&self) -> &Pulse {
+        &self.pulse
+    }
 }
 
 fn session(log: &Log, stop_after: usize) -> FakeSession<'_> {
@@ -186,6 +200,8 @@ fn session(log: &Log, stop_after: usize) -> FakeSession<'_> {
         log,
         stop_after,
         pauses: RefCell::new(0),
+        empty: true,
+        pulse: Pulse::default(),
     }
 }
 
@@ -199,17 +215,13 @@ fn guard(log: &Log) -> FakeGuard<'_> {
     }
 }
 
-fn never_armed() -> io::Result<Script> {
-    Err(io::Error::from_raw_os_error(5))
-}
-
 /// Kill first: the first item found ends the session before it moves; then the lawyer's notice
 /// and the host's line; at the stop, one last rescan.
 #[test]
 fn a_reported_git_ends_the_session_first_then_is_set_aside_and_the_lawyer_told() {
     let log = Log::default();
-    let first = Ok(script(vec![added(&["sub/.git", "b/.git"])]));
-    watch(first, never_armed, &guard(&log), &session(&log, 1));
+    let first = script(vec![added(&["sub/.git", "b/.git"])]);
+    watch(first, &guard(&log), &session(&log, 1));
     assert_eq!(
         log.lines(),
         [
@@ -232,8 +244,8 @@ fn an_overflow_rescans_the_matter_and_reads_on() {
     let log = Log::default();
     let mut found = guard(&log);
     found.rescan_finds = vec![PathBuf::from("a/.git")];
-    let first = Ok(script(vec![Next::Overflow, added(&[])]));
-    watch(first, never_armed, &found, &session(&log, 1));
+    let first = script(vec![Next::Overflow, added(&[])]);
+    watch(first, &found, &session(&log, 1));
     assert_eq!(
         log.lines()[..7],
         [
@@ -253,14 +265,14 @@ fn an_overflow_rescans_the_matter_and_reads_on() {
 fn overflows_in_a_row_end_the_session_and_a_change_between_resets_the_count() {
     assert_eq!(OVERFLOWS, 3);
     let log = Log::default();
-    let first = Ok(script(vec![
+    let first = script(vec![
         Next::Overflow,
         Next::Overflow,
         added(&[]),
         Next::Overflow,
         Next::Overflow,
-    ]));
-    watch(first, never_armed, &guard(&log), &session(&log, 1));
+    ]);
+    watch(first, &guard(&log), &session(&log, 1));
     assert!(
         !log.lines().contains(&"end".to_owned()),
         "{:?}",
@@ -268,8 +280,8 @@ fn overflows_in_a_row_end_the_session_and_a_change_between_resets_the_count() {
     );
 
     let log = Log::default();
-    let first = Ok(script(vec![Next::Overflow, Next::Overflow, Next::Overflow]));
-    watch(first, never_armed, &guard(&log), &session(&log, 1));
+    let first = script(vec![Next::Overflow, Next::Overflow, Next::Overflow]);
+    watch(first, &guard(&log), &session(&log, 1));
     let lines = log.lines();
     let end = lines.iter().position(|l| l == "end").unwrap();
     assert_eq!(lines.iter().filter(|l| *l == "rescan").count(), 4);
@@ -284,15 +296,15 @@ fn a_path_gone_again_and_again_ends_the_session() {
     let log = Log::default();
     let mut chased = guard(&log);
     chased.gone = vec![PathBuf::from(".git")];
-    let first = Ok(script(vec![added(&[".git"]), added(&[".git"])]));
-    watch(first, never_armed, &chased, &session(&log, 1));
+    let first = script(vec![added(&[".git"]), added(&[".git"])]);
+    watch(first, &chased, &session(&log, 1));
     assert!(!log.lines().contains(&"end".to_owned()));
 
     let log = Log::default();
     let mut chased = guard(&log);
     chased.gone = vec![PathBuf::from(".git")];
     let reports = vec![added(&[".git"]), added(&[".git"]), added(&[".git"])];
-    watch(Ok(script(reports)), never_armed, &chased, &session(&log, 1));
+    watch(script(reports), &chased, &session(&log, 1));
     assert_eq!(
         log.lines(),
         ["changed", "changed", "changed", "said", "end", "rescan"]
@@ -304,54 +316,8 @@ fn a_scan_past_its_budget_ends_the_session() {
     let log = Log::default();
     let mut slow = guard(&log);
     slow.slow = true;
-    watch(
-        Ok(script(vec![Next::Overflow])),
-        never_armed,
-        &slow,
-        &session(&log, 1),
-    );
+    watch(script(vec![Next::Overflow]), &slow, &session(&log, 1));
     assert_eq!(log.lines()[..4], ["said", "rescan", "said", "end"]);
-}
-
-#[test]
-fn a_watch_that_cant_be_armed_rescans_every_two_seconds_and_arms_again() {
-    let log = Log::default();
-    let arms = RefCell::new(0);
-    let arm = || {
-        *arms.borrow_mut() += 1;
-        if *arms.borrow() < 3 {
-            never_armed()
-        } else {
-            Ok(script(vec![]))
-        }
-    };
-    watch(never_armed(), arm, &guard(&log), &session(&log, 9));
-    assert_eq!(RESCAN_EVERY, Duration::from_secs(2));
-    assert_eq!(
-        log.lines(),
-        // Degraded once: three rescans, two seconds apart, then armed again with a rescan for
-        // the gap, until the stop, and the last rescan.
-        [
-            "said", "rescan", "pause", "rescan", "pause", "rescan", "pause", "said", "rescan",
-            "rescan"
-        ]
-    );
-}
-
-#[test]
-fn a_broken_watch_rescans_and_is_armed_again() {
-    let log = Log::default();
-    let first = Ok(script(vec![Next::Broken(io::Error::from_raw_os_error(6))]));
-    watch(
-        first,
-        || Ok(script(vec![])),
-        &guard(&log),
-        &session(&log, 9),
-    );
-    assert_eq!(
-        log.lines(),
-        ["said", "rescan", "pause", "said", "rescan", "rescan"]
-    );
 }
 
 /// M4: once the job is empty and the watch stopped, the last rescan still moves what it finds,
@@ -361,7 +327,7 @@ fn the_last_rescan_at_the_stop_sets_aside_what_it_finds() {
     let log = Log::default();
     let mut found = guard(&log);
     found.rescan_finds = vec![PathBuf::from("late/.git")];
-    watch(Ok(script(vec![])), never_armed, &found, &session(&log, 1));
+    watch(script(vec![]), &found, &session(&log, 1));
     assert_eq!(
         log.lines(),
         ["rescan", "moved late/.git", "notice", "denial"]
@@ -373,8 +339,8 @@ fn a_git_that_cant_be_moved_is_tried_again_once_the_session_ended() {
     let log = Log::default();
     let mut stuck = guard(&log);
     stuck.stuck = vec![PathBuf::from(".git")];
-    let first = Ok(script(vec![added(&[".git"])]));
-    watch(first, never_armed, &stuck, &session(&log, 1));
+    let first = script(vec![added(&[".git"])]);
+    watch(first, &stuck, &session(&log, 1));
     assert_eq!(
         log.lines(),
         [
@@ -426,8 +392,8 @@ impl Guard for Stuck<'_> {
 #[test]
 fn a_git_still_stuck_after_the_end_is_tried_and_said() {
     let log = Log::default();
-    let first = Ok(script(vec![added(&[".git"])]));
-    watch(first, never_armed, &Stuck(guard(&log)), &session(&log, 1));
+    let first = script(vec![added(&[".git"])]);
+    watch(first, &Stuck(guard(&log)), &session(&log, 1));
     let lines = log.lines();
     assert_eq!(lines[..3], ["said", "end", "said"]);
     assert_eq!(lines.iter().filter(|l| *l == "retry").count(), 5);
@@ -506,13 +472,15 @@ fn a_buffer_that_doesnt_read_as_records_is_an_overflow() {
     }
 }
 
-/// The lawyer's notice says where the item went and how to put back one the lawyer made; the
-/// host's line reads back as the denial its sink takes, with the agent's plain words.
+/// The lawyer's notice says where the item went (the agent's, here: no step to put it back);
+/// the host's line reads back as the denial its sink takes, with the agent's plain words.
 #[test]
 fn each_item_moved_is_noticed_and_said_in_a_line_the_host_reads_back_as_a_denial() {
-    struct Said(RefCell<Vec<String>>);
+    struct Said(RefCell<Vec<String>>, Pulse);
     impl Session for Said {
-        fn end(&self) {}
+        fn end(&self) -> bool {
+            true
+        }
         fn say(&self, line: &str) {
             self.0.borrow_mut().push(line.to_owned());
         }
@@ -523,12 +491,15 @@ fn each_item_moved_is_noticed_and_said_in_a_line_the_host_reads_back_as_a_denial
         fn now(&self) -> Duration {
             Duration::ZERO
         }
+        fn pulse(&self) -> &Pulse {
+            &self.1
+        }
     }
     let log = Log::default();
-    let said = Said(RefCell::new(Vec::new()));
+    let said = Said(RefCell::new(Vec::new()), Pulse::default());
     let git = PathBuf::from("Precedents").join(".git");
-    let first = Ok(script(vec![added(&[git.to_str().unwrap()])]));
-    watch(first, never_armed, &guard(&log), &said);
+    let first = script(vec![added(&[git.to_str().unwrap()])]);
+    watch(first, &guard(&log), &said);
 
     let lines = said.0.borrow();
     let to = PathBuf::from("aside").join(&git);
@@ -536,8 +507,7 @@ fn each_item_moved_is_noticed_and_said_in_a_line_the_host_reads_back_as_a_denial
         lines[1],
         format!(
             "clauseo-sandbox-run: The AI tool tried to put a code repository in the matter. \
-             Clauseo stopped it and moved {} to {}. If you made it yourself, move it back after \
-             the session ends.",
+             Clauseo stopped it and moved {} to {}.",
             git.display(),
             to.display()
         )

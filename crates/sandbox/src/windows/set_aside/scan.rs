@@ -19,15 +19,19 @@
 //! pass over exactly what is inside a folder it set aside.
 
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Read as _};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
 use super::names::Key;
-use super::repo_names::{COMMON_NAMES, bare_layout, git_lookalike, is_commondir, is_git, is_head};
+use super::repo_names::{bare_layout, git_lookalike, is_commondir, is_git, is_head};
 use super::run::Volume;
 use crate::PROTECTED_NAMES;
+
+mod common;
+
+use common::{common_items, common_target};
 
 /// Also probed at the root: hooks in a `.git` the agent made would run in the lawyer's own git.
 const ALSO: [&str; 1] = [".git"];
@@ -93,7 +97,8 @@ pub(super) enum Kept {
     Head,
     /// A link, in [`Record::links`](super::files::Record::links).
     Link,
-    /// What git reads from a folder a `commondir` names ([`COMMON_NAMES`]), or that folder
+    /// What git reads from a folder a `commondir` names
+    /// ([`COMMON_NAMES`](super::repo_names::COMMON_NAMES)), or that folder
     /// itself while it is missing: made there, git would read it as the lawyer's (9a). Checked
     /// only against a record that holds the `HEAD`s, as [`Kept::Head`] is.
     Common,
@@ -102,9 +107,6 @@ pub(super) enum Kept {
 /// The record's key for the folder a `commondir` names, `[COMMON_KEY, parts...]`, kept with no
 /// file ID so the live watch knows the folder: no name on NTFS holds a `:`.
 pub(super) const COMMON_KEY: &str = ":common";
-
-/// The most of a `commondir` file read: git reads one line.
-const COMMONDIR_MAX: u64 = 4096;
 
 /// What a scan tells its visitor as it finds it, before it goes on.
 #[derive(Clone, Copy)]
@@ -301,16 +303,20 @@ fn scan_from<V: Volume>(
         {
             let id = through.last().copied();
             scan.bare.push((parts.clone(), id));
+            // The visitor first, before anything in the folder is read: the live watch ends the
+            // session at an unknown git folder, so an agent's oplock on its `commondir` can't
+            // hold the watch up while the agent runs.
+            if visit(Found::Bare(&parts, id)) != Step::Go {
+                continue;
+            }
+            let root = scan_root(&path, &parts);
             if let Some(common) = listed
                 .iter()
                 .find(|c| c.kind == Kind::Other && is_commondir(&c.name))
-                .and_then(|c| common_target(scan_root(&path, &parts), &path, &c.name))
+                .and_then(|c| common_target(volume, &folder, (root, &path), &c.name))
                 && !scan.common.contains(&common)
             {
                 scan.common.push(common);
-            }
-            if visit(Found::Bare(&parts, id)) == Step::Prune {
-                continue;
             }
         }
         let names: Vec<&str> = if at_root {
@@ -408,84 +414,6 @@ fn found(scan: &mut Scan, visit: &mut dyn FnMut(Found<'_>) -> Step, item: Item) 
 /// The matter's folder, from the path of a folder `parts` below it.
 fn scan_root<'a>(path: &'a Path, parts: &[OsString]) -> &'a Path {
     parts.iter().fold(path, |at, _| at.parent().unwrap_or(at))
-}
-
-/// The key below `root` of the folder the `commondir` file `name` in the folder `folder` names
-/// (absolute, or relative to `folder`, by its words alone, never followed), when it lies in
-/// the matter outside every `.git`: one outside the matter isn't watched (a limit), and one
-/// in a `.git` is write-denied with it.
-fn common_target(root: &Path, folder: &Path, name: &OsStr) -> Option<Key> {
-    let mut text = String::new();
-    let file = std::fs::File::open(folder.join(name)).ok()?;
-    file.take(COMMONDIR_MAX).read_to_string(&mut text).ok()?;
-    let line = text.lines().next()?.trim();
-    if line.is_empty() {
-        return None;
-    }
-    let target = folder.join(line);
-    let (target, root) = (plain(&target), plain(root));
-    let inside = target.len() >= root.len()
-        && target
-            .iter()
-            .zip(&root)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b));
-    if !inside {
-        tracing::debug!("a commondir names a folder outside the matter; not watched");
-        return None;
-    }
-    let key: Key = target
-        .into_iter()
-        .skip(root.len())
-        .map(OsString::from)
-        .collect();
-    (!key.iter().any(|part| is_git(part))).then_some(key)
-}
-
-/// For each folder a `commondir` names ([`Scan::common`]): each of [`COMMON_NAMES`] there, or
-/// the folder itself while it is missing, as a [`Kept::Common`] item.
-fn common_items<V: Volume>(
-    volume: &V,
-    root: &Path,
-    scan: &mut Scan,
-    visit: &mut dyn FnMut(Found<'_>) -> Step,
-) {
-    for target in scan.common.clone() {
-        let path = target
-            .iter()
-            .fold(root.to_owned(), |at, part| at.join(part));
-        let at_of = |path: &Path| match volume.file_id(path) {
-            Ok(None) => Now::Absent,
-            Ok(Some(id)) => Now::At(id),
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Now::Shut,
-            Err(error) => Now::Failed(io_failure(&error)),
-        };
-        let item = |key: Key, path: PathBuf, now: Now| Item {
-            within: key
-                .get(..key.len().saturating_sub(1))
-                .unwrap_or_default()
-                .to_vec(),
-            key,
-            path,
-            through: Vec::new(),
-            now,
-            kept: Kept::Common,
-        };
-        let here = at_of(&path);
-        if here == Now::Absent {
-            if !target.is_empty() {
-                found(scan, visit, item(target.clone(), path, Now::Absent));
-            }
-            continue;
-        }
-        for name in COMMON_NAMES {
-            let now = at_of(&path.join(name));
-            if now != Now::Absent {
-                let mut key = target.clone();
-                key.push(OsString::from(name));
-                found(scan, visit, item(key, path.join(name), now));
-            }
-        }
-    }
 }
 
 /// `path` as text parts, its `..` and `.` worked out by their words, with a verbatim prefix

@@ -8,7 +8,7 @@ use super::files::{FileId, HEADS_RECORDED, Place, Record, Snapshot};
 use super::moves::set_aside;
 use super::names::Key;
 use super::repo_names::is_git;
-use super::run::{Refused, Volume};
+use super::run::{Need, Refused, Volume};
 use super::scan::{COMMON_KEY, Item, Kept, Now, Scan, inside, same_key};
 
 /// An item this pass set aside, or found gone: its key, and its file ID when the scan read
@@ -107,7 +107,15 @@ pub(super) fn check(
                 continue;
             }
         };
-        match set_aside(volume, place, &item.path, &item.within, reason, now) {
+        match set_aside(
+            volume,
+            place,
+            &item.path,
+            &item.within,
+            reason,
+            now,
+            Need::Anyone,
+        ) {
             Ok(entry) => {
                 aside.push(Aside::of(item));
                 moved.push(entry);

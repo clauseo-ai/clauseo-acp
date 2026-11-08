@@ -1,8 +1,7 @@
 //! The live watch's half of the set-aside: a git repository or an outbound link made while the
 //! agent runs, moved aside at once through the same move, manifest and lock as the after-session
 //! pass (`moves::set_aside`). The outer runner's watch (`runner/git_watch.rs`) hands over the
-//! paths `ReadDirectoryChangesW` reported, or asks for a full rescan when the watch overflowed or
-//! couldn't be armed.
+//! paths `ReadDirectoryChangesW` reported, or asks for a full rescan when the watch overflowed.
 //!
 //! What is moved (names compared as `repo_names.rs` compares them):
 //! - a `.git` (folder, file or link) at its shallowest `.git` part;
@@ -17,10 +16,16 @@
 //!   which sets aside every new link.
 //!
 //! The watch ends the session before it moves anything ([`Hooks::end`], kill first): the
-//! first item found ends the agent's job, so nothing alive races the moves that follow. Each
+//! first item found ends the agent's job, so nothing alive races the moves that follow. A
+//! reported record whose own name is `.git`, or `HEAD` (outside every `.git`, and not in a
+//! launch `.git`), ends the session at once, whether or not it is still there by the check, so
+//! an agent can't keep short-lived `.git`s coming and going ([`Watched::changed`]); those are
+//! moved first, before any folder reported is scanned. An unknown git folder a scan finds ends
+//! the session before anything in it is read (`check.rs`). Each
 //! scan moves what it finds as it finds it (`scan::Found`), never after the whole tree, and a
 //! scan that runs past [`SCAN_BUDGET`] ends the session too. In a folder made or moved in, that
-//! scan stops there, and the folder goes whole when a pool user owns it (`Run::below`); a full
+//! scan stops there, and the folder goes whole when a pool user owns it, read from the handle
+//! the move renames (`check::Run::below`); a full
 //! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
 //! moved is listed ([`Live::gone`]), so the watch can end a session whose agent keeps renaming
 //! one back and forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
@@ -43,31 +48,34 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::MatterId;
 
-use self::keys::{below_git, ends_in_git, holds, key_of, repo_part};
+use self::check::Run;
+use self::keys::{ends_in_git, holds, key_of, repo_part};
 use super::files::{FileId, Place, Record};
-use super::moves::set_aside;
 use super::names::Key;
 use super::repo_names::{COMMON_NAMES, is_git, is_head, opens_as};
-use super::run::{Refused, Volume};
-use super::scan::{
-    COMMON_KEY, Found, Item, Kept, Now, Step, plain, same_key, scan, scan_part_visiting,
-    scan_visiting,
-};
-use super::{Entry, Reason, SetAsideFailure};
+use super::run::Volume;
+use super::scan::{COMMON_KEY, Item, Kept, Now, plain, same_key, scan, scan_visiting};
+use super::{Entry, SetAsideFailure};
 use crate::SetAsideWhat;
 
+mod check;
 mod keys;
 
 /// How long one scan may run while the agent could still be changing the tree: past it, the
 /// session ends, and the scan carries on with nothing alive to race it.
 pub(crate) const SCAN_BUDGET: Duration = Duration::from_secs(2);
 
-/// One item the watch moved: its entry, its path below the watched folder, and what it was.
+/// One item the watch moved: its entry, its path below the watched folder, what it was, and
+/// whether a pool user (the agent) owned it.
 #[derive(Debug, Clone)]
 pub(crate) struct Moved {
     pub(crate) entry: Entry,
     pub(crate) path: PathBuf,
     pub(crate) what: SetAsideWhat,
+    /// Whether the owner read from the handle the move renamed is a pool SID the machine's record
+    /// names: the agent made it. One whose owner couldn't be read is not, so the lawyer's notice
+    /// says how to put back what the lawyer may have made.
+    pub(crate) by_agent: bool,
 }
 
 /// One item the watch found and couldn't move (a sharing violation while the agent holds a
@@ -87,6 +95,10 @@ pub(crate) struct Live {
     /// Each item, by its path below the watched folder, that was reported or found and was gone
     /// before it could be moved.
     pub(crate) gone: Vec<PathBuf>,
+    /// Each item, by its full path, found and not moved because the session's end couldn't be
+    /// confirmed ([`Hooks::end`] said the agent's job isn't empty yet): the check after the
+    /// session moves it.
+    pub(crate) left: Vec<PathBuf>,
 }
 
 /// Why the watch ends the session.
@@ -100,9 +112,9 @@ pub(crate) enum Ending {
 
 /// What a live check asks of the watch as it runs.
 pub(crate) trait Hooks {
-    /// Ends the session now: the agent's job ended and emptied before this returns, the first
-    /// time; every later call does nothing more.
-    fn end(&self, why: Ending);
+    /// Ends the session now, the first time; every later call ends nothing more. Whether the
+    /// agent's job is truly empty: only then does the check move anything.
+    fn end(&self, why: Ending) -> bool;
     /// A monotonic reading, for [`SCAN_BUDGET`].
     fn now(&self) -> Duration;
 }
@@ -205,7 +217,10 @@ impl Watched {
         &self.root
     }
 
-    /// Checks each path the watch reported made or renamed, relative to the root.
+    /// Checks each path the watch reported made or renamed, relative to the root. First each
+    /// name hit ([`Watched::named`]): one ends the session at once, gone or not, and each is
+    /// moved; then each `.git` part, link and `HEAD` below a launch git folder; only then the
+    /// folders reported, scanned below.
     pub(super) fn changed(
         &self,
         volume: &impl Volume,
@@ -215,11 +230,26 @@ impl Watched {
     ) -> Live {
         let mut live = Live::default();
         let mut run = Run::new(self, volume, now, hooks, &mut live);
+        let (mut hits, mut rest) = (Vec::new(), Vec::new());
         for path in paths {
             let Some(key) = key_of(path) else {
                 tracing::debug!("the watch reported a path that isn't plain; passed over");
                 continue;
             };
+            if self.named(volume, &key) {
+                hits.push(key);
+            } else {
+                rest.push(key);
+            }
+        }
+        if !hits.is_empty() {
+            run.end_found();
+        }
+        for key in &hits {
+            run.check(key, SetAsideWhat::GitRepository);
+        }
+        let mut folders = Vec::new();
+        for key in rest {
             let full = self.path(&key);
             let repo = key.iter().position(|part| is_git(part)).map(|at| at + 1);
             if let Some(end) = repo.or_else(|| self.common_at(&key)) {
@@ -231,19 +261,45 @@ impl Watched {
                 continue;
             };
             let link = meta.file_type().is_symlink();
-            let head = key.last().is_some_and(|name| is_head(name)) && !meta.is_dir();
             if link && self.leads_out(&full) {
                 run.check(&key, SetAsideWhat::LinkOut);
             } else if meta.is_dir() && !link {
-                run.below(&key);
-            } else if head {
-                let folder = full.parent().map(|folder| volume.file_id(folder));
-                if !matches!(folder, Some(Ok(Some(id))) if self.git_folder(id)) {
-                    run.check(&key, SetAsideWhat::GitRepository);
-                }
+                folders.push(key);
             }
         }
+        for key in &folders {
+            run.below(key);
+        }
         live
+    }
+
+    /// Whether the reported `key` is a name hit, which ends the session whether or not anything
+    /// is there now: its own name opens as `.git`, outside every `.git` part; or it is `HEAD`
+    /// outside every `.git`, unless its folder is there and is a launch `.git` by file ID (the
+    /// lawyer's git renames `HEAD.lock` to `HEAD` in a `.git` the lawyer renamed) or it is a
+    /// folder, which git never reads as a `HEAD` (scanned as any folder made is). Below a `.git`
+    /// part (the lawyer's git working in a known one) nothing is a hit.
+    fn named(&self, volume: &impl Volume, key: &[OsString]) -> bool {
+        let Some((last, parents)) = key.split_last() else {
+            return false;
+        };
+        if parents.iter().any(|part| is_git(part)) {
+            return false;
+        }
+        if is_git(last) {
+            return true;
+        }
+        if !is_head(last) {
+            return false;
+        }
+        let full = self.path(key);
+        let folder = std::fs::symlink_metadata(&full)
+            .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+        if folder {
+            return false;
+        }
+        let parent = full.parent().map(|parent| volume.file_id(parent));
+        !matches!(parent, Some(Ok(Some(id))) if self.git_folder(id))
     }
 
     /// Checks each path the watch reported changed in its attributes as a reparse point now:
@@ -269,8 +325,7 @@ impl Watched {
     }
 
     /// Scans the whole folder and moves, as it finds it, what the watch moves that it doesn't
-    /// know: after an overflow, a watch armed again, at the session's end, or every few seconds
-    /// while the watch can't be armed.
+    /// know: after an overflow, and at the session's end.
     pub(super) fn rescan(&self, volume: &impl Volume, now: SystemTime, hooks: &impl Hooks) -> Live {
         let mut live = Live::default();
         let mut run = Run::new(self, volume, now, hooks, &mut live);
@@ -374,213 +429,6 @@ impl Watched {
             through: Vec::new(),
             now,
             kept: Kept::Nested,
-        }
-    }
-}
-
-/// One live check in progress: what it moved so far, and when it began.
-struct Run<'a, V: Volume, H: Hooks> {
-    watched: &'a Watched,
-    volume: &'a V,
-    now: SystemTime,
-    hooks: &'a H,
-    live: &'a mut Live,
-    began: Duration,
-    slow: bool,
-    /// Past [`SCAN_BUDGET`] in a folder made or moved in: the scan stops ([`Step::Stop`]).
-    stopping: bool,
-}
-
-impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
-    fn new(
-        watched: &'a Watched,
-        volume: &'a V,
-        now: SystemTime,
-        hooks: &'a H,
-        live: &'a mut Live,
-    ) -> Self {
-        let began = hooks.now();
-        Run {
-            watched,
-            volume,
-            now,
-            hooks,
-            live,
-            began,
-            slow: false,
-            stopping: false,
-        }
-    }
-
-    /// Scans below the folder `key`, made or moved in, moving as it goes. A folder gone is
-    /// nothing to scan. Past [`SCAN_BUDGET`] the session has ended and the scan stops: an agent
-    /// moving in a vast tree with a repository last would keep it there a long while. A folder a
-    /// pool user owns (one the agent made) is then set aside whole; anyone else's (the lawyer's,
-    /// dragged in while the agent ran) stays, for the check after the session.
-    fn below(&mut self, key: &[OsString]) {
-        let (volume, root) = (self.volume, self.watched.root.clone());
-        let scanned = scan_part_visiting(volume, &root, key, true, &mut |found| {
-            self.visit(found, true)
-        });
-        match scanned {
-            Ok(Some(scan)) if scan.stopped => {
-                self.stopping = false;
-                if self.agents(key) {
-                    self.check(key, SetAsideWhat::UncheckedFolder);
-                } else {
-                    tracing::info!("a folder too big to check in time isn't the agent's; left");
-                }
-            }
-            Ok(_) => {}
-            Err(error) => {
-                let error = error.kind();
-                tracing::debug!(%error, "a reported folder the watch can't scan");
-            }
-        }
-    }
-
-    /// Whether a pool user (the agent) owns the item at `key`: `false` when either can't be read.
-    fn agents(&self, key: &[OsString]) -> bool {
-        let owner = self.volume.owner(&self.watched.path(key));
-        let pool = self.volume.pool();
-        matches!((owner, pool), (Ok(owner), Ok(pool)) if pool.contains(&owner))
-    }
-
-    /// What the scan found, moved at once when the watch moves it and doesn't know it: in a
-    /// folder made or moved in (`new`), a git folder whole; what is below a `.git` is left to
-    /// that one (the known one's tree is denied, an unknown one goes whole). [`Step::Prune`]
-    /// once moved, so nothing below it is scanned.
-    fn visit(&mut self, found: Found<'_>, new: bool) -> Step {
-        if self.stopping {
-            return Step::Stop;
-        }
-        if !self.slow && self.hooks.now().saturating_sub(self.began) > SCAN_BUDGET {
-            self.slow = true;
-            self.hooks.end(Ending::Slow);
-            if new {
-                self.stopping = true;
-                return Step::Stop;
-            }
-        }
-        let watched = self.watched;
-        let in_git = |id: Option<FileId>| id.is_some_and(|id| watched.git_folder(id));
-        match found {
-            Found::Folder => Step::Go,
-            Found::Bare(folder, id) => {
-                if !new || in_git(id) || below_git(folder) || self.head_known(folder) {
-                    return Step::Go;
-                }
-                let item = watched.item(folder, Now::Shut);
-                self.step(&item, SetAsideWhat::GitRepository)
-            }
-            Found::Item(item) => {
-                if below_git(&item.key) {
-                    return Step::Go;
-                }
-                let what = match item.kept {
-                    Kept::Link if watched.leads_out(&item.path) => SetAsideWhat::LinkOut,
-                    Kept::Head if in_git(item.through.last().copied()) => return Step::Go,
-                    Kept::Head | Kept::Common => SetAsideWhat::GitRepository,
-                    Kept::Root | Kept::Nested if ends_in_git(&item.key) => {
-                        SetAsideWhat::GitRepository
-                    }
-                    Kept::Root | Kept::Nested | Kept::Link => return Step::Go,
-                };
-                match item.now {
-                    Now::Absent => Step::Go,
-                    Now::At(id) if watched.knows_as(&item.key, id, what) => Step::Go,
-                    Now::At(_) | Now::Shut | Now::Failed(_) => self.step(item, what),
-                }
-            }
-        }
-    }
-
-    /// Moves `item`; [`Step::Prune`] when it moved.
-    fn step(&mut self, item: &Item, what: SetAsideWhat) -> Step {
-        if self.move_one(item, what) {
-            Step::Prune
-        } else {
-            Step::Go
-        }
-    }
-
-    /// Whether the `HEAD` in the folder `folder` is one the watch knows.
-    fn head_known(&self, folder: &[OsString]) -> bool {
-        let mut key = folder.to_vec();
-        key.push(OsString::from("HEAD"));
-        matches!(
-            self.volume.file_id(&self.watched.path(&key)),
-            Ok(Some(id)) if self.watched.knows_as(&key, id, SetAsideWhat::GitRepository)
-        )
-    }
-
-    /// Moves the item at `key` as `what` unless nothing is there or the watch knows it there.
-    /// One the watch was told of and that is gone is listed in [`Live::gone`].
-    fn check(&mut self, key: &[OsString], what: SetAsideWhat) {
-        let now_at = match self.volume.file_id(&self.watched.path(key)) {
-            Ok(None) => {
-                self.live.gone.push(key.iter().collect());
-                return;
-            }
-            Ok(Some(id)) if self.watched.knows_as(key, id, what) => return,
-            Ok(Some(id)) => Now::At(id),
-            Err(_) => Now::Shut,
-        };
-        let item = self.watched.item(key, now_at);
-        self.move_one(&item, what);
-    }
-
-    /// Ends the session, then moves `item` as `what` under the matter's lock into this pass's
-    /// folder at its own path, as the after-session pass does. Whether it moved. One gone
-    /// meanwhile is listed in [`Live::gone`].
-    fn move_one(&mut self, item: &Item, what: SetAsideWhat) -> bool {
-        // Kill first: nothing of the agent's is alive to race the move, or to put another back.
-        self.hooks.end(Ending::Found);
-        let watched = self.watched;
-        let seen = match what {
-            SetAsideWhat::LinkOut => holds(&watched.links, &item.key, None),
-            SetAsideWhat::GitRepository => holds(&watched.known, &item.key, None),
-            SetAsideWhat::UncheckedFolder => false,
-        };
-        let reason = if seen { Reason::Changed } else { Reason::New };
-        let place = &watched.place;
-        let moved = place
-            .lock()
-            .map_err(|failure| Refused::at(failure, &item.path))
-            .and_then(|held| {
-                let moved = set_aside(
-                    self.volume,
-                    place,
-                    &item.path,
-                    &item.within,
-                    reason,
-                    self.now,
-                );
-                drop(held);
-                moved
-            });
-        match moved {
-            Ok(entry) => {
-                self.live.moved.push(Moved {
-                    entry,
-                    path: item.key.iter().collect(),
-                    what,
-                });
-                true
-            }
-            Err(refused) if refused.failure == SetAsideFailure::Gone => {
-                tracing::debug!("an item went before the watch could set it aside");
-                self.live.gone.push(item.key.iter().collect());
-                false
-            }
-            Err(refused) => {
-                self.live.failed.push(Failed {
-                    path: item.path.clone(),
-                    failure: refused.failure,
-                    what,
-                });
-                false
-            }
         }
     }
 }

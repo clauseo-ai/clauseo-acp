@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::files::{Manifest, Place, io_failure};
-use super::run::{Refused, Volume, items_root, one_part};
+use super::run::{Need, Refused, Volume, items_root, one_part};
 use super::time::{rfc3339, timestamp};
 use super::{Entry, Reason, SetAsideFailure};
 
@@ -20,7 +20,9 @@ const NAMES_TRIED: u32 = 9;
 /// its own name or the first free `~n` one, and adds its manifest entry: an intent first, then,
 /// once the move is done, the finished entry. Names are kept as they are, text or not. The
 /// chain starts at the item's folder's set-aside folder ([`items_root`]: the sandbox folder, or
-/// the one on the item's volume, made or checked first). A failure's `at` is `from`.
+/// the one on the item's volume, made or checked first). A failure's `at` is `from`. The entry's
+/// owner is the one read from the handle the move renamed ([`Volume::move_into`], which refuses
+/// an item `need` doesn't allow); the intent's, read by path before, is for a crash alone.
 pub(super) fn set_aside(
     volume: &impl Volume,
     place: &Place,
@@ -28,6 +30,7 @@ pub(super) fn set_aside(
     within: &[OsString],
     reason: Reason,
     now: SystemTime,
+    need: Need<'_>,
 ) -> Result<Entry, Refused> {
     let refuse = |failure| Refused::at(failure, from);
     let own = from
@@ -58,7 +61,7 @@ pub(super) fn set_aside(
             Ok(Some(_)) => continue,
             Err(error) => return Err(refuse(io_failure(&error))),
         }
-        let entry = Entry {
+        let mut entry = Entry {
             id,
             matter: place.matter(),
             from: from.to_owned(),
@@ -72,14 +75,15 @@ pub(super) fn set_aside(
         };
         manifest.intents.push(entry.clone());
         place.write_manifest(&manifest).map_err(refuse)?;
-        let result = volume.move_into(from, &root, &parts, &entry.name);
+        let result = volume.move_into(from, &root, &parts, &entry.name, need);
         manifest.intents.retain(|intent| intent.id != id);
-        if result.is_ok() {
+        if let Ok(owned) = &result {
+            entry.owner.clone_from(owned);
             manifest.entries.push(entry.clone());
         }
         place.write_manifest(&manifest).map_err(refuse)?;
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 tracing::info!(?reason, "a protected name was set aside");
                 hand_over(volume, &entry.to, "a set-aside item");
                 return Ok(entry);

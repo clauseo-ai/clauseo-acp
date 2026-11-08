@@ -21,6 +21,8 @@ mod heal;
 mod links;
 mod live;
 mod live_ends;
+#[cfg(unix)]
+mod live_hits;
 mod nested;
 #[cfg(unix)]
 mod pool;

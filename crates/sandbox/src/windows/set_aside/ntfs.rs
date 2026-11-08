@@ -8,11 +8,13 @@
 //!   point): each next part is made or opened relative to its parent's handle (`NtCreateFile`
 //!   with `RootDirectory`, `FILE_OPEN_IF` or `FILE_OPEN`, `FILE_DIRECTORY_FILE`,
 //!   `FILE_OPEN_REPARSE_POINT` and `OBJ_DONT_REPARSE`), and refused if a reparse point.
-//! - An item is opened as itself with `DELETE | FILE_READ_ATTRIBUTES` alone, relative to its
-//!   folder's handle (that folder opened by its path as itself, refused if a reparse point or
-//!   if its final path isn't the planned one), its own final path checked against the planned
-//!   one, and renamed on that handle (`NtSetInformationFile(FileRenameInformation)`) into the
-//!   pass folder's handle (`RootDirectory`), `ReplaceIfExists` false. Not
+//! - An item is opened as itself with `DELETE | FILE_READ_ATTRIBUTES` (and `READ_CONTROL`, to
+//!   read its owner from that handle, when its DACL gives it; else without, owner unread),
+//!   relative to its folder's handle (that folder opened by its path as itself, refused if a
+//!   reparse point or if its final path isn't the planned one), its own final path checked
+//!   against the planned one, and renamed on that handle
+//!   (`NtSetInformationFile(FileRenameInformation)`) into the pass folder's handle
+//!   (`RootDirectory`), `ReplaceIfExists` false. Not
 //!   `SetFileInformationByHandle(FileRenameInfo)`: kernelbase refuses a non-NULL
 //!   `RootDirectory` with `ERROR_INVALID_PARAMETER`, which the VM showed. A restore opens the
 //!   item relative to its pass's folder and renames it into its old folder, opened and checked
@@ -55,14 +57,14 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_NAME_NORMALIZED,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
     FileAttributeTagInfo, FileIdInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
 
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
-use super::run::Volume;
+use super::run::{Need, Volume};
 use super::scan::Listed;
 use crate::windows::acl_plan::verbatim;
 use crate::windows::folder::verbatim_wide;
@@ -70,6 +72,7 @@ use crate::windows::private_dir::make_drive_folder;
 use crate::windows::setup::journal::volume_root;
 
 mod forget;
+mod read;
 mod scan;
 mod temps;
 
@@ -120,6 +123,10 @@ impl Volume for Ntfs {
 
     fn probe(&self, folder: &Handle, name: &OsStr) -> io::Result<Option<FileId>> {
         scan::probe(folder, name)
+    }
+
+    fn read_small(&self, folder: &Handle, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
+        read::read_small(folder, name, max)
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
@@ -177,7 +184,8 @@ impl Volume for Ntfs {
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure> {
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure> {
         let folder = folder_chain(sandbox, parts, FILE_OPEN_IF)?;
         let parent_path = from
             .parent()
@@ -187,18 +195,29 @@ impl Volume for Ntfs {
             .ok_or(SetAsideFailure::Io(io::ErrorKind::InvalidInput))?;
         let parent = open_folder(parent_path, PARENT)?;
         let leaf: Vec<u16> = leaf.encode_wide().collect();
-        let item = open_at(
-            &parent,
-            &leaf,
-            MOVE,
-            FILE_OPEN,
-            NTCREATEFILE_CREATE_OPTIONS(0),
-        )
-        .map_err(|e| gone_or(&e))?;
+        let options = NTCREATEFILE_CREATE_OPTIONS(0);
+        // The owner comes from this very handle, the one renamed: never a read by path before.
+        let (item, owner) = match open_at(&parent, &leaf, MOVE | READ_CONTROL.0, FILE_OPEN, options)
+        {
+            Ok(item) => {
+                let owner = read::owner_of(&item).ok();
+                (item, owner)
+            }
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                let item =
+                    open_at(&parent, &leaf, MOVE, FILE_OPEN, options).map_err(|e| gone_or(&e))?;
+                (item, None)
+            }
+            Err(error) => return Err(gone_or(&error)),
+        };
         if !same_path(&item, from).map_err(|e| io_failure(&e))? {
             return Err(SetAsideFailure::Changed);
         }
-        rename(&item, &folder, &wide_os(name)).map_err(|e| failure(&e))
+        if !need.allows(owner.as_deref()) {
+            return Err(SetAsideFailure::NotTheAgents);
+        }
+        rename(&item, &folder, &wide_os(name)).map_err(|e| failure(&e))?;
+        Ok(owner)
     }
 
     fn move_back(
@@ -405,6 +424,19 @@ fn open_at(
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
     options: NTCREATEFILE_CREATE_OPTIONS,
 ) -> io::Result<Handle> {
+    open_at_status(folder, name, access, disposition, options).map(|(handle, _, _)| handle)
+}
+
+/// [`open_at`], with the open's own status and its `IO_STATUS_BLOCK.Information`: an open with
+/// `FILE_COMPLETE_IF_OPLOCKED` succeeds with `STATUS_OPLOCK_BREAK_IN_PROGRESS` while an oplock's
+/// break is under way, which the caller reads as it needs (`scan::read_small`).
+fn open_at_status(
+    folder: &Handle,
+    name: &[u16],
+    access: u32,
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+    options: NTCREATEFILE_CREATE_OPTIONS,
+) -> io::Result<(Handle, NTSTATUS, usize)> {
     let bytes = u16::try_from(name.len() * 2)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let unicode = UNICODE_STRING {
@@ -444,7 +476,7 @@ fn open_at(
     if done.is_err() {
         return Err(nt_error(done));
     }
-    Ok(Handle(handle))
+    Ok((Handle(handle), done, status.Information))
 }
 
 /// Whether the handle's file or folder is a reparse point.

@@ -17,6 +17,7 @@ use crate::windows::write::rename_new;
 
 mod round3;
 mod round4;
+mod round5;
 
 fn launch() -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(1_762_337_700_123)
