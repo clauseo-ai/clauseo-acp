@@ -6,8 +6,8 @@
 //! session: fail closed. Each watch has a watchdog thread (`git_watch::watchdog`) that ends the
 //! session when one check stays busy past the budget: a call blocked on an agent's oplock never
 //! leaves the matter unwatched while the agent runs. The watches' records (the lawyer's notices
-//! and the set-asides) go to the host's denial pipe (`denial_pipe`), opened here before the
-//! agent runs, or only to the log when the launch names none.
+//! and the set-asides) go to the host's denial pipe (`denial_pipe`), connected just before
+//! (`start.rs`), or only to the log when the launch names none.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -24,7 +24,6 @@ use super::super::git_watch::{Cause, Changes, Dog, Guard, Pulse, Session, watch,
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
 use crate::windows::denial_pipe::Record;
-use crate::windows::denial_pipe::os::open_sink;
 use crate::windows::denial_pipe::sink::RecordSink;
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
 
@@ -283,7 +282,11 @@ fn pause(wait: Duration) {
 /// Starts the watches on `message`'s matter folder and its notes folder, if any, and keeps them
 /// in `end`'s steps, for their [`stop_watch`](super::end::OsEnd::stop_watch). A folder that
 /// can't be watched refuses the launch, in plain words; so does a thread that can't be started.
-pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
+pub(super) fn keep(
+    message: &LaunchMessage,
+    end: &End,
+    records: Arc<RecordSink>,
+) -> Result<(), Failure> {
     let stop = Arc::new(
         Stop::new().map_err(|error| Failure::new(RunExit::Spawn, os("the git watch", &error)))?,
     );
@@ -294,7 +297,6 @@ pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
             .as_ref()
             .map(|notes| (PathBuf::from(notes), Folder::Other)),
     );
-    let records = Arc::new(open_sink(message.denial_pipe.as_deref()));
     let mut done = Vec::new();
     for (root, folder) in &folders {
         let started = start(

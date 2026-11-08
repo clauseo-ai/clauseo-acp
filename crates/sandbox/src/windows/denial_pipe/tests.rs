@@ -1,17 +1,18 @@
-//! The denial pipe's names, descriptor and records, and the outer's sink, on every OS: a round
-//! trip, the strict decode's refusals, and a stderr line in the old shape read as nothing.
+//! The denial pipe's names and records, and the outer's sink, on every OS: a round trip, the
+//! strict decode's refusals, a stderr line in the old shape read as nothing, and the feed that
+//! refuses the launch when the pipe it names can't be opened.
 
 use std::io::{self, BufReader, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::sink::{RecordSink, Sent};
+use super::sink::{RecordSink, Sent, open_feed};
 use super::{
-    DENIAL_PIPE_PREFIX, NotADenialPipe, RECORD_CAP, Record, RecordError, check_pipe_name, decode,
-    denial_pipe_sddl, encode, random_pipe_name, read_record,
+    NotADenialPipe, RECORD_CAP, Record, RecordError, check_pipe_name, decode, denial_pipe_name,
+    encode, read_record,
 };
-use crate::windows::sids::Sid;
+use crate::windows::pipe::PipeSet;
 use crate::{Denial, SetAsideWhat};
 
 fn moved() -> Record {
@@ -23,7 +24,7 @@ fn moved() -> Record {
 }
 
 #[test]
-fn a_record_round_trips_as_one_versioned_json_line() {
+fn a_record_round_trips_as_one_kind_tagged_json_line() {
     for record in [
         moved(),
         Record::notice("Clauseo stopped this session \"now\"\n."),
@@ -31,13 +32,13 @@ fn a_record_round_trips_as_one_versioned_json_line() {
         let line = encode(&record).unwrap();
         assert_eq!(line.last(), Some(&b'\n'));
         assert_eq!(line.iter().position(|b| *b == b'\n'), Some(line.len() - 1));
-        assert!(line.starts_with(br#"{"v":1,"record":{"kind":"#));
+        assert!(line.starts_with(br#"{"kind":"#));
         assert_eq!(decode(&line).unwrap(), record);
     }
     assert_eq!(
         String::from_utf8(encode(&moved()).unwrap()).unwrap(),
-        "{\"v\":1,\"record\":{\"kind\":\"set_aside\",\"path\":\"Precedents\\\\.git\",\"to\":\
-         \"C:\\\\Users\\\\lawyer\\\\Clauseo\\\\aside\\\\.git\",\"what\":\"git_repository\"}}\n"
+        "{\"kind\":\"set_aside\",\"path\":\"Precedents\\\\.git\",\"to\":\
+         \"C:\\\\Users\\\\lawyer\\\\Clauseo\\\\aside\\\\.git\",\"what\":\"git_repository\"}\n"
     );
     assert_eq!(
         moved().denial(),
@@ -50,22 +51,33 @@ fn a_record_round_trips_as_one_versioned_json_line() {
     assert_eq!(Record::notice("x").denial(), None);
 }
 
+/// The launcher's stand-in reader (PR6 C4, `launch/records.rs`) writes the same set-aside line.
 #[test]
-fn the_decode_refuses_other_versions_unknown_shapes_garbage_and_oversize() {
-    let good = r#"{"v":1,"record":{"kind":"notice","text":"hi"}}"#;
-    assert_eq!(decode(good.as_bytes()).unwrap(), Record::notice("hi"));
+fn the_launchers_set_aside_line_reads_back() {
+    let line = br#"{"kind":"set_aside","path":"a\\.git","to":"C:\\x\\.git","what":"link_out"}"#;
     assert_eq!(
-        decode(br#"{"v":2,"record":{"kind":"notice","text":"hi"}}"#),
-        Err(RecordError::Version(2))
+        decode(line).unwrap(),
+        Record::SetAside {
+            path: r"a\.git".to_owned(),
+            to: r"C:\x\.git".to_owned(),
+            what: SetAsideWhat::LinkOut,
+        }
     );
+}
+
+#[test]
+fn the_decode_refuses_unknown_shapes_garbage_and_oversize() {
+    let good = r#"{"kind":"notice","text":"hi"}"#;
+    assert_eq!(decode(good.as_bytes()).unwrap(), Record::notice("hi"));
     for bad in [
-        r#"{"record":{"kind":"notice","text":"hi"}}"#,
-        r#"{"v":1,"record":{"kind":"notice","text":"hi"},"extra":1}"#,
-        r#"{"v":1,"record":{"kind":"notice","text":"hi","extra":1}}"#,
-        r#"{"v":1,"record":{"kind":"denial","text":"hi"}}"#,
-        r#"{"v":1,"record":{"kind":"set_aside","path":"a","to":"b","what":"anything"}}"#,
-        r#"{"v":1,"record":{"kind":"set_aside","path":"a","to":"b"}}"#,
-        r#"{"v":1,"record":{"kind":"notice","text":"hi"}} {"v":1}"#,
+        r#"{"v":1,"kind":"notice","text":"hi"}"#,
+        r#"{"v":1,"record":{"kind":"notice","text":"hi"}}"#,
+        r#"{"kind":"notice","text":"hi","extra":1}"#,
+        r#"{"kind":"denial","text":"hi"}"#,
+        r#"{"text":"hi"}"#,
+        r#"{"kind":"set_aside","path":"a","to":"b","what":"anything"}"#,
+        r#"{"kind":"set_aside","path":"a","to":"b"}"#,
+        r#"{"kind":"notice","text":"hi"} {"kind":"notice","text":"hi"}"#,
         "",
         "\u{0}\u{1}garbage",
     ] {
@@ -76,11 +88,11 @@ fn the_decode_refuses_other_versions_unknown_shapes_garbage_and_oversize() {
     }
     let long = Record::notice("x".repeat(RECORD_CAP));
     assert_eq!(encode(&long), Err(RecordError::TooLong));
-    let mut huge = br#"{"v":1,"record":{"kind":"notice","text":""#.to_vec();
+    let mut huge = br#"{"kind":"notice","text":""#.to_vec();
     huge.resize(RECORD_CAP + 1, b'x');
     assert_eq!(decode(&huge), Err(RecordError::TooLong));
     // The error never quotes what it read.
-    let quoted = decode(br#"{"v":1,"record":{"kind":"tok-SECRET"}}"#).unwrap_err();
+    let quoted = decode(br#"{"kind":"tok-SECRET"}"#).unwrap_err();
     assert!(!quoted.to_string().contains("SECRET"), "{quoted}");
 }
 
@@ -128,43 +140,37 @@ fn a_forged_stderr_line_makes_no_denial_and_no_notice() {
 }
 
 #[test]
-fn a_pipe_name_is_the_local_root_the_prefix_and_32_hex() {
-    let name = random_pipe_name().unwrap();
-    assert!(name.starts_with(&format!(r"\\.\pipe\{DENIAL_PIPE_PREFIX}")));
+fn a_pipe_name_is_a_runner_pipe_sets_denials_pipe() {
+    let set = PipeSet::random().unwrap();
+    let name = denial_pipe_name(&set);
+    assert_eq!(name, format!(r"\\.\pipe\{}-denials", set.base()));
     assert_eq!(check_pipe_name(&name), Ok(()));
-    assert_ne!(name, random_pipe_name().unwrap());
     let hex = "0123456789abcdef0123456789abcdef";
     let short = "123456789abcdef0123456789abcdef";
     assert_eq!(
-        check_pipe_name(&format!(r"\\.\pipe\clauseo-denials-{hex}")),
+        check_pipe_name(&format!(r"\\.\pipe\clauseo-run-{hex}-denials")),
         Ok(())
     );
     for bad in [
-        format!(r"\\server\pipe\clauseo-denials-{hex}"),
-        format!(r"\\?\pipe\clauseo-denials-{hex}"),
-        format!(r"\\.\PIPE\clauseo-denials-{hex}"),
+        format!(r"\\server\pipe\clauseo-run-{hex}-denials"),
+        format!(r"\\?\pipe\clauseo-run-{hex}-denials"),
+        format!(r"\\.\PIPE\clauseo-run-{hex}-denials"),
         format!(r"\\.\pipe\clauseo-run-{hex}-err"),
-        format!(r"\\.\pipe\clauseo-denials-{}", hex.to_uppercase()),
-        format!(r"\\.\pipe\clauseo-denials-{hex}0"),
-        format!(r"\\.\pipe\clauseo-denials-{short}"),
-        format!(r"\\.\pipe\clauseo-denials-{hex}\..\x"),
-        format!(r"\\.\pipe\x\..\clauseo-denials-{hex}"),
-        format!(r"C:\clauseo-denials-{hex}"),
-        format!("clauseo-denials-{hex}"),
-        format!("\\\\.\\pipe\\clauseo-denials-{short}\0"),
+        format!(r"\\.\pipe\clauseo-run-{hex}-ctl"),
+        format!(r"\\.\pipe\clauseo-run-{hex}"),
+        format!(r"\\.\pipe\clauseo-denials-{hex}"),
+        format!(r"\\.\pipe\clauseo-run-{}-denials", hex.to_uppercase()),
+        format!(r"\\.\pipe\clauseo-run-{hex}0-denials"),
+        format!(r"\\.\pipe\clauseo-run-{short}-denials"),
+        format!(r"\\.\pipe\clauseo-run-{hex}-denials\..\x"),
+        format!(r"\\.\pipe\x\..\clauseo-run-{hex}-denials"),
+        format!(r"C:\clauseo-run-{hex}-denials"),
+        format!("clauseo-run-{hex}-denials"),
+        format!("\\\\.\\pipe\\clauseo-run-{hex}-denials\0"),
         String::new(),
     ] {
         assert_eq!(check_pipe_name(&bad), Err(NotADenialPipe), "{bad:?}");
     }
-}
-
-#[test]
-fn the_pipes_descriptor_names_the_lawyer_alone() {
-    let lawyer = Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
-    assert_eq!(
-        denial_pipe_sddl(&lawyer),
-        "D:P(A;;0x12019b;;;S-1-5-21-1-2-3-1001)S:(ML;;NWNR;;;ME)"
-    );
 }
 
 /// A writer the test reads back; it fails every write once `broken`.
@@ -228,4 +234,44 @@ fn with_no_pipe_or_a_broken_one_records_are_only_logged() {
         sink.send(&Record::notice("x".repeat(RECORD_CAP))),
         Sent::Logged
     );
+}
+
+/// No pipe named: a sink that only logs, and nothing is opened.
+#[test]
+fn with_no_pipe_named_the_feed_only_logs() {
+    let sink = open_feed(None, |_name| -> io::Result<Pipe> {
+        panic!("nothing is opened")
+    })
+    .unwrap();
+    assert_eq!(sink.send(&moved()), Sent::Logged);
+}
+
+/// A pipe named but taken, gone or unreachable refuses the launch, in plain words; one that
+/// opens takes the records.
+#[test]
+fn a_named_pipe_that_cant_be_opened_refuses_the_launch_in_plain_words() {
+    let name = denial_pipe_name(&PipeSet::random().unwrap());
+    for (code, why) in [
+        (231, "another program was already connected to it"),
+        (2, "it had already closed"),
+        (53, "it couldn't be reached (error 53)"),
+    ] {
+        let Err(said) = open_feed(Some(&name), |opened| -> io::Result<Pipe> {
+            assert_eq!(opened, name);
+            Err(io::Error::from_raw_os_error(code))
+        }) else {
+            panic!("{code}: the launch went on");
+        };
+        assert!(
+            said.starts_with("Clauseo didn't start the session"),
+            "{said}"
+        );
+        assert!(said.contains(why), "{said}");
+        assert!(!said.contains(&name), "{said}");
+    }
+    let pipe = Pipe::default();
+    let sink = open_feed(Some(&name), |_name| Ok(pipe.clone())).unwrap();
+    assert_eq!(sink.send(&moved()), Sent::Queued);
+    sink.drain(Duration::from_secs(5));
+    assert!(!pipe.bytes.lock().unwrap().is_empty());
 }

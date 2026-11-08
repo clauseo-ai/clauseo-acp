@@ -4,33 +4,34 @@
 //! The outer's stderr carries the agent's stderr too (the relay in `runner/outer.rs`), so
 //! nothing read from it is trusted: a line there never makes a [`Denial`] or a notice. Instead:
 //!
-//! - **The pipe:** the host makes `\\.\pipe\clauseo-denials-<32 hex>` ([`random_pipe_name`],
-//!   128 random bits per launch) before it starts the runner, with [`denial_pipe_sddl`]: the
-//!   lawyer alone, protected, and a Medium label with no-read-up and no-write-up, so neither a
-//!   pool user nor a Low process opens it. One instance, made first or refused, inbound, local
-//!   clients only ([`os::DenialServer::create`] on Windows). Its name goes in the launch message
-//!   (`LaunchMessage::denial_pipe`), which only the lawyer can read; the pool user never sees it.
-//! - **The client:** the outer checks the name ([`check_pipe_name`]), opens it write-only with
-//!   identification-only quality of service (so the host can't act as the lawyer through it) and
-//!   checks it is a pipe, before the inner runner starts. A launch with no name, or a pipe that
-//!   can't be opened, leaves the records in the outer's log only, never on stderr.
-//! - **The host** takes records only from a client whose pid is the runner it started
-//!   (`DenialServer::client_pid`), reads them with [`read_record`] and stops at the first error.
-//! - **The records:** one JSON object per line, `{"v":1,"record":{"kind":...}}` ([`encode`]),
-//!   at most [`RECORD_CAP`] bytes with its newline. [`decode`] is strict: this version only,
-//!   no unknown field or kind, nothing longer. A [`Record::SetAside`] becomes the session's
-//!   [`Denial::SetAside`] ([`Record::denial`]); a [`Record::Notice`] is for the lawyer.
+//! - **The pipe** is the host's (PR6's launcher): a runner pipe set's `denials` pipe,
+//!   `\\.\pipe\clauseo-run-<32 hex>-denials` ([`denial_pipe_name`], the same name as the
+//!   launcher's `PipeSet::name(Role::Denials)`), the desktop user alone in its DACL, the Medium
+//!   label, one instance made first and local clients only. Its name goes in the launch message
+//!   (`LaunchMessage::denial_pipe`), which only the desktop user can read.
+//! - **The client:** the outer checks the name ([`check_pipe_name`]) and opens it, write-only,
+//!   not inheritable, with identification-only quality of service, and checks it is a pipe
+//!   (`os::open_writer`), before anything runs as the pool user (`runner/start.rs`). It takes
+//!   the one instance, so nothing of the agent's can race for it. When the launch names a pipe
+//!   that is taken, gone or can't be reached, the launch fails, in plain words. A launch that
+//!   names none leaves the records in the outer's log only, never on stderr.
+//! - **The records:** one JSON object per line, tagged by `kind` (`{"kind":"set_aside","path":
+//!   …,"to":…,"what":"git_repository"}`, `{"kind":"notice","text":…}`; [`encode`]), at most
+//!   [`RECORD_CAP`] bytes with its newline. Kinds are appended, never renamed; the runner and the
+//!   host ship together, and a change of shape bumps `LAUNCH_VERSION`. [`decode`] is strict: no
+//!   unknown field or kind, nothing longer. A [`Record::SetAside`] becomes the session's
+//!   [`Denial::SetAside`] ([`Record::denial`]); a [`Record::Notice`] is for the lawyer. The
+//!   host reads them with [`read_record`] and stops at the first error.
 //!
-//! The names, the DACL and the records hold no Windows call, so their tests run on every OS.
+//! The names and the records hold no Windows call, so their tests run on every OS.
 
 use std::fmt;
-use std::io::{self, BufRead, Read as _};
+use std::io::{BufRead, Read as _};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::pipe::{PIPE_RIGHTS, PIPE_ROOT, hex};
-use super::sids::Sid;
+use super::pipe::{PIPE_ROOT, PipeSet};
 use crate::{Denial, SetAsideWhat};
 
 #[cfg(windows)]
@@ -38,10 +39,8 @@ pub mod os;
 #[cfg(any(windows, test))]
 pub(crate) mod sink;
 
-/// The start of a denial pipe's name, after `\\.\pipe\`.
-pub const DENIAL_PIPE_PREFIX: &str = "clauseo-denials-";
-/// The records' format version.
-pub const RECORD_VERSION: u32 = 1;
+/// The denial pipe's name after its set's base: the launcher's `Role::Denials` suffix.
+pub const DENIALS_SUFFIX: &str = "-denials";
 /// The longest record, its newline included: two Windows paths of 32767 UTF-16 units, each at
 /// most three bytes in UTF-8, with room for JSON's escapes.
 pub const RECORD_CAP: usize = 256 * 1024;
@@ -51,34 +50,22 @@ pub const RECORD_CAP: usize = 256 * 1024;
 #[error("not a denial pipe's name")]
 pub struct NotADenialPipe;
 
-/// A new denial pipe's full name, `\\.\pipe\clauseo-denials-<32 lowercase hex>`, with 128
-/// random bits from the OS.
-pub fn random_pipe_name() -> io::Result<String> {
-    let mut bits = [0u8; 16];
-    getrandom::fill(&mut bits).map_err(|error| io::Error::other(error.to_string()))?;
-    Ok(format!("{PIPE_ROOT}{DENIAL_PIPE_PREFIX}{}", hex(&bits)))
+/// The denial pipe of the runner pipe set `set`: `\\.\pipe\clauseo-run-<32 hex>-denials`.
+pub fn denial_pipe_name(set: &PipeSet) -> String {
+    format!("{PIPE_ROOT}{}{DENIALS_SUFFIX}", set.base())
 }
 
-/// Refuses `name` unless it is exactly what [`random_pipe_name`] makes: the local pipe root,
-/// the prefix and 32 lowercase hex, nothing else (no server, no other folder, no `..`).
+/// Refuses `name` unless it is exactly what [`denial_pipe_name`] makes: the local pipe root, a
+/// pipe set's base (`clauseo-run-` and 32 lowercase hex) and `-denials`, nothing else (no
+/// server, no other folder, no `..`).
 pub fn check_pipe_name(name: &str) -> Result<(), NotADenialPipe> {
-    let hex = name
+    let base = name
         .strip_prefix(PIPE_ROOT)
-        .and_then(|rest| rest.strip_prefix(DENIAL_PIPE_PREFIX))
+        .and_then(|rest| rest.strip_suffix(DENIALS_SUFFIX))
         .ok_or(NotADenialPipe)?;
-    let lower_hex = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
-    if hex.len() == 32 && hex.bytes().all(lower_hex) {
-        Ok(())
-    } else {
-        Err(NotADenialPipe)
-    }
-}
-
-/// The denial pipe's descriptor: protected, the lawyer (the desktop user the host and the outer
-/// run as) with [`PIPE_RIGHTS`] and no one else, and a Medium label with no-write-up and
-/// no-read-up.
-pub fn denial_pipe_sddl(lawyer: &Sid) -> String {
-    format!("D:P(A;;0x{PIPE_RIGHTS:x};;;{lawyer})S:(ML;;NWNR;;;ME)")
+    PipeSet::parse(base)
+        .map(drop)
+        .map_err(|_bad| NotADenialPipe)
 }
 
 /// What the outer tells the host. Kinds are appended, never renamed: the host reads them.
@@ -152,9 +139,6 @@ pub enum RecordError {
     /// Longer than [`RECORD_CAP`] bytes.
     #[error("the record is longer than {RECORD_CAP} bytes")]
     TooLong,
-    /// Another format version.
-    #[error("the record is version {0}, this reads {RECORD_VERSION}")]
-    Version(u32),
     /// Not a record of this shape; where it failed.
     #[error("not a record (column {0})")]
     Malformed(usize),
@@ -163,32 +147,14 @@ pub enum RecordError {
     Truncated,
     /// The pipe failed.
     #[error("the denial pipe failed: {0}")]
-    Io(io::ErrorKind),
-}
-
-/// One line on the pipe: the version, then the record.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Line {
-    v: u32,
-    record: Record,
-}
-
-/// A line's version alone, read first so another version is named as such.
-#[derive(Deserialize)]
-struct Version {
-    v: u32,
+    Io(std::io::ErrorKind),
 }
 
 /// `record` as one line of the pipe, its newline included; refused past [`RECORD_CAP`], so
 /// nothing is written that the host would refuse.
 pub fn encode(record: &Record) -> Result<Vec<u8>, RecordError> {
-    let line = Line {
-        v: RECORD_VERSION,
-        record: record.clone(),
-    };
     let mut bytes =
-        serde_json::to_vec(&line).map_err(|error| RecordError::Malformed(error.column()))?;
+        serde_json::to_vec(record).map_err(|error| RecordError::Malformed(error.column()))?;
     bytes.push(b'\n');
     if bytes.len() > RECORD_CAP {
         return Err(RecordError::TooLong);
@@ -196,20 +162,14 @@ pub fn encode(record: &Record) -> Result<Vec<u8>, RecordError> {
     Ok(bytes)
 }
 
-/// The record one line holds, with or without its newline: [`RECORD_VERSION`] only, no
-/// unknown field or kind, at most [`RECORD_CAP`] bytes.
+/// The record one line holds, with or without its newline: no unknown field or kind, at most
+/// [`RECORD_CAP`] bytes.
 pub fn decode(line: &[u8]) -> Result<Record, RecordError> {
     if line.len() > RECORD_CAP {
         return Err(RecordError::TooLong);
     }
     let line = line.strip_suffix(b"\n").unwrap_or(line);
-    let malformed = |error: serde_json::Error| RecordError::Malformed(error.column());
-    let version: Version = serde_json::from_slice(line).map_err(malformed)?;
-    if version.v != RECORD_VERSION {
-        return Err(RecordError::Version(version.v));
-    }
-    let line: Line = serde_json::from_slice(line).map_err(malformed)?;
-    Ok(line.record)
+    serde_json::from_slice(line).map_err(|error| RecordError::Malformed(error.column()))
 }
 
 /// The next record on `reader`, or `None` at the end of the stream. It reads at most

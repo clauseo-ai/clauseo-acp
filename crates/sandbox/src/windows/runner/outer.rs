@@ -207,9 +207,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
             os(&format!("the agent's window station: {call}"), &e),
         )
     })?;
-    // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
-    // first act is the sweep of every other process of the pool user's. The job's one handle stays
-    // this process's, so the job's processes end with it.
+    // The denial pipe, the git watch (`outer/watch.rs`), the logon, the user's check, the job, the
+    // shut, then the resume (`start.rs`); the inner's first act is the sweep of every other process
+    // of the pool user's. The job's one handle stays this process's, so the job's processes end
+    // with it.
     let mut steps = Start {
         pool_name: &message.pool_name,
         pool_user: &message.pool_user,
@@ -221,10 +222,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: &steps.cwd,
         job,
         end,
+        message,
+        records: None,
     };
-    // The git watch on the matter's folder, armed before the agent runs (`outer/watch.rs`). It
-    // can end the session from here: then `start` makes no inner, or kills it unresumed.
-    watch::keep(message, end)?;
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {
         pool_user: message.pool_user.clone(),

@@ -1,5 +1,7 @@
 //! The order the outer runner starts the inner runner in (M1), apart from its calls so the tests
-//! hold it on every OS: the logon, the check of the inner's token user, the job, the shut of its
+//! hold it on every OS: the host's denial pipe connected (its one instance taken, so nothing of
+//! the agent's can race for it; one named that can't be opened refuses the launch), the git watch
+//! armed, the logon, the check of the inner's token user, the job, the shut of its
 //! process and thread, and only then the resume. A step that fails after the logon kills the
 //! suspended inner runner, which never runs.
 //!
@@ -20,6 +22,10 @@
 
 /// The outer's steps; Windows' are `outer/steps.rs`'s.
 pub(crate) trait Steps {
+    /// Connects the host's denial pipe, when the launch names one (`denial_pipe`).
+    fn feed(&mut self) -> Result<(), Self::Error>;
+    /// Arms the git watch, whose records go to that pipe (`outer/watch.rs`).
+    fn watch(&mut self) -> Result<(), Self::Error>;
     /// The suspended inner runner.
     type Inner;
     /// A failure, which ends the launch.
@@ -40,9 +46,11 @@ pub(crate) trait Steps {
     fn not_ended(&mut self) -> Result<(), Self::Error>;
 }
 
-/// Runs the steps in order, the end checked before the logon, after the assign and before the
-/// resume; the running inner runner, or the first failure.
+/// Runs the steps in order: the feed and the watch first, then the end checked before the logon,
+/// after the assign and before the resume; the running inner runner, or the first failure.
 pub(crate) fn start<S: Steps>(steps: &mut S) -> Result<S::Inner, S::Error> {
+    steps.feed()?;
+    steps.watch()?;
     steps.not_ended()?;
     let inner = steps.log_on()?;
     let started = steps
@@ -91,6 +99,12 @@ mod tests {
     impl Steps for Record {
         type Inner = u32;
         type Error = String;
+        fn feed(&mut self) -> Result<(), String> {
+            self.step("feed")
+        }
+        fn watch(&mut self) -> Result<(), String> {
+            self.step("watch")
+        }
         fn log_on(&mut self) -> Result<u32, String> {
             self.step("log on").map(|()| 7)
         }
@@ -121,7 +135,9 @@ mod tests {
         }
     }
 
-    const ORDER: [&str; 8] = [
+    const ORDER: [&str; 10] = [
+        "feed",
+        "watch",
         "not ended",
         "log on",
         "check user",
@@ -147,12 +163,34 @@ mod tests {
             ..Record::default()
         };
         assert_eq!(start(&mut record), Err("log on".to_owned()));
-        assert_eq!(record.done, ["not ended", "log on"]);
+        assert_eq!(record.done, ["feed", "watch", "not ended", "log on"]);
+    }
+
+    /// The denial pipe is connected before anything else, and one that can't be opened (taken,
+    /// gone) refuses the launch: no watch, no logon, no inner. So does a watch that can't arm.
+    #[test]
+    fn the_feed_is_connected_first_and_a_failed_one_starts_no_inner() {
+        let mut record = Record {
+            fail: Some("feed"),
+            ..Record::default()
+        };
+        assert_eq!(start(&mut record), Err("feed".to_owned()));
+        assert_eq!(record.done, ["feed"]);
+        let mut record = Record {
+            fail: Some("watch"),
+            ..Record::default()
+        };
+        assert_eq!(start(&mut record), Err("watch".to_owned()));
+        assert_eq!(record.done, ["feed", "watch"]);
+        let mut record = Record::default();
+        assert_eq!(start(&mut record), Ok(7));
+        let at = |name: &str| record.done.iter().position(|s| s == name).unwrap();
+        assert!(at("feed") < at("watch") && at("watch") < at("log on"));
     }
 
     #[test]
     fn a_failure_after_logon_kills_the_inner_and_never_resumes_it() {
-        for (at, step) in ORDER.iter().enumerate().skip(2) {
+        for (at, step) in ORDER.iter().enumerate().skip(4) {
             if *step == "not ended" {
                 continue;
             }
@@ -176,7 +214,14 @@ mod tests {
             ..Record::default()
         };
         assert_eq!(start(&mut record), Err("ended".to_owned()));
-        assert_eq!(record.done, ["not ended"]);
+        assert_eq!(record.done, ["feed", "watch", "not ended"]);
+        // The watch, once armed, ended it before the logon: the same.
+        let mut record = Record {
+            end_at: Some("watch"),
+            ..Record::default()
+        };
+        assert_eq!(start(&mut record), Err("ended".to_owned()));
+        assert_eq!(record.done, ["feed", "watch", "not ended"]);
     }
 
     /// An end that begins at any step before the resume, the one between the check after the
@@ -184,7 +229,7 @@ mod tests {
     /// that begins at the resume finds the inner in the job, whose end ends it.
     #[test]
     fn an_end_racing_the_start_is_caught_before_the_resume() {
-        for (at, step) in ORDER.iter().enumerate().skip(1) {
+        for (at, step) in ORDER.iter().enumerate().skip(3) {
             if *step == "not ended" || *step == "resume" {
                 continue;
             }
