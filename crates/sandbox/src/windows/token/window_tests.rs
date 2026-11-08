@@ -76,7 +76,7 @@ fn the_last_descriptors_are_the_verified_ones() {
     );
     assert_eq!(
         desktop_sddl(&lawyer, &pool, None),
-        format!("D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0xC7;;;{POOL})S:(ML;;NW;;;LW)")
+        format!("D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0x200C7;;;{POOL})S:(ML;;NW;;;LW)")
     );
 }
 
@@ -93,7 +93,7 @@ fn the_matter_sid_gets_the_pool_users_rights_after_the_pool_user() {
     assert_eq!(
         desktop_sddl(&lawyer, &pool, Some(&matter)),
         format!(
-            "D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0xC7;;;{POOL})(A;;0xC7;;;{MATTER})\
+            "D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{LAWYER})(A;;0x200C7;;;{POOL})(A;;0x200C7;;;{MATTER})\
              S:(ML;;NW;;;LW)"
         )
     );
@@ -159,7 +159,23 @@ fn no_pool_sid_and_no_owner_can_take_either_over() {
 fn the_pool_user_gets_exactly_the_rights_user32_needs() {
     let (lawyer, pool) = (sid(LAWYER), sid(POOL));
     assert_eq!(mask_of(&station_sddl(&lawyer, &pool, None), POOL), 0x2007F);
-    assert_eq!(mask_of(&desktop_sddl(&lawyer, &pool, None), POOL), 0xC7);
+    assert_eq!(mask_of(&desktop_sddl(&lawyer, &pool, None), POOL), 0x200C7);
+}
+
+#[test]
+fn the_pool_user_reads_the_final_desktop_dacl_and_writes_none_of_it() {
+    // READ_CONTROL lets Chrome's sandbox read the desktop's DACL when it builds child desktops;
+    // the rest of the pool's use rights stay as user32 needs them.
+    let (lawyer, pool, matter) = (sid(LAWYER), sid(POOL), sid(MATTER));
+    for sddl in [
+        desktop_sddl(&lawyer, &pool, None),
+        desktop_sddl(&lawyer, &pool, Some(&matter)),
+    ] {
+        let mask = mask_of(&sddl, POOL);
+        assert_eq!(mask & 0x0002_0000, 0x0002_0000, "{sddl}");
+        assert_eq!(mask & TAKE_OVER, 0, "{sddl}");
+        assert_eq!(mask & !0x0002_00C7, 0, "{sddl}");
+    }
 }
 
 #[test]
