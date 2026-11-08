@@ -20,7 +20,10 @@ use crate::{SetupError, SetupState};
 pub const SETUP_FILE: &str = "setup.json";
 /// The set-up version this build makes. A marker below it means set-up must run again. Version 1
 /// named one `ClauseoSandbox` account; version 2 names a group and a pool of users (D9, D-B8).
-pub const SETUP_VERSION: u32 = 2;
+/// Version 3 widens tier B's port range to 46100-46399 and gives each pool user a permit slot
+/// with a new remote-port condition, so a version 2 set-up's permits are stale: set-up runs again
+/// and rewrites them (the marker is what routes the lawyer to it, `detect.rs`).
+pub const SETUP_VERSION: u32 = 3;
 
 /// What `setup.json` holds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

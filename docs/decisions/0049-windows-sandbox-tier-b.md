@@ -292,9 +292,9 @@ build 26100):
     rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's
     random `S-1-5-21-<a>-<b>-<c>-<rid>` SID, optional under D9 (`windows::sids`); PR4 adds
     each matter's assigned pool user.
-  - `<data_dir>\sandbox\setup.json`, the set-up marker (version 2): the set-up version, the
+  - `<data_dir>\sandbox\setup.json`, the set-up marker (version 3): the set-up version, the
     Windows user who ran it, the group's SID, the pool's SIDs and the time
-    (`clauseo_sandbox::windows::marker`). A version 1 marker reads as `Outdated`.
+    (`clauseo_sandbox::windows::marker`). A version 1 or 2 marker reads as `Outdated`.
 - **Set-up state.** `SandboxSetup::state` gives `Ready` only for a current marker of this user
   when `OwnerSid` is this user, `GroupSid` is the marker's group and `PoolSids` holds every pool
   SID the marker names; a set `Removing` gives `Failed` ("removal unfinished: reinstall and
@@ -1385,6 +1385,11 @@ tier-B sessions at once, each binding about two, and a pool of up to 256 users: 
 static permit keeps its key (`filters + 0x100 + index`, indices `0..256`), and the permit's remote
 ports change, so an install set up before this one is refused as `sandbox.setup_required` until
 set-up runs again, which empties the sublayer and rewrites the filters and the block rule in place.
+The refresh task (`\Clauseo\SandboxRefresh`) only swaps the exe and never touches WFP, and a
+`/UPDATE` skips `--adopt`, so the refusal alone would not heal. The set-up marker is therefore
+version 3 (`marker::SETUP_VERSION`): a version 2 marker reads as `Outdated`, which the app shows
+as needing set-up, and set-up rewrites the objects. After an update the widened range needs that
+re-set-up, which the SetUp task runs without a prompt once it lands (this change merges after it).
 
 **The range** (`ports::TIER_B_PORTS`, 46100-46399) holds a tier-B launch's listeners and nothing
 else: its proxy's agent listener and R24 relay (`ports::bind_loopback(ListenerFor::TierB)`,
