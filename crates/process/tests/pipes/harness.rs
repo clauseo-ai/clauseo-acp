@@ -58,16 +58,36 @@ pub(crate) fn launch(scenario: &str, dir: &RunDir) -> Result<Launched, Error> {
     launch_locked(&launch_lock(), scenario, dir)
 }
 
+/// As [`launch`], with `opts` as the launch's options.
+pub(crate) fn launch_with(
+    scenario: &str,
+    dir: &RunDir,
+    opts: &SpawnOptions,
+) -> Result<Launched, Error> {
+    let _lock = launch_lock();
+    let bin = fake_agent_bin();
+    start(bin, &["--scenario", scenario], dir, opts)
+}
+
+/// The `fake_agent` binary, which these tests start.
+fn fake_agent_bin() -> PathBuf {
+    clauseo_fake_agent::bin_path().expect(
+        "fake_agent binary; `-p clauseo-process` does not build it: run `cargo build -p clauseo-fake_agent` first",
+    )
+}
+
 /// As [`launch`], under the launch lock the caller holds.
 pub(crate) fn launch_locked(
     _lock: &MutexGuard<'static, ()>,
     scenario: &str,
     dir: &RunDir,
 ) -> Result<Launched, Error> {
-    let bin = clauseo_fake_agent::bin_path().expect(
-        "fake_agent binary; `-p clauseo-process` does not build it: run `cargo build -p clauseo-fake_agent` first",
-    );
-    start(bin, &["--scenario", scenario], dir)
+    start(
+        fake_agent_bin(),
+        &["--scenario", scenario],
+        dir,
+        &SpawnOptions::new(),
+    )
 }
 
 /// `program` with `args`, started in `dir`.
@@ -77,14 +97,19 @@ pub(crate) fn launch_program(
     dir: &RunDir,
 ) -> Result<Launched, Error> {
     let _lock = launch_lock();
-    start(program, args, dir)
+    start(program, args, dir, &SpawnOptions::new())
 }
 
-/// Starts `program` with `args` in `dir`, under the launch lock the caller holds.
-fn start(program: PathBuf, args: &[&str], dir: &RunDir) -> Result<Launched, Error> {
+/// Starts `program` with `args` in `dir` with `opts`, under the launch lock the caller holds.
+fn start(
+    program: PathBuf,
+    args: &[&str],
+    dir: &RunDir,
+    opts: &SpawnOptions,
+) -> Result<Launched, Error> {
     let args = args.iter().map(OsString::from).collect();
     let spec = LaunchSpec::new(program, args, BTreeMap::new(), dir.path().to_owned())?;
-    let launcher: Arc<dyn Launcher> = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let launcher: Arc<dyn Launcher> = Arc::new(PassthroughLauncher::new(opts.clone()));
     launcher.launch(&spec)
 }
 

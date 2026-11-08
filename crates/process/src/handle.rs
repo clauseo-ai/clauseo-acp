@@ -20,8 +20,9 @@ use crate::os::{Root, Tree};
 use crate::stderr::{self, Redactor, SharedRing};
 use crate::stdin::StdinSlot;
 
-/// How long shutdown waits after closing stdin (ACP agents exit when stdin ends).
-const STDIN_GRACE: Duration = Duration::from_secs(2);
+/// How long shutdown waits after closing stdin, unless the spawn says otherwise
+/// (`SpawnOptions::stdin_grace`). ACP agents exit when stdin ends.
+pub(crate) const STDIN_GRACE: Duration = Duration::from_secs(2);
 /// How long shutdown waits after SIGTERM, before SIGKILL.
 #[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(3);
@@ -44,6 +45,8 @@ pub struct Handle {
     /// Whether the tree has been sent its kill, so `Drop` sends none: on Unix a group id can be
     /// reused once the group is gone.
     tree_killed: bool,
+    /// How long the shutdown waits after closing stdin (`SpawnOptions::stdin_grace`).
+    stdin_grace: Duration,
     /// The start's count (`live.rs`), given back when the handle drops, after the tree's kill.
     _live: Live,
 }
@@ -56,6 +59,7 @@ impl Handle {
         stdin: StdinSlot,
         ring: SharedRing,
         redactor: Arc<Redactor>,
+        stdin_grace: Duration,
         live: Live,
     ) -> Handle {
         Handle {
@@ -67,6 +71,7 @@ impl Handle {
             stdin,
             stderr: StderrSource { ring, redactor },
             tree_killed: false,
+            stdin_grace,
             _live: live,
         }
     }
@@ -93,17 +98,18 @@ impl Handle {
         self.finish(&status)
     }
 
-    /// Stops the agent by the ladder: close its stdin and wait 2 s, then (Unix) SIGTERM to its
-    /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job, and wait 2 s
-    /// more for the exit. Whichever way it exits, what is left of its tree is killed: on Unix the
-    /// group, then every process of `listed` that still runs with its listed start (a command
-    /// in a session of its own has left the group). Take `listed` from
-    /// [`Handle::descendants`] just before, where a blocking listing may run; `None` (a listing
-    /// that failed or was not taken) kills the group only. Windows ends the whole job and does
-    /// not read it. The outcome names the step that ended it, or says the agent never exited.
+    /// Stops the agent by the ladder: close its stdin and wait the stdin grace (2 s unless
+    /// `SpawnOptions::stdin_grace` set another), then (Unix) SIGTERM to its group and wait 3 s,
+    /// then SIGKILL to the group, or on Windows end its job, and wait 2 s more for the exit.
+    /// Whichever way it exits, what is left of its tree is killed: on Unix the group, then every
+    /// process of `listed` that still runs with its listed start (a command in a session of its
+    /// own has left the group). Take `listed` from [`Handle::descendants`] just before, where a
+    /// blocking listing may run; `None` (a listing that failed or was not taken) kills the group
+    /// only. Windows ends the whole job and does not read it. The outcome names the step that
+    /// ended it, or says the agent never exited.
     ///
     /// Keep reading the agent's stdout, or drop it, while this runs: an agent blocked writing to
-    /// a full stdout pipe never sees its stdin close, and costs the whole 2 s and the SIGTERM.
+    /// a full stdout pipe never sees its stdin close, and costs the whole grace and the SIGTERM.
     pub async fn shutdown<T: Timer>(
         mut self,
         timer: &T,
@@ -117,7 +123,7 @@ impl Handle {
         drop(listed);
         self.stdin.close();
         let exit = pin!(self.child.status());
-        let ended = ladder(exit, timer, |step| self.step(step)).await;
+        let ended = ladder(exit, timer, self.stdin_grace, |step| self.step(step)).await;
         match ended {
             Ended::StdinClosed(status) => ShutdownOutcome::StdinClosed(self.finish(&status)),
             #[cfg(unix)]
@@ -221,14 +227,15 @@ enum Ended<S> {
     Unresponsive,
 }
 
-/// The ladder's waits, once stdin is closed: `exit` against each grace period, with `act`
-/// taking the step that follows a wait that ran out.
+/// The ladder's waits, once stdin is closed: `exit` against each grace period (`stdin_grace` for
+/// the first), with `act` taking the step that follows a wait that ran out.
 async fn ladder<S, T: Timer>(
     mut exit: Pin<&mut impl Future<Output = S>>,
     timer: &T,
+    stdin_grace: Duration,
     mut act: impl FnMut(Step),
 ) -> Ended<S> {
-    if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
+    if let Some(status) = within(exit.as_mut(), timer.after(stdin_grace)).await {
         return Ended::StdinClosed(status);
     }
     #[cfg(unix)]
@@ -326,7 +333,8 @@ impl ExitReport {
 /// steps are fixed, and a new one should make every match on it fail to build.
 #[derive(Debug, Clone)]
 pub enum ShutdownOutcome {
-    /// It exited within 2 s of its stdin closing.
+    /// It exited within the stdin grace (2 s unless `SpawnOptions::stdin_grace` set another) of
+    /// its stdin closing.
     StdinClosed(ExitReport),
     /// It exited within 3 s of SIGTERM (Unix only).
     Terminated(ExitReport),
