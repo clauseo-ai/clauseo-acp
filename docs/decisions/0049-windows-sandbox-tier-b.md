@@ -2305,7 +2305,8 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
 - **The change:** from each allow in its DACL that gives a right to rewrite the task
   (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_WRITE_EA`, `FILE_WRITE_ATTRIBUTES`,
   `WRITE_DAC`, `WRITE_OWNER`, `GENERIC_WRITE` or `GENERIC_ALL`; `FILE_ALL_ACCESS` holds the
-  first) to an account a pool user may be, those rights and `DELETE` are taken. An entry left
+  first), or `DELETE`, to an account a pool user may be, those rights are taken: write,
+  `DELETE`, `WRITE_DAC` and `WRITE_OWNER`. An entry left
   with no right goes; a mixed one keeps its other rights and its flags. The accounts a pool user
   may be are Users, Authenticated Users, Everyone, INTERACTIVE, LOCAL, CONSOLE LOGON,
   `ClauseoSandboxUsers`, the pool's SIDs, and a local group with a pool member
@@ -2313,8 +2314,8 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   `OWNER RIGHTS` or another user's own SID. Every other entry stays byte for byte, in order,
   and the owner, group, SACL and control stay as read. Nothing is ever added: a NULL DACL,
   which only an added DACL would close, is counted as not hardened. `WRITE_OWNER` counts as
-  write because an owner holds `WRITE_DAC`; `DELETE` alone doesn't, since deleting the task
-  runs nothing as the lawyer.
+  write because an owner holds `WRITE_DAC`. `DELETE` counts too, alone included: it lets a
+  pool user delete the task and register its own under the name (the swap below).
 - **The write:** through the task's own interface. Whether a task needs hardening is told from
   `IRegisteredTask::GetSecurityDescriptor` without the SACL (owner, group and DACL, no
   privilege needed). A task that needs nothing is never counted as a failure; one whose
@@ -2327,6 +2328,22 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   or SACL that changed counts the task as not hardened, and the log says which. MS-TSCH's
   `SchRpcSetSecurity` doesn't say how a descriptor missing a part is applied, so all four
   parts are always written.
+- **The swap race:** each read and the write look the task up by name, so a pool user holding
+  `DELETE` (until this sweep takes it) could delete the task and register its own under the
+  name between them; SYSTEM would then write the read `O:SY` or `O:BA` descriptor onto the
+  pool's task, and the read-back would pass. So the task's `TaskCache\Tree` `Id` (read as
+  #750's `windows_listing` reads it) is read before the first read, again just before the
+  write, and again after it. Changed before the write: nothing is written, the task is counted
+  as swapped and logged, and the walk's own judgment of it stands. Changed across the write:
+  nothing is restored, the task is counted and logged, and the run ends 56 with its path in the
+  56 list. Not a skip, because our write may have made a pool task look admin-owned. Its path
+  and new `Id` go to the record's `OwnerUntrusted` (`REG_MULTI_SZ` in
+  `HKLM\SOFTWARE\Clauseo\Sandbox`, entries `{Id}\A\name`; SYSTEM and Administrators write,
+  Users read; a set-up value `--remove` deletes). Every later sweep, for a listed task there
+  whose `Id` still matches, ignores the owner and judges by principal and file alone: a pool
+  principal is deleted, and anything that only its owner could pass is 56 again. An entry
+  clears once its task is gone or its `Id` no longer matches; a list that can't be read is 56
+  (`sweep/untrusted.rs`).
 - **When:** in every sweep, inside the walk (SYSTEM), and once at set-up, right after the stop
   and sweep tasks (`late_steps::harden_tasks`). Set-up runs as the elevated administrator, not
   SYSTEM: `--set-up` and `--adopt` have no SYSTEM step, so an administrator may fail to
@@ -2345,13 +2362,14 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   Administrators, nothing for Users (`log_path::admin_only`), and the SYSTEM sweep keeps
   appending to one set-up made.
 - **Firm-IT notes:** "At each session end and at set-up, Clauseo (as SYSTEM) removes write,
-  delete and permission-change rights held by Users, Everyone, Authenticated Users,
+  delete and permission changes held by Users, Everyone, Authenticated Users,
   INTERACTIVE and similar groups from scheduled tasks owned by SYSTEM, Administrators or
   TrustedInstaller that run as the Clauseo user or a group containing them. Read and run rights
   are kept, nothing is added, and each change is logged in `sweep-admin.log` with the original
   permissions."
 - **Never 56:** hardening isn't a failure, and a failed one (`SetSecurityDescriptor` refused, a
-  descriptor that can't be read) is logged and counted, still not 56. Whether any task on a
+  descriptor that can't be read) is logged and counted, still not 56. The one exception is an
+  `Id` that changed across the write (the swap race above). Whether any task on a
   real machine needs hardening is not measured; the rule is there because modification isn't.
 - **What it doesn't undo:** hardening at a session's end closes a loose task for the *next*
   session. It doesn't undo a change a pool user made to that task *during* the session: those
