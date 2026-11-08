@@ -46,7 +46,7 @@ fn a_read_of_another_matters_folder_or_file_is_kept() {
     assert!(reads[1].is_file());
     // The matter stays a hidden path; the read is no allowed folder.
     assert!(policy.hidden().contains(&canon(&w.at("m2"))));
-    assert!(policy.allowed_folders().is_empty());
+    assert_eq!(policy.allowed_folders(), [] as [std::path::PathBuf; 0]);
     // Refused names at any depth of the grant, in any case.
     let m2 = canon(&w.at("m2"));
     for refused in [
@@ -92,7 +92,7 @@ fn a_read_with_a_refused_name_anywhere_is_refused() {
     );
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(w.at("m2/.git/config"), w.at("m2/docs/cfg")).unwrap();
+        w.dir.symlink("m2/docs/cfg", &w.at("m2/.git/config"));
         let result = with_m2(&w)
             .other_matter_read(&w.at("m2/docs/cfg"), true)
             .build();

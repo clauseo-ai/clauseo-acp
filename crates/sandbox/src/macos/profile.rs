@@ -184,7 +184,7 @@ impl Writer {
         self.keychain(policy, &p);
         self.denies(policy, &p);
         self.allow_again(&p);
-        self.other_matter_reads(policy);
+        other_matter::other_matter_reads(self, policy);
         self.fixed_folders(&p);
         self.credential_link_metadata(&p);
         self.read_only_state(&p);

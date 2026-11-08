@@ -7,8 +7,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::build::{existing, refuse};
-use super::{Policy, PolicyBuilder, same, under};
+use super::PolicyBuilder;
+use super::build::{all_beneath, beneath_existing, existing, refuse};
+use super::{same, under};
 use crate::Error;
 
 /// The names that stay refused in a read of another matter, in any ASCII letter case: its git
@@ -73,41 +74,6 @@ pub(crate) fn refused_name(name: &std::ffi::OsStr) -> bool {
         .any(|refused| name.eq_ignore_ascii_case(refused))
 }
 
-impl Policy {
-    /// The read-only grants of other matters' folders, each passing the rules of
-    /// [`PolicyBuilder::other_matter_read`].
-    pub fn other_matter_reads(&self) -> &[OtherMatterRead] {
-        &self.other_matter_reads
-    }
-
-    /// The other matter whose hidden folder holds `path`, if any (the innermost).
-    pub fn hidden_matter_of(&self, path: &Path) -> Option<&str> {
-        matter_of(path, &self.hidden_matters).map(|m| m.matter.as_str())
-    }
-}
-
-impl PolicyBuilder {
-    /// Another registered matter's folder, `matter` its id as the host names it: a hidden path
-    /// ([`PolicyBuilder::hidden`], and [`Policy::hidden`] lists it) that
-    /// [`PolicyBuilder::other_matter_read`] may read in, and whose refused paths classify as
-    /// [`PathClass::OtherMatter`](crate::PathClass::OtherMatter). It need not exist.
-    pub fn hidden_matter(mut self, path: &Path, matter: &str) -> PolicyBuilder {
-        self.hidden_matters
-            .push((path.to_owned(), matter.to_owned()));
-        self
-    }
-
-    /// A read-only grant of a folder in another matter, the folder and everything under it, or
-    /// of one file in it (`is_file`) (R18), applied after the hidden paths: it reads again what
-    /// they hide, and writes nothing. `build` refuses it unless it passes
-    /// [`Policy::check_allowed_folder`]'s cross-matter branch and is a file exactly when
-    /// `is_file`. A grant of a folder outside every matter is [`PolicyBuilder::allowed_folder`].
-    pub fn other_matter_read(mut self, path: &Path, is_file: bool) -> PolicyBuilder {
-        self.other_matter_reads.push((path.to_owned(), is_file));
-        self
-    }
-}
-
 /// The innermost of `matters` that is or holds `path`.
 pub(super) fn matter_of<'m>(path: &Path, matters: &'m [HiddenMatter]) -> Option<&'m HiddenMatter> {
     matters
@@ -116,16 +82,34 @@ pub(super) fn matter_of<'m>(path: &Path, matters: &'m [HiddenMatter]) -> Option<
         .max_by_key(|m| m.path.components().count())
 }
 
-/// Each of `reads` by [`existing`] and [`check_read`], a file exactly when it says so.
+/// The hidden paths, by [`all_beneath`], with each of `matters`' folders (by
+/// [`beneath_existing`]) after them; and the matters, which [`all_reads`] needs.
+pub(super) fn hidden_matters(
+    matters: &[(PathBuf, String)],
+    hidden: &[PathBuf],
+) -> Result<(Vec<PathBuf>, Vec<HiddenMatter>), Error> {
+    let mut hidden = all_beneath(hidden, "hidden path")?;
+    let mut out = Vec::with_capacity(matters.len());
+    for (path, matter) in matters {
+        let path = beneath_existing(path, "matter's hidden folder")?;
+        hidden.push(path.clone());
+        let matter = matter.clone();
+        out.push(HiddenMatter { path, matter });
+    }
+    Ok((hidden, out))
+}
+
+/// Each of `b`'s reads of other matters by [`existing`] and [`check_read`], a file exactly
+/// when it says so.
 pub(super) fn all_reads(
-    reads: &[(PathBuf, bool)],
+    b: &PolicyBuilder,
     matter: &Path,
     home: Option<&Path>,
     hidden: &[PathBuf],
     matters: &[HiddenMatter],
 ) -> Result<Vec<OtherMatterRead>, Error> {
-    let mut out = Vec::with_capacity(reads.len());
-    for (p, is_file) in reads {
+    let mut out = Vec::with_capacity(b.other_matter_reads.len());
+    for (p, is_file) in &b.other_matter_reads {
         let path = existing(p, "read of another matter")?;
         let other = check_read(&path, matter, home, hidden, matters)?;
         if fs::metadata(&path).is_ok_and(|meta| meta.is_file()) != *is_file {
@@ -157,7 +141,7 @@ pub(super) fn check_read<'m>(
     let what = "a read of another matter";
     if let Some(name) = path
         .components()
-        .map(|c| c.as_os_str())
+        .map(std::path::Component::as_os_str)
         .find(|name| refused_name(name))
     {
         return refuse(format!(

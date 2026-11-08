@@ -107,7 +107,11 @@ fn a_read_grant_of_one_file_reads_that_file_only() {
     let (doc, note, brief) = (at("m2/doc.txt"), at("m2/sub/note.txt"), at("m2/brief.txt"));
     let out = sh(&launcher, &w.at("m1"), READ_EACH, &[&doc, &note, &brief]);
     out.assert_ok();
-    assert_eq!(lines(&out.stdout, "READ "), [doc.clone()], "{out:#?}");
+    assert_eq!(
+        lines(&out.stdout, "READ "),
+        std::slice::from_ref(&doc),
+        "{out:#?}"
+    );
     let out = sh(&launcher, &w.at("m1"), r#"ls "$1""#, &[&at("m2")]);
     assert_ne!(
         out.code,

@@ -10,6 +10,7 @@ mod build;
 mod links;
 mod names;
 mod other_matter;
+mod rule;
 mod store;
 
 pub use links::LINK_RULES_MAX;
@@ -17,6 +18,7 @@ pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
 use other_matter::HiddenMatter;
 pub use other_matter::{OtherMatterRead, REFUSED_IN_OTHER_MATTER};
+pub use rule::{Loopback, PathRule};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
 };
@@ -81,46 +83,6 @@ pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
         && path
             .file_name()
             .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
-}
-
-/// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum Loopback {
-    /// No loopback beyond the proxy ports.
-    #[default]
-    None,
-    /// These loopback ports, with bind and inbound on localhost. Sorted and de-duplicated.
-    Ports(Vec<u16>),
-    /// Any loopback port. Also reaches other loopback services and other launches' proxies,
-    /// which refuse a request without their token (S16).
-    Any,
-}
-
-/// A path rule: the path alone, or the path and everything under it.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PathRule {
-    /// Exactly this path.
-    Literal(PathBuf),
-    /// This path and everything under it.
-    Subpath(PathBuf),
-}
-
-impl PathRule {
-    /// The rule's path.
-    pub fn path(&self) -> &Path {
-        match self {
-            PathRule::Literal(path) | PathRule::Subpath(path) => path,
-        }
-    }
-
-    /// Whether the rule covers `path`, by [`under`]: on macOS without case and in any Unicode
-    /// normalisation form, as the kernel resolves names on a case-insensitive volume.
-    pub fn covers(&self, path: &Path) -> bool {
-        match self {
-            PathRule::Literal(rule) => same(path, rule),
-            PathRule::Subpath(rule) => under(path, rule),
-        }
-    }
 }
 
 /// What one launch's jail allows. Built by [`Policy::builder`]; every path is canonical
@@ -395,6 +357,16 @@ impl Policy {
         build::check_allowed(&folder, &self.matter, home, hidden)
     }
 
+    /// The read-only grants of other matters' folders ([`PolicyBuilder::other_matter_read`]).
+    pub fn other_matter_reads(&self) -> &[OtherMatterRead] {
+        &self.other_matter_reads
+    }
+
+    /// The other matter whose folder ([`PolicyBuilder::hidden_matter`]) holds `path`, if any.
+    pub fn hidden_matter_of(&self, path: &Path) -> Option<&str> {
+        other_matter::matter_of(path, &self.hidden_matters).map(|m| m.matter.as_str())
+    }
+
     /// Whether a rule after the hidden paths allows `path` again.
     fn allowed_again(&self, path: &Path) -> bool {
         let inside = |p: &PathBuf| under(path, p);
@@ -480,6 +452,24 @@ impl PolicyBuilder {
     /// home). Only [`CLAUDE_STORE_FILES`] and [`CLAUDE_STORE_LOCK_FOLDERS`] in it are allowed.
     pub fn claude_store(mut self, dir: impl Into<PathBuf>) -> PolicyBuilder {
         self.claude_store = Some(dir.into());
+        self
+    }
+
+    /// Another registered matter's folder, `matter` its id as the host names it: a hidden path
+    /// ([`Policy::hidden`] lists it) that [`PolicyBuilder::other_matter_read`] may read in, and
+    /// whose refused paths classify as [`PathClass::OtherMatter`]. It need not exist.
+    pub fn hidden_matter(mut self, path: &Path, matter: &str) -> PolicyBuilder {
+        self.hidden_matters
+            .push((path.to_owned(), matter.to_owned()));
+        self
+    }
+
+    /// A read-only grant of a folder in another matter and everything under it, or of one file
+    /// in it (`is_file`) (R18), applied after the hidden paths: it reads again what they hide
+    /// and writes nothing. `build` refuses it unless it passes [`Policy::check_allowed_folder`]'s
+    /// cross-matter branch and is a file exactly when `is_file`.
+    pub fn other_matter_read(mut self, path: &Path, is_file: bool) -> PolicyBuilder {
+        self.other_matter_reads.push((path.to_owned(), is_file));
         self
     }
 
