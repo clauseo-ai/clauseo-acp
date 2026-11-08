@@ -8,9 +8,11 @@
 //! under [`McpControl::Clauseo`]: under the firm's `managed-mcp.json` no server goes, so the
 //! header says `ManagedByFirm`. Its args and env name the token file, never the token.
 //!
-//! On Windows the entry also carries `SystemRoot`, the host's own: Winsock cannot start without
-//! it, and `clauseo-mcp connector` would then answer every call "relay not reachable". Both
-//! agents' MCP clients pass their own `SystemRoot` on today; the entry does not rely on it.
+//! On Windows the entry also carries the variables the connector's process needs and the host
+//! has (`windows_env`): `SystemRoot` and `windir` (Winsock cannot start without them, and
+//! `clauseo-mcp connector` would then answer every call "relay not reachable"), and `TEMP`, `TMP`
+//! and `PATHEXT` when set. Both agents' MCP clients pass their own `SystemRoot` on today; the
+//! entry does not rely on it. Nothing else is added: no path, no permission.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -24,6 +26,10 @@ use super::McpControl;
 
 /// The variable Windows networking needs (`SystemRoot`).
 pub(crate) const SYSTEM_ROOT: &str = "SystemRoot";
+/// The Windows directory's other name; Winsock and the runtime read it as well.
+const WINDIR: &str = "windir";
+/// Passed to the entry on Windows only when the host has them.
+const OPTIONAL_WINDOWS_VARS: [&str; 3] = ["TEMP", "TMP", "PATHEXT"];
 
 /// The pre-allow rule Claude gets when the entry is sent (decision D7): every tool of our
 /// `case-law` server. The name is reserved, so no other server of that name reaches Claude.
@@ -52,8 +58,9 @@ pub(crate) struct CaseLawInputs<'a> {
     pub(crate) relay: Relay<'a>,
     /// Who controls MCP on this machine, now.
     pub(crate) control: McpControl,
-    /// On Windows, the host's `SystemRoot` for the entry's env; `None` elsewhere.
-    pub(crate) system_root: Option<&'a str>,
+    /// On Windows, the variables the entry's env gets from the host (`windows_env`); none
+    /// elsewhere.
+    pub(crate) windows_env: &'a [(String, String)],
 }
 
 /// The session's case law: the hook's servers without any `case-law` entry, the entry filled
@@ -75,7 +82,7 @@ pub(crate) fn hook_servers(
         Relay::Open { .. } if inputs.control == McpControl::Managed => {
             Err(ToolsUnavailableReason::ManagedByFirm)
         }
-        Relay::Open { port, token_file } => fill(entry, port, token_file, inputs.system_root),
+        Relay::Open { port, token_file } => fill(entry, port, token_file, inputs.windows_env),
     };
     let (entry, availability) = match filled {
         Ok(entry) => (Some(entry), ToolAvailability::Available),
@@ -88,14 +95,14 @@ pub(crate) fn hook_servers(
     (rest, entry, Some(state))
 }
 
-/// The entry with its tokens filled, and `SystemRoot` added when given; `NoRelay` when a value
-/// cannot go (a token file path that is not UTF-8) or the entry holds a token the host cannot
-/// fill.
+/// The entry with its tokens filled, and each of `windows_env` added unless the entry already
+/// names it (in any case); `NoRelay` when a value cannot go (a token file path that is not UTF-8)
+/// or the entry holds a token the host cannot fill.
 fn fill(
     server: McpServer,
     port: u16,
     token_file: &Path,
-    system_root: Option<&str>,
+    windows_env: &[(String, String)],
 ) -> Result<McpServer, ToolsUnavailableReason> {
     let Some(token_file) = dunce::simplified(token_file).to_str() else {
         tracing::warn!("the relay token file's path is not UTF-8: case law is left out");
@@ -115,12 +122,10 @@ fn fill(
             .iter()
             .map(|(key, value)| Ok((key.clone(), fill(value)?)))
             .collect::<Result<_, _>>()?;
-        if let Some(root) = system_root
-            && !env
-                .iter()
-                .any(|(key, _)| key.eq_ignore_ascii_case(SYSTEM_ROOT))
-        {
-            env.push((SYSTEM_ROOT.to_owned(), root.to_owned()));
+        for (key, value) in windows_env {
+            if !env.iter().any(|(own, _)| own.eq_ignore_ascii_case(key)) {
+                env.push((key.clone(), value.clone()));
+            }
         }
         Ok(McpServer::Stdio {
             name,
@@ -135,23 +140,69 @@ fn fill(
     })
 }
 
-/// The `SystemRoot` the entry carries: on Windows (`windows`), the one in `inherited` (the
-/// environment the agent's spec starts from), its name matched in any case; else none.
-pub(crate) fn system_root(
+/// The variables the entry's env carries on Windows (`windows`), in this order: `SystemRoot` and
+/// `windir`, each read through `lookup` (the host's environment, the name matched in any case),
+/// and when that has none, from `windows_dir` (the Windows directory); then `TEMP`, `TMP` and
+/// `PATHEXT`, each only when `lookup` has it. A value that is not UTF-8 counts as absent. Empty
+/// when `windows` is false.
+pub(crate) fn windows_env(
     windows: bool,
-    inherited: impl IntoIterator<Item = (OsString, OsString)>,
-) -> Option<String> {
+    lookup: impl Fn(&str) -> Option<OsString>,
+    windows_dir: impl Fn() -> Option<OsString>,
+) -> Vec<(String, String)> {
     if !windows {
-        return None;
+        return Vec::new();
     }
-    let root = inherited
-        .into_iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(SYSTEM_ROOT))
-        .and_then(|(_, value)| value.into_string().ok());
-    if root.is_none() {
-        tracing::warn!("the host has no SystemRoot to give the case-law entry");
+    let text = |value: OsString| value.into_string().ok();
+    let mut env = Vec::new();
+    for name in [SYSTEM_ROOT, WINDIR] {
+        let value = lookup(name)
+            .and_then(text)
+            .or_else(|| windows_dir().and_then(text));
+        if let Some(value) = value {
+            env.push((name.to_owned(), value));
+        } else {
+            tracing::warn!(
+                name,
+                "the host has no Windows directory for the case-law entry"
+            );
+        }
     }
-    root
+    for name in OPTIONAL_WINDOWS_VARS {
+        if let Some(value) = lookup(name).and_then(text) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    env
+}
+
+/// The Windows directory (`GetWindowsDirectoryW`), the fallback for `SystemRoot` and `windir`.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "GetWindowsDirectoryW, the Win32 call the windows crate binds; its buffer lives across it"
+)]
+pub(crate) fn windows_directory() -> Option<OsString> {
+    use std::os::windows::ffi::OsStringExt;
+
+    use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
+
+    /// The longest directory read; `MAX_PATH` is 260.
+    const MAX_DIR: usize = 1024;
+    let mut buffer = vec![0u16; MAX_DIR];
+    // SAFETY: the call writes at most `buffer.len()` units into the live `buffer`.
+    let len = unsafe { GetWindowsDirectoryW(Some(&mut buffer)) };
+    let len = usize::try_from(len)
+        .ok()
+        .filter(|&len| len > 0 && len < buffer.len())?;
+    buffer.truncate(len);
+    Some(OsString::from_wide(&buffer))
+}
+
+/// Not Windows: there is no Windows directory to read.
+#[cfg(not(windows))]
+pub(crate) fn windows_directory() -> Option<OsString> {
+    None
 }
 
 /// Claude's `allowedTools` without any rule for a `case-law` server: `mcp__case-law` itself

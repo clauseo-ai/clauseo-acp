@@ -3,6 +3,7 @@
 //! does the merging. Path joins and map work only: the folders were made on the launch-prep
 //! thread (`launch_checks.rs`).
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
@@ -222,18 +223,22 @@ fn case_law_servers(
             token_file: &run.relay_token,
         },
     };
-    let system_root = case_law::system_root(
-        cfg!(windows),
-        match &actor.wiring.inherited_env {
-            Some(env) => env.clone(),
-            None if cfg!(windows) => std::env::vars_os().collect(),
-            None => Vec::new(),
-        },
-    );
+    let inherited: Vec<(OsString, OsString)> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None if cfg!(windows) => std::env::vars_os().collect(),
+        None => Vec::new(),
+    };
+    let lookup = |name: &str| {
+        inherited
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    };
+    let windows_env = case_law::windows_env(cfg!(windows), lookup, case_law::windows_directory);
     let inputs = CaseLawInputs {
         relay,
         control,
-        system_root: system_root.as_deref(),
+        windows_env: &windows_env,
     };
     let (rest, entry, state) = case_law::hook_servers(hook, &inputs);
     if entry.is_none()
