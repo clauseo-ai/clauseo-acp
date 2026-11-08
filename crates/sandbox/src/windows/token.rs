@@ -234,8 +234,14 @@ pub const DESKTOP_SYSTEM_RIGHTS: u32 = 0x000F_01FF;
 /// (`0x45A`, `ERROR_DLL_INIT_FAILED`); no `WRITE_DAC`, `WRITE_OWNER` or `DELETE`.
 pub const STATION_POOL_RIGHTS: u32 = 0x0002_007F;
 /// The pool user's rights on the agent's desktop: read objects, make windows and menus,
-/// enumerate, write objects (`0xC7`); no hooks, no journal, no switch.
+/// enumerate, write objects (`0xC7`); no hooks, no journal, no switch. The creation descriptor
+/// does not grant these to the pool user: it grants them to the desktop user, through
+/// [`DESKTOP_MAKE_RIGHTS`].
 pub const DESKTOP_POOL_RIGHTS: u32 = 0x0000_00C7;
+/// The pool user's rights on the agent's desktop once it is final: [`DESKTOP_POOL_RIGHTS`] and
+/// `READ_CONTROL` (`0x200C7`), so Chrome's own sandbox can read the desktop's DACL when it builds
+/// child desktops. No `WRITE_DAC`, `WRITE_OWNER` or `DELETE`.
+pub const DESKTOP_POOL_FINAL_RIGHTS: u32 = 0x0002_0000 | DESKTOP_POOL_RIGHTS;
 /// The desktop user's rights on both once set up: `READ_CONTROL | WRITE_DAC | WRITE_OWNER`
 /// (`0xE0000`), for the owner's own descriptor work and nothing of their use.
 pub const CREATOR_RIGHTS: u32 = 0x000E_0000;
@@ -300,11 +306,11 @@ pub fn station_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> Str
 }
 
 /// The agent's desktop's last descriptor: `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<desktop user>)
-/// (A;;0xC7;;;<pool user>)S:(ML;;NW;;;LW)`, the matter SID and the owner as in [`station_sddl`].
+/// (A;;0x200C7;;;<pool user>)S:(ML;;NW;;;LW)`, the matter SID and the owner as in [`station_sddl`].
 pub fn desktop_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> String {
     final_sddl(
         DESKTOP_SYSTEM_RIGHTS,
-        DESKTOP_POOL_RIGHTS,
+        DESKTOP_POOL_FINAL_RIGHTS,
         creator,
         pool_user,
         matter,

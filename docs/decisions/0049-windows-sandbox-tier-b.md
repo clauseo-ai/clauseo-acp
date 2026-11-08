@@ -1056,14 +1056,16 @@ leaves that profile, both naming the part.
   - **The last descriptors** (`token::station_sddl`, `token::desktop_sddl`), protected and
     labelled Low: `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<lawyer>)(A;;0x2007F;;;<pool>)
     S:(ML;;NW;;;LW)` on the station and `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<lawyer>)
-    (A;;0xC7;;;<pool>)S:(ML;;NW;;;LW)` on the desktop, the matter SID given the pool's rights
+    (A;;0x200C7;;;<pool>)S:(ML;;NW;;;LW)` on the desktop (`token::DESKTOP_POOL_FINAL_RIGHTS`;
+    the `READ_CONTROL` lets Chrome's own sandbox read the desktop's DACL when it builds child
+    desktops; the creation descriptors are unchanged), the matter SID given the pool's rights
     after the pool user when the launch restricts with one. No `OWNER RIGHTS` entry: the lawyer
     owns both by then, and one would give the lawyer's processes, Low ones included, the pool's
     use rights. The owner keeps its implied `READ_CONTROL | WRITE_DAC` and the explicit
     `READ_CONTROL | WRITE_DAC | WRITE_OWNER`, enough to clean up, and no use right.
     The pool's station rights must be `READ_CONTROL` and `0x7F`: less, and user32 fails to start
     the agent's GUI DLLs (`0x45A`). Without the Low label a Low agent hangs in conhost's start
-    (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0xC7`,
+    (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0x200C7`,
     and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
     or `DELETE` (read by hand on both machines).
   - **Every runner process starts on it, never on `WinSta0`.** The inner runner's
