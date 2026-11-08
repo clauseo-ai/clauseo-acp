@@ -224,7 +224,7 @@ fn a_create_matter_whose_probe_answers_creates_it() {
 fn two_creates_of_the_same_name_while_the_probe_waits_make_one_matter() {
     let dir = TempDir::new("probe-twice");
     let clock = clock();
-    let (host, join, held) = start(dir.path(), &clock);
+    let (host, join, held, _locate) = start_with(dir.path(), &clock, true, None);
     let first = create(&host, 1);
     let second = create(&host, 2);
     held.entered
