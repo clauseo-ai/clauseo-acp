@@ -264,6 +264,18 @@ test("an empty title draws no heading, never an empty one, and keeps the line un
   expect(host?.querySelector("h1")?.textContent).toBe("Acme Ltd v. State");
 });
 
+test("a dot stands only between two parts: an empty subtitle leaves Not protected first, with none before it", async () => {
+  const line = () => host?.querySelector(".room-matter .room-next");
+  await mount(null, { subtitle: "", unprotected: true });
+  expect(line()?.querySelector(".room-case")).not.toBeNull();
+  expect(line()?.querySelector(".room-dot")).toBeNull();
+  await remount({ subtitle: "Quick questions, kept like any matter", unprotected: true });
+  expect(line()?.querySelectorAll(".room-dot")).toHaveLength(1);
+  expect(line()?.querySelector(".room-case")?.firstElementChild?.className).toBe("room-dot");
+  await remount({ subtitle: "", unprotected: false });
+  expect(line()?.querySelector(".room-dot")).toBeNull();
+});
+
 test("the caption wiring reaches the buttons: each press calls its handler, and maximised shows Restore", async () => {
   const caption = {
     maximised: true,

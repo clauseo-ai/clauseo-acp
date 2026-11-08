@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "super::add_credits()"
+---
+{
+  "add_credits": {
+    "id": "case-law",
+    "pack": "pack_200"
+  }
+}

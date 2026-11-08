@@ -17,6 +17,11 @@ mod credentials;
 mod discovery;
 
 #[cfg(test)]
+#[cfg(feature = "local")]
+#[path = "client/local.rs"]
+mod local;
+
+#[cfg(test)]
 #[path = "client/mcp.rs"]
 mod mcp;
 

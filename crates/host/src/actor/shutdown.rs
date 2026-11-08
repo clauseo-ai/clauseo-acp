@@ -1,6 +1,6 @@
 //! Shutdown: stop taking commands, let the turn path cancel running turns and stop agents,
-//! wait for every commit and snapshot in flight, then stop the snapshot and matter threads and
-//! close the store.
+//! wait for every commit, snapshot and run folder removal in flight, then stop the snapshot
+//! and matter threads and close the store.
 
 use super::input::Reply;
 use super::{Actor, HostPhase, turn};
@@ -16,15 +16,28 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
         return;
     }
     actor.phase = HostPhase::Stopping(reply.into_iter().collect());
+    // A run folder removal still waiting for a session's processes stops waiting: the stop
+    // releases every held run anyway (`close`).
+    actor.wiring.held.begin_stop();
     super::matters::cancel_imports(actor);
+    super::documents::shutdown(actor);
     super::scan::cancel_all(actor);
     super::browser_install::shutdown(actor);
+    super::connectors::shutdown(actor);
+    super::protection::work::shutdown(actor);
+    super::allowed::shutdown(actor);
     turn::shutdown(actor);
 }
 
 /// Stops the snapshot thread (its queue is already empty), the matter threads, and closes the
 /// store.
 pub(super) async fn close(actor: Actor) -> Result<(), Error> {
+    // The sessions held past their removal's wait free their proxy, relay and ports now; their
+    // run folders stay for the next start's sweep.
+    let held = actor.wiring.held.release_all();
+    if held > 0 {
+        tracing::info!(target: LIFECYCLE, held, "held sessions released at stop");
+    }
     let Actor {
         store,
         snapshots,

@@ -1,0 +1,14 @@
+{"scenario":"codex-web-open","description":"S26's Codex open page and find in page: one page each, with the fragment dropped; an other action records nothing","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-open","title":"Open page: https://indiacode.nic.in/show?x=1#top","kind":"search","status":"in_progress","rawInput":{"query":"","action":{"type":"openPage","url":"https://indiacode.nic.in/show?x=1#top"}}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-open","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-find","title":"Find in page for '138' in https://sci.gov.in/j/1","kind":"search","status":"in_progress","rawInput":{"query":"","action":{"type":"findInPage","url":"https://sci.gov.in/j/1","pattern":"138"}}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-find","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-other","title":"Web search","kind":"search","status":"in_progress","rawInput":{"query":"","action":{"type":"other"}}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-other","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The Supreme Court's judgment is linked below."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

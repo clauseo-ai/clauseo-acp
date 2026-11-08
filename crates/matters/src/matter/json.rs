@@ -92,6 +92,16 @@ impl Found {
     }
 }
 
+/// The marker check alone, for a caller that only shows or opens what is in a matter's folder (the
+/// desktop's `reveal` and `open_file`): `Ok` when `folder`'s `.clauseo/matter.json` names
+/// matter `id`; [`Error::FolderMissing`] when the folder is not there (`NoFolder`,
+/// `matter.folder_missing`) or is there without this matter's marker (`NoMatterJson`,
+/// `Unreadable`, `OtherMatter`: `matter.folder_not_a_matter`); [`Error::Io`] when the folder or
+/// the marker does not read. Reads the marker alone and writes nothing.
+pub fn check_marker(folder: &Path, id: MatterId) -> Result<(), Error> {
+    read(folder)?.require(folder, id)
+}
+
 /// Reads `folder`'s marker. A read that fails for any reason but a missing file (permissions,
 /// an offline cloud placeholder) is an [`Error::Io`], not a finding.
 pub(crate) fn read(folder: &Path) -> Result<Found, Error> {

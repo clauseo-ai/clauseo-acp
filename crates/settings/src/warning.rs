@@ -65,6 +65,10 @@ pub enum WarningKind {
         /// Why the value was refused.
         message: String,
     },
+    /// A key the file holds twice in one object, at the place of the second copy's name: the
+    /// last copy is used. Only `settings.json` warns so; a `policy.json` that does it is dropped
+    /// whole.
+    DuplicateKey,
     /// An agent whose `command` is not an absolute path, left out.
     RelativeAgentCommand {
         /// The agent's id.
@@ -93,6 +97,12 @@ impl fmt::Display for Warning {
             WarningKind::UnknownKey { key } => write!(f, "unknown key {key}, left out"),
             WarningKind::InvalidValue { key, message } => {
                 write!(f, "{key} left out: {message}")
+            }
+            WarningKind::DuplicateKey => {
+                write!(
+                    f,
+                    "a key appears twice in one object; the last copy is used"
+                )
             }
             WarningKind::RelativeAgentCommand { id, command } => write!(
                 f,

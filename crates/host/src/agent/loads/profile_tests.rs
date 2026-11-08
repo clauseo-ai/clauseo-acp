@@ -105,7 +105,9 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
         switch: ON,
         control: McpControl::Clauseo,
         slot_free: true,
+        proxy_set: true,
         port: Some(8123),
+        blocked_by_policy: None,
         executable: chrome,
         browser_dir,
         claims: Some(claims()),
@@ -165,6 +167,7 @@ fn a_folder_named_like_a_token_stays_literal() {
     let folders = Folders {
         work: "/w/{matter_notes}",
         notes: "/n/{work_folder}",
+        connectors: "",
     };
     assert_eq!(
         fill_instructions("{work_folder} and {matter_notes}", folders).unwrap(),
@@ -211,6 +214,7 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                proxy_set: false,
                 port: None,
                 executable: None,
                 ..base
@@ -219,6 +223,27 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserBlockedByPolicy),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserBlockedByPolicy,
+        ),
+        (
+            BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserPolicyUnreadable),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserPolicyUnreadable,
+        ),
+        (
+            BrowserInputs {
+                port: None,
                 executable: None,
                 ..base
             },
@@ -226,10 +251,15 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                port: None,
                 claims: None,
                 ..base
             },
             ToolsUnavailableReason::BrowserNotInstalled,
+        ),
+        (
+            BrowserInputs { port: None, ..base },
+            ToolsUnavailableReason::NoProxy,
         ),
     ];
     for (case, expected) in cases {
@@ -331,8 +361,15 @@ fn folders() -> Folders<'static> {
     Folders {
         work: "/data/run/t-1/work",
         notes: "/data/agent-state/m/notes",
+        connectors: "",
     }
 }
+
+/// No data folder deny rules: these tests are about the other keys.
+static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
+    spellings: Vec::new(),
+    targets: Vec::new(),
+};
 
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
     ClaudeKeys {
@@ -341,6 +378,8 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         folders: folders(),
         seed_sites: SEED_SITES,
         forced_ask: false,
+        data: &NO_DENY,
+        case_law: false,
     }
 }
 
@@ -502,6 +541,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
     let odd = Folders {
         work: "/data/run/a \"b\"\n\\c/work",
         notes: "/data/agent-state/m/notes",
+        connectors: "",
     };
     fill_meta(&mut meta, odd).unwrap();
     let text = Value::Object(meta).to_string();

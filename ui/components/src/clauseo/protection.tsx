@@ -1,38 +1,187 @@
-// Not protected, explained once. The first time a matter stands without protection, because the lawyer switched it
-// off or the computer wouldn't set it up, the system's alert dialog says what that means in plain lines: what Clauseo
-// can now reach and what is still kept. Understood, the act, is the dark primary and takes the starting focus. The
-// app shows it once for a matter; the mark on the room's line stays. The open lock leads it, in concrete: nothing
-// here is red.
+// Not protected, explained. When a matter stands without protection, the system's alert dialog says
+// why in plain lines: what Clauseo can now reach, and what is still kept. The cause picks the body
+// (UC): protection not set up on this computer yet, the set-up refused or failed, a computer that
+// can't give it, every protected space in use (counts only, never a name), or protection switched
+// off for the matter. The body is the same for both plans: "asks before changing anything outside
+// this matter's folder" is true for Claude and ChatGPT alike. Design B adds a Safe workspace
+// something on this computer stops, whose reason's line the caller gives, and the repair: its line,
+// and on a personal install "Get the installer", which opens the installed version's release page
+// (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
+// set-up cause offers its retry beside it ("Set up the Safe workspace", "Try again"; a full pool's
+// "Add room" while it can grow), which leaves the note open: the waiting line stands in the
+// button's place, and a refusal's words under it. Where the firm requires the Safe workspace, the
+// caller's line for it takes the cause's first line's place: Clauseo doesn't answer there, so no
+// line says it works without the Safe workspace. The open lock leads it, in concrete: nothing here
+// is red.
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
+import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
-import type { Unprotected } from "./allowed.tsx";
 import { Say } from "./say.tsx";
+
+/** Why the matter is not protected, as the note says it. "setup" is the older name of "set_up_refused". */
+export type NoteWhy =
+  | "off"
+  | "setup"
+  | "needs_set_up"
+  | "set_up_refused"
+  | "set_up_failed"
+  | "cant"
+  | "not_built"
+  | "pool"
+  | "blocked";
+
+/** The pool's counts (NotProtectedCause's pool_full): how many protected spaces, and what holds them. */
+export type NotePool = {
+  size: number;
+  open: number;
+  held: number;
+  owed: number;
+  set_aside: number;
+};
 
 export function NotProtectedNote({
   open,
   matter,
   why,
+  required = null,
+  pool,
+  named1385 = false,
+  addRoom = false,
+  waiting = null,
+  failed = null,
+  extra = [],
   onClose,
   onProtect,
+  onGetInstaller,
 }: {
   open: boolean;
   /** The matter's name as filed. */
   matter: string;
-  why: Unprotected["why"];
+  why: NoteWhy;
+  /** Optional: the firm requires the Safe workspace; its line for the cause, which takes the cause's
+   * first line's place (the caller's: the firm's notice says the same). */
+  required?: string | null;
+  /** The pool's counts, for "pool". */
+  pool?: NotePool | undefined;
+  /** Optional: R17 PR-E names Windows error 1385 inside a failed set-up; its line takes the platform line's place. */
+  named1385?: boolean;
+  /** Optional, for "pool": the pool can grow, so "Add room" shows. */
+  addRoom?: boolean;
+  /** Optional: the waiting line, in the retry's place while its command runs. */
+  waiting?: string | null;
+  /** Optional: the last retry's refusal, in its code's words. */
+  failed?: string | null;
+  /** Optional: lines after the cause's body, in the page's language (design B: the block's reason,
+   * the repair). */
+  extra?: string[];
   onClose: () => void;
-  /** Switch protection back on, or try setting it up again. */
-  onProtect: () => void;
+  /** The retry: set protection up, try again, or add room. Without it, no retry shows. */
+  onProtect?: (() => void) | undefined;
+  /** Optional: opens the installer's page ("Get the installer"); without it, no such button. */
+  onGetInstaller?: (() => void) | undefined;
 }) {
   const w = useVersionWords();
   const { platform } = useDisplay();
+  const p = (key: Parameters<typeof pw>[1], slots?: Parameters<typeof pw>[2]) =>
+    pw(w.lang, key, slots);
+  const refused = why === "setup" || why === "set_up_refused";
+  const counts: [number, string][] =
+    why === "pool" && pool !== undefined
+      ? [
+          [pool.open, p("In use by other open matters: {n}", { n: pool.open })],
+          [pool.held, p("Kept by matters with nothing open: {n}", { n: pool.held })],
+          [pool.owed, p("Freed the next time Clauseo starts work: {n}", { n: pool.owed })],
+          [pool.set_aside, p("Still holding files set aside: {n}", { n: pool.set_aside })],
+        ]
+      : [];
+  const causeLines: string[] =
+    why === "off"
+      ? [
+          w.v(
+            "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+            { matter },
+          ),
+        ]
+      : why === "needs_set_up"
+        ? [
+            p(
+              "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+            ),
+          ]
+        : why === "not_built"
+          ? [
+              p(
+                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+              ),
+            ]
+          : why === "blocked"
+            ? [
+                p(
+                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                ),
+              ]
+            : why === "cant"
+              ? [
+                  p(
+                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                  ),
+                ]
+              : why === "pool"
+                ? [
+                    p(
+                      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
+                      { size: pool?.size ?? 0 },
+                    ),
+                  ]
+                : [
+                    p(
+                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                    ),
+                    ...(refused
+                      ? [
+                          platform === "windows"
+                            ? w.v("Windows didn't allow the Safe workspace on this computer.")
+                            : platform === "linux"
+                              ? w.v("Linux didn't allow the Safe workspace on this computer.")
+                              : w.v("macOS didn't allow the Safe workspace on this computer."),
+                        ]
+                      : named1385
+                        ? [
+                            p(
+                              "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+                            ),
+                          ]
+                        : []),
+                  ];
+  // the firm's line in the cause's place; the reason lines after it (a platform's refusal, 1385) still stand
+  const lines = required === null ? causeLines : [required, ...causeLines.slice(1)];
+  // the firm's pool line already says to end a conversation in another matter
+  const freeOne = (pool?.open ?? 0) > 0 && required === null;
+  // the line beside the installer's button: the button quits Clauseo once the page is open
+  const close = onGetInstaller === undefined ? [] : [p(INSTALLER_CLOSE)];
+  const retry =
+    onProtect === undefined ||
+    why === "off" ||
+    why === "cant" ||
+    why === "not_built" ||
+    (why === "pool" && !addRoom)
+      ? null
+      : why === "needs_set_up" || why === "blocked"
+        ? p("Set up the Safe workspace")
+        : why === "pool"
+          ? p("Add room")
+          : w.v("Try again");
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onClose()}>
       <AlertDialogPopup
         undoable
         className="np-note"
+        data-testid="np-note"
+        data-cause={why === "setup" ? "set_up_refused" : why}
+        data-required={required !== null}
         title={
           <span className="np-note-title">
             <span className="card-icon np-note-icon">
@@ -43,26 +192,36 @@ export function NotProtectedNote({
         }
         body={
           <span className="np-note-body">
-            <span>
-              <Say>
-                {why === "off"
-                  ? w.v(
-                      "Protection is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
-                      { matter },
-                    )
-                  : w.v(
-                      "Protection couldn't be set up on this computer, so Clauseo asks before each change in this matter.",
-                    )}
-              </Say>
-            </span>
-            {why === "setup" && (
-              <span>
+            {[...lines, ...extra, ...close].map((line) => (
+              <span key={line}>
+                <Say>{line}</Say>
+              </span>
+            ))}
+            {/* a list, by role: the body is the dialog's description, a <p>, which holds no <ul> */}
+            {counts.some(([n]) => n > 0) && (
+              <span className="np-note-counts" role="list" data-testid="np-pool">
+                {counts
+                  .filter(([n]) => n > 0)
+                  .map(([, line]) => (
+                    <span key={line} role="listitem">
+                      <Say>{line}</Say>
+                    </span>
+                  ))}
+              </span>
+            )}
+            {/* the ways out: ending a conversation frees a space another open matter holds; under the largest pool,
+                Add room makes 4 more behind Windows' prompt */}
+            {why === "pool" && (freeOne || addRoom) && (
+              <span data-testid="np-pool-out">
                 <Say>
-                  {platform === "windows"
-                    ? w.v("Windows didn't allow the protected space on this computer.")
-                    : platform === "linux"
-                      ? w.v("Linux didn't allow the protected space on this computer.")
-                      : w.v("macOS didn't allow the protected space on this computer.")}
+                  {[
+                    ...(freeOne
+                      ? [p("To free one now, end a conversation in another matter.")]
+                      : []),
+                    ...(addRoom
+                      ? [p("Clauseo can add room for 4 more. Windows asks for permission first.")]
+                      : []),
+                  ].join(" ")}
                 </Say>
               </span>
             )}
@@ -73,15 +232,30 @@ export function NotProtectedNote({
                 )}
               </Say>
             </span>
+            {failed !== null && (
+              <span className="np-note-failed" role="status" data-testid="protection-failed">
+                <Say>{failed}</Say>
+              </span>
+            )}
           </span>
         }
         actions={
           <>
-            <AlertDialogClose render={<Button kind="quiet" />} onClick={onProtect}>
-              <span className="deva-nudge">
-                {why === "off" ? w.v("Switch protection on") : w.v("Try again")}
-              </span>
-            </AlertDialogClose>
+            {onGetInstaller !== undefined && (
+              <Button kind="quiet" onClick={onGetInstaller} data-testid="protection-installer">
+                <span className="deva-nudge">{p("Get the installer")}</span>
+              </Button>
+            )}
+            {retry !== null &&
+              (waiting !== null ? (
+                <span className="np-note-wait" role="status" data-testid="protection-wait">
+                  <Say>{waiting}</Say>
+                </span>
+              ) : (
+                <Button kind="quiet" onClick={onProtect} data-testid="protection-setup">
+                  <span className="deva-nudge">{retry}</span>
+                </Button>
+              ))}
             <AlertDialogClose render={<Button kind="primary" />}>
               <span className="deva-nudge">{w.v("Understood")}</span>
             </AlertDialogClose>

@@ -1,7 +1,8 @@
 //! The browser's host side (S27, decision record 0029): which Chrome a session runs
 //! ([`chrome`]), how many run at once and the limits each gets ([`limits`]), the sites every
 //! matter's allowlist starts from ([`seed_sites`]) and the background hosts the proxy denies
-//! ([`deny_hosts`]), each session's loopback ports and socket folder ([`session`]), and where
+//! ([`deny_hosts`]), each session's loopback ports and socket folder ([`session`]), whether
+//! the firm's Chrome, Edge and Chromium policy lets any browser start ([`rd_policy`]), and where
 //! Chrome runs ([`BrowserLaunch`]). The `browser` entry itself is
 //! filled in `agent/loads/browser.rs`; the pages it opens are recorded in `sources/browser.rs`.
 
@@ -9,6 +10,7 @@ pub mod chrome;
 pub mod deny_hosts;
 pub mod install;
 pub mod limits;
+pub(crate) mod rd_policy;
 pub mod seed_sites;
 pub(crate) mod session;
 
@@ -50,6 +52,18 @@ pub enum BrowserLaunch {
         /// The port of Chrome's `DevTools` endpoint.
         cdp_port: u16,
     },
+}
+
+impl BrowserLaunch {
+    /// Whether Chrome runs under the agent's process tree, so the tree's end is Chrome's
+    /// (the removal's wait, `launch_checks/straggler.rs`). A launch that starts Chrome
+    /// anywhere else answers false here.
+    pub(crate) fn chrome_in_tree(self) -> bool {
+        match self {
+            Self::InJail => true,
+            Self::OutsideJail { .. } => false,
+        }
+    }
 }
 
 /// A [`BrowserLaunch`] the host does not build yet.

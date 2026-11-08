@@ -1,6 +1,6 @@
-//! The matter commands of the rail: `UpdateMatter` (client, next date, pinned), `OpenMatter`
-//! (`last_opened`) and `ForgetMatter`, and bringing a forgotten matter back when its folder is
-//! imported again.
+//! The matter commands of the rail: `UpdateMatter` (client, next date, skill packs, pinned),
+//! `OpenMatter` (`last_opened`) and `ForgetMatter`, and bringing a forgotten matter back when its
+//! folder is imported again.
 //!
 //! Each writes the matter's row and the command's receipt in one commit and no event: the
 //! details live on the row (store schema 2), `ListMatters` reads rows, and the reducer's matter
@@ -17,7 +17,8 @@
 use std::path::Path;
 
 use clauseo_protocol::{
-    ClientName, CommandOutcome, Date, ErrorCode, FieldChange, MatterId, MatterKind, StreamId,
+    ClientName, CommandOutcome, Date, ErrorCode, FieldChange, MatterId, MatterKind, PackList,
+    StreamId,
 };
 use clauseo_store::MatterRow;
 
@@ -31,18 +32,19 @@ use crate::pipeline::Draft;
 pub(super) struct Update {
     pub(super) client: FieldChange<ClientName>,
     pub(super) next_date: FieldChange<Date>,
+    pub(super) skill_packs: FieldChange<PackList>,
     pub(super) pinned: Option<bool>,
 }
 
 /// `UpdateMatter`: the changed row and the receipt.
 pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId, update: Update) {
-    let done = actor
-        .check_matter(matter)
-        .map(|entry| entry.row.clone())
+    let done = check_skill_packs(&update.skill_packs)
+        .and_then(|()| actor.check_matter(matter).map(|entry| entry.row.clone()))
         .and_then(|before| {
             let mut row = before.clone();
             apply(&mut row.client, update.client);
             apply(&mut row.next_date, update.next_date);
+            apply(&mut row.skill_packs, update.skill_packs);
             if let Some(pinned) = update.pinned {
                 row.pinned = pinned;
             }
@@ -50,6 +52,27 @@ pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterI
         });
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));
+    }
+}
+
+/// A list that names a reserved pack id (`clauseo`, `clauseo-*`, a built-in skill, `stetdoc`) is
+/// refused with `command.invalid`, as a bad value is: no pack folder can have such an id, so the
+/// list would only ever skip it at launch. A stored list can still hold one (the store reads it),
+/// so a launch skips it there (PR-D).
+fn check_skill_packs(change: &FieldChange<PackList>) -> Result<(), Error> {
+    match change {
+        FieldChange::Set(list)
+            if list
+                .as_slice()
+                .iter()
+                .any(|id| !clauseo_profile::packs::is_pack_id(id.as_str())) =>
+        {
+            Err(Error::refused(
+                ErrorCode::CommandInvalid,
+                "a skill pack id is reserved for Clauseo's own packs and skills",
+            ))
+        }
+        FieldChange::Keep | FieldChange::Clear | FieldChange::Set(_) => Ok(()),
     }
 }
 
@@ -164,6 +187,8 @@ pub(super) fn unforget(
         forgotten: None,
         client: client.or(before.client.clone()),
         next_date: next_date.or(before.next_date),
+        // The skill packs are restored as they were: forgetting kept the list on the row, and
+        // the import has no list of its own to give.
         ..before
     };
     let now = actor.now().wall;

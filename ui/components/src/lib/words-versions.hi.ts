@@ -1,5 +1,9 @@
 // The Hindi of words-versions.ts, keyed by its English. Loaded only for a Hindi display: words-hi.ts gathers every words
 // file's Hindi into one lazy chunk, and words-versions.ts imports this file's type alone.
+// Design B's terminology sweep (safe-workspace-installer-setup): every line naming the protection
+// says "Safe workspace", सुरक्षित कार्यक्षेत्र in Hindi; those lines, English and Hindi, are
+// provisional for Rohan's batch review and a Hindi-speaking lawyer, listed in the PR (no
+// copy-approvals entry registers them).
 import { HI as TOOLBAR } from "./words-toolbar.hi.ts";
 
 const OWN = {
@@ -91,12 +95,14 @@ const OWN = {
     "{papers} पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
-  // two or more Word documents, named in one line (hi: later)
-  "Close {files} in Word to undo the change.": null,
-  "Close {files} in Word to restore it.": null,
-  // the second sentence under Word's lines: a Word that has crashed, with the file no longer open in it (hi: later)
-  "If it isn't open in Word, close Word and try again.": null, // hi: later
-  "If they aren't open in Word, close Word and try again.": null, // hi: later
+  // two or more Word documents, named in one line
+  "Close {files} in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में {files} बंद करें।",
+  "Close {files} in Word to restore it.": "पुनर्स्थापित करने के लिए Word में {files} बंद करें।",
+  // the second sentence under Word's lines: a Word that has crashed, with the file no longer open in it
+  "If it isn't open in Word, close Word and try again.":
+    "अगर यह Word में खुली नहीं है, तो Word बंद करें और फिर से प्रयास करें।",
+  "If they aren't open in Word, close Word and try again.":
+    "अगर ये Word में खुली नहीं हैं, तो Word बंद करें और फिर से प्रयास करें।",
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
@@ -159,8 +165,6 @@ const OWN = {
   // History, with the actor first
   "{time} on {date}": "{date}, {time}",
   "{time} today": "आज {time}",
-  // a list of two, as a sentence joins them
-  "{a} and {b}": "{a} और {b}",
 } as const;
 
 const EDGE = {
@@ -169,15 +173,15 @@ const EDGE = {
     "Clauseo इस मामले के बाहर का एक फ़ोल्डर पढ़ना चाहता है: {place}।",
   "Clauseo wants to open a website this matter hasn't used before: {place}.":
     "Clauseo एक ऐसी वेबसाइट खोलना चाहता है जो इस मामले में पहले इस्तेमाल नहीं हुई: {place}।",
-  "Clauseo asks to work without protection in this matter, to read the scanned annexures with a program on this computer.":
-    "Clauseo इस मामले में संरक्षण के बिना काम करने की अनुमति माँगता है, ताकि इस कंप्यूटर के एक प्रोग्राम से स्कैन किए गए अनुलग्नक पढ़ सके।",
+  "Clauseo asks to work outside the Safe workspace in this matter, to read the scanned annexures with a program on this computer.":
+    "Clauseo इस मामले में सुरक्षित कार्यक्षेत्र के बाहर काम करने की अनुमति माँगता है, ताकि इस कंप्यूटर के एक प्रोग्राम से स्कैन किए गए अनुलग्नक पढ़ सके।",
   "Clauseo works inside this matter's folder and asks before going beyond it.":
     "Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
-  "Without protection, Clauseo can reach any file on this computer without asking.":
-    "संरक्षण के बिना Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
+  "Outside the Safe workspace, Clauseo can reach any file on this computer without asking.":
+    "सुरक्षित कार्यक्षेत्र के बाहर Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
   Allow: "अनुमति दें",
   "Don't allow": "अनुमति न दें",
-  "Keep protection": "संरक्षण बनाए रखें",
+  "Keep the Safe workspace": "सुरक्षित कार्यक्षेत्र बनाए रखें",
   "Switch off": "बंद करें",
   // answered, in the past tense
   "Allowed for this matter. Clauseo can read {place}.":
@@ -195,10 +199,10 @@ const EDGE = {
   "Not allowed for this matter. Clauseo won't open {place}.":
     "इस मामले के लिए अनुमति नहीं दी गई। Clauseo {place} नहीं खोलेगा।",
   "Not allowed. Clauseo didn't open {place}.": "अनुमति नहीं दी गई। Clauseo ने {place} नहीं खोली।",
-  "Protection switched off for this matter at {time}.":
-    "{time} बजे इस मामले के लिए संरक्षण बंद किया गया।",
-  "Protection kept. Clauseo left the scanned annexures unread.":
-    "संरक्षण बना रहा। Clauseo ने स्कैन किए गए अनुलग्नक नहीं पढ़े।",
+  "Safe workspace switched off for this matter at {time}.":
+    "{time} बजे इस मामले के लिए सुरक्षित कार्यक्षेत्र बंद किया गया।",
+  "Safe workspace kept. Clauseo left the scanned annexures unread.":
+    "सुरक्षित कार्यक्षेत्र बना रहा। Clauseo ने स्कैन किए गए अनुलग्नक नहीं पढ़े।",
   // the computer's own dialogs
   // the working line while the edge waits, and while Claude starts again
   // after refusals
@@ -229,35 +233,36 @@ const EDGE = {
   "Removed. Clauseo asks again before using it.":
     "हटा दिया गया। इस्तेमाल करने से पहले Clauseo फिर पूछेगा।",
   Undo: "पूर्ववत करें",
-  Protection: "संरक्षण",
+  "Safe workspace": "सुरक्षित कार्यक्षेत्र",
   "On. Clauseo works inside this matter's folder and asks before going beyond it.":
     "चालू। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
   "Off since {time} today. Clauseo can reach any file on this computer without asking.":
     "आज {time} बजे से बंद। Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
-  "Couldn't be set up on this computer. Clauseo asks before each change in this matter.":
-    "इस कंप्यूटर पर सेट नहीं हो सका। Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  "Clauseo asks before each change in this matter.": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  "Protection couldn't be set up on this computer, so Clauseo asks before each change in this matter.":
-    "इस कंप्यूटर पर संरक्षण सेट नहीं हो सका, इसलिए Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  "Switch off protection": "संरक्षण बंद करें",
-  "Switch protection on": "संरक्षण चालू करें",
+  "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.":
+    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
+    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside the matter's folder.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Switch off the Safe workspace": "सुरक्षित कार्यक्षेत्र बंद करें",
+  "Switch the Safe workspace on": "सुरक्षित कार्यक्षेत्र चालू करें",
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":
     "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
   // not protected
   "This matter is not protected": "यह मामला संरक्षित नहीं है",
-  "Protection is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.":
-    "{matter} के लिए संरक्षण बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
-  "Windows didn't allow the protected space on this computer.":
-    "Windows ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
-  "macOS didn't allow the protected space on this computer.":
-    "macOS ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
-  "Linux didn't allow the protected space on this computer.":
-    "Linux ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
+  "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.":
+    "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
+  "Windows didn't allow the Safe workspace on this computer.":
+    "Windows ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
+  "macOS didn't allow the Safe workspace on this computer.":
+    "macOS ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
+  "Linux didn't allow the Safe workspace on this computer.":
+    "Linux ने इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की अनुमति नहीं दी।",
   "Every change inside the matter's folder is still kept, and Versions can undo it.":
     "मामले के फ़ोल्डर के भीतर हर बदलाव अब भी रखा जाता है, और संस्करण उसे पूर्ववत कर सकते हैं।",
   Understood: "ठीक है",
   // the computer's own dialogs, as edgeDialogWords builds them
-  "Switch off protection for {matter}?": "{matter} के लिए संरक्षण बंद करें?",
+  "Switch off the Safe workspace for {matter}?": "{matter} के लिए सुरक्षित कार्यक्षेत्र बंद करें?",
   "If you switch it off, Clauseo can read and change any file on this computer while it works on this matter, without asking.":
     "बंद करने पर Clauseo इस मामले पर काम करते समय बिना पूछे इस कंप्यूटर की कोई भी फ़ाइल पढ़ और बदल सकता है।",
   "If you keep it, Clauseo stays inside this matter's folder, and the scanned annexures stay unread.":

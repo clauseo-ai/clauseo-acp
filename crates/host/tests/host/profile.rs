@@ -11,8 +11,9 @@ use clauseo_protocol::{
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines, escaped,
-    filled_browser, first_frame_tools, notes, path_text, settings, template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
+    codex_lines_for, escaped, filled_browser, first_frame_tools, notes, path_text, settings,
+    template, tool, turn,
 };
 use crate::support::{Dir, FAKE, Scenario};
 use crate::write;
@@ -207,6 +208,46 @@ fn skill_shell_off() {
         turn(&host, host.create_thread(matter, CLAUDE));
         host.shutdown();
     }
+}
+
+/// Codex gets its run folder and the matter's notes as ACP `additionalDirectories`, the roots
+/// codex-acp makes each turn's `workspaceWrite` policy from (`agent::codex_fence`), on
+/// `session/new` and again on `session/load`; Claude gets none there.
+#[test]
+fn codex_gets_its_folders_as_additional_directories_on_new_and_load() {
+    let dir = Dir::new("profile_codex_roots", &[]);
+    let launcher = Wired::new(&dir);
+    let codex = template(&dir, "cr-codex", "");
+    let claude = template(&dir, "cr-claude", "");
+    settings(
+        &dir,
+        agents(&[(CODEX, &codex, json!({})), (CLAUDE, &claude, json!({}))]),
+        json!({}),
+    );
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let notes = path_text(&notes(&dir, matter));
+    let roots = json!({"additionalDirectories": ["@RUN@", notes]});
+    template(&dir, "cr-codex", &codex_lines("cr-codex", &roots));
+    let off = ["/additionalDirectories"];
+    let lines = agent_lines("cr-claude", "session/new", &json!({}), &off);
+    template(&dir, "cr-claude", &lines);
+    let thread = host.create_thread(matter, CODEX);
+    turn(&host, thread);
+    turn(&host, host.create_thread(matter, CLAUDE));
+    host.shutdown();
+
+    let lines = codex_lines_for("cr-codex", "session/load", &roots);
+    template(&dir, "cr-codex", &lines);
+    let host = dir.start_launching(1, Arc::<Wired>::clone(&launcher), |config| config);
+    turn(&host, thread);
+    host.shutdown();
+    let runs = launcher
+        .seen()
+        .iter()
+        .filter(|seen| seen.run.is_some())
+        .count();
+    assert_eq!(runs, 3, "the new, Claude's and the load launch");
 }
 
 /// R22 `matter_notes_folder`: session start makes the matter's notes folder; two sessions of

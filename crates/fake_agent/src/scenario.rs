@@ -31,6 +31,9 @@ pub(crate) enum OnStdinClose {
     Exit,
     /// Write `fake_agent: stdin closed, holding` to stderr and park forever.
     Hang,
+    /// As `Hang`, but for at most [`crate::HANG_BRIEFLY`], then exit [`crate::EXIT_OK`]: a
+    /// host test that holds an agent's stop ladder leaves no agent behind if it is killed.
+    HangBriefly,
 }
 
 /// Which protocol the agent plays: the header's `protocol`, `"acp"` when left out.

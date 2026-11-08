@@ -25,7 +25,8 @@
 //! `setup` command and stream arm: a [`SetupCommand`] (a pasted code or a key inside it a
 //! [`Secret`], which never encodes) and a [`SetupEvent`] carrying [`InstallProgress`] and
 //! [`SignIn`] (decision record 0048). A matter's rail
-//! details are [`ClientName`], [`Date`] and [`MatterStatus`] on
+//! details are [`ClientName`], [`Date`], [`PackList`] (of [`PackId`]s, decision record 0040) and
+//! [`MatterStatus`] on
 //! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
 //! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
 //! [`ThreadsChanged`]. Subscribers receive
@@ -137,9 +138,11 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod allowed_sites;
 mod approval;
 mod browser_install;
 mod command;
+mod connectors;
 mod content;
 mod details;
 mod envelope;
@@ -153,6 +156,7 @@ mod matter;
 mod number;
 mod open_enum;
 mod patch;
+mod protection;
 mod query;
 mod raw;
 mod search;
@@ -160,6 +164,7 @@ mod serde_util;
 mod session;
 mod settings;
 mod setup;
+mod skill_packs;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -191,17 +196,22 @@ macro_rules! wire_types {
 
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
+    allowed_sites::{AllowScope, AllowedSite},
     approval::{
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     command::{
-        CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
-        RefreshWhy, RestoreRequest,
+        CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
+        HostCommand, MatterSource, RefreshWhy, RestoreRequest,
+    },
+    connectors::{
+        Balance, ConnectorErrorKind, ConnectorStatus, ConnectorView, ConnectorsState,
+        DaySpendView, PackView, RechargeOutcome, RecentSpend, RedactedString, ConnectorSignInMethod,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
-    details::{ClientName, Date, MatterStatus},
+    details::{ClientName, Date, MatterStatus, PackId, PackList},
     envelope::{Envelope},
     error_code::{ErrorCode, HostError},
     event::{
@@ -216,7 +226,8 @@ wire_types! {
         UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
     ids::{
-        AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
+        AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,
+        ContentId,
         ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
@@ -229,12 +240,16 @@ wire_types! {
     lists::{LastStop, MattersChanged, ThreadsChanged},
     matter::{
         CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
-        MatterKind, RestoreScope,
+        MatterKind, RestoreScope, SyncService,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     patch::{
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
+    },
+    protection::{
+        NotProtectedCause, Protection, ProtectionTier, ProtectionView, ProtectionWork, SiteTag,
+        UnsupportedWhy,
     },
     query::{
         AgentSummary, BlobRange, DefaultLocation, FolderState, FolderSupportKind, HostQuery, MatterSummary, PageLimit, PaperSummary,
@@ -247,7 +262,8 @@ wire_types! {
     },
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
-        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeLevel, SnoozeBy, PlanEntry, PlanPriority,
+        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeKind, NoticeLevel,
+        PackSkipReason, SnoozeBy, PlanEntry, PlanPriority,
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
@@ -255,6 +271,7 @@ wire_types! {
         Language, Lite, Motion, PlanProvider, PlanView, PrivacyPatch, PrivacySettings,
         SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
     },
+    skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
     setup::{
         FoundLogin, InstallLog, InstallProgress, LoginFrom, Secret, SetupCommand, SetupEvent,
         SignIn, SignInMethod, SignInSource,
@@ -262,7 +279,7 @@ wire_types! {
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
     title::{Title},
-    tool::{PageVia, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
+    tool::{PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
@@ -276,11 +293,16 @@ wire_types! {
         VersionEntry, ViewEntry,
     },
     view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
+    view::{QueueHoldReason},
 }
 
 // Re-exports that are not wire types: constants, functions, and types that never cross the
 // boundary.
+// What stands in a tool call's logged output for an elicitation value it echoed.
+pub use approval::WITHHELD;
 pub use command::{
+    MAX_ALLOWED_HOST_BYTES,
+    MAX_CONNECTOR_ID_BYTES,
     MAX_DAY_START_SKEW_MS,
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
@@ -294,8 +316,12 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+// The text a `RedactedString` encodes and prints as.
+pub use connectors::REDACTED_TEXT;
 // How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.
 pub use details::FieldChange;
+// The most ids a matter's skill packs hold: a constant, so outside `wire_types!`.
+pub use details::PACK_LIST_MAX;
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
 pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.
@@ -314,8 +340,8 @@ pub use setup::{MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BY
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 pub use web::{
-    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, REDACTED,
-    logged_url,
+    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_SEARCH_TOOL_CHARS, MAX_URL_CHARS,
+    MAX_WEB_TITLE_CHARS, REDACTED, logged_url,
 };
 #[cfg(feature = "specta")]
 pub use wire::{WireFormat, known_kinds_typescript};

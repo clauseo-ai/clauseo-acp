@@ -15,6 +15,11 @@ pub(crate) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::R
     std::fs::write(path, contents)
 }
 
+/// `fs::copy`.
+pub(crate) fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
+    std::fs::copy(from, to)
+}
+
 /// `fs::create_dir_all`.
 pub(crate) fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::create_dir_all(path)

@@ -8,8 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
+    AgentId, AgentKind, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString, Count,
+    Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource,
+    MatterStatus, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason,
     RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
     ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
@@ -157,7 +158,10 @@ pub enum HostQuery {
     /// The agents in the settings, for a new thread's choice of agent.
     ListAgents,
     /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
-    /// line before a pick. JSON: `"get_default_location"`.
+    /// line before a pick. JSON: `"get_default_location"`. A host with no default location (no
+    /// `matters.default_location` and no Documents folder, issue #365) refuses it with
+    /// `command.invalid`, as it refuses a `DefaultLocation` create; the form then asks for a
+    /// folder.
     GetDefaultLocation,
     /// Search inside matters and conversations (decision 0043). Answered
     /// `QueryResult::Search`.
@@ -179,6 +183,20 @@ pub enum HostQuery {
     /// Where the updater stands (decision record 0037), read after subscribing to the app
     /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
     GetUpdate,
+    /// Every skill pack folder in `<data>/skill-packs/`, and every pack `skills.enabled`
+    /// names, each with its state (decision record 0040), sorted by id; read off the host
+    /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
+    ListSkillPacks,
+    /// This computer's sandbox and the firm's protection settings (decision record 0051).
+    /// Answered `QueryResult::Protection`, from the host's cache, at once.
+    /// JSON: `"protection"`.
+    Protection,
+    /// The sites the lawyer allowed despite the unsafe-site block list (decision record 0053,
+    /// PR 2), `Always` first, each sorted by host, then by matter. Listed whatever the policy
+    /// says: while `network.allow_unsafe_site_override` is off none is honoured, and
+    /// `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
+    /// JSON: `"allowed_sites"`.
+    AllowedSites,
 }
 
 /// A query's answer.
@@ -231,6 +249,12 @@ pub enum QueryResult {
     /// For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
     /// `{"folder_support": {}}` for a fine folder.
     FolderSupport(PickedFolderSupport),
+    /// For `ListSkillPacks`.
+    SkillPacks(Vec<PackStatus>),
+    /// For `Protection`.
+    Protection(ProtectionView),
+    /// For `AllowedSites`.
+    AllowedSites(Vec<AllowedSite>),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
@@ -335,6 +359,10 @@ pub struct MatterSummary {
     /// Its next date, once set.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub next_date: Option<Date>,
+    /// The skill packs it may load, once set (decision record 0040); missing means the global
+    /// `skills.enabled` list, and `[]` means no pack for this matter.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub skill_packs: Option<PackList>,
     /// Whether it is pinned to the top of the rail; missing reads as `false`.
     #[serde(default)]
     pub pinned: bool,
@@ -363,6 +391,11 @@ pub struct MatterSummary {
     /// folder is fine, before any check since the host started, and off Windows.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub folder_support: Option<FolderSupportKind>,
+    /// Whether its agents run in the sandbox, and why not (decision record 0051): an in-memory
+    /// reading, not state in the log. Missing when not known yet: before the host has decided,
+    /// and from a host that does not tell.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub protection: Option<Protection>,
 }
 
 open_unit_enum! {
@@ -426,6 +459,11 @@ pub struct ThreadSummary {
     /// missing reads as `false`.
     #[serde(default)]
     pub queue_held: bool,
+    /// Why its queue waits, as
+    /// [`HeaderEntry::queue_held_reason`](crate::HeaderEntry::queue_held_reason); set only while
+    /// `queue_held` is true. Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_held_reason: Option<QueueHoldReason>,
     /// Whether the lawyer has seen how its last turn ended: true when no turn ended after its
     /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
     #[serde(default = "seen_default")]

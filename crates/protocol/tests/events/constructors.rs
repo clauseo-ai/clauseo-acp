@@ -129,6 +129,31 @@ fn a_turn_queued_behind_a_turn_waits_in_its_own_thread() {
     assert_eq!(built.turn(), turn);
     assert_eq!(built.behind(), own);
     assert_eq!(built.behind_turn(), Some(earlier));
+    assert!(!built.is_at_head());
+}
+
+#[test]
+fn a_turn_put_back_at_the_head_says_so_and_an_older_entry_reads_as_not() {
+    let (thread, turn, earlier) = (thread_id(2), turn_id(3), turn_id(6));
+    let queued = TurnQueued::new(thread, turn, thread, Some(earlier)).unwrap();
+    // Not at the head: written as before, with no `at_head` field.
+    let plain = serde_json::to_value(DomainEvent::TurnQueued(queued)).unwrap();
+    assert_eq!(
+        plain,
+        json!({"turn_queued": {"turn": turn, "behind": thread, "behind_turn": earlier}})
+    );
+    // An older entry has no `at_head`: it reads as not at the head.
+    let DomainEvent::TurnQueued(read) = serde_json::from_value(plain).unwrap() else {
+        panic!("not a TurnQueued");
+    };
+    assert!(!read.is_at_head());
+    let head = DomainEvent::TurnQueued(queued.at_head());
+    let written = serde_json::to_value(&head).unwrap();
+    assert_eq!(written["turn_queued"]["at_head"], json!(true));
+    let back: DomainEvent = serde_json::from_value(written).unwrap();
+    assert_eq!(back, head);
+    let packed = rmp_serde::to_vec_named(&head).unwrap();
+    assert_eq!(rmp_serde::from_slice::<DomainEvent>(&packed).unwrap(), head);
 }
 
 #[test]

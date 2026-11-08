@@ -125,8 +125,8 @@ error_codes! {
         newer Clauseo.";
     MatterCheckpointFailed = "matter.checkpoint_failed", retryable: true, meaning: "Taking a \
         checkpoint of the matter's files failed.";
-    MatterFolderMissing = "matter.folder_missing", retryable: false, meaning: "The matter's \
-        folder is gone: moved, deleted, or its drive is not mounted.";
+    MatterFolderMissing = "matter.folder_missing", retryable: true, meaning: "The matter's \
+        folder is gone: moved, deleted, or its drive is not mounted or did not answer in time.";
     MatterFolderRefused = "matter.folder_refused", retryable: false, meaning: "The folder may not \
         be a matter: a drive root, the home folder or a system folder.";
     MatterCodexFolder = "matter.codex_folder", retryable: false, meaning: "The matter folder \
@@ -193,6 +193,74 @@ error_codes! {
     UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
         signature check or install failed; the version running keeps running, and a later check \
         tries again.";
+    SettingsRefused = "settings.refused", retryable: false, meaning: "The change breaks a \
+        settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped \
+        variable or an address that is not https; the message names the key, never the value, \
+        and nothing was changed.";
+    SettingsKeyStored = "settings.key_stored", retryable: false, meaning: "A key is already \
+        stored for this agent, so this window may not replace it; it is changed or removed in \
+        Settings. No key text is in the message.";
+    SigninLoginShared = "signin.login_shared", retryable: false, meaning: "A Codex login, logout \
+        or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login \
+        file; the remedy is in the app, \"Stop using it here\".";
+    SigninFirmManaged = "signin.firm_managed", retryable: false, meaning: "Sign-in is \
+        refused: a firm endpoint is set by policy.";
+    SigninKeyInUse = "signin.key_in_use", retryable: false, meaning: "Sign-in is refused: an \
+        API key is stored.";
+    SigninEndpointInUse = "signin.endpoint_in_use", retryable: false, meaning: "Sign-in is \
+        refused: an endpoint is set in Settings.";
+    MatterFolderTooDeep = "matter.folder_too_deep", retryable: false, meaning: "The matter \
+        folder's path is too long for Windows to start programs in it: move the folder closer \
+        to the top of its drive.";
+    SigninAgentsStillRunning = "signin.agents_still_running", retryable: true, meaning: "An \
+        agent was still running after Clauseo waited for it to stop, so the login was not \
+        changed and nothing was removed; trying again once it has stopped can succeed.";
+    AgentKeysLoading = "agent.keys_loading", retryable: true, meaning: "Clauseo has not \
+        finished loading the stored API keys; no agent was started; trying again in a moment can \
+        succeed.";
+    AgentKeyUnreadable = "agent.key_unreadable", retryable: true, meaning: "A stored API key \
+        could not be read from the system's key store (no answer in time, or the read was \
+        refused, often at a permission prompt); no agent was started. Trying again once it can \
+        be read can succeed.";
+    MatterDocumentPathTooLong = "matter.document_path_too_long", retryable: false, meaning: "A \
+        Word document's path is too long for Word to open, even with its folders' short names \
+        (Windows): move the matter's folder nearer the top of its drive, or shorten its folder \
+        names.";
+    MatterProtectedLink = "matter.protected_link", retryable: false, meaning: "A protected \
+        name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a \
+        shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the \
+        agent is not started; the lawyer moves or deletes it.";
+    SandboxSetupRefused = "sandbox.setup_refused", retryable: true, meaning: "The sandbox's set-up \
+        was not done: the lawyer declined the administrator prompt, or Windows refused to raise \
+        it; asking again can succeed.";
+    SandboxSetupFailed = "sandbox.setup_failed", retryable: true, meaning: "The sandbox's set-up, \
+        or the check that the sandbox works, failed; trying again can succeed.";
+    SandboxSetupRequired = "sandbox.setup_required", retryable: false, meaning: "The firm \
+        requires the sandbox (sandbox.required) and this computer needs its one-time set-up \
+        first (not done, or its administrator prompt declined), so no agent was started; \
+        running the set-up fixes it.";
+    SandboxRequired = "sandbox.required", retryable: false, meaning: "The firm requires the \
+        sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does \
+        not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a \
+        newer cause), so no agent was started.";
+    MatterFolderNotAMatter = "matter.folder_not_a_matter", retryable: false, meaning: "The \
+        matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, \
+        unreadable or belongs to another matter: locate the matter's folder.";
+    SandboxBlocked = "sandbox.blocked", retryable: false, meaning: "A Windows setting or \
+        security tool blocks the sandbox (its set-up program is missing or was blocked, say), so \
+        no agent was started; whoever looks after this computer can fix it.";
+    BlocklistOverrideOff = "blocklist.override_off", retryable: false, meaning: "Allowing a \
+        site on Clauseo's unsafe-site list is turned off (network.allow_unsafe_site_override is \
+        false, usually by the firm's policy), so nothing was allowed.";
+    BlocklistNoticeExpired = "blocklist.notice_expired", retryable: false, meaning: "The \
+        blocked-site notice an allow names is one the host no longer keeps (too old, or from \
+        before a restart), so nothing was allowed: allow the site from a new notice.";
+    BlocklistAllowNotSaved = "blocklist.allow_not_saved", retryable: false, meaning: "The \
+        allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store \
+        or the data folder failed), so the site is blocked again after a restart.";
+    BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
+        site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
+        saved allows, so the site may be allowed again after a restart.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

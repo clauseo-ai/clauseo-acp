@@ -67,7 +67,7 @@ fn the_keys_and_their_kinds_are_the_schemas() {
                 Kind::Number => "integer",
                 Kind::String => "string",
                 Kind::Object => "object",
-                other => panic!("{key}: {other:?}"),
+                Kind::StringArray => "array",
             };
             ((*key).to_owned(), kind.to_owned())
         })
@@ -156,4 +156,22 @@ fn the_browser_is_off_by_default_on_windows() {
 #[test]
 fn the_browser_is_off_by_default_elsewhere() {
     assert!(!ToolsSettings::default().browser);
+}
+
+#[test]
+fn an_agent_launch_s_debug_names_each_variable_and_shows_no_value() {
+    const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
+    let launch = super::AgentLaunch {
+        command: "/opt/agent".to_owned(),
+        args: vec!["--acp".to_owned()],
+        env: std::collections::BTreeMap::from([
+            ("ANTHROPIC_API_KEY".to_owned(), KEY.to_owned()),
+            ("CODEX_HOME".to_owned(), "/never/shown".to_owned()),
+        ]),
+    };
+    let shown = format!("{launch:?}");
+    assert!(!shown.contains(KEY), "{shown}");
+    assert!(!shown.contains("/never/shown"), "{shown}");
+    assert!(shown.contains("ANTHROPIC_API_KEY"), "{shown}");
+    assert!(shown.contains("/opt/agent"), "{shown}");
 }

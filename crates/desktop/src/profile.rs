@@ -14,16 +14,18 @@ use std::time::Duration;
 
 use futures::future::Either;
 
-use clauseo_host::{McpServer, ProfileHook};
+use clauseo_host::{HostConfig, McpServer, PackRequest, ProfileHook};
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions, Timer as _};
 use clauseo_profile::skills::stetdoc;
 use clauseo_profile::{
-    BrowserSidecars, ClauseoProfile, ProfileError, ProfilePaths, ProfileServer, SkillSource,
-    SkillWrite, SkillsWritten,
+    BrowserSidecars, ClauseoProfile, PackWrite, PacksWritten, ProfileError, ProfilePaths,
+    ProfileServer, SkillSource, SkillWrite, SkillsWritten,
 };
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value};
+
+use crate::setup::SetupHook;
 
 /// stetdoc's program name, without the OS's suffix.
 const STETDOC: &str = "stetdoc";
@@ -250,8 +252,13 @@ fn stdio(server: ProfileServer) -> McpServer {
 }
 
 impl ProfileHook for DesktopProfile {
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>> {
-        self.profile.session_meta(AgentKind::of(agent))
+    fn session_meta(
+        &self,
+        agent: &AgentId,
+        packs: Option<&PacksWritten>,
+    ) -> Option<Map<String, Value>> {
+        self.profile
+            .session_meta_with_packs(AgentKind::of(agent), packs)
     }
 
     fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString> {
@@ -277,16 +284,61 @@ impl ProfileHook for DesktopProfile {
             .collect()
     }
 
-    fn codex_config(&self, agent: &AgentId, written: Option<&SkillsWritten>) -> Map<String, Value> {
-        let kind = AgentKind::of(agent);
-        match written {
-            Some(written) => self.profile.codex_keys(kind, written),
-            None => self.profile.codex_keys_without_index(kind),
-        }
+    fn codex_config(
+        &self,
+        agent: &AgentId,
+        written: Option<&SkillsWritten>,
+        packs: Option<&PacksWritten>,
+    ) -> Map<String, Value> {
+        self.profile
+            .codex_keys_with_packs(AgentKind::of(agent), written, packs)
     }
 
     fn launch_writes(&self, agent: &AgentId) -> Vec<SkillWrite> {
         self.profile.launch_writes(AgentKind::of(agent))
+    }
+
+    fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {
+        self.profile.pack_write(
+            AgentKind::of(agent),
+            request.entries().to_vec(),
+            request.allow_scripts(),
+        )
+    }
+}
+
+/// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
+/// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
+/// profile (it could not be built) the hook adds only setup's variables.
+pub(crate) fn with_profile(
+    config: HostConfig,
+    profile: Option<DesktopProfile>,
+    hook: SetupHook,
+) -> HostConfig {
+    let Some(profile) = profile else {
+        return config.with_profile_hook(Box::new(hook));
+    };
+    let config = match profile.path_prepend().and_then(absolute_folder) {
+        Some(folder) => config.with_agent_path_prepend(folder),
+        None => config,
+    };
+    config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
+}
+
+/// `folder` when it is absolute. The host takes the agents' `PATH` folder as given, and a
+/// relative one would name a folder under each agent's working folder, so a relative folder is
+/// a bug (a debug build stops on it) and a release build logs it and prepends nothing.
+fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    debug_assert!(
+        folder.is_absolute(),
+        "the agents' PATH folder must be absolute: {}",
+        folder.display()
+    );
+    if folder.is_absolute() {
+        Some(folder)
+    } else {
+        tracing::warn!(folder = %folder.display(), "a relative folder does not go on the agents' PATH");
+        None
     }
 }
 

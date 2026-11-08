@@ -10,22 +10,30 @@
 //! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
 //! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
 //! Every install `Ready` kicks the agent's queued sign-in, if any (`SigninHub::install_ready`).
+//!
+//! Quitting (#386): the job threads are counted as they start and end, and
+//! [`Agents::shutdown`] cancels every job and waits, within a bound, for the count to reach 0.
+//! A job's thread drops its child's handle as it sees the cancel, which kills the child's tree
+//! (npm leads its own process group), so an ended thread has left no child. Once shut down or
+//! dropped, no job starts.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
+use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
 use crate::cancel::Cancel;
-use crate::config::AgentsConfig;
+use crate::config::{AgentsConfig, Network};
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
 
+mod shared;
 mod signin;
 
 pub(crate) use self::signin::SigninHub;
@@ -44,6 +52,8 @@ enum Command {
     Install(AgentId),
     Pause(AgentId),
     Retry(AgentId, bool),
+    /// Replace the proxies and CA files the next jobs take.
+    SetNetwork(Box<Network>),
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
 }
@@ -52,6 +62,10 @@ enum Command {
 #[derive(Debug)]
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
+    /// How many job threads run, installs and sign-ins; `job_ended` wakes `shutdown` as one
+    /// ends.
+    jobs: Mutex<usize>,
+    job_ended: Condvar,
     events: async_channel::Sender<AgentsEvent>,
     /// Every agent's sign-in state and running sign-in job.
     pub(crate) signin: SigninHub,
@@ -64,6 +78,10 @@ struct Inner {
     /// The job that may emit now, if any.
     current: Option<Ticket>,
     next_job: u64,
+    /// Each agent's tries in its last install job that ended, the last one included.
+    tries: BTreeMap<AgentId, u32>,
+    /// Set by `shutdown` or the drop: no job starts after it.
+    closed: bool,
 }
 
 /// One job's identity and pause signal.
@@ -81,22 +99,39 @@ impl Agents {
     /// Starts the worker thread and gives the handle and the events' receiver. The worker
     /// first sends each snapshot agent's state: `Managed` for an id in `config.managed`;
     /// otherwise, once stale install folders are removed, `Ready` for a valid receipt whose
-    /// Node still qualifies, else `Missing`.
+    /// Node still qualifies, else `Missing`. `launcher` starts every child, so it must clear
+    /// the environment, as sign-in needs.
     pub fn start<T: Timer + Send + Sync + 'static>(
         config: AgentsConfig,
         launcher: Arc<dyn Launcher>,
         timer: T,
     ) -> (Agents, async_channel::Receiver<AgentsEvent>) {
+        Self::start_with_launchers(config, Arc::clone(&launcher), launcher, timer)
+    }
+
+    /// [`Agents::start`] with `install` for installs' children (it may inherit the environment:
+    /// Windows needs `SystemRoot` and `PATH`) and `signin`, made with `clear_env`, for sign-in's.
+    pub fn start_with_launchers<T: Timer + Send + Sync + 'static>(
+        config: AgentsConfig,
+        install: Arc<dyn Launcher>,
+        signin: Arc<dyn Launcher>,
+        timer: T,
+    ) -> (Agents, async_channel::Receiver<AgentsEvent>) {
         let (events, receiver) = async_channel::unbounded();
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner::default()),
+            jobs: Mutex::new(0),
+            job_ended: Condvar::new(),
             signin: SigninHub::new(&config, events.clone()),
             events,
         });
         let (commands, inbox) = mpsc::channel();
+        let network = Arc::new(RwLock::new(config.install.network()));
         let worker = Worker {
             config,
-            launcher,
+            network,
+            launcher: install,
+            signin_launcher: signin,
             timer: Arc::new(timer),
             shared: Arc::clone(&shared),
             job_lock: Arc::new(Mutex::new(())),
@@ -129,6 +164,13 @@ impl Agents {
         self.send(Command::Retry(agent.clone(), use_system_proxy));
     }
 
+    /// Replaces the proxies and CA files (`network.*`, resolved by the caller): every sign-in
+    /// job started after this takes them, and every install try, a running job's next one too
+    /// (one waiting offline); a running sign-in keeps its own.
+    pub fn set_network(&self, network: Network) {
+        self.send(Command::SetNetwork(Box::new(network)));
+    }
+
     /// `agent`'s last state, or `None` for an unknown agent or before the worker set it.
     pub fn state(&self, agent: &AgentId) -> Option<InstallState> {
         self.shared.lock().states.get(agent).cloned()
@@ -137,6 +179,34 @@ impl Agents {
     /// `agent`'s finished install, when it is `Ready`.
     pub fn installed(&self, agent: &AgentId) -> Option<Installed> {
         self.shared.installed(agent)
+    }
+
+    /// How many tries `agent`'s last install job that ended made, the one that ended it
+    /// included: set as it sends `Ready` (0 when it found the agent installed already) or
+    /// `Failed`. `None` before any job ended.
+    pub fn install_tries(&self, agent: &AgentId) -> Option<u32> {
+        self.shared.lock().tries.get(agent).copied()
+    }
+
+    /// Stops everything for the app's quit: no job starts from now on, every install and
+    /// sign-in job is cancelled (each kills its child's tree as it sees it), then their threads
+    /// are waited for, at most `wait`. Returns whether every one ended in time; a thread still
+    /// running is left to end by itself. Blocks, so it runs off any UI thread.
+    pub fn shutdown(&self, wait: Duration) -> bool {
+        self.stop();
+        self.shared.wait_for_jobs(wait)
+    }
+
+    /// Closes the worker to new jobs and cancels every running one, install and sign-ins.
+    fn stop(&self) {
+        {
+            let mut inner = self.shared.lock();
+            inner.closed = true;
+            if let Some(running) = inner.current.take() {
+                running.cancel.cancel();
+            }
+        }
+        self.shared.signin.stop_all();
     }
 
     /// Tests only: ends `agent`'s install as an install job would, through the same emit,
@@ -273,6 +343,14 @@ impl Agents {
         self.start_signin(start)
     }
 
+    /// Whether `agent`'s job is a sign-in, going or queued, from the call that reserves it: the
+    /// job [`Agents::cancel_sign_in`] would end, and one `stop_using_login` would replace. R20's
+    /// automatic leave asks before it calls `stop_using_login`, since `signin_state` cannot
+    /// tell a reserved sign-in from none until its first state.
+    pub fn sign_in_going(&self, agent: &AgentId) -> bool {
+        self.shared.signin.going(agent)
+    }
+
     /// `agent`'s last sign-in state, or `None` before any.
     pub fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.shared.signin.state(agent)
@@ -296,114 +374,22 @@ impl Agents {
 }
 
 impl Drop for Agents {
-    /// Stops the running jobs, install and sign-ins; the worker ends once its commands' sender
-    /// is gone.
+    /// Stops the running jobs, install and sign-ins, as `shutdown` does but without waiting:
+    /// each job's thread kills its child's tree as it sees the cancel. The worker ends once its
+    /// commands' sender is gone.
     fn drop(&mut self) {
-        if let Some(running) = self.shared.lock().current.take() {
-            running.cancel.cancel();
-        }
-        self.shared.signin.stop_all();
-    }
-}
-
-impl Shared {
-    fn lock(&self) -> MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// `agent`'s finished install, when it is `Ready`.
-    pub(crate) fn installed(&self, agent: &AgentId) -> Option<Installed> {
-        self.lock().installed.get(agent).cloned()
-    }
-
-    /// Records and sends `state` for `agent`: the worker's own events.
-    fn emit(&self, agent: &AgentId, state: InstallState, installed: Option<Installed>) {
-        let ready = matches!(state, InstallState::Ready { .. });
-        Inner::set(&mut self.lock(), &self.events, agent, state, installed);
-        if ready {
-            self.signin.install_ready(agent);
-        }
-    }
-
-    /// Records and sends `state` for the job of `ticket`, unless it was paused or superseded:
-    /// then nothing happens and `false` comes back. `ends` marks the job's last event (`Ready`
-    /// or `Failed`), after which it is no longer the running job.
-    pub(crate) fn emit_job(
-        &self,
-        ticket: &Ticket,
-        state: InstallState,
-        installed: Option<Installed>,
-        ends: bool,
-    ) -> bool {
-        let mut inner = self.lock();
-        if ticket.cancel.is_cancelled() {
-            return false;
-        }
-        if ends
-            && inner
-                .current
-                .as_ref()
-                .is_some_and(|current| current.job == ticket.job)
-        {
-            inner.current = None;
-        }
-        let ready = matches!(state, InstallState::Ready { .. });
-        Inner::set(&mut inner, &self.events, &ticket.agent, state, installed);
-        drop(inner);
-        // After the lock: a queued sign-in reads the install again once kicked.
-        if ready {
-            self.signin.install_ready(&ticket.agent);
-        }
-        true
-    }
-}
-
-impl Inner {
-    fn set(
-        inner: &mut Inner,
-        events: &async_channel::Sender<AgentsEvent>,
-        agent: &AgentId,
-        state: InstallState,
-        installed: Option<Installed>,
-    ) {
-        match installed {
-            Some(installed) => {
-                inner.installed.insert(agent.clone(), installed);
-            }
-            None if !matches!(state, InstallState::Ready { .. }) => {
-                inner.installed.remove(agent);
-            }
-            None => {}
-        }
-        inner.states.insert(agent.clone(), state.clone());
-        // Fails only when every receiver is gone; nobody is listening then.
-        drop(events.try_send(AgentsEvent::Install {
-            agent: agent.clone(),
-            state,
-        }));
-    }
-
-    /// Stops the running job. It becomes `Paused`, unless it is `next`'s own job (a retry
-    /// while it waits), which is superseded quietly.
-    fn stop_current(
-        &mut self,
-        events: &async_channel::Sender<AgentsEvent>,
-        next: Option<&AgentId>,
-    ) {
-        let Some(running) = self.current.take() else {
-            return;
-        };
-        running.cancel.cancel();
-        if next != Some(&running.agent) {
-            Inner::set(self, events, &running.agent, InstallState::Paused, None);
-        }
+        self.stop();
     }
 }
 
 /// The worker thread's state.
 struct Worker<T> {
     config: AgentsConfig,
+    /// The network every install try reads as it starts; `config.install`'s copy is sign-in's.
+    network: Arc<RwLock<Network>>,
+    /// The installs' children; `signin_launcher` starts sign-in's, clearing the environment.
     launcher: Arc<dyn Launcher>,
+    signin_launcher: Arc<dyn Launcher>,
     timer: Arc<T>,
     shared: Arc<Shared>,
     job_lock: Arc<Mutex<()>>,
@@ -419,6 +405,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Install(agent) => self.install(&agent),
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
+                Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
         }
@@ -520,6 +507,11 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         }
     }
 
+    fn set_network(&mut self, network: Network) {
+        self.config.install.set_network(network.clone());
+        *self.network.write().unwrap_or_else(PoisonError::into_inner) = network;
+    }
+
     fn retry(&mut self, agent: &AgentId, use_system_proxy: bool) {
         if self.config.snapshot.agent(agent).is_none() {
             return;
@@ -530,12 +522,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         }
         let restartable = matches!(
             self.shared.lock().states.get(agent),
-            Some(
-                InstallState::Failed(_)
-                    | InstallState::Waiting { .. }
-                    | InstallState::Paused
-                    | InstallState::Missing { .. }
-            )
+            Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
         );
         if !restartable {
             return;
@@ -552,6 +539,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
     fn start_job(&self, agent: &AgentId) {
         let ticket = {
             let mut inner = self.shared.lock();
+            if inner.closed {
+                return;
+            }
             inner.stop_current(&self.shared.events, Some(agent));
             inner.next_job += 1;
             let ticket = Ticket {
@@ -565,6 +555,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         let job = Job {
             ticket: ticket.clone(),
             config: self.config.clone(),
+            network: Arc::clone(&self.network),
             launcher: Arc::clone(&self.launcher),
             timer: Arc::clone(&self.timer),
             shared: Arc::clone(&self.shared),
@@ -572,9 +563,11 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             system_proxy: self.system_proxy.clone(),
             data_lock: Mutex::new(None),
         };
-        let spawned = std::thread::Builder::new()
-            .name(format!("clauseo-install-{agent}"))
-            .spawn(move || install::run(&job));
+        let spawned = self
+            .shared
+            .spawn_job(format!("clauseo-install-{agent}"), move || {
+                install::run(&job);
+            });
         if let Err(err) = spawned {
             let mut log = InstallLog::new(agent);
             let detail = format!("the install could not start: {err}");

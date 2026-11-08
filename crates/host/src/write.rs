@@ -84,9 +84,54 @@ pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation.
+/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, and a
+/// rejected `allowed.json` set aside (`blocklist/allowed/integrity.rs`).
 pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
+}
+
+/// Moves the file `from` to `to`, failing (`AlreadyExists`) when `to` exists, never replacing
+/// it: a hard link, then `from` removed, then the folder synced. A rejected `allowed.json` set
+/// aside (`blocklist/allowed/integrity.rs`). A crash between leaves both names, which is safe.
+/// Where the folder takes no hard link (FAT, exFAT, some network shares: any failure but
+/// `AlreadyExists` or `NotFound`), it checks that `to` is free, then renames: there alone a
+/// file made at `to` between the two would be replaced.
+pub(crate) fn move_file_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    move_no_replace_with(from, to, |from, to| std::fs::hard_link(from, to))
+}
+
+/// [`move_file_no_replace`] with `link` making the hard link (a test's seam).
+pub(crate) fn move_no_replace_with(
+    from: &Path,
+    to: &Path,
+    link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    match link(from, to) {
+        Ok(()) => std::fs::remove_file(from)?,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::AlreadyExists | io::ErrorKind::NotFound
+            ) =>
+        {
+            return Err(error);
+        }
+        Err(_no_link) => {
+            if to.symlink_metadata().is_ok() {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            std::fs::rename(from, to)?;
+        }
+    }
+    sync_dir(to.parent().unwrap_or(to))
+}
+
+/// Removes the file `path`; a missing one is fine. An old set-aside `allowed.json`.
+pub(crate) fn remove_old_file(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 
 /// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
@@ -147,6 +192,25 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
         drop(std::fs::remove_file(&temp));
     }
     renamed
+}
+
+/// Syncs the folder `path`, so a rename into it survives a power cut (Unix: `fsync` of the
+/// folder). On Windows a folder cannot be opened this way, and NTFS journals the rename itself.
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "one signature on every OS; only Unix can fail, Windows has nothing to sync"
+    )
+)]
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return std::fs::File::open(path)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 /// Removes the temp files a crashed [`replace_private_file`] of `path` left beside it
@@ -222,4 +286,11 @@ pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
+}
+
+/// Makes `link` a symbolic link to the folder `target`; fails without the right to make links
+/// (Developer Mode or an elevated token). For unit tests.
+#[cfg(all(test, windows))]
+pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
 }

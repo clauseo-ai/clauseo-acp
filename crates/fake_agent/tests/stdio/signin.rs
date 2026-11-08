@@ -108,8 +108,10 @@ fn claude_status(scratch: &Scratch, home: &str, env: &[(&str, &str)]) -> String 
 /// Codex's `login status` from a fresh run, which must exit with `code`. Returns its stdout.
 fn codex_status(scratch: &Scratch, home: &str, env: &[(&str, &str)], code: i32) -> String {
     let finished = codex(scratch, home, &["login", "status"], env).finish();
-    assert_eq!(finished.status.code(), Some(code), "{}", finished.stderr);
-    finished.stdout
+    assert_eq!(finished.status.code(), Some(code), "{}", finished.stdout);
+    // Codex prints its status on stderr, as 0.162.1 does; stdout stays empty.
+    assert_eq!(finished.stdout, "");
+    finished.stderr
 }
 
 #[test]

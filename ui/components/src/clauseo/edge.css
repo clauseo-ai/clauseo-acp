@@ -98,6 +98,40 @@
   .np-note-body > span {
     display: block;
   }
+  /* UC: the pool's counts, one per line; the waiting line in the retry's place; a refusal under the body */
+  .np-note-counts {
+    display: grid;
+    gap: var(--s1);
+    font-variant-numeric: tabular-nums;
+  }
+  .np-note-counts > span {
+    display: block;
+  }
+  .np-note-wait {
+    align-self: center;
+    margin-right: auto;
+    @apply text-small-row text-muted;
+  }
+  .np-note-failed {
+    color: var(--primary);
+  }
+  /* UC: the firm requires protection: its notice in the composer's notice slot, its one act beside the words */
+  .room-required {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    margin-top: var(--s2);
+    padding-left: var(--s4);
+    @apply text-small-row text-primary;
+  }
+  .room-required > p {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .room-required-wait {
+    @apply text-muted;
+  }
 
   /* ---------- what this matter allows ---------- */
   .allows {

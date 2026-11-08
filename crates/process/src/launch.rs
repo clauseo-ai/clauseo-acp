@@ -1,6 +1,7 @@
 //! Starting an agent: the [`Launcher`] seam, the passthrough launcher, and [`spawn_in_tree`], the
 //! one place an agent process starts.
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -8,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use async_process::ChildStdout;
 
 use crate::handle::Handle;
+use crate::live::Live;
 use crate::stderr::{Redactor, Ring, StderrPump};
 use crate::stdin::{AgentStdin, StdinSlot};
 use crate::{Error, LaunchSpec, os};
@@ -17,6 +19,20 @@ use crate::{Error, LaunchSpec, os};
 pub trait Launcher: Send + Sync {
     /// Starts the agent `spec` names.
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, Error>;
+}
+
+/// The variables no child gets, inherited or in its spec: either one lets the lawyer's own Node
+/// set-up (a `--require` preload, an old module folder) load code into every agent, install
+/// and reader Clauseo starts, whichever Node runs it. Builders that copy an inherited environment
+/// into a spec leave them out too ([`is_node_env`]), so the spec stays the child's whole env.
+pub const NODE_ENV: [&str; 2] = ["NODE_OPTIONS", "NODE_PATH"];
+
+/// Whether `name` is one of [`NODE_ENV`], ignoring ASCII case (Windows does).
+pub fn is_node_env(name: &OsStr) -> bool {
+    NODE_ENV.iter().any(|node| {
+        name.as_encoded_bytes()
+            .eq_ignore_ascii_case(node.as_bytes())
+    })
 }
 
 /// Starts the spec as it is, with no sandbox.
@@ -46,6 +62,8 @@ pub struct SpawnOptions {
     pub(crate) clear_env: bool,
     #[cfg(windows)]
     pub(crate) creation_flags: u32,
+    #[cfg(target_os = "linux")]
+    pub(crate) end_with_parent: bool,
 }
 
 impl SpawnOptions {
@@ -64,6 +82,24 @@ impl SpawnOptions {
     /// The child gets only the spec's variables: none of this process's environment.
     pub fn clear_env(mut self) -> SpawnOptions {
         self.clear_env = true;
+        self
+    }
+
+    /// The child ends when this process does, however it ends. On Linux the child gets SIGKILL
+    /// as its parent-death signal (`PR_SET_PDEATHSIG`), which comes when the *thread* that
+    /// started it ends, so a launcher with this option must start children only on threads
+    /// that outlive them; it reaches the child alone, not what the child started. On Windows
+    /// every child has it already: its Job Object kills its tree when this process's handle
+    /// closes. On macOS it does nothing: there is no such signal, and the caller's own shutdown
+    /// is all there is.
+    pub fn end_with_parent(self) -> SpawnOptions {
+        #[cfg(target_os = "linux")]
+        {
+            let mut opts = self;
+            opts.end_with_parent = true;
+            opts
+        }
+        #[cfg(not(target_os = "linux"))]
         self
     }
 
@@ -93,14 +129,22 @@ pub struct Launched {
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
-/// variables. No shell, ever.
+/// variables. Either way it never gets [`NODE_ENV`]'s names. No shell, ever.
 pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched, Error> {
+    // Counted before the child exists, and refused once desktop's exit closed the gate
+    // (`live.rs`); every failure below gives the count back when `live` drops.
+    let live = Live::enter()?;
     let mut command = std::process::Command::new(spec.program());
     command.args(spec.args());
     if opts.clear_env {
         command.env_clear();
     }
-    command.envs(spec.env()).current_dir(spec.cwd());
+    for name in NODE_ENV {
+        command.env_remove(name);
+    }
+    command
+        .envs(spec.env().iter().filter(|(name, _)| !is_node_env(name)))
+        .current_dir(spec.cwd());
     os::prepare(&mut command, opts);
     let mut command = async_process::Command::from(command);
     // Set here, not on the std command: async-process's `spawn` resets to inherit every stream
@@ -127,12 +171,16 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     // Read now, while the agent is this process's unreaped child, so its pid is still its own.
     let root = os::Root::of(&tree, child.id());
     let ring = Arc::new(Mutex::new(Ring::new()));
-    let redactor = Arc::new(Redactor::new(opts.home.as_deref(), spec.env()));
+    let redactor = Arc::new(Redactor::new(
+        opts.home.as_deref(),
+        spec.env(),
+        spec.redacted(),
+    ));
     let stdin = StdinSlot::new(stdin);
     Ok(Launched {
         stdin: AgentStdin::new(stdin.clone()),
         stdout,
         stderr: StderrPump::new(stderr, Arc::clone(&ring)),
-        handle: Handle::new(child, tree, root, stdin, ring, redactor),
+        handle: Handle::new(child, tree, root, stdin, ring, redactor, live),
     })
 }

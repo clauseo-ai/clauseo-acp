@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "ConnectorCommand::Check {}"
+---
+{
+  "check": {}
+}

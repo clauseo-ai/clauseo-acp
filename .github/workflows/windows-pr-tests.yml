@@ -1,0 +1,328 @@
+# windows tests (PR): the workspace's nextest on Windows x64 for a pull request, before it can
+# join the merge queue (Rohan's CI decision, 2026-11-06). Without it a pull request only lints on
+# Windows (PR_LINT_ONLY in ci.yml) and the tests first run in the merge group; 4 of the 8 merge-queue
+# ejections of 2026-11-05 caused by our own code were Windows-only test failures. The check is
+# required on main.
+#
+# It runs when the pull request is ready for it, so a draft's pushes take no Windows runner: when
+# it has the label `ready` (`gh pr edit <n> --add-label ready`, added when you ask for review), or
+# an approving review of its current head. Until then the check fails and says so.
+#
+# Per event:
+# - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted): the
+#   job `decide` picks one of seven modes, and `build` acts on it:
+#   - stale: the pull request's head is no longer the commit this run was started for (a push
+#     came while it waited in its group): the check passes in seconds on that old commit, which
+#     no required check reads, and the run cancels nothing.
+#   - covered: another run already passed `windows tests (PR)` for this head commit (the label
+#     `ready` added after a push, an approval after the label, any other label or review): the
+#     check passes in seconds on ubuntu and names that run. Nothing is tested twice.
+#   - failed: a label or review that cannot change the result (any label but `ready`, a review that
+#     does not approve, an approval while `ready` is on), and the commit's last result failed: the
+#     check fails again in seconds, naming that run.
+#   - norust: the pull request changes no Rust (.github/scripts/changes.sh's `rust`, the output
+#     ci.yml's build jobs read): the check passes in seconds on ubuntu.
+#   - run: the label `ready`, the review that started the run is an approval, or an approval of
+#     the head commit is on record: nextest on windows-2025, the steps of ci.yml's Windows x64
+#     build entry (no clippy: ci.yml's pull request job runs it). Each failed test becomes an
+#     annotation and a row of the job summary (.github/scripts/windows-pr-failures.sh).
+#   - wait: none of these: the check fails, naming the label.
+# - merge_group: the check passes in seconds; ci.yml's `build (x86_64-pc-windows-msvc)` runs the
+#   same tests in the merge group, and `build (aarch64-pc-windows-msvc)` runs them on Windows
+#   ARM64 (not required yet), elevated tests included, without clippy and the keychain smoke test. A pull request runs nothing on ARM64 (2026-11-08): its first ARM64
+#   test run is in the merge group.
+#
+# - `build` is never skipped as a whole: a required check skipped that way counts as passed. It
+#   always runs and branches on the mode inside. A failed `decide` runs the tests.
+# - The job id is `build`, as in ci.yml, so Swatinem/rust-cache's key (prefix, key, job id, the
+#   CARGO_* and RUST_* variables: none are set here) is the one main's nightly run saves for
+#   Windows x64, and the tests restore it. This job saves nothing.
+# - A path the files API or changes.sh cannot classify, or a failure of either, counts as a Rust
+#   change, as in ci.yml.
+# - Every action is pinned by commit SHA, with its tag in a comment, copied from ci.yml.
+#
+# No run is cancelled for an event on the same head commit. GitHub reads a required check from
+# the newest run of the workflow, and cancel-in-progress does not cancel in the order the runs were
+# made: on #508 (2026-11-06) the opened and labeled runs of a pull request opened with `ready`
+# started together, the newer one was cancelled before its jobs began, and the check stayed
+# "expected" though the older one had passed (GitHub's answer to the same report:
+# github.com/orgs/community/discussions/77942). So the concurrency group is the pull request and
+# its head commit, with cancel-in-progress off: a second run for the same commit waits for the
+# first, then finds its result and is `covered` (or `failed`). Runs for an older head of the same
+# pull request are cancelled by `decide` (actions: write), as cancel-in-progress did before.
+# "Older" is measured against the pull request's head as the API gives it when `decide` runs,
+# not the event's: on #536 (2026-11-06) a review run for the old head waited 40 minutes behind
+# that head's test run, and its `decide`, comparing against its own stale head, cancelled both
+# runs of the new head, whose check then stayed failed until they were re-run by hand. A run
+# whose own head is no longer the pull request's head is `stale` and cancels nothing.
+
+name: windows-pr-tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  pull_request_review:
+    types: [submitted]
+  # The required check must report in the merge queue too.
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# One group per pull request and head commit, nothing cancelled in it (the note at the top); each
+# merge group has a group of its own.
+concurrency:
+  group: windows-pr-tests-${{ github.event.pull_request.number && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}-{1}', github.event_name, github.sha) }}
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: decide
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # actions: write, to cancel this pull request's runs for an older head.
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      prior: ${{ steps.mode.outputs.prior }}
+    steps:
+      # changes.sh as the base branch has it, not as the pull request changes it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'merge_group'
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+
+      - name: Decide whether the Windows tests run
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_ID: ${{ github.run_id }}
+          READY: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          RELEVANT: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
+        run: |
+          set -euo pipefail
+          mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
+          if [ "$EVENT" = merge_group ]; then mode merge_group; fi
+
+          # The pull request's head now. A run started for an earlier head is stale: it tests
+          # nothing and cancels nothing (the note at the top). If the read fails, nothing is
+          # cancelled and the run goes on for its own head.
+          if current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) && [ -n "$current" ]; then
+            if [ "$current" != "$HEAD_SHA" ]; then
+              echo "This run is for $HEAD_SHA; the pull request's head is now $current."
+              mode stale
+            fi
+          else
+            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+            current=""
+          fi
+
+          # This pull request's unfinished runs for an older head are obsolete (the note at the
+          # top). A failure here only leaves them running.
+          if [ -z "$current" ]; then
+            :
+          elif older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
+              -f branch="$HEAD_REF" -f per_page=50 \
+              -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
+            for id in $older; do
+              if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
+                echo "Cancelled run $id, for an older head."
+              else
+                echo "::warning::Could not cancel run $id, for an older head"
+              fi
+            done
+          else
+            echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+          fi
+
+          # The newest finished `windows tests (PR)` of another run for this head commit. A rerun
+          # of this run does not count, so it tests again.
+          if ! prior=$(gh api -X GET "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+              -f check_name="windows tests (PR)" -f filter=all -f per_page=100 \
+              -q "[.check_runs[] | select(.status == \"completed\" and (.details_url | contains(\"/runs/$RUN_ID/\") | not))]
+                  | sort_by(.completed_at) | last // empty | \"\(.conclusion) \(.details_url)\""); then
+            echo "::warning::The check runs API failed; deciding without this commit's earlier result"
+            prior=""
+          fi
+          if [ -n "$prior" ]; then
+            echo "This commit's last result: $prior"
+            echo "prior=${prior#* }" >> "$GITHUB_OUTPUT"
+          fi
+          case "$prior" in
+            "success "*) mode covered ;;
+            "failure "* | "timed_out "*)
+              # A label or review that cannot change the result keeps the failure.
+              if [ "$RELEVANT" != true ]; then mode failed; fi
+              ;;
+          esac
+
+          # The files API lists a rename's new path; previous_filename adds the old one, as
+          # `git diff --no-renames` would. A path with a newline in it splits into paths no rule
+          # knows, which run everything.
+          rust=true
+          if gh api "repos/$REPO/pulls/$PR/files" --paginate \
+              -q '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed"; then
+            echo "Changed paths:"
+            cat "$RUNNER_TEMP/changed"
+            if out=$(tr '\n' '\0' < "$RUNNER_TEMP/changed" | bash .github/scripts/changes.sh); then
+              echo "$out"
+              rust=$(sed -n 's/^rust=//p' <<< "$out")
+            else
+              echo "::warning::changes.sh failed; counting this as a Rust change"
+            fi
+          else
+            echo "::warning::The files API failed; counting this as a Rust change"
+          fi
+          if [ "$rust" = false ]; then mode norust; fi
+
+          if [ "$READY" = true ]; then
+            echo "The label ready is on the pull request."
+            mode run
+          fi
+          if [ "$EVENT" = pull_request_review ] && [ "$REVIEW_STATE" = approved ]; then
+            echo "This run's review approves."
+            mode run
+          fi
+          # A failed read runs the tests rather than fail an approved pull request's check.
+          if ! approved=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+              -q '.[] | select(.state == "APPROVED") | .commit_id'); then
+            echo "::warning::The reviews API failed; running the tests"
+            mode run
+          fi
+          if grep -qxF "$HEAD_SHA" <<< "$approved"; then
+            echo "An approval of the head commit $HEAD_SHA is on record."
+            mode run
+          fi
+          mode wait
+
+  # The job id must stay `build`: see the note at the top.
+  build:
+    name: windows tests (PR)
+    needs: decide
+    # Never skipped as a whole, a failed `decide` included (its mode is then run).
+    if: ${{ !cancelled() }}
+    runs-on: ${{ (needs.decide.result != 'success' || needs.decide.outputs.mode == 'run') && 'windows-2025' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    # None of these names starts with CARGO or RUST, so none enters rust-cache's key.
+    env:
+      MODE: ${{ needs.decide.result == 'success' && needs.decide.outputs.mode || 'run' }}
+      TARGET: x86_64-pc-windows-msvc
+      PR: ${{ github.event.pull_request.number }}
+      NEXTEST_LOG: ${{ github.workspace }}/nextest.log
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Covered by the merge group's Windows x64 build
+        if: env.MODE == 'merge_group'
+        run: echo "covered by build (x86_64-pc-windows-msvc) in this merge group"
+
+      - name: A newer head replaced this run's commit
+        if: env.MODE == 'stale'
+        run: echo "the pull request's head moved on while this run waited; its own runs decide the check"
+
+      - name: Covered by an earlier run of this commit
+        if: env.MODE == 'covered'
+        env:
+          PRIOR: ${{ needs.decide.outputs.prior }}
+        run: echo "windows tests (PR) already passed for this commit in $PRIOR"
+
+      - name: The last result for this commit failed
+        if: env.MODE == 'failed'
+        env:
+          PRIOR: ${{ needs.decide.outputs.prior }}
+        run: |
+          echo "::error title=windows tests (PR) failed for this commit::Its last result failed: $PRIOR. A label other than ready, or a review that does not approve, does not run the tests: add the label ready, push a fix, or re-run that job."
+          exit 1
+
+      - name: Skip, no Rust change
+        if: env.MODE == 'norust'
+        run: echo "no Rust change; nothing to test on Windows"
+
+      - name: Wait for the label ready or an approval
+        if: env.MODE == 'wait'
+        run: |
+          echo "::error title=windows tests (PR) not run yet::Add the label ready (gh pr edit $PR --add-label ready) when you ask for review, or approve; the Windows x64 tests run then."
+          exit 1
+
+      # From here on, ci.yml's build job as its Windows x64 entry runs it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.MODE == 'run'
+        with:
+          persist-credentials: false
+
+      # Why: ci.yml's step of the same name.
+      - name: Put the temp folder on drive D (Windows)
+        if: env.MODE == 'run'
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+          "temp folder: $t"
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        if: env.MODE == 'run'
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      # main's entry, restored only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.MODE == 'run'
+        with:
+          prefix-key: v1-rust
+          key: x86_64-pc-windows-msvc
+          cache-bin: "false"
+          save-if: false
+
+      - name: Install nextest at its pin
+        if: env.MODE == 'run'
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      # ci.yml's Test step, with no --target as there: the host's target is x86_64-pc-windows-msvc,
+      # and --target would build into target/x86_64-pc-windows-msvc/, where main's cache holds only
+      # clippy's metadata, not the test build in target/debug/. nextest writes its status lines to
+      # stderr, so both streams go to the log.
+      - name: Test
+        if: env.MODE == 'run'
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --no-tests=pass 2>&1 | tee "$NEXTEST_LOG"
+
+      # The `elevated_` tests (D-B16): ignored everywhere else, and each skips unless the token is
+      # elevated and CLAUSEO_ELEVATED_TESTS=1. The hosted runner's token is elevated (probe #509).
+      # One at a time: they make and delete local accounts, a group and an HKLM key.
+      - name: Elevated tests, one at a time
+        if: env.MODE == 'run'
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/(^|::)elevated_/)' --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
+
+      - name: Name the failed tests
+        if: ${{ failure() && env.MODE == 'run' }}
+        run: |
+          if [ -f "$NEXTEST_LOG" ]; then
+            bash .github/scripts/windows-pr-failures.sh "$NEXTEST_LOG"
+          else
+            echo "No nextest log: the job failed before the tests."
+          fi

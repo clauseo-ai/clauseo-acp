@@ -199,3 +199,20 @@ fn an_unknown_folder_ref_is_refused() {
     }
     host.shutdown();
 }
+
+/// Windows only: the picked-folder query refuses a folder too deep for Windows to start programs
+/// in with the code create gives, so the dialog never shows a kind for it.
+#[cfg(windows)]
+#[test]
+fn a_folder_too_deep_for_windows_is_refused_in_the_query() {
+    let dir = Dir::new("folder_query_too_deep", &[]);
+    let name = vec!["d".repeat(40); 6].join("/");
+    let deep = dir.folder(&name, &[]);
+    let host = network(&dir, |config| config);
+    let source = MatterSource::ExistingFolder {
+        folder: register(&host, &deep),
+    };
+    let error = asked(&host, source).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFolderTooDeep, "{error:?}");
+    host.shutdown();
+}

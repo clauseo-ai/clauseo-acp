@@ -61,7 +61,11 @@ export function WorkspaceLine({
         ) : (
           <NotProtectedMark
             {...(unprotected.why === "setup"
-              ? { meaning: w.v("Clauseo asks before each change in this matter.") }
+              ? {
+                  meaning: w.v(
+                    "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
+                  ),
+                }
               : {})}
           />
         )}
@@ -163,11 +167,13 @@ export function AllowedList({
       <BasePopover.Title render={<Heading level={2} className="allows-title" />}>
         {w.v("What this matter allows")}
       </BasePopover.Title>
-      <p className="allows-sub">
-        <Say>
-          {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
-        </Say>
-      </p>
+      {unprotected === null && (
+        <p className="allows-sub">
+          <Say>
+            {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
+          </Say>
+        </p>
+      )}
       <section className="allows-group">
         <Heading level={3} className="allows-head">
           {w.v("Always")}
@@ -215,7 +221,7 @@ export function AllowedList({
       )}
       <div className="allows-foot" data-unprotected={unprotected !== null ? "" : undefined}>
         <p className="allows-protection">
-          <span className="allows-protection-name">{w.v("Protection")}</span>
+          <span className="allows-protection-name">{w.v("Safe workspace")}</span>
           <span className="allows-protection-state">
             <Say>
               {unprotected === null
@@ -228,7 +234,7 @@ export function AllowedList({
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(
-                      "Couldn't be set up on this computer. Clauseo asks before each change in this matter.",
+                      "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.",
                     )}
             </Say>
           </span>
@@ -240,7 +246,9 @@ export function AllowedList({
           onClick={onProtection}
         >
           <span className="deva-nudge">
-            {unprotected === null ? w.v("Switch off protection") : w.v("Switch protection on")}
+            {unprotected === null
+              ? w.v("Switch off the Safe workspace")
+              : w.v("Switch the Safe workspace on")}
           </span>
         </Button>
       </div>

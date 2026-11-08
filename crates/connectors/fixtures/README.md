@@ -23,6 +23,8 @@ ids).
 | `account-open-payment.json` | the same, with an open payment | `open_payment` has the payment object's shape |
 | `account-unknown-fields.json` | `account.json` with fields added at every level | must parse to the same values as `account.json` |
 | `recharge-created.json`, `recharge-paid.json` | the payment object of the out-of-credit answer | **unverified**: the recharge answer's shape is still asked. The crate reads the object itself or under a `payment` key |
+| `recharge-get-awaiting.json`, `recharge-get-paid.json`, `recharge-get-expired.json`, `recharge-get-held.json` | the connector's `GET /v1/case-law/recharges/<id>` answers of 2026-11-06 (the local server; `held` from its code) | the `recharge` tool's `structuredContent`; top-level `status` is the asked recharge's; `paid` has no `recharge_id` and no `payment`; `expired`'s `payment` is a **fresh** link. The local origin is written as the production one, and `expired`'s `payment` spells out the keys the capture elided |
+| `recharge-get-*-with-id.json` | the same four after the connector's change, live 2026-11-06 | a top-level `recharge_id` in every state, the id asked about (for `expired`, the expired one; `payment` stays the fresh link) |
 | `api-402.json` | the thread's out-of-credit answer | the JSON API's body with HTTP 402 |
 | `mcp/initialize.json` | MCP `initialize` result | the fake also answers `server/discover` with it |
 | `mcp/tools-list.json` | the thread's six tools and their annotations | input schemas are sketches |

@@ -11,16 +11,16 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
-    Limits, Matter, MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored,
-    Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
-    matter_path_in,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Limits, Matter,
+    MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored, Retention,
+    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_in,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
-    RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, ErrorCode, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId,
+    MatterPath, RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
+use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -151,10 +151,12 @@ pub(crate) enum MatterJob {
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
     /// lies in `folder` and that Word or another program holds open, by
-    /// `clauseo_matters::held_open_at`. Needs no open matter.
+    /// `clauseo_matters::held_open_at`, after the data-folder check `fence`
+    /// (`agent/data_fence.rs`), when there is one. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
+        fence: Option<Box<FenceCheck>>,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -164,6 +166,9 @@ pub(crate) enum MatterJob {
         before: CheckpointId,
         after: CheckpointId,
     },
+    /// `Matter::still_gone`: which of `paths`, files an undo deleted, are in the folder again.
+    /// Stats only; writes nothing.
+    StillGone { paths: Vec<MatterPath> },
     /// `Matter::discard`: undoes the create or import this worker ran, for a matter the host
     /// could not record; the worker holds no matter afterwards. With none held, nothing to do.
     Discard,
@@ -218,6 +223,7 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
         | MatterReply::EditedSince(_)
         | MatterReply::HeldOpen(_)
         | MatterReply::Papers(_)
+        | MatterReply::StillGone(_)
         | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
@@ -242,9 +248,11 @@ pub(crate) enum MatterReply {
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
-    HeldOpen(Option<(MatterPath, HeldOpen)>),
+    HeldOpen(PathsChecked),
     Papers(Result<PaperList, Error>),
     EditedSince(Result<Vec<MatterPath>, Error>),
+    /// The paths in the folder again.
+    StillGone(Result<Vec<MatterPath>, Error>),
     Discarded(Result<(), Error>),
 }
 
@@ -265,6 +273,7 @@ impl MatterReply {
             Self::HeldOpen(_) => "HeldOpen",
             Self::Papers(_) => "Papers",
             Self::EditedSince(_) => "EditedSince",
+            Self::StillGone(_) => "StillGone",
             Self::Discarded(_) => "Discarded",
         }
     }
@@ -484,17 +493,20 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             open(settings, slot)
                 .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
         ),
-        MatterJob::HeldOpen { folder, paths } => MatterReply::HeldOpen(
-            paths
-                .into_iter()
-                .find_map(|path| held_open_at(&folder, &path)),
-        ),
+        MatterJob::HeldOpen {
+            folder,
+            paths,
+            fence,
+        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
         }
         MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
             open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
         ),
+        MatterJob::StillGone { paths } => {
+            MatterReply::StillGone(open(settings, slot).map(|matter| matter.still_gone(&paths)))
+        }
         MatterJob::Discard => MatterReply::Discarded(match std::mem::replace(slot, Slot::Empty) {
             Slot::Open(matter) => matter.discard().map_err(Error::from),
             Slot::Empty | Slot::Unopened { .. } => Ok(()),
@@ -509,39 +521,6 @@ fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
         .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
 }
 
-fn import(
-    settings: &Settings,
-    slot: &mut Slot,
-    new: NewMatter,
-    refused: &[PathBuf],
-    cancel: &AtomicBool,
-    check: CheckSource,
-) -> Result<ImportEnd, Error> {
-    let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
-    match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
-        Imported::Done {
-            matter,
-            summary,
-            warnings,
-        } => {
-            let commit = root_commit(&matter, root)?;
-            let folder_check = crate::agent::folder_support::FolderCheck {
-                matter: Some(id),
-                source: check,
-            };
-            let folder_support = folder_check.run(&folder).row_kind();
-            *slot = Slot::Open(matter);
-            Ok(ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-                folder_support,
-            })
-        }
-        Imported::Cancelled => Ok(ImportEnd::Cancelled),
-    }
-}
-
 /// The open matter, opening it first when the last open failed.
 ///
 /// The first open after the job that gave a [`Relink`], when it finds `matter.json` deleted or
@@ -550,6 +529,7 @@ fn import(
 /// spends the relink whatever it finds; every later open is answered as it is.
 fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, Error> {
     if let Slot::Unopened { id, folder, relink } = slot {
+        refuse_too_deep(folder.as_path())?;
         // Spent by this open whatever it finds: a later open may meet a folder another matter
         // has claimed since the registry was taken.
         let relink = relink.take();
@@ -576,12 +556,29 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
     }
 }
 
+/// Refuses `folder` when Windows can't start programs in it: `matter.folder_too_deep`, on
+/// Windows only (`clauseo_matters::is_too_deep`). An open checks it before the matter is opened,
+/// and a turn's launch before its agent's home or any session folder is made, so a matter moved
+/// or renamed deeper is refused where it is opened or launched, and stays listed. Its file
+/// system calls: none.
+pub(crate) fn refuse_too_deep(folder: &Path) -> Result<(), Error> {
+    if clauseo_matters::is_too_deep(folder) {
+        return Err(Error::refused(
+            ErrorCode::MatterFolderTooDeep,
+            "the matter's path is too long for Windows to start programs in it",
+        ));
+    }
+    Ok(())
+}
+
 mod checkpoints;
 mod claims;
+mod import;
 mod relocate;
 
 use checkpoints::{repair, timeline_entry, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, check_registry};
+use import::import;
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
 

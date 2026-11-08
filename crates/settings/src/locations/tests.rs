@@ -37,7 +37,7 @@ fn macos_data_dir() {
     assert_eq!(at.data_dir(), data);
     assert_eq!(at.settings_file(), data.join("settings.json"));
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/home/ada/Documents/Clauseo")
     );
 }
@@ -51,7 +51,7 @@ fn windows_data_dir_is_local_not_roaming() {
     );
     // The known folder, wherever it points, not `home/Documents`.
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/D/OneDrive/Documents/Clauseo")
     );
 }
@@ -66,15 +66,90 @@ fn windows_needs_its_known_folders() {
             folder: "LocalAppData"
         }
     ));
+}
+
+/// Issue #365: Windows gives no Documents folder (a redirect to a share it cannot reach, a
+/// deleted folder). The folders still resolve, the data folder from `LocalAppData`, and there is
+/// no default matters folder.
+#[test]
+fn windows_without_documents_has_no_default_matters_dir() {
     let no_documents = windows_dirs_without(Some(KnownFolder::Documents));
-    let error =
-        Locations::resolve_for(Os::Windows, &no_documents, &FakeEnv::default()).unwrap_err();
-    assert!(matches!(
-        error,
-        Error::NoFolder {
-            folder: "Documents"
+    let at = Locations::resolve_for(Os::Windows, &no_documents, &FakeEnv::default()).unwrap();
+    assert_eq!(
+        at.data_dir(),
+        Path::new("/C/Users/ada/AppData/Local/ai.clauseo.desktop")
+    );
+    assert_eq!(at.default_matters_dir(), None);
+    // With `CLAUSEO_DATA_DIR` set, the default sits beside the data folder and needs no
+    // Documents.
+    let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-7/data"))]);
+    let at = Locations::resolve_for(Os::Windows, &no_documents, &env).unwrap();
+    assert_eq!(
+        at.default_matters_dir(),
+        Some(abs("tmp/run-7/data-matters").as_path())
+    );
+}
+
+/// Issue #365 through `Locations::resolve`, the call the desktop's setup makes, on Windows
+/// itself: a known-folder lookup that gives no Documents. The real `SHGetKnownFolderPath` cannot
+/// be made to fail here, so the lookup is faked through `PlatformDirs`.
+#[cfg(windows)]
+#[test]
+fn resolve_on_windows_without_documents_succeeds() {
+    let no_documents = windows_dirs_without(Some(KnownFolder::Documents));
+    let at = Locations::resolve(&no_documents, &FakeEnv::default()).unwrap();
+    assert_eq!(
+        at.data_dir(),
+        Path::new("/C/Users/ada/AppData/Local/ai.clauseo.desktop")
+    );
+    assert_eq!(at.default_matters_dir(), None);
+}
+
+/// The desktop's split start, `without_documents_for` on the main thread and
+/// `with_documents_for` on the Documents thread, gives what `resolve_for` gives, on each OS,
+/// with Documents and without, with `CLAUSEO_DATA_DIR` and without. The first part never asks
+/// for Documents: without `CLAUSEO_DATA_DIR` it has no default matters folder.
+#[test]
+fn the_split_start_gives_what_resolve_gives() {
+    let no_documents = windows_dirs_without(Some(KnownFolder::Documents));
+    let cases = [
+        (Os::Windows, windows_dirs()),
+        (Os::Windows, no_documents),
+        (Os::Mac, home_dirs()),
+        (Os::Linux, home_dirs()),
+        (Os::Mac, FakeDirs::default()),
+    ];
+    let envs = [
+        FakeEnv::default(),
+        FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-7/data"))]),
+    ];
+    for (os, dirs) in &cases {
+        for env in &envs {
+            let Ok(whole) = Locations::resolve_for(*os, dirs, env) else {
+                assert!(Locations::without_documents_for(*os, dirs, env).is_err());
+                continue;
+            };
+            let early = Locations::without_documents_for(*os, dirs, env).unwrap();
+            if env.0.is_empty() {
+                assert_eq!(early.default_matters_dir(), None, "{os:?}");
+            }
+            assert_eq!(early.data_dir(), whole.data_dir(), "{os:?}");
+            assert_eq!(early.with_documents_for(*os, dirs, env), whole, "{os:?}");
         }
-    ));
+    }
+}
+
+/// With `CLAUSEO_DATA_DIR` set and no home, macOS and Linux resolve too, with no default
+/// matters folder: only the data folder needs a home there.
+#[test]
+fn macos_and_linux_without_a_home_but_a_data_dir_have_no_documents() {
+    for os in [Os::Mac, Os::Linux] {
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        let env = FakeEnv(vec![(DATA_DIR_VAR, root.to_owned())]);
+        let at = Locations::resolve_for(os, &FakeDirs::default(), &env).unwrap();
+        assert_eq!(at.data_dir(), Path::new(root), "{os:?}");
+        assert_eq!(at.default_matters_dir(), None, "{os:?}");
+    }
 }
 
 #[test]
@@ -85,7 +160,7 @@ fn linux_data_dir_xdg() {
     ]);
     let at = Locations::resolve_for(Os::Linux, &home_dirs(), &env).unwrap();
     assert_eq!(at.data_dir(), abs("xdg/data/ai.clauseo.desktop"));
-    assert_eq!(at.default_matters_dir(), abs("xdg/docs/Clauseo"));
+    assert_eq!(at.default_matters_dir().unwrap(), abs("xdg/docs/Clauseo"));
 }
 
 #[test]
@@ -103,7 +178,7 @@ fn linux_falls_back_to_home_when_xdg_is_unset_or_relative() {
             Path::new("/home/ada/.local/share/ai.clauseo.desktop")
         );
         assert_eq!(
-            at.default_matters_dir(),
+            at.default_matters_dir().unwrap(),
             Path::new("/home/ada/Documents/Clauseo")
         );
     }
@@ -140,7 +215,7 @@ fn data_dir_override_from_env() {
     for os in [Os::Windows, Os::Mac, Os::Linux] {
         let at = Locations::resolve_for(os, &windows_dirs(), &env).unwrap();
         assert_eq!(
-            at.default_matters_dir(),
+            at.default_matters_dir().unwrap(),
             abs("tmp/clauseo-ci-matters"),
             "{os:?}"
         );
@@ -153,10 +228,13 @@ fn data_dir_override_puts_new_matters_beside_the_data_folder() {
     // the data folder itself, where every matter is refused.
     let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-7/data"))]);
     let at = Locations::resolve_for(Os::Linux, &home_dirs(), &env).unwrap();
-    assert_eq!(at.default_matters_dir(), abs("tmp/run-7/data-matters"));
-    assert!(!at.default_matters_dir().starts_with(at.data_dir()));
+    assert_eq!(
+        at.default_matters_dir().unwrap(),
+        abs("tmp/run-7/data-matters")
+    );
+    assert!(!at.default_matters_dir().unwrap().starts_with(at.data_dir()));
     assert_ne!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/home/ada/Documents/Clauseo")
     );
 }
@@ -169,7 +247,7 @@ fn data_dir_override_at_a_root_keeps_documents() {
     let at = Locations::resolve_for(Os::Linux, &home_dirs(), &env).unwrap();
     assert_eq!(at.data_dir(), Path::new(root));
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/home/ada/Documents/Clauseo")
     );
 }
@@ -179,12 +257,12 @@ fn no_override_keeps_documents_clauseo() {
     // Without `CLAUSEO_DATA_DIR`, nothing changes: the known folder (Windows) or Documents.
     let at = Locations::resolve_for(Os::Windows, &windows_dirs(), &FakeEnv::default()).unwrap();
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/D/OneDrive/Documents/Clauseo")
     );
     let at = Locations::resolve_for(Os::Mac, &home_dirs(), &FakeEnv::default()).unwrap();
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/home/ada/Documents/Clauseo")
     );
 }
@@ -209,7 +287,7 @@ fn under_root_reads_nothing() {
         Path::new("/scratch/run-1").join(SETTINGS_FILE)
     );
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         Path::new("/scratch/run-1/Documents/Clauseo")
     );
 }
@@ -255,7 +333,7 @@ fn the_update_marker_and_downloads_are_in_the_data_folder_never_a_matters_folder
             assert_eq!(updates, at.data_dir().join("updates"), "{os:?}");
             for path in [&marker, &updates] {
                 assert!(
-                    !path.starts_with(at.default_matters_dir()),
+                    !path.starts_with(at.default_matters_dir().unwrap()),
                     "{os:?}: {path:?}"
                 );
                 assert!(!path.starts_with(at.data_dir().join("matters")), "{path:?}");
@@ -366,8 +444,43 @@ fn under_home_keeps_new_matters_outside_the_data_folder() {
     assert_eq!(at.data_dir(), home.join("data"));
     assert_eq!(at.settings_file(), home.join("data").join("settings.json"));
     assert_eq!(
-        at.default_matters_dir(),
+        at.default_matters_dir().unwrap(),
         home.join("Documents").join("Clauseo")
     );
-    assert!(!at.default_matters_dir().starts_with(at.data_dir()));
+    assert!(!at.default_matters_dir().unwrap().starts_with(at.data_dir()));
+}
+
+/// Every folder or file `Locations` builds under the data folder (each `data_dir.join(…)` in
+/// `locations.rs`) names a const listed in `DATA_ENTRIES`, which the host's data folder fence
+/// checks against its deny rules. A new accessor under the data folder whose entry is not
+/// listed, or that names it by a literal, fails here.
+#[test]
+fn every_entry_locations_builds_under_the_data_folder_is_in_data_entries() {
+    let source = include_str!("../locations.rs");
+    let listed = source
+        .split_once("pub const DATA_ENTRIES")
+        .and_then(|(_, rest)| rest.split_once("= ["))
+        .and_then(|(_, rest)| rest.split_once("];"))
+        .map(|(list, _)| list)
+        .expect("DATA_ENTRIES's list");
+    let listed: Vec<&str> = listed
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    assert_eq!(listed.len(), super::DATA_ENTRIES.len(), "{listed:?}");
+    let mut built = Vec::new();
+    for marker in ["data_dir.join(", "data_dir().join("] {
+        for (at, _) in source.match_indices(marker) {
+            let rest = &source[at + marker.len()..];
+            let name = rest.split([')', ',']).next().unwrap_or_default().trim();
+            built.push(name);
+        }
+    }
+    assert!(built.len() >= 5, "{built:?}");
+    let unlisted: Vec<&&str> = built.iter().filter(|name| !listed.contains(name)).collect();
+    assert!(
+        unlisted.is_empty(),
+        "built under the data folder but not in DATA_ENTRIES: {unlisted:?}"
+    );
 }

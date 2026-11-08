@@ -1,0 +1,272 @@
+//! The removal through a fake: each kind listed and deleted, one failing kind leaving the rest,
+//! and counts alone in the log.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::*;
+
+const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+
+/// Items by kind, each a name the log must never carry.
+#[derive(Default)]
+struct Fake {
+    items: BTreeMap<&'static str, Vec<&'static str>>,
+    /// A kind whose list fails.
+    deny_list: BTreeSet<&'static str>,
+    /// Items whose delete fails.
+    deny_delete: BTreeSet<&'static str>,
+    deleted: Vec<&'static str>,
+    /// How many times the classes were listed.
+    class_lists: usize,
+}
+
+fn key(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Classes => "classes",
+        Kind::Tasks => "tasks",
+        Kind::RunKeys => "run",
+        Kind::Startup => "startup",
+    }
+}
+
+impl Leftovers for Fake {
+    type Item = &'static str;
+    fn list(&mut self, kind: Kind) -> io::Result<Vec<&'static str>> {
+        if self.deny_list.contains(key(kind)) {
+            return Err(io::Error::from_raw_os_error(1058));
+        }
+        if kind == Kind::Classes {
+            self.class_lists += 1;
+        }
+        // What was deleted is gone.
+        let items = self.items.get(key(kind)).cloned().unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .filter(|item| !self.deleted.contains(item))
+            .collect())
+    }
+    fn delete(&mut self, _: Kind, item: &&'static str) -> io::Result<()> {
+        if self.deny_delete.contains(item) {
+            return Err(io::Error::from_raw_os_error(5));
+        }
+        self.deleted.push(item);
+        Ok(())
+    }
+}
+
+fn full() -> Fake {
+    let mut fake = Fake::default();
+    fake.items
+        .insert("classes", vec!["CLSID", "Wow6432Node\\CLSID"]);
+    fake.items
+        .insert("tasks", vec!["\\Evil\\AtLogon", "\\Updater"]);
+    fake.items
+        .insert("run", vec!["Run\\backdoor", "RunOnce\\once"]);
+    fake.items
+        .insert("startup", vec!["evil.lnk", "subdir", "x.bat"]);
+    fake
+}
+
+fn run(fake: &mut Fake) -> (bool, Vec<String>) {
+    run_kinds(fake, &Kind::ALL)
+}
+
+fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
+    let mut lines = Vec::new();
+    let clean = remove_all(fake, kinds, "before launch", &mut |l| {
+        lines.push(l.to_owned());
+    });
+    (clean, lines)
+}
+
+#[test]
+fn each_kind_is_listed_and_every_item_deleted() {
+    let mut fake = full();
+    let (clean, lines) = run(&mut fake);
+    assert!(clean);
+    assert_eq!(
+        fake.deleted,
+        [
+            "CLSID",
+            "Wow6432Node\\CLSID",
+            "Run\\backdoor",
+            "RunOnce\\once",
+            "evil.lnk",
+            "subdir",
+            "x.bat",
+            "\\Evil\\AtLogon",
+            "\\Updater",
+        ]
+    );
+    assert_eq!(
+        lines,
+        [
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
+            "clauseo-sandbox-run: cleanup (before launch): removed 3 Startup folder entries",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
+        ]
+    );
+}
+
+#[test]
+fn nothing_left_is_clean_and_silent() {
+    let mut fake = Fake::default();
+    assert_eq!(run(&mut fake), (true, vec![]));
+}
+
+#[test]
+fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
+    let mut fake = full();
+    fake.deny_list.insert("tasks");
+    fake.deny_delete.insert("evil.lnk");
+    let (clean, lines) = run(&mut fake);
+    assert!(!clean);
+    // The classes, the Run values and the other Startup entries are still deleted.
+    assert_eq!(
+        fake.deleted,
+        [
+            "CLSID",
+            "Wow6432Node\\CLSID",
+            "Run\\backdoor",
+            "RunOnce\\once",
+            "subdir",
+            "x.bat",
+        ]
+    );
+    assert_eq!(
+        lines,
+        [
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 Startup folder entries, 1 \
+             couldn't be (5)",
+            "clauseo-sandbox-run: cleanup (before launch): the scheduled tasks can't be listed \
+             (1058)",
+        ]
+    );
+    for line in &lines {
+        for name in [
+            "Evil", "Updater", "backdoor", "once", "evil", "subdir", "x.bat",
+        ] {
+            assert!(!line.contains(name), "{line} names {name}");
+        }
+    }
+}
+
+#[test]
+fn the_inner_lists_nothing_over_com() {
+    let mut fake = full();
+    let (clean, lines) = run_kinds(&mut fake, &Kind::LOCAL);
+    assert!(clean);
+    assert!(Kind::LOCAL.iter().all(|kind| !kind.over_com()));
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(!fake.deleted.contains(&"\\Updater"), "{:?}", fake.deleted);
+}
+
+#[test]
+fn the_classes_go_first_and_com_waits_for_them() {
+    assert_eq!(Kind::ALL.first(), Some(&Kind::Classes));
+    assert_eq!(Kind::LOCAL.first(), Some(&Kind::Classes));
+    // A class key that can't be deleted keeps the end sweeper off COM.
+    let mut fake = full();
+    fake.deny_delete.insert("CLSID");
+    let (clean, lines) = run(&mut fake);
+    assert!(!clean);
+    assert!(!fake.deleted.contains(&"\\Updater"));
+    assert!(fake.deleted.contains(&"x.bat"), "the rest still run");
+    let skipped = lines
+        .iter()
+        .filter(|l| l.contains("weren't listed"))
+        .count();
+    assert_eq!(skipped, 1, "{lines:?}");
+    // So does a class list that fails.
+    let mut fake = full();
+    fake.deny_list.insert("classes");
+    let (clean, _) = run(&mut fake);
+    assert!(!clean);
+    assert!(!fake.deleted.contains(&"\\Updater"));
+}
+
+#[test]
+fn the_classes_are_listed_once_and_no_bits_job_is_a_kind() {
+    // No BITS step: no second class list right before it, and no kind reached over COM but the
+    // tasks, whose class object comes from System32's module with no lookup.
+    let mut fake = full();
+    assert!(run(&mut fake).0);
+    assert_eq!(fake.class_lists, 1);
+    assert_eq!(Kind::ALL.last(), Some(&Kind::Tasks));
+    let over_com: Vec<Kind> = Kind::ALL
+        .into_iter()
+        .filter(|kind| kind.over_com())
+        .collect();
+    assert_eq!(over_com, [Kind::Tasks]);
+    assert!(
+        Kind::ALL
+            .iter()
+            .all(|kind| !kind.to_string().contains("BITS"))
+    );
+}
+
+#[test]
+fn a_task_names_the_pool_user_by_sid_or_account() {
+    let sid = Sid::parse(POOL).unwrap();
+    for named in [
+        POOL,
+        "ClauseoSb03",
+        "clauseosb03",
+        "DESKTOP-1\\ClauseoSb03",
+        ".\\ClauseoSb03",
+        " ClauseoSb03 ",
+    ] {
+        assert!(names_user(named, &sid, "ClauseoSb03"), "{named}");
+    }
+    for named in [
+        "",
+        "ClauseoSb04",
+        "DESKTOP-1\\Lawyer",
+        "S-1-5-18",
+        "SYSTEM",
+        "ClauseoSb03x",
+    ] {
+        assert!(!names_user(named, &sid, "ClauseoSb03"), "{named}");
+    }
+    assert!(!names_user("", &sid, ""));
+}
+
+#[test]
+fn the_startup_folder_must_lie_below_the_profile() {
+    let profile = "C:\\Users\\ClauseoSb03";
+    let startup = "C:\\Users\\ClauseoSb03\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup";
+    assert_eq!(
+        below(startup, profile),
+        Some(vec![
+            "AppData",
+            "Roaming",
+            "Microsoft",
+            "Windows",
+            "Start Menu",
+            "Programs",
+            "Startup"
+        ])
+    );
+    assert_eq!(
+        below(
+            "c:\\users\\clauseosb03\\Startup",
+            "C:\\Users\\ClauseoSb03\\"
+        ),
+        Some(vec!["Startup"])
+    );
+    for elsewhere in [
+        "D:\\Matter",
+        "C:\\Users\\ClauseoSb030\\Startup",
+        "C:\\Users\\ClauseoSb03",
+        "C:\\Users\\ClauseoSb03\\..\\Lawyer\\Startup",
+        "C:\\Users\\ClauseoSb03\\a\\\\b",
+        "C:\\Users\\ClauseoSb03\\.\\Startup",
+        "C:\\Users\\ClauseoSb03\\a/../../x",
+    ] {
+        assert_eq!(below(elsewhere, profile), None, "{elsewhere}");
+    }
+    assert_eq!(below("C:\\x", ""), None);
+}

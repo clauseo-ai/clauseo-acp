@@ -82,3 +82,15 @@ fn t0_is_the_first_mark_and_stays() {
     assert!(t0 > 1_700_000_000_000.0 && t0 <= epoch_ms(), "{t0}");
     assert!(init_script().contains(&format!("t0EpochMs: {t0},")));
 }
+
+#[test]
+fn agents_managed_reads_comma_separated_ids() {
+    let ids = |value| agents_managed_from(value).into_iter().collect::<Vec<_>>();
+    assert_eq!(ids(None), Vec::<String>::new());
+    assert_eq!(ids(Some("")), Vec::<String>::new());
+    assert_eq!(ids(Some("claude-acp")), ["claude-acp"]);
+    assert_eq!(
+        ids(Some(" codex-acp, claude-acp,,")),
+        ["claude-acp", "codex-acp"]
+    );
+}

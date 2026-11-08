@@ -1,19 +1,24 @@
 // The settings window's page: the frame (ui/components' SettingsWindow) over the sections built so far (sections.tsx),
-// each control one patch to the display store, which both windows share. The store says when the settings or the
+// each control one patch to the display store, which both windows share. The open section follows the address's hash
+// (use-hash-section.ts). Each time the window opens it sends the connectors' `check` once, since the host reads the
+// connector's liveness only then and the Connectors section shows only once a state lists it (U15). The store says when the settings or the
 // locks change, from this window, the other, or the host, and the controls follow; the window's own caption buttons
 // are wired off the Mac, as the room's are.
 import { SettingsWindow } from "@clauseo/components/clauseo/settings-window.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
+import { connectorsStoreOf, useConnectors, useConnectorsHeard } from "../store/connectors.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { setWindowTitle } from "../transport/window-title.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
-import { contextOf, sectionOf, shownSections, type SectionId } from "./sections.tsx";
+import { sendConnector } from "./connector-commands.ts";
+import { contextOf, shownSections, type SectionEntry, type SectionId } from "./sections.tsx";
+import { useHashSection } from "./use-hash-section.ts";
 import { useSettings } from "./use-settings.ts";
 
 export function SettingsApp({
@@ -43,13 +48,35 @@ export function SettingsApp({
   );
   const readRelease = useCallback(() => store.releaseDate(), [store]);
   const releaseDate = useSyncExternalStore(subscribeRelease, readRelease, readRelease);
-  const ctx = contextOf(store, transport, settings, display, limitsView, releaseDate);
-  const shown = shownSections(ctx);
-  const [chosen, setChosen] = useState<SectionId | undefined>(() =>
-    sectionOf(section === undefined ? (globalThis.location?.hash ?? "") : `#${section}`, shown),
+  // the connectors' state, over the window's app feed; check once per open (the window is made on open and destroyed
+  // on close), before any state, whichever section opens; the ref holds through StrictMode's second run
+  const [connectors] = useState(() => connectorsStoreOf(transport));
+  const connectorsState = useConnectors(connectors);
+  const connectorsHeard = useConnectorsHeard(connectors);
+  const checked = useRef(false);
+  useEffect(() => {
+    if (checked.current) return;
+    checked.current = true;
+    sendConnector(transport, { check: {} }).catch(() => {});
+  }, [transport]);
+  const ctx = contextOf(
+    store,
+    transport,
+    settings,
+    display,
+    limitsView,
+    releaseDate,
+    connectorsState,
   );
-  // a section that stops showing gives way to the first
-  const open = shown.find((s) => s.id === chosen) ?? shown[0];
+  const shown = shownSections(ctx);
+  // a section that stops showing gives way to the first; a hash's section that isn't shown yet waits for the first
+  // connectors state
+  const follow = useHashSection(
+    shown.map((s) => s.id),
+    connectorsHeard,
+    section,
+  );
+  const open = shown.find((s) => s.id === follow.open);
   // the window's own controls, inside the desktop app only
   const [controls] = useState(() =>
     windowControls !== undefined
@@ -71,13 +98,8 @@ export function SettingsApp({
     document.title = title;
     setWindowTitle(title);
   }, [title]);
-  const onSection = (id: string) => {
-    const next = shown.find((s) => s.id === id);
-    if (next === undefined) return;
-    setChosen(next.id);
-    // the address keeps the section, so a reload opens it again
-    history.replaceState(history.state, "", `#${next.id}`);
-  };
+  const words = (key: NonNullable<SectionEntry["lead"]>) =>
+    typeof key === "function" ? key(w.lang) : w.s(key);
   return (
     <PartsRoot>
       <LimitsContext value={limits}>
@@ -89,14 +111,15 @@ export function SettingsApp({
             const Glyph = s.icon;
             return {
               id: s.id,
-              name: w.s(s.name),
+              name: words(s.name),
               icon: <Glyph size={16} />,
               ...(note === undefined ? {} : { note }),
             };
           })}
           current={open?.id ?? ""}
-          onSection={onSection}
-          lead={open?.lead === undefined ? undefined : w.s(open.lead)}
+          onSection={follow.choose}
+          focusHead={follow.focusHead}
+          lead={open?.lead === undefined ? undefined : words(open.lead)}
           caption={caption}
           nativeLights={controls !== null}
         >

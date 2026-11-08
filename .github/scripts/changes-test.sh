@@ -48,6 +48,7 @@ check "$F $T $T $T" ui/components/button.tsx docs/ui.md
 # Read by Rust tests (the scan at the end finds every such file).
 check "$T $T $T $T" ui/app/src/transport/bindings.ts
 check "$T $T $T $T" ui/components/src/clauseo/shell.css
+check "$T $T $T $T" ui/app/index.html
 check "$T $T $T $T" ui/e2e/app-windows/smoke.spec.ts
 check "$T $T $T $T" ui/e2e/app-windows/scenarios/word-one-docx.jsonl
 check "$T $F $F $F" docs/decisions/0006-store-format.md

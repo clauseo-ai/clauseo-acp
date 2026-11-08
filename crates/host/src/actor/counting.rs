@@ -8,7 +8,10 @@
 //! durable, never per attempt: a refused or failed command counts nothing, and a repeated
 //! command id answered from its receipt makes no commit, so it counts nothing either.
 //!
-//! - `app_opened` (`cold`): the host has started (`Actor::settle`).
+//! - `app_opened` (`cold`, or `after_update` after an install took): the host has started
+//!   (`Actor::settle`).
+//! - `update`: what the updater's machine counts (`installed`, `failed`, `after_answer`,
+//!   `managed`), as it says (`update.rs`).
 //! - `matter_opened`: `CreateMatter`'s commit; `OpenMatter`'s commit, with the folder's papers
 //!   listed on the matter's worker. `place` (`clauseo_matters::place`, which stats the folder)
 //!   runs on the one `clauseo-place` thread, never on the actor, and the event counts there.
@@ -16,8 +19,8 @@
 //!   or a steer.
 //! - `answer_ended`: `turn::end::finish`, the one place every turn ends.
 //! - `feature_used`: `undo` and `restore`, once their log is durable.
-//! - `setting_changed`: after a `SetUiSettings` or `SetPrivacySettings` write, per value that
-//!   changed.
+//! - `setting_changed`: after a `SetUiSettings`, `SetPrivacySettings` or `SetUpdateMode` write,
+//!   per value that changed.
 
 use std::path::PathBuf;
 use std::sync::{OnceLock, mpsc};
@@ -63,14 +66,15 @@ pub(crate) fn bump(actor: &Actor, event: Event) {
     }
 }
 
-/// `app_opened`: the host has started. `after_update` waits for R23's update marker.
+/// `app_opened`: the host has started, `after_update` when `update.json` says this version's
+/// install took (`update.rs`), else `cold`.
 pub(super) fn app_opened(actor: &Actor) {
-    bump(
-        actor,
-        Event::AppOpened(AppOpened {
-            launch: Launch::Cold,
-        }),
-    );
+    let launch = if super::update::updated(actor) {
+        Launch::AfterUpdate
+    } else {
+        Launch::Cold
+    };
+    bump(actor, Event::AppOpened(AppOpened { launch }));
 }
 
 /// Counts `what` when command `id`'s commit, just sent, is durable ([`committed`]). Nothing is

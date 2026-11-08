@@ -42,6 +42,9 @@ pub enum AcpEvent {
         /// strings, without repeats, as the agent wrote them (absolute, or relative to the
         /// session's `cwd`). Empty when it names none.
         paths: Vec<PathBuf>,
+        /// `toolCall.rawInput` as the agent sent it, when it did: the host reads the paths
+        /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
+        raw_input: Option<serde_json::Value>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
@@ -52,6 +55,10 @@ pub enum AcpEvent {
         /// The agent's `elicitationId`, which URL elicitations carry and
         /// [`AcpEvent::ElicitationCompleted`] names again; `None` for a form.
         elicitation_id: Option<CompactString>,
+        /// The scope's `toolCallId`: the agent's tool call the elicitation belongs to, when it
+        /// names one. In-memory only: the host scopes the withheld values to that call
+        /// (0002, `elicitation_resolved`); it is not logged.
+        acp_tool_call_id: Option<CompactString>,
         /// The form or the URL.
         request: ElicitationRequest,
     },

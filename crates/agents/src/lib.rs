@@ -44,12 +44,16 @@
 //! # Interface
 //!
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
-//!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
-//!   `installed`; `sign_in(agent, Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
+//!   [`AgentsEvent`]s ([`Agents::start_with_launchers`]`(config, install, signin, timer)` with
+//!   one launcher for installs and one, clearing the environment, for sign-in); `install`,
+//!   `pause`, `retry(agent, use_system_proxy)`, `state` and `installed`; `sign_in(agent,
+//!   Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
-//!   `Result<(), SigninError>`) and `signin_state`.
-//! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
+//!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
+//! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`];
+//!   [`Agents::set_network`] with a [`Network`] (the proxies and CA files, for the next job), and
+//!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
@@ -89,17 +93,19 @@
 //!   https, becomes `OpenUrl`, once; an address in a run's output never does. No status
 //!   process runs once a sign-in is confirmed, cancelled, expired or failed.
 //! - A sign-in, status or detection child gets exactly the environment `signin/env.rs` builds
-//!   (`SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` removed). **The caller's launcher must be
-//!   made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that inherits the
-//!   app's environment would pass those names on, since a `LaunchSpec` can add variables but
-//!   never remove one.
+//!   (`SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `NODE_OPTIONS` and `NODE_PATH` removed).
+//!   **The caller's sign-in launcher must be made with `SpawnOptions::clear_env`** (R20's
+//!   desktop wiring): a launcher that inherits the app's environment would pass those names on,
+//!   since a `LaunchSpec` can add variables but never remove one (only `NODE_OPTIONS` and
+//!   `NODE_PATH`, which every spawn drops).
 //!
 //! # Depends on
 //!
 //! `protocol` (`AgentId`), `process`, `codex_appserver` (Codex's `account/read`), `serde`,
-//! `serde_json`, `futures`, `async-channel`, `ureq` (rustls, blocking, on the install's own
-//! thread), `rustls`, `sha2`, `base64`, `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize`
-//! (the pasted code and the API keys); `keyring` on macOS and Windows only (the keychain; none
+//! `serde_json`, `futures`, `async-channel`, `tracing` (the Node line at each install and
+//! start), `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`,
+//! `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the pasted code and the API
+//! keys); `keyring` on macOS and Windows only (the keychain; none
 //! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
 //! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
 //! only in tests and the example (the caller passes the data folder and the agent homes in).
@@ -135,7 +141,9 @@ mod write;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
-pub use config::{AgentsConfig, Clock, InstallConfig, NodeSearch, SigninConfig, SystemClock};
+pub use config::{
+    AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
+};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
@@ -144,6 +152,7 @@ pub use receipt::{install_folder, install_root, script_path};
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,
+    Unconfirmed,
 };
 pub use snapshot::{
     AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
@@ -151,6 +160,18 @@ pub use snapshot::{
 pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 pub use status::is_sign_in_again;
 pub use worker::Agents;
+
+/// The variable `agent`'s CLI reads an extra CA file (`network.ca_certs`) from:
+/// `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE` for Codex; `None` for an agent with
+/// no vendor here. The one mapping: sign-in's runs take it too.
+pub fn ca_cert_var(agent: &clauseo_protocol::AgentId) -> Option<&'static str> {
+    signin::vendor_of(agent).map(signin::env::ca_var)
+}
+
+/// `NODE_USE_SYSTEM_CA`: set to `1`, Node trusts the OS's certificate store beside its own
+/// roots (Node 24.6 and 22.19 on). Sign-in's runs set it; desktop's launches and readers take it
+/// from here.
+pub const SYSTEM_CA_VAR: &str = signin::env::SYSTEM_CA_VAR;
 
 /// Tests only: a host-name resolver standing in for the OS's. `Err` reads as a failed name
 /// lookup (offline).

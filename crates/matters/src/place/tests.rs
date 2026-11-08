@@ -2,12 +2,10 @@
 
 use std::path::Path;
 
-use super::{Place, mac_place, service_name, windows_key, windows_place};
+use super::{Place, SyncService, mac_place, windows_key, windows_place};
 
-fn synced(service: &str) -> Place {
-    Place::Synced {
-        service: service.to_owned(),
-    }
+fn synced(service: SyncService) -> Place {
+    Place::Synced { service }
 }
 
 const HOME: &str = "/Users/ana";
@@ -21,20 +19,20 @@ fn mac_cloud_storage_is_synced_with_the_provider_from_its_name() {
     let cloud = "/Users/ana/Library/CloudStorage";
     assert_eq!(
         mac(&format!("{cloud}/OneDrive-Contoso/Clients"), Some(true)),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         mac(&format!("{cloud}/GoogleDrive-ana@example.com"), Some(true)),
-        synced("GoogleDrive")
+        synced(SyncService::GoogleDrive)
     );
     assert_eq!(
         mac(&format!("{cloud}/Dropbox/A"), Some(true)),
-        synced("Dropbox")
+        synced(SyncService::Dropbox)
     );
     // A File Provider mount may not say MNT_LOCAL: the synced rule wins.
     assert_eq!(
         mac(&format!("{cloud}/Box-Box/A"), Some(false)),
-        synced("Box")
+        synced(SyncService::Box)
     );
     // CloudStorage itself is no provider's folder.
     assert_eq!(mac(cloud, Some(true)), Place::Local);
@@ -47,11 +45,11 @@ fn mac_mobile_documents_is_icloud_drive() {
             "/Users/ana/Library/Mobile Documents/com~apple~CloudDocs/Lease",
             Some(true)
         ),
-        synced("iCloud Drive")
+        synced(SyncService::ICloud)
     );
     assert_eq!(
         mac("/Users/ana/Library/Mobile Documents", Some(true)),
-        synced("iCloud Drive")
+        synced(SyncService::ICloud)
     );
 }
 
@@ -83,11 +81,11 @@ fn mac_a_data_volume_spelling_of_home_or_folder_is_still_synced() {
             &format!("{data}/Library/CloudStorage/OneDrive-Contoso/Clients"),
             Some(true)
         ),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         mac(&format!("{data}/Library/Mobile Documents/A"), Some(true)),
-        synced("iCloud Drive")
+        synced(SyncService::ICloud)
     );
     // HOME spelt on the data volume, the folder as Finder gives it.
     assert_eq!(
@@ -96,7 +94,7 @@ fn mac_a_data_volume_spelling_of_home_or_folder_is_still_synced() {
             Some(Path::new(data)),
             Some(true)
         ),
-        synced("Dropbox")
+        synced(SyncService::Dropbox)
     );
     // Another user's folder on the data volume is not ana's.
     assert_eq!(
@@ -116,11 +114,11 @@ fn mac_a_case_folded_home_is_still_synced() {
             "/users/ANA/library/cloudstorage/GoogleDrive-ana@example.com/A",
             Some(true)
         ),
-        synced("GoogleDrive")
+        synced(SyncService::GoogleDrive)
     );
     assert_eq!(
         mac("/USERS/ana/LIBRARY/mobile documents/A", Some(true)),
-        synced("iCloud Drive")
+        synced(SyncService::ICloud)
     );
     assert_eq!(
         mac_place(
@@ -128,7 +126,7 @@ fn mac_a_case_folded_home_is_still_synced() {
             Some(Path::new("/users/Ana")),
             Some(true)
         ),
-        synced("Box")
+        synced(SyncService::Box)
     );
 }
 
@@ -143,23 +141,23 @@ fn roots() -> Vec<String> {
 fn windows_onedrive_folders_are_synced_without_case() {
     assert_eq!(
         windows_place(r"C:\Users\ana\OneDrive\Clients", &roots(), false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         windows_place(r"c:\users\ANA\onedrive - contoso\Leases", &roots(), false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         windows_place(r"C:\Users\ana\OneDrive", &roots(), false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         windows_place(r"\\?\C:\Users\ana\OneDrive\A", &roots(), false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     assert_eq!(
         windows_place("C:/Users/ana/OneDrive/A", &roots(), false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
 }
 
@@ -199,7 +197,7 @@ fn windows_onedrive_on_a_share_is_synced() {
     let roots = [r"\\server\home\ana\OneDrive".to_owned()];
     assert_eq!(
         windows_place(r"\\server\home\ana\OneDrive\A", &roots, true),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
 }
 
@@ -222,26 +220,39 @@ fn windows_onedrive_matches_across_the_verbatim_forms() {
     let share = [r"\\server\home\ana\OneDrive".to_owned()];
     assert_eq!(
         windows_place(r"\\?\UNC\server\home\ana\OneDrive\A", &share, true),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     let verbatim_share = [r"\\?\UNC\server\home\ana\OneDrive".to_owned()];
     assert_eq!(
         windows_place(r"\\server\home\ana\OneDrive\A", &verbatim_share, true),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
     let verbatim_disk = [r"\\?\C:\Users\ana\OneDrive".to_owned()];
     assert_eq!(
         windows_place(r"C:\Users\ana\OneDrive\A", &verbatim_disk, false),
-        synced("OneDrive")
+        synced(SyncService::OneDrive)
     );
 }
 
 #[test]
 fn service_is_the_name_before_its_first_dash() {
-    assert_eq!(service_name("OneDrive-Personal"), "OneDrive");
-    assert_eq!(service_name("OneDrive - Contoso Ltd"), "OneDrive");
-    assert_eq!(service_name("Dropbox"), "Dropbox");
-    assert_eq!(service_name("-odd"), "-odd");
+    let cases = [
+        ("OneDrive-Personal", SyncService::OneDrive),
+        ("OneDrive - Contoso Ltd", SyncService::OneDrive),
+        ("Dropbox", SyncService::Dropbox),
+        ("-odd", SyncService::Other),
+    ];
+    for (name, service) in cases {
+        assert_eq!(SyncService::from_folder_name(name), service, "{name}");
+    }
+}
+
+#[test]
+fn mac_cloud_storage_of_an_unknown_provider_is_synced_by_another_service() {
+    assert_eq!(
+        mac("/Users/ana/Library/CloudStorage/pCloud-ana/Leases", None),
+        synced(SyncService::Other)
+    );
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]

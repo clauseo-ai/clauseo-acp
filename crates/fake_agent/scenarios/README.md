@@ -47,7 +47,7 @@ The code lives in `crates/fake_agent/src/`.
 |---|---|---|---|
 | `scenario` | yes | The scenario name. | Must equal the file stem (`tool-calls` for `tool-calls.jsonl`). |
 | `description` | yes | One line saying what the scenario does and what the test must do. | Must not be empty or only spaces. |
-| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"` or `"hang"`. See [Running](#running). | Must be one of the two strings. |
+| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"`, `"hang"` or `"hang_briefly"`. See [Running](#running). | Must be one of the three strings. |
 | `protocol` | no, default `"acp"` | Which protocol the agent plays: `"acp"` or `"app-server"`. See [App-server scenarios](#app-server-scenarios). | Must be one of the two strings. |
 
 No other keys are allowed in the header (`body.rs`, `Header`).
@@ -320,6 +320,7 @@ scenarios themselves stay timer-free, and only the tests of the flag itself pass
 |---|---|
 | `"exit"` (default) | Exit 0 at once, even if steps are left. Exit 0 does not prove the scenario ran to the end. |
 | `"hang"` | Write `fake_agent: stdin closed, holding` to stderr and block forever, until killed. Use it to test that the client escalates to a signal. |
+| `"hang_briefly"` | Write `fake_agent: stdin closed, holding briefly` to stderr, block for 15 s (`HANG_BRIEFLY`) unless killed first, then exit 0. Use it where a test holds the stop ladder: a test killed from outside leaves no agent behind for long. |
 
 Stdin closing is only seen while a step reads. Steps that send run before the agent reads
 again.
@@ -363,6 +364,7 @@ The script itself is never read: a test may make it an empty file with that name
 |---|---|---|
 | `claude-cli` | Claude Code | `<script> --cli auth login [--claudeai\|--console]`, `<script> auth login`, `<script> --cli auth status --json`, `<script> --cli auth logout` (the `--cli` is optional) |
 | `codex.js` | Codex | `<script> login`, `<script> login --device-auth`, `<script> login status`, `<script> logout`, `<script> app-server` |
+| `index.js` under `codex-acp/dist/` | codex-acp's adapter, run by mistake | any arguments: each JSON-RPC request on stdin gets an error (`initialize` -32602, any other method -32601), nothing else is printed, and it exits 0 once stdin closes |
 
 Any other argv[1] is the usual command line above, unchanged. Each mode's home folder holds one
 marker file, `fake-signin-marker`, holding `{"authMethod": ..., "email": "test@example.com"}`. It
@@ -396,15 +398,18 @@ What each command does:
   `To sign in, open https://auth.openai.com/codex/device and enter the code ABCD-EFGH`, then ends as
   `FAKE_SIGNIN` says. Under `FAKE_SIGNIN=device-off` it prints Codex's refusal instead, exit 1:
   `Enable device code sign-in for Codex, Excel, PowerPoint, and Word in ChatGPT Security Settings, then run codex login --device-auth again.`
-- `codex.js login status`: prints `Logged in using ChatGPT`, exit 0, when the marker is there;
-  `Not logged in`, exit 1, when it is not.
-- `codex.js logout`: removes the marker and prints `Successfully logged out`.
+- `codex.js login status`: prints `Logged in using ChatGPT` on stderr, exit 0, when the marker is
+  there; `Not logged in` on stderr, exit 1, when it is not.
+- `codex.js logout`: removes the marker and Codex's login file `auth.json`, and prints
+  `Successfully logged out`.
 - `codex.js app-server`: answers JSON-RPC on stdin and stdout, one object per line, and exits 0 when
   stdin closes. `initialize` answers with `codexHome`, `platformFamily`, `platformOs` and
   `userAgent` (`fake_agent codex-cli`). `account/read` answers
   `{"account":{"type":"chatgpt","email":"test@example.com","planType":"plus"},"requiresOpenaiAuth":false}`
   when the marker is there, and `{"account":null,"requiresOpenaiAuth":true}` when it is not (signed
-  out). A notification (no `id`) gets no reply. Any other method
+  out). A marker whose `authMethod` is `apikey` gives `{"account":{"type":"apiKey"},…}`, and one
+  whose `authMethod` is `chatgpt-no-email` a `ChatGPT` account with `"email":null`; one whose
+  `authMethod` is `no-account` gets the signed-out reply while `login status` still says signed in. A notification (no `id`) gets no reply. Any other method
   gets error `-32601`.
 
 Bad arguments print the mode's usage line on stderr and exit 2.
@@ -420,6 +425,8 @@ Bad arguments print the mode's usage line on stderr and exit 2.
 | `device` | `login --device-auth` works. This is the default. |
 | `device-off` | `login --device-auth` refuses, as above. The browser `login` still works. |
 | `port-busy` | `codex.js login` prints `Port 1455 is already in use: another login is listening on 127.0.0.1:1455.` and exits 1, with no marker. |
+| `app-server-error` | `codex.js app-server` answers every request with an error, as the adapter does. Logins work as `ok-after:0`, but a `codex.js` login writes its marker as Codex's own login file, `auth.json`. |
+| `adapter` | `codex.js` behaves as codex-acp's adapter (above) for every command. |
 | `reuse:<authMethod>` | Writes the marker with that `authMethod` at startup, for any command. The login then works as `ok-after:0`. |
 
 Unset, empty and any other value mean `ok-after:0`.

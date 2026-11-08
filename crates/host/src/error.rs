@@ -28,7 +28,9 @@ pub enum Error {
     /// An ACP call failed; the code is the ACP crate's.
     #[error("acp: {0}")]
     Acp(#[from] clauseo_acp::Error),
-    /// Settings failed: `settings.locked` for a change to a key policy sets, else `internal`.
+    /// Settings failed: `settings.locked` for a change to a key policy sets, `settings.refused`
+    /// for a value that breaks a settings rule (its text names the key, never the value), else
+    /// `internal`.
     #[error("settings: {0}")]
     Settings(#[from] clauseo_settings::Error),
     /// The host stopped or panicked, so the call has no answer (`internal`).
@@ -50,6 +52,7 @@ impl Error {
             Self::Process(error) => error.code(),
             Self::Acp(error) => error.code(),
             Self::Settings(clauseo_settings::Error::Locked { .. }) => ErrorCode::SettingsLocked,
+            Self::Settings(clauseo_settings::Error::Refused { .. }) => ErrorCode::SettingsRefused,
             Self::Reducer(_) | Self::Settings(_) | Self::Closed | Self::Internal(_) => {
                 ErrorCode::Internal
             }
@@ -79,6 +82,31 @@ impl Error {
             | Self::Settings(_)
             | Self::Closed
             | Self::Internal(_) => HostError::new(self.code(), self.to_string()),
+        }
+    }
+
+    /// The text a failure's `detail` shows (`turn_failed`): the `Display` text, except a matter's
+    /// `FolderMissing`, which gives its reason and not its folder, and `FileLocked`, which gives
+    /// its wire message (the count of files), so no path of the matter's reaches the lawyer's
+    /// screen. The wire message of a command's refusal (an import's) still names the folder.
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Self::Matters(clauseo_matters::Error::FolderMissing { reason, .. }) => {
+                format!("matter: the matter's folder: {reason}")
+            }
+            Self::Matters(clauseo_matters::Error::FileLocked { .. }) => {
+                self.to_wire().message().to_owned()
+            }
+            Self::Invalid(_)
+            | Self::Refused(_)
+            | Self::Reducer(_)
+            | Self::Store(_)
+            | Self::Matters(_)
+            | Self::Process(_)
+            | Self::Acp(_)
+            | Self::Settings(_)
+            | Self::Closed
+            | Self::Internal(_) => self.to_string(),
         }
     }
 

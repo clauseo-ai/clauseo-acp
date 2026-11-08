@@ -5,7 +5,8 @@
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
 //! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
 //! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
-//! (`query/folder_support.rs`).
+//! (`query/folder_support.rs`), and `ListSkillPacks` reads the skill packs off it
+//! (`query/skill_packs.rs`). `Protection` answers from the cached detection (`protection.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -29,6 +30,26 @@ use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 
 mod folder_support;
+mod skill_packs;
+
+/// Where new matters go, for display (`GetDefaultLocation`).
+/// With none (no Documents folder, issue #365) it answers `command.invalid`, and the form asks
+/// for a folder, as it does when the read fails. While Documents is still being looked up
+/// `query` holds it for the answer (`documents.rs`), and past the bound it is refused as
+/// retryable.
+fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
+    let answer = match super::documents::default_matters_dir(actor) {
+        Some(location) => {
+            let display = super::rail::folder_display(location, &actor.home_spellings);
+            Ok(QueryResult::DefaultLocation(
+                clauseo_protocol::DefaultLocation { display },
+            ))
+        }
+        None if super::documents::pending(actor) => Err(super::documents::not_yet()),
+        None => Err(super::matters::no_default_location()),
+    };
+    let _gone = reply.send(answer);
+}
 
 /// Answers one query.
 pub(super) fn query(
@@ -41,6 +62,9 @@ pub(super) fn query(
         let _gone = reply.send(Err(error));
         return;
     }
+    let Err(reply) = super::documents::hold_query(actor, principal, query, reply) else {
+        return;
+    };
     match *query {
         HostQuery::ListMatters => list_matters(actor, reply),
         HostQuery::ListThreads { matter } => {
@@ -104,7 +128,7 @@ pub(super) fn query(
             matter_query(actor, matter, vec![checkpoint], job, reply);
         }
         HostQuery::PreviewUndo { thread, turn } => {
-            super::turn::preview_undo(actor, thread, turn, reply);
+            super::turn::undo_preview::preview_undo(actor, thread, turn, reply);
         }
         HostQuery::Search(ref request) => actor.search.query(
             crate::search::QUERY_WINDOW,
@@ -116,20 +140,19 @@ pub(super) fn query(
         HostQuery::FolderSupport { ref source } => {
             folder_support::folder_support(actor, source, reply);
         }
-        HostQuery::GetDefaultLocation => {
-            let display = super::rail::folder_display(
-                actor.effective.default_matters_dir(),
-                &actor.home_spellings,
-            );
-            let answer =
-                QueryResult::DefaultLocation(clauseo_protocol::DefaultLocation { display });
-            let _gone = reply.send(Ok(answer));
-        }
+        HostQuery::GetDefaultLocation => default_location(actor, reply),
         HostQuery::GetSettings => {
             let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
-        HostQuery::GetUpdate => super::update::answer(reply),
+        HostQuery::GetUpdate => super::update::answer(actor, reply),
+        HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
+        // From the cache (decision record 0051): never detected here.
+        HostQuery::Protection => {
+            let view = super::protection::view(actor);
+            let _gone = reply.send(Ok(QueryResult::Protection(view)));
+        }
+        HostQuery::AllowedSites => super::allowed::list(actor, reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -237,6 +260,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::Restored(_)
         | MatterReply::Located(_)
         | MatterReply::HeldOpen(_)
+        | MatterReply::StillGone(_)
         | MatterReply::Papers(_)
         | MatterReply::Discarded(_)) => Err(Error::Internal(format!(
             "a query answered with another job's reply: {other:?}"

@@ -192,15 +192,41 @@ fn proxy_and_ca_go_to_each_vendor_s_own_variable() {
     };
     let claude = with(Vendor::Claude);
     assert_eq!(get(&claude, "NODE_EXTRA_CA_CERTS"), Some("/firm/ca.pem"));
-    assert_eq!(get(&claude, "SSL_CERT_FILE"), None);
+    assert_eq!(get(&claude, "CODEX_CA_CERTIFICATE"), None);
     assert_eq!(get(&claude, "HTTPS_PROXY"), Some("http://proxy.firm:8080"));
     let codex = with(Vendor::Codex);
-    assert_eq!(get(&codex, "SSL_CERT_FILE"), Some("/firm/ca.pem"));
+    assert_eq!(get(&codex, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
+    assert_eq!(
+        get(&codex, "SSL_CERT_FILE"),
+        None,
+        "never the firm's CA alone"
+    );
     assert_eq!(get(&codex, "NODE_EXTRA_CA_CERTS"), None);
     assert_eq!(get(&codex, "HTTPS_PROXY"), Some("http://proxy.firm:8080"));
     let none = run_env(&inputs(&base, Vendor::Codex, RunKind::Detect));
-    assert_eq!(get(&none, "SSL_CERT_FILE"), None);
+    assert_eq!(get(&none, "CODEX_CA_CERTIFICATE"), None);
     assert_eq!(get(&none, "HTTPS_PROXY"), None);
+    assert_eq!(get(&none, "NO_PROXY"), None);
+}
+
+/// With a proxy, the loopback names (where the OAuth callback listens) never go through it:
+/// `NO_PROXY` holds them, then the inherited entries.
+#[test]
+fn a_proxied_run_keeps_loopback_off_the_proxy() {
+    let mut base = base();
+    base.insert(
+        OsString::from("no_proxy"),
+        OsString::from("*.firm.local, localhost"),
+    );
+    let env = run_env(&EnvInputs {
+        proxy: Some("http://proxy.firm:8080"),
+        ..inputs(&base, Vendor::Claude, RunKind::Detect)
+    });
+    assert_eq!(
+        get(&env, "NO_PROXY"),
+        Some("localhost,127.0.0.1,::1,*.firm.local")
+    );
+    assert_eq!(get(&env, "no_proxy"), None, "one NO_PROXY, in one case");
 }
 
 #[test]
@@ -248,4 +274,33 @@ fn env_inputs_debug_prints_names_never_values() {
         assert!(!printed.contains(secret), "{printed}");
     }
     assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}
+
+/// Every run trusts the OS's store too (`NODE_USE_SYSTEM_CA=1`), unless the base sets it; an
+/// inherited `SSL_CERT_FILE` (a whole root set some launchers build) is left as it is beside a
+/// firm CA.
+#[test]
+fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let env = run_env(&inputs(&base(), vendor, RunKind::Detect));
+        assert_eq!(get(&env, "NODE_USE_SYSTEM_CA"), Some("1"), "{vendor:?}");
+    }
+    let mut base = base();
+    base.insert(OsString::from("node_use_system_ca"), OsString::from("0"));
+    base.insert(
+        OsString::from("SSL_CERT_FILE"),
+        OsString::from("/all-roots.pem"),
+    );
+    let env = run_env(&EnvInputs {
+        ca_file: Some(Path::new("/firm/ca.pem")),
+        ..inputs(&base, Vendor::Codex, RunKind::Detect)
+    });
+    assert_eq!(
+        get(&env, "node_use_system_ca"),
+        Some("0"),
+        "an explicit value stays"
+    );
+    assert_eq!(get(&env, "NODE_USE_SYSTEM_CA"), None);
+    assert_eq!(get(&env, "SSL_CERT_FILE"), Some("/all-roots.pem"));
+    assert_eq!(get(&env, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
 }

@@ -32,6 +32,17 @@ source: crates/settings/src/schema/tests.rs
       ],
       "type": "object"
     },
+    "BrowserSettings": {
+      "description": "The `browser` section. Its key is a security key, set by policy only: a policy source that\ncannot be read locks it `false`, its default, and a `settings.json` value is ignored with a\nwarning.",
+      "properties": {
+        "allow_when_remote_debugging_disabled": {
+          "default": false,
+          "description": "Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote\ndebugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo\ndrives needs. Off by default: such a policy then turns Clauseo's browser off too.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Density": {
       "description": "How much space the app leaves round things.",
       "oneOf": [
@@ -193,6 +204,46 @@ source: crates/settings/src/schema/tests.rs
         }
       ]
     },
+    "NetworkSettings": {
+      "description": "The `network` section (decision records 0051, 0053). Every key is a security key: a policy\nsource that cannot be read leaves no proxy (so the OS's), no CA file, no added domain and no\nallowing a blocked site; block list updates stay on.",
+      "properties": {
+        "allow_unsafe_site_override": {
+          "default": true,
+          "description": "Whether the lawyer may allow a site the block list names (decision record 0053). On by\ndefault.",
+          "type": "boolean"
+        },
+        "allowed_domains": {
+          "default": [],
+          "description": "Host names (`*.` before one allows the names under it) added to every matter's\nallowlist. Set by policy only; empty by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ca_certs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "A CA file per agent id, as an absolute path, that the agent's network clients trust\nbesides the system's. Empty by default.",
+          "type": "object"
+        },
+        "unsafe_site_list_updates": {
+          "default": true,
+          "description": "Whether the host fetches block list updates (decision record 0053). On by default; off,\nthe stored or bundled list stays in use and is never updated. Set by policy only. Locked\non, its default, when a policy source cannot be read: an unreadable policy must not stop\nprotection updates, so a firm that switched it off gets quiet failed fetches (on a\nnetwork that refuses them) while its policy source is unreadable.",
+          "type": "boolean"
+        },
+        "upstream_proxy": {
+          "default": null,
+          "description": "The firm's proxy, which the egress proxy and agent installs send traffic through: an\n`http` or `https` URL with a host, and no user name, password, query or fragment. Unset\nby default: the proxy the OS is set to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Plan": {
       "description": "One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan\nlogin. A security key: a policy source that cannot be read leaves no plan at all, so no\nendpoint the lawyer chose stands in for the firm's (decision record 0048).",
       "properties": {
@@ -260,6 +311,74 @@ source: crates/settings/src/schema/tests.rs
       },
       "type": "object"
     },
+    "SandboxSettings": {
+      "description": "The `sandbox` section (decision record 0051). Both keys are security keys: a policy source\nthat cannot be read leaves `required` `false` and locks `allow_unprotected_auto` `false`, so\nan agent outside the sandbox runs only in the ask modes.",
+      "properties": {
+        "allow_unprotected_auto": {
+          "default": true,
+          "description": "Whether an agent outside the sandbox may still run in an auto mode; when off, it runs\nonly in the ask modes. On by default.",
+          "type": "boolean"
+        },
+        "required": {
+          "default": false,
+          "description": "Whether the firm requires the sandbox: on a computer that cannot give it, no agent starts.\nOff by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SkillsExtra": {
+      "description": "Which packs beyond Clauseo's own may load.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "None.",
+          "type": "string"
+        },
+        {
+          "const": "curated",
+          "description": "Only those whose id is in `skills.curated`.",
+          "type": "string"
+        },
+        {
+          "const": "any",
+          "description": "Any pack the lawyer turns on.",
+          "type": "string"
+        }
+      ]
+    },
+    "SkillsSettings": {
+      "description": "The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are\nsecurity keys: a policy source that cannot be read, or a policy value that does not type,\nlocks `extra` `off`, `allow_scripts` `false` and `curated` empty. `curated` is set by\npolicy only: a `settings.json` value is ignored with a warning.",
+      "properties": {
+        "allow_scripts": {
+          "default": false,
+          "description": "Whether a pack may carry scripts (copied, never run). Off by default.",
+          "type": "boolean"
+        },
+        "curated": {
+          "default": [],
+          "description": "The pack ids `curated` admits. Set by policy only; empty by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "The packs turned on, by id, each with the hash it had then (`sha256:<64 lowercase hex>`):\na pack whose files no longer hash to it is not loaded. Empty by default.",
+          "type": "object"
+        },
+        "extra": {
+          "$ref": "#/$defs/SkillsExtra",
+          "default": "off",
+          "description": "Which packs beyond Clauseo's own may load. `off` by default."
+        }
+      },
+      "type": "object"
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -281,11 +400,16 @@ source: crates/settings/src/schema/tests.rs
       ]
     },
     "ToolsSettings": {
-      "description": "The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that\ncannot be read, or a policy value that does not type, locks each `false`.",
+      "description": "The `tools` section: Clauseo's own tools. Every key is a security key: a policy source that\ncannot be read, or a policy value that does not type, locks each `false`.",
       "properties": {
         "browser": {
           "default": "[per OS]",
           "description": "Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on\nWindows until G17 passes.",
+          "type": "boolean"
+        },
+        "connectors": {
+          "default": true,
+          "description": "Whether data connectors (R24's paid case-law connector) may run. On by default, but\nnothing runs until the lawyer adds a connector. A firm turns every connector off here.",
           "type": "boolean"
         },
         "web_search": {
@@ -375,6 +499,13 @@ source: crates/settings/src/schema/tests.rs
       "description": "The agents Clauseo can launch, by id. Empty by default.",
       "type": "object"
     },
+    "browser": {
+      "$ref": "#/$defs/BrowserSettings",
+      "default": {
+        "allow_when_remote_debugging_disabled": false
+      },
+      "description": "What the firm allows Clauseo's browser beyond its browser policy."
+    },
     "install": {
       "$ref": "#/$defs/InstallSettings",
       "default": {
@@ -397,6 +528,17 @@ source: crates/settings/src/schema/tests.rs
       },
       "description": "The MCP servers a lawyer can turn on for their agents' sessions."
     },
+    "network": {
+      "$ref": "#/$defs/NetworkSettings",
+      "default": {
+        "allow_unsafe_site_override": true,
+        "allowed_domains": [],
+        "ca_certs": {},
+        "unsafe_site_list_updates": true,
+        "upstream_proxy": null
+      },
+      "description": "The firm's network: its proxy, CA files and allowed domains (decision record 0051)."
+    },
     "plans": {
       "additionalProperties": {
         "$ref": "#/$defs/Plan"
@@ -413,10 +555,29 @@ source: crates/settings/src/schema/tests.rs
       },
       "description": "What Clauseo may count and send about its own use (decision record 0036)."
     },
+    "sandbox": {
+      "$ref": "#/$defs/SandboxSettings",
+      "default": {
+        "allow_unprotected_auto": true,
+        "required": false
+      },
+      "description": "Whether the firm requires the agent sandbox, and what runs without it (decision record\n0051)."
+    },
+    "skills": {
+      "$ref": "#/$defs/SkillsSettings",
+      "default": {
+        "allow_scripts": false,
+        "curated": [],
+        "enabled": {},
+        "extra": "off"
+      },
+      "description": "The extra skill packs Clauseo may load (decision record 0040)."
+    },
     "tools": {
       "$ref": "#/$defs/ToolsSettings",
       "default": {
         "browser": "[per OS]",
+        "connectors": true,
         "web_search": true
       },
       "description": "Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart."

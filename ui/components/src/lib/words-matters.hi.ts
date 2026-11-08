@@ -5,8 +5,8 @@ import type { Hindi } from "./words-core.ts";
 export const HI = {
   /* ---------- the rail: finding a matter, a folder that moved ---------- */
   "Find a matter": "मामला खोजें",
-  // RO-20: Find's placeholder and name once it searches inside (U16a); hi: later
-  Find: null,
+  // RO-20: Find's placeholder and name once it searches inside (U16a)
+  Find: "खोजें",
   "Find a matter by its name, client or case number": "नाम, मुवक्किल या केस नंबर से मामला खोजें",
   Recent: "हाल के",
   "Matching matters": "मेल खाते मामले",
@@ -45,12 +45,38 @@ export const HI = {
   "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
   // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
   // the list has it, and Open it beside the line
-  "This folder is already a matter: {name}.": null,
-  "This folder is already a matter.": null,
+  "This folder is already a matter: {name}.": "यह फ़ोल्डर पहले से एक मामला है: {name}।",
+  "This folder is already a matter.": "यह फ़ोल्डर पहले से एक मामला है।",
   // matter.folder_in_matters_root: the folder Clauseo keeps matters in, a choose-another refusal
-  "{path} is the folder Clauseo keeps matters in.": null,
-  "That folder is where Clauseo keeps matters.": null,
-  "Choose the folder for one matter.": null,
+  "{path} is the folder Clauseo keeps matters in.": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
+  "That folder is where Clauseo keeps matters.": "उस फ़ोल्डर में Clauseo मामले रखता है।",
+  "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
+  /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
+  "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
+  /* ---------- Clauseo's own folder chooser, where Windows' folder window would stall (folder-chooser.tsx) ---------- */
+  "Choose the matter's folder": "मामले का फ़ोल्डर चुनें",
+  "Windows' folder window is slow to open on this computer, so Clauseo shows its own.":
+    "इस कंप्यूटर पर Windows की फ़ोल्डर विंडो देर से खुलती है, इसलिए Clauseo अपनी विंडो दिखाता है।",
+  // the start points beside the drives (C:, D:): the home folder, the Desktop, the folder of the last pick
+  Home: "होम",
+  Desktop: "डेस्कटॉप",
+  "Last place": "पिछली जगह",
+  Up: "ऊपर",
+  "Or type a folder's location": "या फ़ोल्डर का स्थान टाइप करें",
+  Go: "जाएँ",
+  "Choose this folder": "यह फ़ोल्डर चुनें",
+  Cancel: "रद्द करें",
+  "This folder didn't answer in time.": "इस फ़ोल्डर ने समय पर जवाब नहीं दिया।",
+  "Try again": "फिर से प्रयास करें",
+  "This folder can't be found.": "यह फ़ोल्डर नहीं मिला।",
+  "Clauseo can't use this folder.": "Clauseo इस फ़ोल्डर का इस्तेमाल नहीं कर सकता।",
+  // beside a folder Clauseo refuses (a system folder, the home folder's own): listed, but it doesn't open
+  "Can't be a matter": "मामला नहीं बन सकता",
+  "Some folders aren't shown.": "कुछ फ़ोल्डर नहीं दिखाए गए हैं।",
+  // where the places to start or the folders stand while the desktop still reads them (provisional Hindi)
+  "Looking…": "देखा जा रहा है…",
+  // while the desktop's own window asks to use the folder chosen
+  "Waiting for you to confirm…": "आपकी पुष्टि की प्रतीक्षा है…",
   /* ---------- a matter whose folder has moved ---------- */
   "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
   "It was at {path}. Find it where it is now, and the matter opens as you left it.":
@@ -101,7 +127,7 @@ export const HI = {
   "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। आपने {time} बजे उत्तर रोका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.":
-    null, // hi: later
+    "कतार रुकी है। आपने {time} बजे एक अनुरोध की अनुमति नहीं दी, इसलिए आपके भेजने तक और कुछ नहीं भेजा जाएगा।",
   "The queue is held. The answer failed at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। {time} बजे उत्तर पूरा नहीं हो सका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "Send next": "अगला भेजें",
@@ -111,6 +137,11 @@ export const HI = {
   // the lawyer sends
   "{n} queued.": "{n} कतार में।",
   "1 queued.": "1 कतार में।",
+  // UD2-57: under the count while the host holds the queue for an update install (#537's queue_held_reason)
+  "Clauseo is installing an update. Your queued questions go once it's done.":
+    "Clauseo एक अपडेट इंस्टॉल कर रहा है। इसके पूरा होते ही कतार में रखे आपके प्रश्न भेजे जाएँगे।",
+  // UD2-58: the resume cue, after an idle stop, while the agent restarts slowly (R20b; the plan's name fills {plan})
+  "Getting {plan} ready.": "{plan} तैयार हो रहा है।",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   "Send now gives your words to Clauseo while it writes.":
     "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",

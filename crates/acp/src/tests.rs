@@ -189,6 +189,7 @@ async fn handshake(client: &AcpClient) {
     client.initialize().await.unwrap();
     let start = client.new_session(NewSession {
         cwd: cwd(),
+        additional_directories: Vec::new(),
         mcp_servers: Vec::new(),
         meta: None,
     });
@@ -205,6 +206,7 @@ fn new_session_sends_empty_mcp_servers_and_meta() {
         let start = client
             .new_session(NewSession {
                 cwd: cwd(),
+                additional_directories: Vec::new(),
                 mcp_servers: Vec::new(),
                 meta: Some(meta),
             })
@@ -267,6 +269,7 @@ fn prompt_content_is_checked_before_anything_is_sent() {
         assert_eq!(unknown, Err(Error::UnknownSession));
         let start = client.new_session(NewSession {
             cwd: cwd(),
+            additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
             meta: None,
         });

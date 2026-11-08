@@ -1,20 +1,29 @@
-// fake_agent `claude-files-one-turn`: one turn creates notes/a.txt, edits brief.txt and deletes
-// old.txt in the matter folder. Undo on that turn puts the folder back as it was.
+// fake_agent `claude-files-one-turn` (scenarios/claude-files-one-turn.jsonl): one turn creates
+// notes/a.txt, edits brief.txt and deletes old.txt in the matter folder. Undo on that turn puts the
+// folder back as it was. The matter starts with papers, so its first read comes first
+// (finishFirstRead).
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
+import {
+  FILES_SCENARIO,
+  expectTurnEnded,
+  finishFirstRead,
+  openMatter,
+  sendPrompt,
+} from "./flow.ts";
 import { readTree } from "./scratch.ts";
 import { window } from "./selectors.ts";
 
 /** The scenario's description asks for these two files first. */
 const BEFORE = { "brief.txt": "Clause 4 draft\n", "old.txt": "Old terms\n" };
 
-test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
+test.use({ scenario: FILES_SCENARIO, matterFiles: BEFORE });
 
 test("Undo restores the files a turn changed", async ({ app, scratch }) => {
   const w = window(app.page);
   await openMatter(w);
+  await finishFirstRead(w);
   await sendPrompt(w, "Finalise clause 4");
   await expect(w.agentMessages.last()).toHaveText(
     "Created one note, edited the brief and deleted the old file.",

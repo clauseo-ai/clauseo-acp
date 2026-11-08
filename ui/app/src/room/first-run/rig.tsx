@@ -97,6 +97,8 @@ export type RigOptions = {
   language?: Lang;
   /** The agents the host lists (R15's list_agents): both plans unless a test says otherwise. */
   agents?: AgentId[];
+  /** Answers each setup command; throwing refuses it. */
+  command?: (command: SetupCommand) => void | Promise<void>;
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
 };
@@ -125,7 +127,10 @@ export async function mountFirstRun(o: RigOptions = {}) {
       o.picked === undefined
         ? { folder: "folder-ref-1", display: "Documents/Matters/Rathi Steels" }
         : o.picked,
-    setup: { first: () => o.first ?? [] },
+    setup: {
+      first: () => o.first ?? [],
+      ...(o.command === undefined ? {} : { command: o.command }),
+    },
     next: fakeNext({
       matters: () => [],
       agents: (o.agents ?? [CLAUDE, CODEX]).map((id) => ({

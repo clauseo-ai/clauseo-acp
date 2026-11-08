@@ -6,7 +6,7 @@
 import { clock, t as roomWords, type Key } from "./words.ts";
 import { ui, type UiKey } from "./words-ui.ts";
 import { useDisplay, type Lang } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { listOf, wordsOf, type Slots } from "./words-core.ts";
 import type { HI } from "./words-versions.hi.ts";
 
 /** Every string of Versions, in English: the matter as it stood, and the edge of the matter. */
@@ -15,12 +15,7 @@ export type VersionKey = keyof typeof HI;
 /** A string of Versions in the language, its slots filled. */
 export const vt = wordsOf("versions");
 
-/** "A", "A and B", "A, B and C", in the language. */
-export function listOf(lang: Lang, items: readonly string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  const head = items.slice(0, -1).join(", ");
-  return vt(lang, "{a} and {b}", { a: head, b: items[items.length - 1] ?? "" });
-}
+export { listOf };
 
 /** Word's file names, each in single quotes, joined as the language joins a list: 'Lease.docx' and 'Notice.docx'. */
 export function wordFiles(lang: Lang, names: readonly string[]): string {
@@ -52,7 +47,7 @@ export function edgeDialogWords(lang: Lang, ask: EdgeAsk) {
   const v = (key: VersionKey, slots?: Slots) => vt(lang, key, slots);
   if (ask.kind === "off") {
     return {
-      title: v("Switch off protection for {matter}?", { matter: ask.matter }),
+      title: v("Switch off the Safe workspace for {matter}?", { matter: ask.matter }),
       lines: [
         v(
           "If you switch it off, Clauseo can read and change any file on this computer while it works on this matter, without asking.",
@@ -64,7 +59,7 @@ export function edgeDialogWords(lang: Lang, ask: EdgeAsk) {
       foot: v("You can switch it back on from the line under the question box."),
       remember: null,
       confirm: v("Switch off"),
-      cancel: v("Keep protection"),
+      cancel: v("Keep the Safe workspace"),
       primary: "cancel" as const,
     };
   }

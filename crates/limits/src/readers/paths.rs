@@ -16,6 +16,7 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use clauseo_codex_appserver::codex_js_candidates;
 use clauseo_settings::AgentLaunch;
 
 use crate::error::Error;
@@ -28,8 +29,6 @@ pub(crate) const CODEX_ID: &str = "codex-acp";
 pub(crate) const CLAUDE_HELPER: &str = "clauseo-claude-usage.mjs";
 /// Where the Claude Agent SDK's `package.json` sits inside a `node_modules` folder.
 const CLAUDE_SDK: [&str; 3] = ["@anthropic-ai", "claude-agent-sdk", "package.json"];
-/// Where the Codex CLI's script sits inside a `node_modules` folder.
-const CODEX_JS: [&str; 4] = ["@openai", "codex", "bin", "codex.js"];
 
 /// An adapter's checked paths: the program, its install folder and its script.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,19 +93,13 @@ pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> 
 }
 
 /// The Codex CLI's `codex.js`: codex-acp's own `node_modules/@openai/codex/bin/codex.js`
-/// first, then the install folder's, each by the no-symlink rule. A candidate that is missing
+/// first, then the install folder's (`codex_appserver`'s [`codex_js_candidates`], the layout the
+/// sign-in follows too), each by the no-symlink rule. A candidate that is missing
 /// moves on to the next; one that breaks the rule refuses.
 pub(crate) fn codex_js(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> {
     let located = locate(CODEX_ID, launch)?;
     let modules = located.install.join("node_modules");
-    let package = package_dir(&modules, &located.script);
-    let own = package
-        .as_deref()
-        .map(|package| package.join("node_modules"));
-    for dir in own.iter().chain(std::iter::once(&modules)) {
-        let candidate = CODEX_JS
-            .iter()
-            .fold(dir.clone(), |path, part| path.join(part));
+    for candidate in codex_js_candidates(&located.install, &located.script) {
         match walk(&located.install, &candidate) {
             Ok(()) => return Ok((located, candidate)),
             Err(Walk::Missing) => {}
@@ -228,22 +221,6 @@ fn has_dot_part(path: &Path) -> bool {
         .as_encoded_bytes()
         .split(|&byte| byte == b'/' || (cfg!(windows) && byte == b'\\'))
         .any(|part| part == b"." || part == b"..")
-}
-
-/// The adapter's package folder: the folder right under `modules` that holds `script`, with its
-/// scope (`@agentclientprotocol/claude-agent-acp`).
-fn package_dir(modules: &Path, script: &Path) -> Option<PathBuf> {
-    let mut parts = script.strip_prefix(modules).ok()?.components();
-    let Some(Component::Normal(first)) = parts.next() else {
-        return None;
-    };
-    let mut package = modules.join(first);
-    if first.as_encoded_bytes().starts_with(b"@")
-        && let Some(Component::Normal(name)) = parts.next()
-    {
-        package.push(name);
-    }
-    Some(package)
 }
 
 /// Why [`walk`] refused a path.

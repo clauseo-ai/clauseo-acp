@@ -39,13 +39,13 @@ const SAYS: Readonly<
     name: "This matter's folder is on a network drive",
     head: "On a network drive.",
     rest: "Claude asks before every change. Codex can't work here.",
-    info: "Clauseo can't keep Claude and Codex inside this folder. For full protection, move the matter to a folder on this computer.",
+    info: "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
   },
   no_permissions: {
     name: "This matter's folder is on a drive that doesn't keep file permissions",
     head: "No file permissions.",
     rest: "Claude asks before every change. Codex can't work here.",
-    info: "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
+    info: "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
   },
   check_failed: {
     name: "Clauseo couldn't check this folder, so Claude asks before every change.",
@@ -59,10 +59,11 @@ const IT_TEXT: FolderKey =
   'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.';
 
 /** An explanation behind an info icon, named with its words, which also show under the pointer and on focus (as the
- * card's, folder-reason.tsx, kept apart so the two chunks share nothing). */
+ * card's, folder-reason.tsx, kept apart so the two chunks share nothing). Below the icon: above, it would cover the
+ * toolbar's matter title. */
 function FolderInfo({ words }: { words: string }) {
   return (
-    <Tooltip content={words}>
+    <Tooltip content={words} side="bottom">
       <button type="button" className="room-info" aria-label={words}>
         <IconAbout size={14} />
       </button>

@@ -4,9 +4,62 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Clauseo</title>
+    <!-- The first paint, before the app's CSS and script: --ground and, for the comma, --ground-press from
+         ui/components/src/styles/tokens-colour.css, in the OS's light until display.ts sets data-theme. Tauri's
+         nonce and the meta CSP's hash allow it (csp.test.ts). -->
+    <style>
+      html:not([data-theme]) {
+        background: #e5e2dc;
+      }
+      #first-mark {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        visibility: visible;
+        color: #d2cdc5;
+      }
+      #first-mark svg {
+        width: 40px;
+        animation: first-breath 2.4s ease-in-out infinite alternate;
+      }
+      @keyframes first-breath {
+        from {
+          opacity: 0.55;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #first-mark svg {
+          animation: none;
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme]) {
+          background: #1b1a18;
+        }
+        html:not([data-theme]) #first-mark {
+          color: #292725;
+        }
+      }
+      [data-theme="night"] #first-mark {
+        color: #292725;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- React's first commit replaces #root's children, the mark with them. -->
+    <div id="root">
+      <div id="first-mark" aria-hidden="true">
+        <svg viewBox="7752 944 411 695" fill="currentColor">
+          <path
+            d="M 8162.05 1149.65 C 8162.05 1188.03 8151 1275.08 8100.24 1368.41 C 8035.48 1487.55 7941.48 1552.6 7819.19 1638.22 L 7760.24 1553.94 C 7842.72 1496.22 7903.1 1431.36 7934.24 1347.75 C 7828.43 1332.79 7753 1237.46 7762.91 1131.08 C 7772.81 1024.7 7864.62 944.89 7971.38 949.84 C 8078.05 954.79 8162.05 1042.79 8162.05 1149.65 Z"
+          />
+        </svg>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

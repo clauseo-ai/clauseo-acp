@@ -1,13 +1,21 @@
 /* folder rights: the notice at the top of the work column, on the well and inside the reading column, its words
    beside their icon, What to tell IT and Close at the end; the IT text under it, with Copy */
+@reference "../styles/system.css";
+
+/* the composer's gutter on both sides, so its edges stand on the composer's field */
 .room-folder {
   box-sizing: border-box;
-  width: calc(100% - 2 * var(--thread-pad));
-  max-width: calc(var(--measure) + 2 * var(--s3));
-  margin: var(--s3) auto 0;
+  margin: var(--s3) var(--gutter) 0;
   padding: var(--s1-5) var(--s2) var(--s1-5) var(--s3);
   border-radius: var(--r-card);
   background: var(--well);
+}
+/* one column: the docked composer's field stands 16 px in, its measure at most */
+@variant max-mid {
+  .room-folder {
+    max-width: var(--measure);
+    margin-inline: var(--s4);
+  }
 }
 .room-folder-row {
   display: flex;
@@ -30,6 +38,7 @@
 }
 .room-folder-text .room-info {
   vertical-align: middle;
+  margin-inline-start: var(--s1);
 }
 .room-folder-it {
   display: grid;

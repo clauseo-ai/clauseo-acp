@@ -3,7 +3,7 @@
 //! the confirm's words are in `links.rs`; the files and folders here.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, Language, MatterId};
@@ -12,7 +12,9 @@ use uuid::Uuid;
 use super::*;
 use crate::test_support::Scratch;
 
+mod bounded;
 mod links;
+mod word;
 
 /// What the fake OS was asked to do, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +25,9 @@ enum Opened {
     Reveal(PathBuf),
 }
 
+/// The fake OS, and the short folder it gives every folder (`None`: no 8.3 names).
 #[derive(Default)]
-struct FakeOpener(Mutex<Vec<Opened>>);
+struct FakeOpener(Mutex<Vec<Opened>>, Option<PathBuf>);
 
 impl FakeOpener {
     fn opened(&self) -> Vec<Opened> {
@@ -50,6 +53,9 @@ impl Opener for FakeOpener {
             .unwrap()
             .push(Opened::Reveal(path.to_path_buf()));
         Ok(())
+    }
+    fn short_folder(&self, _folder: &Path) -> Option<PathBuf> {
+        self.1.clone()
     }
 }
 
@@ -79,10 +85,25 @@ impl LinkConfirm for FakeConfirm {
     }
 }
 
-/// A host that knows one file ref and one matter.
+/// A host that knows one file ref and one matter, and its marker check.
 struct FakeHost {
     file: FileRefId,
     located: LocatedFile,
+    check: MarkerCheck,
+}
+
+impl FakeHost {
+    /// A marker check that asks only about this host's matter and folder, and answers `refused`
+    /// (`None`: it passes).
+    fn refusing(&mut self, refused: Option<ErrorCode>) {
+        let (folder, matter) = (self.located.folder.clone(), self.located.matter);
+        self.check = Arc::new(move |asked: &Path, asked_matter| {
+            assert_eq!((asked, asked_matter), (folder.as_path(), matter));
+            refused.map_or(Ok(()), |code| {
+                Err(HostError::new(code, "the marker check refused"))
+            })
+        });
+    }
 }
 
 impl Locate for FakeHost {
@@ -108,6 +129,9 @@ impl Locate for FakeHost {
         };
         Box::pin(async move { answer })
     }
+    fn marker_check(&self) -> MarkerCheck {
+        Arc::clone(&self.check)
+    }
 }
 
 fn file_ref() -> FileRefId {
@@ -118,16 +142,20 @@ fn matter_id() -> MatterId {
     MatterId::new(Uuid::now_v7()).unwrap()
 }
 
-/// A host whose one ref names `path` in the matter whose folder is `folder`.
+/// A host whose one ref names `path` in the matter whose folder is `folder`, a folder whose
+/// marker check passes.
 fn host(folder: &Path, path: &Path) -> FakeHost {
-    FakeHost {
+    let mut host = FakeHost {
         file: file_ref(),
+        check: Arc::new(|_: &Path, _| Ok(())),
         located: LocatedFile {
             matter: matter_id(),
             folder: folder.to_path_buf(),
             path: path.to_path_buf(),
         },
-    }
+    };
+    host.refusing(None);
+    host
 }
 
 /// A clock the test moves by hand.
@@ -167,10 +195,15 @@ fn external(
 }
 
 /// `open_file` through a fresh gate.
-fn file(host: &FakeHost, opener: &FakeOpener, file: FileRefId) -> Result<(), HostError> {
+fn file(
+    host: &FakeHost,
+    opener: &Arc<FakeOpener>,
+    file: FileRefId,
+) -> Result<OpenedFile, HostError> {
     let clock = Clock::new();
     let gate = gate::Gate::default();
-    block_on(open_file(host, opener, &gate, &|| clock.now(), file))
+    let now = || clock.now();
+    block_on(open_file(host, opener, &gate, &now, FOLDER_WAIT, file))
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -199,7 +232,7 @@ fn a_document_in_its_matter_opens_by_its_resolved_path() {
         &folder,
         &folder.join("Drafts").join("..").join("Drafts/Brief.docx"),
     );
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
@@ -215,7 +248,7 @@ fn an_unknown_ref_opens_nothing() {
     let scratch = Scratch::new("open-unknown", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let refused = file(&host, &opener, file_ref());
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(opener.opened(), []);
@@ -225,7 +258,7 @@ fn an_unknown_ref_opens_nothing() {
 fn a_file_outside_its_matter_is_refused() {
     let scratch = Scratch::new("open-outside", &[]);
     let (folder, _, outside) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     for path in [outside.as_path(), &folder.join("..").join("Outside.docx")] {
         let host = host(&folder, path);
         let refused = file(&host, &opener, host.file);
@@ -247,11 +280,107 @@ fn a_file_outside_its_matter_is_refused() {
     assert_eq!(opener.opened(), []);
 }
 
+/// A document in a nested subfolder of its matter opens, and what it hands on has no `\\?\`
+/// prefix at a normal length: `dunce` keeps the prefix only past `MAX_PATH`.
+#[test]
+fn a_document_in_a_nested_folder_of_its_matter_opens_plain() {
+    let scratch = Scratch::new("open-nested", &[]);
+    let folder = scratch.path().join("Acme");
+    scratch.dir("Acme/Clients/2026/Drafts");
+    let brief = scratch.file("Acme/Clients/2026/Drafts/Brief.docx", b"PK");
+    let document = check_document(&brief, &folder).unwrap();
+    assert!(
+        !document.path.to_string_lossy().starts_with(r"\\?\"),
+        "{}",
+        document.path.display()
+    );
+    assert_eq!(document.kind, "docx");
+    let host = host(&folder, &brief);
+    let opener = Arc::new(FakeOpener::default());
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(
+        opener.opened(),
+        [Opened::Path(document.path, "docx".to_owned())]
+    );
+}
+
+/// `starts_with` compares whole components, so a sibling whose name begins with the folder's
+/// name (`Acme2` beside `Acme`) is not inside it.
+#[test]
+fn a_sibling_whose_name_starts_with_the_folders_is_refused() {
+    let scratch = Scratch::new("open-prefix", &[]);
+    let folder = scratch.dir("Acme");
+    scratch.dir("Acme2");
+    let sibling = scratch.file("Acme2/Brief.docx", b"PK");
+    let opener = Arc::new(FakeOpener::default());
+    let host = host(&folder, &sibling);
+    let refused = file(&host, &opener, host.file);
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
+    assert_eq!(opener.opened(), []);
+}
+
+/// Eight nested folder names, about 370 characters with the separators: a document under them
+/// passes `MAX_PATH` (260 UTF-16 units) on Windows, whatever the scratch folder's own length.
+#[cfg(windows)]
+fn deep_folders() -> Vec<String> {
+    (0..8)
+        .map(|n| format!("Subfolder {n} with a long name to pass MAX_PATH"))
+        .collect()
+}
+
+/// On Windows a document past `MAX_PATH` in a short matter folder is accepted, and it is handed on
+/// verbatim, as a long path must be (a PDF: a Word document this long opens through its short
+/// folders, `word.rs`). Both sides canonicalize verbatim, so `starts_with` finds
+/// the folder. A file outside the matter, named through `..`, is still refused.
+#[cfg(windows)]
+#[test]
+fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let scratch = Scratch::new("open-long-path", &[]);
+    let folder = scratch.dir("Acme");
+    let nested = deep_folders();
+    let rel = nested.join("/");
+    scratch.dir(&format!("Acme/{rel}"));
+    let brief = scratch.file(&format!("Acme/{rel}/Brief.pdf"), b"PK");
+    let long = dunce::canonicalize(&brief).unwrap();
+    assert!(
+        long.as_os_str().encode_wide().count() > 260,
+        "{}",
+        long.display()
+    );
+
+    let document = check_document(&brief, &folder).unwrap();
+    assert!(
+        document.path.to_string_lossy().starts_with(r"\\?\"),
+        "a long path stays verbatim: {}",
+        document.path.display()
+    );
+    let host = host(&folder, &brief);
+    let opener = Arc::new(FakeOpener::default());
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(
+        opener.opened(),
+        [Opened::Path(document.path, "pdf".to_owned())]
+    );
+
+    // `Acme\<first folder>\..\..\Outside.docx` is `Outside.docx` beside the matter's folder.
+    scratch.file("Outside.docx", b"PK");
+    let through = folder
+        .join(&nested[0])
+        .join("..")
+        .join("..")
+        .join("Outside.docx");
+    let refused = check_document(&through, &folder);
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
+    assert_eq!(opener.opened().len(), 1);
+}
+
 #[test]
 fn only_document_files_open() {
     let scratch = Scratch::new("open-types", &[]);
     let (folder, _, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     // A folder, and a folder named like an app bundle.
     scratch.dir("Acme/Tool.app/Contents");
     let mut refused = vec![folder.join("Drafts"), folder.join("Tool.app")];
@@ -299,7 +428,7 @@ fn a_file_marked_as_a_program_is_refused() {
     let (folder, brief, _) = matter_folder(&scratch);
     scratch.executable("Acme/Drafts/Brief.docx");
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let refused = file(&host, &opener, host.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(opener.opened(), []);
@@ -311,10 +440,19 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
     let scratch = Scratch::new("open-gate", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let clock = Clock::new();
     let gate = gate::Gate::default();
-    let run = || block_on(open_file(&host, &opener, &gate, &|| clock.now(), host.file));
+    let run = || {
+        block_on(open_file(
+            &host,
+            &opener,
+            &gate,
+            &|| clock.now(),
+            FOLDER_WAIT,
+            host.file,
+        ))
+    };
     let pass = gate.enter(clock.now()).unwrap();
     assert_eq!(code(run()), ErrorCode::CommandConflict);
     drop(pass);
@@ -324,6 +462,7 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
         &opener,
         &gate,
         &|| clock.now(),
+        FOLDER_WAIT,
         file_ref(),
     ));
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
@@ -339,7 +478,7 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
 fn a_missing_file_or_folder_opens_nothing() {
     let scratch = Scratch::new("open-missing", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let gone = host(&folder, &folder.join("Gone.docx"));
     let refused = file(&gone, &opener, gone.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
@@ -356,15 +495,23 @@ fn reveal_shows_a_matters_folder_or_the_app_data_folder() {
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
     let app_data = scratch.path().join("data");
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     block_on(reveal(
         &host,
         &opener,
         &app_data,
+        FOLDER_WAIT,
         RevealTarget::Matter(host.located.matter),
     ))
     .unwrap();
-    block_on(reveal(&host, &opener, &app_data, RevealTarget::AppData)).unwrap();
+    block_on(reveal(
+        &host,
+        &opener,
+        &app_data,
+        FOLDER_WAIT,
+        RevealTarget::AppData,
+    ))
+    .unwrap();
     assert_eq!(
         opener.opened(),
         [Opened::Reveal(folder), Opened::Reveal(app_data)]
@@ -375,12 +522,13 @@ fn reveal_shows_a_matters_folder_or_the_app_data_folder() {
 fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
     let scratch = Scratch::new("reveal-refused", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let host_ = host(&folder, &brief);
     let unknown = block_on(reveal(
         &host_,
         &opener,
         scratch.path(),
+        FOLDER_WAIT,
         RevealTarget::Matter(matter_id()),
     ));
     assert_eq!(code(unknown), ErrorCode::CommandUnknownMatter);
@@ -390,10 +538,38 @@ fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
         &moved,
         &opener,
         scratch.path(),
+        FOLDER_WAIT,
         RevealTarget::Matter(moved.located.matter),
     ));
     assert_eq!(code(missing), ErrorCode::MatterFolderMissing);
     assert_eq!(opener.opened(), []);
+}
+
+/// The host's marker check refusing the matter's folder (`matter.folder_not_a_matter`, for a
+/// folder that is there without the matter's `.clauseo/matter.json`) refuses a reveal and the
+/// open of a file in it with that code, and nothing opens; with the check passing both go ahead.
+/// The check itself is `clauseo_host::check_matter_folder`'s, tested in the host.
+#[test]
+fn the_marker_check_refuses_a_reveal_and_an_open() {
+    let scratch = Scratch::new("reveal-not-a-matter", &[]);
+    let (folder, brief, _) = matter_folder(&scratch);
+    let mut host = host(&folder, &brief);
+    let opener = Arc::new(FakeOpener::default());
+    let matter = RevealTarget::Matter(host.located.matter);
+    for refused_with in [
+        ErrorCode::MatterFolderNotAMatter,
+        ErrorCode::MatterFolderMissing,
+    ] {
+        host.refusing(Some(refused_with));
+        let refused = block_on(reveal(&host, &opener, scratch.path(), FOLDER_WAIT, matter));
+        assert_eq!(code(refused), refused_with);
+        assert_eq!(code(file(&host, &opener, host.file)), refused_with);
+    }
+    assert_eq!(opener.opened(), []);
+    host.refusing(None);
+    block_on(reveal(&host, &opener, scratch.path(), FOLDER_WAIT, matter)).unwrap();
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(opener.opened().len(), 2);
 }
 
 #[test]

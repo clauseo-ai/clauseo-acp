@@ -1,5 +1,5 @@
 //! The launch profile tests' rig (`profile.rs`, `tools.rs`, `mcp.rs`): a launcher ([`Wired`])
-//! that sees each launch after its prep made the session's folders and fills `@WORK@`,
+//! that sees each launch after its prep made the session's folders and fills `@RUN@`, `@WORK@`,
 //! `@BROWSER@` and `@SESSION@` into the scenario the agent is about to read, so every value is
 //! checked exactly; a profile hook; and scenario builders.
 
@@ -24,11 +24,15 @@ pub(crate) const CLAUDE: &str = "claude-acp";
 pub(crate) const CODEX: &str = "codex-acp";
 
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
-/// launch whose prep made none) and its environment.
+/// launch whose prep made none), its environment, and the files its pack plugin
+/// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
 #[derive(Debug, Clone)]
 pub(crate) struct Seen {
     pub(crate) run: Option<PathBuf>,
     pub(crate) env: BTreeMap<OsString, OsString>,
+    pub(crate) packs: Vec<String>,
+    /// The secrets the spec names for the stderr tail to hide (`LaunchSpec::redacted`).
+    pub(crate) redacted: Vec<String>,
 }
 
 impl Seen {
@@ -95,19 +99,47 @@ impl Launcher for Wired {
             if let Ok(text) = std::fs::read_to_string(&template) {
                 let session = run.file_name().unwrap().to_str().unwrap();
                 let text = text
+                    .replace("@RUN@", &escaped(&path_text(run)))
                     .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
                     .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
-                    .replace("@SESSION@", &escaped(session));
+                    .replace("@SESSION@", &escaped(session))
+                    .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());
                 FILLED.lock().unwrap().push(text);
             }
         }
+        let packs = run
+            .as_ref()
+            .map(|run| files_under(&run.join("skill-packs")))
+            .unwrap_or_default();
         self.seen.lock().unwrap().push(Seen {
             run,
             env: spec.env().clone(),
+            packs,
+            redacted: spec.redacted().to_vec(),
         });
         self.inner.launch(spec)
     }
+}
+
+/// Every file under `root`, by path under it with `/`, sorted; none when it does not exist.
+pub(crate) fn files_under(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_owned()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let rel = path.strip_prefix(root).unwrap();
+                let parts: Vec<_> = rel.iter().map(|part| part.to_str().unwrap()).collect();
+                files.push(parts.join("/"));
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 /// Every scenario [`Wired`] filled in this process, for [`turn`]'s failure message. nextest
@@ -161,7 +193,11 @@ pub(crate) struct Hook {
 }
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         (agent.as_str() == CLAUDE)
             .then(|| self.meta.as_object().cloned())
             .flatten()
@@ -179,7 +215,12 @@ impl ProfileHook for Hook {
         self.skills.clone()
     }
 
-    fn codex_config(&self, agent: &AgentId, written: Option<&SkillsWritten>) -> Map<String, Value> {
+    fn codex_config(
+        &self,
+        agent: &AgentId,
+        written: Option<&SkillsWritten>,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Map<String, Value> {
         if agent.as_str() != CODEX {
             return Map::new();
         }
@@ -306,6 +347,19 @@ pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]
 /// A Codex agent's scenario, as `codex-handshake` (codex-acp 2.2.2): `initialize`,
 /// `session/new` matching `params`, the switch to its ask mode, one prompt.
 pub(crate) fn codex_lines(name: &str, params: &Value) -> String {
+    codex_lines_for(name, "session/new", params)
+}
+
+/// [`codex_lines`] with `method`, `session/new` or `session/load` (of `sess-1`).
+pub(crate) fn codex_lines_for(name: &str, method: &str, params: &Value) -> String {
+    let modes = json!({"currentModeId": "agent", "availableModes": [
+        {"id": "read-only", "name": "Read-only"}, {"id": "workspace-write", "name": "Workspace access"},
+        {"id": "agent", "name": "Auto review"}, {"id": "agent-full-access", "name": "Full access"}]});
+    let result = if method == "session/new" {
+        json!({"sessionId": "sess-1", "modes": modes})
+    } else {
+        json!({"modes": modes})
+    };
     [
         json!({"scenario": name, "description": "a launch profile test, Codex", "on_stdin_close": "exit"}),
         json!({"expect": {"method": "initialize", "as": "init", "params": {"protocolVersion": 1}}}),
@@ -315,11 +369,8 @@ pub(crate) fn codex_lines(name: &str, params: &Value) -> String {
             "delete": {}, "additionalDirectories": {}, "resume": {}, "close": {}}},
             "authMethods": [], "agentInfo": {"name": "@agentclientprotocol/codex-acp",
             "title": "Codex", "version": "2.2.2"}}}}),
-        json!({"expect": {"method": "session/new", "as": "new", "params": params}}),
-        json!({"respond": {"to": "new", "result": {"sessionId": "sess-1", "modes": {
-            "currentModeId": "agent", "availableModes": [{"id": "read-only", "name": "Read-only"},
-            {"id": "workspace-write", "name": "Workspace access"}, {"id": "agent", "name": "Auto review"},
-            {"id": "agent-full-access", "name": "Full access"}]}}}}),
+        json!({"expect": {"method": method, "as": "start", "params": params}}),
+        json!({"respond": {"to": "start", "result": result}}),
         json!({"expect": {"method": "session/set_mode", "as": "set-mode",
             "params": {"sessionId": "sess-1", "modeId": "workspace-write"}}}),
         json!({"respond": {"to": "set-mode", "result": {}}}),

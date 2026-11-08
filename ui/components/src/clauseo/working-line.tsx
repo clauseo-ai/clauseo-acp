@@ -63,6 +63,10 @@ export type WorkingState =
       details?: string | null;
       /** Optional: the error's code (an ErrorCode), when the wait is an error, set as the row's data-code. */
       code?: string;
+      /** Optional: what assistive technology hears, when it is not the words: a download's words
+       * carry its bytes, which move every 250 ms, so the live region hears the state alone. Left
+       * out, it hears the words. */
+      said?: string;
     };
 
 /** What leads the row: the permission's shield or the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
@@ -191,9 +195,10 @@ function TimePill({ children, place }: { children: string; place: "row" | "field
  * a break's words, or nothing between) is said once in place; the row's own words are seen, not read twice. */
 export function WorkingSaid({ state }: { state: WorkingState }) {
   const { words, pill } = useParts(state);
+  const said = state.kind === "wait" && state.said !== undefined ? state.said : words;
   return (
     <>
-      <Say>{words}</Say>
+      <Say>{said}</Say>
       {pill !== null && ` ${pill}`}
     </>
   );

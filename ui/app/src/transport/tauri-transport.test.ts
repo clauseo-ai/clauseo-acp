@@ -23,6 +23,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { TauriTransport, pageTransport } = await import("./tauri-transport.ts");
+/** The picker's calls, past the channel's own. */
+const picks = () =>
+  invoked.map((i) => i.command).filter((c) => c.startsWith("pick_") || c.startsWith("chooser_"));
+// the setup feed the transport imports on demand, loaded once here so that import resolves within a settle
+await import("./setup-feed.ts");
 
 afterEach(() => {
   answers.clear();
@@ -68,7 +73,7 @@ describe("TauriTransport", () => {
 
   test("a Tauri string rejection and a thrown Error each reject as internal", async () => {
     answers.set("query", () => Promise.reject("command query not allowed"));
-    answers.set("pick_folder", () => {
+    answers.set("pick_folder_or_choose", () => {
       throw new Error("ipc down");
     });
     const t = new TauriTransport({ warn: () => {} });
@@ -84,21 +89,26 @@ describe("TauriTransport", () => {
     });
   });
 
-  test("pick_folder resolves to the picked folder's ref and display, or null when cancelled", async () => {
-    answers.set("pick_folder", () => ({ folder: "folder-1", display: "Documents/Acme" }));
+  test("pick_folder_or_choose resolves to the picked folder's ref and display, or null when cancelled", async () => {
+    answers.set("pick_folder_or_choose", () => ({
+      kind: "picked",
+      folder: { folder: "folder-1", display: "Documents/Acme" },
+    }));
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.pickFolder()).resolves.toEqual({
       folder: "folder-1",
       display: "Documents/Acme",
     });
-    answers.set("pick_folder", () => null);
+    answers.set("pick_folder_or_choose", () => ({ kind: "cancelled" }));
     await expect(t.pickFolder()).resolves.toBeNull();
+    expect(picks()).toEqual(["pick_folder_or_choose", "pick_folder_or_choose"]);
   });
 
-  test("open_external, open_file and reveal send their argument and resolve to nothing", async () => {
+  test("open_external, open_file and reveal send their argument; open_file resolves to what the host opened", async () => {
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.openExternal("https://example.com/a")).resolves.toBeUndefined();
-    await expect(t.openFile("ref-1")).resolves.toBeUndefined();
+    answers.set("open_file", () => ({ protected_view: true }));
+    await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: true });
     await expect(t.reveal({ matter: "m-1" })).resolves.toBeUndefined();
     await expect(t.reveal("app_data")).resolves.toBeUndefined();
     const sent = invoked.filter((i) =>
@@ -110,6 +120,12 @@ describe("TauriTransport", () => {
       { command: "reveal", args: { target: { matter: "m-1" } } },
       { command: "reveal", args: { target: "app_data" } },
     ]);
+  });
+
+  test("quit_app asks the host to quit; the call resolves once the host has it", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.quitApp()).resolves.toBeUndefined();
+    expect(invoked.filter((i) => i.command === "quit_app")).toHaveLength(1);
   });
 
   test("open_settings asks the host to open or focus the settings window; a refusal rejects as a HostError", async () => {
@@ -126,7 +142,7 @@ describe("TauriTransport", () => {
 
   test("a declined confirm and a refused open or reveal reject with the host's error", async () => {
     const declined = { code: "transport.unauthorized", message: "declined", retryable: false };
-    const missing = { code: "matter.folder_missing", message: "gone", retryable: false };
+    const missing = { code: "matter.folder_missing", message: "gone", retryable: true };
     answers.set("open_external", () => Promise.reject(declined));
     answers.set("open_file", () => Promise.reject(missing));
     answers.set("reveal", () => Promise.reject("command reveal not allowed"));
@@ -340,6 +356,18 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 1 }]);
   });
 
+  test("connectors_changed reaches the app listeners, no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const state = { available: true, locked: false, connectors: [] };
+    send({ connectors_changed: state });
+    expect(heard).toEqual([{ connectors_changed: state }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];
@@ -384,17 +412,165 @@ describe("TauriTransport", () => {
   });
 });
 
-// UD1: R20's setup wire is a stub until stage D's P5 brings desktop's `setup` command and stream arm: no event ever
-// arrives, so the first run holds nothing back, and a setup command does nothing. count_ui (S21) is on the wire already.
-test("the setup wire is a stub: onSetup hears nothing, setup does nothing, and countUi invokes count_ui", async () => {
-  const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
-  t.onSetup()();
-  await settle();
-  await expect(t.setup()).resolves.toBeUndefined();
-  expect(invoked.map((c) => c.command)).not.toContain("setup");
-  await t.countUi({ onboarding_step: { step: "welcome_shown" } });
-  expect(invoked.at(-1)).toEqual({
-    command: "count_ui",
-    args: { event: { onboarding_step: { step: "welcome_shown" } } },
+// UD1: R20's setup wire (0048). Desktop's `setup` arm comes on the window's channel after `subscribe_app`, and the
+// `setup` command takes `{ command }`.
+describe("the setup wire", () => {
+  const info = { setup_info: { keys_available: true } };
+  const install = (state: unknown) => ({ agent_install_progress: { agent: "claude-acp", state } });
+  const signIn = (state: unknown) => ({ sign_in_changed: { agent: "claude-acp", state } });
+
+  test("the first listener subscribes the app feed; each setup arm reaches every listener in order until it unsubscribes", async () => {
+    const { t, send, frame, acks } = await rig();
+    const heard: unknown[] = [];
+    const stop = t.onSetup((e) => heard.push(["one", e]));
+    t.onSetup((e) => heard.push(["two", e]));
+    await settle();
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(1);
+    send({ setup: info });
+    send({ setup: install("ready") });
+    expect(heard).toEqual([
+      ["one", info],
+      ["two", info],
+      ["one", install("ready")],
+      ["two", install("ready")],
+    ]);
+    stop();
+    send({ setup: signIn("queued") });
+    expect(heard.at(-1)).toEqual(["two", signIn("queued")]);
+    expect(heard).toHaveLength(5);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 3 }]);
+  });
+
+  test("a listener that comes later hears the info, then each agent's last install and sign-in, then what is new", async () => {
+    const { t, send } = await rig();
+    t.onSetup(() => {});
+    await settle();
+    send({ setup: signIn("queued") });
+    send({ setup: install({ downloading: { bytes: 1, total: 2 } }) });
+    send({ setup: info });
+    send({ setup: install("ready") });
+    send({ setup: { sign_in_changed: { agent: "codex-acp", state: "queued" } } });
+    const late: unknown[] = [];
+    t.onSetup((e) => late.push(e));
+    // desktop's replay after a feed restart: the same picture again, which reaches no one
+    send({ setup: info });
+    await settle();
+    send({ setup: signIn({ signed_out: {} }) });
+    expect(late).toEqual([
+      info,
+      install("ready"),
+      signIn("queued"),
+      { sign_in_changed: { agent: "codex-acp", state: "queued" } },
+      signIn({ signed_out: {} }),
+    ]);
+  });
+
+  test("messages that arrive before the feed module resolves still reach the first listener, in order", async () => {
+    const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+    const heard: unknown[] = [];
+    t.onSetup((e) => heard.push(e));
+    const send = (message: unknown) => opened.at(-1)!.onmessage(JSON.stringify(message));
+    send({ setup: info });
+    send({ setup: install("ready") });
+    send({ setup: signIn("queued") });
+    expect(heard).toEqual([]);
+    await settle();
+    expect(heard).toEqual([info, install("ready"), signIn("queued")]);
+    send({ setup: signIn({ signed_out: {} }) });
+    expect(heard.at(-1)).toEqual(signIn({ signed_out: {} }));
+  });
+
+  test("setup invokes desktop's setup command with the command, sign-out and a found login included", async () => {
+    answers.set("setup", () => "done");
+    const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+    for (const command of [
+      { start_sign_in: { agent: "claude-acp" } },
+      { sign_out: { agent: "claude-acp" } },
+      { use_found_login: { agent: "codex-acp" } },
+    ]) {
+      await expect(t.setup(command)).resolves.toBeUndefined();
+      expect(invoked.at(-1)).toEqual({ command: "setup", args: { command } });
+    }
+  });
+
+  test("a refusal rejects with desktop's HostError", async () => {
+    const error = {
+      code: "transport.unauthorized",
+      message: "window main may not send SignOut",
+      retryable: false,
+    };
+    answers.set("setup", () => Promise.reject(error));
+    const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+    await expect(t.setup({ sign_out: { agent: "claude-acp" } })).rejects.toEqual(error);
+  });
+
+  test("a malformed setup arm is warned about by name and never thrown", async () => {
+    const warned: string[] = [];
+    const t = new TauriTransport({ warn: (m) => warned.push(m), nextFrame: () => {} });
+    const heard: unknown[] = [];
+    t.onSetup((e) => heard.push(e));
+    await settle();
+    const send = (message: unknown) => opened.at(-1)!.onmessage(JSON.stringify(message));
+    for (const bad of [
+      { setup: null },
+      { setup: { setup_info: { keys_available: "yes" } } },
+      { setup: { sign_in_changed: { state: "queued" } } },
+      { setup: { device_code: { code: "WDJB-MJHT" } } },
+      { setup: { setup_info: { keys_available: true }, sign_in_changed: {} } },
+    ])
+      expect(() => send(bad)).not.toThrow();
+    expect(heard).toEqual([]);
+    expect(warned).toEqual(Array(5).fill("a setup message is malformed"));
+  });
+
+  test("a pasted code or key never reaches the warn sink, on a refusal, a Tauri rejection or a throw", async () => {
+    const secret = "sk-ant-api03-SECRET";
+    const warned: string[] = [];
+    const console = vi.spyOn(globalThis.console, "warn").mockImplementation(() => {});
+    const t = new TauriTransport({ warn: (m) => warned.push(m), nextFrame: () => {} });
+    const commands = [
+      { set_agent_key: { agent: "claude-acp", key: secret } },
+      { paste_sign_in_code: { agent: "claude-acp", code: secret } },
+    ];
+    const rejections: unknown[] = [];
+    for (const answer of [
+      () => Promise.reject(`invalid args \`command\`: invalid type: string "${secret}"`),
+      () => {
+        throw new Error(secret);
+      },
+      () =>
+        Promise.reject({
+          code: "settings.key_stored",
+          message: "a key is already stored",
+          retryable: false,
+        }),
+    ]) {
+      answers.set("setup", answer);
+      for (const command of commands)
+        await t.setup(command).catch((e: unknown) => rejections.push(e));
+    }
+    expect(rejections).toHaveLength(6);
+    expect(rejections[0]).toEqual({
+      code: "internal",
+      message: "setup set_agent_key did not reach desktop",
+      retryable: false,
+    });
+    const printed = [
+      ...warned,
+      ...console.mock.calls.flat().map(String),
+      JSON.stringify(rejections),
+    ];
+    expect(printed.join("\n")).not.toContain(secret);
+    console.mockRestore();
+  });
+
+  test("countUi invokes count_ui", async () => {
+    const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+    await t.countUi({ onboarding_step: { step: "welcome_shown" } });
+    expect(invoked.at(-1)).toEqual({
+      command: "count_ui",
+      args: { event: { onboarding_step: { step: "welcome_shown" } } },
+    });
   });
 });

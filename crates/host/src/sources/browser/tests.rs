@@ -337,3 +337,22 @@ fn a_name_holding_the_open_is_not_the_open() {
         );
     }
 }
+
+/// D3: the browser's open with a bidi control in its URL writes no page (the address-bar rule
+/// adds nothing to a URL that already has a scheme; the unsafe character refuses it).
+#[test]
+fn a_browser_open_with_an_unsafe_character_writes_nothing() {
+    for url in [
+        "https://evil.example/\u{202E}fdp.exe",
+        "https://a b.example/",
+    ] {
+        let mut opens = Opens::default();
+        let started = call(CLAUDE_OPEN, None, &json!({"url": url}));
+        opens.started(turn(), tool_id(), &started);
+        assert_eq!(
+            opens.updated(turn(), "tc-1", &completed(Some("Page")),),
+            None,
+            "{url:?}"
+        );
+    }
+}

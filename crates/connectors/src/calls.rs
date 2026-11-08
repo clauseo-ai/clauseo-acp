@@ -9,19 +9,21 @@ use std::time::{Duration, SystemTime};
 use crate::account::{Account, parse_account};
 use crate::cancel::CancelFlag;
 use crate::connectors::{ConnectorHandle, lock};
+use crate::credential::{Credential, CredentialKind};
 use crate::error::{AuthError, Error, parse_error};
-use crate::http::{self, POLL_TIMEOUT, Reply, SendBody};
+use crate::http::{self, Reply, Route, SendBody};
 use crate::mcp::{McpBody, McpReply, McpRequestHeaders, parse_event_stream};
-use crate::recharge::{Recharge, RechargeStatus, insufficient_credits_402, parse_recharge};
+use crate::recharge::{
+    Recharge, RechargeStatus, insufficient_credits_402, parse_recharge, parse_recharge_poll,
+};
 use crate::secret::Secret;
+use serde_json::value::RawValue;
+use zeroize::Zeroizing;
 
 /// The account is read at most once a minute; a copy younger than this is served from memory.
 pub const ACCOUNT_MIN_INTERVAL: Duration = Duration::from_mins(1);
 /// How long `wait_recharge` waits after a network error before polling again.
 const POLL_BACKOFF: Duration = Duration::from_secs(5);
-/// The least time between the starts of two recharge polls, so a connector (or a proxy) that
-/// answers `awaiting_payment` at once is not polled in a loop.
-const POLL_MIN_INTERVAL: Duration = Duration::from_secs(2);
 /// How often a waiting `wait_recharge` looks at the cancel flag and the deadline.
 const POLL_TICK: Duration = Duration::from_millis(20);
 
@@ -52,7 +54,7 @@ pub(crate) fn mcp_post(
         timeout,
         true,
     )?;
-    mcp_reply(&reply)
+    mcp_reply(reply)
 }
 
 /// The account (`GET /v1/case-law/account?recent_days=30`). A copy younger than
@@ -62,8 +64,10 @@ pub(crate) fn account(handle: &ConnectorHandle) -> Result<Account, Error> {
     let mut cache = lock(&handle.inner.account);
     let now = handle.inner.shared.config.clock.now();
     let generation = handle.inner.generation.load(Ordering::SeqCst);
-    if let Some((cached_generation, account)) = cache.as_ref()
+    let forgets = handle.inner.forgets.load(Ordering::SeqCst);
+    if let Some((cached_generation, cached_forgets, account)) = cache.as_ref()
         && *cached_generation == generation
+        && *cached_forgets == forgets
         && now
             .duration_since(account.fetched_at)
             .is_ok_and(|age| age < ACCOUNT_MIN_INTERVAL)
@@ -88,7 +92,10 @@ pub(crate) fn account(handle: &ConnectorHandle) -> Result<Account, Error> {
         402 => return Err(out_of_credit(handle, &reply)),
         status => return Err(Error::Http { status }),
     };
-    *cache = Some((generation, account.clone()));
+    // Forgotten while in flight: the caller gets it, the cache does not.
+    if handle.inner.forgets.load(Ordering::SeqCst) == forgets {
+        *cache = Some((generation, forgets, account.clone()));
+    }
     Ok(account)
 }
 
@@ -116,10 +123,19 @@ pub(crate) fn create_recharge(handle: &ConnectorHandle, pack: &str) -> Result<Re
     }
 }
 
-/// Polls `GET /v1/case-law/recharges/{id}?wait=40` until the recharge is no longer awaiting
-/// payment, the recharge deadline passes (`RechargeTimedOut`) or `cancel` is set
-/// (`Cancelled`, within about 20 ms, even mid-poll). Polls start at least 2 s apart. A network
-/// error or a 5xx waits 5 s and polls again. An answer for another recharge is `Parse`.
+/// Polls `GET /v1/case-law/recharges/{id}` until the recharge is settled
+/// ([`RechargeStatus::settled`]), the recharge deadline passes (`RechargeTimedOut`) or
+/// `cancel` is set (`Cancelled`, within about 20 ms, even mid-poll). A paid one drops the
+/// account's copy, so the next `account` reads the new balance.
+///
+/// Each poll is a plain GET, with no query: `wait` would hold a long wait, which the connector
+/// caps per account (the agent's own `recharge` call waits too), and `resume` would claim the
+/// call the agent's `recharge` resumes. The connector does not limit or charge these GETs;
+/// polls start [`Config::recharge_interval`] apart (3 s). A network error or a 5xx waits 5 s
+/// and polls again. An answer is read by [`parse_recharge_poll`]: one whose top-level
+/// `recharge_id` is another recharge's is `Parse`.
+///
+/// [`Config::recharge_interval`]: crate::Config::recharge_interval
 pub(crate) fn wait_recharge(
     handle: &ConnectorHandle,
     recharge_id: &str,
@@ -139,23 +155,25 @@ pub(crate) fn wait_recharge(
         .now()
         .checked_add(config.recharge_deadline)
         .ok_or_else(|| Error::Parse("recharge: the deadline is out of range".to_owned()))?;
-    let url = format!(
-        "{}/recharges/{recharge_id}?wait=40",
-        handle.inner.urls.api_base
-    );
+    let url = format!("{}/recharges/{recharge_id}", handle.inner.urls.api_base);
+    let timeout = handle.inner.shared.timeout();
     loop {
         let remaining = time_left(handle, deadline, cancel)?;
         let started = config.clock.now();
-        let failure = match poll_once(handle, &url, remaining.min(POLL_TIMEOUT), cancel, deadline)?
-        {
+        let failure = match poll_once(handle, &url, remaining.min(timeout), cancel, deadline)? {
             Ok(reply) if reply.status == 200 => {
-                let recharge = recharge_from(handle, &reply)?;
-                if recharge.recharge_id != recharge_id {
-                    return Err(Error::Parse(
-                        "recharge: the answer is for another recharge".to_owned(),
-                    ));
-                }
-                if recharge.status != RechargeStatus::AwaitingPayment {
+                let shared = &handle.inner.shared;
+                let recharge = parse_recharge_poll(
+                    &reply.body,
+                    handle.inner.known,
+                    &shared.config.origin,
+                    recharge_id,
+                )?;
+                if recharge.status.settled() {
+                    if recharge.status == RechargeStatus::Paid {
+                        // The balance changed: the next account read asks the connector.
+                        handle.forget_account();
+                    }
                     return Ok(recharge);
                 }
                 let took = config
@@ -163,7 +181,7 @@ pub(crate) fn wait_recharge(
                     .now()
                     .duration_since(started)
                     .unwrap_or_default();
-                let gap = POLL_MIN_INTERVAL.saturating_sub(took);
+                let gap = config.recharge_interval.saturating_sub(took);
                 if !gap.is_zero() {
                     let remaining = time_left(handle, deadline, cancel)?;
                     if cancel.wait_timeout(remaining.min(gap)) {
@@ -267,9 +285,11 @@ pub(crate) fn authed(
     timeout: Duration,
     anonymous_ok: bool,
 ) -> Result<Reply, Error> {
+    // Asked before the credential's lock, and used for every request below.
+    let route = handle.inner.shared.agent.route();
     let token = {
         let mut slot = lock(&handle.inner.slot);
-        match crate::refresh::fresh_token(handle, &mut slot) {
+        match crate::refresh::fresh_token(handle, &mut slot, &route) {
             Ok(token) => Some(token),
             Err(AuthError::NotAdded | AuthError::SignedOut | AuthError::KeyRevoked)
                 if anonymous_ok =>
@@ -279,61 +299,155 @@ pub(crate) fn authed(
             Err(err) => return Err(Error::Auth(err)),
         }
     };
-    let reply = send_with(handle, method, url, headers, body, timeout, token.as_ref())?;
+    let request = Request {
+        route: &route,
+        method,
+        url,
+        headers,
+        body,
+        timeout,
+    };
+    let reply = send_with(&request, token.as_ref())?;
     let Some(used) = token.filter(|_| reply.status == 401) else {
         return Ok(reply);
     };
-    let next = crate::refresh::after_401(handle, &used)?;
-    let reply = send_with(handle, method, url, headers, body, timeout, Some(&next))?;
+    let next = crate::refresh::after_401(handle, &used, &route)?;
+    let reply = send_with(&request, Some(&next))?;
     if reply.status == 401 {
         return Err(Error::Auth(crate::refresh::after_second_401(handle, &next)));
     }
     Ok(reply)
 }
 
-fn send_with(
-    handle: &ConnectorHandle,
-    method: &str,
-    url: &str,
-    headers: &[(&str, &str)],
-    body: SendBody<'_>,
+/// One request of [`authed`], before its `Authorization`.
+struct Request<'a> {
+    route: &'a Route,
+    method: &'a str,
+    url: &'a str,
+    headers: &'a [(&'a str, &'a str)],
+    body: SendBody<'a>,
     timeout: Duration,
-    token: Option<&Secret>,
-) -> Result<Reply, Error> {
+}
+
+fn send_with(request: &Request<'_>, token: Option<&Secret>) -> Result<Reply, Error> {
+    let Request {
+        route,
+        method,
+        url,
+        headers,
+        body,
+        timeout,
+    } = *request;
     let auth = token.map(ConnectorHandle::bearer_header);
     let mut all: Vec<(&str, &str)> = Vec::with_capacity(headers.len().saturating_add(1));
     if let Some(auth) = &auth {
         all.push(("Authorization", auth.as_str()));
     }
     all.extend_from_slice(headers);
-    http::send(&handle.inner.shared.agent, method, url, &all, body, timeout).map_err(Error::Network)
+    http::send_on(route, method, url, &all, body, timeout).map_err(Error::Network)
 }
 
-/// An MCP answer as [`McpReply`]. A body that is neither JSON nor an event stream is a parse
-/// error on a 2xx and `Http` otherwise.
-fn mcp_reply(reply: &Reply) -> Result<McpReply, Error> {
+/// An MCP answer as [`McpReply`], its JSON kept raw: validated, never built as a tree (a dense
+/// array of 8 MB would take hundreds of MB as a `Value`). The body is moved, not copied, into a
+/// `Json` answer. A body that is neither JSON nor an event stream is a parse error on a 2xx and
+/// `Http` otherwise.
+fn mcp_reply(mut reply: Reply) -> Result<McpReply, Error> {
+    let status = reply.status;
+    let not_json = |err: Error| {
+        if (200..300).contains(&status) {
+            err
+        } else {
+            Error::Http { status }
+        }
+    };
+    let event_stream = reply.content_type.as_deref() == Some("text/event-stream");
     let body = if reply.status == 202 || reply.body.is_empty() {
         McpBody::Empty
-    } else if reply.content_type.as_deref() == Some("text/event-stream") {
-        let text = std::str::from_utf8(&reply.body)
-            .map_err(|_not_utf8| Error::Parse("event stream: not UTF-8".to_owned()))?;
-        McpBody::Events(parse_event_stream(text)?)
     } else {
-        match serde_json::from_slice(&reply.body) {
-            Ok(value) => McpBody::Json(value),
-            Err(err) if (200..300).contains(&reply.status) => {
-                return Err(parse_error("MCP answer", &err));
+        // An MCP answer holds no credential, so its bytes leave the zeroing buffer.
+        let bytes = std::mem::take(&mut *reply.body);
+        match (String::from_utf8(bytes), event_stream) {
+            (Ok(text), true) => McpBody::Events(parse_event_stream(&text)?),
+            (Ok(text), false) => McpBody::Json(
+                raw_json(text).map_err(|err| not_json(parse_error("MCP answer", &err)))?,
+            ),
+            (Err(_not_utf8), true) => {
+                return Err(Error::Parse("event stream: not UTF-8".to_owned()));
             }
-            Err(_) => {
-                return Err(Error::Http {
-                    status: reply.status,
-                });
+            (Err(_not_utf8), false) => {
+                return Err(not_json(Error::Parse("MCP answer: not UTF-8".to_owned())));
             }
         }
     };
     Ok(McpReply {
         status: reply.status,
-        session_id: reply.session_id.clone(),
+        session_id: reply.session_id,
         body,
     })
+}
+
+/// `text` validated as one JSON value and kept as it is, trimmed of the whitespace around it
+/// in place, so `serde_json` keeps the buffer instead of copying the value out of it.
+pub(crate) fn raw_json(mut text: String) -> Result<Box<RawValue>, serde_json::Error> {
+    let json_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+    let end = text.trim_end_matches(json_space).len();
+    text.truncate(end);
+    let start = text.len() - text.trim_start_matches(json_space).len();
+    text.drain(..start);
+    RawValue::from_string(text)
+}
+
+/// `ConnectorHandle::add_api_key_while`: the key's shape, one account read with it, then the
+/// store if `still` agrees under the credential's lock.
+pub(crate) fn add_api_key(
+    handle: &ConnectorHandle,
+    key: &str,
+    still: &dyn Fn() -> bool,
+) -> Result<(), Error> {
+    if !crate::credential::is_api_key(key) {
+        return Err(Error::BadKeyFormat);
+    }
+    let key = Secret::from(key);
+    let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
+    let url = handle.account_url();
+    // Before the request, as `account` does: a forget during it leaves no copy tagged current.
+    let forgets = handle.inner.forgets.load(Ordering::SeqCst);
+    let headers = [
+        ("Authorization", auth.as_str()),
+        ("Accept", "application/json"),
+    ];
+    let shared = &handle.inner.shared;
+    let reply = http::send_via(
+        &shared.agent,
+        "GET",
+        &url,
+        &headers,
+        SendBody::None,
+        shared.timeout(),
+    )
+    .map_err(Error::Network)?;
+    match reply.status {
+        // A 402 is a valid key on an empty account.
+        200 | 402 => {}
+        401 => return Err(Error::Auth(AuthError::KeyRevoked)),
+        status => return Err(Error::Http { status }),
+    }
+    let credential = Credential::ApiKey(key);
+    if !handle.store_new(credential, CredentialKind::ApiKey, still)? {
+        return Err(Error::Cancelled);
+    }
+    if reply.status == 200 {
+        let now = shared.config.clock.now();
+        let parsed = crate::account::parse_account(
+            &reply.body,
+            handle.inner.known,
+            &shared.config.origin,
+            now,
+        );
+        if let Ok(account) = parsed {
+            let generation = handle.inner.generation.load(Ordering::SeqCst);
+            *lock(&handle.inner.account) = Some((generation, forgets, account));
+        }
+    }
+    Ok(())
 }

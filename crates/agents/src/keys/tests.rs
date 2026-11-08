@@ -98,7 +98,7 @@ fn printable_ascii_keys_pass_including_dash_and_underscore() {
 
 /// Plants `bytes` as `agent`'s item, as another app or Keychain Access would.
 fn plant(keychain: &Keychain, agent: &AgentId, bytes: &[u8]) {
-    let super::Backend::Memory(items) = &keychain.backend else {
+    let super::Backend::Memory(items, ..) = &keychain.backend else {
         panic!("plant needs the memory keychain");
     };
     super::lock(items).insert(account(agent), super::Zeroizing::new(bytes.to_vec()));
@@ -206,4 +206,76 @@ fn the_os_keychain_follows_the_platform_rule() {
             Err(KeyError::NoKeychain { .. })
         ));
     }
+}
+
+#[test]
+fn store_if_absent_stores_only_when_no_key_is_there() {
+    let keychain = Keychain::memory();
+    assert_eq!(keychain.store_if_absent(&claude(), KEY), Ok(true));
+    assert_eq!(keychain.store_if_absent(&claude(), "second"), Ok(false));
+    let loaded = keychain.load(&claude()).expect("loaded").expect("a key");
+    assert_eq!(loaded.as_str(), KEY, "the first key stays");
+    assert_eq!(keychain.store_if_absent(&codex(), "codex-key"), Ok(true));
+}
+
+#[test]
+fn store_if_absent_refuses_as_store_does_and_with_no_keychain() {
+    let keychain = Keychain::memory();
+    assert!(matches!(
+        keychain.store_if_absent(&claude(), "has space"),
+        Err(KeyError::Invalid { .. })
+    ));
+    assert_eq!(keychain.load(&claude()).expect("loaded"), None);
+    assert_eq!(
+        Keychain::none().store_if_absent(&claude(), KEY),
+        Err(KeyError::NoKeychain { agent: claude() })
+    );
+}
+
+#[test]
+fn store_if_absent_racing_on_two_threads_stores_exactly_one() {
+    for round in 0..200 {
+        let keychain = Keychain::memory();
+        let barrier = std::sync::Barrier::new(2);
+        let (first, second) = std::thread::scope(|scope| {
+            let run = |key: &'static str| {
+                let keychain = keychain.clone();
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    keychain.store_if_absent(&claude(), key).expect("no error")
+                })
+            };
+            let first = run("first-key");
+            let second = run("second-key");
+            (
+                first.join().expect("first thread"),
+                second.join().expect("second thread"),
+            )
+        });
+        assert!(first ^ second, "round {round}: exactly one stores");
+        let kept = keychain.load(&claude()).expect("loaded").expect("a key");
+        let winner = if first { "first-key" } else { "second-key" };
+        assert_eq!(
+            kept.as_str(),
+            winner,
+            "round {round}: the winner's key is kept"
+        );
+    }
+}
+
+#[test]
+fn a_memory_keychain_failing_reads_refuses_store_if_absent_and_writes_nothing() {
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    assert!(matches!(
+        keychain.load(&claude()),
+        Err(KeyError::NoAccess { .. })
+    ));
+    assert!(matches!(
+        keychain.store_if_absent(&claude(), "sk-first"),
+        Err(KeyError::NoAccess { .. })
+    ));
+    keychain.fail_reads(false);
+    assert_eq!(keychain.load(&claude()).unwrap(), None, "nothing written");
 }

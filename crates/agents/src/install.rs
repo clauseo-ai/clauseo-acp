@@ -18,7 +18,7 @@ use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::pin::pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
@@ -26,7 +26,7 @@ use clauseo_protocol::AgentId;
 use futures::future::{Either, select};
 
 use crate::cancel::Cancel;
-use crate::config::AgentsConfig;
+use crate::config::{AgentsConfig, Network};
 use crate::disk;
 use crate::download::{FetchError, FetchKind, write_kind};
 use crate::log::{InstallLog, redact};
@@ -50,6 +50,7 @@ const MB: u64 = 1_000_000;
 pub(crate) struct Job<T> {
     pub(crate) ticket: Ticket,
     pub(crate) config: AgentsConfig,
+    pub(crate) network: Arc<RwLock<Network>>, // `Agents::set_network`'s, read by each try
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) timer: Arc<T>,
     pub(crate) shared: Arc<Shared>,
@@ -291,7 +292,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
         if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
-            self.ready(installed);
+            self.ready(installed, 0);
             return;
         }
         let user = search.found;
@@ -303,7 +304,7 @@ impl<T: Timer + Send + Sync> Job<T> {
             run.attempts += 1;
             let err = match self.attempt(user.as_ref(), &mut run).await {
                 Ok(installed) => {
-                    self.ready(installed);
+                    self.ready(installed, run.tries + 1);
                     return;
                 }
                 Err(err) => err,
@@ -414,8 +415,10 @@ impl<T: Timer + Send + Sync> Job<T> {
         self.shared.emit_job(&self.ticket, state, None, ends)
     }
 
-    fn ready(&self, installed: Installed) {
+    /// Sends the job's last state, `Ready`, after `tries` tries.
+    fn ready(&self, installed: Installed, tries: u32) {
         self.release_lock();
+        self.shared.set_tries(&self.ticket.agent, tries);
         let version = installed.version.clone();
         self.shared.emit_job(
             &self.ticket,
@@ -431,6 +434,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         let mut log = run.log.clone();
         push_error(&mut log, err);
         finish_log(&mut log, run, kind);
+        self.shared.set_tries(&self.ticket.agent, run.tries);
         let (need_mb, free_mb) = if kind == FailureKind::DiskFull {
             let node_needed = user.is_none() && !runtime_ready(&self.config);
             let (need, free) = self.space(node_needed);
@@ -576,13 +580,17 @@ pub(crate) async fn ready_install<T: Timer>(
             if !usable {
                 return None;
             }
-            (runtime, format!("v{}", config.snapshot.node().version()))
+            (
+                runtime.clone(),
+                format!("v{}", config.snapshot.node().version()),
+            )
         };
         receipt.node = program;
         receipt.node_version = version;
         // A receipt that will not be rewritten now is rewritten at the next start.
         drop(write_receipt(&folder, &receipt));
     }
+    tracing::info!(%agent, "agent start: {}", receipt.node_line(&runtime));
     Some(Installed {
         node: receipt.node.clone(),
         script: script_path(&folder, entry),

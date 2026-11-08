@@ -168,6 +168,11 @@ impl ThreadState {
     pub const fn running(&self) -> Option<TurnId> {
         self.running
     }
+
+    /// The messages of its queued prompts, in the order they go (`queued_order.rs`).
+    pub fn queued_order(&self) -> Vec<MessageId> {
+        crate::queued_order(self.entries.values())
+    }
 }
 
 /// A matter's folded state: its header and its Versions timeline.

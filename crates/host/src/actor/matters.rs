@@ -1,5 +1,6 @@
 //! Matters: `CreateMatter` (a new folder, picked or in the default location, or an import), the
-//! Scratch matter on the first start, and each matter's worker thread, started and opened on
+//! Scratch matter's create and commit (its folder scan is in `scratch.rs`), and each matter's
+//! worker thread, started and opened on
 //! first use (relinking a deleted `matter.json` once, when no other matter claims the folder). A
 //! refused folder gets one code per reason (`refusal`), and an import of a forgotten matter's
 //! folder brings that matter back (`matter_details.rs`). `RelocateMatter` is in `relocate.rs`.
@@ -15,8 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_matters::{DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    ClientName, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind, MatterSource,
-    Title,
+    ClientName, CommandId, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind,
+    MatterSource, Title,
 };
 
 use super::commands::{AfterCommand, CommandCtx};
@@ -32,13 +33,11 @@ use crate::pipeline::Failure;
 
 mod made;
 pub(super) mod picked;
+pub(super) mod probe;
 
 pub(crate) use made::Made;
 use made::matter_commit;
 pub(super) use made::{Stage, discard, recorded, row_checked};
-
-/// The Scratch matter's name.
-const SCRATCH: &str = "Scratch";
 
 /// A matter whose create or import runs on its new worker.
 pub(crate) struct PendingMatter {
@@ -129,8 +128,10 @@ fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
     refused
 }
 
-/// Starts a new matter's worker with its create or import job.
-fn begin_matter(
+/// Starts a new matter's worker with its create or import job. The Scratch matter's job is not
+/// counted in `work.matter_jobs`: `scratch::holds` holds start-up and shutdown for it instead,
+/// so start-up's ready waits for it only so long.
+pub(super) fn begin_matter(
     actor: &mut Actor,
     (name, kind, details): (String, MatterKind, Details),
     folder: PathBuf,
@@ -162,8 +163,11 @@ fn begin_matter(
             check,
         }
     };
+    let counted = !matches!(tag, MatterTag::Scratch);
     worker.send(job, tag)?;
-    actor.work.matter_jobs += 1;
+    if counted {
+        actor.work.matter_jobs += 1;
+    }
     Ok(Box::new(PendingMatter {
         new,
         name,
@@ -176,11 +180,13 @@ fn begin_matter(
 
 /// `CreateMatter`: a new folder `<parent>/<name>` or `<default location>/<name>` (refused
 /// when it exists) or an import of an existing folder, on the new matter's worker; then one
-/// commit. A folder that is, holds or sits inside another matter's folder (listed, forgotten or
-/// being made; `registry`) is refused with `matter.folder_is_matter`, naming the matter when it
-/// is listed: for an import on its worker, after the place check, so a drive root or the home
-/// folder is named for what it is even when a matter sits below it; for a new folder here,
-/// since only its parent exists.
+/// commit. A new folder's parent is canonicalised and the folder looked for off the actor
+/// (`probe.rs`), as either may hang on a network share; the create goes on when that answers
+/// (`begin_create`). A folder that is, holds or sits inside another matter's folder (listed,
+/// forgotten or being made; `registry`) is refused with `matter.folder_is_matter`, naming the
+/// matter when it is listed: for an import on its worker, after the place check, so a drive root
+/// or the home folder is named for what it is even when a matter sits below it; for a new folder
+/// on the actor once its probe answers, since only its parent exists.
 pub(super) fn create_matter(
     actor: &mut Actor,
     ctx: &CommandCtx,
@@ -188,67 +194,90 @@ pub(super) fn create_matter(
     source: MatterSource,
     details: Details,
 ) {
-    let begun = matter_folder(actor, name, &source)
-        .and_then(|(folder, import)| {
-            let registry = claimed_folders(actor);
-            if import {
-                Ok((folder, Some(registry)))
-            } else {
-                check_registry(&folder, &registry, false).map(|()| (folder, None))
-            }
-        })
-        .and_then(|(folder, import)| {
-            begin_matter(
-                actor,
-                (name.as_str().to_owned(), MatterKind::Folder, details),
-                folder,
-                import,
-                MatterTag::Create(ctx.id),
-            )
-        });
-    match begun {
-        Ok(pending) => {
-            let claim = (pending.new.id, pending.new.folder.clone());
-            actor.claims.insert(ctx.id, claim);
-            if let Some(command) = actor.commands.get_mut(&ctx.id) {
-                command.matter = Some(pending);
-            }
-        }
-        Err(error) => {
-            made::not_created(None, &error, "check");
-            actor.finish_command(ctx.id, Err(error));
-        }
+    let waits = matches!(source, MatterSource::DefaultLocation);
+    if waits && super::documents::hold_create(actor, ctx, name, &details) {
+        return;
+    }
+    let name = name.as_str().to_owned();
+    match matter_folder(actor, &source) {
+        Ok((folder, true)) => begin_create(actor, ctx.id, (name, details), folder, true),
+        Ok((parent, false)) => probe::start(actor, ctx.id, (name, details), parent),
+        Err(error) => not_begun(actor, ctx.id, error),
     }
 }
 
-/// The folder a `CreateMatter` names, and whether it is an import.
-fn matter_folder(
-    actor: &Actor,
-    name: &Title,
-    source: &MatterSource,
-) -> Result<(PathBuf, bool), Error> {
-    let (parent, import) = match source {
-        MatterSource::NewFolder { folder } => (registered(actor, *folder)?, false),
-        MatterSource::ExistingFolder { folder } => (registered(actor, *folder)?, true),
-        MatterSource::DefaultLocation => {
-            (actor.effective.default_matters_dir().to_path_buf(), false)
-        }
+/// Starts a `CreateMatter`'s create or import of `folder` on its new worker, checked first
+/// against the folders claimed now (for a new folder; an import's worker checks them), and
+/// reserves the folder in `actor.claims` and the command's `matter` until the command ends.
+/// Both are set here on the actor, so of two creates of one folder the second always finds the
+/// first's claim.
+pub(super) fn begin_create(
+    actor: &mut Actor,
+    id: CommandId,
+    (name, details): (String, Details),
+    folder: PathBuf,
+    import: bool,
+) {
+    let registry = claimed_folders(actor);
+    let registry = if import {
+        Ok(Some(registry))
+    } else {
+        check_registry(&folder, &registry, false).map(|()| None)
     };
-    if import {
-        return Ok((parent, true));
+    let begun = registry.and_then(|import| {
+        begin_matter(
+            actor,
+            (name, MatterKind::Folder, details),
+            folder,
+            import,
+            MatterTag::Create(id),
+        )
+    });
+    match begun {
+        Ok(pending) => {
+            let claim = (pending.new.id, pending.new.folder.clone());
+            actor.claims.insert(id, claim);
+            if let Some(command) = actor.commands.get_mut(&id) {
+                command.matter = Some(pending);
+            }
+        }
+        Err(error) => not_begun(actor, id, error),
     }
-    // The parent as the file system names it, so the registry check compares it with
-    // canonical folders; the new folder itself does not exist yet. A parent that does not
-    // exist (the default location before its first matter) is taken as written.
-    let parent = dunce::canonicalize(&parent).unwrap_or(parent);
-    let path = parent.join(name.as_str());
-    if path.exists() {
-        return Err(Error::refused(
-            ErrorCode::CommandInvalid,
-            format!("{} already exists; import it instead", path.display()),
-        ));
+}
+
+/// A `CreateMatter` refused before its matter's worker started.
+pub(super) fn not_begun(actor: &mut Actor, id: CommandId, error: Error) {
+    made::not_created(None, &error, "check");
+    actor.finish_command(id, Err(error));
+}
+
+/// The folder a `CreateMatter` names and whether it is an import: an import's folder, or a new
+/// folder's parent as registered or configured. Nothing here touches the disk.
+fn matter_folder(actor: &Actor, source: &MatterSource) -> Result<(PathBuf, bool), Error> {
+    match source {
+        MatterSource::NewFolder { folder } => Ok((registered(actor, *folder)?, false)),
+        MatterSource::ExistingFolder { folder } => Ok((registered(actor, *folder)?, true)),
+        MatterSource::DefaultLocation => Ok((default_location(actor)?, false)),
     }
-    Ok((path, false))
+}
+
+/// The default matters folder, or `command.invalid` when there is none (no Documents folder,
+/// issue #365), or the retryable `matter.folder_missing` while Documents is still being looked
+/// up past the hold's bound (`documents.rs`: before it, a create waits for the answer).
+pub(super) fn default_location(actor: &Actor) -> Result<PathBuf, Error> {
+    match super::documents::default_matters_dir(actor) {
+        Some(location) => Ok(location.to_path_buf()),
+        None if super::documents::pending(actor) => Err(super::documents::not_yet()),
+        None => Err(no_default_location()),
+    }
+}
+
+/// The refusal for a default location the host does not have.
+pub(super) fn no_default_location() -> Error {
+    Error::refused(
+        ErrorCode::CommandInvalid,
+        "this host has no default location",
+    )
 }
 
 /// The folder `folder` names, or `command.invalid` when it names none.
@@ -358,34 +387,9 @@ impl RefusalNames {
             }
             Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
             Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
+            Refusal::TooDeep => ErrorCode::MatterFolderTooDeep,
         };
         Error::refused(code, error.to_string())
-    }
-}
-
-/// Starts creating the Scratch matter in the first free folder of
-/// `<default_matters_dir>/Scratch`, `Scratch 2`, ...
-pub(super) fn create_scratch(actor: &mut Actor) {
-    let base = actor.effective.default_matters_dir().to_path_buf();
-    let folder = (1_u32..=u32::MAX)
-        .map(|n| match n {
-            1 => base.join(SCRATCH),
-            _ => base.join(format!("{SCRATCH} {n}")),
-        })
-        .find(|folder| !folder.exists());
-    let Some(folder) = folder else {
-        return;
-    };
-    let begun = begin_matter(
-        actor,
-        (SCRATCH.to_owned(), MatterKind::Scratch, (None, None)),
-        folder,
-        None,
-        MatterTag::Scratch,
-    );
-    match begun {
-        Ok(pending) => actor.scratch = Some(pending),
-        Err(error) => tracing::warn!(error = %Cause(&error), "could not start the Scratch matter"),
     }
 }
 
@@ -396,7 +400,10 @@ pub(super) fn on_matter_reply(
     tag: MatterTag,
     reply: MatterReply,
 ) {
-    actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
+    // The Scratch matter's create is not counted (`begin_matter`).
+    if !matches!(tag, MatterTag::Scratch) {
+        actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
+    }
     match tag {
         MatterTag::Create(id) => {
             let pending = actor
@@ -445,6 +452,7 @@ pub(super) fn on_matter_reply(
             if let Err(error) = committed {
                 let error = refusal(actor, error, &folder);
                 made::not_created(Some(minted), &error, "worker");
+                made::recheck_marker(actor, minted, folder);
                 actor.finish_command(id, Err(error));
             }
         }
@@ -487,6 +495,7 @@ pub(super) fn on_matter_reply(
         }
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
         MatterTag::Discard => made::discarded(actor, matter, &reply),
+        MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),
     }
 }
 
@@ -503,14 +512,19 @@ pub(super) fn command_ctx(
     Ok(CommandCtx { id, hash })
 }
 
-/// The Scratch matter's commit returned.
+/// The Scratch matter's commit returned. Once durable it joins the list, and app subscribers
+/// hear of it at the next flush, as of a matter a command created: Scratch can come after
+/// ready (`scratch.rs`).
 pub(super) fn scratch_committed(
     actor: &mut Actor,
     entry: MatterEntry,
     outcome: Result<(), &Failure>,
 ) {
     match outcome {
-        Ok(()) => made::recorded(actor, entry),
+        Ok(()) => {
+            made::recorded(actor, entry);
+            actor.lists.touch_all();
+        }
         Err(failure) => {
             let error = Error::Store(failure.error.clone());
             made::discard(actor, None, entry.row.id, error, made::Stage::Store);

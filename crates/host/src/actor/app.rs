@@ -23,15 +23,17 @@
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
 //! (`settings.rs`), `MattersChanged` and `ThreadsChanged` when a row of the rail changes
 //! (`app_lists.rs`), `FolderScanned` as a folder scan goes (`scan.rs`, throttled; its last
-//! event is part of the catch-up), and `BrowserInstall` at each step of the Chrome for Testing
-//! download (`browser_install.rs`). Still to come, each through [`publish`] and each adding its
-//! part of the current state to [`catch_up`]: notices. The limits have their own subscribers
+//! event is part of the catch-up), `BrowserInstall` at each step of the Chrome for Testing
+//! download (`browser_install.rs`), and `ConnectorsChanged` when the connector state changes
+//! (`connectors.rs`, R24; whole, and in the catch-up when connectors are wired). Still to come,
+//! each through [`publish`] and each adding its part of the current state to [`catch_up`]:
+//! notices. The limits have their own subscribers
 //! (`limits.rs`). `subscribe_app` carries no window identity, so the host sends every changed
 //! thread summary to every app subscriber and each window drops those of threads it has open.
 //!
 //! The current state ([`catch_up`]) is whole: one `SettingsChanged`, one `MattersChanged` with
-//! `all`, one `ThreadsChanged` with `all` per matter, and the download's latest `BrowserInstall`
-//! once there is one, each replacing what a window holds. The
+//! `all`, one `ThreadsChanged` with `all` per matter, the download's latest `BrowserInstall`
+//! once there is one, and the connector state when wired, each replacing what a window holds. The
 //! partial rows that follow build on it, so a subscriber that missed some (it lagged) gets it
 //! again before any partial row. An event added here must keep that: whole in the catch-up.
 
@@ -172,6 +174,12 @@ pub(super) fn subscribe(actor: &mut Actor, principal: &Principal, reply: Reply<A
 /// Sends `event` to every app subscriber, serialised once. An event that does not serialise
 /// is a host bug: it is logged and goes to nobody.
 pub(crate) fn publish(actor: &mut Actor, event: &HostEvent) {
+    if let HostEvent::SettingsChanged(_) = event {
+        // The block list's next round reads the settings as they are now.
+        crate::blocklist::refresh(actor);
+        // The allowed sites follow `network.allow_unsafe_site_override` (PR 2).
+        super::allowed::refresh(actor);
+    }
     if actor.app_subs.is_empty() {
         return;
     }
@@ -204,13 +212,15 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
 
 /// The current state, as the events that start a subscription and bring a lagged subscriber up
 /// to date: the settings, the matter list, each matter's thread list, the last folder scan
-/// event and the download's latest `BrowserInstall`. Each event here must replace what a window
+/// event, the download's latest `BrowserInstall` and, with connectors wired, the whole
+/// `ConnectorsChanged`. Each event here must replace what a window
 /// holds whole; see the module doc before adding a partial one.
 fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     let mut events = vec![HostEvent::SettingsChanged(super::settings::view(actor))];
     events.extend(super::app_lists::current(actor));
     events.extend(super::scan::catch_up(actor));
     events.extend(super::browser_install::current(actor));
+    events.extend(super::connectors::current(actor));
     events
         .iter()
         .filter_map(|event| {

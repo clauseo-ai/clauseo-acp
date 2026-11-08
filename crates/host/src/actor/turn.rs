@@ -12,14 +12,19 @@
 mod agents;
 mod answers;
 mod asks;
+mod came_back;
 mod cancel;
+pub(super) mod case_law;
 mod close;
 mod end;
 mod failure;
 mod forced_mode;
+mod idle;
 mod inputs;
+mod key_retry;
 mod known;
 mod launch_checks;
+mod logout;
 mod out;
 mod profile_loads;
 mod prompt;
@@ -28,12 +33,15 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
+mod sign_in;
 mod state;
 mod steps;
 mod text;
 mod undo;
-mod undo_preview;
+pub(crate) mod undo_preview;
 mod updates;
+pub(crate) mod wide;
+mod withheld;
 mod writer;
 
 use std::collections::VecDeque;
@@ -52,18 +60,24 @@ use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
 
 pub(crate) use asks::asks_pending;
+pub(crate) use came_back::{
+    Check as CameBackCheck, Watches as CameBackWatches, on_reply as came_back_reply,
+};
 pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
+pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as idle_tick};
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
-pub(crate) use launch_checks::RunSweep;
+pub(crate) use launch_checks::HeldRuns;
+pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
-pub(crate) use queue::queue_held;
+pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
-pub(crate) use undo_preview::preview_undo;
+pub(crate) use sign_in::on_request as sign_in_request;
+pub(crate) use state::busy;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -81,12 +95,14 @@ pub(crate) struct TurnState {
     preparing: Option<Box<launch_checks::Preparing>>,
     /// The folders of the launched agent's session, from its launch until it ends.
     run: Option<launch_checks::RunFolders>,
+    /// The skill packs its launches skipped, each pack and reason told once for the host's run.
+    packs: launch_checks::PackNotices,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
-    /// The browser opens of the thread's turns that have not finished, for `PageVisited`. Kept
-    /// past a turn's end, so a completion that comes late or in a replay finds its open and is
-    /// still not recorded (`updates.rs` drops it by its origin).
-    browser_opens: crate::sources::browser::Opens,
+    /// The thread's sources in progress: the browser's opens and the agents' web calls that have
+    /// not finished. Kept past a turn's end, so a completion that comes late or in a replay finds
+    /// its call and is still not recorded (`updates.rs` drops it by its origin).
+    sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
     /// The files put back since the last `TurnStarted`; `None` until first needed, then
@@ -105,6 +121,9 @@ pub(crate) struct TurnState {
     undo: Option<Box<undo::UndoLog>>,
     /// The prompts waiting behind the current turn, whether they are held, steers in flight.
     queue: queue::ThreadQueue,
+    /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
+    /// to the queue held for the sign-in (`sign_in.rs`).
+    stopped_for_sign_in: Option<TurnId>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -149,11 +168,14 @@ struct Current {
     turn: TurnId,
     /// The lawyer's message that opened it.
     message: clauseo_protocol::MessageId,
-    /// The prompt's content, until step 5 sends it.
+    /// The prompt's content, as step 5 sends it (kept, so a turn held for the sign-in goes
+    /// back to the queue with it, `sign_in.rs`).
     prompt: Vec<ContentBlock>,
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
+    /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
+    stopped: key_retry::Stopped,
     /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
     /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
     /// reject option ends the turn). Another answer or a Stop clears it.
@@ -162,6 +184,9 @@ struct Current {
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
+    /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
+    /// whether to offer the connector.
+    case_law_hint: crate::connectors::hint::TurnLooks,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
@@ -188,6 +213,9 @@ struct Current {
     started: std::time::Duration,
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
+    /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
+    /// the turn ends.
+    withheld: withheld::Withheld,
 }
 
 /// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
@@ -291,6 +319,8 @@ enum TimerKind {
     LimitRead(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
+    /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
+    StopWait(u64),
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -341,6 +371,8 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
+        TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::Log {
             thread,
             why,
@@ -366,6 +398,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
+        TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
     }
 }
 
@@ -483,34 +516,9 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
 /// limit is logged. The actor closes the store once [`busy`] is false and commits returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
+    came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether start-up (reconciliation) or shutdown (cancels, agent stops, unlogged stops at the
-/// limit) must wait for the turn path. Scanned only while starting or stopping.
-pub(crate) fn busy(actor: &Actor) -> bool {
-    if matches!(actor.phase, HostPhase::Serving) {
-        return false;
-    }
-    let stops = host_stopping(actor) && super::limits::stops_busy(actor);
-    stops
-        || actor.threads.values().any(|entry| {
-            let state = &entry.turn;
-            state.reconciling
-                || state.agent.is_some()
-                || state.preparing.is_some()
-                || state.current.as_ref().is_some_and(|current| {
-                    matches!(
-                        current.phase,
-                        TurnPhase::Checkpointing
-                            | TurnPhase::Starting
-                            | TurnPhase::Prompting
-                            | TurnPhase::FallbackStop
-                            | TurnPhase::Ending
-                    )
-                })
-        })
 }
 
 /// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
@@ -520,6 +528,12 @@ pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
         let state = &entry.turn;
         state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
     })
+}
+
+/// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
+pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
+    let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
+    Some(current.turn)
 }
 
 /// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.

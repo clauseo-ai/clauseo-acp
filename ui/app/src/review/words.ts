@@ -16,6 +16,9 @@ import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-li
 import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
+import { pw, type ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
+import { tbt, type ToolbarKey } from "@clauseo/components/lib/words-toolbar.ts";
+import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { roomHindi } from "@clauseo/components/lib/words-room.hi.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
@@ -209,4 +212,25 @@ export const folderCardWords = (key: FolderCardKey): WordsRef => ({
   key,
   text: (lang) => frc(lang, key),
   later: frc.hi[key] === null,
+});
+
+export const protectionWords = (key: ProtectionKey): WordsRef => ({
+  file: "lib/words-protection.ts",
+  key,
+  text: (lang) => pw(lang, key),
+  later: pw.hi[key] === null,
+});
+
+export const toolbarWords = (key: ToolbarKey): WordsRef => ({
+  file: "lib/words-toolbar.ts",
+  key,
+  text: (lang) => tbt(lang, key),
+  later: tbt.hi[key] === null,
+});
+
+export const firstLaunchWords = (key: FirstLaunchKey): WordsRef => ({
+  file: "lib/words-first-launch.ts",
+  key,
+  text: (lang) => fl(lang, key),
+  later: fl.hi[key] === null,
 });

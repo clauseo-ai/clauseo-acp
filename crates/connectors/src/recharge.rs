@@ -34,6 +34,8 @@ pub struct Recharge {
     pub credits: Option<i64>,
     /// When the payment link expires, as the connector writes it.
     pub expires_at: Option<String>,
+    /// The balance after it, when the answer carries one (a paid recharge's poll does).
+    pub balance_credits: Option<i64>,
 }
 
 /// A recharge's status.
@@ -47,6 +49,31 @@ pub enum RechargeStatus {
     Other(String),
 }
 
+impl RechargeStatus {
+    /// The status the connector wrote.
+    fn from_text(text: &str) -> RechargeStatus {
+        match text {
+            "awaiting_payment" => RechargeStatus::AwaitingPayment,
+            "paid" => RechargeStatus::Paid,
+            other => RechargeStatus::Other(other.to_owned()),
+        }
+    }
+
+    /// Whether the recharge is over, so a poll stops: `paid`, `expired`,
+    /// `amount_mismatch_held`, `cancelled` or `failed`. Awaiting payment, or any other status
+    /// (an empty or a new one), is polled again until the deadline.
+    pub fn settled(&self) -> bool {
+        match self {
+            RechargeStatus::Paid => true,
+            RechargeStatus::Other(other) => matches!(
+                other.as_str(),
+                "expired" | "amount_mismatch_held" | "cancelled" | "canceled" | "failed"
+            ),
+            RechargeStatus::AwaitingPayment => false,
+        }
+    }
+}
+
 impl Default for RechargeStatus {
     fn default() -> RechargeStatus {
         RechargeStatus::Other(String::new())
@@ -55,11 +82,7 @@ impl Default for RechargeStatus {
 
 impl<'de> Deserialize<'de> for RechargeStatus {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<RechargeStatus, D::Error> {
-        Ok(match de::text(deserializer)?.as_str() {
-            "awaiting_payment" => RechargeStatus::AwaitingPayment,
-            "paid" => RechargeStatus::Paid,
-            other => RechargeStatus::Other(other.to_owned()),
-        })
+        Ok(RechargeStatus::from_text(&de::text(deserializer)?))
     }
 }
 
@@ -98,8 +121,11 @@ pub struct PayUrl(String);
 impl PayUrl {
     /// A production pay link, or `None`: `https`, host exactly `data.clauseo.chat` (no port,
     /// not even 443, and no user info), path exactly `/pay/<id>` with `<id>` matching
-    /// `[A-Za-z0-9_-]{1,128}`, no query, no fragment. A backslash or a percent escape anywhere
-    /// is refused, so nothing the URL parser would rewrite gets through.
+    /// `[A-Za-z0-9_-]{1,128}`, no query, no fragment. Nothing the URL parser rewrites gets
+    /// through: the parsed link must read as the text written, but for the ASCII case of the
+    /// scheme and host, which it lowercases (a dot segment such as `/pay/rch_1/../x`, a tab or a
+    /// newline inside, or a space around the link, is refused). A backslash or a percent escape
+    /// anywhere is refused as well.
     pub fn parse(connector: &KnownConnector, text: &str) -> Option<PayUrl> {
         PayUrl::parse_for(connector, &Origin::Production, text)
     }
@@ -122,7 +148,10 @@ impl PayUrl {
         let written = text
             .split_once("://")
             .and_then(|(_, rest)| rest.split(['/', '?', '#']).next());
-        let ours = written.is_some_and(|written| written.eq_ignore_ascii_case(&authority))
+        // As written: the parser drops dot segments, tabs, newlines and spaces around the link,
+        // and lowercases the scheme and host; the path's case it keeps, so only those differ.
+        let ours = url.as_str().eq_ignore_ascii_case(text)
+            && written.is_some_and(|written| written.eq_ignore_ascii_case(&authority))
             && url.scheme() == prefix.scheme()
             && url.host_str().is_some()
             && url.host_str() == prefix.host_str()
@@ -139,13 +168,36 @@ impl PayUrl {
             return None;
         }
         match origin {
-            Origin::Production | Origin::Staging => Some(PayUrl(url.into())),
+            Origin::Production => Some(PayUrl(url.into())),
+            #[cfg(feature = "staging")]
+            Origin::Staging => Some(PayUrl(url.into())),
+            #[cfg(feature = "local")]
+            Origin::Local => Some(PayUrl(url.into())),
             #[cfg(feature = "test-support")]
             Origin::Fake(_) => Some(PayUrl(format!(
                 "{PRODUCTION_ORIGIN}{}",
                 &url[Position::BeforePath..]
             ))),
         }
+    }
+
+    /// Whether this link still reads as a pay link of `origin`, as [`PayUrl::parse_for`] would
+    /// return it: under `Production` only `https://data.clauseo.chat/pay/<id>`, under `Staging`
+    /// only `https://data-staging.clauseo.chat/pay/<id>`, under `Local` only
+    /// `http://127.0.0.1:8793/pay/<id>` (that exact origin). Under `Fake` the link was rewritten
+    /// to the production form, so it is checked as production. `OpenPayLink`'s check before it
+    /// opens.
+    pub fn is_for(&self, connector: &KnownConnector, origin: &Origin) -> bool {
+        let reparsed = match origin {
+            Origin::Production => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "staging")]
+            Origin::Staging => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "local")]
+            Origin::Local => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "test-support")]
+            Origin::Fake(_) => PayUrl::parse(connector, &self.0),
+        };
+        reparsed.as_ref() == Some(self)
     }
 
     /// The link.
@@ -215,6 +267,7 @@ pub(crate) fn recharge_from_value(
         amount: wire.amount,
         credits: wire.credits,
         expires_at: wire.expires_at,
+        balance_credits: None,
     })
 }
 
@@ -231,6 +284,72 @@ pub(crate) fn parse_recharge(
         return Err(Error::Parse("recharge: not an object".to_owned()));
     }
     recharge_from_value(&value, connector, origin, true)
+}
+
+/// The top level of a recharge poll's answer, the `recharge` tool's `structuredContent`.
+#[derive(Deserialize)]
+struct PollTop {
+    #[serde(default, deserialize_with = "de::opt_text")]
+    recharge_id: Option<String>,
+    #[serde(default, deserialize_with = "de::opt_text")]
+    status: Option<String>,
+    #[serde(default, deserialize_with = "de::opt_int")]
+    balance_credits: Option<i64>,
+}
+
+/// A recharge poll's answer (`GET /recharges/{id}`) for recharge `asked`, in the connector's
+/// shapes (`fixtures/recharge-get-*.json`):
+///
+/// - the top-level `status` is the asked recharge's and always wins; `payment.status` (or a
+///   flat answer's own) counts only when there is none;
+/// - a top-level `recharge_id` that is not `asked` is `Parse`; a missing one (a `paid`
+///   answer has none) means `asked`;
+/// - `payment` is the link to pay now, which after `expired` is a fresh recharge: its id is
+///   not checked, and its link, amount, credits and expiry are kept only when it is `asked`'s;
+/// - `balance_credits` is kept when present.
+///
+/// A pay link that is not ours is dropped, not refused: the poll is for the status.
+pub(crate) fn parse_recharge_poll(
+    bytes: &[u8],
+    connector: &KnownConnector,
+    origin: &Origin,
+    asked: &str,
+) -> Result<Recharge, Error> {
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|err| parse_error("recharge", &err))?;
+    if !value.is_object() {
+        return Err(Error::Parse("recharge: not an object".to_owned()));
+    }
+    let top = PollTop::deserialize(&value).map_err(|err| parse_error("recharge", &err))?;
+    if top.recharge_id.as_deref().is_some_and(|id| id != asked) {
+        return Err(Error::Parse(
+            "recharge: the answer is for another recharge".to_owned(),
+        ));
+    }
+    let wire = RechargeIn::deserialize(payment_object(&value))
+        .map_err(|err| parse_error("recharge", &err))?;
+    let status = match top.status {
+        Some(status) => RechargeStatus::from_text(&status),
+        None => wire.status,
+    };
+    let mut recharge = Recharge {
+        recharge_id: asked.to_owned(),
+        status,
+        url: None,
+        amount: None,
+        credits: None,
+        expires_at: None,
+        balance_credits: top.balance_credits,
+    };
+    if wire.recharge_id.is_empty() || wire.recharge_id == asked {
+        recharge.url = wire
+            .url
+            .and_then(|text| PayUrl::parse_for(connector, origin, &text));
+        recharge.amount = wire.amount;
+        recharge.credits = wire.credits;
+        recharge.expires_at = wire.expires_at;
+    }
+    Ok(recharge)
 }
 
 /// The payment an out-of-credit body points to (a tool result's `structuredContent`, or the

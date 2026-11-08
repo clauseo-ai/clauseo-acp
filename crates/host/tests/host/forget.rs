@@ -10,7 +10,7 @@ use clauseo_protocol::{
     MatterSource, QueryResult, RestoreRequest, StopReason, StreamId, Title,
 };
 
-use crate::matters::{client, created, date, import, summary};
+use crate::matters::{client, created, date, import, packs, summary};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, send_prompt, wait};
 
 /// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
@@ -54,6 +54,7 @@ fn forget_takes_the_matter_off_the_list_and_an_import_brings_it_back() {
         matter,
         client: FieldChange::Set(client("Smith")),
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(true),
     });
     let mut events = host.events(StreamId::Thread(thread));
@@ -228,6 +229,53 @@ fn a_folder_moved_while_forgotten_comes_back_where_it_is_now_in_the_same_run() {
         summary(&host, matter).folder_display,
         moved.display().to_string()
     );
+    host.shutdown();
+}
+
+/// A restored list is returned as it was. Whether a pack in it loads is decided at launch: a pack
+/// that is not turned on, or whose hash no longer matches, is skipped there (decision record
+/// 0040, PR-D). This test checks only that the list comes back.
+#[test]
+fn forget_keeps_skill_packs_and_unforget_restores_them() {
+    let dir = Dir::new("forget_skill_packs", &[]);
+    let folder = dir.folder("Kaveri Agro", &[("brief.txt", "Clause 4\n")]);
+    let host = dir.start(0);
+    let matter = created(import(&host, "Kaveri Agro", &folder, (None, None)));
+    let list = packs(&["india-litigation", "contracts"]);
+    host.ok(HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Set(list.clone()),
+        pinned: None,
+    });
+    let before = summary(&host, matter).skill_packs;
+    assert_eq!(before, Some(list));
+    assert_eq!(
+        host.ok(HostCommand::ForgetMatter { matter }),
+        CommandOutcome::Done
+    );
+    host.shutdown();
+
+    // The forgotten matter's row still holds the list.
+    let store = crate::titles::open_store(dir.data());
+    let row = wait("matters", store.matters())
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == matter)
+        .unwrap();
+    assert!(row.forgotten.is_some(), "{row:?}");
+    assert_eq!(row.skill_packs, before);
+    wait("close", store.close()).unwrap();
+
+    // Importing the folder again brings the list back exactly as it was, so a bring-back never
+    // adds a pack the matter did not already have.
+    let host = dir.start(1);
+    assert_eq!(
+        created(import(&host, "Kaveri Agro", &folder, (None, None))),
+        matter
+    );
+    assert_eq!(summary(&host, matter).skill_packs, before);
     host.shutdown();
 }
 

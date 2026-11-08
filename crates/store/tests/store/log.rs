@@ -97,6 +97,7 @@ fn commit_is_atomic() {
             pinned: false,
             last_opened: None,
             forgotten: None,
+            skill_packs: None,
         }),
         snapshot: Some(SnapshotIn::compress(thread(2), seq(1), 1, b"state")),
         ..Commit::default()

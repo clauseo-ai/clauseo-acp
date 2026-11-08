@@ -1,0 +1,113 @@
+/* Clauseo's own folder chooser (components' clauseo/folder-chooser.tsx): wider than a dialog's 440 px so a folder's
+   name and its note fit on one row, and a column whose list takes what height is left and scrolls, so the chooser fits
+   a 640 by 480 window at any text size. Loaded with the chooser. */
+.folder-chooser {
+  width: min(calc(var(--size-dialog) + 120px), calc(100% - 2 * var(--s4)));
+  display: flex;
+  flex-direction: column;
+}
+/* the places to start, where it is, and the folders */
+.folder-chooser-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.folder-chooser-crumbs {
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+/* the start of a long path gives way; the folder itself stays in view */
+.folder-chooser-crumbs > span:first-child {
+  margin-inline-start: auto;
+}
+.folder-chooser-list {
+  flex: 1 1 auto;
+  /* two rows at least: in Hindi at the largest text size in a 640 by 480 window, the rest is what's left */
+  min-height: calc(2 * var(--size-control-small));
+  max-height: calc(9 * var(--size-control-small));
+  overflow-y: auto;
+  padding: var(--s1);
+  border-radius: var(--r-control);
+  background: var(--well);
+}
+.folder-chooser-row {
+  cursor: default;
+}
+.folder-chooser-row[data-disabled] {
+  color: var(--faint);
+}
+/* A short window (640 by 480): the chooser takes the window's height, 4 px from its edge; the places to start stand in
+   a column beside the folders, the typed location's label beside its field, and the folders take every row left,
+   six or more at the default text size. */
+@media (max-height: 560px) {
+  .folder-chooser {
+    height: calc(100dvh - 2 * var(--s1));
+    max-height: calc(100dvh - 2 * var(--s1));
+    padding: var(--s3) var(--s4);
+  }
+  .folder-chooser-body {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: var(--s2);
+  }
+  .folder-chooser-starts {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    /* as wide while it says Looking… as once the places land, so the folders don't move */
+    min-width: 6rem;
+    max-width: 10rem;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .folder-chooser-where {
+    grid-column: 2;
+    grid-row: 1;
+    margin-top: 0;
+  }
+  .folder-chooser-list {
+    grid-column: 2;
+    grid-row: 2;
+    max-height: none;
+    margin-top: 0;
+  }
+  .folder-chooser-typed {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--s2);
+  }
+  .folder-chooser-acts {
+    margin-top: var(--s3);
+  }
+}
+/* A window shorter still: 640 by 480 on Windows leaves a client area of about 592 by 398. The line on why Clauseo shows
+   its own chooser goes out of sight (a screen reader still reads it with the title) and the gaps tighten, so the folders
+   keep six rows or more there. */
+@media (max-height: 440px) {
+  .folder-chooser {
+    padding-block: var(--s2);
+  }
+  .folder-chooser-note {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .folder-chooser-body {
+    margin-top: var(--s2);
+  }
+  .folder-chooser-typed {
+    margin-top: var(--s2);
+  }
+  .folder-chooser-acts {
+    margin-top: var(--s2);
+  }
+}

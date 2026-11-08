@@ -29,8 +29,13 @@ pub(crate) fn create_dir_all(path: &Path) -> Result<(), Error> {
 /// differs (a missing file differs): a new temp file beside it, named for this process and this
 /// call, written, synced, then renamed over `target`. The rename replaces a link at `target`
 /// rather than writing through it; the caller refuses a link before calling. On any error the
-/// temp file is removed. Returns whether it wrote.
-pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Error> {
+/// temp file is removed, and a removal that fails is logged by `agent` (its settings id) and the
+/// error's kind, never a path (decision record 0047). Returns whether it wrote.
+pub(crate) fn replace_if_differs(
+    agent: &'static str,
+    target: &Path,
+    bytes: &[u8],
+) -> Result<bool, Error> {
     if holds(target, bytes)? {
         return Ok(false);
     }
@@ -39,9 +44,10 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Er
         .ok_or_else(|| Error::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
     let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let temp = Temp(Some(
-        dir.join(format!(".{name}.{}-{n}.tmp", std::process::id())),
-    ));
+    let temp = Temp {
+        agent,
+        path: Some(dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()))),
+    };
     let mut file = create_new(temp.path())?;
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
@@ -91,21 +97,24 @@ fn create_new(path: &Path) -> Result<File, Error> {
         .map_err(|err| Error::io("create", path, err))
 }
 
-/// A temp file, removed on drop unless it was renamed.
-struct Temp(Option<PathBuf>);
+/// A temp file, removed on drop unless it was renamed; `agent` names it in the log.
+struct Temp {
+    agent: &'static str,
+    path: Option<PathBuf>,
+}
 
 impl Temp {
     fn path(&self) -> &Path {
-        self.0.as_deref().unwrap_or_else(|| Path::new(""))
+        self.path.as_deref().unwrap_or_else(|| Path::new(""))
     }
 
     /// Renames the temp file over `target`.
     fn rename_to(mut self, target: &Path) -> Result<(), Error> {
-        let Some(temp) = self.0.take() else {
+        let Some(temp) = self.path.take() else {
             return Ok(());
         };
         if let Err(err) = std::fs::rename(&temp, target) {
-            self.0 = Some(temp);
+            self.path = Some(temp);
             return Err(Error::io("rename", target, err));
         }
         Ok(())
@@ -114,11 +123,16 @@ impl Temp {
 
 impl Drop for Temp {
     fn drop(&mut self) {
-        if let Some(temp) = self.0.take()
+        if let Some(temp) = self.path.take()
             && let Err(err) = std::fs::remove_file(&temp)
             && err.kind() != io::ErrorKind::NotFound
         {
-            tracing::warn!(path = %temp.display(), error = %err, "temp file left behind");
+            let kind = err.kind();
+            tracing::warn!(
+                agent = self.agent,
+                ?kind,
+                "a limits temp file was left behind"
+            );
         }
     }
 }
@@ -206,9 +220,9 @@ mod tests {
     fn a_missing_file_is_written_and_a_same_one_is_left() {
         let scratch = Scratch::new("missing");
         let target = scratch.0.join("helper.mjs");
-        assert!(replace_if_differs(&target, b"one").unwrap());
+        assert!(replace_if_differs("claude-acp", &target, b"one").unwrap());
         assert_eq!(std::fs::read(&target).unwrap(), b"one");
-        assert!(!replace_if_differs(&target, b"one").unwrap());
+        assert!(!replace_if_differs("claude-acp", &target, b"one").unwrap());
         assert_eq!(names(&scratch.0), ["helper.mjs"]);
     }
 
@@ -217,7 +231,7 @@ mod tests {
         let scratch = Scratch::new("differs");
         let target = scratch.0.join("helper.mjs");
         std::fs::write(&target, b"old and longer").unwrap();
-        assert!(replace_if_differs(&target, b"new").unwrap());
+        assert!(replace_if_differs("claude-acp", &target, b"new").unwrap());
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
         assert_eq!(names(&scratch.0), ["helper.mjs"]);
     }
@@ -228,7 +242,7 @@ mod tests {
         // A non-empty folder at the target: the rename fails on every OS, and the temp file goes.
         let target = scratch.0.join("helper.mjs");
         std::fs::create_dir_all(target.join("inside")).unwrap();
-        let err = replace_if_differs(&target, b"new").unwrap_err();
+        let err = replace_if_differs("claude-acp", &target, b"new").unwrap_err();
         assert!(matches!(err, Error::Io { .. }), "{err}");
         assert_eq!(names(&scratch.0), ["helper.mjs"]);
     }

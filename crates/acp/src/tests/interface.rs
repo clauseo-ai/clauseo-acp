@@ -15,6 +15,7 @@ fn session() -> AgentSessionId {
 fn new_session() -> NewSession {
     NewSession {
         cwd: cwd(),
+        additional_directories: Vec::new(),
         mcp_servers: Vec::new(),
         meta: None,
     }

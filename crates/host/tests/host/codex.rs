@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher};
 use clauseo_protocol::{
     DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand, LimitStopReason, MatterPath,
-    PermissionChoice, Seq, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
+    NoticeKind, PermissionChoice, Seq, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
 };
 use serde_json::{Map, Value, json};
 
@@ -217,6 +217,11 @@ fn codex_launch_variables_beat_the_settings_env() {
     });
     if cfg!(windows) {
         expected["windows"] = json!({"sandbox": "unelevated"});
+    } else {
+        // The data-folder fence (`codex_fence.rs`).
+        for (key, value) in crate::codex_fence::checked_keys(&config, &dir, matter, run, &home) {
+            expected[key] = value;
+        }
     }
     assert_eq!(config, expected);
     for dropped in [
@@ -269,6 +274,17 @@ fn notices(events: &Events) -> Vec<String> {
         .events()
         .filter_map(|event| match event {
             DomainEvent::Notice(notice) => Some(notice.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The kinds of the `Notice`s logged.
+fn notice_kinds(events: &Events) -> Vec<Option<NoticeKind>> {
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => Some(notice.kind.clone()),
             _ => None,
         })
         .collect()
@@ -341,6 +357,13 @@ fn an_agent_with_neither_load_nor_resume_gets_session_new() {
         notices(&events).len(),
         1,
         "context not restored: {}",
+        events.dump()
+    );
+    // The host's notice carries its kind, for the app's own words.
+    assert_eq!(
+        notice_kinds(&events),
+        [Some(NoticeKind::ContextNotRestored)],
+        "{}",
         events.dump()
     );
     host.shutdown();

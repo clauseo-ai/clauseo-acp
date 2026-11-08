@@ -1,6 +1,7 @@
 //! A refused folder gets one code per reason (decision record 0022): a drive root, the home
 //! folder, a system folder, a folder or `matter.json` that does not read, a folder that is, holds
-//! or sits inside another matter's (naming it), and Clauseo's own data folder.
+//! or sits inside another matter's (naming it), Clauseo's own data folder, and on Windows a path
+//! too long for Windows to start programs in.
 
 use std::path::Path;
 
@@ -281,5 +282,22 @@ fn a_matters_folder_by_another_spelling_is_folder_is_matter_and_makes_nothing() 
             "{case}: matter.json unchanged"
         );
     }
+    host.shutdown();
+}
+
+/// Windows only: a folder whose path is too long for Windows to start programs in is refused
+/// as `matter.folder_too_deep` on import, with nothing written in it. Six 41-unit names make a
+/// path over the limit under any temp dir.
+#[cfg(windows)]
+#[test]
+fn a_folder_too_deep_for_windows_is_folder_too_deep() {
+    let dir = Dir::new("refuse_too_deep", &[]);
+    let name = vec!["d".repeat(40); 6].join("/");
+    let folder = dir.folder(&name, &[("a.txt", "x\n")]);
+    let host = dir.start(0);
+    let error = refused(&host, &folder, ErrorCode::MatterFolderTooDeep);
+    assert_eq!(error.matter(), None);
+    assert!(!error.retryable());
+    assert!(!folder.join(".clauseo").exists(), "nothing was written");
     host.shutdown();
 }

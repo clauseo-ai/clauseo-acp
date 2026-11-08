@@ -1,0 +1,16 @@
+{"scenario":"web-other-tools","description":"S26's only-these-tools rule: an MCP fetch, a named search tool, a Codex search with no query key and a search whose query is empty record nothing","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-mcp","title":"Fetch https://evil.example/x","name":"mcp__docs__fetch","kind":"fetch","status":"in_progress","rawInput":{"url":"https://evil.example/x"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-mcp","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Fetched"}}],"rawOutput":"Fetched"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-named","title":"Search \"x\"","name":"WebLookup","kind":"fetch","status":"in_progress","rawInput":{"query":"x"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-named","status":"completed","rawOutput":"Links: [{\"title\":\"x\",\"url\":\"https://example.org/x\"}]"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-noquery","title":"Web search","kind":"search","status":"in_progress","rawInput":{}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-noquery","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-empty","title":"Web search","kind":"search","status":"in_progress","rawInput":{"query":"","action":null}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-empty","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The Supreme Court's judgment is linked below."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

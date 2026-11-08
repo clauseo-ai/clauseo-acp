@@ -237,6 +237,26 @@ fn a_ui_count_goes_into_the_counts_once_they_are_open() {
     assert_eq!(today.error_shown.len(), 1);
 }
 
+/// The setup pump's counts: dropped while the counts are absent, counted once they are open.
+#[test]
+fn a_setup_count_goes_into_the_counts_only_once_they_are_open() {
+    use clauseo_counts::schema::{Agent, Billing, SignIn, SignInResult};
+    let event = Event::SignIn(SignIn {
+        agent: Agent::Claude,
+        billing: Billing::Plan,
+        result: SignInResult::Done,
+    });
+    let state = CountsState::default();
+    state.bump(event);
+    let counts = in_memory();
+    assert_eq!(counts.today().sign_in.len(), 0);
+    state.start(counts.clone());
+    state.bump(event);
+    let today = counts.today();
+    assert_eq!(today.sign_in.len(), 1);
+    assert_eq!(today.sign_in[0].n.get(), 1);
+}
+
 #[test]
 fn either_window_holding_the_focus_is_the_foreground() {
     let state = CountsState::default();

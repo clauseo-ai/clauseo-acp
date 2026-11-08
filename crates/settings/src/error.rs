@@ -20,7 +20,8 @@ pub enum Error {
         source: io::Error,
     },
     /// A JSON file does not parse. `line` and `column` count from 1, except that an error at
-    /// the end of the input has column 0, as the JSON parser reports it.
+    /// the end of the input has column 0, as the JSON parser reports it. Also a macOS managed
+    /// preferences file that is no property list dictionary, at line and column 0.
     #[error("{}:{line}:{column}: {message}", path.display())]
     Parse {
         /// The file.
@@ -31,6 +32,18 @@ pub enum Error {
         column: usize,
         /// What the parser said.
         message: String,
+    },
+    /// A `policy.json` holds a key twice in one object, at any level: what the firm meant there
+    /// is unknown, so the source is dropped whole, as one that does not parse. The message names
+    /// the place, never the key.
+    #[error("{}:{line}:{column}: a key appears twice in one object", path.display())]
+    DuplicateKey {
+        /// The file.
+        path: PathBuf,
+        /// The line of the second copy's name.
+        line: usize,
+        /// The column just after the second copy's name, in bytes.
+        column: usize,
     },
     /// A change names a key that policy set, so the user cannot change it. Nothing was written.
     #[error("{key} is set by policy and cannot be changed")]

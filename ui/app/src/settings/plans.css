@@ -1,0 +1,74 @@
+/* Plans (UD2; design/03-system/src/pages/settings/settings.css, plans), apart from settings.css so the copy review page
+   (review.css) can take it without the window's frame sheets: settings.css imports this file. One block per plan on
+   the well, stacked so UD1's sign-in panel has the pane's width inline; its name in the matter title's voice, its
+   line, its acts, and the other ways in under a hairline. UD1's gate parts keep their own sheet (first-launch.css). */
+@layer components {
+  .set-plans {
+    display: grid;
+    gap: var(--s4);
+  }
+  .set-plan {
+    display: grid;
+    gap: var(--s1);
+    min-width: 0;
+    padding: var(--s4) var(--s5);
+    border-radius: var(--r-card);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  /* a plan not added yet stands back: its name in the muted tone, on a shallower well */
+  .set-plan[data-state="add"] {
+    background: var(--desk);
+  }
+  .set-plan[data-state="add"] .set-plan-name {
+    @apply text-muted;
+  }
+  .set-plan-name {
+    @apply text-title font-chrome stretch-voice tracking-title text-primary;
+  }
+  .set-plan-line {
+    @apply text-ui text-primary;
+    overflow-wrap: anywhere;
+  }
+  .set-plan-signed {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .set-plan-fine,
+  .set-plan-refused {
+    @apply text-small text-muted;
+    overflow-wrap: anywhere;
+  }
+  .set-plan-refused {
+    @apply text-primary;
+    margin-top: var(--s2);
+  }
+  .set-plan-acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1-5);
+    margin-top: var(--s2);
+  }
+  .set-plan-install,
+  .set-plan-gate {
+    display: grid;
+    gap: var(--s2);
+    margin-top: var(--s1);
+  }
+  .set-plan-ways {
+    display: grid;
+    gap: var(--s3);
+    margin-top: var(--s4);
+    padding-top: var(--s4);
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
+  }
+  .set-plan-sub {
+    @apply text-small text-muted font-ui;
+  }
+  .set-plan-endpoint {
+    display: grid;
+    gap: var(--s1);
+  }
+}

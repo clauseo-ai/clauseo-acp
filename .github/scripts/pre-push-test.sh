@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Tests pre-push.sh, lefthook's pre-push command: a push of deletes only passes without the check,
 # and every other push runs `cargo xtask check --quick --no-tests`, in CI mode unless CI says otherwise, with
-# `--skip-ui` only when changes.sh says every pushed branch changes no ui path. First
+# `--skip-ui` only when changes.sh says every pushed branch changes no ui path, and then Windows clippy for
+# the crates the push touches when the x86_64-pc-windows-gnu target and MinGW-w64 are there. First
 # the script alone, fed git's ref lines; then through lefthook, with this repo's lefthook.yml, in a
 # scratch repo that pushes to a local bare remote, so the test also fails when lefthook stops
-# passing git's stdin on. A fake `cargo` first on PATH records each call instead of checking.
+# passing git's stdin on. A fake `cargo` first on PATH records each call instead of checking; a fake
+# `rustup` lists the targets in FAKE_TARGETS, and a fake MinGW-w64 gcc is on PATH only where a case
+# puts $tmp/mingw there.
 # fast-lane runs it after installing the pinned tools, lefthook among them.
 # Run it from anywhere: bash .github/scripts/pre-push-test.sh
 
@@ -21,10 +24,18 @@ mkdir "$tmp/bin"
 cat > "$tmp/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 echo "CI=${CI-unset} $*" >> "$CALLS"
+if [ "$1" = clippy ]; then exit "${FAKE_CLIPPY_EXIT:-0}"; fi
 exit "${FAKE_CARGO_EXIT:-0}"
 EOF
-chmod +x "$tmp/bin/cargo"
+cat > "$tmp/bin/rustup" <<'EOF'
+#!/usr/bin/env bash
+if [ "$*" = "target list --installed" ] && [ -n "${FAKE_TARGETS:-}" ]; then printf '%s\n' $FAKE_TARGETS; fi
+EOF
+mkdir "$tmp/mingw"
+printf '#!/usr/bin/env bash\n' > "$tmp/mingw/x86_64-w64-mingw32-gcc"
+chmod +x "$tmp/bin/cargo" "$tmp/bin/rustup" "$tmp/mingw/x86_64-w64-mingw32-gcc"
 export PATH="$tmp/bin:$PATH" CALLS="$tmp/calls"
+unset FAKE_TARGETS PREPUSH_WINDOWS_CLIPPY
 
 failures=0
 fail() {
@@ -48,6 +59,14 @@ b=2222222222222222222222222222222222222222
 check="CI=1 xtask check --quick --no-tests"
 skip="CI=1 xtask check --quick --no-tests --skip-ui"
 skip_note="pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"
+win="x86_64-pc-windows-gnu"
+win_note="pre-push: Windows clippy skipped: it needs"
+# The Windows clippy call for the crates named.
+winclippy() {
+  local args="" crate
+  for crate in "$@"; do args="$args -p $crate"; done
+  echo "CI=1 clippy --target $win --all-targets$args -- -D warnings"
+}
 
 # ---- the script alone: $1 name, $2 stdin, $3 calls expected, $4 exit expected; env from the caller.
 alone() {
@@ -139,6 +158,62 @@ in_repo "changes.sh failing after ui=false runs the ui steps" "$rust_line" "$che
 cp "$tmp/changes.sh" "$repo/.github/scripts/changes.sh"
 in_repo "changes.sh restored skips the ui steps again" "$rust_line" "$skip" 0
 
+# ---- Windows clippy for the touched crates, in the same scratch repo. The crates are read from the
+# working tree, which the check lints too, so each case checks out the branch it pushes.
+# A branch off main in `$repo` whose one commit adds a crate per name given, each with its Cargo.toml
+# and a source file: $1 the branch, the rest folder:package pairs (folder under crates/, or xtask).
+crate_branch() {
+  local name=$1 pair dir
+  shift
+  g checkout -q -b "$name" main
+  for pair in "$@"; do
+    dir=${pair%%:*}
+    [ "$dir" = xtask ] || dir=crates/$dir
+    mkdir -p "$repo/$dir/src"
+    printf '[package]\nname = "%s"\nversion = "0.1.0"\n' "${pair#*:}" > "$repo/$dir/Cargo.toml"
+    echo "// $name" > "$repo/$dir/src/lib.rs"
+  done
+  g add -A
+  g commit -q --no-verify -m "$name"
+  g checkout -q main
+}
+crate_branch one core:clauseo-core
+crate_branch two core:clauseo-core zeta:clauseo-zeta xtask:xtask
+branch root Cargo.lock
+ready="$tmp/mingw:$PATH"
+nl=$'\n'
+g checkout -q one
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate's change runs Windows clippy for it after the check" \
+  "$(line one)$nl" "$skip$nl$(winclippy clauseo-core)" 0
+grep -qF "pre-push: Windows clippy ($win) for clauseo-core" "$tmp/out" || fail "in a repo: one crate: no Windows clippy note (output: $(cat "$tmp/out"))"
+FAKE_TARGETS="$win" PATH="$ready" FAKE_CLIPPY_EXIT=4 in_repo "a failed Windows clippy fails the push" \
+  "$(line one)$nl" "$skip$nl$(winclippy clauseo-core)" 4
+FAKE_TARGETS="$win" PATH="$ready" FAKE_CARGO_EXIT=3 in_repo "a failed check stops before Windows clippy" \
+  "$(line one)$nl" "$skip" 3
+FAKE_TARGETS="$win" PATH="$ready" PREPUSH_WINDOWS_CLIPPY=0 in_repo "PREPUSH_WINDOWS_CLIPPY=0 skips it" \
+  "$(line one)$nl" "$skip" 0
+grep -qF "PREPUSH_WINDOWS_CLIPPY=0; skipping Windows clippy" "$tmp/out" || fail "in a repo: PREPUSH_WINDOWS_CLIPPY=0: no note"
+PATH="$ready" in_repo "without the target it is skipped with a note" "$(line one)$nl" "$skip" 0
+grep -qF "$win_note" "$tmp/out" || fail "in a repo: no target: no note (output: $(cat "$tmp/out"))"
+if command -v x86_64-w64-mingw32-gcc > /dev/null; then
+  echo "skip: without MinGW-w64: this machine has a real one on PATH (CI's runner has none)"
+else
+  FAKE_TARGETS="$win" in_repo "without MinGW-w64 it is skipped with a note" "$(line one)$nl" "$skip" 0
+  grep -qF "$win_note" "$tmp/out" || fail "in a repo: no MinGW: no note (output: $(cat "$tmp/out"))"
+fi
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate the working tree lacks is left out" "$(line two)$nl" "$skip$nl$(winclippy clauseo-core)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a crate change and a ui change run both" "$(line one)$nl$(line ui)$nl" \
+  "$check$nl$(winclippy clauseo-core)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "no refs run no Windows clippy" "" "$check" 0
+g checkout -q two
+FAKE_TARGETS="$win" PATH="$ready" in_repo "three crates go in one Windows clippy, sorted" \
+  "$(line two)$nl" "$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "two branches touching one crate name it once" \
+  "$(line one)$nl$(line two)$nl" "$skip$nl$(winclippy clauseo-core clauseo-zeta xtask)" 0
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a root file touches no crate" "$(line root)$nl" "$skip" 0
+g checkout -q main
+FAKE_TARGETS="$win" PATH="$ready" in_repo "a path under crates/ with no Cargo.toml names no crate" "$(line rust)$nl" "$skip" 0
+
 # ---- through lefthook and git push, in a scratch repo with this lefthook.yml and pre-push.sh.
 if ! command -v lefthook > /dev/null; then
   fail "lefthook is not on PATH (cargo xtask setup installs it)"
@@ -175,6 +250,14 @@ else
   pushed "a ui-only branch runs the ui steps" "$check" 0 ui:refs/heads/ui
   pushed "a Rust and ui branch runs the ui steps" "$check" 0 mixed:refs/heads/mixed
   pushed "two branches, one with a ui change, run the ui steps" "$check" 0 rust:refs/heads/rust-b ui:refs/heads/ui-b
+  crate_branch one core:clauseo-core
+  g checkout -q one
+  FAKE_TARGETS="$win" PATH="$tmp/mingw:$PATH" pushed "a crate's change runs Windows clippy for it" \
+    "$skip$nl$(winclippy clauseo-core)" 0 one:refs/heads/one
+  FAKE_TARGETS="$win" PATH="$tmp/mingw:$PATH" FAKE_CLIPPY_EXIT=4 pushed "a failed Windows clippy stops the push" \
+    "$skip$nl$(winclippy clauseo-core)" 1 one:refs/heads/one-b
+  git -C "$tmp/remote.git" rev-parse -q --verify refs/heads/one-b > /dev/null && fail "lefthook: a failed Windows clippy stops the push: the branch reached the remote"
+  g checkout -q main
 fi
 
 # ---- CI never skips the ui steps: no workflow passes the flag.

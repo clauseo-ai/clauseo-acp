@@ -226,6 +226,15 @@ impl SigninHub {
         }
     }
 
+    /// Whether `agent`'s job is one [`Self::cancel`] would end.
+    pub(super) fn going(&self, agent: &AgentId) -> bool {
+        let inner = self.lock();
+        inner
+            .jobs
+            .get(agent)
+            .is_some_and(|slot| slot.task.signs_in())
+    }
+
     /// Hands `code` to `agent`'s sign-in run, which writes it to the login's stdin. Codex's
     /// logins read no code (the paste route is Claude's `claude.ai` and console logins), so a
     /// code for Codex is refused with `WrongMethod`, never taken and dropped.
@@ -378,11 +387,16 @@ impl SigninHub {
         true
     }
 
-    /// Ends `ticket`'s job with the state unchanged.
+    /// Ends `ticket`'s job with the state unchanged, and says so
+    /// (`AgentsEvent::SigninUnchanged`); nothing once the job is superseded.
     pub(crate) fn end_job(&self, ticket: &Ticket) {
         let mut inner = self.lock();
         if is_current(&inner, ticket) {
             inner.jobs.remove(&ticket.agent);
+            // Fails only when every receiver is gone; nobody is listening then.
+            drop(self.events.try_send(AgentsEvent::SigninUnchanged {
+                agent: ticket.agent.clone(),
+            }));
         }
     }
 
@@ -480,14 +494,16 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         installed,
         home,
         browser,
-        launcher: Arc::clone(&worker.launcher),
+        launcher: Arc::clone(&worker.signin_launcher),
         timer: Arc::clone(&worker.timer),
         shared: Arc::clone(&worker.shared),
         paste,
     };
-    let spawned = std::thread::Builder::new()
-        .name(format!("clauseo-signin-{}", ticket.agent))
-        .spawn(move || job::run(job, kick));
+    let spawned = worker
+        .shared
+        .spawn_job(format!("clauseo-signin-{}", ticket.agent), move || {
+            job::run(job, kick);
+        });
     if spawned.is_err() {
         fail(&ticket);
     }

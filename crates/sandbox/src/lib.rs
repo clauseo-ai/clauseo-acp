@@ -6,12 +6,15 @@
 //! - The policy ([`Policy`], built by [`Policy::builder`]): the matter and state folders, the
 //!   runtime, read-only and allowed paths, the notes folder, the credential link, Claude's login
 //!   store, hidden paths, loopback ports, the Keychain switch, and what is write-denied in the
-//!   matter ([`PROTECTED_NAMES`], every `.git`, over-cap files). Every path in it is canonical
-//!   and every refusal of [`PolicyBuilder::build`] holds. R17 decides which paths go in.
+//!   matter ([`PROTECTED_NAMES`], every [`PROTECTED_AT_ANY_DEPTH`] name, over-cap files).
+//!   Every path in it is canonical and every refusal of [`PolicyBuilder::build`] holds. R17
+//!   decides which paths go in.
 //! - The walk of the matter ([`scan_matter`], [`scan_links`]): links that lead outside it and
-//!   every `.git`, one walk per launch, and the link rule budget ([`LINK_RULES_MAX`],
-//!   [`Policy::link_folders`]).
-//! - Tier detection ([`detect`], cached; [`probe`], uncached): [`Tier`] and [`NoSandbox`].
+//!   every [`PROTECTED_AT_ANY_DEPTH`] name, one walk per launch, and the link rule budget
+//!   ([`LINK_RULES_MAX`], [`Policy::link_folders`]).
+//! - Tier detection ([`detect`], the OS's part cached; [`probe`], uncached): [`Tier`] and
+//!   [`NoSandbox`].
+//! - The set-up seam ([`SandboxSetup`], [`SetupState`], [`SetupError`]) and [`SetAside`].
 //! - The denial types every stage C task uses ([`Denial`], [`Access`], [`PathClass`],
 //!   [`HostRefusal`], [`Reachability`]), the per-launch [`DenialSink`], and the rate cap
 //!   ([`CappedSink`]: at most [`DENIALS_PER_WINDOW`] per [`DENIAL_WINDOW`], the excess folded
@@ -19,7 +22,9 @@
 //! - [`Error`], with [`Error::code`] mapping each variant to a `clauseo_protocol::ErrorCode`.
 //! - The egress proxy, one per agent launch ([`start_proxy`], [`ProxyHandle`]): CONNECT to 443
 //!   and plain `http://` to 80 under an [`Allowlist`], a token on the agent listener, address
-//!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
+//!   checks, the unsafe-site block list (ADR 0053: by name or IP literal, before the allowlist,
+//!   no DNS), the firm's upstream, refusals as [`Denial::Host`] and [`Denial::Blocked`]
+//!   (`Clauseo-Blocked: <tag>` on a plain-http 403). [`ports::bind_loopback`] binds
 //!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
 //!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
 //!   which no bind or claim of this process hands out again until the claim drops (on macOS
@@ -27,27 +32,44 @@
 //! - Unix: the browser's socket folder ([`BrowserSocketDir`]), `/tmp/clauseo-ab-<id>`, made
 //!   by the host for one launch, removed on drop, and swept at host start.
 //! - Windows: the folder check (`windows::folder_support`), which says whether a folder can
-//!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`.
+//!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`. Tier B's
+//!   records (S15), in `<data_dir>\sandbox\` under a protected DACL: matter SIDs in
+//!   `matters.json` (`windows::matters`), the set-up marker `setup.json` (`windows::marker`),
+//!   the machine's record of the pool (`windows::sandbox_pool_sids`, which the desktop's
+//!   start-up check reads, `windows::sandbox_owner_sid` and the rest; `windows::pool`), and the
+//!   set-up state they give (`windows::setup_state`). Tier B's folder gate (`windows::admit`),
+//!   grant plan (`windows::acl_plan`) and write-ahead ACL ledger (`windows::ledger`); nothing
+//!   writes a permission entry yet.
+
 //!
 //! # Interface
 //!
-//! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `runtime`, `read`,
+//! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `tmpdir`, `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
 //!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
 //!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
-//!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`],
-//!   [`Policy::read_only_in_matter`] ([`PathRule`]s), [`Policy::link_folders`] and
+//!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
+//!   session's temp folder the host set, `<data_dir>/run/<session>/tmp`, read-write without
+//!   its run folder; else `<state>/tmp`, deprecated: R17 PR-D passes `run/<s>/tmp`),
+//!   [`Policy::session_tmpdir`], [`Policy::read_only_in_matter`] ([`PathRule`]s),
+//!   [`Policy::link_folders`] and
 //!   [`Policy::links_outside_link_folders`]; [`Policy::claude_store`] gives a
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
 //!   [`CLAUDE_STORE_LOCK_FOLDERS`], [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]).
 //! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
 //!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
-//!   which also lists every `.git` and the folders `.git` files name.
-//! - [`detect`] and [`probe`] return a [`Detection`]: tier A on macOS when Seatbelt applies a
-//!   profile, C with [`NoSandbox::NotBuilt`] on Windows until S15, C with
+//!   which also lists every `.git`, the folders `.git` files name, and the other
+//!   [`PROTECTED_AT_ANY_DEPTH`] names.
+//! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
+//!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
+//!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
+//!   C with the state's reason otherwise ([`NoSandbox::NeedsSetUp`] with no `setup`); C with
 //!   [`NoSandbox::UnsupportedOs`] elsewhere.
+//! - Windows: `windows::matters::matter_sid``(data_dir, matter)` gives a matter's SID, made and
+//!   saved at its first call (`windows::matters::MatterSids`, `windows::sids::Reserved`);
+//!   `windows::marker::read`, `write` and `state_of`; `windows::setup_state`.
 //! - [`DenialSink`]: `denied` for each denial, `upstream` for the proxy's reachability. `Arc` of
 //!   a sink is a sink. [`CappedSink::new`] wraps one on the real clock, [`CappedSink::with_clock`]
 //!   on any [`Clock`]; [`CappedSink::tick`] delivers a held count from the owner's timer.
@@ -56,9 +78,9 @@
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
 //! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials)` is a `process::Launcher`. Each
 //!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
-//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=<state>/tmp` (made if missing) and
-//!   nothing else: the launcher always adds `SpawnOptions::clear_env` to the options it is
-//!   given, so no variable of the host's environment reaches the jail.
+//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
+//!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
+//!   options it is given, so no variable of the host's environment reaches the jail.
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the
@@ -70,7 +92,9 @@
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
-//! - [`start_proxy`] with a [`ProxyConfig`] (lists, [`Upstream`], sink); the handle's ports,
+//! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
+//!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
+//!   once); the handle's ports,
 //!   `env()`, `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
 //!   [`upstream_for`] routes the host's own HTTPS.
 //! - Unix: [`BrowserSocketDir::create`] (a `flock`ed lock file beside it, then one atomic
@@ -96,8 +120,12 @@
 //! - Time is an input: the rate cap reads only its [`Clock`]; [`SystemClock::new`] is the one
 //!   read of the real clock. A sink gets every denial that passes the cap, with no dedupe; the
 //!   cap calls the inner sink with no lock held.
-//! - Detection runs its probe at most once per process. The probe and the watcher's
-//!   `/usr/bin/log stream` are the only processes this crate starts outside a launcher.
+//! - Detection runs its OS probe at most once per process; Windows' set-up state is read on
+//!   every call, never cached. The probe and the watcher's `/usr/bin/log stream` are the only
+//!   processes this crate starts outside a launcher.
+//! - A matter's SID is random, made once, never given to another matter, and never removed here;
+//!   `matters.json` and `setup.json` change only by whole-file atomic replacement, and a
+//!   `matters.json` that can't be read is refused, never rewritten.
 //! - The proxy decides by host name and never looks inside TLS; it connects only to addresses
 //!   it checked, never resolving a name twice; its token never reaches a log, a `Debug` or the
 //!   upstream.
@@ -108,10 +136,12 @@
 //! `serde` (denials and findings as JSON), `tracing` (skipped folders, a failed probe, the
 //! watcher), `dunce` (canonical paths without `\\?\`); the proxy's `async-executor`,
 //! `async-io`, `futures`, `blocking`, `httparse`, `url`, `psl`, `getrandom`, `base64` and
-//! `subtle`; on macOS, for the watcher, `async-process` (`log stream`) and `serde_json` (its
-//! lines); on Unix, `rustix` (the open-file limit, and the browser socket folder's effective
-//! user id, lock file and `flock`); on Windows, `socket2` and `windows` (the proxy's
-//! listeners).
+//! `subtle`, and `blocklist` (the block list it asks); on macOS, for the watcher,
+//! `async-process` (`log stream`) and `serde_json` (its lines); on Unix, `rustix` (the
+//! open-file limit, and the browser socket folder's effective user id, lock file and `flock`);
+//! on Windows, `socket2` and `windows` (the proxy's
+//! listeners, the folder check, the registry and token reads) and `serde_json` (tier B's
+//! records and ACL ledger, built on every OS).
 //!
 //! # Start reading
 //!
@@ -137,9 +167,9 @@ mod macos;
 mod policy;
 pub mod ports;
 pub mod proxy;
+mod setup;
 #[cfg(test)]
 mod test_support;
-#[cfg(windows)]
 pub mod windows;
 
 #[cfg(unix)]
@@ -148,7 +178,7 @@ pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
     PathClass, Reachability, SystemClock,
 };
-pub use detect::{Detection, NoSandbox, Tier, detect, probe};
+pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 #[cfg(target_os = "macos")]
@@ -156,10 +186,14 @@ pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_NAMES, PathRule, Policy,
-    PolicyBuilder,
+    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
+    PathRule, Policy, PolicyBuilder,
 };
 pub use proxy::{
-    Allowlist, Exchange, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route, Upstream,
-    Verdict, builtin_allowlist, start_proxy, upstream_for,
+    Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route,
+    Upstream, UpstreamAnswer, Verdict, builtin_allowlist, start_proxy, upstream_answer,
+    upstream_for,
 };
+pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
+#[cfg(windows)]
+pub use windows::UserSetup;

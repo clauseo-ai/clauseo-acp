@@ -18,6 +18,7 @@ golden! { HostCommand::name_of {
         matter: matter_id(1),
         client: FieldChange::Set(ClientName::new("Rathi Steels").unwrap()),
         next_date: FieldChange::Clear,
+        skill_packs: FieldChange::Set(pack_list(&["nda-kit", "a1"])),
         pinned: Some(true),
     };
     OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
@@ -109,7 +110,12 @@ golden! { HostCommand::name_of {
         patch: ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: Some(false),
         },
+    };
+    SetSkillPack => set_skill_pack: HostCommand::SetSkillPack {
+        id: PackId::new("nda-kit").unwrap(),
+        on: true,
     };
     SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
         patch: privacy::privacy_patch(),
@@ -127,6 +133,19 @@ golden! { HostCommand::name_of {
     InstallUpdate => install_update: HostCommand::InstallUpdate { when: InstallWhen::AfterTurn };
     CancelScheduledUpdate => cancel_scheduled_update: HostCommand::CancelScheduledUpdate {};
     SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
+    RetryProtection => retry_protection: HostCommand::RetryProtection {};
+    RemoveSandboxSetup => remove_sandbox_setup: HostCommand::RemoveSandboxSetup {};
+    AllowBlockedSite => allow_blocked_site: HostCommand::AllowBlockedSite {
+        block_id: blocked_site_id(3),
+        scope: AllowScope::Matter,
+    };
+    RevokeAllowedSite => revoke_allowed_site: HostCommand::RevokeAllowedSite {
+        host: "evil.example".to_owned(),
+        scope: AllowScope::Matter,
+        matter: Some(matter_id(1)),
+    };
+    // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
+    Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

@@ -1,13 +1,17 @@
 //! [`PolicyBuilder::build`]: canonicalising the inputs and the refusals.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
-use super::{ClaudeStore, Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under};
+use super::{
+    ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
+    PolicyBuilder, same, under,
+};
 use crate::Error;
 use crate::links::{LinkFinding, scan_matter};
 
@@ -20,12 +24,10 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .as_deref()
         .map(|home| beneath_existing(home, "home folder"))
         .transpose()?;
-    let hidden = b
-        .hidden
-        .iter()
-        .map(|p| beneath_existing(p, "hidden path"))
-        .collect::<Result<Vec<_>, _>>()?;
-    check_matter(&matter, &state, home.as_deref(), &hidden)?;
+    let hidden = all_beneath(&b.hidden, "hidden path")?;
+    let home_ref = home.as_deref();
+    check_matter(&matter, &state, home_ref, &hidden)?;
+    let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
 
     let notes = b
         .notes
@@ -59,7 +61,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let read = all_existing(&b.read, "read path")?;
     for (paths, what) in [(&runtime, "a runtime path"), (&read, "a read path")] {
         for p in paths {
-            check_reallowed(p, what, &matter, home.as_deref(), &hidden)?;
+            check_reallowed(p, what, &matter, home_ref, &hidden)?;
         }
     }
     let read_only_in_state = all_inside(
@@ -71,7 +73,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let mut allowed_folders = Vec::new();
     for p in &b.allowed_folders {
         let folder = existing(p, "allowed folder")?;
-        check_allowed(&folder, &matter, home.as_deref(), &hidden)?;
+        check_allowed(&folder, &matter, home_ref, &hidden)?;
         allowed_folders.push(folder);
     }
 
@@ -87,6 +89,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .map(|name| PathRule::Subpath(matter.join(name)))
         .chain(parts.git.into_iter().map(PathRule::Subpath))
         .chain(parts.git_dirs.into_iter().map(PathRule::Subpath))
+        .chain(outermost(parts.nested, &matter))
         .chain(over_cap.iter().cloned().map(PathRule::Literal))
         .collect();
     read_only_in_matter.sort();
@@ -99,6 +102,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
     add_new(&mut links, &found, linked);
     let mut allowed: Vec<&Path> = vec![state.as_path()];
+    allowed.extend(tmpdir.as_deref());
     allowed.extend(runtime.iter().map(PathBuf::as_path));
     allowed.extend(read.iter().map(PathBuf::as_path));
     allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
@@ -113,6 +117,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     Ok(Policy {
         matter,
         state,
+        tmpdir,
         home,
         runtime,
         read,
@@ -146,6 +151,34 @@ fn add_new(links: &mut Vec<LinkFinding>, found: &HashSet<PathBuf>, extra: Vec<Li
             .into_iter()
             .filter(|finding| !found.contains(&keys.of(&finding.path))),
     );
+}
+
+/// A subpath rule for each of `nested`, the [`PROTECTED_AT_ANY_DEPTH`] names the walk found in
+/// `matter` besides `.git`, except one in a folder whose own rule covers it ([`in_denied_folder`]).
+fn outermost(nested: Vec<PathBuf>, matter: &Path) -> impl Iterator<Item = PathRule> {
+    nested
+        .into_iter()
+        .filter(move |p| !in_denied_folder(p, matter))
+        .map(PathRule::Subpath)
+}
+
+/// Whether `path`, a [`PROTECTED_AT_ANY_DEPTH`] name the walk found in `matter`, is inside a
+/// folder whose own rule covers it already: a folder of one of those names, or of one of
+/// [`PROTECTED_NAMES`] at the root (`a/.claude/CLAUDE.md`, `.codex/AGENTS.md`). Names only,
+/// in any letter case, as the walk matched them. A path not below `matter` as written (a scan
+/// the caller gave of another spelling) is kept: one rule too many costs nothing.
+fn in_denied_folder(path: &Path, matter: &Path) -> bool {
+    let Ok(rest) = path.strip_prefix(matter) else {
+        return false;
+    };
+    let mut folders: Vec<&std::ffi::OsStr> = rest.iter().collect();
+    folders.pop();
+    let is =
+        |names: &[&str], name: &std::ffi::OsStr| names.iter().any(|n| name.eq_ignore_ascii_case(n));
+    folders
+        .first()
+        .is_some_and(|first| is(&PROTECTED_NAMES, first))
+        || folders.iter().any(|name| is(&PROTECTED_AT_ANY_DEPTH, name))
 }
 
 /// The folders that hold a `.git`, repositories' working trees: neither they nor a folder above
@@ -211,6 +244,97 @@ fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Er
         ));
     }
     Ok(())
+}
+
+/// The session's temp folder if set, by [`folder_and_name`] after refusing a `p` whose own name
+/// is a symbolic link (the launcher makes the folder if it is missing). It is allowed again
+/// after the hidden paths and holds the agent's writes, so it may not be `/`, equal or hold the
+/// home folder, the state folder or a hidden path, nor be inside the matter or hold it.
+fn tmp_folder(
+    p: Option<&Path>,
+    matter: &Path,
+    state: &Path,
+    home: Option<&Path>,
+    hidden: &[PathBuf],
+) -> Result<Option<PathBuf>, Error> {
+    let Some(p) = p else {
+        return Ok(None);
+    };
+    let what = "temp folder";
+    absolute(p, what)?;
+    if ends_in_dots(p) {
+        return refuse(format!(
+            "the {what} may not end in `.` or `..`: {}",
+            p.display()
+        ));
+    }
+    if fs::symlink_metadata(p).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return refuse(format!(
+            "the {what} may not be a symbolic link: {}",
+            p.display()
+        ));
+    }
+    let tmpdir = folder_and_name(p, what)?;
+    let shown = tmpdir.display();
+    if is_root(&tmpdir) {
+        return refuse(format!("the {what} may not be the root folder: {shown}"));
+    }
+    if home.is_some_and(|home| under(home, &tmpdir)) {
+        return refuse(format!(
+            "the {what} may not equal or hold the home folder: {shown}"
+        ));
+    }
+    if under(state, &tmpdir) {
+        return refuse(format!(
+            "the {what} may not equal or hold the state folder: {shown} and {}",
+            state.display()
+        ));
+    }
+    if overlap(&tmpdir, matter) {
+        return refuse(format!(
+            "the {what} may not be inside the matter or hold it: {shown} and {}",
+            matter.display()
+        ));
+    }
+    if let Some(h) = hidden.iter().find(|h| under(h, &tmpdir)) {
+        return refuse(format!(
+            "the {what} may not equal or hold a hidden path: {shown} and {}",
+            h.display()
+        ));
+    }
+    if !run_shaped(&tmpdir) {
+        return refuse(format!(
+            "the {what} must be `<data_dir>/{RUN_DIR}/<session>/{TEMP_DIR}`: {shown}"
+        ));
+    }
+    Ok(Some(tmpdir))
+}
+
+/// The run folder in the data folder, holding one folder per session.
+const RUN_DIR: &str = "run";
+
+/// The session's temp folder's name in its session folder.
+const TEMP_DIR: &str = "tmp";
+
+/// Whether `p`'s last name, as written, is `.` or `..`: `Path` drops a trailing `.` (and
+/// `file_name` skips `..`), so `run/s1/.` would name `s1`, the folder that holds the token.
+fn ends_in_dots(p: &Path) -> bool {
+    let bytes = p.as_os_str().as_encoded_bytes();
+    let sep = |b: &u8| *b == b'/' || (cfg!(windows) && *b == b'\\');
+    let last = bytes.rsplit(sep).find(|name| !name.is_empty());
+    last.is_some_and(|name| name == b"." || name == b"..")
+}
+
+/// Whether the canonical `tmpdir` is `.../run/<session>/tmp`: named `tmp`, two levels below a
+/// folder named `run`. The policy doesn't know the data folder, so the shape is the rule; tier
+/// B's plan checks that the run folder is the data folder's own (`acl_plan::targets`).
+fn run_shaped(tmpdir: &Path) -> bool {
+    let named =
+        |p: Option<&Path>, name: &str| p.and_then(Path::file_name) == Some(OsStr::new(name));
+    let session = tmpdir.parent();
+    named(Some(tmpdir), TEMP_DIR)
+        && session.and_then(Path::file_name).is_some()
+        && named(session.and_then(Path::parent), RUN_DIR)
 }
 
 /// The rules of a runtime or read path (`what`, with its article), on canonical paths. Both
@@ -346,6 +470,11 @@ pub(super) fn folder_and_name(p: &Path, what: &str) -> Result<PathBuf, Error> {
     };
     let folder = dunce::canonicalize(folder).map_err(|error| cannot_resolve(p, what, &error))?;
     Ok(folder.join(name))
+}
+
+/// Each of `paths`, by [`beneath_existing`].
+fn all_beneath(paths: &[PathBuf], what: &str) -> Result<Vec<PathBuf>, Error> {
+    paths.iter().map(|p| beneath_existing(p, what)).collect()
 }
 
 /// `p` canonical as far as it exists: the longest existing ancestor canonicalised, the rest

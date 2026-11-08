@@ -11,6 +11,9 @@ import { U4B } from "./registry-u4b.tsx";
 import { U10 } from "./registry-u10.tsx";
 import { U11 } from "./registry-u11.tsx";
 import { U12 } from "./registry-u12.tsx";
+import { U15 } from "./registry-u15.tsx";
+import { U15_ROOM } from "./registry-u15-room.tsx";
+import { U17 } from "./registry-u17.tsx";
 import { WEB_SETTINGS } from "./registry-web-settings.tsx";
 import { U16A_RAIL } from "./registry-u16a-rail.tsx";
 import { U16A_FIND } from "./registry-u16a-find.tsx";
@@ -26,6 +29,9 @@ import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
 import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
+import { UD2 } from "./registry-ud2.tsx";
+import { UD2_PLANS } from "./registry-ud2-plans.tsx";
+import { UC } from "./registry-uc.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -54,6 +60,10 @@ import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/s
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
+import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
+import { TN } from "./registry-notices.tsx";
+import { UBL } from "./registry-blocklist.tsx";
+import { R23 } from "./registry-update.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -355,6 +365,9 @@ export const REGISTRY: readonly Entry[] = [
   ...U10,
   ...U11,
   ...U12,
+  ...U15,
+  ...U15_ROOM,
+  ...U17,
   ...WEB_SETTINGS,
   ...U16A_RAIL,
   ...U16A_FIND,
@@ -371,6 +384,9 @@ export const REGISTRY: readonly Entry[] = [
   ...UET,
   ...ME,
   ...UD1,
+  ...UD2,
+  ...UD2_PLANS,
+  ...UC,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),
@@ -565,4 +581,8 @@ export const REGISTRY: readonly Entry[] = [
   },
   ...U16B,
   ...FOLDER_RIGHTS,
+  ...FOLDER_CHOOSER,
+  ...TN,
+  ...UBL,
+  ...R23,
 ];

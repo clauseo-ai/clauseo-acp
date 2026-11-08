@@ -154,6 +154,13 @@ export type StepRowProps = {
   background?: boolean;
   /** Its clock time in the thread's words, first, in the work list's time column, and the ISO form for `<time>`; null while it runs. */
   time?: { text: string; iso: string } | null;
+  /** What came back (U17): its press and, while open, its block, drawn after the words and the mark; none for a row
+   * with nothing to show. */
+  result?: ReactNode;
+  /** Whether that block is open, as the row's data-result; undefined for a row with no result. */
+  resultOpen?: boolean | undefined;
+  /** What came back was an error: the break and the mark's primary ink, whatever the status says. */
+  failed?: boolean;
 };
 
 /** One row of an open group. */
@@ -167,6 +174,9 @@ export function StepRow({
   mark,
   background,
   time = null,
+  result,
+  resultOpen,
+  failed = false,
 }: StepRowProps) {
   return (
     <li
@@ -177,13 +187,20 @@ export function StepRow({
       data-status={status}
       data-kind={kind}
       data-background={background ? true : undefined}
+      data-result={resultOpen === undefined ? undefined : resultOpen ? "open" : "closed"}
+      data-failed={failed ? true : undefined}
     >
       {time !== null && (
         <time className="step-row-time" dateTime={time.iso}>
           {time.text}
         </time>
       )}
-      <ToolKindIcon kind={kind} failed={status === "failed"} size={14} className="step-icon" />
+      <ToolKindIcon
+        kind={kind}
+        failed={failed || status === "failed"}
+        size={14}
+        className="step-icon"
+      />
       <span className="step-row-text" title={hover ?? undefined}>
         <bdi>
           <Say>{text}</Say>
@@ -196,6 +213,7 @@ export function StepRow({
             </span>
           </>
         )}
+        {result}
       </span>
     </li>
   );

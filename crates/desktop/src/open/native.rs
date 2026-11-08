@@ -4,6 +4,7 @@
 //! has no permission for either plugin.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clauseo_host::HostHandle;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId, Principal};
@@ -110,6 +111,11 @@ impl<R: Runtime> Opener for NativeOpener<R> {
             .reveal_item_in_dir(path)
             .map_err(|error| not_opened("folder", &error))
     }
+
+    #[cfg(windows)]
+    fn short_folder(&self, folder: &Path) -> Option<PathBuf> {
+        super::word_path::short_folder(folder)
+    }
 }
 
 /// The host answers both as the local desktop, the principal of every bridge call.
@@ -124,5 +130,9 @@ impl Locate for HostHandle {
             Principal::LocalDesktop,
             matter,
         ))
+    }
+
+    fn marker_check(&self) -> super::MarkerCheck {
+        Arc::new(clauseo_host::check_matter_folder)
     }
 }

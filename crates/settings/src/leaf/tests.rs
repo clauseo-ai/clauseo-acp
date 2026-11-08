@@ -6,8 +6,8 @@
 use super::{KEYS, Leaf, Raw, SECURITY_KEYS, agent_id, typed};
 use crate::policy::kind_of;
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
-    Settings, Theme, ToolsSettings, UpdateMode,
+    AgentLaunch, BrowserSettings, Density, FontSize, Language, Lite, McpServerLaunch, Motion,
+    NetworkSettings, PrivacySettings, SandboxSettings, Settings, Theme, ToolsSettings, UpdateMode,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
@@ -75,7 +75,7 @@ fn a_value_of_the_wrong_type_is_left_out_with_its_key() {
         one("ui.theme", json!("purple")),
         Err(invalid(
             "ui.theme",
-            "unknown variant `purple`, expected one of `system`, `light`, `dark`"
+            "unknown variant, expected one of `system`, `light`, `dark`"
         ))
     );
     // 12 and 13 were sizes before the range moved to 14 to 20: a stored one now warns and the
@@ -92,21 +92,21 @@ fn a_value_of_the_wrong_type_is_left_out_with_its_key() {
         one("ui.language", json!("en-GB")),
         Err(invalid(
             "ui.language",
-            "unknown variant `en-GB`, expected `en` or `hi`"
+            "unknown variant, expected `en` or `hi`"
         ))
     );
     assert_eq!(
         one("ui.lite", json!("sometimes")),
         Err(invalid(
             "ui.lite",
-            "unknown variant `sometimes`, expected one of `automatic`, `on`, `off`"
+            "unknown variant, expected one of `automatic`, `on`, `off`"
         ))
     );
     assert_eq!(
         one("ui.motion", json!(true)),
         Err(invalid(
             "ui.motion",
-            "invalid type: boolean `true`, expected string or map"
+            "invalid type: boolean, expected string or map"
         ))
     );
     assert_eq!(
@@ -214,7 +214,7 @@ fn the_update_mode_is_auto_notify_or_none() {
         one("update.mode", json!("off")),
         Err(invalid(
             "update.mode",
-            "unknown variant `off`, expected one of `auto`, `notify`, `none`"
+            "unknown variant, expected one of `auto`, `notify`, `none`"
         ))
     );
 }
@@ -307,6 +307,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
         (Leaf::Motion(Motion::Reduce), "ui.motion"),
         (Leaf::WebSearch(false), "tools.web_search"),
         (Leaf::Browser(true), "tools.browser"),
+        (Leaf::Connectors(false), "tools.connectors"),
         (Leaf::UpdateMode(UpdateMode::Notify), "update.mode"),
     ];
     let mut settings = Settings::default();
@@ -325,6 +326,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.motion, Motion::Reduce);
     assert!(!settings.tools.web_search);
     assert!(settings.tools.browser);
+    assert!(!settings.tools.connectors);
     assert_eq!(settings.update.mode, UpdateMode::Notify);
 }
 
@@ -342,10 +344,23 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!(true),
         json!(false),
         json!(false),
+        json!(false),
         json!(true),
         json!("notify"),
         json!(abs_str("bundle")),
         json!("https://npm.firm.example"),
+        json!("curated"),
+        json!(["nda-kit"]),
+        json!(true),
+        json!({"nda-kit": format!("sha256:{}", "ab".repeat(32))}),
+        json!(true),
+        json!(false),
+        json!("http://proxy.firm.example:8080"),
+        json!({"claude-acp": abs_str("firm-ca.pem")}),
+        json!(["docs.firm.example", "*.firm.example"]),
+        json!(false),
+        json!(false),
+        json!(true),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -373,11 +388,24 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("full"),
         json!(!ToolsSettings::default().web_search),
         json!(!ToolsSettings::default().browser),
+        json!(!ToolsSettings::default().connectors),
         json!(!PrivacySettings::default().counts),
         json!(!PrivacySettings::default().crash_reports),
         json!("none"),
         json!(abs_str("bundle")),
         json!("https://npm.firm.example"),
+        json!("any"),
+        json!(["nda-kit"]),
+        json!(true),
+        json!({"nda-kit": format!("sha256:{}", "ab".repeat(32))}),
+        json!(!SandboxSettings::default().required),
+        json!(!SandboxSettings::default().allow_unprotected_auto),
+        json!("https://proxy.firm.example"),
+        json!({"codex-acp": abs_str("firm-ca.pem")}),
+        json!(["docs.firm.example"]),
+        json!(!NetworkSettings::default().allow_unsafe_site_override),
+        json!(!NetworkSettings::default().unsafe_site_list_updates),
+        json!(!BrowserSettings::default().allow_when_remote_debugging_disabled),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {
@@ -392,11 +420,10 @@ fn a_refused_key_goes_back_to_its_default() {
         assert_eq!(refused.key(), *key);
         assert!(!refused.is_value());
         refused.apply(&mut settings);
-        assert_eq!(
-            settings,
-            Settings::default(),
-            "{key} did not go back to its default"
-        );
+        // `allow_unprotected_auto` goes to its safe value, `false`, not its default (0051).
+        let mut expected = Settings::default();
+        expected.sandbox.allow_unprotected_auto = *key != "sandbox.allow_unprotected_auto";
+        assert_eq!(settings, expected, "{key} did not go back to its default");
     }
     // An agent's refused key drops that agent and no other.
     let launch = AgentLaunch {

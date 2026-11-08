@@ -8,12 +8,13 @@ use std::path::Path;
 use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, SetFileAttributesW};
 use windows::core::HSTRING;
 
+use crate::long_path::long_path;
+
 /// Sets the attributes of `path` to `attributes`, all of them: the caller passes the ones it
-/// keeps. The path goes as it is, without a `\\?\` prefix, so one over 260 characters fails
-/// (and [`super::hide_dir`] logs it, leaving the folder visible) unless the process is
-/// long-path aware.
+/// keeps. The path goes through [`long_path`], since this call does not get std's own verbatim
+/// prefix: a matter folder past 260 UTF-16 units is hidden too.
 pub(super) fn set_attributes(path: &Path, attributes: u32) -> io::Result<()> {
-    let wide = HSTRING::from(path);
+    let wide = HSTRING::from(long_path(path).as_path());
     // SAFETY: `wide` is a NUL-terminated UTF-16 string that outlives the call, and the call
     // keeps no pointer to it.
     unsafe { SetFileAttributesW(&wide, FILE_FLAGS_AND_ATTRIBUTES(attributes)) }

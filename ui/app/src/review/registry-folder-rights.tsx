@@ -1,4 +1,4 @@
-// Folder rights' copy review entries (FR-01 to FR-15, FR-20): the room's notice for a matter folder Clauseo can't
+// Folder rights' copy review entries (FR-01 to FR-15, FR-20, FR-21): the room's notice for a matter folder Clauseo can't
 // fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
 // in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
 // a folder picked, the host's FolderSupport answering. Apart from registry.tsx to keep that file under the size
@@ -12,7 +12,7 @@ import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
 import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
-import { folderCardWords, folderWords as w, uiWords, type WordsRef } from "./words.ts";
+import { folderCardWords, folderWords as w, matterWords, uiWords, type WordsRef } from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
 const joined = (parts: readonly WordsRef[]): WordsRef => ({
@@ -48,6 +48,12 @@ const picking = (kind: FolderSupportKind) => () =>
   });
 /** New matter, the name typed, and Change: the folder picked, its warning under the folder line. */
 const PICKED: readonly Step[] = [...NEW_MATTER, { press: "matter-existing" }];
+/** New matter, the name typed, and Change over a picker that holds: its line shows after 300 ms. */
+const holding = () =>
+  new FakeTransport({
+    query: () => ({ matters: [MATTER] }),
+    pickFolder: () => new Promise(() => {}),
+  });
 const warned = (kind: FolderSupportKind) => () => <RoomAfter host={picking(kind)} steps={PICKED} />;
 const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => ({
   id,
@@ -158,7 +164,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. Codex can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. For full protection, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -171,7 +177,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. Codex can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
@@ -198,4 +204,8 @@ export const FOLDER_RIGHTS: Entry[] = [
     w("Clauseo couldn't check this folder, so Claude asks before every change."),
     () => <RoomOver host={room("check_failed")} />,
   ),
+  // New matter's line while the folder picker opens (after 300 ms; picker-wait.ts), under the folder line
+  entry("FR-21", matterWords("Opening the folder picker…"), () => (
+    <RoomAfter host={holding} steps={PICKED} />
+  )),
 ];

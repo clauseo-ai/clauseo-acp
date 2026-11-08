@@ -1,9 +1,10 @@
 //! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
-//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>` or `plans.<id>` entry.
-//! Only [`crate::Effective::apply_ui_patch`], [`crate::Effective::apply_tools_patch`],
-//! [`crate::Effective::apply_privacy_patch`], [`crate::Effective::apply_update_mode`],
-//! [`crate::Effective::set_agent_launch`] and [`crate::Effective::set_plan`] call those
-//! writes, after they have checked policy locks.
+//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>`, `plans.<id>` or
+//! `skills.enabled` entry. Only [`crate::Effective::apply_ui_patch`],
+//! [`crate::Effective::apply_tools_patch`], [`crate::Effective::apply_privacy_patch`],
+//! [`crate::Effective::apply_update_mode`], [`crate::Effective::set_agent_launch`],
+//! [`crate::Effective::set_plan`] and [`crate::Effective::set_skill_pack`] call those writes,
+//! after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -45,8 +46,19 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
         }
     };
     match json::read(path, &bytes) {
-        Ok((raws, file_warnings)) => {
+        Ok((raws, file_warnings, _wrapped, _places)) => {
             warnings.extend(file_warnings);
+            // A key twice in one object: the last copy wins, with a warning at the second.
+            if let Ok(Some(position)) = json::duplicate(&bytes) {
+                warnings.push(Warning {
+                    origin: Origin::File {
+                        path: path.to_owned(),
+                        position: Some(position),
+                    },
+                    kind: WarningKind::DuplicateKey,
+                });
+            }
+            let raws = leaf::without_policy_only(raws, warnings);
             leaf::typed(raws, Vec::new(), warnings)
         }
         Err(syntax) => {
@@ -159,6 +171,32 @@ pub(crate) fn write_entry(
     }
     save_document(locations, files, &document)?;
     Ok(true)
+}
+
+/// Saves one entry of `skills.enabled` in the user's `settings.json`: `hash` becomes the entry
+/// `id`, or `None` removes it, and every other key stays, as [`write_user_settings`] keeps
+/// them. A `skills` or `enabled` that is not an object is replaced by one. It checks neither
+/// locks nor the id and hash: [`crate::Effective::set_skill_pack`] does, before it calls this.
+pub(crate) fn write_skill_pack(
+    locations: &Locations,
+    files: &dyn Files,
+    id: &str,
+    hash: Option<&str>,
+) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let Value::Object(skills) = section_mut(&mut document, "skills")
+        && let Value::Object(entries) = section_mut(skills, "enabled")
+    {
+        match hash {
+            Some(hash) => {
+                entries.insert(id.to_owned(), Value::String(hash.to_owned()));
+            }
+            None => {
+                entries.remove(id);
+            }
+        }
+    }
+    save_document(locations, files, &document)
 }
 
 /// The user's `settings.json` as one object: empty when the file is missing; an error, with

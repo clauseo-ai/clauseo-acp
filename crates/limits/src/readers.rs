@@ -13,14 +13,16 @@ mod run;
 mod tap;
 mod time;
 
-use std::future::{Future, ready};
+use std::future::Future;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
+use zeroize::{Zeroize as _, Zeroizing};
 
 pub(crate) use claude::looks_like_email;
 pub use codex::CODEX_OVERRIDES;
@@ -86,29 +88,64 @@ pub enum ReadFailure {
     Malformed(String),
 }
 
-/// The stored API key of an agent, asked at each read; `None` or empty for no key.
-type LaunchEnv = Arc<dyn Fn(AgentKind) -> Option<String> + Send + Sync>;
+/// The variables a read of an agent adds over its entry's, asked at each read: the stored API
+/// key and the firm plan's variables, as the caller's launch hook adds them. Zeroed when dropped.
+type LaunchEnv = Arc<dyn Fn(AgentKind) -> Vec<(String, Zeroizing<String>)> + Send + Sync>;
 
-/// The variable a stored key goes in for `agent`.
-fn key_var(agent: AgentKind) -> &'static str {
-    match agent {
-        AgentKind::Claude => "ANTHROPIC_API_KEY",
-        AgentKind::Codex => "CODEX_API_KEY",
+/// One read's entry, with the read's variables in: its variables, the stored API key among
+/// them, are zeroed when it drops, a read that is dropped mid-way included.
+struct ReadEntry(AgentLaunch);
+
+impl Drop for ReadEntry {
+    fn drop(&mut self) {
+        for value in self.0.env.values_mut() {
+            value.zeroize();
+        }
     }
 }
 
-/// `launch` with `agent`'s stored key, if `launch_env` gives one. Asked once the read is past
-/// its gate, so a read held over a key change carries the new key.
-fn with_stored_key(
+impl Deref for ReadEntry {
+    type Target = AgentLaunch;
+
+    fn deref(&self) -> &AgentLaunch {
+        &self.0
+    }
+}
+
+/// The settings entries, shared by every copy of the readers ([`ProcessReaders::with_entry`]).
+/// Never `Debug`-printed: an env may hold secrets.
+#[derive(Default)]
+struct Entries {
+    claude: Option<AgentLaunch>,
+    codex: Option<AgentLaunch>,
+}
+
+/// `agent`'s entry as it is now, with `launch_env`'s variables, each over any settings
+/// variable of that name in any case; `None` with no entry. Asked once the read is past its
+/// gate, so a read held over a login, key or entry change reads the new one.
+fn entry_now(
+    entries: &RwLock<Entries>,
     launch_env: Option<&LaunchEnv>,
     agent: AgentKind,
-    mut launch: AgentLaunch,
-) -> AgentLaunch {
-    let key = launch_env.and_then(|key| key(agent));
-    if let Some(key) = key.filter(|key| !key.is_empty()) {
-        env::with_key(&mut launch.env, key_var(agent), key);
+) -> Option<ReadEntry> {
+    let entries = entries.read().unwrap_or_else(PoisonError::into_inner);
+    let mut launch = ReadEntry(match agent {
+        AgentKind::Claude => entries.claude.clone(),
+        AgentKind::Codex => entries.codex.clone(),
+    }?);
+    drop(entries);
+    for (name, value) in launch_env.map(|vars| vars(agent)).unwrap_or_default() {
+        // The entry's copy is zeroed with it; `value` is zeroed here.
+        env::with_key(&mut launch.0.env, &name, String::clone(&value));
     }
-    launch
+    Some(launch)
+}
+
+/// The read of an agent with no entry.
+fn no_entry(id: &str) -> ReadOutcome {
+    ReadOutcome::Failed(ReadFailure::LaunchFailed(format!(
+        "no settings entry for {id}"
+    )))
 }
 
 /// Reads one agent's limits.
@@ -129,21 +166,24 @@ pub trait ReadLimits: Send + Sync {
 /// path checks, the compare of a ~4 KiB file, at most one small write, and the folder creation.
 /// Poll it where a brief block is fine.
 ///
-/// With [`ProcessReaders::with_launch_env`] each read also carries the agent's stored API key
-/// (`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for Codex), so a key sign-in reads as
-/// pay-as-you-go. [`ProcessReaders::hold`] keeps an agent's reads off while its login changes,
-/// until its [`HoldGuard`] drops (decision record 0048).
+/// With [`ProcessReaders::with_launch_env`] each read also carries the caller's variables: the
+/// agent's stored API key (`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for Codex), so a key
+/// sign-in reads as pay-as-you-go, and its firm plan's routing, so the read goes where the
+/// agent's launches go. [`ProcessReaders::hold`] keeps an agent's reads off while its login
+/// changes, until its [`HoldGuard`] drops (decision record 0048).
 pub struct ProcessReaders<T> {
     launcher: Arc<dyn Launcher>,
     timer: T,
-    /// Claude's settings entry, if it has one. Never `Debug`-printed: its env may hold secrets.
-    claude: Option<AgentLaunch>,
-    /// Codex's settings entry, if it has one. Never `Debug`-printed either.
-    codex: Option<AgentLaunch>,
+    /// Claude's and Codex's settings entries, shared by every copy, read once a read is past
+    /// its gate.
+    entries: Arc<RwLock<Entries>>,
     /// The readers' working folder, `<data_dir>/limits/run`.
     run_dir: PathBuf,
     /// Clauseo's own Codex home, which the Codex reader forces as `CODEX_HOME`.
     codex_home: PathBuf,
+    /// Clauseo's own Claude home, which the Claude reader forces as `CLAUDE_CONFIG_DIR`;
+    /// `None` leaves the entry's and the inherited variable as they are.
+    claude_home: Option<PathBuf>,
     /// G16's copy of each reader's stdout; `None` everywhere but its live tests.
     tap: Option<tap::StdoutTap>,
     /// Each agent's stored key, asked at each read; `None` for no key source.
@@ -177,20 +217,20 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
         if let Some(launch) = &claude
             && let Err(err) = paths::claude(launch)
         {
-            tracing::warn!(error = %err, "Claude's limits reader is refused");
+            tracing::warn!(kind = err.kind(), "Claude's limits reader is refused");
         }
         if let Some(launch) = &codex
             && let Err(err) = paths::codex_js(launch)
         {
-            tracing::warn!(error = %err, "Codex's limits reader is refused");
+            tracing::warn!(kind = err.kind(), "Codex's limits reader is refused");
         }
         ProcessReaders {
             launcher,
             timer,
-            claude,
-            codex,
+            entries: Arc::new(RwLock::new(Entries { claude, codex })),
             run_dir: effective.data_dir().join("limits").join("run"),
             codex_home,
+            claude_home: None,
             tap: None,
             launch_env: None,
             claude_gate: Arc::default(),
@@ -198,18 +238,73 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
         }
     }
 
-    /// These readers, asking `key` for the agent's stored API key at each read (desktop asks
-    /// the OS keychain). A key goes in as `ANTHROPIC_API_KEY` (Claude) or `CODEX_API_KEY`
-    /// (Codex), over any settings variable of that name in any case; `None` or an empty key
-    /// leaves the settings variables as they are. The key is never logged, and a tail that
-    /// echoes it shows `[redacted]`.
+    /// These readers, asking `vars` at each read, once past the gate, for the variables the
+    /// read adds: desktop gives the same ones its launch hook gives the agent (decision record
+    /// 0048), the stored API key as `ANTHROPIC_API_KEY` (Claude) or `CODEX_API_KEY` (Codex) and
+    /// the firm plan's routing (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, the plan's
+    /// `env`). Each goes over any settings variable of that name in any case; a name not given
+    /// leaves the settings variable as it is. No value is logged, and a tail that echoes a key
+    /// shows `[redacted]`. The values, and the read's copy of its entry with them in, are zeroed
+    /// when dropped.
     #[must_use]
     pub fn with_launch_env(
         mut self,
-        key: impl Fn(AgentKind) -> Option<String> + Send + Sync + 'static,
+        vars: impl Fn(AgentKind) -> Vec<(String, Zeroizing<String>)> + Send + Sync + 'static,
     ) -> ProcessReaders<T> {
-        self.launch_env = Some(Arc::new(key));
+        self.launch_env = Some(Arc::new(vars));
         self
+    }
+
+    /// These readers, forcing `CLAUDE_CONFIG_DIR` to `claude_home` (Clauseo's own Claude home,
+    /// `Locations::agent_home`) last in each Claude read's env, over any inherited or settings
+    /// variable of that name in any case, as the host forces it at an agent's launch (decision
+    /// record 0048): an inherited `CLAUDE_CONFIG_DIR` never points the read at another login.
+    #[must_use]
+    pub fn with_claude_home(mut self, claude_home: PathBuf) -> ProcessReaders<T> {
+        self.claude_home = Some(claude_home);
+        self
+    }
+
+    /// Replaces `agent`'s settings entry with `launch` (`None` for no entry), for desktop to
+    /// call after each entry it writes. Every copy of these readers shares the entries, and a
+    /// read takes its entry once past its gate, so a read queued behind a hold reads the entry
+    /// set before the hold drops. An entry whose paths break a rule is logged here, at `warn`,
+    /// by its agent and the error's kind only, as [`ProcessReaders::new`] logs one.
+    pub fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
+        if let Some(launch) = &launch {
+            let refused = match agent {
+                AgentKind::Claude => paths::claude(launch).err(),
+                AgentKind::Codex => paths::codex_js(launch).err(),
+            };
+            if let Some(err) = refused {
+                tracing::warn!(kind = err.kind(), ?agent, "a limits reader is refused");
+            }
+        }
+        let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
+        match agent {
+            AgentKind::Claude => entries.claude = launch,
+            AgentKind::Codex => entries.codex = launch,
+        }
+    }
+
+    /// [`Self::set_entry`], then a copy of these readers. The copy shares these readers'
+    /// entries, gates and variable source, so a hold taken on either holds both and a
+    /// [`HoldGuard`] taken before survives the copy; every other part is kept.
+    #[must_use]
+    pub fn with_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) -> ProcessReaders<T> {
+        self.set_entry(agent, launch);
+        ProcessReaders {
+            launcher: Arc::clone(&self.launcher),
+            timer: self.timer.clone(),
+            entries: Arc::clone(&self.entries),
+            run_dir: self.run_dir.clone(),
+            codex_home: self.codex_home.clone(),
+            claude_home: self.claude_home.clone(),
+            tap: self.tap.clone(),
+            launch_env: self.launch_env.clone(),
+            claude_gate: Arc::clone(&self.claude_gate),
+            codex_gate: Arc::clone(&self.codex_gate),
+        }
     }
 
     /// Holds `agent`'s reads from this call on, and answers a future that resolves to the
@@ -244,33 +339,25 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
     fn read(&self, agent: AgentKind) -> Pin<Box<dyn Future<Output = ReadOutcome> + Send>> {
         match agent {
             AgentKind::Claude => {
-                let Some(launch) = self.claude.as_ref() else {
-                    let message = format!("no settings entry for {CLAUDE_ID}");
-                    return Box::pin(ready(ReadOutcome::Failed(ReadFailure::LaunchFailed(
-                        message,
-                    ))));
-                };
-                let launch = launch.clone();
+                let entries = Arc::clone(&self.entries);
                 let launch_env = self.launch_env.clone();
                 let launcher = Arc::clone(&self.launcher);
                 let timer = self.timer.clone();
                 let run_dir = self.run_dir.clone();
+                let claude_home = self.claude_home.clone();
                 let tap = self.tap.clone();
                 let gate = Arc::clone(&self.claude_gate);
                 Box::pin(async move {
                     let _running = gate.enter().await;
-                    let launch = with_stored_key(launch_env.as_ref(), agent, launch);
-                    claude::read(&*launcher, &timer, &launch, &run_dir, tap).await
+                    let Some(launch) = entry_now(&entries, launch_env.as_ref(), agent) else {
+                        return no_entry(CLAUDE_ID);
+                    };
+                    let home = claude_home.as_deref();
+                    claude::read(&*launcher, &timer, &launch, &run_dir, home, tap).await
                 })
             }
             AgentKind::Codex => {
-                let Some(launch) = self.codex.as_ref() else {
-                    let message = format!("no settings entry for {CODEX_ID}");
-                    return Box::pin(ready(ReadOutcome::Failed(ReadFailure::LaunchFailed(
-                        message,
-                    ))));
-                };
-                let launch = launch.clone();
+                let entries = Arc::clone(&self.entries);
                 let launch_env = self.launch_env.clone();
                 let launcher = Arc::clone(&self.launcher);
                 let timer = self.timer.clone();
@@ -280,7 +367,9 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let gate = Arc::clone(&self.codex_gate);
                 Box::pin(async move {
                     let _running = gate.enter().await;
-                    let launch = with_stored_key(launch_env.as_ref(), agent, launch);
+                    let Some(launch) = entry_now(&entries, launch_env.as_ref(), agent) else {
+                        return no_entry(CODEX_ID);
+                    };
                     codex::read(&*launcher, &timer, &launch, &run_dir, &codex_home, tap).await
                 })
             }

@@ -2,6 +2,17 @@
 slow-timeout = { period = "10s", terminate-after = 3 } # unit tests are fast; 30 s kills a hung test
 fail-fast = false
 
+# The `elevated_` tests (D-B16, split §8) make and delete local accounts, groups and HKLM keys,
+# so they run one at a time whatever --test-threads says. Set in default, so ci and quarantine
+# inherit it; CI's elevated step also passes --test-threads 1.
+[test-groups]
+elevated = { max-threads = 1 }
+real-chrome = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/(^|::)elevated_/)'
+test-group = 'elevated'
+
 # The store's tests wait on real syncs (synchronous=FULL), so they run at the disk's speed, not
 # the CPU's. On the Windows runner the disk once stalled for about 140 s (issue #83, run
 # 41131302912 attempt 1): store tests were 25 to 57 times slower from 21:37:38 to 21:39:16, and
@@ -52,6 +63,34 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The sandbox's elevated set-up exe test makes a fresh pool, 8 users since the top-up (#609), and
+# each user's first logon makes its profile: 12 to 15 s each on the windows-2025 runner (CI run
+# 42339880668), so about 2 min with the removal after; 30 s killed it. 300 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/elevated_set_up_/)'
+slow-timeout = { period = "30s", terminate-after = 10 }
+
+# The sandbox's elevated logon tests log a pool user on for real, and a first logon makes the
+# profile: 20 s for one logon on the windows-2025 runner (run 42399836578, log_on_once). The
+# profile reset test logs on twice with a profile delete between, so 30 s killed it on both
+# tries in that run. 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/(^|::)elevated_/) & test(/::logon::tests::/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# The owner's task run test logs a new account on twice (its first makes its profile, 20 to 40 s)
+# and waits up to 15 s three times for the Task Scheduler; 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/elevated_the_owner_can_start_and_end/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# The sandbox's tier B timing row (ignored; run on a Windows VM with --run-ignored) makes 50,000
+# files, then times three walks over them: about 11 s, 10 s and 10 s each on the S15 PR3 VM run at
+# fca0bf0ca, plus the file creation, so 30 s killed it on 3 of 3 tries. 600 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(=windows::apply::ntfs_tests::timing_first_propagation_and_fix_costs)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # host's window-specs test launches the host and fake_agent once for every scenario the window's
 # e2e specs play, one after another, so it grows with each new spec: about 2.3 s on Linux and
 # macOS, 15 s on the Windows x64 runner, and past 30 s on both tries on Windows ARM64 (merge
@@ -82,6 +121,17 @@ threads-required = "num-cpus"
 filter = 'package(xtask) & (test(/^buildtime::(worktree|profile)::tests::/) | test(/^checks::core_io::tests::clippy::/))'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# The guard's real-Chrome tests (crates/mcp/tests/guard/real_chrome.rs; they run where
+# CLAUSEO_TEST_AGENT_BROWSER is set, CI's Linux job) each start Chrome, 11 or 12 processes. Run side
+# by side on the loaded runner, Chrome took more than 10 s to listen once its start was logged, and
+# a_guard_killed_while_chrome_starts_leaves_no_chrome failed its first try in four merge groups
+# after #534 (first run 42223670975). They run one at a time; the test's wait for Chrome to listen
+# is 60 s, and 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-mcp) & binary(guard) & test(/^real_chrome::/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+test-group = 'real-chrome'
+
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
 # once under the runner's load does not eject a pull request from the merge queue. Flakes are still
@@ -97,22 +147,24 @@ junit = { path = "junit.xml" }
 # still runs them (profile quarantine below), so it shows when one is fixed. Each entry names its
 # tracking issue; an entry comes out in the fix's pull request. The same expression is in both
 # profiles: keep them equal.
-#   - agents install tests, on Windows only: stall all at once on the loaded runner, 11 timed out
-#     on Windows x64 in run 41840642164 (stage D's #366 gives them 160 s)
 #   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
-default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does))'
-# On Windows the agents install tests too (their stalls are the Windows runner's; Linux and macOS
-# keep gating them while their crate changes).
+#   - clauseo-host::host stop_for::a_login_switch_stop_still_shows_switching_with_a_turn_put_back: failed then passed on retry 1 time since 2026-11-06; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/42278168966/job/128102060184 (autoquarantine)
+#   - clauseo-host::host stop_for::the_latest_stop_sets_the_shown_reason: failed then passed on retry 1 time since 2026-11-07; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/42375835017/job/128416319155 (autoquarantine)
+#   - clauseo-host::host stop_for::a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once: failed then passed on retry 1 time since 2026-11-07; first https://github.com/clauseo-ai/clauseo-acp/pull/680 (host thread: a local full run, passes alone)
+#   - clauseo-mcp::guard lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts: failed then passed on retry 1 time since 2026-11-08; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/42443733243/job/128618222371 (autoquarantine)
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-host) & binary(host) & test(=stop_for::a_login_switch_stop_still_shows_switching_with_a_turn_put_back) | package(clauseo-host) & binary(host) & test(=stop_for::the_latest_stop_sets_the_shown_reason) | package(clauseo-host) & binary(host) & test(=stop_for::a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once) | package(clauseo-mcp) & binary(guard) & test(=lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts))'
+# The Windows overrides are their profile's line plus the tests quarantined on Windows
+# only; the hourly auto-quarantine reads and writes all four lines, so keep them.
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install))'
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-host) & binary(host) & test(=stop_for::a_login_switch_stop_still_shows_switching_with_a_turn_put_back) | package(clauseo-host) & binary(host) & test(=stop_for::the_latest_stop_sets_the_shown_reason) | package(clauseo-host) & binary(host) & test(=stop_for::a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once) | package(clauseo-mcp) & binary(guard) & test(=lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
 [profile.quarantine]
 retries = 1
 failure-output = "immediate-final"
-default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-host) & binary(host) & test(=stop_for::a_login_switch_stop_still_shows_switching_with_a_turn_put_back) | package(clauseo-host) & binary(host) & test(=stop_for::the_latest_stop_sets_the_shown_reason) | package(clauseo-host) & binary(host) & test(=stop_for::a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once) | package(clauseo-mcp) & binary(guard) & test(=lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-host) & binary(host) & test(=stop_for::a_login_switch_stop_still_shows_switching_with_a_turn_put_back) | package(clauseo-host) & binary(host) & test(=stop_for::the_latest_stop_sets_the_shown_reason) | package(clauseo-host) & binary(host) & test(=stop_for::a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once) | package(clauseo-mcp) & binary(guard) & test(=lazy::the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts)'

@@ -1,200 +1,61 @@
 //! What `Host::start` needs: the settings, the launcher, and the parts tests swap out.
 
-use std::collections::BTreeMap;
+#[cfg(feature = "test-support")]
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_acp::McpServer;
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_profile::{SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentId, MatterId, ThreadId};
+use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
-use serde_json::{Map, Value};
 
+use crate::agent::login_link::{LoginCheck, SignInAgain};
+use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
+#[cfg(feature = "test-support")]
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
+use crate::update::{NoUpdater, Updater};
 
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
-/// What Clauseo's launch profile adds to an agent's session and launch (decision record 0030).
-/// The host calls it at each launch and session start, with only the agent's id, then fills the
-/// per-session placeholders (`clauseo_profile::placeholders`) and sets its own keys over what
-/// the hook returned (`agent/loads.rs` lists them):
-///
-/// - `session_meta` becomes the `_meta` of `session/new` and `session/load`. A
-///   `claudeCode.options.mcpServers` in it is removed in every MCP control mode: servers come
-///   only from [`ProfileHook::mcp_servers`].
-/// - `launch_env` fills the hook slot of the agent's launch.
-/// - `mcp_servers` go after the lawyer's enabled servers. The host fills each `browser`
-///   entry's tokens per session, or drops the entry (no proxy, no browser, too many browsers,
-///   `tools.browser` off, or the firm's `managed-mcp.json`).
-/// - `codex_config` keys go into a Codex agent's `CODEX_CONFIG`, added only where R15's keys
-///   and the host's own (`web_search`, `hooks`) leave room.
-/// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
-///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
-///
-/// Every method runs on the host thread, at each launch and session start, and must do no I/O:
-/// no file, network or process call, and nothing that blocks. It hands back data the adapter
-/// already holds; the host does any file work (writing `launch_writes`) off that thread.
-pub trait ProfileHook: Send {
-    /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>>;
-    /// Variables set on top of the agent's own when it launches.
-    fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString>;
-    /// MCP servers for `agent`'s sessions, after the lawyer's (default: none). Strings may hold
-    /// `clauseo_profile::placeholders::IN_SERVERS` tokens.
-    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
-        Vec::new()
-    }
-    /// Keys for a Codex agent's `CODEX_CONFIG`, as nested objects (default: none). Strings may
-    /// hold `clauseo_profile::placeholders::IN_INSTRUCTIONS` tokens in `developer_instructions`.
-    /// `written` is this launch's own token, from writing the first of [`Self::launch_writes`]
-    /// on its launch-prep thread; `None` when that write failed or there was none. The desktop
-    /// adapter hands it to `ClauseoProfile::codex_keys`, and without it calls
-    /// `ClauseoProfile::codex_keys_without_index`, so the skills index names only files this
-    /// launch wrote (decision record 0031).
-    fn codex_config(
-        &self,
-        _agent: &AgentId,
-        _written: Option<&SkillsWritten>,
-    ) -> Map<String, Value> {
-        Map::new()
-    }
-    /// The skills writes to run, in order, before `agent` starts (default: none), as
-    /// `ClauseoProfile::launch_writes` gives them: Claude's plugin first, for a Codex agent too,
-    /// since Codex reads its skills through the index in its instructions. A write failure is a
-    /// warning, never a failed launch.
-    fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
-        Vec::new()
-    }
-}
-
-/// One agent session, as the egress proxy knows it: the matter, the thread, and the launch (the
-/// launch prep's id, from the same counter as the agent's).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SessionKey {
-    /// The thread's matter.
-    pub matter: MatterId,
-    /// The thread.
-    pub thread: ThreadId,
-    /// The launch.
-    pub launch: u64,
-}
-
-impl SessionKey {
-    /// The session's id, `<thread>-<launch>`: the name of its `run/` folder and agent-browser's
-    /// session name.
-    pub fn id(&self) -> String {
-        format!("{}-{}", self.thread, self.launch)
-    }
-}
-
-/// The egress proxy, as the host asks it (stage C's R17 implements it). Until it exists,
-/// production passes none and the `browser` entry is left out (`NoProxy`).
-pub trait EgressProxy: Send + Sync {
-    /// The port of `session`'s browser listener, or none.
-    fn port_for(&self, session: SessionKey) -> Option<u16>;
-}
-
-/// A proxy stand-in for tests: the same port for every session.
+mod idle;
+pub(crate) use idle::IdleStop;
+pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
+mod profile_hook;
+pub use profile_hook::{NoProfile, ProfileHook};
+mod parts;
+pub(crate) use parts::{ConfigParts, UpdateSeams};
+mod sandbox;
+pub use sandbox::{Detect, Sandbox};
+mod egress;
 #[cfg(feature = "test-support")]
-#[derive(Debug, Clone, Copy)]
-pub struct TestProxy(pub u16);
+pub use egress::TestProxy;
+pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
+mod session;
+pub use session::SessionKey;
+mod wiring;
+pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
-#[cfg(feature = "test-support")]
-impl EgressProxy for TestProxy {
-    fn port_for(&self, _session: SessionKey) -> Option<u16> {
-        Some(self.0)
-    }
-}
-
-/// What the browser entry and the agents' `PATH` need beyond the hook: the proxy, stetdoc's
-/// folder, where to look for Chrome, and the browser slots.
-#[derive(Clone)]
-pub(crate) struct LaunchWiring {
-    pub(crate) proxy: Option<Arc<dyn EgressProxy>>,
-    pub(crate) path_prepend: Option<PathBuf>,
-    /// A Chrome the tests force, in place of the search.
-    pub(crate) browser_executable: Option<PathBuf>,
-    /// Where the launch prep looks for Chrome; `None` is this machine's roots
-    /// (`ChromeRoots::system` with the data folder as app data).
-    pub(crate) chrome_roots: Option<ChromeRoots>,
-    /// The browser slots: the limit from the machine's memory, and the sessions holding one.
-    pub(crate) browser_slots: BrowserSlots,
-    /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
-    /// `None` is `/tmp`. Tests pass a folder of their own.
-    #[cfg(unix)]
-    pub(crate) browser_socket_root: Option<PathBuf>,
-    /// The environment an agent's spec starts from, in place of the host's own
-    /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
-    pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
-    /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
-    pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
-}
-
-impl Default for LaunchWiring {
-    fn default() -> Self {
-        Self {
-            proxy: None,
-            path_prepend: None,
-            browser_executable: None,
-            chrome_roots: None,
-            browser_slots: BrowserSlots::new(None),
-            #[cfg(unix)]
-            browser_socket_root: None,
-            inherited_env: None,
-            install_tools: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for LaunchWiring {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LaunchWiring")
-            .field("proxy", &self.proxy.is_some())
-            .field("path_prepend", &self.path_prepend)
-            .field("browser_executable", &self.browser_executable)
-            .field("chrome_roots", &self.chrome_roots)
-            .field("browser_slots", &self.browser_slots)
-            // Names and values stay out: the environment holds secrets.
-            .field("inherited_env", &self.inherited_env.is_some())
-            .field("install_tools", &self.install_tools.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-/// No profile: no `_meta`, no extra variables.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoProfile;
-
-impl ProfileHook for NoProfile {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
-        None
-    }
-
-    fn launch_env(&self, _agent: &AgentId) -> BTreeMap<OsString, OsString> {
-        BTreeMap::new()
-    }
-}
+pub use crate::actor::turn::PackRequest;
 
 /// How to start a host. The data folder is `Effective::data_dir()`.
 #[non_exhaustive]
 pub struct HostConfig {
-    effective: Effective,
+    pub(crate) effective: Effective,
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
+    documents: Option<crate::actor::documents::Later>,
     home_folder: Option<PathBuf>,
-    clock: Arc<dyn Clock>,
+    pub(crate) clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
     managed_mcp: PathBuf,
@@ -203,35 +64,15 @@ pub struct HostConfig {
     folder_check: crate::agent::folder_support::CheckSource,
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
-    wiring: LaunchWiring,
+    pub(crate) wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
+    scratch: crate::actor::scratch::Seams,
+    folder_probes: crate::actor::FolderProbes,
     counts: Option<Counts>,
     search: SearchSeams,
-}
-
-/// A `HostConfig` taken apart by the host thread.
-pub(crate) struct ConfigParts {
-    pub(crate) effective: Effective,
-    pub(crate) launcher: Arc<dyn Launcher>,
-    pub(crate) profile: Box<dyn ProfileHook>,
-    pub(crate) refused_folders: Vec<PathBuf>,
-    pub(crate) home_folder: Option<PathBuf>,
-    pub(crate) clock: Arc<dyn Clock>,
-    pub(crate) ids: Box<dyn IdSource>,
-    pub(crate) patch_window_bytes: usize,
-    pub(crate) managed_mcp: PathBuf,
-    pub(crate) app_capacity: usize,
-    pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
-    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
-    pub(crate) pre_write_guard: Option<PathBuf>,
-    /// The limits reader a caller set; `None` builds the default at start-up.
-    pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
-    pub(crate) wiring: LaunchWiring,
-    pub(crate) scan_walk: crate::actor::scan::Walk,
-    /// The usage counts a caller set; `None` counts nothing.
-    pub(crate) counts: Option<Counts>,
-    /// The search thread's test seams.
-    pub(crate) search: SearchSeams,
+    update: UpdateSeams,
+    idle: IdleStop,
+    sandbox: Option<Sandbox>,
 }
 
 impl HostConfig {
@@ -250,6 +91,7 @@ impl HostConfig {
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),
+            documents: None,
             home_folder: SystemDirs.home(),
             clock: Arc::new(SystemClock),
             ids: Box::new(RandomV7::new()),
@@ -262,8 +104,20 @@ impl HostConfig {
             limits_reader: None,
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
+            scratch: crate::actor::scratch::Seams::default(),
+            folder_probes: crate::actor::FolderProbes::default(),
             counts: None,
             search: SearchSeams::default(),
+            update: UpdateSeams {
+                updater: Arc::new(NoUpdater),
+                jitter_seed: None,
+                // Only a caller that knows the app's version (desktop) can do better.
+                app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                #[cfg(feature = "test-support")]
+                fail_close: false,
+            },
+            idle: IdleStop::default(),
+            sandbox: None,
         }
     }
 
@@ -277,6 +131,28 @@ impl HostConfig {
         self
     }
 
+    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
+    /// The host checks and downloads through it on its own pool (decision record 0037).
+    pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
+        self.update.updater = updater;
+        self
+    }
+
+    /// The seed of the updater's check delays (default: one taken from the clock at start), so a
+    /// test with `ManualClock` knows when each check comes.
+    pub fn with_update_jitter_seed(mut self, seed: u64) -> Self {
+        self.update.jitter_seed = Some(seed);
+        self
+    }
+
+    /// The app's version, `0.4.1` (default: this crate's own version, which is not the app's).
+    /// Desktop passes its `tauri.conf.json` version: `GetUpdate` shows it, and the marker of an
+    /// install compares it at the next start.
+    pub fn with_app_version(mut self, version: String) -> Self {
+        self.update.app_version = version;
+        self
+    }
+
     /// The profile hook (default: [`NoProfile`]).
     pub fn with_profile_hook(mut self, hook: Box<dyn ProfileHook>) -> Self {
         self.profile = hook;
@@ -287,6 +163,19 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// The default matters folder comes later (default: it is in the settings from the start):
+    /// the host starts without waiting on Documents and takes `later`'s folders when they come
+    /// (`Locations::with_documents`). Until then `GetDefaultLocation`, a create or check in the
+    /// default location and the Scratch matter wait for them, at most 5 s on the host clock,
+    /// then are refused as retryable; a dropped sender leaves no default matters folder.
+    pub fn with_documents_later(
+        mut self,
+        later: futures::channel::oneshot::Receiver<clauseo_settings::Locations>,
+    ) -> Self {
+        self.documents = Some(later);
         self
     }
 
@@ -321,10 +210,31 @@ impl HostConfig {
         self
     }
 
-    /// The egress proxy that gives each session's browser its port (default: none, so no session
-    /// gets the `browser` server and the header shows it unavailable with `NoProxy`).
+    /// The egress proxy giving each session's browser its port (default: none: no `browser`
+    /// server, shown as `NoProxy`); one opens per launch with the browser ([`EgressProxy`]).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
+        self
+    }
+
+    /// The removal wait's cap (default [`DEFAULT_TREE_WAIT`]; `launch_checks::straggler`).
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait(mut self, wait: std::time::Duration) -> Self {
+        self.wiring.tree_wait = wait;
+        self
+    }
+
+    /// Runs as a removal's wait starts, with the session's Chrome port: a test binds it there.
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait_hook(mut self, hook: Arc<dyn Fn(Option<u16>) + Send + Sync>) -> Self {
+        self.wiring.tree_wait_hook = Some(hook);
+        self
+    }
+
+    /// Makes every removal's thread fail to start: a test checks the run's parts are held.
+    #[cfg(feature = "test-support")]
+    pub fn with_removal_thread_failing(mut self) -> Self {
+        self.wiring.removal_thread_fails = true;
         self
     }
 
@@ -378,6 +288,18 @@ impl HostConfig {
         self
     }
 
+    /// What the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` says, for tests that
+    /// pass a fake (default under `test-support`: nothing set; in production, this machine's
+    /// registry, managed preferences or policy folders).
+    #[cfg(feature = "test-support")]
+    pub fn with_remote_debugging_policy(
+        mut self,
+        policy: Arc<dyn clauseo_settings::chromium_policy::RemoteDebuggingPolicy>,
+    ) -> Self {
+        self.wiring.rd_policy = Arc::new(crate::browser::rd_policy::RdPolicy::new(policy));
+        self
+    }
+
     /// Where the launch prep looks for Chrome (default: this machine's places, with the data
     /// folder as the app data folder that holds Chrome for Testing). Tests pass fixture folders.
     pub fn with_chrome_roots(mut self, roots: ChromeRoots) -> Self {
@@ -390,6 +312,26 @@ impl HostConfig {
     /// The desktop fills it.
     pub fn with_machine_memory(mut self, bytes: u64) -> Self {
         self.wiring.browser_slots = BrowserSlots::new(Some(bytes));
+        self.idle.memory = Some(bytes);
+        self
+    }
+
+    /// How long an agent with nothing pending stays live (default [`IDLE_LIMIT`], 300 s).
+    pub fn with_idle_limit(mut self, limit: std::time::Duration) -> Self {
+        self.idle.limit = limit;
+        self
+    }
+
+    /// Agents live at once on a machine of 8 GB or less (default [`LIVE_AGENTS`], 2).
+    pub fn with_live_agents(mut self, agents: usize) -> Self {
+        self.idle.live_agents = agents;
+        self
+    }
+
+    /// How long an agent must be idle before the live-agents cap may stop it for another
+    /// thread's launch (default [`CAP_MIN_IDLE`], 60 s); with none, the launch passes the cap.
+    pub fn with_cap_min_idle(mut self, min_idle: std::time::Duration) -> Self {
+        self.idle.cap_min_idle = min_idle;
         self
     }
 
@@ -421,6 +363,14 @@ impl HostConfig {
     /// its pool and never waits on one.
     pub fn with_limits_reader(mut self, reader: Arc<dyn ReadLimits>) -> Self {
         self.limits_reader = Some(reader);
+        self
+    }
+
+    /// The store's close reports a failure once it has closed, for the updater's tests of an
+    /// install whose shutdown did not end cleanly.
+    #[cfg(feature = "test-support")]
+    pub fn with_failing_close(mut self) -> Self {
+        self.update.fail_close = true;
         self
     }
 
@@ -493,6 +443,30 @@ impl HostConfig {
         self
     }
 
+    /// The scan the Scratch matter's folder is found by at start-up instead of
+    /// `scratch::free_folder`, for tests that hold it.
+    #[cfg(test)]
+    pub(crate) fn with_scratch_scan(mut self, scan: crate::actor::scratch::Scan) -> Self {
+        self.scratch.scan = scan;
+        self
+    }
+
+    /// Shutdown waits for the Scratch scan too, and says so on `told` each time it does, for
+    /// tests that answer the scan while the host stops.
+    #[cfg(test)]
+    pub(crate) fn with_scratch_stop_held(mut self, told: std::sync::mpsc::Sender<()>) -> Self {
+        self.scratch.stop_held = Some(told);
+        self
+    }
+
+    /// The folder probes run off the actor (a new matter's folder, a located file's) instead of
+    /// the file system's (`actor/matters/probe.rs`), for tests that hold them.
+    #[cfg(test)]
+    pub(crate) fn with_folder_probes(mut self, probes: crate::actor::FolderProbes) -> Self {
+        self.folder_probes = probes;
+        self
+    }
+
     /// The capacity of the commit channel to the search thread (default 1,024), for tests
     /// that make it lag and catch up from the store.
     #[cfg(feature = "test-support")]
@@ -514,28 +488,109 @@ impl HostConfig {
         self
     }
 
-    /// Takes the config apart.
-    pub(crate) fn into_parts(self) -> ConfigParts {
-        ConfigParts {
-            effective: self.effective,
-            launcher: self.launcher,
-            profile: self.profile,
-            refused_folders: self.refused_folders,
-            home_folder: self.home_folder,
-            clock: self.clock,
-            ids: self.ids,
-            patch_window_bytes: self.patch_window_bytes,
-            app_capacity: self.app_capacity,
-            managed_mcp: self.managed_mcp,
-            codex_hooks: self.codex_hooks,
-            folder_check: self.folder_check,
-            pre_write_guard: self.pre_write_guard,
-            limits_reader: self.limits_reader,
-            wiring: self.wiring,
-            scan_walk: self.scan_walk,
-            counts: self.counts,
-            search: self.search,
+    /// The sign-in hook (decision record 0048, ruling 2): asked off the actor at every Codex
+    /// launch, with a bounded wait, whether Clauseo's Codex home shares the lawyer's login file
+    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check and no
+    /// guard.
+    pub fn with_login_check(mut self, check: Arc<dyn LoginCheck + Send + Sync>) -> Self {
+        self.wiring.sign_in.check = Some(check);
+        self
+    }
+
+    /// The case-law connector's relays (R24): each agent launch whose profile offers a
+    /// `case-law` entry, with `tools.connectors` on, no firm `managed-mcp.json` and the
+    /// connector signed in, gets a relay of its own and the entry. Unset (the default), no session
+    /// gets case law. Desktop builds the relays from the `Connectors` it passes to
+    /// [`Self::with_connectors`], with that wiring's `ConnectorEvents` as their events.
+    pub fn with_case_law_relays(mut self, relays: crate::connectors::Relays) -> Self {
+        self.wiring.relays = Some(relays);
+        self
+    }
+
+    /// The connector commands' wiring (R24): the app's `Connectors`, the events sink its relays
+    /// were built with, and the opener for the sign-in page. Unset (the default), every connector
+    /// command is refused and no app subscriber hears `ConnectorsChanged`.
+    pub fn with_connectors(mut self, wiring: crate::connectors::ConnectorsWiring) -> Self {
+        self.wiring.connectors = Some(wiring);
+        self
+    }
+
+    /// The sign-in-again test (S18's `is_sign_in_again`): a turn whose agent error's text it
+    /// accepts fails as `agent.auth_required`, so its turn is held for the sign-in. Unset (the
+    /// default), only `agent.auth_required` itself is.
+    pub fn with_sign_in_again(mut self, again: SignInAgain) -> Self {
+        self.wiring.sign_in.again = Some(again);
+        self
+    }
+
+    /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
+    /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
+    /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys (and
+    /// counted as `agent.key_unreadable` past its bound). As
+    /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
+    /// is a bug: debug builds assert, and release builds log it and set nothing.
+    #[must_use]
+    pub fn with_launch_refused(mut self, agent: AgentId, code: ErrorCode) -> Self {
+        debug_assert!(
+            crate::agent::launch_refusals::taken(code),
+            "with_launch_refused takes no {code:?}"
+        );
+        if let Err(error) = self.wiring.sign_in.refused.set(agent, Some(code)) {
+            tracing::warn!(code = error.code().as_str(), "a launch refusal was not set");
         }
+        self
+    }
+
+    /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
+    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
+    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
+    /// must not block.
+    #[must_use]
+    pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
+        self.wiring.sign_in.refused.set_key_retry(retry);
+        self
+    }
+
+    /// A hook run, with the pack's id, between the two reads of a skill pack that
+    /// `SetSkillPack` and `ListSkillPacks` make off the host thread: a test changes the pack
+    /// there, or asks which thread reads.
+    #[cfg(feature = "test-support")]
+    pub fn with_pack_read_hook(mut self, hook: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+        self.wiring.pack_read_hook = Some(hook);
+        self
+    }
+
+    /// A hook run off the host thread with a session's run folder once its agent has ended
+    /// (its case-law token revoked) and just before the folder is removed: a test checks what
+    /// the session left at that moment.
+    #[cfg(feature = "test-support")]
+    pub fn with_run_removal_hook(
+        mut self,
+        hook: Arc<dyn Fn(&std::path::Path) + Send + Sync>,
+    ) -> Self {
+        self.wiring.run_removal_hook = Some(hook);
+        self
+    }
+
+    /// The sandbox seam (default: none: the computer is `Unsupported { why: not_built }`, and
+    /// `RetryProtection` and `RemoveSandboxSetup` are `command.invalid`). Pass it only together
+    /// with the launchers (R17 PR-B2/D/E): alone, macOS' detection says tier A with no jail behind
+    /// it, and `sandbox.required` would pass. The first detection runs in `Host::start`, on the
+    /// calling thread; later ones off the host's thread.
+    #[must_use]
+    pub fn with_sandbox(mut self, sandbox: Sandbox) -> Self {
+        self.sandbox = Some(sandbox);
+        self
+    }
+
+    /// The seam set, for the first detection in `Host::start`.
+    pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
+        self.sandbox.as_ref()
+    }
+
+    /// The receiving end of the login splits, for `HostHandle::login_splits`.
+    pub(crate) fn login_splits(&self) -> LoginSplits {
+        self.wiring.sign_in.receiver()
     }
 }
 

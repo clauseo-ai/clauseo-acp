@@ -62,13 +62,34 @@ added: the dialog and opener plugins are called from Rust, as before.
   On Windows the shell picks the app by the extension of the name, which was checked. One open at
   a time and at most one document opened a second (`command.conflict`; a refused call does not
   count). Refusals are `command.invalid`, or
-  `matter.folder_missing` when the folder is gone; a failure of the OS to open, or a type macOS
+  `matter.folder_missing` when the folder is gone, or `matter.folder_not_a_matter` when it is
+  there without the matter's `.clauseo/matter.json` (none, unreadable, or another matter's;
+  added 2026-11-07, `clauseo_host::check_matter_folder`); a failure of the OS to open, or a type macOS
   has no app for, is `internal`. No confirm: the lawyer clicked one of their own documents.
+- **A Word document whose path is too long for Word** (added 2026-11-06, `open/word_path.rs`).
+  Word on Windows cannot open a file whose full path is over 259 UTF-16 units. For a Word
+  document (`docx`, `doc`, `docm`, `dotx`, `dotm`, `rtf`, any case) over that, `open_file` opens
+  the 8.3 short form of its folder (`GetShortPathNameW`) joined to its real file name, when that
+  is within 259 units, and answers `{ "protected_view": true }`, since Word opens a file reached
+  that way in Protected View; the page says so. The file name is never shortened: Word would
+  title the window with the short name. With no short form (8.3 names off, many network shares)
+  or a result still too long, it is refused as `matter.document_path_too_long`, which adds an
+  error code (0003). Every other file, and every path within the limit, opens as before with
+  `{ "protected_view": false }`.
 - **`reveal { target }`.** `target` is `{ "matter": MatterId }` or `"app_data"`, never a path.
   The host answers the matter's folder (`command.unknown_matter` otherwise); the app data folder
   is the one `Locations::resolve` found at start-up. The folder is shown selected in its parent
   folder (the opener plugin's `reveal_item_in_dir`), which never launches what it shows, even a
-  folder that is a bundle. A matter's folder that is not there is `matter.folder_missing`.
+  folder that is a bundle. A matter's folder that is not there is `matter.folder_missing`; one
+  that is there without the matter's `.clauseo/matter.json` is `matter.folder_not_a_matter`
+  (added 2026-11-07).
+- **No call waits on a folder that does not answer** (added 2026-11-07, `open/bounded.rs`).
+  `open_file`'s checks (the marker check, `canonicalize`, `metadata`, the short-name lookup) and
+  its open, and `reveal`'s checks (the marker check, `is_dir`) and its reveal, run on a thread of
+  their own, the checks and the OS call each waited on for at most 10 s (#617's bound). Past it
+  the call is `matter.folder_missing` (retryable; `internal` for the app data folder), with no
+  path, and the async runtime's thread is never held. Checks that answer late never open or
+  reveal.
 - **`open_url_unconfirmed`**, for Rust's own callers only (stage D's R20 opens the captured
   sign-in page with it): `open_external`'s link check narrowed to https, then the default browser,
   with no confirm. It is a crate-internal function, not a command: no capability, handler or

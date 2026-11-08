@@ -115,9 +115,11 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   behind a later turn that ended (the newest prompt without a step counts, not the last one). A
   steer saved but never answered before the stop moves to a new held queued turn
   (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it.
-  A restart restores the log's order: a requeued steer keeps its message's place, behind prompts
-  queued before it, and a send now or a requeue's place at the head is not kept. A send now or a
-  `SendQueuedNow` move not yet started when the host stops is lost; the turn stays queued, held.
+  A restart restores the log's order, except for the turns put back at the head: a requeued
+  steer and a turn held for its agent's sign-in keep that head place as they have it live (their
+  `TurnQueued` is `at_head`), the latest put back first. A send now's place at the head is not
+  kept. A send now or a `SendQueuedNow` move not yet started when the host stops is lost; the
+  turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
 lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before

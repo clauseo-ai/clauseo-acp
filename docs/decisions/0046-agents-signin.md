@@ -113,9 +113,17 @@ its own stderr ring for `ExitReport::stderr_tail`, and S18 never reads it.
   `firstParty` gives `LoginFound { from: ClaudeCode, email }`. Any other signed-in
   `authMethod`, or `claude.ai` with another provider, gives `SignedOut { found: ClaudeSettings }`.
 - In Clauseo's own folder, `loggedIn: true` is signed in, whatever the `authMethod`.
-- Codex: `login status` exit 0 is signed in. Then the stat of the lawyer's login file decides
+- Codex: `login status` exit 0 with its `Logged in using …` line is signed in; a sign-in or a
+  status check is `SignedIn` only once `account/read` then names a `chatgpt` account. Exit 0
+  with no signed-in line, a JSON-RPC error, `account: null`, and an API-key, Amazon Bedrock or
+  unknown account are definite answers: signed out. Only a sign-in the lawyer started then
+  fails, and it removes the login it ran (`logout`, else the home's `auth.json` directly; never
+  while the guard says shared or the lawyer's home folder is unknown), so no unmarked file reads
+  as reused later. A status check never sends `Failed`: a run with no answer at all (killed at
+  its limit, or not started) is asked once more, then the state is left exactly as it was (no
+  downgrade, no end of a reuse, never an upgrade) with `status_not_confirmed state_kept` logged. Then the stat of the lawyer's login file decides
   between reusable and `CodexKeyring`.
-- `account/read`: only a `chatgpt` account gives an email and plan.
+- `account/read`: only a `chatgpt` account gives an email and plan, and only it is a login.
 - `is_sign_in_again(error_text)` is true when the text names `refresh_token_reused`,
   `refresh_token_expired` or `refresh_token_invalidated`, in any case.
 
@@ -289,7 +297,11 @@ nudge, expiry, Cancel, paste, sign-out) is the same.
 
 ### Codex's sign-in
 
-**The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` with the Own environment
+**The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` (the adapter package's own
+`node_modules` first, then the install's; `Installed::codex_cli`, never the install's `script`,
+which is codex-acp's ACP adapter and exits 0 for any arguments; missing, a sign-in fails and runs
+nothing, a sign-out removes the home's `auth.json` directly, and "Stop using it" still unlinks and
+writes `no-reuse`) with the Own environment
 (`CODEX_HOME` and, on macOS and Linux, `HOME` set to the agent's home; `CODEX_API_KEY=""`;
 `SSL_CERT_FILE` for the agent's CA; `HTTPS_PROXY`), in the home, and
 `-c cli_auth_credentials_store="file"` before the subcommand, where Codex takes its `-c`
@@ -297,9 +309,10 @@ overrides:
 - `login` (`Method::Browser`), 10 minute limit;
 - `login --device-auth` (`Method::DeviceCode`), 20 minute limit, so the code's own 15 minutes
   end it first;
-- `login status`, 5 s limit, exit code only (its output is never read);
+- `login status`, 15 s limit (Claude's stays 5 s): signed in only on exit 0 with its `Logged in using …` line on
+  stderr (the line is checked, never kept); `Not logged in` exits 1;
 - `logout`, 30 s limit;
-- `app-server`, 10 s limit, with `limits`' six `-c` overrides as well (plugins off stops its
+- `app-server`, 20 s limit, with `limits`' six `-c` overrides as well (plugins off stops its
   start-up git sync, #203). It is asked `initialize` and `account/read` through
   `codex_appserver`'s `Client`, then its client is dropped and its tree killed.
 
@@ -361,7 +374,7 @@ to the other.
 
 **The calls.** Four, each a job on the model above:
 - `find_login(agent)`: UD2's "Look for my … login". It deletes `no-reuse`, then runs the status
-  check.
+  check; a check that cannot tell ends it `signin.failed`, so the lawyer always gets an answer.
 - `use_found_login(agent)`: the lawyer's "Use it". It is refused with `NothingFound` unless the
   state is `LoginFound`.
 - `use_different_account(agent)`: "Sign in with a different account". It writes `no-reuse`,
@@ -397,7 +410,8 @@ at start and when a window shows Plans. It runs:
      `account/read` under the home. `Split` gives `CodexLinkSplit`, `Gone` gives
      `ReusedSignedOut`.
 2. Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
-3. With `no-reuse` there, `SignedOut`. Otherwise detection.
+3. With `no-reuse` there, `SignedOut { found: ReuseOff }`. Otherwise detection, whose
+   "nothing" is `SignedOut { found: NoLogin }` (UD2).
 
 A run that cannot tell leaves the state unchanged. The job creates the agent's home before
 any run. Without it, a status check before the first sign-in could not start, since every run
@@ -418,19 +432,20 @@ is set to 0700 as well, as `make_home` does. `agents` itself does not depend on 
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
 `cli_auth_credentials_store`. Its working folder is the empty `<data_dir>/agents/signin/detect`.
 - Claude: `--cli auth status --json`, read by `status::claude_detection`.
-- Codex: `login status`, exit code only. Exit 0 is followed by a `symlink_metadata` of the
+- Codex: `login status`, exit 0 with its signed-in line. That is followed by a `symlink_metadata` of the
   lawyer's `~/.codex` login file: present is `LoginFound` (with `account/read`, same
   environment, same folder), absent is `CodexKeyring`. An `account/read` that gets no answer
-  (cut short by Cancel or its 10 s limit, or an error reply) is "could not tell", never "no
+  (cut short by Cancel or its 20 s limit, or an error reply) is "could not tell", never "no
   email": the status check leaves the state unchanged, and "Use it" ends. `LoginFound { email:
-  None }` comes only from an answer that names no `ChatGPT` account (an API key, say).
+  None }` comes only from a `ChatGPT` account whose email Codex does not know. A login whose
+  account is not a `ChatGPT` one (an API key, say) is not offered: `SignedOut { found: None }`.
 
 The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
 `HOME`, or `USERPROFILE` on Windows.
 
 **"Use it"** runs detection again first. It goes on only when detection's email is the one
-`LoginFound` showed, `None` equal to `None`: a login with no email (an API-key Codex login)
-is shown and can be used, since a read that got no answer is "could not tell", never `None`.
+`LoginFound` showed, `None` equal to `None`: a ChatGPT login with no email is shown and can be
+used, since a read that got no answer is "could not tell", never `None`.
 Otherwise (`Some` shown and `None` found, `None` and `Some`, or two emails) nothing is linked
 or recorded, and the new detection is the state: `LoginFound` with the new email, or what was
 seen. Detection that cannot tell
@@ -460,9 +475,11 @@ ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin
   starts the login, whose guard runs as for any login.
 
 **Reuse stops** (`found::stop`) with no logout:
-- no reason: `no-reuse` is written;
+- no reason (`NoLogin` and `ReuseOff` count as none, `Found::is_stop_reason`): `no-reuse` is
+  written;
 - for Codex, a reused home's login file name is removed (`unlink_reused_login`);
-- then `login-source` is deleted, and the state is `SignedOut { found: why }`.
+- then `login-source` is deleted, and the state is `SignedOut { found: why }`, or
+  `SignedOut { found: ReuseOff }` with no reason.
 
 A marker write that fails gives `signin.failed`, since the next start could otherwise reuse
 again without asking. The status check uses the same steps when it finds reuse has ended. So the
@@ -470,7 +487,7 @@ next start shows `LoginFound` again, and nothing re-links on its own.
 
 **The run-time fallback.** Claude's status can say signed out under the session's environment
 while detection says signed in. Then the `claude_reuse_fallback` note goes out, and reuse stops
-with no reason: `no-reuse`, `SignedOut`. This happens on "Use it" or at a later start. A Claude
+with no reason: `no-reuse`, `SignedOut { found: ReuseOff }`. This happens on "Use it" or at a later start. A Claude
 Code that ignores the variable would loop through "Use it" otherwise. "Look for my Claude Code
 login" offers it again.
 

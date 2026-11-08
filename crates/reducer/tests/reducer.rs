@@ -21,12 +21,20 @@ mod field_updates;
 mod fold;
 #[path = "reducer/fold_edges.rs"]
 mod fold_edges;
+#[path = "reducer/idle_stop.rs"]
+mod idle_stop;
+#[path = "reducer/notice_kind.rs"]
+mod notice_kind;
 #[path = "reducer/orders.rs"]
 mod orders;
 #[path = "reducer/props.rs"]
 mod props;
 #[path = "reducer/queued.rs"]
 mod queued;
+#[path = "reducer/queued_order.rs"]
+mod queued_order;
+#[path = "reducer/resuming.rs"]
+mod resuming;
 #[path = "reducer/snapshot.rs"]
 mod snapshot;
 #[path = "reducer/steer.rs"]

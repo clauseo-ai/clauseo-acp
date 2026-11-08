@@ -536,9 +536,9 @@ fn a_late_completed_open_writes_nothing() {
 }
 
 /// Plays one scenario per launch, in order: the replay test's first agent, then its relaunch.
-struct Sequence {
-    inner: clauseo_process::PassthroughLauncher,
-    plays: std::sync::Mutex<Vec<Scenario>>,
+pub(crate) struct Sequence {
+    pub(crate) inner: clauseo_process::PassthroughLauncher,
+    pub(crate) plays: std::sync::Mutex<Vec<Scenario>>,
 }
 
 impl clauseo_process::Launcher for Sequence {

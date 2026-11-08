@@ -81,11 +81,48 @@ fn relative_cwd_is_invalid() {
 }
 
 #[test]
-fn cwd_must_be_a_folder() {
+fn cwd_must_be_a_folder_and_no_path_is_in_the_text() {
     let file = std::env::current_exe().unwrap();
-    let why = refused(spec(absolute("agent"), file));
-    assert!(why.ends_with("is not a folder"), "{why}");
-    let missing = absolute("clauseo-process-no-such-folder");
-    let why = refused(spec(absolute("agent"), missing));
-    assert!(why.ends_with("is not a folder"), "{why}");
+    let not_a_folder = spec(absolute("agent"), file.clone()).unwrap_err();
+    assert!(
+        matches!(not_a_folder, Error::NoWorkingFolder),
+        "{not_a_folder:?}"
+    );
+    assert!(!not_a_folder.to_string().contains(&*file.to_string_lossy()));
+    let gone = spec(
+        absolute("agent"),
+        absolute("clauseo-process-no-such-folder"),
+    )
+    .unwrap_err();
+    assert!(matches!(gone, Error::NoWorkingFolder), "{gone:?}");
+    assert!(!gone.to_string().contains("no-such-folder"), "{gone}");
+    let why = refused(spec(absolute("agent"), PathBuf::from("matter")));
+    assert!(!why.contains("matter"), "{why}");
+}
+
+#[test]
+fn the_debug_names_each_variable_and_shows_no_value() {
+    const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
+    let env = BTreeMap::from([
+        (OsString::from("ANTHROPIC_API_KEY"), OsString::from(KEY)),
+        (OsString::from("CODEX_HOME"), OsString::from("/never/shown")),
+    ]);
+    let spec = LaunchSpec::new(absolute("agent"), Vec::new(), env, std::env::temp_dir()).unwrap();
+    let shown = format!("{spec:?}");
+    assert!(!shown.contains(KEY), "{shown}");
+    assert!(!shown.contains("/never/shown"), "{shown}");
+    assert!(shown.contains("ANTHROPIC_API_KEY"), "{shown}");
+    assert!(shown.contains("[redacted]"), "{shown}");
+}
+
+#[test]
+fn named_secrets_ride_on_the_spec_and_debug_prints_only_their_count() {
+    let token = "ab".repeat(32);
+    let spec = spec(absolute("agent"), std::env::temp_dir())
+        .unwrap()
+        .with_redacted([token.clone()]);
+    assert_eq!(spec.redacted(), std::slice::from_ref(&token));
+    let debug = format!("{spec:?}");
+    assert!(!debug.contains(&token), "{debug}");
+    assert!(debug.contains("[1 redacted]"), "{debug}");
 }

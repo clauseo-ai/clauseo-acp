@@ -2,22 +2,25 @@
 // the stop at the usage limit, its mark and its note with the reset (U12). An Undo refused because a program holds a
 // file shows the lock's lines under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one
 // Word document the wall lists offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in
-// its error line when the open fails. Focus follows the lock: to Try again when the lines come, back to Undo (or the
+// its error line when the open fails, with Show in folder beside it for a path too long for Word, or in a quiet line
+// under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go.
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx";
 import { IconChecking } from "@clauseo/components/icons/icons.tsx";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
 import { toHostError } from "../../transport/host-transport.ts";
+import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
 import type {
@@ -55,6 +58,7 @@ const ROW = "not-first:mt-(--s3)";
 
 function Changed({ entry }: { entry: StepEntry }) {
   const w = useWords();
+  const { platform } = useDisplay();
   const { undo, previewUndo, sentTurn, stream } = useThreadActions();
   const busy = useBusy(stream, sentTurn);
   const plan = useAgentPlan();
@@ -65,6 +69,8 @@ function Changed({ entry }: { entry: StepEntry }) {
   const { openerFor } = useWordOpen();
   // a failed Open in Word, by its code, for the note's error line
   const [openFailed, setOpenFailed] = useState<string | null>(null);
+  // the last open went through in Protected View: a quiet line says so until the next open or Undo
+  const [protectedView, setProtectedView] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
   const undoable = entry.checkpoint_after !== undefined;
@@ -82,7 +88,11 @@ function Changed({ entry }: { entry: StepEntry }) {
           label: opener.label,
           onOpen: () => {
             setOpenFailed(null);
-            void opener.onOpen().then(setOpenFailed);
+            setProtectedView(false);
+            void opener.onOpen().then((opened) => {
+              setOpenFailed(opened.refused);
+              setProtectedView(opened.protectedView);
+            });
           },
         };
   // a refusal again keeps what it said until the host answers: a lock stays a lock, another code replaces it
@@ -100,6 +110,7 @@ function Changed({ entry }: { entry: StepEntry }) {
     if (pending) return;
     setRefused(null);
     setOpenFailed(null);
+    setProtectedView(false);
     send();
   };
   // Undo asks about a paper the lawyer edited since Clauseo's change: PreviewUndo says which, on each press, and Undo
@@ -129,6 +140,11 @@ function Changed({ entry }: { entry: StepEntry }) {
     back?.focus();
   }, [locked]);
   const undoRefusal = refused === null || locked ? null : refused.code;
+  // a folder gone, or not the matter's: Locate folder beside the words (act-refusals.ts)
+  const locate = useLocateFolder();
+  // Show in folder's refusal takes the line's place; one that goes through leaves the line as it is
+  const reveal = (o: WordOpener) => () =>
+    void o.onReveal().then((code) => code !== null && setOpenFailed(code));
   const shown = undoRefusal ?? openFailed;
   return (
     <div data-testid="files-changed" ref={box}>
@@ -140,8 +156,26 @@ function Changed({ entry }: { entry: StepEntry }) {
         {...(open === undefined ? {} : { open })}
         undoDisabled={busy || pending}
         error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
-        testIds={{ paper: "file-changed", undo: "undo", error: "error", open: "open-in-word" }}
+        errorAction={
+          shown === "matter.document_path_too_long" && opener !== undefined
+            ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
+            : locatable(shown) && locate !== null
+              ? { label: ui(w.lang, "Locate folder"), onAction: locate }
+              : undefined
+        }
+        testIds={{
+          paper: "file-changed",
+          undo: "undo",
+          error: "error",
+          errorAction: locatable(shown) ? "locate-folder" : "reveal",
+          open: "open-in-word",
+        }}
       />
+      {protectedView && opener !== undefined && shown === null && (
+        <p className={QUIET} role="status" data-testid="open-protected-view">
+          <Say>{opener.protectedLine}</Say>
+        </p>
+      )}
       {locked && (
         <Suspense fallback={null}>
           <WordLock

@@ -77,8 +77,9 @@ impl std::fmt::Debug for AgentsConfig {
 
 /// A firm's install settings (R20's `install.*` keys and R17's `network.*` keys). With none
 /// set, packages come from the snapshot's registry and Node from its download host, through
-/// `HTTPS_PROXY` when the environment sets it.
-#[derive(Debug, Clone, Default)]
+/// `HTTPS_PROXY` when the environment sets it. Its `Debug` never prints a proxy: one may hold a
+/// password.
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct InstallConfig {
     /// `install.registry`: a firm npm mirror. Each tarball URL's registry prefix is replaced by
@@ -87,12 +88,21 @@ pub struct InstallConfig {
     /// `install.bundle`: an offline bundle folder (`node/<archive>`, `npm/<sha512 hex>.tgz`),
     /// read instead of the network, with the same checks.
     pub bundle: Option<PathBuf>,
-    /// The proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment (the caller
-    /// resolves which), else none.
+    /// The installs' proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment,
+    /// else the OS's proxy for the registry (the caller resolves which), else none. Also each
+    /// sign-in's, for an agent [`InstallConfig::signin_proxy`] has no entry for.
     pub proxy: Option<String>,
+    /// Each agent's sign-in proxy where the caller resolved it per agent (the OS's proxy for the
+    /// agent's first sign-in host, which a PAC script may answer differently): `None` signs in
+    /// with no proxy. An agent with no entry signs in through [`InstallConfig::proxy`].
+    pub signin_proxy: BTreeMap<AgentId, Option<String>>,
     /// `network.ca_certs`: an agent's extra CA file (PEM), the TLS roots of its downloads. npm
     /// never gets it, since npm makes no network call here.
     pub ca_certs: BTreeMap<AgentId, PathBuf>,
+    /// Called by each install try before it makes its HTTP client (S17's route refresh): the
+    /// network to use, resolved again by the caller when its last is stale, or `None` to take
+    /// the one [`crate::Agents::set_network`] last gave. It may block; the caller bounds it.
+    pub refresh: Option<Arc<RefreshFn>>,
     /// Tests only: resolves host names instead of the OS, so a test can be offline and come
     /// back, and can see every host a download looked up.
     #[cfg(feature = "test-support")]
@@ -101,6 +111,91 @@ pub struct InstallConfig {
     /// registry. Outside `test-support` the field does not exist, so every download is https.
     #[cfg(feature = "test-support")]
     pub allow_http_for_tests: bool,
+}
+
+impl InstallConfig {
+    /// `agent`'s sign-in proxy: its [`InstallConfig::signin_proxy`] entry, else
+    /// [`InstallConfig::proxy`].
+    pub(crate) fn signin_proxy_for(&self, agent: &AgentId) -> Option<&str> {
+        match self.signin_proxy.get(agent) {
+            Some(proxy) => proxy.as_deref(),
+            None => self.proxy.as_deref(),
+        }
+    }
+
+    /// Its network part: the proxies and the CA files.
+    pub(crate) fn network(&self) -> Network {
+        Network {
+            proxy: self.proxy.clone(),
+            signin_proxy: self.signin_proxy.clone(),
+            ca_certs: self.ca_certs.clone(),
+        }
+    }
+
+    /// Takes in `network`: the proxies and the CA files, for the next job.
+    pub(crate) fn set_network(&mut self, network: Network) {
+        let Network {
+            proxy,
+            signin_proxy,
+            ca_certs,
+        } = network;
+        self.proxy = proxy;
+        self.signin_proxy = signin_proxy;
+        self.ca_certs = ca_certs;
+    }
+}
+
+/// What [`InstallConfig::refresh`] calls.
+pub type RefreshFn = dyn Fn() -> Option<Network> + Send + Sync;
+
+/// Names whether a proxy is set, never its text.
+fn shown(proxy: Option<&str>) -> Option<&'static str> {
+    proxy.map(|_| "<set>")
+}
+
+impl std::fmt::Debug for InstallConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let signin: BTreeMap<&AgentId, Option<&str>> = self
+            .signin_proxy
+            .iter()
+            .map(|(agent, proxy)| (agent, shown(proxy.as_deref())))
+            .collect();
+        f.debug_struct("InstallConfig")
+            .field("registry", &self.registry)
+            .field("bundle", &self.bundle)
+            .field("proxy", &shown(self.proxy.as_deref()))
+            .field("signin_proxy", &signin)
+            .field("ca_certs", &self.ca_certs)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The network part of [`InstallConfig`], which [`crate::Agents::set_network`] replaces while
+/// `Agents` runs (the settings changed): the next install and sign-in job take it. Its `Debug`
+/// never prints a proxy.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Network {
+    /// [`InstallConfig::proxy`].
+    pub proxy: Option<String>,
+    /// [`InstallConfig::signin_proxy`].
+    pub signin_proxy: BTreeMap<AgentId, Option<String>>,
+    /// [`InstallConfig::ca_certs`].
+    pub ca_certs: BTreeMap<AgentId, PathBuf>,
+}
+
+impl std::fmt::Debug for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let signin: BTreeMap<&AgentId, Option<&str>> = self
+            .signin_proxy
+            .iter()
+            .map(|(agent, proxy)| (agent, shown(proxy.as_deref())))
+            .collect();
+        f.debug_struct("Network")
+            .field("proxy", &shown(self.proxy.as_deref()))
+            .field("signin_proxy", &signin)
+            .field("ca_certs", &self.ca_certs)
+            .finish()
+    }
 }
 
 /// What S18's runs are built from. Proxy and CA come from [`InstallConfig::proxy`] and

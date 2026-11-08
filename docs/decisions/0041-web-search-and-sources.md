@@ -121,6 +121,68 @@ A change to a call's web sends the call's entry as an `Upsert`, as any change to
 - **The payloads carry no `thread` and no `at`.** The S26 brief named both. The envelope's `stream`
   and `ts` already hold them, and the log is the one place they are read from.
 
+## The matches (S26)
+
+The host writes a record when a tool call completes, from the last `rawInput`, `rawOutput`, `content`
+and title it has for the call (`crates/host/src/sources/`). A call that starts completed is read at
+once. A call that fails or is cancelled, and any update the host drops as late or replayed
+(`actor/turn/updates.rs`), write nothing. A call records only in the turn it started in: a call still
+open when its turn ends, and a completion that arrives in a later turn (for a cancelled turn, after
+the next prompt starts), write nothing. The match goes by the call's
+shape, not by the agent's id, and a record names the thread's agent by its registry id. The field
+names below are the ones the adapters sent in the fixtures in `crates/host/tests/scenarios/`, written
+from claude-agent-acp 0.89.1 and codex-acp 2.2.2 source; check 3 (recorded fixtures) is not yet run.
+
+Claude Code (`sources/claude.rs`):
+
+- **Which tool**: the ACP `name` (Clauseo's `ToolCall.tool_name`): `WebSearch` is a search,
+  `WebFetch` a fetch. Any other name is no web tool. With no `name`, a call of kind `fetch` is a
+  search when its title starts `Search "` and its `rawInput` has `query`, and a fetch when its title
+  starts `Fetch ` and its `rawInput` has `url`.
+- **Search**: the query is `rawInput.query`. The results are the `title` and `url` of each `Links:`
+  array in `rawOutput` (the string's lines that start `Links: `), in order. When no array parses, they
+  are the `Title (url)` lines of `content`, split at the last ` (`. An empty array is a parse with no
+  results. Every result URL goes through the URL rule below, so a line whose "URL" is no URL (`Note
+  (see below)`) is no result.
+- **Fetch**: the page is `rawInput.url`, with no title, `via` `WebFetch`, through the URL rule.
+
+Codex (`sources/codex.rs`):
+
+- **Which call**: kind `search`, no `name`, and a `rawInput` that has a `query` key. An MCP server's
+  own search tool has a `name`, so it is no Codex search.
+- **Query**: when `action.queries` holds two or more non-empty entries, they are joined with ", ". This
+  comes first because codex-acp 2.2.2 runs several queries in one call and sends `rawInput.query` as the
+  first one with " ..." after it; the join was confirmed live with codex-acp 2.2.2 (stage B, 2026-11-05).
+  Otherwise the first non-empty of `rawInput.query`, `action.query`, and the one `action.queries` entry.
+  Each query is cleaned as a title is, and the joined text is capped at 1,000 characters. With none, no
+  record.
+- **Action**: `rawInput.action`, which the AIR shape and the standard shape both carry. `null` (or
+  absent): a `WebSearchRecorded` with no results. `type` `search`: the same. `openPage` or
+  `findInPage`: a `PageVisited` with `action.url` through the URL rule, `via` `CodexOpenPage`, no title.
+  `other`, a type not known, or no `type`: nothing, with a warning in the host log.
+
+Decided here (not in the brief):
+
+- **The URL rule** (`sources::record_url`, for every Claude and Codex result and page URL). A URL must
+  start with an explicit `http://` or `https://` (either case) and have a host after it. Nothing is
+  added to a value with no scheme. It is refused, not cleaned, when it holds whitespace, a control
+  character (C0, DEL or C1), or a bidi control (U+200E, U+200F, U+061C, U+202A to U+202E, U+2066 to
+  U+2069). Its logged form (`logged_url`, after the fragment, userinfo and secret values go) must be at
+  most 2,000 characters; the cap is on that form, not on the input. The browser's address-bar rule
+  (`browser.rs` `web_url`, which adds `https://` to a value with no colon) is for the browser's own
+  opens only, and the same refusal applies to it, which is a change to the browser's path that
+  predates this PR.
+- **Results**: the first 50 that remain, with the URL rule applied and repeats (by the logged URL)
+  dropped. A title has its control and bidi characters removed; an empty title is the URL.
+- **Query**: cleaned the way a title is (`clean_title`), so it has no control or bidi characters;
+  a query that is empty after cleaning is no query.
+- **Queries and pages must be non-empty.** A search with no query, or a page with no web URL, is no
+  record.
+- **Unfinished calls are kept per thread**, up to 64. A call that starts in a turn drops the
+  unfinished calls of earlier turns, since they can no longer record. At 64 a new call is not tracked
+  (a warning in the host log) and records nothing; the calls already open keep their records.
+- **One record per tool call.** A repeat fetch of the same page is a second record.
+
 ## Consequences
 
 The log now holds what the agent searched and opened, with the tool call and turn that did it, so a

@@ -7,6 +7,18 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The elevated set-up (S15 PR4h): run by the app's UserSetup and the uninstaller's hook. build.rs
+# embeds its requireAdministrator manifest and its VERSIONINFO on msvc.
+[[bin]]
+name = "clauseo-sandbox-setup"
+path = "src/bin/clauseo-sandbox-setup.rs"
+
+# Tier B's runner (S15 PR5): the host starts it as the desktop user; it starts itself again as the
+# matter's pool user, which starts the agent under the (B) token.
+[[bin]]
+name = "clauseo-sandbox-run"
+path = "src/bin/clauseo-sandbox-run.rs"
+
 [features]
 # Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
 test-support = []
@@ -14,6 +26,8 @@ test-support = []
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
+# The unsafe-site block list the egress proxy refuses (ADR 0053): parsed and verified by the host.
+clauseo-blocklist = { path = "../blocklist" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # Denials print as JSON lines in the examples and travel to `host` (R18).
@@ -38,6 +52,17 @@ psl = { workspace = true }
 getrandom = { workspace = true }
 base64 = { workspace = true }
 subtle = { workspace = true }
+# Tier B's files, read and written on every OS: the ACL ledger, matters.json and setup.json.
+serde_json = { workspace = true }
+# The elevated set-up's pool passwords are wiped from memory on drop (src/windows/setup).
+zeroize = { workspace = true }
+# The admin copy's refresh (src/windows/refresh): the staged exe's minisign signature, checked
+# against the updater key build.rs embeds, and its SHA-256, which the record holds. Built on every
+# OS: the checks are pure and tested everywhere.
+minisign-verify = { workspace = true }
+sha2 = { workspace = true }
+# The signed versions it compares, by semver precedence (a prerelease below its release).
+semver = { workspace = true }
 # The egress proxy's upstream: proxy URLs, and the logs of an ignored setting or a failed lookup.
 # (url and tracing are listed above.)
 
@@ -46,7 +71,6 @@ subtle = { workspace = true }
 # The upstream lookup's proxy settings and PAC runs (src/proxy/upstream/macos.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
-serde_json = { workspace = true }
 objc2-cf-network = { workspace = true, features = ["std", "CFProxySupport"] }
 objc2-core-foundation = { workspace = true, features = [
   "CFArray",
@@ -71,35 +95,121 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # GetFinalPathNameByHandleW, GetVolumePathNameW, GetDriveTypeW (DRIVE_REMOTE), the volume's
 # FILE_PERSISTENT_ACLS flag, GetFileSecurityW and AccessCheck on a duplicated token
 # (GetCurrentProcess and OpenProcessToken from Win32_System_Threading), and the test's SDDL and
-# SetNamedSecurityInfoW.
+# SetNamedSecurityInfoW. Tier B's records (src/windows/{record,detect}.rs): RegGetValueW for the
+# sandbox user record and the build number (System_Registry), the token's user and
+# ConvertSidToStringSidW, and IsWow64Process2's machine type (System_SystemInformation);
+# DeviceIoControl for the tests' junctions (System_IO). The walk (src/windows/acl/object.rs):
+# NtCreateFile relative to a folder's handle (Wdk_Foundation, Wdk_Storage_FileSystem). The
+# set-aside's scan (src/windows/set_aside/ntfs/scan.rs): CompareStringOrdinal, to compare names as
+# NTFS does (Win32_Globalization). The change journal (src/windows/clean_close/ntfs.rs):
+# FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_UNPRIVILEGED_USN_JOURNAL and its structs, and the storage
+# bus from IOCTL_STORAGE_QUERY_PROPERTY (Win32_System_Ioctl). The set-up's accounts and group
+# (src/windows/setup/accounts.rs): NetUserAdd and the other Net* calls (NetManagement).
+# The set-up's logon, profile, preflight and process calls (src/windows/setup, S15 PR4f):
+# LoadUserProfileW and DeleteProfileW (UI_Shell), QueryServiceConfigW (System_Services),
+# LsaEnumerateAccountsWithUserRight (Security_Authentication_Identity), EnumProcesses
+# (System_ProcessStatus).
+# secrets.bin (src/windows/secrets/dpapi.rs, setup/owner): CryptProtectData (Security_Cryptography);
+# the set-up's recorded parent from NtQueryInformationProcess (Wdk_System_Threading).
+# The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
+# known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
+# System32 (SetDefaultDllDirectories, System_LibraryLoader).
+# The network filters (src/windows/wfp, S15 PR7): the WFP management calls
+# (NetworkManagement_WindowsFilteringPlatform, whose FwpmEngineOpen0 takes an RPC auth identity:
+# System_Rpc) and the firewall rules through INetFwPolicy2 (NetworkManagement_WindowsFirewall);
+# tier B's port check (src/windows/wfp/os_ports.rs): the dynamic range from WMI (System_Wmi,
+# System_Ole, System_Variant) and the listeners from GetExtendedTcpTable
+# (NetworkManagement_IpHelper).
+# The admin copy's refresh (src/windows/refresh): its SYSTEM task through ITaskService
+# (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
+# log lines in the Event Log (System_EventLog). The stop task's process snapshot
+# (src/windows/setup/stop/windows_stopper.rs): CreateToolhelp32Snapshot
+# (System_Diagnostics_ToolHelp), each process's user from WTSEnumerateProcessesExW
+# (System_RemoteDesktop), and the pool users' BITS jobs it cancels
+# (Networking_BackgroundIntelligentTransferService).
+# The runner (S15 PR5, src/windows/{runner,token,pipe}): the named pipes (System_Pipes), its
+# private desktop (System_StationsAndDesktops, whose CreateDesktopW needs Graphics_Gdi), the
+# error mode (System_Diagnostics_Debug), the kill-on-close job (System_JobObjects), and the
+# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp), the sweep of
+# the pool user's processes, listed by a Toolhelp snapshot too and by WTSEnumerateProcessesW
+# (System_RemoteDesktop), and the removal of what the pool
+# user could leave to start at a logon: its scheduled tasks (System_TaskScheduler, whose
+# collections take a VARIANT index: System_Variant, System_Ole) and BITS jobs
+# (Networking_BackgroundIntelligentTransferService).
 [target.'cfg(windows)'.dependencies]
+# The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
+sha2 = { workspace = true }
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Wdk_System_Threading",
   "Win32_Foundation",
+  "Win32_Networking_BackgroundIntelligentTransferService",
+  "Win32_Globalization",
+  "Win32_Graphics_Gdi",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_NetworkManagement_WindowsFirewall",
+  "Win32_Networking_BackgroundIntelligentTransferService",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",
+  "Win32_Security_Authentication_Identity",
   "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_Ioctl",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_EventLog",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_Pipes",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Rpc",
+  "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Services",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
+  "Win32_System_TaskScheduler",
   "Win32_System_Threading",
+  "Win32_System_Variant",
   "Win32_System_WindowsProgramming",
+  "Win32_System_Wmi",
+  "Win32_UI_Shell",
 ] }
 
-[dev-dependencies]
-# The denials' JSON shape, `run_sandboxed --print-spec`, and the proxy example's JSON lines.
+# build.rs compiles the setup exe's VERSIONINFO on msvc with embed-resource, its values read from
+# crates/desktop/tauri.conf.json with serde_json. Not target-gated: a build script runs on the
+# host and checks TARGET, and both crates are in the tree already (tauri-build, the deps above).
+#
+# It also embeds the updater key the admin copy's refresh trusts (src/windows/refresh/key.rs), on
+# every target.
+[build-dependencies]
+embed-resource = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
 # The Seatbelt profile snapshots.
 insta = { workspace = true }
 # The jail tests run fake_agent through the launcher.
 clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
+# The refresh's signature tests sign with an Ed25519 key they make.
+ring = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-nix = { workspace = true, features = ["event", "term", "fs"] }
+nix = { workspace = true, features = ["event", "term", "fs", "signal"] }
 
 [lints]
 workspace = true

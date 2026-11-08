@@ -3,7 +3,7 @@
 //! calls refused, and no status run after the end.
 
 use clauseo_agents::testing::write_file;
-use clauseo_agents::{Method, PasteCode, SigninCode, SigninError, SigninState, Source};
+use clauseo_agents::{Found, Method, PasteCode, SigninCode, SigninError, SigninState, Source};
 
 use crate::support::{
     Events, Fixture, LOGIN_LIMIT, NUDGE, POLL, STATUS_LIMIT, Seen, claude, codex, now,
@@ -234,9 +234,12 @@ fn sign_out_runs_the_logout_then_status() {
         "auth".to_owned(),
         "logout".to_owned()
     ]));
-    // A status check now agrees.
+    // A status check now agrees, and finds no login of the lawyer's.
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none);
 }
 
 #[test]
@@ -327,4 +330,56 @@ fn calls_that_cannot_run_are_refused() {
         Err(SigninError::NoHome(claude()))
     );
     assert_eq!(fx.launches(), []);
+}
+
+#[test]
+fn sign_in_runs_through_the_sign_in_launcher_and_never_the_install_one() {
+    let fx = Fixture::new("signin-split", "ok-after:0");
+    let (agents, events, installs) = fx.start_split(claude());
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
+    assert_eq!(
+        fx.runs_of("login").len(),
+        1,
+        "the login went through the sign-in launcher"
+    );
+    assert_ne!(fx.runs_of("status"), []);
+    let auth_runs: Vec<String> = installs
+        .args()
+        .into_iter()
+        .filter(|args| args.contains("\"auth\""))
+        .collect();
+    assert_eq!(
+        auth_runs,
+        Vec::<String>::new(),
+        "no sign-in run on the install launcher"
+    );
+}
+
+/// The status check that runs detection (a CLI run in the lawyer's home) holds no caller: with
+/// every `auth status` run hung, `check_status` returns at once, and the state and a second
+/// command answer while the run goes on. Desktop's `setup` and the windows' calls never wait on it.
+#[cfg(unix)]
+#[test]
+fn a_status_run_that_never_answers_holds_no_caller() {
+    let fx = Fixture::new("signin-status-hangs", "never");
+    let (agents, _events) = fx.start();
+    fx.stall(Some("status"));
+    let began = clauseo_agents::testing::instant();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(agents.signin_state(&claude()), None);
+    drop(agents.cancel_sign_in(&claude()));
+    agents.check_status(&claude()).unwrap();
+    let took = clauseo_agents::testing::millis_since(began);
+    assert!(took < 1000, "the calls took {took} ms");
+    let mut runs = 0;
+    for _ in 0..3000 {
+        runs = fx.runs_of("status").len();
+        if runs > 0 {
+            break;
+        }
+        crate::support::pause();
+    }
+    assert_eq!(runs, 1, "one status run, still going");
 }

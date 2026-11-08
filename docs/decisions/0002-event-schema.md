@@ -108,20 +108,20 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `content_appended` | turn, message, acp_message_id?, kind, block (never text) | acp | yes | T |
 | `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content | acp | yes | T |
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
-| `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty) | acp | yes | T |
+| `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty), source? (`SearchSource`, default `web`, left out when `web`; R24), tool? (the connector's tool, cap 64 chars; R24) | acp | yes | T |
 | `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`) | acp | yes | T |
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
-| `elicitation_resolved` | elicitation, outcome, by (never the values) | host | yes | T |
+| `elicitation_resolved` | elicitation, outcome, by (never the values; see the paragraph after the table) | host | yes | T |
 | `elicitation_expired` | elicitation, reason | host | yes | T |
 | `plan_replaced` | entries | acp | yes | T |
 | `mode_changed` | mode_id | acp | yes | T |
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`); host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |
@@ -138,6 +138,11 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `caught_up` (`HostEvent`) | stream, last_seq; once per `SubscribeEvents`, between replay and live | host | no | the subscribed stream |
 | `account_limits_changed` (`HostEvent`) | `AccountLimits` | limits, through the host | no | none |
 | `limits_view_changed` (`HostEvent`) | `LimitsView`, the whole view after a change | limits, through the host | no | none; `subscribe_limits` subscribers only |
+| `connectors_changed` (`HostEvent`) | `ConnectorsState`, the whole state after a change (R24) | host | no | none; app subscribers, and every app catch-up |
+| `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
+| `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
+| `protection_view_changed` (`HostEvent`) | `ProtectionView`, the whole view after a change (0051, R17 PR-B1) | host | no | none; app subscribers only, no catch-up (`HostQuery::Protection` has it) |
+| `site_blocked` (`HostEvent`) | block_id, matter, thread?, turn?, host, tag (`SiteTag`), list_generated, override_allowed, count; the egress proxy refused a listed site (0053), re-sent with the same block_id and a higher count when the same site is refused again in the turn | host | no | none; app subscribers only, no catch-up |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
   started. `turn_failed` and `turn_stopped_at_limit` add detail and never replace it;
@@ -148,6 +153,51 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
   field back to absent: a call that has a `tool_name`, `raw_input` or `raw_output` keeps one. A
   new tool-call field touches `ToolCallStarted`, `ToolCallPatch` and the view's `ToolCallEntry`,
   plus the reducer's merge.
+- Elicitation values stay out of Clauseo's record: `elicitation_resolved` never carries them,
+  and since a tool call can echo what the agent was told, the host also withholds them from tool
+  output. When the lawyer accepts a form, the host keeps the submitted strings in memory
+  (zeroized when dropped) and writes `[withheld]` (`clauseo_protocol::WITHHELD`) in place of
+  each occurrence in later `tool_call_started` and `tool_call_updated` events, before the
+  inline or blob decision, so a blob is scrubbed too.
+  - Fields: every string field of the call and its content. That is the title, `tool_name`,
+    `locations` (an inside path that no longer makes a valid matter path becomes an outside
+    place: it loses its link), `raw_input` and `raw_output`, and in content a text block, a
+    diff's path and its old and new text, a resource link's `uri`, `name`, `mime_type`,
+    `title` and `description`, a resource's `uri`, `mime_type` and text, an image's
+    `uri` and `mime_type`, an audio block's `mime_type`, and an unsupported block's `kind`
+    and raw JSON. Not scrubbed: the agent's `toolCallId` (the host's key for the call) and
+    base64 data (an image's or audio's `data`, a resource's `blob`).
+  - JSON (`raw_input`, `raw_output`, an unsupported block's raw) is parsed and scrubbed in
+    its string values, its numbers and its object keys, then written back, so it stays valid.
+    Two keys that both become `[withheld]` stay apart: `[withheld]`, `[withheld] 2`, and so
+    on. A value whose trimmed text is a JSON number (`12345678`, `1.50`) also replaces an equal
+    JSON number with the string `"[withheld]"`.
+  - Forms matched, in every string field and JSON string or key: the value as typed; trimmed,
+    when that differs and is not empty; and of each, the JSON-escaped text (what `serde_json`
+    writes between the quotes, as found in JSON text nested in a string) and that text with
+    every non-ASCII char as `\uXXXX` (lower or upper hex, a char outside the BMP as its
+    surrogate pair, as Python's `ensure_ascii` writes it). Other escapings (mixed hex case, an
+    escaped `/`, `\u` for an ASCII char, HTML or URL encoding) are not matched. Matching is
+    exact and case-sensitive, earliest match first, longest form at a position.
+  - A form scoped to a tool call (the scope's `toolCallId`): every string of 3 characters or
+    more after trimming, a string in a list included, is withheld from that call until the call
+    is `completed` or `failed` or the turn ends.
+  - A form with no tool call scope: every string of 8 characters or more after trimming is
+    withheld from every tool call for the rest of the turn. Shorter strings ("Yes", "Fees")
+    would blank ordinary words in unrelated output. A turn can hold both kinds; a scoped call
+    gets both.
+  - Booleans and numbers the lawyer submits as numbers are not withheld: they cannot be told
+    apart from other output. A declined or cancelled form, and a URL elicitation, keep nothing.
+  - Not covered (residuals): another tool call that repeats a value from a scoped form; a value
+    under the minimum length (3 scoped, 8 unscoped); the agent's own message or thought text;
+    an echo after the call or the turn ended; a value the agent transforms (encodes otherwise,
+    splits, rewords). The scrub's cost grows with the output's size times the number of values
+    on the host's actor; the values come from the lawyer, so an agent cannot raise their count.
+  - Only what is logged is scrubbed. The turn's own list of the paths its tool calls named
+    (memory only, for the after-turn checkpoint and Undo) takes the calls as the agent sent
+    them, so a file named after a value is still the agent's edit. Residual: restart recovery
+    rebuilds that list from the scrubbed log, so after a crash mid-turn such a file shows in
+    Undo under its real name (it is on disk), unticked, as a possible lawyer's edit.
 - `DomainEvent` is what `store` accepts; `HostEvent` is what a subscriber receives and is never logged.
   Limit ticks stay out of the log; `store` keeps the last `AccountLimits` per account apart.
 
@@ -243,6 +293,14 @@ The rail's triage (0045) folds `thread_snoozed` into `HeaderEntry.snoozed_until`
 `ThreadSummary` carries them too. `REDUCER_SCHEMA_VERSION` goes from 6 to 7, after the tool call
 times' 5 to 6: old snapshots are passed over and each thread's log is folded once at its next
 reopen, as for the bumps above.
+
+Resuming after an idle stop (0052) folds into `HeaderEntry.resuming_since`, a `Timestamp`. A
+`user_message` that moves an `IdleStopped` thread to `Starting` sets it to that event's `ts`, so a
+replay gives the same time. It is cleared when the status leaves `Starting` (the turn starts, ends
+or fails, or the thread is archived or detached) and by the next `agent_session_attached`. It is
+never set for a first start or a start after `AgentExited`. The field is additive (missing reads as
+`None`, and `None` is left out), and `REDUCER_SCHEMA_VERSION` goes from 10 to 11: old snapshots are
+passed over and each thread's log is folded once at its next reopen, as for the bumps above.
 
 Tool calls carry their web (0041; no event changes, the fold does). `ToolCallEntry.web` (a boxed
 `ToolCallWeb`, left out when none) holds the call's `WebSearchRecorded` as `search` and its
@@ -502,8 +560,8 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `DomainEvent` | open, `Unknown { kind, payload }` | data | |
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
-| `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
+| `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
@@ -628,7 +686,7 @@ A new variant of an open enum:
    `ALL` the macro writes.
 2. If `tests/events/unknown_variants.rs` checks the enum with `unit_enum`, its
    `(Variant, "wire_name")` case, in `ALL` order: that test asserts the cases follow `ALL`.
-3. If the enum is one of the 15 that `every_listed_variant_is_in_ui_states` (tests/ui_states.rs)
+3. If the enum is one of the 21 that `every_listed_variant_is_in_ui_states` (tests/ui_states.rs)
    lists, `ThreadStatus`, `ToolKind` and `ErrorCode` among them, a row naming `Type::Variant` in
    the second column of a table in sections 1 to 9 of `docs/ui-states.md`: that test. The same
    holds for a new variant of a closed enum on that list.

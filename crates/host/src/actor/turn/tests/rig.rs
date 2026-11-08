@@ -94,7 +94,7 @@ impl Rig {
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
-    fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
+    pub(super) fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
         crate::write::create_dir_all(&root.join("home")).unwrap();
         let scenario = root.join(format!("{test}.jsonl"));
         let header = format!(
@@ -126,6 +126,21 @@ impl Rig {
     /// The host on the data folder `dir`, started and serving, with the start-up read
     /// `failing` names failing.
     fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
+        // The idle stop is off unless a test turns it on (`Rig::start_idle`).
+        Self::open_with(dir, run, failing, |config| {
+            config
+                .with_idle_limit(Duration::MAX)
+                .with_live_agents(usize::MAX)
+        })
+    }
+
+    /// [`Rig::open`], with `adjust` given the host config last.
+    pub(super) fn open_with(
+        dir: TempDir,
+        run: u16,
+        failing: Option<Failing>,
+        adjust: impl FnOnce(HostConfig) -> HostConfig,
+    ) -> Self {
         let root = dir.path();
         let effective = Effective::load(&Locations::under_home(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
@@ -134,10 +149,12 @@ impl Rig {
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(root.join("managed-mcp.json"));
+        let config = adjust(config);
         let mut pool = LocalPool::new();
         let (post, internal) = async_channel::unbounded();
         let (ready, _ready) = std::sync::mpsc::channel();
-        let open = startup::open(config, pool.spawner(), post, ready);
+        let first = crate::actor::protection::observe(config.sandbox());
+        let open = startup::open((config, first), pool.spawner(), post, ready);
         let mut actor = pool.run_until(open).unwrap();
         startup::begin_startup(&mut actor);
         let mut rig = Self {
@@ -242,6 +259,18 @@ impl Rig {
     /// Handles inputs until `done` holds.
     pub(super) fn run_until(&mut self, what: &str, done: impl FnMut(&mut Actor) -> bool) {
         self.run_holding(what, |_, _| false, done);
+    }
+
+    /// Runs the tasks that can go on and handles every input they posted, until none is left;
+    /// waits for nothing else (an agent's exit).
+    pub(super) fn drain(&mut self) {
+        loop {
+            self.pool.run_until_stalled();
+            let Ok(input) = self.internal.try_recv() else {
+                return;
+            };
+            self.actor.on_input(input);
+        }
     }
 
     /// Handles the inputs held back, in the order they came.
@@ -510,7 +539,7 @@ impl Rig {
 
 /// A store read that fails during a start-up.
 #[derive(Debug, Clone, Copy)]
-enum Failing {
+pub(super) enum Failing {
     /// The load of a stream.
     Load(StreamId),
     /// Reconciliation's whole-log read of a thread.

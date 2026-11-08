@@ -181,16 +181,22 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
         }
     }
     if let Some(matter) = &commit.matter {
+        let skill_packs = matter
+            .skill_packs
+            .as_ref()
+            .map(codec::skill_packs_text)
+            .transpose()?;
         conn.prepare_cached(
             "INSERT INTO matters (id, name, kind, folder_path, folder_locator, shadow_repo_path, \
-             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (id) DO UPDATE \
+             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+             ON CONFLICT (id) DO UPDATE \
              SET name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
              folder_locator = excluded.folder_locator, \
              shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms, \
              client = excluded.client, next_date = excluded.next_date, \
              pinned = excluded.pinned, last_opened_ms = excluded.last_opened_ms, \
-             forgotten_ms = excluded.forgotten_ms",
+             forgotten_ms = excluded.forgotten_ms, skill_packs = excluded.skill_packs",
         )?
         .execute(params![
             matter.id.to_string(),
@@ -205,6 +211,7 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             matter.pinned,
             matter.last_opened.map(Timestamp::as_millis),
             matter.forgotten.map(Timestamp::as_millis),
+            skill_packs,
         ])?;
     }
     if let Some(thread) = &commit.thread {

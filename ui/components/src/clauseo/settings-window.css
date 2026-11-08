@@ -119,6 +119,11 @@
   .set-pane-title {
     @apply text-title font-chrome stretch-voice tracking-title text-primary;
   }
+  /* the head takes focus only when the address opened its section (focusHead): a place to start reading, not a
+     control, so no ring */
+  .set-pane-title:focus {
+    outline: none;
+  }
   .set-pane-lead {
     @apply text-ui-loose text-muted;
   }
@@ -256,6 +261,10 @@
   }
   .set-lockup {
     width: var(--size-search);
+  }
+  /* a test build's label beside the version: the tag's own look (shell.css, .test-build), in line with the version */
+  .set-about .test-build {
+    margin-inline: var(--s2) 0;
   }
 
   /* the window is the viewport: its side of sections stands at its own 960 px and down to where side and pane still

@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/agent_homes.rs"]
+mod agent_homes;
+#[cfg(test)]
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
@@ -35,6 +38,15 @@ mod browser;
 #[path = "host/browser_install.rs"]
 mod browser_install;
 #[cfg(test)]
+#[path = "host/browser_policy.rs"]
+mod browser_policy;
+#[cfg(test)]
+#[path = "host/came_back.rs"]
+mod came_back;
+#[cfg(test)]
+#[path = "host/came_back_marker.rs"]
+mod came_back_marker;
+#[cfg(test)]
 #[path = "host/cancel.rs"]
 mod cancel;
 #[cfg(test)]
@@ -47,8 +59,15 @@ mod claude_mode;
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]
+#[path = "host/web_sources.rs"]
+mod web_sources;
+
+#[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
+#[cfg(test)]
+#[path = "host/codex_fence.rs"]
+mod codex_fence;
 #[cfg(test)]
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
@@ -58,12 +77,83 @@ mod codex_plans;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+
+#[cfg(test)]
+#[path = "host/case_law.rs"]
+mod case_law;
+#[cfg(test)]
+#[path = "host/case_law_hint.rs"]
+mod case_law_hint;
+#[cfg(test)]
+#[path = "host/case_law_sources.rs"]
+mod case_law_sources;
+#[cfg(test)]
+#[path = "host/connector_money.rs"]
+mod connector_money;
+#[cfg(test)]
+#[path = "host/connector_no_key.rs"]
+mod connector_no_key;
+#[cfg(test)]
+#[path = "host/connector_outcomes.rs"]
+mod connector_outcomes;
+#[cfg(test)]
+#[path = "host/connector_paid.rs"]
+mod connector_paid;
+#[cfg(test)]
+#[path = "host/connector_pay_link.rs"]
+mod connector_pay_link;
+#[cfg(test)]
+#[path = "host/connector_races.rs"]
+mod connector_races;
+#[cfg(test)]
+#[path = "host/connector_recharge.rs"]
+mod connector_recharge;
+#[cfg(test)]
+#[path = "host/connector_resume_order.rs"]
+mod connector_resume_order;
+#[cfg(test)]
+#[path = "host/connector_rig.rs"]
+mod connector_rig;
+#[cfg(test)]
+#[path = "host/connector_state.rs"]
+mod connector_state;
+#[cfg(test)]
+#[path = "host/connectors.rs"]
+mod connectors;
 #[cfg(test)]
 #[path = "host/counts.rs"]
 mod counts;
+// Its one test makes symlinks, so the module is Unix-only.
+#[cfg(test)]
+#[path = "host/allowed_integrity.rs"]
+mod allowed_integrity;
+#[cfg(test)]
+#[path = "host/allowed_saving.rs"]
+mod allowed_saving;
+#[cfg(test)]
+#[path = "host/allowed_sites.rs"]
+mod allowed_sites;
+#[cfg(test)]
+#[path = "host/allowed_stores.rs"]
+mod allowed_stores;
+#[cfg(all(test, unix))]
+#[path = "host/data_fence.rs"]
+mod data_fence;
+#[cfg(test)]
+#[path = "host/documents_later.rs"]
+mod documents_later;
 #[cfg(test)]
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
+#[cfg(test)]
+#[path = "host/egress.rs"]
+mod egress;
+#[cfg(test)]
+#[path = "host/egress_wait.rs"]
+mod egress_wait;
+#[cfg(test)]
+#[path = "host/elicitation_withheld.rs"]
+mod elicitation_withheld;
 #[cfg(test)]
 #[path = "host/folder_query.rs"]
 mod folder_query;
@@ -83,8 +173,34 @@ mod guard_hook;
 #[path = "host/hindi.rs"]
 mod hindi;
 #[cfg(test)]
+#[path = "host/hold_appends.rs"]
+mod hold_appends;
+#[cfg(test)]
+#[path = "host/hold_reasons.rs"]
+mod hold_reasons;
+#[cfg(test)]
+#[path = "host/idle_stop.rs"]
+mod idle_stop;
+#[cfg(test)]
+#[path = "host/idle_stop_during.rs"]
+mod idle_stop_during;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
+#[cfg(test)]
+#[path = "host/key_retry.rs"]
+mod key_retry;
+#[path = "host/key_unreadable.rs"]
+mod key_unreadable;
+#[cfg(test)]
+#[path = "host/keys_loading.rs"]
+mod keys_loading;
+#[cfg(test)]
+#[path = "host/launch_folder.rs"]
+mod launch_folder;
+#[cfg(test)]
+#[path = "host/launch_refused.rs"]
+mod launch_refused;
 #[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
@@ -95,8 +211,14 @@ mod limits_asks;
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]
+#[path = "host/limits_login.rs"]
+mod limits_login;
+#[cfg(test)]
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
+#[cfg(test)]
+#[path = "host/limits_sandbox.rs"]
+mod limits_sandbox;
 #[cfg(test)]
 #[path = "host/limits_stop.rs"]
 mod limits_stop;
@@ -116,6 +238,15 @@ mod locate;
 #[path = "host/log_file.rs"]
 mod log_file;
 #[cfg(test)]
+#[path = "host/login_check.rs"]
+mod login_check;
+#[cfg(test)]
+#[path = "host/login_shared.rs"]
+mod login_shared;
+#[cfg(test)]
+#[path = "host/long_paths.rs"]
+mod long_paths;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
@@ -124,6 +255,18 @@ mod mcp;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
+#[cfg(test)]
+#[path = "host/own_logout.rs"]
+mod own_logout;
+#[cfg(test)]
+#[path = "host/packs.rs"]
+mod packs;
+#[cfg(test)]
+#[path = "host/packs_log.rs"]
+mod packs_log;
+#[cfg(test)]
+#[path = "host/packs_timing.rs"]
+mod packs_timing;
 #[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
@@ -142,6 +285,15 @@ mod profile;
 #[cfg(test)]
 #[path = "host/profile_rig.rs"]
 mod profile_rig;
+#[cfg(test)]
+#[path = "host/protection.rs"]
+mod protection;
+#[cfg(test)]
+#[path = "host/protection_edges.rs"]
+mod protection_edges;
+#[cfg(test)]
+#[path = "host/protection_rig.rs"]
+mod protection_rig;
 #[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
@@ -176,8 +328,32 @@ mod search_review;
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]
+#[path = "host/settings_entries.rs"]
+mod settings_entries;
+#[cfg(test)]
+#[path = "host/sign_in_hold.rs"]
+mod sign_in_hold;
+#[cfg(test)]
+#[path = "host/site_blocked.rs"]
+mod site_blocked;
+#[cfg(test)]
+#[path = "host/skill_packs.rs"]
+mod skill_packs;
+#[cfg(test)]
+#[path = "host/skill_packs_cap.rs"]
+mod skill_packs_cap;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
+#[cfg(test)]
+#[path = "host/steer_at_head.rs"]
+mod steer_at_head;
+#[cfg(test)]
+#[path = "host/stop_for.rs"]
+mod stop_for;
+#[cfg(test)]
+#[path = "host/stop_hold.rs"]
+mod stop_hold;
 #[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
@@ -209,6 +385,12 @@ mod undo_preview;
 #[cfg(test)]
 #[path = "host/update.rs"]
 mod update;
+#[cfg(test)]
+#[path = "host/update_holds.rs"]
+mod update_holds;
+#[cfg(test)]
+#[path = "host/update_install.rs"]
+mod update_install;
 #[cfg(test)]
 #[path = "host/versions.rs"]
 mod versions;

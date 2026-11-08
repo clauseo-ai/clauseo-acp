@@ -1,0 +1,50 @@
+/* The Safe workspace (UC; design/03-system/src/pages/settings/settings.css, the status block), apart from settings.css
+   so the copy review page (review.css) can take it: this computer's state on the well, its icon in a tile (primary
+   when on, the deeper well when Not protected), the words, and its one act at the end; the firm's lines under it. */
+@layer components {
+  .set-ws {
+    display: grid;
+    gap: var(--s3);
+  }
+  .set-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s3) var(--s4);
+    padding: var(--s4);
+    border-radius: var(--r-card);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .set-status-icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--size-control);
+    height: var(--size-control);
+    border-radius: var(--r-control);
+    background: var(--primary);
+    color: var(--on-primary);
+    box-shadow: var(--shadow-icon-primary);
+  }
+  .set-status[data-off] .set-status-icon {
+    background: var(--well-strong);
+    color: var(--muted);
+    box-shadow: var(--set-in-lights);
+  }
+  .set-status-words {
+    display: grid;
+    gap: var(--s1);
+    flex: 1;
+    min-width: 0;
+  }
+  .set-status-title {
+    @apply text-ui font-chip text-primary deva-nudge;
+  }
+  .set-ws-wait {
+    @apply text-small-row text-muted;
+  }
+  .set-ws-failed {
+    @apply text-small-row text-primary;
+  }
+}

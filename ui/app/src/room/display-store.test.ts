@@ -149,6 +149,25 @@ test("the first display is laid out for the platform the store starts with; the 
   expect(shown.map((d) => d.platform)).toEqual(["mac"]);
 });
 
+test("the host's test-build word reaches the display; the same answer moves nothing", () => {
+  const { store, shown } = harness({ platform: "mac" });
+  store.setTestBuild(false);
+  expect(shown).toEqual([]);
+  store.setTestBuild(true);
+  expect(store.display().testBuild).toBe(true);
+  expect(shown.at(-1)?.testBuild).toBe(true);
+});
+
+test("the host's release mode reaches the display; the same answer moves nothing", () => {
+  const { store, shown } = harness({ platform: "mac" });
+  expect(store.display().releaseMode).toBe("release");
+  store.setReleaseMode("release");
+  expect(shown).toEqual([]);
+  store.setReleaseMode("dry");
+  expect(store.display().releaseMode).toBe("dry");
+  expect(shown.at(-1)?.releaseMode).toBe("dry");
+});
+
 test("connectRoom starts the display on the webview's own OS, and display_info confirms it", async () => {
   vi.stubGlobal("navigator", { platform: "Win32", userAgent: "Windows NT 10.0" });
   try {
@@ -192,7 +211,16 @@ test("displayOf maps every setting to the display it shows", () => {
     lang: "hi",
     textSize: 14,
     platform: "linux",
+    testBuild: false,
+    releaseMode: "release",
   });
+  expect(
+    displayOf(ui, { dark: true, reduced: true, platform: "linux", testBuild: true }).testBuild,
+  ).toBe(true);
+  expect(
+    displayOf(ui, { dark: true, reduced: true, platform: "linux", releaseMode: "test" })
+      .releaseMode,
+  ).toBe("test");
 });
 
 /* ---------- with a NextHost (H7), over FakeTransport ---------- */

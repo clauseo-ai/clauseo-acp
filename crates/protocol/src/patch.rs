@@ -14,9 +14,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, BrowserInstallState, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry,
-    LimitsView, MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId,
-    ThreadsChanged, UpdateView, ViewEntry, ViewEpoch,
+    AccountLimits, BlockedSiteId, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope,
+    FolderScanned, HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId,
+    Protection, ProtectionView, Seq, SettingsView, SiteTag, StreamId, ThreadId, ThreadsChanged,
+    Timestamp, TurnId, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -164,6 +165,67 @@ pub enum HostEvent {
     /// The updater's state changed: the whole view after the change (decision record 0037).
     /// App-wide, never part of a stream: it reaches app subscribers only.
     UpdateChanged(UpdateView),
+    /// The connectors' state changed: the whole state after the change (R24). App-wide, never
+    /// logged and in no stream: it reaches app subscribers only, and every app catch-up carries
+    /// the latest one, as for `SettingsChanged`.
+    ConnectorsChanged(ConnectorsState),
+    /// A turn's web searches looked like Indian case law and the case-law connector is live but
+    /// not added (R24): the app offers it under the answer. Once per matter, never after the
+    /// lawyer dismissed it. App-wide and never logged: an offer, not part of the record, so a
+    /// reopened thread does not show it again.
+    CaseLawHint {
+        /// The matter.
+        matter: MatterId,
+        /// The thread.
+        thread: ThreadId,
+        /// The turn whose searches fired it.
+        turn: TurnId,
+    },
+    /// A matter's protection changed (decision record 0051): the sandbox came or went, or why it
+    /// is off changed. App-wide, never logged and in no stream: it reaches app subscribers
+    /// only, and a catch-up carries none, since `ListMatters` gives each matter's current one
+    /// (`MatterSummary::protection`).
+    ProtectionChanged {
+        /// The matter.
+        matter: MatterId,
+        /// Its protection now.
+        protection: Protection,
+    },
+    /// This computer's protection view changed (decision record 0051): the sandbox's detection,
+    /// the set-up work in progress, `retry_asks_admin`, or either protection setting. The whole
+    /// view after the change, as `HostQuery::Protection` answers it. App-wide, never logged,
+    /// in no stream and never folded: it reaches app subscribers only, and, as for
+    /// `ProtectionChanged`, a catch-up carries none (`HostQuery::Protection` gives it).
+    ProtectionViewChanged {
+        /// The view now.
+        view: ProtectionView,
+    },
+    /// The egress proxy refused a site the block list names (decision record 0053): the app
+    /// tells the lawyer. App-wide, never logged and in no stream: it reaches app subscribers
+    /// only, and a catch-up carries none. Once per site per turn: the same site refused again
+    /// in that turn re-sends the event with the same `block_id` and a higher `count`.
+    SiteBlocked {
+        /// This site in this turn: a re-sent event keeps it, so the app updates one notice.
+        block_id: BlockedSiteId,
+        /// The matter whose agent asked for the site.
+        matter: MatterId,
+        /// The thread, when the request could be traced to one; left out when not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<ThreadId>,
+        /// The turn that was running, if any; left out when none was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn: Option<TurnId>,
+        /// The host name or IP address the agent asked for, as it asked.
+        host: String,
+        /// Why the list names it.
+        tag: SiteTag,
+        /// When the list in use was made.
+        list_generated: Timestamp,
+        /// `network.allow_unsafe_site_override`: the lawyer may allow the site anyway.
+        override_allowed: bool,
+        /// How many times the site was refused in this turn, at least 1.
+        count: u32,
+    },
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

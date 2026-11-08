@@ -1,7 +1,8 @@
 //! Live tests against a real connector, ignored unless asked for, and skipped unless
 //! `CONNECTORS_LIVE_ORIGIN` names one: `staging`, or `fake:http://127.0.0.1:<port>` for the
 //! connector's pre-staging server on this machine. Run them with
-//! `cargo nextest run -p clauseo-connectors --run-ignored only -E 'test(live_)'`.
+//! `cargo nextest run -p clauseo-connectors --run-ignored only -E 'test(live_)'` (staging adds
+//! `--features staging`).
 //!
 //! They print nothing secret: an error prints its kind or status only. The API key is read from
 //! the file named by `CONNECTORS_LIVE_KEY_FILE` and never printed. No paid tool is called.
@@ -19,9 +20,15 @@ mod live {
     /// The connector named by `CONNECTORS_LIVE_ORIGIN`, or `None` (the test then skips).
     fn origin() -> Option<Origin> {
         let value = std::env::var("CONNECTORS_LIVE_ORIGIN").ok()?;
+        #[cfg(feature = "staging")]
         if value == "staging" {
             return Some(Origin::Staging);
         }
+        #[cfg(not(feature = "staging"))]
+        assert!(
+            value != "staging",
+            "CONNECTORS_LIVE_ORIGIN=staging needs --features staging"
+        );
         let url = value
             .strip_prefix("fake:")
             .and_then(|url| url::Url::parse(url).ok());

@@ -1,0 +1,14 @@
+{"scenario":"codex-auth-required-key","description":"Codex launched with a key still answers session/new with auth_required (JSON-RPC -32000); the host's one authenticate with api-key succeeds, session/new goes again and the turn's one prompt ends end_turn. Any second authenticate is a mismatch","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"note":"codex-acp 2.2.2's initialize as in codex-auth-required.jsonl, authMethods [] as there: the host's authenticate names api-key whatever is listed.","respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new-1","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new-1","error":{"code":-32000,"message":"Authentication required"}}}
+{"note":"codex-acp's authenticate(\"api-key\") reads the key from CODEX_API_KEY when the request has no _meta (research 22 §2.4); the host sends only the method id.","expect":{"method":"authenticate","as":"auth","params":{"methodId":"api-key"},"off":["/_meta"]}}
+{"respond":{"to":"auth","result":{}}}
+{"expect":{"method":"session/new","as":"new-2","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new-2","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Signed in with the key."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

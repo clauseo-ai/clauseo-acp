@@ -21,7 +21,10 @@ decided, as applied:
 - **One HTTP agent**: ureq over rustls with the `ring` provider and the OS trust store
   (rustls-platform-verifier). Connect timeout 10 s, whole request 60 s, 50 s for a `wait=40`
   recharge poll. Redirects are never followed. Production and staging are `https` only. The proxy
-  is `ProxyChoice::Env` until S16's upstream lookup exists.
+  is `ProxyChoice::Env` by default; the app (R24, PR5) passes `ProxyChoice::Resolve`, a lookup
+  over S16's `upstream_for` asked before each request and never by `Connectors::new`, so a slow
+  WPAD lookup delays no start and the route follows the lookup's 5-minute cache. A changed route
+  gets a new agent; a refused one fails the request rather than going direct.
 - **Origins.** Every compiled-in URL starts with `https://data.clauseo.chat`. Under `Staging` and
   the test-only `Fake` (`http://127.0.0.1:<port>` only), that prefix maps onto the origin and the
   path is kept. The discovery, PKCE, `state` and `iss` checks stay on in every origin.

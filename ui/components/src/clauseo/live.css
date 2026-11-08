@@ -297,6 +297,17 @@
     margin-top: var(--s3);
     padding-left: calc(var(--perm-indent) - var(--s3));
   }
+  .perm-actions-pairs {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    justify-items: start;
+  }
+  /* no icon before the ask: its lines start under its first word, the answers' edges with them */
+  .perm[data-plain] .perm-kept,
+  .perm[data-plain] .perm-confirming,
+  .perm[data-plain] .perm-actions {
+    padding-left: 0;
+  }
   .perm-key {
     margin-right: calc(-1 * var(--s1));
   }

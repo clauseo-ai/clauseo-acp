@@ -6,10 +6,12 @@ use url::Url;
 
 use super::Scheme::{Http, Https};
 use super::parse::{self, BadProxy, Bypass, NoProxy};
-use super::{CACHE_FOR, Env, Lookup, Route, Upstream};
+use super::{CACHE_FOR, Env, FailKind, Lookup, Route, Upstream, UpstreamAnswer};
 use crate::{Clock, Error};
 
+mod failed;
 mod flights;
+mod pac;
 mod scheme;
 
 /// A clock the test moves by hand.
@@ -269,7 +271,7 @@ fn no_proxy_applies_only_to_env() {
 }
 
 #[test]
-fn cache_hits_then_expires_after_five_minutes() {
+fn cache_hits_then_expires_after_60_seconds() {
     let (lookup, calls, clock) = lookup(Upstream::System, Env::default(), http("os-proxy", 1));
     assert_eq!(
         lookup.route(Https, "example.test", 443),
@@ -290,22 +292,79 @@ fn cache_hits_then_expires_after_five_minutes() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2, "another port: a miss");
 
-    clock.advance(CACHE_FOR.checked_sub(Duration::from_secs(1)).unwrap());
+    assert_eq!(CACHE_FOR, Duration::from_secs(60));
+    clock.advance(Duration::from_secs(59));
     lookup.route(Https, "example.test", 443);
-    assert_eq!(calls.load(Ordering::SeqCst), 2, "under 5 minutes: a hit");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "under 60 s: a hit");
 
     clock.advance(Duration::from_secs(1));
     lookup.route(Https, "example.test", 443);
-    assert_eq!(calls.load(Ordering::SeqCst), 3, "at 5 minutes: expired");
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "at 60 s: expired");
     lookup.route(Https, "example.test", 443);
     assert_eq!(calls.load(Ordering::SeqCst), 3, "refreshed");
 }
 
+/// A `DIRECT` answer is cached for the same 60 s.
 #[test]
-fn failed_os_answer_goes_direct() {
+fn a_direct_answer_is_cached_for_60_seconds_too() {
+    let (lookup, calls, clock) = lookup(Upstream::System, Env::default(), Route::Direct);
+    assert_eq!(lookup.route(Https, "example.test", 443), Route::Direct);
+    clock.advance(Duration::from_secs(59));
+    assert_eq!(lookup.route(Https, "example.test", 443), Route::Direct);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "under 60 s: a hit");
+    clock.advance(Duration::from_secs(1));
+    lookup.route(Https, "example.test", 443);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
+}
+
+/// A failed lookup (a WPAD or PAC timeout) is kept apart from `DIRECT` ([`UpstreamAnswer::Failed`])
+/// and cached 60 s like any answer, so a timeout stalls a connection at most once a minute per
+/// host; a connection takes it as direct.
+#[test]
+fn a_failed_answer_is_cached_apart_from_direct_for_60_seconds() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let clock = FakeClock::default();
+    let failing = Lookup::with_parts(
+        Upstream::System,
+        Env::default(),
+        {
+            let calls = Arc::clone(&calls);
+            move |_: super::Scheme, _: &str, _: u16| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                UpstreamAnswer::Failed(FailKind::Other)
+            }
+        },
+        clock.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        failing.answer(Https, "example.test", 443),
+        UpstreamAnswer::Failed(FailKind::Other)
+    );
+    assert_eq!(failing.route(Https, "example.test", 443), Route::Direct);
+    clock.advance(Duration::from_secs(59));
+    assert_eq!(
+        failing.answer(Https, "example.test", 443),
+        UpstreamAnswer::Failed(FailKind::Other)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "under 60 s: a hit");
+    clock.advance(Duration::from_secs(1));
+    failing.answer(Https, "example.test", 443);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
+}
+
+#[test]
+fn failed_os_answer_is_failed_and_goes_direct() {
     let answer = Err("the PAC script failed".to_owned());
-    assert_eq!(super::settle(443, answer), Route::Direct);
-    assert_eq!(super::settle(443, Ok(http("p", 1))), http("p", 1));
+    assert_eq!(
+        super::settle(443, answer.clone()),
+        UpstreamAnswer::Failed(FailKind::Other)
+    );
+    assert_eq!(super::settle(443, answer).route(), Route::Direct);
+    assert_eq!(
+        super::settle(443, Ok::<_, String>(http("p", 1))),
+        UpstreamAnswer::Route(http("p", 1))
+    );
 }
 
 #[test]
@@ -448,7 +507,7 @@ mod macos {
         let script = r#"function FindProxyForURL(url, host) { throw new Error("broken"); }"#;
         let answer = macos::script_route(script, "https://via-proxy.test/");
         assert!(answer.is_err(), "{answer:?}");
-        assert_eq!(settle(443, answer), Route::Direct);
+        assert_eq!(settle(443, answer).route(), Route::Direct);
     }
 }
 

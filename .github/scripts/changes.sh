@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver profile agents counts sandbox"
+APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver connectors profile agents counts sandbox blocklist"
 
 nl=$'\n'
 rust=false app=false ui=false product=false product_also=false unknown=""
@@ -74,7 +74,11 @@ classify() {
     ui/app/src/transport/bindings.ts | ui/components/src/styles/tokens-parts.css) ui=true app=true rust=true ;;
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
     ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
-    ui/app/src/review/registry-h11.tsx) ui=true app=true rust=true ;;
+    ui/app/src/review/registry-h11.tsx | ui/package.json) ui=true app=true rust=true ;;
+    # The page's first mark: native_mark.rs tests that its comma matches index.html's.
+    ui/app/index.html) ui=true app=true rust=true ;;
+    docs/firm-it.md) rust=true ;;
+    ui/app/doc-approvals.json) ui=true app=true rust=true ;;
     # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
     ui/e2e/app-windows | ui/e2e/app-windows/*) ui=true app=true rust=true ;;
     # A crate's assets are built into it (include_str!), Markdown too, so they are not prose.

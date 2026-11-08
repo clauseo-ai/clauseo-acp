@@ -37,7 +37,8 @@ open_unit_enum! {
 }
 
 open_unit_enum! {
-    /// How a page was opened: the agent's web fetch, Codex's open-page tool, or the browser.
+    /// How a page was opened: the agent's web fetch, Codex's open-page tool, the browser, or the
+    /// case-law connector.
     pub enum PageVia {
         /// The agent's web fetch tool.
         WebFetch,
@@ -45,8 +46,36 @@ open_unit_enum! {
         CodexOpenPage,
         /// The browser.
         Browser,
+        /// The case-law connector's document tool (R24).
+        CaseLaw,
     }
     test mod page_via;
+}
+
+open_unit_enum! {
+    /// Where a recorded search ran: the agent's web search, or the case-law connector (R24).
+    pub enum SearchSource {
+        /// The agent's web search tool. What a record without the field reads as.
+        Web,
+        /// The case-law connector's search tool.
+        CaseLaw,
+    }
+    test mod search_source;
+}
+
+impl SearchSource {
+    /// `Web`: what a record without the field reads as.
+    #[must_use]
+    pub(crate) const fn web() -> Self {
+        Self::Web
+    }
+
+    /// Whether `source` is `Web`, which a record leaves out. For `skip_serializing_if`, which
+    /// passes a reference; generic, as `Delivery::is_queue` is, since the lint on a small
+    /// `Copy` by reference does not apply to a generic one.
+    pub(crate) fn is_web<T: Copy + Into<Self>>(source: &T) -> bool {
+        (*source).into() == Self::Web
+    }
 }
 
 open_unit_enum! {

@@ -5,9 +5,9 @@
 
 use clauseo_protocol::{
     AgentCapabilities, AgentSessionAttached, ContentBlock, DomainEvent, HeaderEntry, MessageId,
-    QueuedPromptEdited, SteerOutcome, SteerResolved, SteeringCapability, ThreadCreated, ThreadId,
-    ToolCallStatus, TurnId, TurnQueued, TurnStarted, UserMessage, UserMessageEntry,
-    UserMessageStatus, ViewEntry,
+    QueueHoldReason, QueuedPromptEdited, SteerOutcome, SteerResolved, SteeringCapability,
+    ThreadCreated, ThreadId, ToolCallStatus, TurnId, TurnQueued, TurnStarted, UserMessage,
+    UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{Applied, Snapshot, StreamState, ViewChange, apply, set_queue_held};
 
@@ -323,14 +323,50 @@ fn steer_joins_turn_from_kind_then_session() {
 fn queue_held_is_the_hosts_flag() {
     let (_, mut state, _) = created();
     let thread_state = state.as_thread_mut().unwrap();
-    let change = set_queue_held(thread_state, true).unwrap();
+    let change = set_queue_held(thread_state, Some(QueueHoldReason::Paused)).unwrap();
     assert!(matches!(&change,
         ViewChange::Upsert(entry) if matches!(&**entry, ViewEntry::Header(h) if h.queue_held)));
-    assert!(set_queue_held(thread_state, true).is_none(), "no change");
+    assert!(
+        set_queue_held(thread_state, Some(QueueHoldReason::Paused)).is_none(),
+        "no change"
+    );
     assert!(header(&state).queue_held);
     // A snapshot writes it false: the host sets it again after a load.
     let bytes = Snapshot::of(&state).to_bytes().unwrap();
     let read = Snapshot::from_bytes(&bytes).unwrap().state;
     assert!(!header(&read).queue_held);
     assert!(header(&state).queue_held);
+}
+
+#[test]
+fn the_queues_reason_is_the_hosts_and_a_snapshot_writes_none() {
+    let (log, mut state, _) = created();
+    let thread_state = state.as_thread_mut().unwrap();
+    set_queue_held(thread_state, Some(QueueHoldReason::Limit)).unwrap();
+    // The reason alone changing is one header upsert, the flag already set.
+    let change = set_queue_held(thread_state, Some(QueueHoldReason::Update)).unwrap();
+    let ViewChange::Upsert(entry) = &change else {
+        panic!("not an upsert: {change:?}");
+    };
+    let ViewEntry::Header(shown) = &**entry else {
+        panic!("not the header: {entry:?}");
+    };
+    assert!(shown.queue_held);
+    assert_eq!(shown.queue_held_reason, Some(QueueHoldReason::Update));
+    // A snapshot writes no reason, so the state read back equals the fold of the log.
+    let bytes = Snapshot::of(&state).to_bytes().unwrap();
+    let read = Snapshot::from_bytes(&bytes).unwrap().state;
+    assert_eq!(header(&read).queue_held_reason, None);
+    assert_eq!(read, fold(log.events()));
+    assert_eq!(
+        header(&state).queue_held_reason,
+        Some(QueueHoldReason::Update)
+    );
+    // Not held clears both, in one upsert.
+    let thread_state = state.as_thread_mut().unwrap();
+    let change = set_queue_held(thread_state, None).unwrap();
+    assert!(matches!(&change, ViewChange::Upsert(entry)
+        if matches!(&**entry, ViewEntry::Header(h) if !h.queue_held && h.queue_held_reason.is_none())));
+    assert!(set_queue_held(thread_state, None).is_none(), "no change");
+    assert_eq!(state, fold(log.events()));
 }

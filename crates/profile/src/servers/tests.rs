@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::browser_for;
+use super::{CASE_LAW, browser_for, case_law};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -64,4 +64,26 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
     assert!(!windows.env.contains_key("AGENT_BROWSER_SOCKET_DIR"));
     assert_eq!(unix.env.len(), 6);
     assert_eq!(windows.env.len(), 5);
+}
+
+/// The `case-law` entry: `clauseo-mcp connector case-law` with the relay's address and the
+/// token file's path as tokens, and no token anywhere in it.
+#[test]
+fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
+    let entry = case_law(&paths());
+    assert_eq!(entry.name, CASE_LAW);
+    assert_eq!(entry.command, paths().browser.clauseo_mcp);
+    assert_eq!(entry.args, ["connector", "case-law"]);
+    let env: Vec<(&str, &str)> = entry
+        .env
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        env,
+        [
+            ("CLAUSEO_RELAY", "127.0.0.1:{relay_port}"),
+            ("CLAUSEO_RELAY_TOKEN_FILE", "{relay_token_file}"),
+        ]
+    );
 }

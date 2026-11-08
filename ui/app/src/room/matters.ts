@@ -11,10 +11,11 @@ import { frameBatch, type Batch } from "../store/batch.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
-import { quietly } from "./open.ts";
+import { ActRefusals } from "./act-refusals.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
+  FolderScanned,
   FolderSupportKind,
   MatterId,
   MatterSummary,
@@ -167,6 +168,8 @@ export class Matters {
   readonly #removedEarly = new Set<MatterId>();
   readonly #changedEarly = new Map<MatterId, MatterInfo>();
   readonly #listeners = new Set<() => void>();
+  /** What the lawyer's last open or show on each matter was refused with (act-refusals.ts). */
+  readonly refusals = new ActRefusals();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
    * matters still working. */
@@ -318,16 +321,22 @@ export class Matters {
     await this.#command({ forget_matter: { matter } }, "forget_matter");
   }
 
-  /** H3: asks for the folder of a matter that moved, and tells the host where it is now. */
-  async locate(matter: MatterId): Promise<void> {
-    const picked = await this.#transport.pickFolder();
+  /** H3: asks for the folder of a matter that moved, and tells the host where it is now. `around` runs the picker, so a
+   * caller can show its wait; left out, the pick runs as it is. */
+  async locate(
+    matter: MatterId,
+    around: <T>(pick: () => Promise<T>) => Promise<T> = (pick) => pick(),
+  ): Promise<void> {
+    const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
+    this.refusals.clear(matter);
     await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
   }
 
-  /** H11: shows the matter's folder in Finder or File Explorer; a refusal only goes to the console. */
+  /** H11: shows the matter's folder in Finder or File Explorer; a refusal stands in `refusals`
+   * until the next try. */
   reveal(matter: MatterId): Promise<void> {
-    return quietly("reveal", this.#transport.reveal({ matter }));
+    return this.refusals.track("reveal", matter, this.#transport.reveal({ matter }));
   }
 
   /** H20: where a new matter's folder goes, as the lawyer would write it; null without it, or when the read fails. */
@@ -353,6 +362,31 @@ export class Matters {
     return this.#transport.pickFolder();
   }
 
+  /** R20a: the scan of a folder the picker gave, before it becomes a matter; its progress comes as `folder_scanned`
+   * (onScan). Rejects with the host's error: a `matter.folder_*` refusal is create's own. */
+  async scan(folder: FolderRefId): Promise<void> {
+    await this.#transport.dispatch({
+      command_id: crypto.randomUUID(),
+      command: { scan_folder: { folder } },
+    });
+  }
+
+  /** Stops the scan of `folder`; its last `folder_scanned` says `cancelled`. A refusal only goes to the console. */
+  cancelScan(folder: FolderRefId): void {
+    this.#transport
+      .dispatch({ command_id: crypto.randomUUID(), command: { cancel_scan: { folder } } })
+      .catch((error: unknown) => console.warn(`cancel_scan failed: ${JSON.stringify(error)}`));
+  }
+
+  /** Hears each `folder_scanned` (an app event); returns the stop. Nothing without the app feed. */
+  onScan(listener: (scanned: FolderScanned) => void): () => void {
+    const app = this.next.app;
+    if (app === null) return () => {};
+    return app.subscribeApp((event) => {
+      if ("folder_scanned" in event) listener(event.folder_scanned);
+    });
+  }
+
   async #command(command: MattersCommand, name: string): Promise<void> {
     if (this.#rows === null) return;
     try {
@@ -365,7 +399,8 @@ export class Matters {
 
   /** An app event (H4): held until the frame, so a burst is one apply and one render. */
   #hear(event: AppEvent): void {
-    if (!this.#live) return;
+    // a scan's progress, up to four a second, is the form's alone (onScan): no ticket, no frame's apply
+    if (!this.#live || "folder_scanned" in event) return;
     // before the first list there is no list to change a row of or take a matter off: keep the rows and the ids for
     // the list to come, and take no ticket, so the read on its way still applies
     if (this.#view.phase !== "ready" && "matters_changed" in event && !event.matters_changed.all) {
@@ -401,6 +436,11 @@ export class Matters {
       if ("matters_changed" in event) {
         const change = event.matters_changed;
         matters = change.all ? change.matters : merged(matters, change.matters, change.removed);
+        changed = true;
+      } else if ("protection_changed" in event) {
+        // UC: a matter's protection now, on its row, so the rail's mark and the room's line change with it
+        const { matter, protection } = event.protection_changed;
+        matters = matters.map((m) => (m.matter === matter ? { ...m, protection } : m));
         changed = true;
       }
       // threads_changed is the conversations' (conversations.ts); a matter row's status is H5's

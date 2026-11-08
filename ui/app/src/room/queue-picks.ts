@@ -15,16 +15,19 @@ const NONE: readonly Queued[] = [];
 const filesOf = (entry: UserMessageEntry) =>
   entry.content.reduce((n, b) => (b.text === undefined ? n + 1 : n), 0);
 
-/** A pick of the queued messages, in the order they go (their entries' order), the same array while each reads the
- * same: one per mount (useState(queuedPick)). */
+/** A pick of the queued messages, in the order they go, the same array while each reads the same: one per mount
+ * (useState(queuedPick)). The order is the host's (0048, P4b; the reducer's queued_order): the messages put back at the
+ * head (`at_head`) first, the latest first, then the rest in their entries' order. */
 export function queuedPick(): (v: StreamView | undefined) => readonly Queued[] {
   let last = NONE;
   return (v) => {
     if (v === undefined) return (last = NONE);
     const next: Queued[] = [];
-    for (const id of userIds(v.ids)) {
-      const entry = v.entries.get(id)?.user_message;
-      if (entry?.status !== "queued") continue;
+    const ids = userIds(v.ids).filter((id) => v.entries.get(id)?.user_message?.status === "queued");
+    const heads = ids.filter((id) => v.entries.get(id)!.user_message!.at_head === true).reverse();
+    const order = heads.length === 0 ? ids : [...heads, ...ids.filter((id) => !heads.includes(id))];
+    for (const id of order) {
+      const entry = v.entries.get(id)!.user_message!;
       const prev = last[next.length];
       const text = questionText(id, entry, v.texts);
       next.push(
@@ -45,8 +48,11 @@ const failedStops: readonly StopReason[] = ["failed", "max_tokens", "max_turn_re
 export function heldPick(): (v: StreamView | undefined) => Held | null {
   let last: Held | null = null;
   return (v) => {
-    if (v?.header?.header?.queue_held !== true) return (last = null);
-    let next: Held = { kind: "held" };
+    const head = v?.header?.header;
+    if (v === undefined || head?.queue_held !== true) return (last = null);
+    // why the host holds it (#537), absent from an older host; a reason this version doesn't know passes as said
+    const reason: string | undefined = head.queue_held_reason;
+    let next: Held = reason === undefined ? { kind: "held" } : { kind: "held", reason };
     for (let i = v.ids.length - 1; i >= 0; i--) {
       const id = v.ids[i]!;
       // the newest turn's end: a stop at a limit names no stop of the lawyer's, nor an older step's
@@ -54,19 +60,22 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
       if (!id.startsWith(STEP)) continue;
       const step = v.entries.get(id)?.step;
       if (step === undefined) continue;
-      if (step.stop === "cancelled") next = { kind: "stopped", at: step.ts };
-      else if (step.stop === "not_allowed") next = { kind: "not_allowed", at: step.ts };
+      const why = reason === undefined ? {} : { reason };
+      if (step.stop === "cancelled") next = { kind: "stopped", at: step.ts, ...why };
+      else if (step.stop === "not_allowed") next = { kind: "not_allowed", at: step.ts, ...why };
       else if (failedStops.includes(step.stop))
         next = {
           kind: "failed",
           at: step.ts,
           ...(step.failure === undefined ? {} : { code: step.failure }),
+          ...why,
         };
       break;
     }
     const same =
       last !== null &&
       last.kind === next.kind &&
+      last.reason === next.reason &&
       (next.kind === "held" ||
         (last.kind !== "held" && last.at === next.at && last.code === next.code));
     return same ? last : (last = next);

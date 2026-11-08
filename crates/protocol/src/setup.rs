@@ -29,8 +29,8 @@ use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum SetupCommand {
-    /// Install the agent, after a native confirm naming it and its size; another agent's
-    /// download pauses.
+    /// Install the agent (the lawyer chose its card, which shows the size): no confirm;
+    /// another agent's download pauses.
     InstallAgent {
         /// The agent.
         agent: AgentId,
@@ -44,7 +44,8 @@ pub enum SetupCommand {
         use_system_proxy: bool,
     },
     /// Sign in with the agent's plan login. A sign-in already running for the agent is joined,
-    /// not restarted.
+    /// not restarted. On an agent not installed yet it starts the install and signs in once
+    /// it is ready (`Queued` meanwhile).
     StartSignIn {
         /// The agent.
         agent: AgentId,
@@ -95,7 +96,11 @@ pub enum SetupCommand {
         /// The agent.
         agent: AgentId,
     },
-    /// Look again for a login the lawyer already has.
+    /// Look again for a login the lawyer already has, turning reuse back on. An **accepted**
+    /// `FindLogin` ends in exactly one `SignInChanged`, sent even when the state is unchanged:
+    /// `LoginFound`, `SignedOut` with `found` (`none_found` for nothing), `SignedIn`, or `Failed`
+    /// (`signin.failed`) when the search could not tell. A refused one (the agent is not
+    /// installed) gets an error reply and no `SignInChanged`.
     FindLogin {
         /// The agent.
         agent: AgentId,
@@ -259,7 +264,9 @@ pub enum SetupEvent {
 pub enum SignIn {
     /// Not signed in.
     SignedOut {
-        /// A login seen but not reusable, or why reuse stopped; missing when neither.
+        /// What the search for a login saw (a login not reusable, none, or reuse off), or why
+        /// reuse stopped; missing when nothing was looked for (the agent not installed, a key
+        /// or an endpoint that took over, a sign-out).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<FoundLogin>,
     },
@@ -313,9 +320,19 @@ pub enum SignIn {
         /// When.
         at: Timestamp,
     },
+    /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
+    /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and
+    /// nothing of the agent launches meanwhile. Ends when a try succeeds (the state after it)
+    /// or a new sign-in arrives; it has no failed end.
+    Switching {
+        /// When the first try did not finish; a later try never moves it.
+        since: Timestamp,
+        /// Whether it has gone on for 2 minutes or more.
+        stuck: bool,
+    },
 }
 
-/// A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`.
+/// What the search for a login saw, or why reuse stopped: [`SignIn::SignedOut`]'s `found`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -334,11 +351,16 @@ pub enum FoundLogin {
     ReusedChanged,
     /// Reuse stopped: Codex's shared login file was replaced, so it is no longer shared.
     CodexLinkSplit,
+    /// The search for a login ran and found none of the lawyer's on this computer.
+    NoneFound,
+    /// Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
+    /// nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
+    ReuseOff,
 }
 
 impl FoundLogin {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::ClaudeSettings,
         Self::ClaudeWindowsSandbox,
         Self::CodexKeyring,
@@ -346,6 +368,8 @@ impl FoundLogin {
         Self::ReusedSignedOut,
         Self::ReusedChanged,
         Self::CodexLinkSplit,
+        Self::NoneFound,
+        Self::ReuseOff,
     ];
 }
 

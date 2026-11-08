@@ -22,6 +22,37 @@ import { cn } from "../lib/cn.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { Say } from "./say.tsx";
 
+/** Words naming files, each name with its quotes kept on one line, so the words break only at the spaces between
+ * them, such as around "and". A name longer than the line still wraps inside its own box rather than run out. */
+function WholeNames({ names, children }: { names: readonly string[]; children: string }) {
+  const parts: { text: string; name: boolean }[] = [];
+  let rest = children;
+  for (const name of names) {
+    const at = rest.indexOf(name);
+    if (name === "" || at < 0) continue;
+    // out to its quotes, past the isolates a slot adds around it
+    let from = at;
+    let to = at + name.length;
+    while (from > 0 && "\u2068'".includes(rest[from - 1] ?? "")) from--;
+    while (to < rest.length && "\u2069'".includes(rest[to] ?? "")) to++;
+    parts.push(
+      { text: rest.slice(0, from), name: false },
+      { text: rest.slice(from, to), name: true },
+    );
+    rest = rest.slice(to);
+  }
+  parts.push({ text: rest, name: false });
+  return parts.map((p, i) =>
+    p.name ? (
+      <span key={i} className="inline-block max-w-full" data-whole="">
+        <Say>{p.text}</Say>
+      </span>
+    ) : p.text === "" ? null : (
+      <Say key={i}>{p.text}</Say>
+    ),
+  );
+}
+
 export type EditedChoice = "undo" | "keep";
 export type EditedRow = { id: string; title: string; at: string; choice: EditedChoice };
 
@@ -83,7 +114,7 @@ export function RestoreDialog({
           {ask?.kind === "word" ? (
             <>
               <Base.Title className={dialogTitle}>
-                <Say>
+                <WholeNames names={ask.files}>
                   {ask.files.length === 1
                     ? w.v(
                         ask.act === "undo"
@@ -97,7 +128,7 @@ export function RestoreDialog({
                           : "Close {files} in Word to restore it.",
                         { files: w.files(ask.files) },
                       )}
-                </Say>
+                </WholeNames>
               </Base.Title>
               <p className={dialogBody}>
                 <Say>

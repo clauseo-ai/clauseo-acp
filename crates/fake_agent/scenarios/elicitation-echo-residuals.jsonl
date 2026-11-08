@@ -1,0 +1,16 @@
+{"scenario":"elicitation-echo-residuals","description":"What the host does not withhold: a form scoped to tool call tc-1 accepted with an server code, echoed by another tool call tc-2 and by tc-1 after it completed; then a form scoped to tc-3 that the client declines and an unscoped form it cancels, each followed by an echo of a value it never sent; end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Configure the search server","kind":"other","status":"in_progress"}}}
+{"request":{"id":"elicit-1","method":"elicitation/create","params":{"mode":"form","sessionId":"sess-1","toolCallId":"tc-1","message":"The search server needs your server code.","requestedSchema":{"type":"object","properties":{"server_code":{"type":"string","title":"server code"}},"required":["server_code"]}}}}
+{"expect_response":{"id":"elicit-1","result":{"action":"accept","content":{"server_code":"sk-test-SECRET-123"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"Echo","kind":"other","status":"completed","rawOutput":{"other":"another call says sk-test-SECRET-123"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","rawOutput":{"echo":"done with sk-test-SECRET-123"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","rawOutput":{"after":"after completion sk-test-SECRET-123"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-3","title":"Configure the court feed","kind":"other","status":"in_progress"}}}
+{"request":{"id":"elicit-2","method":"elicitation/create","params":{"mode":"form","sessionId":"sess-1","toolCallId":"tc-3","message":"The court feed needs a token.","requestedSchema":{"type":"object","properties":{"server_code":{"type":"string","title":"server code"}},"required":["server_code"]}}}}
+{"expect_response":{"id":"elicit-2","result":{"action":"decline"}}}
+{"request":{"id":"elicit-3","method":"elicitation/create","params":{"mode":"form","sessionId":"sess-1","message":"Any other token?","requestedSchema":{"type":"object","properties":{"server_code":{"type":"string","title":"server code"}},"required":["server_code"]}}}}
+{"expect_response":{"id":"elicit-3","result":{"action":"cancel"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-3","status":"completed","rawOutput":{"echo":"declined-SECRET-456 cancelled-SECRET-789"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

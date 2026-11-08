@@ -36,6 +36,12 @@ Detach reasons are in the log only (`agent_session_detached`, read through `Subs
 entry carries them: `DetachReason::Exited`, `DetachReason::Closed`, `DetachReason::Restarting`,
 `DetachReason::IdleStopped`, and `DetachReason::Unknown`.
 
+Resuming after an idle stop: `HeaderEntry.resuming_since` is set while the thread's status is
+`Starting` because a send resumed it, and cleared when the status leaves `Starting` or the agent
+attaches again. The app may show a "resuming" cue while it is set, after about 300 ms. The 300 ms
+threshold belongs to the app, not the host: the host only sends the time. The status itself stays
+`Starting`; the field is not a status.
+
 ## 2. Transcript entries
 
 Entries sort by `order`. Text streams through `ViewPatchBody::AppendText`; everything else arrives as
@@ -92,6 +98,11 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Notice, information | `ViewEntry::Notice` with `NoticeLevel::Info` | text |
 | Notice, warning | `NoticeLevel::Warning` | text |
 | Notice level from a newer Clauseo | `NoticeLevel::Unknown` | text |
+| Notice from the agent | `ViewEntry::Notice` with no `kind` | text, the agent's own words |
+| Host notice: the agent no longer remembers the earlier turns | `NoticeKind::ContextNotRestored` | none; the app's own words (the host's English `text` until it renders the kind) |
+| Host notice: papers an undo removed came back (a sync client put them back) and stay | `NoticeKind::FilesCameBack` | files (at most five, sorted by path), more (how many beyond them); the app's own words (the host's English `text`, a count only, until it renders the kind) |
+| Host notice of a kind from a newer Clauseo | `NoticeKind::Unknown` | text, the host's English fallback |
+| Host notice: a skill pack the launch left out | `NoticeKind::SkillPackNotLoaded`, with `pack` (the pack's id) and `reason` (`PackSkipReason`) | the pack and the reason in the app's own words (the host's English `text` until the app renders the kind) |
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
 | Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
 | Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |
@@ -216,6 +227,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Restore or undo refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable; `HostError.files`, the files to close |
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
+| Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
 
 ## 7. Matter
@@ -230,7 +242,20 @@ its step card, and compare (below) lists the files between any two versions.
 | Picked folder's support for Codex's sandbox (Windows), before the matter exists | `HostQuery::FolderSupport { source }` (the `CreateMatter` source) returns `QueryResult::FolderSupport`; `check_failed` when the check doesn't answer in 5 s; an existing folder create refuses gets create's `matter.folder_*` code | `support`: `network`, `no_permissions`, `cant_change_permissions`, `check_failed`, or missing |
 | Folder refused, one code per reason (`matter.folder_refused` before decision record 0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderInMattersRoot` | choose another folder |
 | Folder is already a matter's, or nested with one | `ErrorCode::MatterFolderIsMatter` | `HostError.matter`, the matter to name and offer to open |
-| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display and status per matter |
+| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display, status and protection per matter |
+| Matter protected (0051) | `Protection::Protected` with `ProtectionTier::A` or `ProtectionTier::B` | `tier`; `MatterSummary::protection`, `HostEvent::ProtectionChanged` |
+| Matter Not protected (0051) | `Protection::NotProtected` (tier `ProtectionTier::C`) | `cause`, below; missing `protection` means not known yet |
+| Not protected: no sandbox on this computer | `NotProtectedCause::Unsupported` | Linux, Windows on ARM, a build without it |
+| Not protected: set-up not done | `NotProtectedCause::NeedsSetUp` | offer the set-up (`HostCommand::RetryProtection`) |
+| Not protected: set-up refused | `NotProtectedCause::SetUpRefused` | the administrator prompt was declined; offer it again |
+| Not protected: set-up failed | `NotProtectedCause::SetUpFailed` | offer to try again |
+| Not protected: the pool is full | `NotProtectedCause::PoolFull` | counts: `size`, `open`, `held`, `owed`, `set_aside` |
+| Not protected: switched off | `NotProtectedCause::SwitchedOff` | `at` |
+| Not protected: a cause from a newer Clauseo | `NotProtectedCause::Unknown` | show as Not protected |
+| This computer's protection (0051) | `HostQuery::Protection` returns `QueryResult::Protection` | `tier`, `computer` (a `Protection`), `required`, `unprotected_auto_allowed`; `command.invalid` until the host builds it |
+| Remove the sandbox's set-up (0051) | `HostCommand::RemoveSandboxSetup` | one administrator prompt; `command.invalid` until the host builds it |
+| Site blocked: the agent asked for a site the block list names (0053) | `HostEvent::SiteBlocked` | `host`, `tag` (`phishing`, `malware`; `unknown` from a newer Clauseo), `list_generated`, `override_allowed`; one notice per `block_id`, its `count` updated when re-sent; with `override_allowed`, "Allow this site" sends `HostCommand::AllowBlockedSite` (`matter` or `always`); the notice under the turn's answer (`ui/app/src/room/thread/site-blocked.tsx`), only where the event names a thread and a turn |
+| Sites allowed despite the block list (0053, PR 2) | `HostQuery::AllowedSites` returns `QueryResult::AllowedSites` | per site: `host`, `scope` (`matter`, `always`), `matter` for `matter`, `allowed_at`, `saved` (false when Clauseo couldn't save the allow, so it lasts until Clauseo closes); each removed with `HostCommand::RevokeAllowedSite`; none is honoured while `network.allow_unsafe_site_override` is in `SettingsView::locked` as false; Settings, Privacy, "Allowed sites" (`ui/app/src/settings/sections/allowed-sites.tsx`), matter names from `matters_changed` |
 | Matter idle | `MatterStatus::Idle` | nothing runs, nothing to read |
 | Matter working | `MatterStatus::Working` | a thread's turn starts, runs or waits for the writer |
 | Matter needs a permission | `MatterStatus::NeedsPermission` | outranks every other status |
@@ -301,14 +326,27 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
 | Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
-| Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot` | no |
+| Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot`, `ErrorCode::MatterFolderTooDeep` (Windows) | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
-| Settings | `ErrorCode::SettingsLocked` | no |
+| Settings | `ErrorCode::SettingsLocked`, `ErrorCode::SettingsRefused`, `ErrorCode::SettingsKeyStored` | no |
 | Agent install (0048) | `ErrorCode::AgentInstallOffline`, `ErrorCode::AgentInstallDiskFull`, `ErrorCode::AgentInstallFailed` | yes |
 | Agent install (0048) | `ErrorCode::AgentInstallBlocked` | no |
 | Sign-in (0048) | `ErrorCode::SigninLinkExpired`, `ErrorCode::SigninPortBusy`, `ErrorCode::SigninFailed` | yes |
-| Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable` | no |
+| Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable`, `ErrorCode::SigninLoginShared`, `ErrorCode::SigninFirmManaged`, `ErrorCode::SigninKeyInUse`, `ErrorCode::SigninEndpointInUse` | no |
 | Update (0037) | `ErrorCode::UpdateFailed` | yes |
+| Leave order | `ErrorCode::SigninAgentsStillRunning` | yes |
+| Launch while the keys load (0048) | `ErrorCode::AgentKeysLoading` | yes |
+| Launch with an unreadable key (0048) | `ErrorCode::AgentKeyUnreadable` | yes |
+| Open in Word with a path too long for Word (0026, Windows) | `ErrorCode::MatterDocumentPathTooLong` | no |
+| A protected name in the matter is a shortcut (Windows, S15 PR4a2) | `ErrorCode::MatterProtectedLink` | no |
+| Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |
+| Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
+| The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
+| Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
+| "Allow this site" is turned off, by the firm's policy or in settings (0053) | `ErrorCode::BlocklistOverrideOff` | no |
+| "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
+| "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
+| Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).
@@ -319,8 +357,8 @@ These arrive later as additive events and commands.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Onboarding: welcome | planned: the `agents` crate | runtime download started in the background |
-| Onboarding: choose the agent | planned: the `agents` crate | the two agents, an API key or an account the firm provides |
+| Onboarding: welcome | planned: the `agents` crate | nothing downloads yet: each agent's size (`AgentInstallProgress` `Missing { download_bytes }`) |
+| Onboarding: choose the agent | planned: the `agents` crate | the two agents with their sizes, an API key or an account the firm provides; choosing one (`InstallAgent`, no confirm) or signing in to it starts its download (0033, "When an install starts") |
 | Onboarding: sign in, waiting, cancelled, timed out, no plan, network failure | planned: the `agents` crate | sign-in progress and its failure |
 | Onboarding: matter protection, sandbox unavailable | planned: the `sandbox` crate | the protection level; the ask-before-each-change fallback |
 | Onboarding: first matter, folder unreadable | planned: the `agents` crate (flow); `ErrorCode::MatterFolderUnreadable` exists | folder state |

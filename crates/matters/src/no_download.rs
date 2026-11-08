@@ -53,6 +53,8 @@ pub(crate) mod fault;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos;
 #[cfg(test)]
+pub(crate) mod resurrect;
+#[cfg(test)]
 mod tests;
 
 /// While alive, reads on this thread do not download a cloud-only file: on macOS the thread's

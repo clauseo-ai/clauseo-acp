@@ -9,50 +9,55 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::pin;
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use clauseo_process::Launcher;
-use clauseo_protocol::{
-    CommandId, CommandOutcome, FolderRefId, MatterId, Principal, StreamId, ThreadId,
-};
+use clauseo_protocol::{CommandId, CommandOutcome, FolderRefId, MatterId, StreamId, ThreadId};
 use clauseo_settings::Effective;
 use clauseo_store::Store;
 use futures::executor::{LocalPool, LocalSpawner};
 use futures::future::{AbortHandle, Abortable};
 use futures::task::LocalSpawnExt;
-use futures::{StreamExt, stream};
 
+use crate::blocklist;
 use crate::clock::{Clock, Now};
 use crate::config::{HostConfig, ProfileHook};
 use crate::encode::Encoder;
 use crate::error::Error;
-use crate::handle::{HostHandle, HostJoin};
+use crate::handle::{HostExit, HostHandle, HostJoin};
 use crate::ids::Ids;
 use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
-use crate::principal::{Access, authorize};
 use crate::snapshot::SnapshotWorker;
 
+mod allowed;
 mod app;
 mod app_lists;
+mod blocked;
 mod browser_install;
 mod commands;
+mod connectors;
 pub(crate) mod counting;
+pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
 pub(crate) mod limits;
 mod locate;
+mod main_loop;
 mod matter_details;
 mod matters;
 mod papers;
+pub(crate) mod protection;
 mod query;
 mod rail;
 mod relocate;
+mod requests;
 pub(crate) mod scan;
+pub(crate) mod scratch;
+pub(crate) use matters::probe::FolderProbes;
 mod seen;
 mod settings;
 mod shutdown;
@@ -80,6 +85,8 @@ const REQUEST_CAPACITY: usize = 256;
 /// How the loop ended.
 enum Exit {
     Shutdown(Vec<input::Reply<()>>),
+    /// A shutdown to install this download (`update.rs`).
+    Install(crate::update::Downloaded, Vec<input::Reply<()>>),
     #[cfg(feature = "test-support")]
     Abort(futures::channel::oneshot::Sender<()>),
 }
@@ -95,14 +102,19 @@ pub(crate) struct Actor {
     pub(crate) snapshots: SnapshotWorker,
     /// The search thread (`search.rs`): each returned commit goes to it, and searches.
     pub(crate) search: crate::search::Search,
-    /// The settings. Only the actor touches them, so it is the one lock their writes need:
-    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, `SetToolSettings`
-    /// `Effective::apply_tools_patch` and `SetPrivacySettings` `Effective::apply_privacy_patch`,
-    /// one command at a time.
+    /// The settings. Only the actor touches them, so it is the one lock their writes need: each
+    /// `Set…Settings` runs its `Effective` write here, one command at a time.
     pub(crate) effective: Effective,
+    /// Each skill pack's generation, bumped by every `SetSkillPack` for it: an `on`'s read
+    /// writes only while its generation is still the pack's (`settings/packs.rs`).
+    pub(crate) pack_generations: BTreeMap<clauseo_protocol::PackId, u64>,
+    /// The policy lock causes last logged (`settings/lock_causes.rs`): a reload logs a change.
+    pub(crate) lock_causes: Vec<clauseo_settings::LockReason>,
     /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
     /// (`counting.rs`).
     pub(crate) counts: Option<clauseo_counts::Counts>,
+    /// The updater's machine, its tasks, timer and file thread (`update.rs`).
+    pub(crate) update: update::UpdateHost,
     /// What to count once a command's commit is durable, by command (`counting.rs`).
     pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
@@ -122,11 +134,17 @@ pub(crate) struct Actor {
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
     pub(crate) browser_install: browser_install::BrowserInstall,
+    /// This computer's protection, its seam and the set-up work running (`protection.rs`).
+    pub(crate) protection: protection::ProtectionHost,
+    /// The connector state and the commands' work in flight (R24).
+    pub(crate) connectors: connectors::ConnectorsOnActor,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
-    /// The start-up sweep of leftover `run/` folders, done by the first launch's prep.
-    pub(crate) run_sweep: turn::RunSweep,
+    /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
+    pub(crate) turn_path: turn::wide::TurnPath,
     pub(crate) refused_folders: Vec<PathBuf>,
+    /// The default matters folder's late answer (`documents.rs`).
+    pub(crate) documents: documents::DocumentsWait,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
     /// names it the same way).
     pub(crate) home: Option<PathBuf>,
@@ -152,6 +170,15 @@ pub(crate) struct Actor {
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,
     /// The app subscribers, in the order they came.
     pub(crate) app_subs: Vec<app::AppSub>,
+    /// The sites the egress proxy refused, per thread, for the running turn (`blocked.rs`).
+    /// Boxed, so the host thread's close future stays under clippy's `large_futures` limit.
+    pub(crate) blocked: Box<blocked::Blocks>,
+    /// The lawyer's allowed sites: the notices an allow can name, the stored allows and the
+    /// proxies' views (`allowed.rs`). Boxed, as is `blocked`, so the host thread's close future
+    /// stays under clippy's `large_futures` limit on Windows.
+    pub(crate) allowed: Box<allowed::AllowState>,
+    /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
+    pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
     /// The rail's triage: streams it holds loaded and the snooze timer (`triage.rs`).
@@ -181,6 +208,12 @@ pub(crate) struct Actor {
     pub(crate) phase: HostPhase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
+    /// The Scratch matter's folder scan and how long start-up waits for it (`scratch.rs`).
+    pub(crate) scratch_wait: scratch::ScratchWait,
+    /// The scan for the Scratch matter's folder: `scratch::free_folder`, or a test's stand-in.
+    pub(crate) scratch_scan: scratch::Scan,
+    /// The folder probes run off the actor (`matters/probe.rs`), or a test's stand-ins.
+    pub(crate) folder_probes: FolderProbes,
     /// The workers of matters made on disk whose commit has not returned, and of those being
     /// discarded because it failed (`matters/made.rs`), by matter.
     pub(crate) made: BTreeMap<MatterId, matters::Made>,
@@ -206,13 +239,19 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
     let (requests, request_rx) = async_channel::bounded::<Request>(REQUEST_CAPACITY);
     let (internal, internal_rx) = async_channel::unbounded::<Input>();
     let (ready, started) = mpsc::channel::<Result<(), Error>>();
+    let (exit, exited) = futures::channel::oneshot::channel::<HostExit>();
     let post = internal.clone();
+    // The first detection, here on the calling thread: never on the actor (`protection.rs`).
+    let config = (protection::observe(config.sandbox()), config);
     let thread = thread::Builder::new()
         .name(THREAD_NAME.to_owned())
-        .spawn(move || run(config, request_rx, post, internal_rx, ready))
+        .spawn(move || run(config, request_rx, (post, internal_rx), ready, exit))
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;
     match started.recv() {
-        Ok(Ok(())) => Ok((HostHandle::new(requests, internal), HostJoin::new(thread))),
+        Ok(Ok(())) => Ok((
+            HostHandle::new(requests, internal, exited),
+            HostJoin::new(thread),
+        )),
         Ok(Err(error)) => {
             // The thread closes what it opened and ends; its own result adds nothing.
             let _ended = thread.join();
@@ -229,28 +268,56 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    config: HostConfig,
+    (first, mut config): (protection::Observed, HostConfig),
     requests: async_channel::Receiver<Request>,
-    post: async_channel::Sender<Input>,
-    internal: async_channel::Receiver<Input>,
+    (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
+    exit: futures::channel::oneshot::Sender<HostExit>,
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
+    let allowed_sites = blocklist::allowed_sites(&config);
+    let blocklist = blocklist::take(&mut config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
-        let mut actor = match startup::open(config, spawner, post, ready.clone()).await {
+        let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
             Ok(actor) => actor,
             Err(error) => {
                 let _gone = ready.send(Err(error));
                 return Ok(None);
             }
         };
+        allowed::start(&mut actor, allowed_sites);
         startup::begin_startup(&mut actor);
-        let exit = main_loop(&mut actor, requests, internal).await;
+        // Stops when this block ends, however it ends (`blocklist.rs`).
+        let _blocklist = blocklist.and_then(|start| {
+            actor.blocklist = Some(start.live.clone());
+            blocklist::start(start)
+        });
+        let exit = main_loop::main_loop(&mut actor, requests, internal).await;
+        let fail_close = update::fails_close(&actor);
+        let close = |actor| async move {
+            let closed = shutdown::close(actor).await;
+            if fail_close && closed.is_ok() {
+                return Err(Error::Internal(
+                    "the close failed (a test's seam)".to_owned(),
+                ));
+            }
+            closed
+        };
         match exit {
             Exit::Shutdown(replies) => {
-                let closed = shutdown::close(actor).await;
-                Ok(Some((closed, replies)))
+                // Boxed: the close future is over clippy's `large_futures` limit on Windows.
+                let closed = Box::pin(close(actor)).await;
+                Ok(Some((closed, replies, None)))
+            }
+            Exit::Install(downloaded, replies) => {
+                let files = update::exit_files(&mut actor);
+                let closed = Box::pin(close(actor)).await;
+                if closed.is_err() {
+                    // No install then (`HostExit::Stopped`): nor its marker.
+                    files.clear_marker().await;
+                }
+                Ok(Some((closed, replies, Some(downloaded))))
             }
             #[cfg(feature = "test-support")]
             Exit::Abort(reply) => {
@@ -263,51 +330,21 @@ fn run(
     drop(pool);
     match ended {
         Ok(None) => Ok(()),
-        Ok(Some((closed, replies))) => shutdown::answer(closed, replies),
+        Ok(Some((closed, replies, install))) => {
+            // An install only after a clean close; else desktop just quits, and the next start
+            // finds the download again.
+            let ended = match install {
+                Some(downloaded) if closed.is_ok() => HostExit::Install(downloaded),
+                Some(_) | None => HostExit::Stopped,
+            };
+            let answered = shutdown::answer(closed, replies);
+            // The handles may all be gone; nobody is left to tell.
+            let _gone = exit.send(ended);
+            answered
+        }
         Err(abort_reply) => {
             let _gone = abort_reply.send(());
             Ok(())
-        }
-    }
-}
-
-/// One item of the merged input stream.
-enum Next {
-    Request(Request),
-    /// Every handle is gone: shut down.
-    HandlesGone,
-    Input(Input),
-}
-
-/// The loop: one input at a time until shutdown or abort.
-async fn main_loop(
-    actor: &mut Actor,
-    requests: async_channel::Receiver<Request>,
-    internal: async_channel::Receiver<Input>,
-) -> Exit {
-    let requests = requests
-        .map(Next::Request)
-        .chain(stream::once(async { Next::HandlesGone }));
-    let mut inputs = pin!(stream::select(requests, internal.map(Next::Input)));
-    loop {
-        if let Some(exit) = actor.settle() {
-            return exit;
-        }
-        match inputs.next().await {
-            Some(Next::Request(request)) => {
-                actor.on_request(request);
-                triage::tick(actor);
-                app_lists::flush(actor);
-            }
-            // Every handle is gone (the internal channel never ends: the actor holds a sender).
-            Some(Next::HandlesGone) | None => shutdown::begin_shutdown(actor, None),
-            #[cfg(feature = "test-support")]
-            Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
-            Some(Next::Input(input)) => {
-                actor.on_input(input);
-                triage::tick(actor);
-                app_lists::flush(actor);
-            }
         }
     }
 }
@@ -423,112 +460,19 @@ impl Actor {
         Ok(ticket)
     }
 
-    /// One request from a handle.
+    /// One request from a handle (`requests.rs`), then the idle clocks brought up to date.
     fn on_request(&mut self, request: Request) {
-        if !matches!(self.phase, HostPhase::Serving) {
-            if let Request::Shutdown { reply } = request {
-                shutdown::begin_shutdown(self, Some(reply));
-            } else {
-                // Dropping the reply answers `internal`: the host is stopping.
-                drop(request);
-            }
-            return;
-        }
-        match request {
-            Request::Dispatch { command, reply } => commands::dispatch(self, command, reply),
-            Request::Query {
-                principal,
-                query,
-                reply,
-            } => query::query(self, &principal, &query, reply),
-            Request::Search {
-                principal,
-                window,
-                request,
-                reply,
-            } => match authorize(&principal, Access::Query) {
-                Ok(()) => self.search.query(
-                    &window,
-                    request,
-                    Box::new(move |answer| {
-                        let _gone = reply.send(answer);
-                    }),
-                ),
-                Err(error) => {
-                    let _gone = reply.send(Err(error));
-                }
-            },
-            Request::Subscribe {
-                principal,
-                stream,
-                after,
-                reply,
-            } => subs::subscribe(self, &principal, stream, after, reply),
-            Request::SubscribeEvents {
-                principal,
-                stream,
-                after_seq,
-                reply,
-            } => subs::subscribe_events(self, &principal, stream, after_seq, reply),
-            Request::SubscribeApp { principal, reply } => app::subscribe(self, &principal, reply),
-            Request::SubscribeLimits { principal, reply } => {
-                limits::subscribe(self, &principal, reply);
-            }
-            Request::Ack {
-                principal,
-                stream,
-                epoch,
-                cursor,
-                reply,
-            } => {
-                let acked = authorize(&principal, Access::Ack).map(|()| {
-                    subs::ack(self, stream, epoch, cursor);
-                });
-                let _gone = reply.send(acked);
-            }
-            Request::RegisterFolder { path, reply } => {
-                let minted = authorize(&Principal::LocalDesktop, Access::RegisterFolder)
-                    .and_then(|()| self.ids.mint::<FolderRefId>(self.clock.now().wall));
-                let _gone = reply.send(minted.inspect(|id| {
-                    self.folders.insert(*id, path);
-                }));
-            }
-            Request::RegisterFile { path, reply } => {
-                let minted = authorize(&Principal::LocalDesktop, Access::RegisterFile)
-                    .and_then(|()| papers::file_ref(self, path));
-                let _gone = reply.send(minted);
-            }
-            Request::LocateFile {
-                principal,
-                file,
-                reply,
-            } => {
-                let located = authorize(&principal, Access::LocateFile)
-                    .and_then(|()| locate::locate_file(self, file));
-                let _gone = reply.send(located);
-            }
-            Request::MatterFolder {
-                principal,
-                matter,
-                reply,
-            } => {
-                let folder = authorize(&principal, Access::MatterFolder)
-                    .and_then(|()| locate::matter_folder(self, matter));
-                let _gone = reply.send(folder);
-            }
-            Request::Shutdown { reply } => {
-                match authorize(&Principal::LocalDesktop, Access::Shutdown) {
-                    Ok(()) => shutdown::begin_shutdown(self, Some(reply)),
-                    Err(error) => {
-                        let _gone = reply.send(Err(error));
-                    }
-                }
-            }
-        }
+        requests::on_request(self, request);
+        turn::idle_tick(self);
     }
 
-    /// One internal input.
+    /// One internal input, then the idle clocks brought up to date (`turn/idle.rs`).
     fn on_input(&mut self, input: Input) {
+        self.on_input_only(input);
+        turn::idle_tick(self);
+    }
+
+    fn on_input_only(&mut self, input: Input) {
         match input {
             Input::Committed { ticket, result } => streams::on_committed(self, ticket, result),
             Input::Reopened { stream, result } => streams::on_reopened(self, stream, result),
@@ -550,9 +494,19 @@ impl Actor {
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
             Input::SnoozeWake { generation } => triage::on_wake(self, generation),
+            Input::IdleDeadline { generation } => turn::idle_due(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
+            Input::Scratch(input) => scratch::on_input(self, input),
+            Input::Documents(input) => documents::on_input(self, input),
+            Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
+            Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
+            Input::SkillPack(read) => settings::packs::on_read(self, *read),
+            Input::Update(input) => update::on_input(self, input),
+            Input::Connector(input) => connectors::on_input(self, *input),
+            Input::Protection(done) => protection::work::on_done(self, *done),
+            Input::Allowed(input) => allowed::on_input(self, *input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -563,22 +517,30 @@ impl Actor {
 
     /// Moves start-up to serving, and shutdown to its end, once their work is done.
     fn settle(&mut self) -> Option<Exit> {
-        if !self.work.idle() || turn::busy(self) || browser_install::busy(self) {
+        if !self.work.idle()
+            || turn::busy(self)
+            || browser_install::busy(self)
+            || allowed::busy(self)
+            || update::busy(self)
+            || scratch::holds(self)
+            || matters::probe::stop_held(self)
+        {
             return None;
         }
         match std::mem::replace(&mut self.phase, HostPhase::Serving) {
             HostPhase::Starting(ready) => {
-                if self.scratch.is_some() {
-                    self.phase = HostPhase::Starting(ready);
-                    return None;
-                }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
+                scratch::serving(self);
+                update::serving(self);
                 counting::app_opened(self);
                 None
             }
             HostPhase::Serving => None,
-            HostPhase::Stopping(replies) => Some(Exit::Shutdown(replies)),
+            HostPhase::Stopping(replies) => Some(match update::take_install(self) {
+                Some(downloaded) => Exit::Install(downloaded, replies),
+                None => Exit::Shutdown(replies),
+            }),
         }
     }
 }

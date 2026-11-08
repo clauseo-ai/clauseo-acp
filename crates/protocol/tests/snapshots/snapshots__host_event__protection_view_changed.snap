@@ -1,0 +1,20 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::ProtectionViewChanged\n{\n    view: ProtectionView\n    {\n        in_progress: Some(ProtectionWork::SetUp), retry_asks_admin: true,\n        ..ProtectionView::new(Protection::NotProtected\n        { cause: NotProtectedCause::NeedsSetUp }, true, false,)\n    },\n}"
+---
+{
+  "protection_view_changed": {
+    "view": {
+      "tier": "c",
+      "computer": {
+        "not_protected": {
+          "cause": "needs_set_up"
+        }
+      },
+      "required": true,
+      "unprotected_auto_allowed": false,
+      "in_progress": "set_up",
+      "retry_asks_admin": true
+    }
+  }
+}

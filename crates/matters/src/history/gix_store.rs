@@ -15,13 +15,15 @@ use super::blob::{Blobs, Target};
 use super::durable::{self, NewObjects, put};
 use super::objects::Objects;
 use super::{CommitRecord, HEAD_REF, HistoryStore, Oid, TreeFile, index_file, tree};
+use crate::long_path::long_path;
 use crate::no_download::NoDownload;
 use crate::stat::{FileTime, StatCache};
 use crate::{Error, fsync, write};
 
 /// The shadow repository of one matter: its git dir and the loose objects in it.
 pub(crate) struct GixStore {
-    /// `history.git`.
+    /// `history.git`, as [`long_path`] gives it: every path under it is for IO, never compared
+    /// with a folder the host passed.
     git_dir: PathBuf,
     /// The loose objects: every read checked against its id.
     objects: Objects,
@@ -88,9 +90,12 @@ fn config_text(worktree: &Path) -> Result<String, Error> {
 /// nowhere: the folder the matter was last opened from. `None` when the key is missing or not
 /// UTF-8 (this crate writes only UTF-8).
 pub(crate) fn recorded_worktree(git_dir: &Path) -> Result<Option<PathBuf>, Error> {
-    Ok(recorded(git_dir)?.map(PathBuf::from))
+    Ok(recorded(&long_path(git_dir))?.map(PathBuf::from))
 }
 
+/// [`recorded_worktree`] of `git_dir`, already through [`long_path`]. gix keeps the git dir as
+/// given (no `..` to normalize) and finds `core.worktree` by `git_dir/config` starting with it,
+/// so the verbatim form reads the same key; `core.worktree` itself stays plain.
 fn recorded(git_dir: &Path) -> Result<Option<String>, Error> {
     let options = gix::open::Options::isolated().open_path_as_is(true);
     let repo = gix::open_opts(git_dir, options).map_err(|err| Error::history("open", err))?;
@@ -120,7 +125,7 @@ pub(super) fn modified(file: &File, path: &Path) -> Result<FileTime, Error> {
 }
 
 impl GixStore {
-    /// The store of the git dir `git_dir`, which exists.
+    /// The store of the git dir `git_dir`, which exists, already through [`long_path`].
     fn at(git_dir: &Path) -> Self {
         Self {
             git_dir: git_dir.to_path_buf(),
@@ -146,6 +151,9 @@ impl GixStore {
 impl HistoryStore for GixStore {
     fn create(git_dir: &Path, worktree: &Path) -> Result<Self, Error> {
         let config = config_text(worktree)?;
+        let plain = git_dir;
+        let long = long_path(plain);
+        let git_dir = long.as_path();
         let parent = git_dir
             .parent()
             .ok_or_else(|| Error::io("create", git_dir, io::ErrorKind::InvalidInput.into()))?;
@@ -154,7 +162,7 @@ impl HistoryStore for GixStore {
             Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(Error::HistoryExists {
-                    git_dir: git_dir.to_path_buf(),
+                    git_dir: plain.to_path_buf(),
                 });
             }
             Err(err) => return Err(Error::io("create", git_dir, err)),
@@ -174,6 +182,8 @@ impl HistoryStore for GixStore {
     }
 
     fn open(git_dir: &Path, worktree: &Path) -> Result<Self, Error> {
+        let long = long_path(git_dir);
+        let git_dir = long.as_path();
         let current = recorded(git_dir)?;
         let head = git_dir.join("HEAD");
         let text = head_text();

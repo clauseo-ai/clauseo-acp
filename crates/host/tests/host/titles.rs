@@ -76,7 +76,7 @@ fn renames(host: &Running, thread: ThreadId) -> Vec<(String, RenameSource)> {
 /// Opens the store in `dir`, waiting while its lock is held. A lock can outlive the host that
 /// held it for a moment: another test's agent, forked before it execs, holds a copy of the
 /// lock's file descriptor until then. Panics with the store's error after about ten seconds.
-fn open_store(dir: &Path) -> Store {
+pub(crate) fn open_store(dir: &Path) -> Store {
     const TRIES: u32 = 2_000;
     for _ in 0..TRIES {
         match wait(

@@ -37,6 +37,8 @@ pub struct ClaudeOptions {
     disallowed_tools: Vec<String>,
     /// The local plugin holding the skills.
     plugin_dir: Option<PathBuf>,
+    /// The launch's own plugin holding its skill packs (decision record 0040), second.
+    pack_plugin: Option<PathBuf>,
     /// `{"disableSkillShellExecution": true}`: no skill runs a shell command on load.
     settings: Map<String, Value>,
 }
@@ -57,8 +59,23 @@ impl ClaudeOptions {
             allowed_tools,
             disallowed_tools: Vec::new(),
             plugin_dir,
+            pack_plugin: None,
             settings,
         }
+    }
+
+    /// The same options with the launch's pack plugin at `dir`, as a second `plugins` entry
+    /// after the built-in one. Only `ClauseoProfile::session_meta_with_packs` sets it, from a
+    /// `PacksWritten`.
+    #[must_use]
+    pub fn with_pack_plugin(mut self, dir: PathBuf) -> Self {
+        self.pack_plugin = Some(dir);
+        self
+    }
+
+    /// The pack plugin folder.
+    pub fn pack_plugin(&self) -> Option<&PathBuf> {
+        self.pack_plugin.as_ref()
     }
 
     /// The same options with `key` set to `value` in `settings`. Only [`SETTINGS_KEYS`] ever
@@ -91,7 +108,8 @@ impl ClaudeOptions {
 
     /// The `_meta` object: `systemPrompt.append`, and under `claudeCode.options` only
     /// [`OPTION_KEYS`] (`disallowedTools` when it is not empty, `plugins` when there is a
-    /// plugin, as one `{"type": "local", "path": …}`, and `settings` holding only
+    /// plugin, as one `{"type": "local", "path": …}` each, the built-in plugin first and the
+    /// launch's pack plugin second, and `settings` holding only
     /// [`SETTINGS_KEYS`]). So `hooks`, `disableAllHooks` or any other settings key never
     /// reaches the host's merge; each is dropped with a warning. A plugin path that is no UTF-8
     /// is left out with a warning: a lossy copy could name another folder.
@@ -107,15 +125,23 @@ impl ClaudeOptions {
                 Value::from(self.disallowed_tools.clone()),
             );
         }
+        let mut plugins = Vec::new();
         if let Some(dir) = &self.plugin_dir {
             if let Some(path) = dir.to_str() {
-                options.insert(
-                    "plugins".to_owned(),
-                    serde_json::json!([{"path": path, "type": "local"}]),
-                );
+                plugins.push(serde_json::json!({"path": path, "type": "local"}));
             } else {
                 tracing::warn!("the Claude plugin folder is not UTF-8: no skills go to Claude");
             }
+        }
+        if let Some(dir) = &self.pack_plugin {
+            if let Some(path) = dir.to_str() {
+                plugins.push(serde_json::json!({"path": path, "type": "local"}));
+            } else {
+                tracing::warn!("the pack plugin folder is not UTF-8: no packs go to Claude");
+            }
+        }
+        if !plugins.is_empty() {
+            options.insert("plugins".to_owned(), Value::Array(plugins));
         }
         let mut settings = Map::new();
         for (key, value) in &self.settings {

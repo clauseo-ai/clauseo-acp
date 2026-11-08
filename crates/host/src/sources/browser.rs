@@ -169,7 +169,7 @@ fn url_of(raw_input: &TextOrBlob) -> Option<String> {
 /// The page an open's `url` names, as agent-browser reads it: a value with no `:` gets
 /// `https://` in front (`sci.gov.in/x`); then only an `http` or `https` URL counts, so
 /// `about:blank` and other schemes are no page.
-fn web_url(url: &str) -> Option<String> {
+pub(crate) fn web_url(url: &str) -> Option<String> {
     let url = url.trim();
     let url = if url.contains(':') {
         url.to_owned()
@@ -178,7 +178,7 @@ fn web_url(url: &str) -> Option<String> {
     };
     let (scheme, rest) = url.split_once("://")?;
     let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
-    (web && !rest.is_empty()).then_some(url)
+    (web && !rest.is_empty() && super::is_safe_url_text(&url)).then_some(url)
 }
 
 /// Whether the MCP result in `rawOutput` says the call failed: a non-null `error` (Codex), or

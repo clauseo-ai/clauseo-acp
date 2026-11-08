@@ -2,7 +2,7 @@
 
 use clauseo_protocol::{
     AgentId, FolderState, FolderSupportKind, LastStop, MatterId, MatterKind, MatterStatus,
-    MatterSummary, StopReason, ThreadId, ThreadStatus, ThreadSummary, Timestamp,
+    MatterSummary, PackList, StopReason, ThreadId, ThreadStatus, ThreadSummary, Timestamp,
 };
 
 use super::{same_matter, same_thread};
@@ -23,12 +23,14 @@ fn matter() -> MatterSummary {
         last_activity: Some(at(1)),
         client: None,
         next_date: None,
+        skill_packs: None,
         pinned: false,
         last_opened: None,
         status: MatterStatus::Idle,
         folder_display: "Documents/m".to_owned(),
         folder_state: FolderState::Found,
         folder_support: None,
+        protection: None,
     }
 }
 
@@ -40,6 +42,7 @@ fn thread() -> ThreadSummary {
         agent: AgentId::new("fake-agent").unwrap(),
         status: ThreadStatus::Idle,
         queue_held: false,
+        queue_held_reason: None,
         seen: true,
         snoozed_until: None,
         done: false,
@@ -71,6 +74,10 @@ fn every_other_shown_field_is_a_change() {
         },
         MatterSummary {
             pinned: true,
+            ..matter()
+        },
+        MatterSummary {
+            skill_packs: Some(PackList::default()),
             ..matter()
         },
         MatterSummary {

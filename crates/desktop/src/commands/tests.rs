@@ -12,7 +12,10 @@ use tauri::{Manager as _, WebviewWindow, WebviewWindowBuilder};
 use uuid::Uuid;
 
 use super::*;
+use crate::settings_window::{HashesSet, SETTINGS_WINDOW};
 use crate::test_support::{Scratch, envelope};
+
+mod release_mode;
 
 /// An app on the mock runtime with every command, the app's own context (so its capabilities)
 /// and a bridge, and its `main` window.
@@ -29,12 +32,21 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             ack,
             answer_permission,
             pick_folder,
+            pick_folder_or_choose,
+            chooser_starts,
+            chooser_list,
+            chooser_choose,
+            chooser_cancel,
+            chooser_shown,
             display_info,
             open_external,
             open_file,
             reveal,
             open_settings,
             count_ui,
+            setup,
+            quit_app,
+            page_marks,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -50,6 +62,8 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     app.manage(crate::counts::CountsState::default());
     app.manage(crate::open::AppData(std::env::temp_dir()));
     app.manage(crate::open::OpenGates::default());
+    app.manage(crate::dialogs::LastPick::default());
+    app.manage(crate::chooser::Chooser::system());
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
         .unwrap();
@@ -146,7 +160,22 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         "linux"
     };
     // Tests are never a release build, so no release date (release.yml sets one on tags only).
-    assert_eq!(info, json!({ "platform": platform, "release_date": null }));
+    // Nor is CLAUSEO_RELEASE_MODE set for them, so an e2e build is a test build and any other a
+    // release.
+    let mode = if cfg!(feature = "e2e") {
+        "test"
+    } else {
+        "release"
+    };
+    assert_eq!(
+        info,
+        json!({
+            "platform": platform,
+            "release_date": null,
+            "test_build": cfg!(feature = "e2e"),
+            "release_mode": mode,
+        })
+    );
 
     // The same command from a page that is not the app's is refused.
     let foreign = invoke_from(&window, "https://example.com", "display_info", json!({}));
@@ -156,6 +185,28 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         .and_then(Value::as_str)
         .is_some_and(|text| text.contains("not allowed"));
     assert!(denied, "{foreign:?}");
+}
+
+/// A build without the `e2e` feature is not a test build: the rail and Settings say nothing.
+#[cfg(not(feature = "e2e"))]
+#[test]
+fn a_build_without_e2e_is_not_a_test_build() {
+    let scratch = Scratch::new("display-info-release", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let info = invoke(&window, "display_info", json!({})).unwrap();
+    assert_eq!(info["test_build"], json!(false), "{info}");
+}
+
+/// The mirror of the test above: an `e2e` build says it is a test build.
+#[cfg(feature = "e2e")]
+#[test]
+fn an_e2e_build_is_a_test_build() {
+    let scratch = Scratch::new("display-info-e2e", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let info = invoke(&window, "display_info", json!({})).unwrap();
+    assert_eq!(info["test_build"], json!(true), "{info}");
 }
 
 /// The e2e and marks commands answer only in their builds; the default build's capabilities do
@@ -362,7 +413,7 @@ fn every_list_of_commands_agrees() {
         allowed(&marks),
         "capabilities/marks.json"
     );
-    // The settings window gets its six, all among the release commands.
+    // The settings window gets its eight, all among the release commands.
     assert_eq!(
         granted(dir, "settings.json", "settings")
             .into_iter()
@@ -418,15 +469,75 @@ fn every_list_of_commands_agrees() {
     assert_eq!(invoked, ours, "bindings.ts");
 }
 
-/// The commands `capabilities/settings.json` grants the settings window (0028).
-const SETTINGS_COMMANDS: [&str; 6] = [
+/// The commands `capabilities/settings.json` grants the settings window (0028, and 0048's
+/// `setup`).
+const SETTINGS_COMMANDS: [&str; 8] = [
     "dispatch",
     "query",
     "open_stream",
     "subscribe_app",
     "ack",
     "display_info",
+    "setup",
+    "quit_app",
 ];
+
+/// `open_settings` takes an optional, closed `section` (R24: the room's case-law hint and
+/// banner open Connectors; R17's first run opens Protection): none, `"connectors"` and
+/// `"protection"` open the window; a value the build does not
+/// know, or one of another type, is refused as the arguments decode and opens nothing.
+#[test]
+fn open_settings_takes_a_known_section_or_none_and_refuses_others() {
+    let scratch = Scratch::new("settings-section", &[]);
+    let host = scratch.start(Vec::new());
+    let (app, main) = app(host.bridge());
+    for refused in [
+        json!({"section": "billing"}),
+        json!({"section": "Connectors"}),
+        json!({"section": "Protection"}),
+        json!({"section": 1}),
+    ] {
+        let answer = invoke(&main, "open_settings", refused.clone());
+        assert!(answer.is_err() && !denied(&answer), "{refused}: {answer:?}");
+        assert_eq!(app.webview_windows().len(), 1, "{refused} opened a window");
+    }
+    app.manage(HashesSet::default());
+    let at = invoke(&main, "open_settings", json!({"section": "connectors"}));
+    assert_eq!(at, Ok(Value::Null));
+    assert_eq!(app.webview_windows().len(), 2);
+    let settings = app.get_webview_window(SETTINGS_WINDOW).unwrap();
+    let url = settings.url().unwrap();
+    assert_eq!(url.fragment(), Some("connectors"), "{url}");
+    assert!(url.path().ends_with("/settings.html"), "{url}");
+    // Built at the fragment, so no hash set on it.
+    assert_eq!(hashes(&app), Vec::<&str>::new());
+    // Open already: brought forward at the section, still one settings window.
+    assert_eq!(
+        invoke(&main, "open_settings", json!({"section": "connectors"})),
+        Ok(Value::Null)
+    );
+    assert_eq!(hashes(&app), ["connectors"]);
+    assert_eq!(invoke(&main, "open_settings", json!({})), Ok(Value::Null));
+    assert_eq!(
+        invoke(&main, "open_settings", json!({"section": null})),
+        Ok(Value::Null)
+    );
+    // No section: brought forward where it was, with no hash set.
+    assert_eq!(hashes(&app), ["connectors"]);
+    assert_eq!(app.webview_windows().len(), 2);
+    // R17: UC's first-run button opens Protection.
+    assert_eq!(
+        invoke(&main, "open_settings", json!({"section": "protection"})),
+        Ok(Value::Null)
+    );
+    assert_eq!(hashes(&app), ["connectors", "protection"]);
+    assert_eq!(app.webview_windows().len(), 2);
+}
+
+/// The fragments `open_settings` set on the open settings window.
+fn hashes(app: &tauri::App<MockRuntime>) -> Vec<&'static str> {
+    app.state::<HashesSet>().0.lock().unwrap().clone()
+}
 
 /// Whether Tauri refused `answer` before any command ran.
 fn denied(answer: &Result<Value, Value>) -> bool {
@@ -437,7 +548,7 @@ fn denied(answer: &Result<Value, Value>) -> bool {
         .is_some_and(|text| text.contains("not allowed"))
 }
 
-/// Through Tauri's own access check: the settings window reaches exactly its six commands and is
+/// Through Tauri's own access check: the settings window reaches exactly its eight commands and is
 /// refused every other one, `open_settings` and `subscribe` among them, and the e2e and marks
 /// commands in their builds too. `main`'s `open_settings` opens it, once however often it is
 /// called.
@@ -455,7 +566,14 @@ fn the_settings_window_is_allowed_exactly_its_commands() {
     let allowed = set(&SETTINGS_COMMANDS);
     // Empty arguments: an allowed command fails to decode them, or answers; it is never refused
     // by the access check. The ones that would act (a dialog, a window) are only ever refused.
-    for command in COMMANDS.iter().chain(&E2E_COMMANDS).chain(&MARKS_COMMANDS) {
+    // `quit_app` is left out: granted here, it would end the mock app.
+    // every_list_of_commands_agrees checks its grant in the capability.
+    for command in COMMANDS
+        .iter()
+        .filter(|command| **command != "quit_app")
+        .chain(&E2E_COMMANDS)
+        .chain(&MARKS_COMMANDS)
+    {
         let answer = invoke(&settings, command, json!({}));
         assert_eq!(
             denied(&answer),

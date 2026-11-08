@@ -1,0 +1,391 @@
+//! An extend (D-B5) and a re-run (D-B6) on a pool this owner set up.
+
+use super::fake::rid;
+use super::*;
+
+/// `path` canonical, as the fence's grants name it.
+fn canonical(path: &std::path::Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap()
+}
+
+#[test]
+fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() {
+    let mut machine = FakeMachine::new("setup-extend");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let old: Vec<(String, String)> = (1..=8)
+        .map(|n| {
+            let name = format!("ClauseoSb{n:02}");
+            let password = machine.state.accounts[&name].password.clone();
+            (name, password)
+        })
+        .collect();
+    let matters = two_matters(&machine);
+    let from = machine.calls.len();
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    let mut expected: Vec<String> = [
+        "lock",
+        "read_record",
+        "registered_matters",
+        "resets_due",
+        "stop_resets",
+        "held_users",
+        "seclogon",
+        "logon_right",
+    ]
+    .map(str::to_owned)
+    .into();
+    expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
+    expected.push("group".to_owned());
+    expected.extend((1001..=1008).map(|r| format!("profile_of {r}")));
+    let mut recorded: Vec<String> = (1001..=1008).map(|r| r.to_string()).collect();
+    for n in 9..=12u32 {
+        let name = format!("ClauseoSb{n:02}");
+        recorded.push((1000 + n).to_string());
+        expected.extend([
+            format!("account_sid {name}"),
+            format!("create_user {name}"),
+            format!("add_to_group {name}"),
+            format!("hide {name}"),
+            format!("write_record {}", recorded.join(",")),
+            format!("log_on_once {name}"),
+        ]);
+    }
+    for n in 1..=12 {
+        expected.extend([
+            format!("exists ClauseoSb{n:02}"),
+            format!("owner_of ClauseoSb{n:02}"),
+        ]);
+    }
+    expected.extend(
+        [
+            "program_data",
+            "exists DeviceSync",
+            "owner_of DeviceSync",
+            "ledger",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012",
+            "journal_volumes",
+            "journal_size C:",
+            "protect_for_owner 1009,1010,1011,1012",
+            "write_marker",
+            "unlock",
+        ]
+        .map(str::to_owned),
+    );
+    assert_eq!(machine.calls_since(from), expected);
+
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert_eq!(made, (1009..=1012).map(sid).collect::<Vec<_>>());
+    assert_eq!((report.top_up.free_before, report.top_up.added), (8, 0));
+    assert!(report.reset.is_empty(), "an extend resets no password");
+    for (name, password) in &old {
+        assert_eq!(&machine.state.accounts[name].password, password, "{name}");
+        let sid = &machine.state.accounts[name].sid;
+        assert_eq!(&machine.state.secrets[sid], password, "{name}'s blob kept");
+    }
+    assert_eq!(machine.state.secrets.len(), 12);
+    assert_eq!(machine.state.record.clone().unwrap().pool.len(), 12);
+    assert_eq!(machine.state.marker.clone().unwrap().pool.len(), 12);
+
+    // Every registered matter's folders deny every new user; never the matter's own.
+    let fenced = report.fenced.unwrap();
+    assert!(fenced.written > 0);
+    for matter in &matters {
+        for folder in [&matter.folders.root, &matter.folders.state] {
+            let folder = canonical(folder);
+            for new in &made {
+                assert!(
+                    acl.has(&folder, new, Rights::DenyReadWrite),
+                    "{} on {}",
+                    rid(new),
+                    folder.display()
+                );
+            }
+            assert!(!acl.has(&folder, &matter.pool_user, Rights::DenyReadWrite));
+        }
+    }
+    // The new users' `LocalLow` is closed too.
+    for user in &report.made {
+        assert!(acl.has(
+            &local_low(&machine, &user.name),
+            &sid(1000),
+            Rights::DenyWrite
+        ));
+    }
+}
+
+#[test]
+fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
+    let mut machine = FakeMachine::new("setup-rerun");
+    let mut acl = FakeAcl::default();
+    let first = set_up_fresh(&mut machine, &mut acl);
+    let old: Vec<String> = first
+        .pool
+        .iter()
+        .map(|u| machine.state.accounts[&u.name].password.clone())
+        .collect();
+    machine.state.marker = None;
+    let record = machine.state.record.clone();
+    let from = machine.calls.len();
+    let req = request(&mut machine, 0, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    let mut expected: Vec<String> = [
+        "lock",
+        "read_record",
+        "registered_matters",
+        "resets_due",
+        "stop_resets",
+        "held_users",
+        "seclogon",
+        "logon_right",
+    ]
+    .map(str::to_owned)
+    .into();
+    expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
+    expected.extend(["sessions_open", "group"].map(str::to_owned));
+    for n in 1..=8 {
+        let name = format!("ClauseoSb0{n}");
+        expected.extend(
+            ["set_password", "add_to_group", "hide", "log_on_once"].map(|c| format!("{c} {name}")),
+        );
+    }
+    for n in 1..=8 {
+        expected.extend([
+            format!("exists ClauseoSb0{n}"),
+            format!("owner_of ClauseoSb0{n}"),
+        ]);
+    }
+    expected.extend(
+        [
+            "program_data",
+            "exists DeviceSync",
+            "owner_of DeviceSync",
+            "network 1001,1002,1003,1004,1005,1006,1007,1008",
+            "journal_volumes",
+            "journal_size C:",
+            "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008",
+            "write_marker",
+            "unlock",
+        ]
+        .map(str::to_owned),
+    );
+    assert_eq!(machine.calls_since(from), expected);
+    assert_eq!(report.pool, first.pool, "the same accounts and SIDs");
+    assert_eq!(report.reset, first.pool);
+    assert_eq!(report.made, []);
+    assert!(!report.group_made);
+    assert_eq!(machine.state.record, record);
+    for (user, old) in first.pool.iter().zip(&old) {
+        let now = &machine.state.accounts[&user.name].password;
+        assert_ne!(now, old, "{}", user.name);
+        assert_eq!(&machine.state.secrets[&user.sid], now, "{}", user.name);
+    }
+    assert!(machine.state.marker.is_some());
+}
+
+#[test]
+fn a_re_run_refuses_while_a_session_is_open() {
+    let mut machine = FakeMachine::new("setup-rerun-open");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    machine.sessions_open = true;
+    let before = machine.state.clone();
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    assert_eq!((failure.step, failure.rolled_back), (Step::Sessions, true));
+    assert_eq!(machine.calls.last().map(String::as_str), Some("unlock"));
+    assert!(!machine.calls.iter().any(|c| c.starts_with("set_password")));
+    assert_eq!(machine.state, before);
+}
+
+#[test]
+fn a_re_run_makes_a_deleted_account_again_under_a_new_sid() {
+    let mut machine = FakeMachine::new("setup-rerun-deleted");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    machine.state.accounts.remove("ClauseoSb02");
+    let req = request(&mut machine, 0, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.made.len(), 1);
+    assert_eq!(report.made[0].name, "ClauseoSb02");
+    assert_eq!(report.made[0].sid, sid(1009));
+    assert_eq!(report.dropped, [sid(1002)], "no ledger entry names it");
+    assert_eq!(report.kept_dead, []);
+    let record = machine.state.record.clone().unwrap();
+    let mut pool = vec![sid(1001)];
+    pool.extend((1003..=1009).map(sid));
+    assert_eq!(record.pool, pool);
+    assert_eq!(report.reset.len(), 7);
+    assert_eq!(report.top_up.added, 0, "the user made again keeps 8 free");
+}
+
+#[test]
+fn a_dead_sid_the_ledger_names_stays_recorded_and_is_made_again_once() {
+    let mut machine = FakeMachine::new("setup-rerun-named");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let req = request(&mut machine, 4, matters.clone());
+    set_up(&mut machine, &mut acl, &req).unwrap();
+    // The fence's ledger entries name every pool user; one account is then deleted by hand.
+    machine.state.accounts.remove("ClauseoSb06");
+    let req = request(&mut machine, 0, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.kept_dead, [sid(1006)]);
+    assert_eq!(report.dropped, []);
+    assert_eq!(report.made.len(), 1);
+    assert_eq!(
+        (report.made[0].name.as_str(), &report.made[0].sid),
+        ("ClauseoSb06", &sid(1013))
+    );
+    let record = machine.state.record.clone().unwrap();
+    assert!(record.pool.contains(&sid(1006)), "its entries stay trusted");
+    assert!(record.pool.contains(&sid(1013)));
+    assert_eq!(report.pool.len(), 12);
+    assert!(
+        !machine
+            .state
+            .marker
+            .clone()
+            .unwrap()
+            .pool
+            .contains(&sid(1006))
+    );
+    for matter in &matters {
+        let root = canonical(&matter.folders.root);
+        assert!(acl.has(&root, &sid(1013), Rights::DenyReadWrite));
+    }
+
+    // Run again: the dead SID was made again already, so nothing more is made.
+    let from = machine.calls.len();
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert!(report.made.is_empty(), "{:?}", report.made);
+    assert_eq!(report.kept_dead, [sid(1006)]);
+    assert!(
+        !machine
+            .calls_since(from)
+            .iter()
+            .any(|c| c.starts_with("create_user"))
+    );
+}
+
+#[test]
+fn an_extend_at_the_cap_refuses_before_any_change() {
+    let mut machine = FakeMachine::new("setup-cap");
+    let mut acl = FakeAcl::default();
+    let req = request(&mut machine, 32, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.pool.len(), 32);
+    assert_eq!(report.pool[31].name, "ClauseoSb32");
+    let before = machine.state.clone();
+    let req = request(&mut machine, 4, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    assert_eq!((failure.step, failure.rolled_back), (Step::Pool, true));
+    assert!(failure.cause.contains("32"), "{}", failure.cause);
+    assert_eq!(machine.state, before);
+}
+
+/// The roots of `matter`, as the plan names them and canonical, owned by its own pool user.
+fn owned_by_its_pool_user(acl: &mut FakeAcl, matter: &RegisteredMatter) -> Vec<PathBuf> {
+    let roots = vec![matter.folders.root.clone(), canonical(&matter.folders.root)];
+    for root in &roots {
+        acl.owners.insert(root.clone(), matter.pool_user.clone());
+    }
+    roots
+}
+
+/// Whether every one of `made` is denied on each of `matter`'s folders.
+fn fenced_against(acl: &FakeAcl, matter: &RegisteredMatter, made: &[Sid]) -> bool {
+    [&matter.folders.root, &matter.folders.state]
+        .into_iter()
+        .map(|folder| canonical(folder))
+        .all(|folder| {
+            made.iter()
+                .all(|new| acl.has(&folder, new, Rights::DenyReadWrite))
+        })
+}
+
+/// S15 `PR4h`: a registered matter whose root its own pool user owns goes to the owner first
+/// (that user could take the denies off), and is fenced like the other.
+#[test]
+fn an_extend_hands_a_pool_owned_root_back_and_fences_it() {
+    let mut machine = FakeMachine::new("setup-extend-hand-back");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    owned_by_its_pool_user(&mut acl, &matters[0]);
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert!(
+        report.fence_skipped.is_empty(),
+        "{:?}",
+        report.fence_skipped
+    );
+    let root = canonical(&matters[0].folders.root);
+    assert!(
+        !acl.owners.contains_key(&root),
+        "the plan's root is the owner's now"
+    );
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(matters.iter().all(|m| fenced_against(&acl, m, &made)));
+}
+
+/// S15 `PR4h`: a pool-owned root whose hand-back fails can't be fenced, so the extend skips its
+/// matter and says so, and fences the other.
+#[test]
+fn an_extend_skips_a_matter_whose_root_cant_be_handed_back_and_fences_the_other() {
+    let mut machine = FakeMachine::new("setup-extend-skip");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let (owned, fenced) = (&matters[0], &matters[1]);
+    let roots = owned_by_its_pool_user(&mut acl, owned);
+    acl.keeps_owner.extend(roots);
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert_eq!(report.fence_skipped.len(), 1, "{:?}", report.fence_skipped);
+    let (skipped, why) = &report.fence_skipped[0];
+    assert_eq!(*skipped, owned.id);
+    assert!(why.contains("a sandbox user owns the folder"), "{why}");
+    assert!(report.fenced.unwrap().written > 0);
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(fenced_against(&acl, fenced, &made));
+    for folder in [&owned.folders.root, &owned.folders.state] {
+        let folder = canonical(folder);
+        assert!(
+            made.iter()
+                .all(|new| !acl.has(&folder, new, Rights::DenyReadWrite))
+        );
+    }
+}
+
+/// S15 `PR4h`: an item in a registered matter that another matter's pool user owns, and whose
+/// hand-back fails, refuses that matter's fence walk: the extend skips the matter, says so, and
+/// fences the other.
+#[test]
+fn an_extend_skips_a_matter_whose_child_cant_be_handed_back_and_fences_the_other() {
+    let mut machine = FakeMachine::new("setup-extend-skip-child");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let (owned, fenced) = (&matters[0], &matters[1]);
+    let child = canonical(&owned.folders.root).join("moved.txt");
+    acl.owners.insert(child.clone(), fenced.pool_user.clone());
+    acl.keeps_owner.insert(child.clone());
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert_eq!(report.fence_skipped.len(), 1, "{:?}", report.fence_skipped);
+    let (skipped, why) = &report.fence_skipped[0];
+    assert_eq!(*skipped, owned.id);
+    assert!(why.contains("another sandbox user owns an item"), "{why}");
+    assert_eq!(acl.owners[&child], fenced.pool_user, "nothing handed back");
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(fenced_against(&acl, fenced, &made));
+    assert!(!fenced_against(&acl, owned, &made));
+}

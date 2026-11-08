@@ -8,7 +8,8 @@ use std::time::Duration;
 use clauseo_host::Clock as _;
 use clauseo_protocol::{
     ClientName, CommandOutcome, Date, ErrorCode, FieldChange, FolderState, HostCommand, HostQuery,
-    MatterId, MatterKind, MatterSource, MatterStatus, MatterSummary, StopReason, StreamId, Title,
+    MatterId, MatterKind, MatterSource, MatterStatus, MatterSummary, PackId, PackList, StopReason,
+    StreamId, Title,
 };
 
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, send_prompt, wait};
@@ -19,6 +20,11 @@ pub(crate) fn client(name: &str) -> ClientName {
 
 pub(crate) fn date(text: &str) -> Date {
     text.parse().unwrap()
+}
+
+/// The pack list of `ids`.
+pub(crate) fn packs(ids: &[&str]) -> PackList {
+    PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
 }
 
 /// The summary of `matter` in `ListMatters`.
@@ -81,12 +87,19 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             last_activity: Some(now),
             client: Some(client("Kunal Desai")),
             next_date: Some(date("2026-11-20")),
+            skill_packs: None,
             pinned: false,
             last_opened: None,
             status: MatterStatus::Idle,
             folder_display: work.join("State v. Kunal Desai").display().to_string(),
             folder_state: FolderState::Found,
             folder_support: None,
+            // No sandbox seam: this build's protection is not built (0051).
+            protection: Some(clauseo_protocol::Protection::NotProtected {
+                cause: clauseo_protocol::NotProtectedCause::Unsupported {
+                    why: clauseo_protocol::UnsupportedWhy::NotBuilt,
+                },
+            }),
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it
@@ -198,6 +211,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
         matter,
         client,
         next_date,
+        skill_packs: FieldChange::Keep,
         pinned,
     };
     // Nothing named: nothing changes, and the answer is still Done.
@@ -246,6 +260,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
             matter: unknown,
             client: FieldChange::Keep,
             next_date: FieldChange::Keep,
+            skill_packs: FieldChange::Keep,
             pinned: Some(true),
         },
         ErrorCode::CommandUnknownMatter,
@@ -257,6 +272,102 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
         after,
         "the details survive a restart"
     );
+    host.shutdown();
+}
+
+#[test]
+fn update_matter_keeps_clears_and_sets_skill_packs() {
+    let dir = Dir::new("update_skill_packs", &[]);
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[]);
+    let matter = created(import(&host, "m", &folder, (None, None)));
+    let update = |client, skill_packs| HostCommand::UpdateMatter {
+        matter,
+        client,
+        next_date: FieldChange::Keep,
+        skill_packs,
+        pinned: None,
+    };
+    // A new matter has no list: it takes the global one.
+    assert_eq!(summary(&host, matter).skill_packs, None);
+    // Set a list; it comes back as given.
+    let list = packs(&["india-litigation", "tax-2026"]);
+    assert_eq!(
+        host.ok(update(FieldChange::Keep, FieldChange::Set(list.clone()))),
+        CommandOutcome::Done
+    );
+    assert_eq!(summary(&host, matter).skill_packs, Some(list.clone()));
+    // A missing field keeps it.
+    host.ok(update(FieldChange::Keep, FieldChange::Keep));
+    assert_eq!(summary(&host, matter).skill_packs, Some(list.clone()));
+    // A change of another field leaves it alone.
+    host.ok(update(FieldChange::Set(client("Acme")), FieldChange::Keep));
+    let listed = summary(&host, matter);
+    assert_eq!(
+        (listed.client, listed.skill_packs),
+        (Some(client("Acme")), Some(list))
+    );
+    // An empty list is a list: the matter narrows to no pack.
+    host.ok(update(
+        FieldChange::Keep,
+        FieldChange::Set(PackList::default()),
+    ));
+    assert_eq!(
+        summary(&host, matter).skill_packs,
+        Some(PackList::default())
+    );
+    // Clear goes back to the global list.
+    host.ok(update(FieldChange::Keep, FieldChange::Clear));
+    assert_eq!(summary(&host, matter).skill_packs, None);
+    // A set list survives a restart.
+    let kept = packs(&["contracts"]);
+    host.ok(update(FieldChange::Keep, FieldChange::Set(kept.clone())));
+    host.shutdown();
+    let host = dir.start(1);
+    assert_eq!(summary(&host, matter).skill_packs, Some(kept));
+    host.shutdown();
+}
+
+#[test]
+fn update_matter_refuses_a_reserved_pack_id() {
+    let dir = Dir::new("update_reserved_pack", &[]);
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[]);
+    let matter = created(import(&host, "m", &folder, (None, None)));
+    let kept = packs(&["contracts"]);
+    host.ok(HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Set(kept.clone()),
+        pinned: None,
+    });
+    // Each reserved name is refused as a bad value is: command.invalid, and nothing changes.
+    for reserved in [
+        "clauseo",
+        "clauseo-x",
+        "builtin",
+        "stetdoc",
+        "legal-drafting",
+    ] {
+        let list = PackList::new(vec![
+            PackId::new("contracts").unwrap(),
+            PackId::new(reserved).unwrap(),
+        ])
+        .unwrap();
+        host.refused(
+            HostCommand::UpdateMatter {
+                matter,
+                client: FieldChange::Keep,
+                next_date: FieldChange::Keep,
+                skill_packs: FieldChange::Set(list),
+                pinned: Some(true),
+            },
+            ErrorCode::CommandInvalid,
+        );
+        assert_eq!(summary(&host, matter).skill_packs, Some(kept.clone()));
+        assert!(!summary(&host, matter).pinned, "{reserved}");
+    }
     host.shutdown();
 }
 
@@ -330,7 +441,88 @@ fn a_home_reached_through_a_link_still_shortens_the_folder() {
     host.shutdown();
 }
 
+#[test]
+fn without_a_documents_folder_new_matter_asks_for_a_folder() {
+    let dir = Dir::new("no_documents", &[]);
+    let host = dir.start_without_documents(0);
+    // The host starts; with no default location there is no Scratch matter.
+    assert!(
+        host.matters()
+            .iter()
+            .all(|matter| matter.kind != MatterKind::Scratch),
+        "{:?}",
+        host.matters()
+    );
+    // The form's folder line has nothing to show, so it asks for a folder.
+    // (`with_no_documents_a_set_location_still_makes_scratch` covers a set location.)
+    let error = host.query(HostQuery::GetDefaultLocation).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    let create = |source| HostCommand::CreateMatter {
+        name: Title::new("Acme").unwrap(),
+        source,
+        client: None,
+        next_date: None,
+    };
+    let error = host.refused(
+        create(MatterSource::DefaultLocation),
+        ErrorCode::CommandInvalid,
+    );
+    assert!(error.message().contains("no default location"), "{error}");
+    assert_eq!(host.matters(), []);
+    // A folder the lawyer picks still makes the matter.
+    let parent = dir.folder("parent", &[]);
+    let folder = host.folder_ref(&parent);
+    created(host.dispatch(create(MatterSource::NewFolder { folder })));
+    assert!(
+        parent
+            .join("Acme")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    host.shutdown();
+}
+
 /// `GetDefaultLocation`'s display.
+/// No Documents folder, but `matters.default_location` set (as the Windows e2e fixture sets it):
+/// the host still makes its Scratch matter there, and New matter shows that folder, asking
+/// for none (issue #365 keeps a set default working).
+#[test]
+fn with_no_documents_a_set_location_still_makes_scratch() {
+    let dir = Dir::new("no_documents_set_location", &[]);
+    let location = dir.home().join("matters");
+    dir.set_settings(
+        &[],
+        serde_json::json!({ "matters": { "default_location": location.display().to_string() } }),
+    );
+    let host = dir.start_without_documents(0);
+    let matters = host.matters();
+    assert_eq!(matters.len(), 1, "{matters:?}");
+    assert_eq!(matters[0].kind, MatterKind::Scratch);
+    assert!(
+        location
+            .join("Scratch")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    assert_eq!(default_display(&host), location.display().to_string());
+    created(host.dispatch(HostCommand::CreateMatter {
+        name: Title::new("Acme").unwrap(),
+        source: MatterSource::DefaultLocation,
+        client: None,
+        next_date: None,
+    }));
+    assert!(
+        location
+            .join("Acme")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    host.shutdown();
+}
+
 fn default_display(host: &Running) -> String {
     match host.query(HostQuery::GetDefaultLocation).unwrap() {
         clauseo_protocol::QueryResult::DefaultLocation(location) => location.display,

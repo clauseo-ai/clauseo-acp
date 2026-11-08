@@ -16,6 +16,7 @@ import { mt } from "../lib/words-matters.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { nextDateError, parseNextDate } from "./matter-form-check.ts";
 import { Heading } from "./heading.tsx";
+import { PickerLine } from "./picker-line.tsx";
 import { Say } from "./say.tsx";
 
 export type NewMatterFormProps = {
@@ -42,6 +43,9 @@ export type NewMatterFormProps = {
    * line shows it, or null if none was, which keeps what was there. It may answer later: Change waits for it. Without
    * it, Change stands for the picker and keeps the folder Clauseo would make. */
   pickFolder?: ((current: string) => Promise<string | null> | string | null) | undefined;
+  /** Optional: the folder picker is on its way (its pick has run 300 ms, the caller's wait): a muted line under the
+   * folder line says so, and goes when the pick resolves. */
+  opening?: boolean | undefined;
   /** Optional: a line under the fields, from the caller, in the language: a folder refused, a matter not made. */
   error?: string | null | undefined;
   /** Optional: the next date's line, from the caller. Left out, the form reads the date itself and, where it doesn't
@@ -58,6 +62,11 @@ export type NewMatterFormProps = {
     | undefined;
   /** Optional: Create held back, for a folder the caller refused. */
   blocked?: boolean | undefined;
+  /** Optional: the scan of the folder picked, under the folder line and above any warning, from the caller. */
+  scan?: ReactNode;
+  /** Optional: a count the caller bumps to drop the folder Change picked (the scan's Stop), so the line goes back to
+   * what it showed before the pick. */
+  unpick?: number | undefined;
   /** Optional: test ids for the name field, Change, Create the matter and Open it, and the warning's buttons. */
   testIds?:
     | {
@@ -146,6 +155,9 @@ export function NewMatterForm({
   openMatter,
   warning,
   blocked = false,
+  scan,
+  unpick = 0,
+  opening = false,
   testIds,
   titled = true,
   inDialog = false,
@@ -156,6 +168,12 @@ export function NewMatterForm({
   const [client, setClient] = useState(client0);
   const [next, setNext] = useState(next0);
   const [picked, setPicked] = useState<string | null>(null);
+  // the caller dropped the pick: set while rendering, as React allows for state that follows a prop
+  const [unpicked, setUnpicked] = useState(unpick);
+  if (unpicked !== unpick) {
+    setUnpicked(unpick);
+    setPicked(null);
+  }
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState(false);
   // the next date's line waits until the lawyer leaves the field or tries Create, so a date half typed isn't wrong
@@ -296,6 +314,8 @@ export function NewMatterForm({
           <span className="deva-nudge">{w("Change")}</span>
         </Button>
       </div>
+      {opening && <PickerLine />}
+      {scan}
       {warning?.note}
       {error !== undefined && error !== null && (
         <div className="matter-form-refusal">

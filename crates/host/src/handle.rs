@@ -10,14 +10,20 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
-    MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId, ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandOutcome, Cursor, ErrorCode, FileRefId, FolderRefId,
+    HostError, HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq,
+    StreamId, ViewEpoch,
 };
+use futures::FutureExt as _;
 use futures::channel::oneshot;
+use futures::future::Shared;
 
-use crate::actor::input::{Input, Request};
-use crate::config::HostConfig;
+use crate::actor::input::{Input, PlanWrite, Request, SignInRequest};
+use crate::agent::login_link::{self, StopFor};
+use crate::agent::login_splits::{self, LoginSplits};
+use crate::config::{HostConfig, SessionKey};
 use crate::error::Error;
+use crate::update::Downloaded;
 
 mod subscription;
 
@@ -36,6 +42,19 @@ pub struct LocatedFile {
     pub path: PathBuf,
 }
 
+/// A site the egress proxy refused because the block list names it (decision record 0053), as
+/// its sink passes it to [`HostHandle::site_blocked`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedSite {
+    /// The host name or IP address the agent asked for, as the proxy prints it (`Name::text`:
+    /// case folded, one trailing dot dropped, an IDN as punycode, an IPv6 address unbracketed).
+    pub host: String,
+    /// Why the list names it.
+    pub tag: clauseo_blocklist::Tag,
+    /// When the list in use was made.
+    pub generated: clauseo_blocklist::Generated,
+}
+
 /// The session host. [`Host::start`] runs it on its own thread, `clauseo-host`.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -46,14 +65,34 @@ impl Host {
     /// threads, creates the Scratch matter on the first start, repairs what the last run left
     /// open, and serves. Fails with `store.locked` when another host holds the data folder.
     pub fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), HostError> {
-        crate::actor::start(config).map_err(HostError::from)
+        let splits = config.login_splits();
+        let (mut handle, join) = crate::actor::start(config).map_err(HostError::from)?;
+        handle.splits = splits;
+        Ok((handle, join))
     }
 }
 
+/// How the host thread ended ([`HostHandle::exit`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HostExit {
+    /// It stopped: a shutdown, every handle gone, a failure, or an install whose store did not
+    /// close cleanly.
+    Stopped,
+    /// It stopped to install this download (`InstallUpdate`, decision record 0037): turns
+    /// ended, the store closed and `update.json` written. Desktop calls the updater's install
+    /// after joining the host thread, flushing the log and saving the counts and window state.
+    Install(Downloaded),
+}
+
 /// A caller's way to the host. Cheap to clone and `Send`; every clone reaches the same host.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HostHandle {
     requests: async_channel::Sender<Request>,
+    /// The login splits the actor sends (`HostHandle::login_splits`).
+    splits: LoginSplits,
+    /// How the host thread ended, once it has.
+    exit: Shared<oneshot::Receiver<HostExit>>,
     /// The actor's internal input channel, for `abort_for_test`.
     #[cfg(feature = "test-support")]
     internal: async_channel::Sender<Input>,
@@ -81,16 +120,28 @@ impl HostJoin {
     }
 }
 
+impl std::fmt::Debug for HostHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostHandle")
+            .field("requests", &self.requests)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HostHandle {
-    /// Wraps the actor's request channel and its internal input channel.
+    /// Wraps the actor's request channel, its internal input channel and the end it reports.
     pub(crate) fn new(
         requests: async_channel::Sender<Request>,
         internal: async_channel::Sender<Input>,
+        exit: oneshot::Receiver<HostExit>,
     ) -> Self {
         #[cfg(not(feature = "test-support"))]
         drop(internal);
         Self {
             requests,
+            // `Host::start` puts the config's own in.
+            splits: login_splits::channel().1,
+            exit: exit.shared(),
             #[cfg(feature = "test-support")]
             internal,
         }
@@ -276,11 +327,208 @@ impl HostHandle {
         .await
     }
 
+    /// Writes `agents.<agent>` as `launch` (decision record 0048): desktop calls it when an
+    /// agent's install is ready, Rust only, since a webview must not choose a program to run.
+    /// The entry is written to `settings.json`, in force for the next launch, and every app
+    /// subscriber gets `SettingsChanged`. Refused, with nothing written, with `settings.locked`
+    /// for an id policy sets, and with `settings.refused` for a launch that is not Clauseo's
+    /// own install (a command under `<data_dir>/agents/`, or `node` with its script there) or
+    /// an `env` that sets a secret-shaped name; the message names the key, never a value. An
+    /// entry already there that is the lawyer's or the firm's own is never replaced: the answer
+    /// is [`EntryWrite::LeftAlone`](clauseo_settings::EntryWrite::LeftAlone), with nothing
+    /// written or sent.
+    pub async fn set_agent_launch(
+        &self,
+        agent: AgentId,
+        launch: clauseo_settings::AgentLaunch,
+    ) -> Result<clauseo_settings::EntryWrite, HostError> {
+        let launch = Box::new(launch);
+        self.call(|reply| Request::SetAgentLaunch {
+            agent,
+            launch,
+            reply,
+        })
+        .await
+    }
+
+    /// Writes `plans.<agent>` as `plan`, or removes it with `None` (decision record 0048):
+    /// desktop calls it, Rust only, after a firm endpoint's confirm. Written to `settings.json`,
+    /// then `SettingsChanged` to every app subscriber. Refused, with nothing written, with
+    /// `settings.locked` for a plan policy sets (every plan while a policy source cannot be read),
+    /// and with `settings.refused` for an endpoint that is not an `https` address or a variable
+    /// a plan may not set; the message names the key or the variable's place, never a value.
+    pub async fn set_plan(
+        &self,
+        agent: AgentId,
+        plan: Option<clauseo_settings::Plan>,
+    ) -> Result<(), HostError> {
+        let plan = PlanWrite::Whole(plan.map(Box::new));
+        self.call(|reply| Request::SetPlan { agent, plan, reply })
+            .await
+    }
+
+    /// Sets `plans.<agent>.endpoint` to `endpoint`, or removes it with `None`, keeping the
+    /// plan's provider and variables (decision record 0048): desktop's `SetFirmEndpoint`, after
+    /// its confirm. A plan left empty is removed. Read and written on the actor, so no other
+    /// settings write falls between; refused as [`HostHandle::set_plan`] is.
+    pub async fn set_plan_endpoint(
+        &self,
+        agent: AgentId,
+        endpoint: Option<String>,
+    ) -> Result<(), HostError> {
+        let plan = PlanWrite::Endpoint(endpoint);
+        self.call(|reply| Request::SetPlan { agent, plan, reply })
+            .await
+    }
+
+    /// Lifts [`Self::stop_agents`]' hold on `agent`, stops every live agent of it that is not in
+    /// a turn, so the next question launches with the new login, and resumes, once, each queue
+    /// held for that agent's sign-in (a turn that failed with `agent.auth_required`, one
+    /// [`Self::stop_agents`] cancelled, or a prompt sent while it held the agent). Rust
+    /// only: desktop calls it on `SignedIn` and after a key, endpoint or source change. A
+    /// second call resumes nothing more. A lawyer's `ResumeQueue` before it resumes the queue
+    /// as usual, and the call then leaves it alone.
+    pub async fn restart_agents(&self, agent: AgentId) -> Result<(), HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::Restart { agent, reply }))
+            .await
+    }
+
+    /// Step 1 of the leave order (decision record 0048, ruling 1): cancels each turn of
+    /// `agent` through the Cancel path, puts it back at the head of its queue held for the
+    /// sign-in, and stops every live agent of that id, launches being prepared included, so no
+    /// process of it runs while the login link changes. Rust only. The same as
+    /// [`Self::stop_agents_for`] with [`StopFor::LoginSwitch`].
+    ///
+    /// Answers once every process of the id has exited ([`AgentsStopped::Exited`]), or after
+    /// the bounded wait (10 s, past the shutdown ladder's 7 s) or a process that outlived its
+    /// kill ([`AgentsStopped::TimedOut`]); it never hangs. From then on the id is held, in
+    /// memory only (a host restart clears it): nothing of it launches, and a prompt for it
+    /// queues held for the sign-in, as #408 holds a queue. [`Self::restart_agents`] lifts the
+    /// hold, relaunches and resumes once; desktop calls it too when its leave flow is
+    /// abandoned.
+    ///
+    /// [`AgentsStopped::Exited`]: crate::AgentsStopped::Exited
+    /// [`AgentsStopped::TimedOut`]: crate::AgentsStopped::TimedOut
+    pub async fn stop_agents(&self, agent: AgentId) -> Result<crate::AgentsStopped, HostError> {
+        self.stop_agents_for(agent, StopFor::LoginSwitch).await
+    }
+
+    /// [`Self::stop_agents`] with the reason it gives: the same cancel, stop, wait and hold, but
+    /// the held queues show `switching` for [`StopFor::LoginSwitch`] and `sign_in` for
+    /// [`StopFor::SignInAgain`], the account on the shared login having changed, so the app
+    /// asks for a sign-in. A second call while held sets the reason again: the latest wins.
+    /// Rust only.
+    pub async fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> Result<crate::AgentsStopped, HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::Stop { agent, why, reply }))
+            .await
+    }
+
+    /// Desktop's word that `agent`'s login is the lawyer's own, reused (`true`, after
+    /// `UseFoundLogin`'s link), or no longer (`false`). While it is, each Codex launch runs
+    /// the split check through the [`LoginCheck`](crate::LoginCheck) hook. Rust only.
+    pub async fn set_reused_login(&self, agent: AgentId, reused: bool) -> Result<(), HostError> {
+        self.call(|reply| {
+            Request::SignIn(SignInRequest::Reused {
+                agent,
+                reused,
+                reply,
+            })
+        })
+        .await
+    }
+
+    /// The reused Codex logins that split, as each launch's split check finds them: desktop
+    /// reads them and runs S18's `stop_using_login` and the leave order. Rust only. The
+    /// receiver keeps the latest split per agent, so a slow reader loses none and none back up
+    /// (`LoginSplits`). Every clone takes from the same splits, so one reader takes each.
+    pub fn login_splits(&self) -> LoginSplits {
+        self.splits.clone()
+    }
+
+    /// Step 3 of the leave order: removes each matter's link to `agent`'s login file, without
+    /// a restart. The actor only names the folders; the removal runs on a thread of its own with
+    /// a bounded wait, so no file call blocks the actor. Matters get links in stage C (R17):
+    /// until then there are none and nothing is removed. Rust only.
+    pub async fn remove_login_links(&self, agent: AgentId) -> Result<(), HostError> {
+        let asked = agent.clone();
+        let homes = self
+            .call(|reply| {
+                Request::SignIn(SignInRequest::LinkHomes {
+                    agent: asked,
+                    reply,
+                })
+            })
+            .await?;
+        login_link::remove_links(agent, homes)
+            .await
+            .map_err(HostError::from)
+    }
+
+    /// Refuses `agent`'s new launches with `code` (decision record 0048, P4d), or, with
+    /// `None`, lets them start again. A turn that would launch the agent fails as any refused
+    /// launch does: an ordinary `TurnFailed` with `code`. Running sessions go on until they
+    /// exit; desktop calls [`Self::stop_agents`] to end them sooner. Only the codes desktop may
+    /// put there are taken, `signin.policy_unreadable`, `agent.keys_loading` and
+    /// `agent.key_unreadable`: another is a bug, which debug builds assert, and release builds
+    /// refuse with `command.invalid`, changing nothing. A launch meeting `agent.keys_loading`
+    /// or `agent.key_unreadable` waits up to 2 s on the host clock for it to be lifted before
+    /// it fails. In memory only. Rust only.
+    pub async fn set_launch_refused(
+        &self,
+        agent: AgentId,
+        code: Option<ErrorCode>,
+    ) -> Result<(), HostError> {
+        debug_assert!(
+            code.is_none_or(crate::agent::launch_refusals::taken),
+            "set_launch_refused takes no {code:?}"
+        );
+        self.call(|reply| Request::SignIn(SignInRequest::LaunchRefused { agent, code, reply }))
+            .await
+    }
+
+    /// Desktop's word that `agent`'s login changed (a sign-in, a sign-out, an account change, or
+    /// an API key or firm endpoint set or cleared; decision record 0048): `limits`'
+    /// `Input::LoginChanged`, so the limits are read at once, past any age or back-off, and a
+    /// read already in flight, which read the old login, is followed by another. The next
+    /// scheduled read stays where it was. Rust only: no window can send it.
+    pub async fn limits_login_changed(&self, agent: AgentKind) -> Result<(), HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::LimitsLogin { agent, reply }))
+            .await
+    }
+
+    /// The egress proxy refused `site` for `session` (decision record 0053): the host tells the
+    /// main window with `HostEvent::SiteBlocked`, once per site per turn, re-sent with a higher
+    /// count when the site is refused again in that turn. Never waits: when the host is gone or
+    /// its request channel is full, the report is dropped (logged at debug). Rust only.
+    pub fn site_blocked(&self, session: SessionKey, site: BlockedSite) {
+        if let Err(error) = self
+            .requests
+            .try_send(Request::SiteBlocked { session, site })
+        {
+            let why = if error.is_full() { "busy" } else { "gone" };
+            tracing::debug!(
+                why,
+                "egress: a blocked site was not reported: the host is {why}"
+            );
+        }
+    }
+
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text
     /// flushed, the store closed. Answers once the store is closed; later calls are
     /// `internal`.
     pub async fn shutdown(&self) -> Result<(), HostError> {
         self.call(|reply| Request::Shutdown { reply }).await
+    }
+
+    /// How the host thread ended: resolves once it has stopped, its store closed and every
+    /// shutdown call answered. [`HostExit::Install`] when it stopped to install an update, which
+    /// the host does on its own after `InstallUpdate`; desktop waits on this to learn of it.
+    pub async fn exit(&self) -> HostExit {
+        self.exit.clone().await.unwrap_or(HostExit::Stopped)
     }
 
     /// Ends the host thread at once, with no flush and no graceful stop, as a crash would.

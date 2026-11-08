@@ -90,6 +90,33 @@ fn claude_detection_runs_without_the_home_variables() {
     );
 }
 
+/// No sign-in or status run gets `NODE_OPTIONS` or `NODE_PATH`, though the base environment
+/// sets both: neither reaches the fake CLI's environment nor any run's spec.
+#[test]
+fn a_status_run_gets_neither_node_options_nor_node_path() {
+    let mut fx = Fixture::new("reuse-claude-node-env", "ok-after:0");
+    for name in clauseo_process::NODE_ENV {
+        fx.config
+            .signin
+            .base_env
+            .insert(name.into(), fx.data.path().join("stray").into_os_string());
+    }
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), found(EMAIL));
+    let names = fx.env_names();
+    assert!(names.iter().any(|got| got == "HOME"), "{names:?}");
+    for name in clauseo_process::NODE_ENV {
+        assert!(!names.iter().any(|got| got == name), "{name}: {names:?}");
+    }
+    assert!(fx.launches().iter().all(|run| {
+        clauseo_process::NODE_ENV
+            .iter()
+            .all(|name| !run.env.contains_key(OsStr::new(name)))
+    }));
+}
+
 /// "a `claude.ai` status gives `LoginFound { from: ClaudeCode, email }` with the status output's
 /// email, no login run and no reuse".
 #[test]
@@ -200,17 +227,37 @@ fn stop_using_login_writes_no_reuse_and_runs_no_logout() {
     let (agents, events) = fx.start();
     reuse(&agents, &events);
     agents.stop_using_login(&claude(), None).unwrap();
-    assert_eq!(events.state(), signed_out(None));
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
     assert!(fx.marker(&claude(), "no-reuse").is_file());
     assert!(!fx.marker(&claude(), "login-source").exists());
     assert_eq!(fx.runs_of("logout"), []);
     assert!(lawyer_signed_in(&fx));
     // The next start does not reuse again without asking, nor offer it.
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(None));
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
     agents.find_login(&claude()).unwrap();
     assert_eq!(events.state(), found(EMAIL));
     assert!(!fx.marker(&claude(), "no-reuse").exists());
+}
+
+/// UD2: with no login of the lawyer's, the status check and `find_login` say none was found;
+/// a reason that is no stop reason stops reuse as no reason does.
+#[test]
+fn no_lawyer_login_gives_none_found_and_a_non_reason_stop_turns_reuse_off() {
+    let fx = Fixture::new("reuse-claude-none", "ok-after:0");
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
+    agents.find_login(&claude()).unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
+
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    reuse(&agents, &events);
+    agents
+        .stop_using_login(&claude(), Some(Found::NoLogin))
+        .unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
+    assert!(fx.marker(&claude(), "no-reuse").is_file());
 }
 
 /// "a settings-made Claude login gives `SignedOut { found: ClaudeSettings }`".
@@ -271,7 +318,7 @@ fn the_run_time_fallback_logs_and_offers_clauseo_s_own_sign_in() {
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.state(), found(EMAIL));
     agents.use_found_login(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(None));
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
     assert_eq!(events.notes(), [SigninNote::ClaudeReuseFallback]);
     assert_eq!(
         SigninNote::ClaudeReuseFallback.code(),
@@ -292,7 +339,7 @@ fn the_run_time_fallback_logs_and_offers_clauseo_s_own_sign_in() {
         .insert("FAKE_SIGNIN".into(), "secure-ignored".into());
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.state(), signed_out(None));
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
     assert_eq!(events.notes(), [SigninNote::ClaudeReuseFallback]);
     assert!(lawyer_signed_in(&fx));
 }
@@ -322,4 +369,25 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
         }
     );
     assert!(!fx.marker(&claude(), "login-source").exists());
+}
+
+/// UD2: a search whose status run never answers (killed at its 5 s limit) ends
+/// `signin.failed`, so the lawyer who asked gets an answer; the state is never left as it was.
+#[cfg(unix)]
+#[test]
+fn a_find_login_that_cannot_tell_ends_failed() {
+    let fx = Fixture::new("reuse-claude-find-stalled", "ok-after:0");
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
+    fx.stall(Some("status"));
+    agents.find_login(&claude()).unwrap();
+    fx.timer.fire(std::time::Duration::from_secs(5));
+    assert_eq!(
+        events.state(),
+        SigninState::Failed {
+            code: clauseo_agents::SigninCode::Failed,
+            at: now()
+        }
+    );
 }

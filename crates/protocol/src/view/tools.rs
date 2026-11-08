@@ -23,6 +23,8 @@ open_unit_enum! {
         WebSearch,
         /// Clauseo's browser.
         Browser,
+        /// The case-law connector (R24), shown only when the connector is added.
+        CaseLaw,
     }
     test mod clauseo_tool;
 }
@@ -60,8 +62,8 @@ open_unit_enum! {
         /// Web search only: this login has no web search (Bedrock); reading web pages still
         /// works.
         NoSearchOnThisLogin,
-        /// The browser (and other MCP servers): the firm manages the agent's MCP servers (Claude
-        /// Code's managed MCP), so the host sends none.
+        /// The browser, case law and other MCP servers: the firm manages the agent's MCP servers
+        /// (Claude Code's managed MCP), so the host sends none.
         ManagedByFirm,
         /// The browser only: no egress proxy for this session.
         NoProxy,
@@ -70,6 +72,18 @@ open_unit_enum! {
         /// The browser only: the machine already runs as many browser sessions as its memory
         /// allows.
         TooManyBrowsers,
+        /// Case law only: the host could not open the session's loopback relay.
+        NoRelay,
+        /// The browser only: the firm turned off Chrome's or Edge's remote debugging
+        /// (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
+        /// policy does not allow Clauseo's browser anyway
+        /// (`browser.allow_when_remote_debugging_disabled`).
+        BrowserBlockedByPolicy,
+        /// The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+        /// can be set could not be read (not missing: denied or failed), so Clauseo does not know
+        /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+        /// not allow Clauseo's browser anyway. Checked again at the next launch.
+        BrowserPolicyUnreadable,
     }
     test mod tools_unavailable_reason;
 }

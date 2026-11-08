@@ -289,13 +289,25 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "browser.allow_when_remote_debugging_disabled",
             "install.bundle",
             "install.registry",
             "mcp.servers",
+            "network.allow_unsafe_site_override",
+            "network.allowed_domains",
+            "network.ca_certs",
+            "network.unsafe_site_list_updates",
+            "network.upstream_proxy",
             "plans.",
             "privacy.counts",
             "privacy.crash_reports",
+            "sandbox.allow_unprotected_auto",
+            "sandbox.required",
+            "skills.allow_scripts",
+            "skills.curated",
+            "skills.extra",
             "tools.browser",
+            "tools.connectors",
             "tools.web_search",
             "update.mode"
         ]

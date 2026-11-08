@@ -9,8 +9,9 @@ use crate::title::shows_something;
 #[cfg(doc)]
 use crate::{AgentChoiceId, DeliveryRequest, check_display_title};
 use crate::{
-    CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision, MatterPath,
-    PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode, is_windows_reserved_name,
+    AllowScope, CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision,
+    MatterPath, PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode,
+    is_windows_reserved_name,
 };
 
 /// Most prompt text, in UTF-8 bytes summed over the prompt's `Text` blocks (256 KiB). Raw bytes,
@@ -37,6 +38,10 @@ pub const MAX_FILE_LIST: usize = 10_000;
 /// Most bytes of paths in one such file list (1 MiB), summed over its `MatterPath`s, so a list
 /// within [`MAX_FILE_LIST`] of long paths cannot make a 40 MB command.
 pub const MAX_PATH_LIST_BYTES: usize = 1024 * 1024;
+
+/// Most bytes in a `RevokeAllowedSite`'s host: a DNS name's limit, with room for a bracketed
+/// IPv6 address.
+pub const MAX_ALLOWED_HOST_BYTES: usize = 255;
 
 /// A command whose shape passed [`CommandEnvelope::validate`], the only way to build one: its
 /// fields are private and it has no other constructor, so a command built in Rust goes through
@@ -143,23 +148,7 @@ impl HostCommand {
                 thread: _,
                 turn: _,
                 files,
-            } => {
-                // An undo undoes at least one file: a list of only `Keep` choices (or none)
-                // is refused alike, since the files it leaves out are kept anyway.
-                if !files
-                    .iter()
-                    .any(|FileDecision { path: _, choice }| *choice == FileChoice::Undo)
-                {
-                    return Err(Error::Format {
-                        kind: "UndoStep",
-                        rule: "an undo undoes at least one file",
-                    });
-                }
-                check_paths(
-                    "UndoStep",
-                    files.iter().map(|FileDecision { path, choice: _ }| path),
-                )
-            }
+            } => check_undo(files),
             Self::RestoreVersion {
                 matter: _,
                 checkpoint: _,
@@ -203,6 +192,8 @@ impl HostCommand {
             // The font size's range is the settings crate's rule; the host checks it.
             | Self::SetUiSettings { patch: _ }
             | Self::SetToolSettings { patch: _ }
+            // The id is checked by its type as it decodes.
+            | Self::SetSkillPack { id: _, on: _ }
             | Self::SetPrivacySettings { patch: _ }
             | Self::FirstAct { counts: _ }
             // The client's name and the date are checked by their types as they decode.
@@ -210,6 +201,7 @@ impl HostCommand {
                 matter: _,
                 client: _,
                 next_date: _,
+                skill_packs: _,
                 pinned: _,
             }
             | Self::OpenMatter { matter: _ }
@@ -232,8 +224,15 @@ impl HostCommand {
             // Whether the updater's state takes them is the host's check.
             | Self::CheckForUpdate {}
             | Self::InstallUpdate { when: _ }
-            | Self::CancelScheduledUpdate {} => Ok(()),
+            | Self::CancelScheduledUpdate {}
+            // No fields; whether this computer has a set-up to retry or remove is state.
+            | Self::RetryProtection {} | Self::RemoveSandboxSetup {} => Ok(()),
+            Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
+                validate_allowed_sites(self)
+            }
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
+            // Ids by shape; whether the connector or pack is known, live or added is state.
+            Self::Connector(command) => command.check(),
         }
     }
 }
@@ -246,6 +245,70 @@ fn check_update_mode(mode: UpdateMode) -> Result<(), Error> {
         UpdateMode::None => Err(Error::Format {
             kind: "SetUpdateMode",
             rule: "a window sets auto or notify; none comes only from policy",
+        }),
+    }
+}
+
+/// `UndoStep`'s files: an undo undoes at least one file (a list of only `Keep` choices, or none,
+/// is refused alike, since the files it leaves out are kept anyway), and the paths' checks.
+fn check_undo(files: &[FileDecision]) -> Result<(), Error> {
+    if !files
+        .iter()
+        .any(|FileDecision { path: _, choice }| *choice == FileChoice::Undo)
+    {
+        return Err(Error::Format {
+            kind: "UndoStep",
+            rule: "an undo undoes at least one file",
+        });
+    }
+    check_paths(
+        "UndoStep",
+        files.iter().map(|FileDecision { path, choice: _ }| path),
+    )
+}
+
+/// The unsafe-site override's two commands (0053): `AllowBlockedSite` has nothing to check here
+/// (its id by its type; whether the host keeps the notice is state); `RevokeAllowedSite` goes to
+/// [`check_revoke`].
+fn validate_allowed_sites(command: &HostCommand) -> Result<(), Error> {
+    if let HostCommand::RevokeAllowedSite {
+        host,
+        scope,
+        matter,
+    } = command
+    {
+        return check_revoke(host, *scope, matter.is_some());
+    }
+    Ok(())
+}
+
+/// `RevokeAllowedSite`'s shape: a host of 1 to [`MAX_ALLOWED_HOST_BYTES`] bytes with no white
+/// space or control character, and a matter exactly when the scope is `Matter`.
+fn check_revoke(host: &str, scope: AllowScope, has_matter: bool) -> Result<(), Error> {
+    const KIND: &str = "RevokeAllowedSite";
+    if host.len() > MAX_ALLOWED_HOST_BYTES {
+        return Err(too_large(
+            KIND,
+            "host in bytes",
+            host.len(),
+            MAX_ALLOWED_HOST_BYTES,
+        ));
+    }
+    if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(Error::Format {
+            kind: KIND,
+            rule: "a host is not empty and holds no space or control character",
+        });
+    }
+    match (scope, has_matter) {
+        (AllowScope::Matter, true) | (AllowScope::Always, false) => Ok(()),
+        (AllowScope::Matter, false) => Err(Error::Format {
+            kind: KIND,
+            rule: "a matter allow names its matter",
+        }),
+        (AllowScope::Always, true) => Err(Error::Format {
+            kind: KIND,
+            rule: "an always allow names no matter",
         }),
     }
 }

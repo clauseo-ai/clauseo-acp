@@ -9,6 +9,8 @@
 // Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
 //
+// Last, the sites allowed past the unsafe-site list, each with Remove (allowed-sites.tsx, 0053).
+//
 // The switches are the host's: SettingsView.tools, the effective `web_search` and `browser`, in get_settings and
 // settings_changed, and a flip is HostCommand::SetToolSettings { patch }, refused whole with settings.locked when it
 // names a locked key, then settings_changed. Only the settings window sends it (the main window's host refuses it),
@@ -23,6 +25,7 @@ import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { AgentKind, ToolsSettingsView } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
+import { AllowedSites } from "./allowed-sites.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
 
@@ -146,6 +149,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
           />
         </Group>
       )}
+      <AllowedSites transport={ctx.transport} />
     </>
   );
 }

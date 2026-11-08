@@ -29,7 +29,15 @@ fn assert_missing(err: &Error, expected: MissingReason) {
         matches!(err, Error::FolderMissing { reason, .. } if *reason == expected),
         "{err:?}"
     );
-    assert_eq!(err.code(), ErrorCode::MatterFolderMissing);
+    // A folder that is not there is `folder_missing`; one that is there without this matter's
+    // marker (none, unreadable, another matter's, or a relink that could not repair it) is
+    // `folder_not_a_matter`.
+    let code = if expected == MissingReason::NoFolder {
+        ErrorCode::MatterFolderMissing
+    } else {
+        ErrorCode::MatterFolderNotAMatter
+    };
+    assert_eq!(err.code(), code, "{err:?}");
 }
 
 fn assert_refused(err: &Error, expected: &Refusal) {

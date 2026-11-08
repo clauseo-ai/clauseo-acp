@@ -97,7 +97,8 @@ findings, build with the walk 0.55 s, jailed `echo` 40 ms; 20,000 hard links to 
 folders give 100 folder rules, build 0.16 s, jailed `echo` 124 ms.
 
 **Denials.** One `Denial` enum for every OS and the proxy (`Path`, `Host`, `UpstreamAuth`,
-`Dropped`), one `DenialSink` per launch, at most 20 a second, the rest folded into one `Dropped`.
+`Dropped`, `UpstreamUnavailable`), one `DenialSink` per launch, at most 20 a second, the rest
+folded into one `Dropped`.
 
 **The Seatbelt profile** (`src/macos/profile.rs`, `src/macos/base.sb`). Paths reach it only as
 `-D NAME=path` parameters read through `(param "NAME")`, numbered for lists (`RUNTIME_0`,

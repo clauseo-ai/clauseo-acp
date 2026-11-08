@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
 use super::{
-    Fold, check_folder, fold, is_unc, is_unc_text, is_windows_drive_root_text, same_folder,
-    same_or_nested,
+    Fold, WINDOWS_FOLDER_LIMIT, check_folder, fold, is_too_deep, is_unc, is_unc_text,
+    is_windows_drive_root_text, same_folder, same_or_nested, too_deep_for_windows,
 };
 use crate::test_dir::TestDir;
 use crate::{Error, MissingReason, Refusal, write};
@@ -284,4 +284,39 @@ fn share_roots_are_drive_roots_on_windows() {
             "{inside} is not a drive root"
         );
     }
+}
+
+#[test]
+fn the_windows_folder_limit_is_240_units() {
+    assert_eq!(WINDOWS_FOLDER_LIMIT, 240);
+    assert!(!too_deep_for_windows(239));
+    assert!(!too_deep_for_windows(240), "exactly the limit is allowed");
+    assert!(too_deep_for_windows(241), "one unit over is refused");
+}
+
+/// Devanagari letters are one UTF-16 unit each and three UTF-8 bytes, so the two counts part
+/// ways: a path the byte count would refuse can be within the limit, and one the unit count
+/// refuses is the one Windows counts.
+#[test]
+fn a_devanagari_path_is_counted_in_utf16_units() {
+    let at_limit = format!("C:\\{}", "क".repeat(WINDOWS_FOLDER_LIMIT - 3));
+    assert_eq!(at_limit.encode_utf16().count(), 240);
+    assert!(
+        at_limit.len() > WINDOWS_FOLDER_LIMIT,
+        "its bytes are over the limit"
+    );
+    assert!(!too_deep_for_windows(at_limit.encode_utf16().count()));
+
+    let over = format!("{at_limit}x");
+    assert_eq!(over.encode_utf16().count(), 241);
+    assert!(too_deep_for_windows(over.encode_utf16().count()));
+}
+
+/// A path over the limit is too deep on Windows and only there: off Windows a long path is fine.
+#[test]
+fn a_long_path_is_too_deep_on_windows_only() {
+    let long = PathBuf::from("/").join("d".repeat(WINDOWS_FOLDER_LIMIT + 50));
+    assert_eq!(is_too_deep(&long), cfg!(windows));
+    let short = PathBuf::from("/").join("d".repeat(WINDOWS_FOLDER_LIMIT - 50));
+    assert!(!is_too_deep(&short));
 }

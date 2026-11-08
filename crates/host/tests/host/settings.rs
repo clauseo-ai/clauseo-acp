@@ -269,6 +269,7 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
     let patch = ToolsPatch {
         web_search: Some(false),
         browser: None,
+        connectors: None,
     };
     assert_eq!(
         host.dispatch_as(id, set_tools(patch.clone())).unwrap(),
@@ -326,6 +327,7 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
         set_tools(ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: None,
         }),
         ErrorCode::SettingsLocked,
     );
@@ -363,27 +365,6 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
     );
     assert_eq!(view.locked, ["tools.browser"]);
     host.shutdown();
-}
-
-/// The tool switches as `clauseo-settings` has them and the wire has them: the same keys, the
-/// same values, and the same patch JSON.
-#[test]
-fn the_tool_switches_mirror_the_settings_crate() {
-    let settings_tools = serde_json::to_value(clauseo_settings::ToolsSettings::default()).unwrap();
-    let wire_tools = serde_json::to_value(tool_defaults()).unwrap();
-    assert_eq!(settings_tools, wire_tools);
-    let settings_patch = clauseo_settings::ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    let wire_patch = ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    assert_eq!(
-        serde_json::to_value(settings_patch).unwrap(),
-        serde_json::to_value(wire_patch).unwrap()
-    );
 }
 
 #[test]

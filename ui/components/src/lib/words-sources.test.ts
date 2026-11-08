@@ -34,8 +34,8 @@ test("the whole set: no sentence of round 2 is left", () => {
   );
 });
 
-test("every string is hi: later, and the Hindi interface shows its English", () => {
-  expect(Object.values(src.hi).every((hi) => hi === null)).toBe(true);
-  expect(sourcesSummary("hi", 2)).toBe("2 sources");
+test("every string has its Hindi, and the Hindi interface shows it", () => {
+  expect(Object.values(src.hi).every((hi) => hi !== null)).toBe(true);
+  expect(sourcesSummary("hi", 2)).toBe("2 स्रोत");
   expect(partsOf("hi", "'{query}'", "query")).toEqual(["'", "'"]);
 });

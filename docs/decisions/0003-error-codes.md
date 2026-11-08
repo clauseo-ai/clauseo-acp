@@ -67,7 +67,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `store.locked` | Another Clauseo process holds the data folder. | no | store |
 | `store.newer_version` | The data came from a newer Clauseo. | no | store |
 | `matter.checkpoint_failed` | Taking a checkpoint of the matter's files failed. | yes | matters |
-| `matter.folder_missing` | The matter's folder is gone: moved, deleted, or its drive is not mounted. | no | matters |
+| `matter.folder_missing` | The matter's folder is gone: moved, deleted, or its drive is not mounted or did not answer in time. | yes | matters |
 | `matter.folder_refused` | The folder may not be a matter: a drive root, the home folder or a system folder. | no | matters |
 | `matter.codex_folder` | The matter folder holds a `.codex` folder, whose settings Codex would load. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
 | `matter.file_locked` | A file the operation needs is locked by another program, such as an open document. | yes | matters |
@@ -80,9 +80,10 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_in_matters_root` | The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. | no | host (0022) |
 | `matter.folder_network` | The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
 | `matter.folder_no_permissions` | The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
+| `matter.folder_too_deep` | The matter folder's path is too long for Windows to start programs in it: move the folder closer to the top of its drive. | no | host (matters' refusal on create, import and the folder query; the host on open and at a launch, on Windows) |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |
 | `transport.too_large` | The message is larger than the transport accepts. | no | transport_ws, desktop |
-| `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`; decision records 0017, 0030 and 0036) |
+| `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, `SetSkillPack`; decision records 0017, 0030, 0036 and 0040) |
 | `agent.install_offline` | The agent's install cannot reach its hosts: name resolution or connect failed with no route. The install waits and tries again by itself. | yes | agents (S17 `FailureKind::Offline`), desktop (0048) |
 | `agent.install_blocked` | A proxy or firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web page where a file should be. | no | agents (S17 `FailureKind::Blocked`), desktop (0048) |
 | `agent.install_disk_full` | Too little free space for the agent's install; a retry succeeds once space is freed. | yes | agents (S17 `FailureKind::DiskFull`), desktop (0048) |
@@ -96,12 +97,47 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `signin.policy_unreadable` | The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. | no | desktop (0048); new area for R20 |
 | `agent.guard_missing` | A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. | no | host (a forced-ask Claude launch with no guard hook, `actor/turn/profile_loads.rs`) |
 | `update.failed` | The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. | yes | host (the updater, decision record 0037; produced from R23 PR 4) |
+| `settings.refused` | The change breaks a settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped variable or an address that is not https; the message names the key, never the value, and nothing was changed. | no | host (`HostHandle::set_agent_launch`, `HostHandle::set_plan`, `SetSkillPack`; decision records 0048 and 0040) |
+| `settings.key_stored` | A key is already stored for this agent, so this window may not replace it; it is changed or removed in Settings. No key text is in the message. | no | desktop (`setup`: a `SetAgentKey` from `main` when the agent already has a key, decision record 0048) |
+| `signin.login_shared` | A Codex login, logout or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login file; the remedy is in the app, "Stop using it here". | no | host (Codex login, logout and authenticate; decision record 0048) |
+| `signin.firm_managed` | Sign-in is refused: a firm endpoint is set by policy. | no | desktop (`setup`: a sign-in start while a firm policy sets the agent's endpoint, decision record 0048) |
+| `signin.key_in_use` | Sign-in is refused: an API key is stored. | no | desktop (`setup`: a sign-in start while an API key is stored for the agent, decision record 0048) |
+| `signin.endpoint_in_use` | Sign-in is refused: an endpoint is set in Settings. | no | desktop (`setup`: a sign-in start while an endpoint set in Settings is in force, decision record 0048) |
+| `signin.agents_still_running` | An agent was still running after Clauseo waited for it to stop, so the login was not changed and nothing was removed; trying again once it has stopped can succeed. | yes | desktop (the leave order's stop_agents timed out) |
+| `agent.keys_loading` | Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. | yes | host (a launch while desktop still loads the stored API keys, decision record 0048) |
+| `agent.key_unreadable` | A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. | yes | host (a launch for an agent whose stored API key could not be read, decision record 0048) |
+| `matter.document_path_too_long` | A Word document's path is too long for Word to open, even with its folders' short names (Windows): move the matter's folder nearer the top of its drive, or shorten its folder names. | no | desktop (`open_file` for a Word document on Windows, decision record 0026) |
+| `matter.protected_link` | A protected name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the agent is not started; the lawyer moves or deletes it. | no | sandbox (`windows::apply` on Windows, `Error::ProtectedLink` with the item's path relative to the matter; S15 PR4a2) |
+| `sandbox.setup_refused` | The sandbox's set-up was not done: the lawyer declined the administrator prompt, or Windows refused to raise it; asking again can succeed. | yes | host (the set-up's administrator prompt, decision record 0051) |
+| `sandbox.setup_failed` | The sandbox's set-up, or the check that the sandbox works, failed; trying again can succeed. | yes | host (the set-up or its check, decision record 0051) |
+| `sandbox.setup_required` | The firm requires the sandbox (sandbox.required) and this computer needs its one-time set-up first (not done, or its administrator prompt declined), so no agent was started; running the set-up fixes it. | no | host (`CreateThread` or a turn's launch under `sandbox.required`, cause `needs_set_up` or `set_up_refused`, decision record 0051) |
+| `sandbox.required` | The firm requires the sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a newer cause), so no agent was started. | no | host (`CreateThread` or a turn's launch under `sandbox.required`, any other cause, decision record 0051) |
+| `matter.folder_not_a_matter` | The matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, unreadable or belongs to another matter: locate the matter's folder. | no | matters (`Error::FolderMissing` with reason `NoMatterJson`, `Unreadable` or `OtherMatter`: open, locate, relink, every checkpoint), desktop (`open_file` and `reveal` for a folder without its marker) |
+| `sandbox.blocked` | A Windows setting or security tool blocks the sandbox (its set-up program is missing or was blocked, say), so no agent was started; whoever looks after this computer can fix it. | no | sandbox (`Error::Blocked`: tier B's launch check refused the set-up program's admin copy, `Blocked::AdminCopyMissing`, `AdminCopyChanged` or `AdminCopyUnsafe`, or Windows security blocked or removed it, `ToolMissing`; decision record 0049) |
+| `blocklist.override_off` | Allowing a site on Clauseo's unsafe-site list is turned off (network.allow_unsafe_site_override is false, usually by the firm's policy), so nothing was allowed. | no | host (`AllowBlockedSite`, decision record 0053); new area |
+| `blocklist.notice_expired` | The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. | no | host (`AllowBlockedSite` naming a `block_id` it no longer keeps, decision record 0053); not retryable because the same `block_id` stays unknown, and only a new notice can be allowed |
+| `blocklist.allow_not_saved` | The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. | no | host (`AllowBlockedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
+| `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
 launch can work; `store.locked` is not, because the lawyer must close the other Clauseo first;
 `matter.checkpoint_failed` is, because the usual cause (another program holding the repository lock)
 passes; `matter.turn_running` is, as `thread.turn_running` is.
+
+`matter.folder_missing` became retryable, and its meaning gained "or did not answer in time", on
+2026-11-07 for #617, at the orchestrator's request. The widened meaning clarifies "its drive is
+not mounted": a folder on a drive or network share that is not there, or does not answer within
+the host's 10 s bound, comes back once the drive or share does, and the same call then works. It
+changes a code's meaning, which the rule above forbids, but no peer of another version decodes
+this code: the host and the app ship in one bundle.
+
+`matter.folder_not_a_matter` was added on 2026-11-07, at the orchestrator's request. Until then a
+folder that is there but whose `.clauseo/matter.json` is missing, unreadable or names another
+matter (a relink that could not repair it included) came back as `matter.folder_missing`, whose
+meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
+retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
+now comes only for a folder that is not there or does not answer.
 
 ## Consequences
 

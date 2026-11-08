@@ -126,10 +126,10 @@ test("plan-key: with keys_available false there is no key field, and the screen 
   expect(text()).toContain("This computer has no keyring to keep an API key in.");
 });
 
-test("signin-wait: Finish signing in in your browser, with Cancel sending CancelSignIn; no nudge until the host says so", async () => {
+test("signin-wait: Finish signing in with your browser, with Cancel sending CancelSignIn; no nudge until the host says so", async () => {
   const t = await at({ waiting: { since: AT, nudge: false } });
   expect(gateState()).toBe("waiting");
-  expect(text()).toContain("Finish signing in in your browser");
+  expect(text()).toContain("Finish signing in with your browser.");
   expect(text()).not.toContain("Didn't open?");
   // the window keeps no clock of its own: time passing brings no nudge
   await new Promise((resolve) => setTimeout(resolve, 40));
@@ -257,9 +257,9 @@ test("signin-done: with a key, Using an API key; with no email or plan, the line
   expect(byId("signin-done")?.textContent).toBe("Signed in to Claude");
 });
 
-test("signin-cancel: Sign-in was cancelled in the browser, with Sign in", async () => {
+test("signin-cancel: Sign-in was cancelled, with Sign in", async () => {
   const t = await at({ failed: { code: "signin.cancelled", at: AT } });
-  expect(text()).toContain("Sign-in was cancelled in the browser.");
+  expect(text()).toContain("Sign-in was cancelled.");
   await press("Sign in");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
@@ -305,7 +305,7 @@ test("signin-failed: Sign-in didn't finish, with Try again", async () => {
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("signin-policy: the firm's settings can't be read, Ask your IT team, and no button", async () => {
+test("signin-policy: the firm's settings can't be read, the firm manages them, and no button", async () => {
   await at({ failed: { code: "signin.policy_unreadable", at: AT } });
   expect(text()).toContain(
     "Clauseo can't read your firm's settings for Claude, so it won't sign in until they can be read.",
@@ -395,7 +395,7 @@ const FOUND: [FoundLogin, string][] = [
   ],
   [
     "claude_windows_sandbox",
-    "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
   ],
   [
     "reused_signed_out",
@@ -407,6 +407,16 @@ const FOUND: [FoundLogin, string][] = [
   ],
   ["reused_failed", "Claude Code's sign-in stopped working here, so Clauseo stopped using it."],
 ];
+
+test.each<FoundLogin>(["none_found", "reuse_off"])(
+  "plan (%s): no login found and reuse off are the plain plan screen, with no found line",
+  async (found) => {
+    const t = await at({ signed_out: { found } });
+    for (const [, line] of FOUND) expect(text()).not.toContain(line);
+    await press("Sign in");
+    expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  },
+);
 
 test.each(FOUND)(
   "plan-found (%s): its line, Sign in sending StartSignIn, and the key or firm's account for Claude",

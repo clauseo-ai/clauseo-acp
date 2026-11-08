@@ -5,8 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::error::Error;
-use crate::known::{KnownConnector, PRODUCTION_ORIGIN, STAGING_ORIGIN};
+#[cfg(feature = "local")]
+use crate::known::LOCAL_ORIGIN;
+#[cfg(feature = "staging")]
+use crate::known::STAGING_ORIGIN;
+use crate::known::{KnownConnector, PRODUCTION_ORIGIN};
 
 #[cfg(feature = "test-support")]
 mod manual;
@@ -18,6 +21,8 @@ pub use manual::ManualClock;
 pub(crate) const SIGNIN_TIMEOUT: Duration = Duration::from_mins(5);
 /// How long `wait_recharge` polls before `RechargeTimedOut`.
 pub(crate) const RECHARGE_DEADLINE: Duration = Duration::from_mins(15);
+/// How often `wait_recharge` polls: the connector's own advice for its free status GET.
+pub(crate) const RECHARGE_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How the crate reaches the connector, and where it keeps its state.
 #[derive(Clone)]
@@ -32,6 +37,8 @@ pub struct Config {
     pub signin_timeout: Duration,
     /// How long `wait_recharge` polls.
     pub recharge_deadline: Duration,
+    /// The least time between the starts of two `wait_recharge` polls.
+    pub recharge_interval: Duration,
     /// The one source of time.
     pub clock: Arc<dyn Clock>,
     /// `<data_dir>/connectors/state.json`.
@@ -47,6 +54,7 @@ impl Config {
             proxy: ProxyChoice::Env,
             signin_timeout: SIGNIN_TIMEOUT,
             recharge_deadline: RECHARGE_DEADLINE,
+            recharge_interval: RECHARGE_INTERVAL,
             clock: Arc::new(SystemClock),
             state_file,
         }
@@ -61,46 +69,55 @@ impl fmt::Debug for Config {
             .field("proxy", &self.proxy)
             .field("signin_timeout", &self.signin_timeout)
             .field("recharge_deadline", &self.recharge_deadline)
+            .field("recharge_interval", &self.recharge_interval)
             .field("state_file", &self.state_file)
             .finish_non_exhaustive()
     }
 }
 
 /// The connector's host. Every compiled-in URL starts with `https://data.clauseo.chat`; under
-/// `Staging` and `Fake` that prefix is replaced by the origin's, keeping the path.
+/// `Staging`, `Local` and `Fake` that prefix is replaced by the origin's, keeping the path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
     /// `https://data.clauseo.chat`.
     Production,
-    /// `https://data-staging.clauseo.chat`, the same paths as production.
+    /// `https://data-staging.clauseo.chat`, the same paths as production (feature `staging`,
+    /// which desktop's `staging-connector` build turns on; never in a release).
+    #[cfg(feature = "staging")]
     Staging,
+    /// `http://127.0.0.1:8793`, the connector's local test server (feature `local`, which
+    /// desktop's `local-connector` build turns on; never in a release). Plain http, exactly
+    /// this host and port.
+    #[cfg(feature = "local")]
+    Local,
     /// The fake connector at `http://127.0.0.1:<port>` (feature `test-support`); any other URL
-    /// is refused before any request (`Error::BadOrigin`).
+    /// is refused before any request (`crate::Error::BadOrigin`).
     #[cfg(feature = "test-support")]
     Fake(url::Url),
 }
 
 impl Origin {
-    /// Refuses an origin the crate must never talk to: a `Fake` that is not
-    /// `http://127.0.0.1:<port>` with no path, query, fragment or user info.
-    pub(crate) fn check(&self) -> Result<(), Error> {
+    /// Whether the crate may talk to this origin: not a `Fake` that is not
+    /// `http://127.0.0.1:<port>` with no path, query, fragment or user info. A `bool`, not a
+    /// `Result`: without `test-support` every origin is allowed, and clippy refuses a `Result`
+    /// that is always `Ok` (`unnecessary_wraps`).
+    pub(crate) fn allowed(&self) -> bool {
         match self {
-            Origin::Production | Origin::Staging => Ok(()),
+            Origin::Production => true,
+            #[cfg(feature = "staging")]
+            Origin::Staging => true,
+            #[cfg(feature = "local")]
+            Origin::Local => true,
             #[cfg(feature = "test-support")]
             Origin::Fake(url) => {
-                let loopback = url.scheme() == "http"
+                url.scheme() == "http"
                     && url.host_str() == Some("127.0.0.1")
                     && url.port().is_some()
                     && url.username().is_empty()
                     && url.password().is_none()
                     && matches!(url.path(), "" | "/")
                     && url.query().is_none()
-                    && url.fragment().is_none();
-                if loopback {
-                    Ok(())
-                } else {
-                    Err(Error::BadOrigin)
-                }
+                    && url.fragment().is_none()
             }
         }
     }
@@ -110,7 +127,10 @@ impl Origin {
     pub(crate) fn prefix(&self) -> String {
         match self {
             Origin::Production => PRODUCTION_ORIGIN.to_owned(),
+            #[cfg(feature = "staging")]
             Origin::Staging => STAGING_ORIGIN.to_owned(),
+            #[cfg(feature = "local")]
+            Origin::Local => LOCAL_ORIGIN.to_owned(),
             #[cfg(feature = "test-support")]
             Origin::Fake(url) => url.origin().ascii_serialization(),
         }
@@ -185,7 +205,7 @@ pub(crate) struct ConnectorUrls {
 }
 
 /// The proxy every request goes through.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum ProxyChoice {
     /// `HTTPS_PROXY` from the environment, until stage C's upstream lookup exists.
     Env,
@@ -193,7 +213,54 @@ pub enum ProxyChoice {
     Fixed(url::Url),
     /// No proxy.
     Direct,
+    /// Asked before every request, never by [`Connectors::new`](crate::Connectors::new), so
+    /// a slow lookup (a WPAD script, say) delays no app start and the route follows the
+    /// lookup's own cache. It answers `Direct` or `Fixed`; anything else, or
+    /// [`ProxyRefused`], fails that request without going around the proxy. A request whose
+    /// answer differs from the last one gets a new HTTP agent.
+    Resolve(ProxyResolver),
 }
+
+impl PartialEq for ProxyChoice {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ProxyChoice::Env, ProxyChoice::Env) | (ProxyChoice::Direct, ProxyChoice::Direct) => {
+                true
+            }
+            (ProxyChoice::Fixed(a), ProxyChoice::Fixed(b)) => a == b,
+            (ProxyChoice::Resolve(a), ProxyChoice::Resolve(b)) => Arc::ptr_eq(&a.0, &b.0),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ProxyChoice {}
+
+/// The lookup behind [`ProxyChoice::Resolve`]. Blocking is fine: it runs on the caller of the
+/// request, never on [`Connectors::new`](crate::Connectors::new).
+#[derive(Clone)]
+pub struct ProxyResolver(Arc<dyn Fn() -> Result<ProxyChoice, ProxyRefused> + Send + Sync>);
+
+impl ProxyResolver {
+    /// A resolver that asks `lookup`.
+    pub fn new(
+        lookup: impl Fn() -> Result<ProxyChoice, ProxyRefused> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(lookup))
+    }
+
+    /// The route now: `Direct` or `Fixed`, or refused.
+    pub(crate) fn resolve(&self) -> Result<ProxyChoice, ProxyRefused> {
+        match (self.0)() {
+            Ok(choice @ (ProxyChoice::Direct | ProxyChoice::Fixed(_))) => Ok(choice),
+            Ok(ProxyChoice::Env | ProxyChoice::Resolve(_)) | Err(ProxyRefused) => Err(ProxyRefused),
+        }
+    }
+}
+
+/// A proxy setting the caller refuses: the request fails rather than go around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProxyRefused;
 
 /// `Fixed(<scheme>://<host>:<port>)`: never the user info (a proxy password), path or query.
 impl fmt::Debug for ProxyChoice {
@@ -201,6 +268,7 @@ impl fmt::Debug for ProxyChoice {
         match self {
             ProxyChoice::Env => f.write_str("Env"),
             ProxyChoice::Direct => f.write_str("Direct"),
+            ProxyChoice::Resolve(_) => f.write_str("Resolve"),
             ProxyChoice::Fixed(url) => {
                 let host = url.host_str().unwrap_or("?");
                 match url.port_or_known_default() {

@@ -2,11 +2,28 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { useState } from "react";
 import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
-import { nextHostOf } from "../room/host-next.ts";
+import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
-import { FakeTransport } from "../transport/fake-transport.ts";
-import type { LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
+import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
+import type { FakeUpdateHost } from "../transport/fake-update.ts";
+import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
+import type {
+  ConnectorsState,
+  LimitsView,
+  SettingsView,
+  SetupCommand,
+  SetupEvent,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
+
+/** The setup wire a cell's host carries (UD2's Plans): the events its feed starts with, after SetupInfo, and what
+ * each command plays back, as desktop would answer it. */
+export type CellSetup = {
+  first: SetupEvent[];
+  keys?: boolean;
+  answer?: (command: SetupCommand) => SetupEvent[];
+};
 
 /** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
  * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
@@ -18,6 +35,13 @@ export function SettingsOver({
   limits,
   releaseDate = null,
   tools,
+  connectors,
+  setup,
+  plans,
+  protection,
+  blocklist,
+  update,
+  matters = [],
 }: {
   section: SectionId;
   lang: Lang;
@@ -26,6 +50,20 @@ export function SettingsOver({
   releaseDate?: string | null;
   /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
   tools?: ToolsSettingsView;
+  /** The connectors' state the app feed's catch-up carries (U15); none when left out. */
+  connectors?: ConnectorsState;
+  /** The setup wire (UD2's Plans); none when left out, and Plans doesn't show. */
+  setup?: CellSetup;
+  /** Each agent's firm plan the host sends (SettingsView.plans). */
+  plans?: SettingsView["plans"];
+  /** UC's protection wire; none when left out, and the Safe workspace doesn't show. */
+  protection?: FakeProtectionHost;
+  /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
+  blocklist?: FakeBlocklistHost;
+  /** R23's updater (fake-update.ts), Settings' Updates; none when left out, and Updates doesn't show. */
+  update?: FakeUpdateHost;
+  /** The matters the app feed's first frames list, for the allowed sites' matter names. */
+  matters?: MatterInfo[];
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -38,11 +76,34 @@ export function SettingsOver({
                 ui: { ...DEFAULT_UI, language: lang },
                 locked,
                 ...(tools === undefined ? {} : { tools }),
+                ...(plans === undefined ? {} : { plans }),
               },
             };
           throw new Error("not scripted");
         },
+        first: () => [
+          ...(connectors === undefined ? [] : [{ connectors_changed: connectors }]),
+          ...(matters.length === 0
+            ? []
+            : [{ matters_changed: { matters, removed: [], all: true } }]),
+        ],
       },
+      ...(protection === undefined ? {} : { protection }),
+      ...(blocklist === undefined ? {} : { blocklist }),
+      ...(update === undefined ? {} : { update }),
+      ...(setup === undefined
+        ? {}
+        : {
+            setup: {
+              first: () => [{ setup_info: { keys_available: setup.keys ?? true } }, ...setup.first],
+              command: (command: SetupCommand) => {
+                const events = setup.answer?.(command) ?? [];
+                queueMicrotask(() => {
+                  for (const event of events) transport.setupEvent(event);
+                });
+              },
+            },
+          }),
     });
     if (limits !== undefined) transport.limitsChanged(limits);
     const store = createDisplayStore({

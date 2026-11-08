@@ -14,9 +14,11 @@ use super::{Cause, FileSink, LogGuard, Sink, build, kept_target, panic};
 use crate::clock::{Clock, SystemClock};
 use crate::pipeline::tests::support::TempDir;
 
-/// The events the full-disk and blocked-sink tests emit, and how long the caller may take.
+/// The events the full-disk and blocked-sink tests emit, and how long the caller may take. A
+/// caller that stalled would wait out the writer's 5 s `BACKOFF` at least, so 1 s still tells the
+/// two apart, with room for a loaded machine (200 ms failed at a load average of 27 on 8 cores).
 const EVENTS: u64 = 10_000;
-const CALLER_LIMIT: Duration = Duration::from_millis(200);
+const CALLER_LIMIT: Duration = Duration::from_secs(1);
 
 fn now() -> Duration {
     SystemClock.now().mono

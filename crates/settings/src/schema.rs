@@ -15,8 +15,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 9] = [
-    "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install",
+pub(crate) const SECTIONS: [&str; 13] = [
+    "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install", "skills",
+    "sandbox", "network", "browser",
 ];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
@@ -44,6 +45,15 @@ pub struct Settings {
     pub plans: BTreeMap<String, Plan>,
     /// Where agent installs come from in a firm (decision record 0048).
     pub install: InstallSettings,
+    /// The extra skill packs Clauseo may load (decision record 0040).
+    pub skills: SkillsSettings,
+    /// Whether the firm requires the agent sandbox, and what runs without it (decision record
+    /// 0051).
+    pub sandbox: SandboxSettings,
+    /// The firm's network: its proxy, CA files and allowed domains (decision record 0051).
+    pub network: NetworkSettings,
+    /// What the firm allows Clauseo's browser beyond its browser policy.
+    pub browser: BrowserSettings,
 }
 
 /// The `matters` section.
@@ -56,7 +66,9 @@ pub struct MattersSettings {
 }
 
 /// How to start one agent. `process` and `host` launch it; this crate only reads it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+// Its `Debug` (below) names each variable but shows no value: a reader adds the stored API key
+// to a copy (decision record 0048, ruling 5), and no key reaches a log, an error or a `Debug`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentLaunch {
     /// The program, as an absolute path.
     pub command: String,
@@ -66,6 +78,21 @@ pub struct AgentLaunch {
     /// Variables added to its environment. Never a secret: keys go in the OS keychain.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for AgentLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let env: BTreeMap<&str, &str> = self
+            .env
+            .keys()
+            .map(|name| (name.as_str(), "[redacted]"))
+            .collect();
+        f.debug_struct("AgentLaunch")
+            .field("command", &self.command)
+            .field("args", &self.args)
+            .field("env", &env)
+            .finish()
+    }
 }
 
 /// One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan
@@ -111,6 +138,111 @@ pub struct InstallSettings {
     pub registry: Option<String>,
 }
 
+/// The `sandbox` section (decision record 0051). Both keys are security keys: a policy source
+/// that cannot be read leaves `required` `false` and locks `allow_unprotected_auto` `false`, so
+/// an agent outside the sandbox runs only in the ask modes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct SandboxSettings {
+    /// Whether the firm requires the sandbox: on a computer that cannot give it, no agent starts.
+    /// Off by default.
+    pub required: bool,
+    /// Whether an agent outside the sandbox may still run in an auto mode; when off, it runs
+    /// only in the ask modes. On by default.
+    pub allow_unprotected_auto: bool,
+}
+
+impl Default for SandboxSettings {
+    fn default() -> Self {
+        Self {
+            required: false,
+            allow_unprotected_auto: true,
+        }
+    }
+}
+
+/// The `network` section (decision records 0051, 0053). Every key is a security key: a policy
+/// source that cannot be read leaves no proxy (so the OS's), no CA file, no added domain and no
+/// allowing a blocked site; block list updates stay on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct NetworkSettings {
+    /// The firm's proxy, which the egress proxy and agent installs send traffic through: an
+    /// `http` or `https` URL with a host, and no user name, password, query or fragment. Unset
+    /// by default: the proxy the OS is set to.
+    pub upstream_proxy: Option<String>,
+    /// A CA file per agent id, as an absolute path, that the agent's network clients trust
+    /// besides the system's. Empty by default.
+    pub ca_certs: BTreeMap<String, PathBuf>,
+    /// Host names (`*.` before one allows the names under it) added to every matter's
+    /// allowlist. Set by policy only; empty by default.
+    pub allowed_domains: Vec<String>,
+    /// Whether the lawyer may allow a site the block list names (decision record 0053). On by
+    /// default.
+    pub allow_unsafe_site_override: bool,
+    /// Whether the host fetches block list updates (decision record 0053). On by default; off,
+    /// the stored or bundled list stays in use and is never updated. Set by policy only. Locked
+    /// on, its default, when a policy source cannot be read: an unreadable policy must not stop
+    /// protection updates, so a firm that switched it off gets quiet failed fetches (on a
+    /// network that refuses them) while its policy source is unreadable.
+    pub unsafe_site_list_updates: bool,
+}
+
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        Self {
+            upstream_proxy: None,
+            ca_certs: BTreeMap::new(),
+            allowed_domains: Vec::new(),
+            allow_unsafe_site_override: true,
+            unsafe_site_list_updates: true,
+        }
+    }
+}
+
+/// The `browser` section. Its key is a security key, set by policy only: a policy source that
+/// cannot be read locks it `false`, its default, and a `settings.json` value is ignored with a
+/// warning.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct BrowserSettings {
+    /// Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote
+    /// debugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo
+    /// drives needs. Off by default: such a policy then turns Clauseo's browser off too.
+    pub allow_when_remote_debugging_disabled: bool,
+}
+
+/// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are
+/// security keys: a policy source that cannot be read, or a policy value that does not type,
+/// locks `extra` `off`, `allow_scripts` `false` and `curated` empty. `curated` is set by
+/// policy only: a `settings.json` value is ignored with a warning.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct SkillsSettings {
+    /// Which packs beyond Clauseo's own may load. `off` by default.
+    pub extra: SkillsExtra,
+    /// The pack ids `curated` admits. Set by policy only; empty by default.
+    pub curated: Vec<String>,
+    /// Whether a pack may carry scripts (copied, never run). Off by default.
+    pub allow_scripts: bool,
+    /// The packs turned on, by id, each with the hash it had then (`sha256:<64 lowercase hex>`):
+    /// a pack whose files no longer hash to it is not loaded. Empty by default.
+    pub enabled: BTreeMap<String, String>,
+}
+
+/// Which packs beyond Clauseo's own may load.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillsExtra {
+    /// None.
+    #[default]
+    Off,
+    /// Only those whose id is in `skills.curated`.
+    Curated,
+    /// Any pack the lawyer turns on.
+    Any,
+}
+
 /// The `mcp` section.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -139,7 +271,7 @@ pub struct McpServerLaunch {
     pub enabled: bool,
 }
 
-/// The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that
+/// The `tools` section: Clauseo's own tools. Every key is a security key: a policy source that
 /// cannot be read, or a policy value that does not type, locks each `false`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -149,6 +281,9 @@ pub struct ToolsSettings {
     /// Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on
     /// Windows until G17 passes.
     pub browser: bool,
+    /// Whether data connectors (R24's paid case-law connector) may run. On by default, but
+    /// nothing runs until the lawyer adds a connector. A firm turns every connector off here.
+    pub connectors: bool,
 }
 
 impl Default for ToolsSettings {
@@ -156,6 +291,7 @@ impl Default for ToolsSettings {
         ToolsSettings {
             web_search: true,
             browser: cfg!(target_os = "macos"),
+            connectors: true,
         }
     }
 }

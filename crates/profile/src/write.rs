@@ -4,7 +4,8 @@
 //!
 //! What changes: the skills folders the profile owns (Claude's plugin under
 //! `<data>/profile/claude-plugin`, Codex's `<agent home>/skills`), and in them only the folders
-//! of the skills a render is given, their manifest and the plugin's `plugin.json`.
+//! of the skills a render is given, their manifest and the plugin's `plugin.json`; and for the
+//! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`.
 
 #![expect(
     clippy::disallowed_methods,
@@ -120,12 +121,43 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Pr
     Ok(true)
 }
 
+/// `fs::create_dir`: a new folder, an error when `path` already exists.
+pub(crate) fn create_dir(path: &Path) -> Result<(), ProfileError> {
+    std::fs::create_dir(path).map_err(|err| ProfileError::io("create", path, err))
+}
+
+/// A new file at `path` holding `bytes`, its folder made if missing, an error when the file
+/// already exists. Opened with the default mode, so no exec bit. Not synced: it is for a
+/// launch's disposable pack plugin, which a crash leaves for the run folder's cleanup.
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
+    if let Some(dir) = path.parent() {
+        create_dir_all(dir)?;
+    }
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+        .map_err(|err| ProfileError::io("write", path, err))
+}
+
+/// `fs::remove_dir_all`, which never follows a symlink inside; a missing folder is no error,
+/// and any other is logged and left.
+pub(crate) fn remove_dir_all(path: &Path) {
+    match std::fs::remove_dir_all(path) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => {
+            tracing::warn!(%err, "a leftover folder stays");
+        }
+        _ => {}
+    }
+}
+
 /// Syncs the folder `dir`, so a rename in it survives a power cut. A failure is no error.
 #[cfg(unix)]
-fn sync_dir(dir: &Path) {
+pub(crate) fn sync_dir(dir: &Path) {
     let _synced = std::fs::File::open(dir).and_then(|folder| folder.sync_all());
 }
 
 /// Nothing on Windows: a folder cannot be opened as a file there, and NTFS journals the rename.
 #[cfg(not(unix))]
-fn sync_dir(_dir: &Path) {}
+pub(crate) fn sync_dir(_dir: &Path) {}

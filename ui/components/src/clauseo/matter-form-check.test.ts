@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { HI } from "../lib/words-errors.hi.ts";
 import { createErrorLine, nextDateError, parseNextDate } from "./matter-form-check.ts";
 
 test("the next date reads as the lawyer writes it, or as ISO, into a calendar date", () => {
@@ -56,6 +57,23 @@ test("a refusal says why in the form's words, never the host's message", () => {
   );
 });
 
+test("a folder refusal with its own line in words-errors gives that line, in the language", () => {
+  const TOO_DEEP =
+    "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.";
+  expect(createErrorLine("en", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(TOO_DEEP);
+  expect(createErrorLine("hi", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(HI[TOO_DEEP]);
+  expect(createErrorLine("en", "matter.folder_network")).toBe(
+    "Codex can't work on a network drive. Move the matter to this computer.",
+  );
+  expect(createErrorLine("en", "matter.something_new")).toBe(
+    "Clauseo couldn't create the matter. Try again, or choose another folder.",
+  );
+  // a code that isn't a folder refusal keeps the generic line, even where words-errors has one
+  expect(createErrorLine("en", "agent.auth_required")).toBe(
+    "Clauseo couldn't create the matter. Try again, or choose another folder.",
+  );
+});
+
 test("a folder already a matter names that matter, with Open it beside the line; without a name, no name is said", () => {
   // the matter's name is isolated in the line, as a path is
   expect(createErrorLine("en", "matter.folder_is_matter", "Z:\\Acme", "Acme Ltd v. State")).toBe(
@@ -72,9 +90,9 @@ test("a folder already a matter names that matter, with Open it beside the line;
   expect(createErrorLine("en", "matter.folder_is_matter", "", "a\u202Efdp.exe")).toBe(
     "This folder is already a matter: \u2068a\u202Efdp.exe\u2069.",
   );
-  // Hindi, English until the Hindi comes (hi: later)
+  // Hindi: the name isolated the same way, before the Hindi full stop
   expect(createErrorLine("hi", "matter.folder_is_matter", "", "Acme")).toBe(
-    "This folder is already a matter: \u2068Acme\u2069.",
+    "यह फ़ोल्डर पहले से एक मामला है: \u2068Acme\u2069।",
   );
 });
 

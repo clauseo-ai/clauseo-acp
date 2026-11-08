@@ -4,6 +4,7 @@
 // beyond the generated ones (room/host-next.ts), scripted, and `appEvent` plays H4's events as the room reads them.
 import type {
   AppEvent,
+  SiteBlocked,
   NextCommand,
   NextHost,
   NextHostSource,
@@ -15,7 +16,12 @@ import type {
   Settings,
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
+import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
+import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
+import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
+import { chooserOf } from "./chooser.ts";
+import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
 import {
   internalError,
   toHostError,
@@ -30,11 +36,17 @@ import type {
   RefreshWhy,
   CommandEnvelope,
   CommandOutcome,
+  ConnectorCommand,
+  SettingsSection,
   FileRefId,
+  OpenedFile,
+  FolderRefId,
+  FolderScanned,
   HostError,
   HostQuery,
   PermissionRequestId,
   PickedFolder,
+  Protection,
   QueryResult,
   RevealTarget,
   SetupCommand,
@@ -42,10 +54,12 @@ import type {
   StreamId,
   ThreadId,
   UiCount,
+  UpdateView,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
+import type { SendMarks } from "../start-marks.ts";
 
 /** One host call the fake saw, in order. */
 export type FakeCall =
@@ -61,10 +75,12 @@ export type FakeCall =
       option: AgentChoiceId;
     }
   | { call: "pick_folder" }
+  | FakeChooserCall
   | { call: "open_external"; url: string }
+  | { call: "quit_app" }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
-  | { call: "open_settings" }
+  | { call: "open_settings"; section: SettingsSection | null }
   | { call: "next_query"; query: NextQuery }
   | { call: "next_command"; command: NextCommand }
   | { call: "setup"; command: SetupCommand }
@@ -97,11 +113,19 @@ export type FakeNextHost = {
 export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
-  pickFolder?: () => PickedFolder | null;
+  /** Answers the folder picker; a promise holds it open (the picker's line shows while it waits). */
+  pickFolder?: () => PickedFolder | null | Promise<PickedFolder | null>;
+  /** With it, the picker answers `choose` as the desktop does where Windows' folder window would stall, and Clauseo's
+   * own chooser opens over this tree (fake-chooser.ts; FAKE_CHOOSER is a lawyer's machine). A promise holds the pick
+   * open first, as the desktop's pre-check does. Ahead of pickFolder. */
+  chooser?: FakeChooser | (() => Promise<FakeChooser>);
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
-   * `transport.unauthorized`). Without one the call succeeds. */
+   * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
+   * Protected View. */
   openExternal?: (url: string) => void | Promise<void>;
-  openFile?: (file: FileRefId) => void | Promise<void>;
+  /** Answer `quitApp`; throwing refuses. Without one the quit is accepted and nothing ends. */
+  quitApp?: () => void | Promise<void>;
+  openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
    * it the fake has no `openSettings`, like a host without the window. Read when the fake is made. */
@@ -111,16 +135,39 @@ export type FakeHost = {
   platform?: DisplayInfo["platform"];
   /** The release date display_info reports; null, the dev and CI build's, when left out. */
   releaseDate?: DisplayInfo["release_date"];
+  /** Whether display_info says this is a test build; false, a release build's, when left out. */
+  testBuild?: boolean;
+  /** The release mode display_info reports: `test` in a test build, `release` otherwise, when
+   * left out. */
+  releaseMode?: DisplayInfo["release_mode"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
+  /** UD2: the `folder_scanned` events a `scan_folder` the host took plays, in order, to every app listener. Left out,
+   * one last event that says the scan was cancelled with nothing counted, so the form shows no scan lines and Create
+   * doesn't wait. */
+  scan?: (folder: FolderRefId) => readonly FolderScanned[];
   /** With it, the fake carries the setup wire (`onSetup`, `setup`, `countUi`), and the room loads the first run.
    * Without it the fake has none of the three, like a host before R20. Read when the fake is made. */
   setup?: FakeSetupHost;
+  /** UC: with it, the fake carries the protection wire (`protectionWire`), as R17 PR-B's host will. Read when made. */
+  protection?: FakeProtectionHost;
+  /** 0053: the unsafe-site list's host (fake-blocklist.ts); without it allowed_sites lists none. */
+  blocklist?: FakeBlocklistHost;
+  /** R23: with it, the fake carries the updater (`updateWire`, fake-update.ts). Read when made. */
+  update?: FakeUpdateHost;
 };
+
+export type { FakeProtectionHost };
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
+  /** UC: whether the protection wire is scripted (`host.protection`). */
+  readonly protectionWire: boolean;
+  /** R23: whether the updater is scripted (`host.update`). */
+  readonly updateWire: boolean;
   readonly calls: FakeCall[] = [];
+  /** The start-up marks' send (start-marks.ts): none unless a test sets it. */
+  pageMarks: SendMarks | undefined = undefined;
   /** Problems the channel reader reported. */
   readonly problems: string[] = [];
   /** Bytes of every channel message delivered, as serialized text. */
@@ -129,11 +176,13 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
+  /** The chooser sessions opened, for each one's id. */
+  #sessions = 0;
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
-  readonly openSettings: (() => Promise<void>) | undefined;
+  readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
   readonly onSetup: ((listener: (event: SetupEvent) => void) => () => void) | undefined;
   readonly setup: ((command: SetupCommand) => Promise<void>) | undefined;
@@ -223,11 +272,13 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   constructor(host: FakeHost = {}) {
     this.host = host;
+    this.protectionWire = host.protection !== undefined;
+    this.updateWire = host.update !== undefined;
     this.openSettings =
       host.openSettings === undefined
         ? undefined
-        : async () => {
-            this.calls.push({ call: "open_settings" });
+        : async (section = null) => {
+            this.calls.push({ call: "open_settings", section });
             await this.#answer(() => this.host.openSettings?.());
           };
     const setup = host.setup;
@@ -309,6 +360,14 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     });
   }
 
+  /** The connector commands dispatched (`{ connector: ... }`, U15), in order. */
+  connectorCommands(): ConnectorCommand[] {
+    return this.only("dispatch").flatMap(({ command }) => {
+      const sent = command.command.connector;
+      return sent === undefined ? [] : [sent];
+    });
+  }
+
   /** The bridge's report that a stream failed, as its channel message would say. */
   failStream(stream: StreamId, error: HostError): void {
     this.#subs.fail(stream, error);
@@ -353,6 +412,33 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#appHeard) listener(event);
   }
 
+  /** 0053: plays `site_blocked` as the host sends it to every window; the blocklist host hears
+   * it. */
+  siteBlocked(site: SiteBlocked): void {
+    this.host.blocklist?.notice?.(site);
+    this.appEvent({ site_blocked: site });
+  }
+
+  /** UC: plays `protection_changed` for a matter, as the host sends it to every window. */
+  protectionChanged(matter: string, protection: Protection): void {
+    this.appEvent({ protection_changed: { matter, protection } });
+  }
+
+  /** UC: plays R17 PR-B's `protection_view_changed`, the whole view (not in bindings.ts yet). */
+  protectionViewChanged(view: unknown): void {
+    this.appEvent({ protection_view_changed: { view } });
+  }
+
+  /** UC: the protection commands dispatched, in order. */
+  protectionCommands(): ("retry_protection" | "remove_sandbox_setup")[] {
+    return this.only("dispatch").flatMap(({ command }) => protectionCommandOf(command) ?? []);
+  }
+
+  /** R23: plays `update_changed`, the whole view, as the host sends it to every window. */
+  updateChanged(view: UpdateView): void {
+    this.appEvent({ update_changed: view });
+  }
+
   async #nextCommand(command: NextCommand): Promise<NextOutcome> {
     this.calls.push({ call: "next_command", command });
     try {
@@ -389,16 +475,41 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   async dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
-    if (this.host.dispatch === undefined) return "done";
-    try {
-      return await this.host.dispatch(command);
-    } catch (error) {
-      throw toHostError(error);
-    }
+    let outcome: CommandOutcome = "done";
+    const protecting = protectionCommandOf(command);
+    const update = this.host.update;
+    if (protecting !== null && this.host.protection !== undefined)
+      await this.#answer(() => this.host.protection?.command?.(protecting));
+    else if (isBlocklistCommand(command.command) && this.host.blocklist !== undefined) {
+      const [blocklist, sent] = [this.host.blocklist, command.command];
+      await this.#answer(() => blocklist.command?.(sent));
+    } else if (isUpdateCommand(command.command) && update !== undefined) {
+      const sent = command.command;
+      const view = await this.#answer(() => update.command?.(sent));
+      if (view !== undefined) this.updateChanged(view);
+    } else if (this.host.dispatch !== undefined)
+      try {
+        outcome = await this.host.dispatch(command);
+      } catch (error) {
+        throw toHostError(error);
+      }
+    const scanned = command.command.scan_folder?.folder;
+    if (scanned !== undefined)
+      for (const event of this.host.scan?.(scanned) ?? [quietScan(scanned)])
+        this.appEvent({ folder_scanned: event });
+    return outcome;
   }
 
   async query(query: HostQuery): Promise<QueryResult> {
     this.calls.push({ call: "query", query });
+    if (query === "allowed_sites")
+      return { allowed_sites: [...(await this.#answer(() => this.host.blocklist?.sites() ?? []))] };
+    const protection = this.host.protection;
+    if (query === "protection" && protection !== undefined)
+      return { protection: await this.#answer(() => protection.view()) };
+    const update = this.host.update;
+    if (query === "get_update" && update !== undefined)
+      return { update: await this.#answer(() => update.view()) };
     if (this.host.query === undefined) throw internalError("the fake host answers no query");
     try {
       return await this.host.query(query);
@@ -417,7 +528,16 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   async pickFolder(): Promise<PickedFolder | null> {
     this.calls.push({ call: "pick_folder" });
-    return this.host.pickFolder?.() ?? null;
+    const chooser = this.host.chooser;
+    if (chooser !== undefined) {
+      const tree = typeof chooser === "function" ? await chooser() : chooser;
+      this.#sessions += 1;
+      const { start, wire } = fakeChooserSession(tree, this.#sessions, (call) =>
+        this.calls.push(call),
+      );
+      return chooserOf(this).run(start, wire);
+    }
+    return (await this.host.pickFolder?.()) ?? null;
   }
 
   async openExternal(url: string): Promise<void> {
@@ -425,9 +545,14 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.openExternal?.(url));
   }
 
-  async openFile(file: FileRefId): Promise<void> {
+  async quitApp(): Promise<void> {
+    this.calls.push({ call: "quit_app" });
+    await this.#answer(() => this.host.quitApp?.());
+  }
+
+  async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });
-    await this.#answer(() => this.host.openFile?.(file));
+    return (await this.#answer(() => this.host.openFile?.(file))) ?? { protected_view: false };
   }
 
   async reveal(target: RevealTarget): Promise<void> {
@@ -435,16 +560,21 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.reveal?.(target));
   }
 
-  async #answer(run: () => void | Promise<void>): Promise<void> {
+  async #answer<T>(run: () => T | Promise<T>): Promise<T> {
     try {
-      await run();
+      return await run();
     } catch (error) {
       throw toHostError(error);
     }
   }
 
   async displayInfo(): Promise<DisplayInfo> {
-    return { platform: this.host.platform ?? "linux", release_date: this.host.releaseDate ?? null };
+    return {
+      platform: this.host.platform ?? "linux",
+      release_date: this.host.releaseDate ?? null,
+      test_build: this.host.testBuild ?? false,
+      release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
+    };
   }
 
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {

@@ -9,8 +9,9 @@
 // call, a microtask after the flush; messages that carried nothing and no flush followed are acked on the next
 // animation frame with no positions.
 import { Channel, isTauri } from "@tauri-apps/api/core";
-import { commands, type Ack, type StreamMessage } from "./bindings.ts";
+import { commands, type Ack, type PageMarks, type StreamMessage } from "./bindings.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
+import { chooserOf } from "./chooser.ts";
 import {
   NullTransport,
   toHostError,
@@ -26,19 +27,43 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   FileRefId,
+  OpenedFile,
   HostEvent,
   HostQuery,
   PermissionRequestId,
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SettingsSection,
+  SetupCommand,
+  SetupEvent,
   StreamId,
   ThreadId,
   UiCount,
   ViewPosition,
 } from "./protocol.ts";
+import { Lane } from "./lane.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
+import type { SetupFeed } from "./setup-feed.ts";
+
+/** Desktop's `setup` command, from the setup feed's module: the lazy store calls it, so it loads with the feed. */
+const sendSetup = async (command: SetupCommand) =>
+  (await import("./setup-feed.ts")).sendSetup(command);
 import { Subscriptions } from "./subscriptions.ts";
+
+/** How many background calls (reads, subscriptions, counts) may be in flight at once. WebView2 lets the page hold six
+ * requests to the IPC; with three for the background and one for the ack, a lawyer's action always finds one free. */
+export const BACKGROUND_SLOTS = 3;
+
+/** The commands `dispatch` sends without the lawyer asking: they go in the background lane. */
+const BACKGROUND_COMMANDS = new Set(["refresh_limits", "mark_seen"]);
+
+/** Whether `command` is one the page sends on its own, not a lawyer's action. */
+function isBackground(command: CommandEnvelope): boolean {
+  const body = command.command as unknown;
+  const kind = typeof body === "string" ? body : Object.keys(body as object)[0];
+  return kind !== undefined && BACKGROUND_COMMANDS.has(kind);
+}
 
 type Answer<T> = { status: "ok"; data: T } | { status: "error"; error: unknown };
 
@@ -63,6 +88,11 @@ export type TauriOptions = {
 
 export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
   readonly kind = "tauri";
+  /** UC: the desktop carries the protection wire (settings/sections/workspace-shown.ts); before R17 PR-B its host
+   * answers `command.invalid`, which hides or quiets every protection line. */
+  readonly protectionWire = true;
+  /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
+  readonly updateWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
@@ -79,6 +109,12 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   /** Whether the message being read handed a batch to a subscriber. */
   #carried = false;
   #sendQueued = false;
+  /** An `ack` is in flight: the next waits for it, so acks hold at most one request. */
+  #ackInFlight = false;
+  /** Something new to ack came while one was in flight. */
+  #ackAgain = false;
+  /** The background calls' lane (lane.ts): reads, subscriptions and counts, never a lawyer's action. */
+  readonly #background = new Lane(BACKGROUND_SLOTS);
   /** `onDispatch` listeners; none in release. */
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   #frameQueued = false;
@@ -88,6 +124,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   #appReady: Promise<void> | null = null;
   /** The limits view the channel carries from `open_stream` on (R16): the last one, and its listeners. */
   readonly #limits: LimitsFeed;
+  /** The install and sign-in events `subscribe_app` brings (0048): the last of each, and their listeners. Loaded on
+   * the first `onSetup` or setup message (setup-feed.ts lives outside the first load); null until then. */
+  #setup: SetupFeed | null = null;
+  #setupLoad: Promise<SetupFeed> | null = null;
+  /** The setup messages that came while the feed loaded, in order; handed to it once it has. */
+  readonly #setupEarly: object[] = [];
+  /** `onSetup` listeners not stopped. */
+  #setupListeners = 0;
 
   constructor(options: TauriOptions = {}) {
     const warn = options.warn ?? ((m: string) => console.warn(m));
@@ -98,11 +142,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       {
         subscribe: async (stream, after) => {
           await this.#open();
-          await call(commands.subscribe(stream, after));
+          await this.#background.run(() => call(commands.subscribe(stream, after)));
         },
         unsubscribe: async (stream) => {
           await this.#open();
-          await call(commands.unsubscribe(stream));
+          await this.#background.run(() => call(commands.unsubscribe(stream)));
         },
       },
       warn,
@@ -112,7 +156,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
         // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
         // under an answer (room/thread/sources.tsx) come from the view's tool calls, each one's `web`.
         const failed = streamFailedOf(event);
-        if (failed !== null) {
+        if ("setup" in (event as object)) {
+          // no stream and no position: processed at once, as settings_changed is
+          if (this.#setup !== null) this.#setup.receive(event);
+          else {
+            this.#setupEarly.push(event);
+            this.#setupFeed().catch(() => {});
+          }
+        } else if (failed !== null) {
           this.#subs.fail(failed.stream, toHostError(failed.error));
         } else if ("patches" in event && event.patches !== undefined) {
           this.#carried = this.#subs.deliver(event.patches) > 0;
@@ -125,12 +176,21 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("settings_changed" in event && event.settings_changed !== undefined) ||
           ("matters_changed" in event && event.matters_changed !== undefined) ||
           ("threads_changed" in event && event.threads_changed !== undefined) ||
-          ("browser_install" in event && event.browser_install !== undefined)
+          ("browser_install" in event && event.browser_install !== undefined) ||
+          ("connectors_changed" in event && event.connectors_changed !== undefined) ||
+          ("case_law_hint" in event && event.case_law_hint !== undefined) ||
+          ("folder_scanned" in event && event.folder_scanned !== undefined) ||
+          ("protection_changed" in event && event.protection_changed !== undefined) ||
+          ("site_blocked" in event && event.site_blocked !== undefined) ||
+          ("update_changed" in event && event.update_changed !== undefined) ||
+          // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
+          Object.hasOwn(event, "protection_view_changed")
         ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
             try {
-              listener(event);
+              // protection_view_changed (R17 PR-B) isn't in HostEvent yet; the room reads it loosely
+              listener(event as HostEvent);
             } catch (error) {
               warn(`an app event listener threw: ${String(error)}`);
             }
@@ -152,7 +212,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       // a channel opened again (after a failed open) carries no app events until subscribed again
       opened.then(
         () => {
-          if (this.#appListeners.size > 0 && this.#appReady === null)
+          if ((this.#appListeners.size > 0 || this.#setupListeners > 0) && this.#appReady === null)
             this.#subscribeApp().catch(() => {});
         },
         () => {},
@@ -165,11 +225,29 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#opened;
   }
 
+  /** Sends a call that waits for the host's start in the desktop anyway once the channel is open, which is once the
+   * host has started: until then only `open_stream` holds a request. WebView2 lets the page hold six requests to the
+   * IPC at once, and the launch's queries waiting for a slow start (a Documents folder on a share that is down) took
+   * them all, so the folder picker's calls queued behind them for seconds. A failed open lets the call go on, to fail
+   * as it would have. */
+  #afterOpen<T>(send: () => Promise<T>): Promise<T> {
+    return this.#open().then(send, send);
+  }
+
+  /** `#afterOpen`, then the background lane: a read the page makes on its own never holds more than its share of the
+   * IPC's requests, however long the desktop takes to answer it. */
+  #inBackground<T>(send: () => Promise<T>): Promise<T> {
+    const queued = () => this.#background.run(send);
+    return this.#open().then(queued, queued);
+  }
+
   /** Subscribes the channel to the app-wide events, once per open channel; after a failed attempt the next listener
    * (or the next open) tries again. */
   #subscribeApp(): Promise<void> {
     if (this.#appReady === null) {
-      const ready = this.#open().then(() => call(commands.subscribeApp()).then(() => undefined));
+      const ready = this.#open().then(() =>
+        this.#background.run(() => call(commands.subscribeApp())).then(() => undefined),
+      );
       this.#appReady = ready;
       ready.catch((e: unknown) => {
         this.#warn(`subscribe_app failed: ${JSON.stringify(toHostError(e))}`);
@@ -179,8 +257,10 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`). The first listener subscribes the window's channel to them;
-   * read the current state with `query` after `ready`, so no change falls between. */
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
+   * `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`,
+   * `protection_changed`, `site_blocked`, `update_changed`). The first listener subscribes the window's channel to
+   * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
     return {
@@ -211,8 +291,13 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     });
   }
 
-  /** One bridge call with the positions waiting and the messages processed, when there is anything new. */
+  /** One bridge call with the positions waiting and the messages processed, when there is anything new. While one is
+   * in flight the next waits for it, and then carries everything new since. */
   #send(): void {
+    if (this.#ackInFlight) {
+      this.#ackAgain = true;
+      return;
+    }
     const messages = Math.min(
       this.#processedBefore ?? this.#reader.messages,
       this.#reader.unfinishedSince ?? this.#reader.messages,
@@ -221,9 +306,15 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     const positions = [...this.#positions.values()];
     this.#positions.clear();
     this.#ackedMessages = Math.max(this.#ackedMessages, messages);
-    call(commands.ack(positions, messages)).catch((e: unknown) =>
-      this.#warn(`ack failed: ${JSON.stringify(toHostError(e))}`),
-    );
+    this.#ackInFlight = true;
+    call(commands.ack(positions, messages))
+      .catch((e: unknown) => this.#warn(`ack failed: ${JSON.stringify(toHostError(e))}`))
+      .finally(() => {
+        this.#ackInFlight = false;
+        if (!this.#ackAgain) return;
+        this.#ackAgain = false;
+        this.#send();
+      });
   }
 
   ack(stream: StreamId, position: ViewPosition): void {
@@ -251,10 +342,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
 
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     for (const listener of this.#dispatched) listener(command);
-    return call(commands.dispatch(command));
+    const send = () => call(commands.dispatch(command));
+    return isBackground(command) ? this.#inBackground(send) : this.#afterOpen(send);
   }
   query(query: HostQuery): Promise<QueryResult> {
-    return call(commands.query(query));
+    return this.#inBackground(() => call(commands.query(query)));
   }
   async answerPermission(
     thread: ThreadId,
@@ -263,24 +355,47 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   ): Promise<void> {
     await call(commands.answerPermission(thread, request, option));
   }
-  pickFolder(): Promise<PickedFolder | null> {
-    return call(commands.pickFolder());
+  /** The native folder dialog, or Clauseo's own chooser where Windows' would stall (chooser.ts): either way the
+   * folder picked, or null. */
+  async pickFolder(): Promise<PickedFolder | null> {
+    const clicked = performance.now();
+    const answer = await call(commands.pickFolderOrChoose());
+    if (answer.kind === "picked") return answer.folder;
+    if (answer.kind === "cancelled") return null;
+    const answered = performance.now();
+    const session = answer.start.chooser;
+    const ms = (at: number) => Math.max(0, Math.min(Math.round(at - clicked), 2 ** 31));
+    return chooserOf(this).run(answer.start, {
+      // the desktop logs the page's timing with its own (chooser/trace.rs); a failure only loses the line
+      shown: (renderAt, paintAt) => {
+        commands.chooserShown(ms(answered), ms(renderAt), ms(paintAt)).catch(() => {});
+      },
+      starts: () => call(commands.chooserStarts(session)),
+      list: (go) => call(commands.chooserList(session, go)),
+      choose: () => call(commands.chooserChoose(session)),
+      cancel: async () => {
+        await call(commands.chooserCancel(session));
+      },
+    });
   }
   displayInfo(): Promise<DisplayInfo> {
-    return call(commands.displayInfo());
+    return this.#background.run(() => call(commands.displayInfo()));
   }
   async openExternal(url: string): Promise<void> {
     await call(commands.openExternal(url));
   }
-  async openFile(file: FileRefId): Promise<void> {
-    await call(commands.openFile(file));
+  async quitApp(): Promise<void> {
+    await call(commands.quitApp());
+  }
+  async openFile(file: FileRefId): Promise<OpenedFile> {
+    return call(commands.openFile(file));
   }
   async reveal(target: RevealTarget): Promise<void> {
     await call(commands.reveal(target));
   }
-  /** Opens the settings window or focuses it: the host's open_or_focus, so a second call makes no second window. */
-  async openSettings(): Promise<void> {
-    await call(commands.openSettings());
+  /** Opens the settings window or focuses it: the host's open_or_focus, so a second call makes no second window; at `section` when named (R24: the case-law hint and banner open "connectors"). */
+  async openSettings(section: SettingsSection | null = null): Promise<void> {
+    await call(commands.openSettings(section));
   }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
     return this.#subs.add(stream, after, subscriber);
@@ -288,16 +403,60 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
   }
-  // A stub of R20's setup wire (store/setup.ts's SetupSource): desktop's `setup` command and stream arm come with
-  // stage D's P5. Until then no SetupEvent arrives, so the first run shows its first screen but no install line and no
-  // sign-in gate; with no state to act on no setup command can be pressed, and one sent anyway does nothing.
-  onSetup(): () => void {
-    return () => {};
+  /** Hears each install and sign-in event (R20's `setup` arm; store/setup.ts's SetupSource). Desktop sends them after
+   * `subscribe_app`, which the first listener asks for; a listener first hears the current picture (setup-feed.ts). */
+  onSetup(listener: (event: SetupEvent) => void): () => void {
+    this.#setupListeners += 1;
+    let stopped = false;
+    let stop = () => {};
+    this.#setupFeed().then(
+      (feed) => {
+        if (!stopped) stop = feed.onSetup(listener);
+      },
+      () => {},
+    );
+    // a refusal is warned in #subscribeApp; the next listener, or the next open, tries again
+    this.#subscribeApp().catch(() => {});
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      this.#setupListeners -= 1;
+      stop();
+    };
   }
-  async setup(): Promise<void> {}
+
+  /** The setup feed, imported once; the messages that came meanwhile go to it first, in order. A failed import is
+   * warned, and the next listener or message tries again. */
+  #setupFeed(): Promise<SetupFeed> {
+    if (this.#setupLoad === null) {
+      const load = import("./setup-feed.ts").then(({ SetupFeed }) => {
+        const feed = new SetupFeed(this.#warn);
+        for (const message of this.#setupEarly.splice(0)) feed.receive(message);
+        this.#setup = feed;
+        return feed;
+      });
+      this.#setupLoad = load;
+      load.catch((e: unknown) => {
+        this.#warn(`the setup feed did not load: ${toHostError(e).message}`);
+        if (this.#setupLoad === load) this.#setupLoad = null;
+      });
+    }
+    return this.#setupLoad;
+  }
+  /** Sends one install or sign-in command (desktop's `setup`); rejects with desktop's HostError when it refuses. The
+   * command can hold a pasted code or an API key: nothing keeps or prints it, and a rejection that is not desktop's
+   * own HostError (Tauri's text, which can quote what it could not decode) becomes `internal` naming the kind only. */
+  async setup(command: SetupCommand): Promise<void> {
+    await sendSetup(command);
+  }
+  /** Sends the room's start-up marks (start-marks.ts) to host.log through `page_marks`, on the background lane, never
+   * a lawyer's action's; `read` gives them as the call leaves, so each mark's age is the age it is then. */
+  async pageMarks(read: () => PageMarks): Promise<void> {
+    await this.#inBackground(() => call(commands.pageMarks(read())));
+  }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {
-    await call(commands.countUi(event));
+    await this.#inBackground(() => call(commands.countUi(event)));
   }
 }
 

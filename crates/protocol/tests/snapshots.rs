@@ -30,6 +30,7 @@ mod privacy;
 
 use clauseo_protocol::{
     AgentKind,
+    AllowScope,
     AppendTarget,
     BrowserInstallFailure,
     BrowserInstallState,
@@ -65,13 +66,22 @@ use clauseo_protocol::{
     MatterStatus,
     MatterSummary,
     MattersChanged,
+    NotProtectedCause,
+    PackId,
+    PackList,
     PatchBatch,
     PromptBlock,
+    Protection,
+    ProtectionTier,
+    ProtectionView,
+    ProtectionWork,
     RefreshWhy,
     RestoreRequest,
+    SiteTag,
     StopReason,
     StreamHeader,
     StreamId,
+    SyncService,
     TextOrBlob,
     Theme,
     ThreadStatus,
@@ -92,12 +102,18 @@ use clauseo_protocol::{
 use entries::{agent_text_entry, every_entry, header_entry};
 use examples::{acp_unsupported_block, every_event};
 use fixtures::{
-    agent, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id, folder_ref_id,
-    matter_id, message_id, path, permission_request_id, raw, round_trips, seq, short, thread_id,
-    title, turn_id, unknown_event, unknown_of, v7,
+    agent, blocked_site_id, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id,
+    folder_ref_id, matter_id, message_id, path, permission_request_id, raw, round_trips, seq,
+    short, thread_id, title, turn_id, unknown_event, unknown_of, v7,
 };
 use fixtures::{blob as sample_blob, envelope as sample_envelope};
 use limits::{account_limits, limits_view};
+
+/// The skill packs `ids`, in order.
+#[cfg(test)]
+fn pack_list(ids: &[&str]) -> PackList {
+    PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
+}
 
 /// The example of the known kind `kind`, from `examples::every_event`.
 #[cfg(test)]
@@ -251,6 +267,10 @@ mod host_command;
 #[path = "snapshots/update.rs"]
 mod update;
 
+#[cfg(test)]
+#[path = "snapshots/connectors.rs"]
+mod connectors;
+
 mod view_patch {
     use super::*;
 
@@ -331,6 +351,20 @@ mod view_entry {
         insta::assert_json_snapshot!("header_with_agent_name", entry);
         round_trips(&entry);
     }
+
+    /// A header whose thread is resuming after an idle stop: the field set, as the reducer sets
+    /// it from the `UserMessage` that moved the status to `Starting`. Its own snapshot.
+    #[test]
+    fn header_resuming() {
+        let header = HeaderEntry {
+            status: ThreadStatus::Starting,
+            resuming_since: Some(Timestamp::new(1_760_000_000_000).unwrap()),
+            ..entries::header_entry()
+        };
+        let entry = ViewEntry::Header(Box::new(header));
+        insta::assert_json_snapshot!("header_resuming", entry);
+        round_trips(&entry);
+    }
 }
 
 mod host_event {
@@ -356,12 +390,18 @@ mod host_event {
                 last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),
                 client: Some(ClientName::new("Rathi Steels").unwrap()),
                 next_date: None,
+                skill_packs: Some(pack_list(&["nda-kit"])),
                 pinned: true,
                 last_opened: None,
                 status: MatterStatus::Stopped { at: Timestamp::new(1_760_000_008_000).unwrap() },
                 folder_display: "Documents/Clauseo/Smith v Jones".to_owned(),
                 folder_state: FolderState::Missing,
                 folder_support: Some(FolderSupportKind::CantChangePermissions),
+                protection: Some(Protection::NotProtected {
+                    cause: NotProtectedCause::SwitchedOff {
+                        at: Timestamp::new(1_760_000_007_000).unwrap(),
+                    },
+                }),
             }],
             removed: vec![matter_id(3)],
             all: false,
@@ -375,6 +415,7 @@ mod host_event {
                 agent: agent("claude-acp"),
                 status: ThreadStatus::Idle,
                 queue_held: false,
+                queue_held_reason: None,
                 seen: false,
                 snoozed_until: Some(Timestamp::new(1_760_086_400_000).unwrap()),
                 done: false,
@@ -389,7 +430,7 @@ mod host_event {
             files: 12,
             bytes: Count::new(40_960).unwrap(),
             now_reading: Some(path("Leases/a.docx")),
-            place: FolderPlace::Synced { service: "OneDrive".to_owned() },
+            place: FolderPlace::Synced { service: SyncService::OneDrive },
             cloud_only: 3,
             done: false,
             cancelled: false,
@@ -401,6 +442,40 @@ mod host_event {
             },
         };
         UpdateChanged => update_changed: HostEvent::UpdateChanged(super::update::update_view());
+        ConnectorsChanged => connectors_changed: HostEvent::ConnectorsChanged(
+            super::connectors::connectors_state(),
+        );
+        CaseLawHint => case_law_hint: HostEvent::CaseLawHint {
+            matter: matter_id(1),
+            thread: thread_id(2),
+            turn: turn_id(3),
+        };
+        ProtectionChanged => protection_changed: HostEvent::ProtectionChanged {
+            matter: matter_id(1),
+            protection: Protection::Protected { tier: ProtectionTier::B },
+        };
+        ProtectionViewChanged => protection_view_changed: HostEvent::ProtectionViewChanged {
+            view: ProtectionView {
+                in_progress: Some(ProtectionWork::SetUp),
+                retry_asks_admin: true,
+                ..ProtectionView::new(
+                    Protection::NotProtected { cause: NotProtectedCause::NeedsSetUp },
+                    true,
+                    false,
+                )
+            },
+        };
+        SiteBlocked => site_blocked: HostEvent::SiteBlocked {
+            block_id: blocked_site_id(4),
+            matter: matter_id(1),
+            thread: Some(thread_id(2)),
+            turn: Some(turn_id(3)),
+            host: "login.bank-secure.test".to_owned(),
+            tag: SiteTag::Phishing,
+            list_generated: Timestamp::new(1_794_031_200_000).unwrap(),
+            override_allowed: true,
+            count: 2,
+        };
     } }
 }
 

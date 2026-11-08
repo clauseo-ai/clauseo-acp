@@ -3,30 +3,36 @@
 //! data-folder refusal (`agent/data_folder.rs`), and for a Codex agent its preparation
 //! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the
 //! `.codex` refusal, the folder check, the home made and the home's `config.toml`; for a Claude
-//! agent the folder check alone, `agent/folder_support.rs`). The work that waits for the
-//! agent is held on the thread's turn state meanwhile. Phase two, when they answer, launches
-//! the agent on the actor with what they found ([`agents::launch_now`]), or fails the waiting
-//! work.
+//! agent the folder check, `agent/folder_support.rs`, and its home made, the folder it gets as
+//! `CLAUDE_CONFIG_DIR`, with Claude Code's user settings written there, `agent/home.rs`). The
+//! work that waits for the agent is held on the thread's turn state meanwhile. Phase two, when
+//! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
+//! fails the waiting work.
 //!
 //! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
 //! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
 //! notes folder) and, for an agent with a kind, writes the profile's skills
 //! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`). A skill write that fails is
 //! a warning, never a failed launch. The first write's token goes in [`Prepared`], so only that
-//! launch's Codex keys carry the skills index; a failed write leaves none. The notes folder
+//! launch's Codex keys carry the skills index; a failed write leaves none. Then the launch's
+//! skill packs go into its own plugin under the run folder ([`packs`]). The notes folder
 //! stays; the run folder is the launch's own (its id is in the name) and is removed off the
 //! actor on every way out: by the prep thread when nobody waits for its answer any more
 //! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
 //! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
 //! fail, or the agent ends ([`remove_run`]). No launch
-//! removes another's folder: a prep that came late can only take its own.
+//! removes another's folder: a prep that came late can only take its own. Shutdown waits for
+//! the actor's removals in flight, so the host answers it with the run folders gone.
 //!
 //! For a session that can get the browser, the same thread checks that the browser entry's
 //! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
 //! on macOS and Linux, its socket folder ([`BrowserSession`]); a missing sidecar or a failed
 //! claim leaves the browser out (`BrowserNotInstalled`) with a log line, and the launch goes
 //! on. The claims ride on [`RunFolders`] and drop with the run folder, off the actor, once the
-//! agent's process tree has been killed (or the agent never started).
+//! agent's process tree and its Chrome are gone ([`straggler`]), or the agent never started.
+//! The session's case-law relay and its token file (R24, [`relay`]) are made on the same thread
+//! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
+//! is found and closed as the run drops.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -35,16 +41,18 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_profile::{SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentKind, MatterId, ThreadId};
+use clauseo_process::TreeWatch;
+use clauseo_profile::{PacksWritten, SkillWrite, SkillsWritten};
+use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
-use futures::task::LocalSpawnExt;
 
+use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
+use crate::agent::login_link::{self, Checked, LoginCheck};
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -67,6 +75,9 @@ pub(crate) struct Prepared {
     pub(super) stored: PathBuf,
     /// A Codex agent's preparation; `None` for any other agent.
     pub(super) codex: Option<CodexPrepared>,
+    /// A Claude agent's home, `Locations::agent_home` of its id, made: its `CLAUDE_CONFIG_DIR`
+    /// (`agent/home.rs`). `None` for any other agent.
+    pub(super) claude_home: Option<PathBuf>,
     /// The folder check's answer at this launch (`agent/folder_support.rs`), when it ran: for a
     /// Codex or a Claude agent. A Claude agent's decides its forced ask (`agent/forced_ask.rs`).
     pub(super) folder: Option<Answer>,
@@ -75,6 +86,8 @@ pub(crate) struct Prepared {
     /// This launch's own token for its first skills write (Claude's plugin), taken by
     /// `profile_loads::launch_keys`; `None` when that write failed or there was none.
     pub(super) skills_written: Option<SkillsWritten>,
+    /// The skill packs this launch left out, by id, with the reason, for its notice.
+    pub(super) packs_skipped: Vec<(String, PackSkip)>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -104,6 +117,44 @@ pub(crate) struct RunFolders {
     /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
     /// `Loopback::Ports(session.ports.loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`.
+    pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
+    /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
+    /// written by the launch prep only when a pack loaded. R17 passes this to
+    /// `PolicyBuilder::read_only_in_state`.
+    pub(crate) skill_packs: PathBuf,
+    /// What the launch prep wrote into [`Self::skill_packs`]; none when it wrote nothing. This
+    /// launch's `session_meta` and `codex_config` take it, and no other launch's.
+    pub(crate) packs_written: Option<Arc<PacksWritten>>,
+    /// Claude's data folder deny rules (`agent/data_fence.rs`): the data folder's canonical
+    /// path, then the path as configured when it differs, and the patterns under it, every
+    /// entry that is not this session's own enumerated by the launch prep. Run folders and
+    /// matters' notes made after the launch are in no rule (the accepted residual).
+    pub(crate) data_deny: LaunchDeny,
+    /// `<root>/relay-token`: the case-law relay's token file (R24), written by the launch prep
+    /// only when the session's relay opened, and gone with the run folder. R17 passes this to
+    /// `PolicyBuilder::read_only_in_state`.
+    pub(crate) relay_token: PathBuf,
+    /// The session's case law ([`relay::CaseLaw`]): its relay, opened on the launch-prep
+    /// thread, or why there is none. Like the browser claims, the relay stops when the last
+    /// clone drops in [`discard`], after the agent's tree was killed; its token is revoked
+    /// before that, when the agent is stopped and again before the run folder is removed.
+    /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
+    pub(crate) case_law: relay::CaseLaw,
+    /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
+    /// session can get the browser and its Chrome and claims were found; none otherwise, or
+    /// when it did not open (`NoProxy`). It closes when the last clone drops, normally in
+    /// [`discard`]'s off-actor removal once the agent's tree and Chrome are gone. Last of the
+    /// fields, so the claims and the relay drop first. Stage C's R17 adds its ports to the
+    /// session's policy (`proxy_ports`).
+    pub(crate) egress: Option<Arc<egress::EgressGuard>>,
+    /// The run's lease on its claims, relay and proxy ([`straggler::Lease`]), shared by its
+    /// clones: they are freed only after a completed wait, and held until the host stops on
+    /// any other drop.
+    pub(crate) lease: Arc<straggler::Lease>,
+    /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
+    pub(crate) slot_waited: bool,
 }
 
 impl RunFolders {
@@ -114,10 +165,19 @@ impl RunFolders {
             key,
             work: root.join("work"),
             browser: root.join("browser"),
+            skill_packs: root.join("skill-packs"),
+            relay_token: relay::token_file(&root),
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
             browser_session: None,
+            browser_blocked: None,
+            packs_written: None,
+            data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
+            case_law: relay::CaseLaw::Absent,
+            egress: None,
+            lease: Arc::default(),
+            slot_waited: false,
         }
     }
 
@@ -168,127 +228,6 @@ impl RunFolders {
     }
 }
 
-/// The start-up sweep of `<data>/run`, once per host start: no launch is live before the
-/// first, so every folder there is an earlier run's leftover. The first launch-prep thread, under
-/// a lock every launch's prep takes before making its folders, renames `run` to
-/// `run.old-<n>` in one call, so no live folder is taken and no launch waits on a delete; a
-/// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
-/// is left as it is, and the launches refuse it.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
-
-/// Whether the start-up sweep ran, and (for the tests) its delete's thread.
-#[derive(Debug, Default)]
-struct Swept {
-    done: bool,
-    #[cfg(test)]
-    delete: Option<std::thread::JoinHandle<()>>,
-}
-
-impl RunSweep {
-    /// Sets `<data>/run` aside the first time and starts its delete; nothing after.
-    pub(crate) fn once(&self, data: &Path) {
-        let mut swept = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if swept.done {
-            return;
-        }
-        swept.done = true;
-        set_aside(data);
-        let data = data.to_owned();
-        let started = std::thread::Builder::new()
-            .name("clauseo-run-sweep".to_owned())
-            .spawn(move || delete_set_aside(&data));
-        match started {
-            #[cfg(test)]
-            Ok(delete) => swept.delete = Some(delete),
-            #[cfg(not(test))]
-            Ok(_delete) => {}
-            Err(error) => {
-                tracing::warn!(%error, "the earlier run's folders stay until the next start");
-            }
-        }
-    }
-
-    /// Waits for the start-up sweep's delete, when it started.
-    #[cfg(test)]
-    pub(crate) fn join_delete(&self) {
-        let delete = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .delete
-            .take();
-        if let Some(delete) = delete {
-            delete.join().unwrap();
-        }
-    }
-}
-
-/// The prefix of a `run` folder set aside.
-const SET_ASIDE: &str = "run.old-";
-
-/// Renames `<data>/run` to the first free `run.old-<n>`, when it is a real folder.
-fn set_aside(data: &Path) {
-    let run = run_dir(data);
-    match std::fs::symlink_metadata(&run) {
-        Err(_) => return,
-        Ok(meta) if !meta.is_dir() => {
-            tracing::warn!("the run folder is a link or no folder; left as is");
-            return;
-        }
-        Ok(_) => {}
-    }
-    let free = (0..1000_u32)
-        .map(|n| data.join(format!("{SET_ASIDE}{n}")))
-        .find(|old| std::fs::symlink_metadata(old).is_err());
-    let renamed = match free {
-        Some(old) => crate::write::rename_folder(&run, &old),
-        None => Err(std::io::Error::other("no free run.old-<n> name")),
-    };
-    if let Err(error) = renamed {
-        tracing::warn!(%error, "the earlier run's folders stay");
-    }
-}
-
-/// Deletes every real `run.old-*` folder under `data`; a link of that name is left alone.
-fn delete_set_aside(data: &Path) {
-    let Ok(entries) = std::fs::read_dir(data) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let named = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(SET_ASIDE));
-        if named && crate::write::is_real_dir(&path) {
-            remove_tree(&path);
-        }
-    }
-}
-
-/// `<data>/run`.
-fn run_dir(data: &Path) -> PathBuf {
-    data.join("run")
-}
-
-/// `<data>/agent-state/<matter>/notes`.
-pub(crate) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
-    data.join("agent-state")
-        .join(matter.to_string())
-        .join("notes")
-}
-
-/// Removes `folder` and all it holds, through no link; a failure is a warning.
-fn remove_tree(folder: &Path) {
-    if let Err(error) = crate::write::remove_tree(folder) {
-        tracing::warn!(%error, "a session's run folder stays");
-    }
-}
-
 /// What a Codex launch's preparation found.
 #[derive(Debug)]
 pub(crate) struct CodexPrepared {
@@ -299,41 +238,34 @@ pub(crate) struct CodexPrepared {
     /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
     /// (`profile_loads::launch_keys`).
     pub(super) keys: serde_json::Map<String, serde_json::Value>,
+    /// What the sign-in hook found for the home (`agent/login_link.rs`), asked after the
+    /// rest succeeded; `None` with no hook set.
+    pub(super) login: Option<Checked>,
 }
 
-/// Phase one: the checks go to their thread, and `waiting` waits on the thread's state.
-pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+/// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
+/// `keys_wait` (the agent's waited-out key refusal, `sign_in::keys_wait`) they start once
+/// it has resolved.
+pub(super) fn prepare(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    keys_wait: Option<impl std::future::Future<Output = ()> + Send + 'static>,
+) {
     let id = agents::next_agent_id();
-    let paths = (|| -> Result<_, Error> {
-        let row = &actor.check_thread(thread)?.row;
-        let stored = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
-        let locations = actor.effective.locations();
-        let kind = AgentKind::of(&row.agent);
-        let home =
-            (kind == Some(AgentKind::Codex)).then(|| locations.agent_home(row.agent.as_str()));
-        let key = SessionKey {
-            matter: row.matter,
-            thread,
-            launch: id,
-        };
-        let run = RunFolders::new(locations.data_dir(), key);
-        let skills = match kind {
-            Some(_) => actor.profile.launch_writes(&row.agent),
-            None => Vec::new(),
-        };
-        let browser = browser_prep(actor, &row.agent, key);
-        let claude = kind == Some(AgentKind::Claude);
-        Ok((
-            stored,
-            locations.data_dir().to_owned(),
-            (home, claude),
-            run,
-            skills,
-            browser,
-        ))
-    })();
-    let sweep = actor.run_sweep.clone();
-    let (stored, data, (home, claude), mut run, skills, browser) = match paths {
+    let paths = launch_paths(actor, thread, id);
+    let sweep = actor.turn_path.run_sweep.clone();
+    let login = login_hook(actor, thread);
+    let LaunchPaths {
+        stored,
+        data,
+        home,
+        claude,
+        mut run,
+        skills,
+        packs,
+        claims,
+    } = match paths {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
@@ -341,6 +273,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         }
     };
     let job = codex::prepare::Job::launch(run.key.matter);
+    let slot_wait = browser::slot_wait(actor, run.key, &claims.browser);
+    run.slot_waited = slot_wait.is_some();
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -350,14 +284,37 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         source: actor.folder_check,
     };
     let clock = std::sync::Arc::clone(&actor.clock);
+    let check_clock = std::sync::Arc::clone(&actor.clock);
+    let matter = run.key.matter;
     actor.spawn_post(async move {
+        if let Some(keys_wait) = keys_wait {
+            keys_wait.await;
+        }
+        // Before anything is made for the launch: a folder that is gone, or does not answer,
+        // is `matter.folder_missing`, not a spawn that fails in it (`folder.rs`).
+        let there = folder::check(Arc::clone(&clock), matter, stored.clone()).await;
+        if let Err(error) = there {
+            return Input::Turn(TurnInput::Prepared {
+                thread,
+                id,
+                result: Err(error),
+            });
+        }
+        // Whether a slot is there for the browser after a wait; without one, it is.
+        let slot = match slot_wait {
+            Some(slot_wait) => slot_wait.await,
+            None => true,
+        };
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
+                // The working folder the agent starts in, as spawn takes it (`session_folder`).
+                crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
                 let mut answer = None;
-                let codex = match home {
+                let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
+                let codex = match codex_home {
                     Some(home) => {
                         let (folder, support) =
                             codex::prepare_launch(&check, &stored, &data, &home)?;
@@ -366,31 +323,102 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                             folder,
                             home,
                             keys: serde_json::Map::new(),
+                            login: None,
                         })
                     }
                     None => None,
                 };
                 // Claude is never refused for its folder: the answer decides its forced ask.
-                if claude {
+                if let Some(home) = &claude_home {
                     answer = Some(check.run(&crate::agent::session_folder(&stored)));
+                    codex::make_agent_home(&data, home, "Claude Code")?;
+                    if let Err(error) = crate::agent::home::write_claude_settings(home) {
+                        tracing::warn!(
+                            error = %Cause(&error),
+                            "Claude's home settings were not written"
+                        );
+                    }
                 }
                 run.make(&data, &sweep)?;
-                (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
+                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                claim(&mut run, &data, claims, slot);
                 let skills_written = write_skills(&skills);
+                let packs_skipped;
+                (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
                     stored,
                     codex,
+                    claude_home,
                     folder: answer,
                     run,
                     skills_written,
+                    packs_skipped,
                 })
             },
-            |late: Prepared| late.run.remove(),
+            undo_late,
         )
         .await;
+        let result = match (result, login) {
+            (Ok(mut prepared), Some((hook, agent))) => {
+                if let Some(codex) = prepared.codex.as_mut() {
+                    let home = codex.home.clone();
+                    let checked = login_link::check(check_clock, matter, hook, agent, home).await;
+                    codex.login = Some(checked);
+                }
+                Ok(prepared)
+            }
+            (result, _) => result,
+        };
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
+}
+
+/// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
+/// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
+fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
+    let Claims {
+        browser,
+        case_law,
+        egress,
+        held,
+    } = claims;
+    let browser = if slot { browser } else { browser.skipped() };
+    let prepared = browser.prepare(data, &run.key.id());
+    (run.chrome, run.browser_session) = (prepared.chrome, prepared.session);
+    run.browser_blocked = prepared.policy_block;
+    // The launch offers the browser only once its Chrome was found and claimed.
+    let offered = run.chrome.is_some() && run.browser_session.is_some();
+    run.egress = egress.open(run.key, offered);
+    run.case_law = case_law.open(run);
+    let parts = straggler::Parts {
+        browser: run.browser_session.clone(),
+        case_law: run.case_law.clone(),
+        egress: run.egress.clone(),
+    };
+    run.lease.keep(held, parts);
+}
+
+/// A prep nobody waits for any more takes back what it made: the relay's token first, then the
+/// run folder with the token file. No agent was started, so nothing waits.
+fn undo_late(late: Prepared) {
+    let Prepared { run, .. } = late;
+    // Nothing to wait for: no agent was started, so its parts are freed as it drops.
+    run.lease.wait_done();
+    relay::end(&run);
+    run.remove();
+    // Its claims, relay and proxy go now, after the folder.
+    drop(run);
+}
+
+/// The sign-in hook and the agent it asks about, for a Codex thread when a hook is set.
+fn login_hook(
+    actor: &Actor,
+    thread: ThreadId,
+) -> Option<(Arc<dyn LoginCheck + Send + Sync>, AgentId)> {
+    let hook = actor.wiring.sign_in.check.clone()?;
+    let agent = actor.threads.get(&thread)?.row.agent.clone();
+    (AgentKind::of(&agent) == Some(AgentKind::Codex)).then_some((hook, agent))
 }
 
 /// A launch's folder check answered (`agent/folder_support.rs`, a Codex or a Claude agent):
@@ -448,7 +476,7 @@ pub(super) fn on_prepared(
         .and_then(|state| state.preparing.take_if(|preparing| preparing.id == id));
     let Some(preparing) = preparing else {
         if let Ok(stale) = result {
-            discard(actor, thread, stale.run);
+            discard(actor, thread, stale.run, None);
         }
         return;
     };
@@ -462,68 +490,74 @@ pub(super) fn on_prepared(
         }
     };
     if host_stopping(actor) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
+    browser::warn_if_still_full(actor, &prepared.run);
+    // A refusal that came, or stayed, while the checks ran (a key refusal waited out
+    // included): nothing launches.
+    if let Some(error) = super::sign_in::launch_refusal(actor, thread) {
+        discard(actor, thread, prepared.run, None);
+        agents::fail_all(actor, thread, waiting, &error);
+        return;
+    }
+    if let Err(error) = super::sign_in::check_launch(actor, thread, &prepared) {
+        discard(actor, thread, prepared.run, None);
+        agents::fail_all(actor, thread, waiting, &error);
+        return;
+    }
     if let Err(error) = super::profile_loads::launch_keys(actor, thread, &mut prepared) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
     let run = prepared.run.clone();
+    let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
     if let Some(state) = state(actor, thread) {
         state.run = Some(run.clone());
     }
-    agents::launch_now(actor, thread, waiting, *prepared);
+    let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
     let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
-    if !launched {
+    if launched {
+        packs::hold_notice(actor, thread, packs_skipped);
+    } else {
         if let Some(state) = state(actor, thread) {
             state.run = None;
         }
-        discard(actor, thread, run);
+        // A process that was started and then failed is waited for like any other.
+        discard(actor, thread, run, failed_tree);
     }
 }
 
-/// Removes `run` (`thread`'s launch's run folder) off the actor and drops its browser claims
-/// there; the notes folder stays. The session has ended (its agent's tree killed) or never
-/// started, so its browser slot, if it held one, is free.
-fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
-    actor.wiring.browser_slots.release(run.key);
-    let clock = std::sync::Arc::clone(&actor.clock);
-    let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
-    let spawned = actor.spawner.spawn_local(async move {
-        let removed = codex::prepare::off_actor(clock, job, move || {
-            run.remove();
-            // The browser claims go here, off the actor and after the agent's tree was killed:
-            // the socket folder is removed and the ports are free for the next session.
-            drop(run);
-            Ok(())
-        })
-        .await;
-        if let Err(error) = removed {
-            tracing::warn!(
-                %thread,
-                error = %Cause(&error),
-                "a session's run folder was not removed"
-            );
-        }
-    });
-    if let Err(error) = spawned {
-        tracing::warn!(%thread, %error, "a session's run folder was not removed");
-    }
-}
-
-/// Removes `thread`'s run folder off the actor, once its agent has ended or failed to launch.
-/// The notes folder stays.
-pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
+/// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
+/// has ended. The notes folder stays.
+pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
     if let Some(run) = state(actor, thread).and_then(|state| state.run.take()) {
-        discard(actor, thread, run);
+        discard(actor, thread, run, Some(tree));
     }
 }
 
 mod browser;
-use browser::browser_prep;
+mod egress;
+use paths::Claims;
+pub(super) mod folder;
+pub(super) mod relay;
+mod straggler;
+pub(crate) use straggler::HeldRuns;
+mod removal;
+use removal::discard;
+pub(super) use removal::on_run_removed;
+mod sweep;
+pub(crate) use sweep::RunSweep;
+mod packs;
+pub use packs::PackRequest;
+use packs::PackSkip;
+pub(super) use packs::{PackNotices, pack_notices};
+mod folders;
+use folders::{launch_deny, notes_dir, remove_tree, run_dir};
+mod paths;
+use paths::{LaunchPaths, launch_paths};
 
 #[cfg(test)]
 mod tests;

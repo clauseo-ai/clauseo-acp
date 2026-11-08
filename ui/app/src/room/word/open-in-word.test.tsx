@@ -1,9 +1,12 @@
-// @vitest-environment happy-dom
-// "Open in Word" over FakeTransport: a .doc or .docx the wall lists opens through open_file with its file ref, from its
-// tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
-// a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
-// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
-// only in the console for a tile.
+// @vitest-environment happy-dom "Open in Word" over FakeTransport: a .doc or .docx the wall lists
+// opens through open_file with its file ref, from its tile (a press, Enter or Space, with the hint
+// on hover and keyboard focus and the label for screen readers) and from a change note naming it
+// while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
+// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why
+// under the note and under the tiles, by its code; a path too long for Word with Show in folder
+// beside it, revealing the matter's folder. An open Word started in Protected View says so in a
+// quiet line under the note, until the next open or Undo, and under the tiles, until the next press
+// of a tile.
 import { IconFileGeneric, IconFilePdf, IconFileWord } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
@@ -15,7 +18,7 @@ import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
-import { reset, step, uuid } from "../../testing/stream-script.ts";
+import { MATTER, reset, step, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, PaperSummary, ViewEntry } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { defaultOutcome, mountRoom, type Harness, type Script } from "../thread/harness.ts";
@@ -173,7 +176,7 @@ test("Enter and Space on a focused Word tile open it: the face is a native butto
   expect(opened()).toEqual([uuid(1, 8)]);
 });
 
-test("a declined open says nothing; a failed one goes only to the console", async () => {
+test("a declined open says nothing; a failed one says why under the tiles", async () => {
   h = await withPapers();
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   h.transport.host.openFile = () => {
@@ -188,7 +191,8 @@ test("a declined open says nothing; a failed one goes only to the console", asyn
   await h.click(faceOf("Reply.docx"));
   await h.settle();
   expect(warn).toHaveBeenCalledTimes(1);
-  expect(h.host.querySelector('[role="alert"]')).toBeNull();
+  expect(wallLine("wall-error")?.dataset["code"]).toBe("internal");
+  expect(wallLine("wall-error")?.getAttribute("role")).toBe("alert");
   expect(opened()).toHaveLength(2);
 });
 
@@ -255,7 +259,13 @@ test("two quick presses on the note's Open in Word send one open_file", async ()
 const noteError = () =>
   h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="error"]') ?? null;
 
-for (const code of ["internal", "command.conflict", "matter.folder_missing", "command.invalid"]) {
+for (const code of [
+  "internal",
+  "command.conflict",
+  "matter.folder_missing",
+  "command.invalid",
+  "matter.document_path_too_long",
+]) {
   test(`a failed open from the note says why in its error line, by its code: ${code}`, async () => {
     h = await withPapers();
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -274,6 +284,156 @@ for (const code of ["internal", "command.conflict", "matter.folder_missing", "co
     expect(noteError()).toBeNull();
   });
 }
+
+const PROTECTED =
+  "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.";
+const protectedLine = () =>
+  h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="open-protected-view"]') ??
+  null;
+const openFromNote = async () => {
+  await h!.click(h!.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+  await h!.settle();
+};
+
+test("an open in Protected View says so in a quiet line under the note; the next open clears it", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  expect(protectedLine()).toBeNull();
+  await openFromNote();
+  expect(protectedLine()?.textContent).toBe(PROTECTED);
+  expect(protectedLine()?.getAttribute("role")).toBe("status");
+  expect(protectedLine()?.closest('[role="alert"]')).toBeNull();
+  expect(noteError()).toBeNull();
+  // the next open clears it as it goes, and an open outside Protected View leaves it gone
+  h.transport.host.openFile = () => ({ protected_view: false });
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+});
+
+test("an open outside Protected View, or a failed one, shows no Protected View line", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(opened()).toHaveLength(1);
+  expect(protectedLine()).toBeNull();
+  h.transport.host.openFile = () => {
+    throw { code: "matter.document_path_too_long", message: "for logs", retryable: false };
+  };
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+  expect(noteError()?.dataset["code"]).toBe("matter.document_path_too_long");
+});
+
+test("Undo clears the Protected View line", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(protectedLine()).not.toBeNull();
+  await h.click(h.one("undo"));
+  await h.settle();
+  expect(protectedLine()).toBeNull();
+});
+
+const wallLine = (testId: string) =>
+  h!.host.querySelector<HTMLElement>(`aside.room-pane [data-testid="${testId}"]`);
+const openFromTile = async () => {
+  await h!.click(faceOf("Reply.docx"));
+  await h!.settle();
+};
+const TOO_LONG = { code: "matter.document_path_too_long", message: "for logs", retryable: false };
+
+test("a tile's open in Protected View says so in a quiet line under the tiles; the next press clears it", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  expect(wallLine("open-protected-view")).toBeNull();
+  await openFromTile();
+  expect(opened()).toEqual([uuid(1, 8)]);
+  expect(wallLine("open-protected-view")?.textContent).toBe(PROTECTED);
+  expect(wallLine("open-protected-view")?.getAttribute("role")).toBe("status");
+  expect(wallLine("wall-error")).toBeNull();
+  // the line is the wall's: the thread says nothing
+  expect(h.host.querySelectorAll('[data-testid="open-protected-view"]')).toHaveLength(1);
+  h.transport.host.openFile = () => ({ protected_view: false });
+  await openFromTile();
+  expect(opened()).toHaveLength(2);
+  expect(wallLine("open-protected-view")).toBeNull();
+});
+
+test("a tile's open outside Protected View, with protected_view absent, shows no line", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => {};
+  await openFromTile();
+  expect(opened()).toEqual([uuid(1, 8)]);
+  expect(wallLine("open-protected-view")).toBeNull();
+  expect(wallLine("wall-error")).toBeNull();
+});
+
+test("a tile's open of a path too long for Word says why under the tiles, and Show in folder reveals the matter's folder", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.transport.host.openFile = () => {
+    throw TOO_LONG;
+  };
+  await openFromTile();
+  expect(wallLine("wall-error")?.textContent).toBe(errorWords("en", TOO_LONG.code));
+  expect(wallLine("wall-error")?.getAttribute("role")).toBe("alert");
+  expect(wallLine("open-protected-view")).toBeNull();
+  const reveal = wallLine("reveal");
+  expect(reveal?.textContent).toBe("Show in folder");
+  expect(h.transport.only("reveal")).toEqual([]);
+  await h.click(reveal);
+  await h.settle();
+  expect(h.transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: MATTER } }]);
+  // the next press clears it
+  h.transport.host.openFile = () => {};
+  await openFromTile();
+  expect(wallLine("wall-error")).toBeNull();
+  expect(wallLine("reveal")).toBeNull();
+});
+
+for (const code of ["internal", "command.conflict", "matter.folder_missing", "some.newer_code"])
+  test(`a tile's other failures say why under the tiles, by their code, without Show in folder: ${code}`, async () => {
+    h = await withPapers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.transport.host.openFile = () => {
+      throw { code, message: "for logs", retryable: false };
+    };
+    await openFromTile();
+    expect(wallLine("wall-error")?.dataset["code"]).toBe(code);
+    // an unknown code says the generic words
+    expect(wallLine("wall-error")?.textContent).toBe(errorWords("en", code));
+    expect(wallLine("reveal")).toBeNull();
+    // the next press that opens clears it
+    h.transport.host.openFile = () => {};
+    await openFromTile();
+    expect(wallLine("wall-error")).toBeNull();
+  });
+
+test("the note's error line for a path too long for Word has Show in folder, which reveals the matter's folder", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.transport.host.openFile = () => {
+    throw TOO_LONG;
+  };
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(noteError()?.dataset["code"]).toBe(TOO_LONG.code);
+  const reveal = h.one("files-changed")?.querySelector<HTMLElement>('[data-testid="reveal"]');
+  expect(reveal?.textContent).toBe("Show in folder");
+  await h.click(reveal);
+  await h.settle();
+  expect(h.transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: MATTER } }]);
+  // another code offers no Show in folder
+  h.transport.host.openFile = () => {
+    throw { code: "internal", message: "for logs", retryable: false };
+  };
+  await openFromNote();
+  expect(noteError()?.dataset["code"]).toBe("internal");
+  expect(h.one("files-changed")?.querySelector('[data-testid="reveal"]')).toBeNull();
+});
 
 test("a declined open from the note says nothing", async () => {
   h = await withPapers();

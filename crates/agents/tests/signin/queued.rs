@@ -140,7 +140,9 @@ fn cancel_while_queued_ends_the_wait() {
     let mut fx = Fixture::new("queued-cancel", "ok-after:0");
     let install = fx.not_installed(&claude());
     let (agents, events) = fx.start_missing(claude());
+    assert!(!agents.sign_in_going(&claude()));
     agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    assert!(agents.sign_in_going(&claude()), "from the call on");
     assert_eq!(events.state(), SigninState::Queued);
     agents.cancel_sign_in(&claude()).unwrap();
     let (_, last) = events.until_end();
@@ -151,6 +153,7 @@ fn cancel_while_queued_ends_the_wait() {
             at: now()
         }
     );
+    assert!(!agents.sign_in_going(&claude()), "the job ended");
     assert_eq!(
         agents.cancel_sign_in(&claude()),
         Err(SigninError::NotRunning(claude()))

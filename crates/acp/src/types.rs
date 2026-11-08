@@ -65,6 +65,8 @@ pub enum AuthKind {
 pub struct NewSession {
     /// The session's folder; tool locations inside it become matter paths.
     pub cwd: PathBuf,
+    /// ACP's `additionalDirectories`: more workspace roots, absolute; not sent when empty.
+    pub additional_directories: Vec<PathBuf>,
     /// The MCP servers; always sent, empty when none is turned on.
     pub mcp_servers: Vec<McpServer>,
     /// The `_meta` object, sent verbatim and never read.
@@ -78,6 +80,9 @@ pub struct LoadSession {
     pub session: AgentSessionId,
     /// The session's folder.
     pub cwd: PathBuf,
+    /// ACP's `additionalDirectories`, as `session/new` sent them: on load and resume the list
+    /// is the session's whole set of extra roots.
+    pub additional_directories: Vec<PathBuf>,
     /// The MCP servers; always sent, empty when none is turned on.
     pub mcp_servers: Vec<McpServer>,
     /// The `_meta` object, sent verbatim and never read. An adapter may read its options again

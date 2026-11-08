@@ -23,24 +23,63 @@
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
-crates/desktop/src/open.rs open_url_unconfirmed dead_code
+crates/desktop/src/open.rs check_document clippy::disallowed_methods
+crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
+# The uninstaller's --delete-app-data (S20): its only writes, and its tests' links, locks and modes.
+crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
+# S20 follow-up: a linked `sandbox`'s reparse tag read and its delete done on one handle; the
+# test's own reparse point of no link kind.
+crates/desktop/src/delete_app_data/ops.rs unlink_name_surrogate unsafe_code
+crates/desktop/src/delete_app_data/tests/make.rs foreign_reparse_point unsafe_code
+crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
+# The UI language in HKCU for the installer and uninstaller: the registry calls.
+crates/desktop/src/ui_language/windows.rs - unsafe_code
+# One RegGetValueW of HKCU's AppsUseLightTheme before the main window exists (the first frame's colour).
+crates/desktop/src/window_size/windows_theme.rs - unsafe_code
+# WEBVIEW2_DEFAULT_BACKGROUND_COLOR set to the ground in main, before any thread: set_var.
+crates/desktop/src/window_size.rs ground_in_env unsafe_code
+# The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
+crates/desktop/src/native_mark/windows.rs - unsafe_code
+crates/desktop/src/ui_language.rs KEY dead_code
+crates/desktop/src/chooser/windows.rs - unsafe_code
+# WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.
+crates/desktop/src/navigation/browser_args.rs keep_no_dns_in_env unsafe_code
+# The WebView2 AdditionalBrowserArguments policy check: RegGetValueW.
+crates/desktop/src/navigation/browser_args.rs policy_set unsafe_code
+crates/desktop/src/open/word_path.rs short_folder unsafe_code
+# R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
+crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
+crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
+crates/desktop/src/setup/readers/tests.rs fake_file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::link clippy::disallowed_methods
 crates/desktop/src/lib.rs context clippy::disallowed_methods
+# The updater (R23 PR 5, 0037): its one write, the download saved beside updates/<version>/ and
+# moved in whole (the desktop crate has no write module); access(2) on the .app's folder for the
+# macOS install kind; RegOpenKeyExW for the Windows per-machine uninstall key.
+crates/desktop/src/update/plugin.rs save_download clippy::disallowed_methods
+crates/desktop/src/update/install_kind.rs writable unsafe_code
+crates/desktop/src/update/install_kind/windows.rs - unsafe_code
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
-crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
+crates/desktop/src/window_events.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
 # The machine's total memory (src/machine_memory.rs): sysctlbyname on macOS, GlobalMemoryStatusEx
 # on Windows. Each module's FFI call, under its own #![expect].
 crates/desktop/src/machine_memory.rs mac unsafe_code
 crates/desktop/src/machine_memory.rs win unsafe_code
+# R24 PR5: the day cap's local day from the OS (localtime_r; the Win32 time conversions).
+crates/desktop/src/connectors/local_day.rs offset unsafe_code
+crates/desktop/src/connectors/local_day.rs offset unsafe_code
 # The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
 # clauseo-counts takes time as an input.
 crates/desktop/src/counts.rs now clippy::disallowed_methods
+# setup-result.json's stamp (result_file.rs, 0049): SystemTime::now, read there alone, so a
+# result an earlier run left isn't read as this run's.
+crates/sandbox/src/windows/setup/result_file.rs now_secs clippy::disallowed_methods
 # The usage counts' canary test (tests/canary.rs, S21): its scratch folder and the papers planted in
 # it, the one end-to-end session, kept in one function so each step's canary reads in order, and
 # the child process of its own binary that runs that session in an environment holding the canary.
@@ -126,12 +165,77 @@ crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
 
+# The setup exe's VERSIONINFO .rc, written into OUT_DIR by the build script.
+crates/sandbox/build.rs write_out clippy::disallowed_methods
+# The admin copy's refresh: build.rs's copy of the key module (public in the crate), the FFI of
+# its reads (the install folder's handle-relative walk included), staging, record and Event Log
+# writes and Task Scheduler calls, and its tests' BLAKE2b, which keeps RFC 7693's names.
+crates/sandbox/build.rs key unreachable_pub
+crates/sandbox/src/windows/refresh/source.rs - unsafe_code
+crates/sandbox/src/windows/refresh/staging.rs - unsafe_code
+crates/sandbox/src/windows/refresh/task.rs - unsafe_code
+# The tasks' elevated test: its Task Scheduler calls, the test user's cmd, and its bounded waits.
+crates/sandbox/src/windows/refresh/windows_tests.rs - unsafe_code
+crates/sandbox/src/windows/refresh/windows_tests.rs pause clippy::disallowed_methods
+crates/sandbox/src/windows/refresh/walk.rs - unsafe_code
+crates/sandbox/src/windows/refresh/windows_refresher.rs - unsafe_code
+crates/sandbox/src/windows/refresh/test_signer.rs compress clippy::many_single_char_names
+crates/sandbox/src/windows/refresh/test_signer.rs g clippy::many_single_char_names
+crates/sandbox/examples/run_sandboxed/env.rs remove_secret clippy::disallowed_methods
+crates/sandbox/examples/run_sandboxed.rs jail::catch_termination unsafe_code
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
-# The folder check (src/windows.rs): its Win32 calls, and its test's DACL setup.
-crates/sandbox/src/windows.rs - unsafe_code
+# The folder check (src/windows/folder.rs): its Win32 calls, and its test's DACL setup.
+crates/sandbox/src/windows/folder.rs - unsafe_code
 crates/sandbox/src/windows/test_dacl.rs - unsafe_code
+crates/sandbox/src/windows/tests.rs - unsafe_code
+crates/sandbox/src/windows/test_junction.rs - unsafe_code
+crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/record.rs - unsafe_code
+crates/sandbox/src/windows/detect.rs - unsafe_code
+crates/sandbox/src/windows/private_dir.rs - unsafe_code
+# secrets.bin (S15 PR4g): user-scope DPAPI, and the set-up owner's parent token and impersonation.
+crates/sandbox/src/windows/secrets/dpapi.rs - unsafe_code
+crates/sandbox/src/windows/setup/owner/token.rs - unsafe_code
+crates/sandbox/src/windows/setup/owner/process.rs - unsafe_code
+# The set-aside's folders opened and items renamed by handle (src/windows/set_aside/ntfs.rs).
+crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
+# Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
+# play an agent racing the walk, and the label helpers only Windows uses.
+crates/sandbox/src/windows/acl.rs - unsafe_code
+crates/sandbox/src/windows/acl/profile.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs/volume.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs_timing.rs later_launch clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs the_next_walk_reaches_a_file_moved_in_since clippy::disallowed_methods
+crates/sandbox/src/windows/acl_bytes.rs SACL_AUTO_INHERITED dead_code
+crates/sandbox/src/windows/acl_bytes.rs empty_acl dead_code
+crates/sandbox/src/windows/acl_bytes.rs label_spec dead_code
+crates/sandbox/src/windows/acl_bytes.rs owner_bytes dead_code
+crates/sandbox/src/windows/acl_bytes.rs without_broad dead_code
+crates/sandbox/src/windows/acl_bytes/repair.rs rebuild dead_code
+crates/sandbox/src/windows/acl_bytes/repair.rs owner_descriptor dead_code
+crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after_the_listing_is_never_passed_through clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+# The elevated clean-up (S15 PR4i): its privilege guard, the tests reading the token back and a
+# path's short name, the strip that only the Windows hand-back calls, and the VM harness's FFI.
+crates/sandbox/src/windows/acl/privilege.rs - unsafe_code
+crates/sandbox/src/windows/acl/privilege/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl/take/tests.rs - unsafe_code
+crates/sandbox/src/windows/acl_bytes/steps.rs stripped dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs bare dead_code
+crates/sandbox/src/windows/acl_bytes/steps.rs taken_write dead_code
+crates/sandbox/examples/s15_reclaim_vm/win.rs - unsafe_code
+# The apply layer's NTFS tests (S15 PR3b): win-01's timing row.
+crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_costs clippy::disallowed_methods
+# The pool user's writes a nested protected item's deny must refuse (S15 PR4a2): the test plays
+# the agent, through std's own calls.
+crates/sandbox/src/windows/apply/ntfs_tests/nested.rs agent clippy::disallowed_methods
+# The set-aside's scan timing (S15 PR4a): the clock that times the nested probe lists.
+crates/sandbox/src/windows/set_aside/tests/timing.rs timed clippy::disallowed_methods
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.
@@ -173,10 +277,12 @@ crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 # clauseo-process: its Windows Job Object calls, its pipe tests' write module (each run's own
 # folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
+crates/process/src/os/linux/death.rs - unsafe_code
 # Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
 crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
+crates/process/tests/parent_death.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
 crates/process/tests/spawn_options.rs console_processes unsafe_code
 
@@ -185,11 +291,22 @@ crates/process/tests/spawn_options.rs console_processes unsafe_code
 crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_methods
 crates/settings/tests/disk/write.rs - clippy::disallowed_methods
 crates/settings/src/policy/windows.rs - unsafe_code
+# The pause between retries of a held policy.json (#590): Windows only, on a plain thread.
+crates/settings/src/policy/windows/acl.rs pause clippy::disallowed_methods
 crates/settings/src/policy/macos/tests.rs UserDomain::set unsafe_code
 crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_methods
 crates/settings/src/system/windows.rs - unsafe_code
 crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code
+crates/settings/src/system/tests.rs windows_without_documents clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_roaming_unchecked clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_local_app_data_unchecked clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_documents_on_a_dead_share clippy::disallowed_methods
+crates/settings/src/system/tests.rs windows_documents_on_a_dead_share_child clippy::disallowed_methods
+crates/settings/src/system/bounded/tests.rs timed clippy::disallowed_methods
+# Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
+# follows the real user id.
+crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods
 
 # Added by #116: matters' calls to getiopolicy_np and setiopolicy_np (the read guard on macOS).
 crates/matters/src/no_download/macos.rs - unsafe_code
@@ -199,10 +316,18 @@ crates/matters/src/place/windows.rs - unsafe_code
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
+# R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.
+crates/host/src/write.rs sync_dir clippy::unnecessary_wraps
 crates/host/tests/host/write.rs - clippy::disallowed_methods
+crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
 crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
 crates/host/benches/common/dir.rs - clippy::disallowed_methods
+# R24 PR3: the connector relay bench's unwraps and its one report line.
+crates/host/benches/connector_relay.rs - clippy::unwrap_used
+crates/host/benches/connector_relay.rs main clippy::print_stdout
+# R24 PR4: the relay memory test's counting allocator (GlobalAlloc is an unsafe trait).
+crates/host/tests/relay_memory.rs memory::Counting unsafe_code
 
 # clauseo-limits (S13): the write module (the helper file and the run folder) and the readers
 # tests' folders.
@@ -249,6 +374,8 @@ fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods
 crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
 crates/sandbox/src/test_support.rs - clippy::disallowed_methods
 crates/sandbox/src/browser_dir/write.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/write.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/tests.rs a_junction_named_sandbox_is_refused clippy::disallowed_methods
 crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
 crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
@@ -259,16 +386,46 @@ crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
 # write module and guard starts.
 crates/mcp/src/main.rs main clippy::print_stderr
 crates/mcp/src/write.rs - clippy::disallowed_methods
-crates/mcp/src/browser_guard/relay.rs spawn_child clippy::disallowed_methods
+crates/mcp/src/browser_guard/relay/pumps.rs spawn_child clippy::disallowed_methods
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
 crates/mcp/src/browser_guard/job.rs - unsafe_code
+# Windows: the guard's children created in its job (CreateProcessW with a job list), the child
+# type std's Child cannot be made into, and the tests' IsProcessInJob.
+crates/mcp/src/browser_guard/job/spawn.rs - unsafe_code
+crates/mcp/src/browser_guard/job/child.rs - unsafe_code
+crates/mcp/src/browser_guard/job/tests.rs - unsafe_code
+crates/mcp/src/browser_guard/job/tests.rs an_inheritable_handle_outside_the_list_stays_out_of_the_child clippy::disallowed_methods
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
+crates/mcp/tests/connector/support.rs write clippy::disallowed_methods
+crates/mcp/tests/connector/support.rs run clippy::disallowed_methods
+crates/mcp/tests/connector/support.rs start clippy::disallowed_methods
+crates/mcp/src/browser_guard.rs pause clippy::disallowed_methods
+crates/mcp/src/browser_guard.rs now clippy::disallowed_methods
+crates/mcp/src/browser_guard/session.rs end_agent unused_variables
+crates/mcp/src/browser_guard/record/windows.rs - unsafe_code
+crates/mcp/src/browser_guard/record/scan/macos.rs - unsafe_code
+crates/mcp/src/browser_guard/record/scan.rs Reader::new clippy::unnecessary_wraps
+crates/mcp/src/browser_guard/record/scan.rs Reader::args_of clippy::unused_self
+crates/mcp/src/browser_guard/record/tests.rs group clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
+crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
+crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
+crates/mcp/src/write/windows.rs - unsafe_code
+crates/mcp/src/write/mac.rs - unsafe_code
+crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods
+crates/mcp/examples/daemon_stub.rs daemon clippy::disallowed_methods
+crates/mcp/examples/parent_stub.rs main clippy::disallowed_methods
+crates/mcp/tests/guard/lifecycle.rs within clippy::disallowed_methods
+crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods
+crates/mcp/tests/guard/real_chrome.rs - clippy::disallowed_methods
 # R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
 crates/profile/src/write.rs - clippy::disallowed_methods
 crates/profile/tests/skills/write.rs - clippy::disallowed_methods
+crates/profile/src/packs/windows.rs - unsafe_code
+crates/profile/tests/packs/support.rs - clippy::disallowed_methods
 
 crates/sandbox/src/proxy/server.rs accept clippy::infinite_loop
 crates/sandbox/src/ports.rs imp::exclusive unsafe_code
@@ -290,6 +447,7 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 # the Windows proxy registry read.
 crates/agents/src/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
+crates/agents/tests/install/quit.rs - clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
 crates/agents/src/write/extract.rs - clippy::disallowed_methods
@@ -314,3 +472,124 @@ crates/agents/src/fileid.rs file_id unsafe_code
 crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
+crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
+# The record's owner in Administrators, by SID (NetUserGetLocalGroups), for the removal.
+crates/sandbox/src/windows/setup/admin_member.rs - unsafe_code
+crates/sandbox/src/windows/setup/account_list.rs - unsafe_code
+crates/sandbox/src/windows/setup/lock.rs - unsafe_code
+crates/sandbox/src/windows/setup/lock.rs back_off clippy::disallowed_methods
+crates/sandbox/src/windows/setup/record_write.rs - unsafe_code
+crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::disallowed_methods
+# The set-up's logon, profile, preflight, process and journal calls (S15 PR4f); the profile
+# delete's bounded wait; the elevated tests' token read, their marker files and the hive load's
+# retry wait.
+crates/sandbox/src/windows/setup/ffi.rs - unsafe_code
+crates/sandbox/src/windows/setup/journal.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests/reset.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests/reset.rs leave_marker clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests/reset.rs wait clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests/as_user.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests/links.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests/links.rs wait clippy::disallowed_methods
+crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
+# S15 PR7: the network filters' WFP calls, the owner's grants on them, a launch's reads of
+# them, and the firewall rules through COM.
+crates/sandbox/src/windows/wfp/engine.rs - unsafe_code
+crates/sandbox/src/windows/wfp/engine/read.rs - unsafe_code
+crates/sandbox/src/windows/wfp/engine/security.rs - unsafe_code
+crates/sandbox/src/windows/wfp/firewall.rs - unsafe_code
+crates/sandbox/src/windows/wfp/engine/conditions.rs - unsafe_code
+crates/sandbox/src/windows/wfp/os_ports.rs - unsafe_code
+# S15 PR7's VM harness: the pool user's logon, the (B) token and the probe's start.
+crates/sandbox/examples/s15_wfp_vm/launch.rs - unsafe_code
+# Its probe's derived-token children and ICMP echo, and the accept loop's pause.
+crates/sandbox/examples/s15_wfp_vm/derived.rs - unsafe_code
+crates/sandbox/examples/s15_wfp_vm/derived.rs pause_tenth clippy::disallowed_methods
+crates/sandbox/examples/s15_wfp_vm/ports_rows.rs timed clippy::disallowed_methods
+crates/sandbox/src/windows/setup/processes.rs - unsafe_code
+crates/sandbox/src/windows/setup/profile.rs - unsafe_code
+crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
+# The stop task's process snapshot, the WTS process list, OpenProcess, NtSuspendProcess and
+# TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
+# it starts.
+crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_bits.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
+# S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
+# and the wall clock of a set-aside's folder and of a forget's release.
+crates/sandbox/src/windows/user_setup.rs - unsafe_code
+# The set-up program's admin copy: its checks' Win32 reads and lock-down, its hash's read-only
+# open, and --remove's deletion of the admin folder (MoveFileExW for the running copy).
+crates/sandbox/src/windows/admin_copy/os.rs - unsafe_code
+crates/sandbox/src/windows/admin_copy/mark_os.rs - unsafe_code
+# The admin folder's lock-down walked through handles: a link's delete on its own handle.
+crates/sandbox/src/windows/admin_copy/lock_tree_os.rs - unsafe_code
+crates/sandbox/src/windows/admin_copy/os.rs open_shared clippy::disallowed_methods
+# --adopt's and --remove's take-back deletes in the admin folder (0049, the staging folder's DACL).
+crates/sandbox/src/windows/admin_copy/take_back_os.rs NtfsLockDown::remove clippy::disallowed_methods
+crates/sandbox/src/windows/admin_copy/ntfs_tests.rs a_held_hash_keeps_the_file_from_changing_until_it_drops clippy::disallowed_methods
+crates/sandbox/src/windows/setup/admin_remove.rs - unsafe_code
+crates/sandbox/src/windows/setup/admin_remove.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disallowed_methods
+crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
+crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
+# The --remove VM harness (S15 PR4j): its FFI, and the reg query and PowerShell lists it reads.
+crates/sandbox/examples/s15_remove_vm/win.rs - unsafe_code
+crates/sandbox/examples/s15_remove_vm/snapshot.rs capture clippy::disallowed_methods
+crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line clippy::disallowed_methods
+# S15 PR4j: `SetupExit::Removed`, the exit 0 the uninstall hook reads, as an alias of `Done`
+# named like the variants beside it, so no exit code is used twice.
+crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
+crates/sandbox/src/windows/reclaim/taken_tests.rs timed clippy::disallowed_methods
+# An OLE date's seconds, range-checked to 1900..10000 just above the cast (refresh task's last run, host.log).
+crates/sandbox/src/windows/refresh/last_run.rs ole_date_text clippy::cast_possible_truncation
+# S15 PR5: tier B's runner (clauseo-sandbox-run), the (B) token, the runner pipes and the CA bundle.
+crates/sandbox/src/bin/clauseo-sandbox-run.rs exit_with clippy::exit
+crates/sandbox/src/bin/clauseo-sandbox-run.rs main clippy::print_stderr
+crates/sandbox/src/windows/token/os.rs - unsafe_code
+crates/sandbox/src/windows/pipe/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
+crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
+crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
+crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer/end.rs pause clippy::disallowed_methods
+crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
+crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
+crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
+crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
+crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
+crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
+crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code
+crates/sandbox/src/windows/test_pool.rs - unsafe_code
+crates/sandbox/src/windows/test_pool.rs run_powershell clippy::disallowed_methods
+crates/sandbox/src/windows/token/ntfs_tests.rs - unsafe_code
+crates/sandbox/src/windows/pipe/ntfs_tests.rs - unsafe_code
+# S15 PR5: the VM and CI harness for tier B's runner (examples/s15_launch_vm).
+crates/sandbox/examples/s15_launch_vm/win.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/ui.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/probe.rs exit_with clippy::exit
+crates/sandbox/examples/s15_launch_vm/sys.rs make_dir clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs write_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs copy_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs remove_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs remove_tree clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs start clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs output clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs now clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs sleep clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/win_sec.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_desk.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/sys.rs hard_link clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/sys.rs symlink_file clippy::disallowed_methods
+crates/sandbox/examples/s15_launch_vm/win_thread.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_ctl.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_logon.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
+# The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
+crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code

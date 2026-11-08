@@ -21,7 +21,7 @@ use clauseo_process::Timer;
 
 use crate::cancel::Cancel;
 use crate::signin::SigninState;
-use crate::signin::codex::identity;
+use crate::signin::codex::identity::{self, AccountRead};
 use crate::signin::env::RunKind;
 use crate::signin::job::SigninJob;
 use crate::signin::{claude, codex, reuse};
@@ -67,24 +67,38 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
     Some(Detected { state, identity })
 }
 
-/// Codex's detection; `None` when it could not tell: a status run that could not, or, for a
-/// reusable login, an `account/read` that got no answer (cut short by Cancel or its limit, or
-/// an error). Such a read is never "no email": `LoginFound { email: None }` comes only from an
-/// answer that names no `ChatGPT` account.
+/// Codex's detection; `None` when it could not tell: a status run that got no answer, or, for a
+/// reusable login, an `account/read` that got none (cut short by Cancel or its limit). Such a
+/// read is never "no email": `LoginFound { email: None }` comes only from a `ChatGPT` account
+/// whose email Codex does not know. A login whose `account/read` names no `ChatGPT` account (an
+/// API key, say, `account: null`, or a JSON-RPC error) is not offered: `SignedOut { found: None
+/// }`, the plain sign-in card.
 pub(crate) async fn codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
 ) -> Option<Detected> {
     let folder = folder(job)?;
-    let code = codex::status_run(job, cancel, RunKind::Detect, &folder).await?;
+    let said = codex::status_run(job, cancel, RunKind::Detect, &folder).await;
+    if said == codex::StatusSaid::NoAnswer {
+        return None;
+    }
     let present = job
         .config
         .signin
         .lawyer_home()
         .is_some_and(|lawyer| reuse::lawyer_login_present(&lawyer));
-    let verdict = CodexDetect::classify(code, present);
+    let verdict = CodexDetect::classify(said == codex::StatusSaid::LoggedIn, present);
     let identity = if verdict == CodexDetect::Reusable {
-        identity::read_as(job, cancel, RunKind::Detect, &folder).await?
+        match identity::read_as(job, cancel, RunKind::Detect, &folder).await {
+            AccountRead::Chatgpt(identity) => identity,
+            AccountRead::NotChatgpt | AccountRead::NoAccount => {
+                return Some(Detected {
+                    state: SigninState::SignedOut { found: None },
+                    identity: Identity::default(),
+                });
+            }
+            AccountRead::NoAnswer => return None,
+        }
     } else {
         Identity::default()
     };

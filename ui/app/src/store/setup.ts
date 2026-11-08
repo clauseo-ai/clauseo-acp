@@ -20,7 +20,8 @@ import type {
 } from "../transport/protocol.ts";
 
 /** A transport that carries the setup wire: R20's `setup` command and stream, and S21's `count_ui`. The desktop one
- * stubs it until stage D's P5 lands; the fake scripts it. The room asks for it by duck type (first-run/hold.ts). */
+ * carries desktop's own (tauri-transport.ts, setup-feed.ts); the fake scripts it. The room asks for it by duck type
+ * (first-run/hold.ts). */
 export interface SetupSource {
   /** Hears each SetupEvent: a new listener first gets SetupInfo, then each agent's install and sign-in state. Returns
    * the unsubscribe. */
@@ -45,6 +46,8 @@ export type AgentSetup = {
   readyHere?: boolean;
   /** The sign-in finished while this window watched, or the first word was a reused login: the signed-in line shows. */
   signedHere?: boolean;
+  /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
+  refused?: string | undefined;
 };
 
 export type CountsState = {
@@ -69,6 +72,16 @@ export type SetupState = {
   pasting: boolean;
   copied: "message" | "log" | null;
   counts: CountsState;
+  /** The settings the firm's policy locks (SettingsView.locked), as read at the start: a locked plan's sign-in has no
+   * control on the first screen. */
+  locked: readonly string[];
+};
+
+/** Whether a firm's policy locks the agent's plan: `plans.<id>`, or a prefix of it ending in `.` (`plans.`, while a
+ * policy source can't be read; SettingsView.locked). */
+export const planLocked = (locked: readonly string[], agent: AgentId): boolean => {
+  const key = `plans.${agent}`;
+  return locked.some((k) => k === key || (k.endsWith(".") && key.startsWith(k)));
 };
 
 const START: SetupState = {
@@ -80,9 +93,14 @@ const START: SetupState = {
   pasting: false,
   copied: null,
   counts: { on: true, locked: false, started: false },
+  locked: [],
 };
 
 const MB = 1_000_000;
+
+/** A byte count as the first run says a size: whole MB, 10^6 bytes, rounded. The one MB
+ * formatter the install lines use (the download's size, and its done and total). */
+export const mbOf = (bytes: number): number => Math.round(bytes / MB);
 
 /** Whether an install state is a failure on screen, and its code. */
 function installCode(state: InstallProgress): ErrorCode | null {
@@ -106,8 +124,11 @@ export type SetupStore = {
   state: () => SetupState;
   /** Subscribes to the setup stream and reads the privacy settings; returns the stop. */
   start: () => () => void;
-  /** One setup command; a refusal goes to the console, and the next event says what came of it. */
+  /** One setup command; a refusal goes to the console and to the agent's `refused`, and the next event says what came
+   * of it. */
   command: (command: SetupCommand) => void;
+  /** `command`, with the promise of whether desktop took it: a code's or a key's field keeps its words until then. */
+  send: (command: SetupCommand) => Promise<boolean>;
   /** Changes the gate's own state. */
   set: (
     patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen" | "pending">>,
@@ -148,13 +169,13 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       const was = state.agents[id];
       const patch: AgentSetup = { install };
       if (typeof install === "object" && "missing" in install && install.missing !== undefined)
-        patch.mb = Math.round(install.missing.download_bytes / MB);
+        patch.mb = mbOf(install.missing.download_bytes);
       if (
         typeof install === "object" &&
         "downloading" in install &&
         install.downloading !== undefined
       )
-        patch.mb = Math.round(install.downloading.total / MB);
+        patch.mb = mbOf(install.downloading.total);
       if (isReady(install) && was?.install !== undefined && !isReady(was.install)) {
         patch.readyHere = true;
         count({ onboarding_step: { step: "agent_ready" } });
@@ -168,7 +189,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     } else if ("sign_in_changed" in event && event.sign_in_changed !== undefined) {
       const { agent: id, state: signIn } = event.sign_in_changed;
       const was = state.agents[id];
-      const patch: AgentSetup = { signIn };
+      // a new sign-in state answers whatever was refused before it
+      const patch: AgentSetup = { signIn, refused: undefined };
       if (isSignedIn(signIn) && !isSignedIn(was?.signIn)) {
         // the first word a reused login: no sign-in step, and the through line (UD1's brief)
         const reused = typeof signIn === "object" && signIn.signed_in?.source === "reused";
@@ -187,6 +209,22 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       });
       agent(id, patch);
     }
+  };
+  const send = (command: SetupCommand): Promise<boolean> => {
+    const id = Object.values(command)[0]?.agent;
+    // a press answers whatever was refused before it
+    if (id !== undefined && state.agents[id]?.refused !== undefined)
+      agent(id, { refused: undefined });
+    return transport.setup(command).then(
+      () => true,
+      (error: unknown) => {
+        // the command's kind only: it can hold a pasted code or an API key
+        warn(`setup ${Object.keys(command).join(",")}`)(error);
+        const code = (error as { code?: unknown } | null)?.code;
+        if (id !== undefined) agent(id, { refused: typeof code === "string" ? code : "internal" });
+        return false;
+      },
+    );
   };
   const readSettings = async () => {
     try {
@@ -207,6 +245,7 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
         locked,
         started,
       },
+      locked: settings.locked,
     });
   };
   return {
@@ -222,9 +261,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       void readSettings();
       return stop;
     },
-    command: (command) => {
-      transport.setup(command).catch(warn("setup"));
-    },
+    command: (command) => void send(command),
+    send,
     set: (patch) => emit({ ...state, ...patch }),
     setCounts: (on) => {
       if (state.counts.locked) return;

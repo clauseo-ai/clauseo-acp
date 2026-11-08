@@ -1,5 +1,9 @@
 //! The folder check's answers on folders this test makes, and the admin shares on a Windows
 //! runner.
+//!
+//! Past 500 lines: split tier B's record tests (from the registry read down) into a file of
+//! their own when this grows.
+#![expect(unsafe_code, reason = "FFI to read a test folder's DACL back as SDDL")]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -158,7 +162,7 @@ fn admin_share_root(path: &Path) -> PathBuf {
 }
 
 /// `path` as a UNC path through the admin share: `C:\x\y` gives `\\localhost\C$\x\y`.
-fn admin_share_path(path: &Path) -> PathBuf {
+pub(in crate::windows) fn admin_share_path(path: &Path) -> PathBuf {
     let (drive, rest) = drive_and_rest(path);
     PathBuf::from(format!(r"\\localhost\{drive}$\{rest}"))
 }
@@ -173,4 +177,403 @@ fn drive_and_rest(path: &Path) -> (&str, &str) {
 /// Gives `path` the protected DACL that `sddl` describes.
 fn protect_with(path: &Path, sddl: &str) {
     test_dacl::protect_with(path, sddl).unwrap();
+}
+
+// Tier B's records: the registry read moved here from the desktop's check (#317), this user's
+// SID, the OS facts and the set-up state on a runner that was never set up.
+
+#[test]
+fn the_registry_read_tells_missing_wrong_type_and_a_string_apart() {
+    use windows::core::w;
+
+    use super::RecordError;
+    use super::record::read_string;
+
+    let missing = read_string(w!("SOFTWARE\\Clauseo\\NoSuchKeyForTests"), w!("OwnerSid"));
+    assert!(matches!(missing, Ok(None)), "{missing:?}");
+    // Values every Windows has: ProductName is a REG_SZ, InstallDate a REG_DWORD.
+    let version = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let name = read_string(version, w!("ProductName"));
+    assert!(
+        matches!(&name, Ok(Some(text)) if text.starts_with("Windows")),
+        "{name:?}"
+    );
+    let missing_value = read_string(version, w!("NoSuchValueForTests"));
+    assert!(matches!(missing_value, Ok(None)), "{missing_value:?}");
+    let dword = read_string(version, w!("InstallDate"));
+    assert!(matches!(dword, Err(RecordError::WrongType)), "{dword:?}");
+    // REG_EXPAND_SZ is refused unexpanded: without RRF_NOEXPAND it would come back expanded, e.g.
+    // `C:\Program Files`, and the environment (which the agent controls) would choose the text.
+    let expand = read_string(
+        w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion"),
+        w!("ProgramFilesPath"),
+    );
+    assert!(matches!(expand, Err(RecordError::WrongType)), "{expand:?}");
+    // The real record: a CI runner has none, a developer's machine may.
+    let record = super::sandbox_pool_sids();
+    assert!(record.is_ok(), "{record:?}");
+}
+
+#[test]
+fn the_registry_read_tells_a_multi_sz_and_a_dword_apart() {
+    use windows::Win32::System::Registry::RRF_RT_REG_MULTI_SZ;
+    use windows::core::w;
+
+    use super::RecordError;
+    use super::pool::pool_sids_from_multi_sz;
+    use super::record::{read_dword, read_string, read_units};
+
+    // Values every Windows has: ServiceGroupOrder's List is a REG_MULTI_SZ of group names.
+    let order = w!("SYSTEM\\CurrentControlSet\\Control\\ServiceGroupOrder");
+    let list = read_units(order, w!("List"), RRF_RT_REG_MULTI_SZ)
+        .unwrap()
+        .unwrap();
+    assert!(list.ends_with(&[0, 0]), "{list:?}");
+    // Group names are not SIDs: the pool decoder refuses the list whole.
+    assert!(pool_sids_from_multi_sz(&list).is_err());
+    let as_string = read_string(order, w!("List"));
+    assert!(
+        matches!(as_string, Err(RecordError::WrongType)),
+        "{as_string:?}"
+    );
+    let version = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let date = read_dword(version, w!("InstallDate"));
+    assert!(matches!(date, Ok(Some(_))), "{date:?}");
+    let name = read_dword(version, w!("ProductName"));
+    assert!(matches!(name, Err(RecordError::WrongType)), "{name:?}");
+    let missing = read_dword(version, w!("NoSuchValueForTests"));
+    assert!(matches!(missing, Ok(None)), "{missing:?}");
+}
+
+#[test]
+fn a_machine_without_the_record_has_no_pool_and_needs_set_up() {
+    // A CI runner was never set up, so it has no HKLM\SOFTWARE\Clauseo\Sandbox.
+    let owner = super::sandbox_owner_sid();
+    assert!(
+        matches!(owner, Ok(None)),
+        "this machine has a record: {owner:?}"
+    );
+    let pool = super::sandbox_pool_sids();
+    assert!(matches!(&pool, Ok(sids) if sids.is_empty()), "{pool:?}");
+    assert!(matches!(super::sandbox_group_sid(), Ok(None)));
+    assert!(matches!(super::sandbox_data_dir(), Ok(None)));
+    assert!(matches!(super::record::sandbox_removing(), Ok(false)));
+    let temp = TempDir::new("setup-state-no-record");
+    assert_eq!(super::setup_state(temp.path()), crate::SetupState::Needed);
+}
+
+#[test]
+fn this_users_sid_is_a_canonical_account_sid() {
+    let user = super::record::current_user_sid().unwrap();
+    assert!(user.as_str().starts_with("S-1-5-"), "{user}");
+}
+
+#[test]
+fn the_runners_architecture_and_build_are_read() {
+    let os = super::os_facts();
+    assert_eq!(os.arm64, cfg!(target_arch = "aarch64"), "{os:?}");
+    let build = os.build.unwrap();
+    assert!(build >= crate::detect::FIRST_BUILD, "{build}");
+    // ARM64 is tier C on purpose; the nightly's ARM64 runner checks that on real hardware.
+    if os.arm64 {
+        let found = crate::detect::detect(None);
+        let unsupported = Some(crate::detect::NoSandbox::UnsupportedOs);
+        assert_eq!(found.reason, unsupported, "{found:?}");
+    }
+}
+
+#[test]
+fn a_data_folder_without_a_marker_needs_set_up() {
+    let temp = TempDir::new("setup-state");
+    assert_eq!(super::setup_state(temp.path()), crate::SetupState::Needed);
+}
+
+// The review's fixes: machine accounts never load as matter SIDs, and the sandbox folder's
+// protected DACL.
+
+/// A fixed matter id (a v7 UUID).
+const MATTER_A: &str = "0190f5c8-7b1a-7c3d-8e4f-0123456789ab";
+
+/// `matters.json` under `temp` mapping `MATTER_A` to `sid`.
+fn matters_with(temp: &TempDir, sid: &str) {
+    temp.file(
+        "sandbox/matters.json",
+        &format!(r#"{{"version":1,"matters":{{"{MATTER_A}":"{sid}"}}}}"#),
+    );
+}
+
+#[test]
+fn machine_accounts_never_load_as_matter_sids() {
+    use super::matters::MatterSids;
+    use super::sids::{Reserved, Sid};
+
+    let temp = TempDir::new("matter-sids-accounts");
+    let user = super::record::current_user_sid().unwrap();
+    matters_with(&temp, user.as_str());
+    assert!(MatterSids::load(temp.path()).is_err(), "{user}");
+    if let Some(record) = super::sandbox_pool_sids().unwrap().first() {
+        // A machine that was set up: the real record.
+        matters_with(&temp, record.as_str());
+        assert!(MatterSids::load(temp.path()).is_err(), "{record}");
+    } else {
+        // A CI runner has no record: the same reservation, given by hand.
+        let sandbox = Sid::parse("S-1-5-21-11-22-33-1005").unwrap();
+        matters_with(&temp, sandbox.as_str());
+        let reserved = Reserved::new([user.clone(), sandbox]);
+        assert!(MatterSids::load_with(temp.path(), reserved).is_err());
+    }
+    // New matter SIDs stay out of this user's domain.
+    let fresh = TempDir::new("matter-sids-fresh");
+    let mut sids = MatterSids::load(fresh.path()).unwrap();
+    let matter: clauseo_protocol::MatterId = MATTER_A.parse().unwrap();
+    let sid = sids.sid_for(&matter).unwrap();
+    assert!(
+        user.domain().is_none() || sid.domain() != user.domain(),
+        "{sid}"
+    );
+}
+
+/// The SDDL of `path`'s DACL.
+fn dacl_sddl(path: &Path) -> String {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::core::{PCWSTR, PWSTR};
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `wide` is NUL-terminated; `descriptor` is a live out-pointer, freed below.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            PCWSTR(wide.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &raw mut descriptor,
+        )
+    };
+    assert_eq!(status, ERROR_SUCCESS);
+    let mut text = PWSTR::null();
+    // SAFETY: the descriptor is valid; `text` is a live out-pointer, freed below.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+    }
+    .unwrap();
+    // SAFETY: a NUL-terminated string from the call above.
+    let sddl = unsafe { text.to_string() }.unwrap();
+    // SAFETY: both were allocated with LocalAlloc and are freed once.
+    unsafe {
+        LocalFree(Some(HLOCAL(text.0.cast())));
+        LocalFree(Some(HLOCAL(descriptor.0)));
+    }
+    sddl
+}
+
+/// Asserts `path`'s DACL is protected and holds exactly three entries: full access for the
+/// user, `SYSTEM` and `Administrators`.
+fn assert_private(path: &Path) {
+    let user = super::record::current_user_sid().unwrap();
+    let sddl = dacl_sddl(path);
+    assert!(sddl.starts_with("D:P"), "{sddl}");
+    let mut trustees: Vec<String> = sddl
+        .split('(')
+        .skip(1)
+        .map(|ace| {
+            let fields: Vec<&str> = ace.trim_end_matches(')').split(';').collect();
+            assert_eq!(fields.len(), 6, "{sddl}");
+            assert_eq!((fields[0], fields[2]), ("A", "FA"), "{sddl}");
+            fields[5].to_owned()
+        })
+        .collect();
+    trustees.sort();
+    // The local Administrator account (RID 500) prints as the alias LA.
+    let me = if user.as_str().ends_with("-500") {
+        "LA".to_owned()
+    } else {
+        user.as_str().to_owned()
+    };
+    let mut expected = vec![me, "BA".to_owned(), "SY".to_owned()];
+    expected.sort();
+    assert_eq!(trustees, expected, "{sddl}");
+}
+
+#[test]
+fn the_sandbox_folder_gets_a_protected_private_dacl_again_and_again() {
+    let temp = TempDir::new("sandbox-dacl");
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_private(&folder);
+    // A DACL changed behind the folder's back is put back at the next make.
+    test_dacl::protect_with(&folder, "D:P(A;OICI;FA;;;WD)").unwrap();
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_private(&folder);
+}
+
+/// Enables `SeRestorePrivilege` in this test process's token, so it may give a folder to another
+/// account. `false` when the token lacks it (a non-admin runner).
+fn enable_restore_privilege() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, LUID};
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::w;
+
+    let mut token = HANDLE::default();
+    // SAFETY: a pseudo-handle and a live out-pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
+        .is_err()
+    {
+        return false;
+    }
+    let mut luid = LUID::default();
+    // SAFETY: a NUL-terminated literal and a live out-pointer.
+    let found = unsafe { LookupPrivilegeValueW(None, w!("SeRestorePrivilege"), &raw mut luid) };
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    // SAFETY: the token was opened to adjust; `privileges` lives for the call. Its success can
+    // still mean "not all assigned", which GetLastError tells.
+    let enabled = found.is_ok()
+        && unsafe { AdjustTokenPrivileges(token, false, Some(&raw const privileges), 0, None, None) }
+            .is_ok()
+        // SAFETY: reads this thread's last error, set by the call above.
+        && unsafe { GetLastError() } == ERROR_SUCCESS;
+    // SAFETY: opened above, closed once.
+    drop(unsafe { CloseHandle(token) });
+    enabled
+}
+
+#[test]
+fn a_sandbox_folder_owned_by_another_account_is_taken_back() {
+    use super::private_dir::{owner, owner_allowed, set_owner};
+    use super::sids::Sid;
+
+    let user = super::record::current_user_sid().unwrap();
+    let local_service = Sid::parse("S-1-5-19").unwrap();
+    assert!(owner_allowed(&user, &user));
+    assert!(owner_allowed(&Sid::parse("S-1-5-18").unwrap(), &user));
+    assert!(owner_allowed(&Sid::parse("S-1-5-32-544").unwrap(), &user));
+    assert!(!owner_allowed(&local_service, &user));
+
+    let temp = TempDir::new("sandbox-owner");
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    if !enable_restore_privilege() {
+        println!("skipped the re-own case: this token can't give a folder away");
+        return;
+    }
+    set_owner(&folder, &local_service).unwrap();
+    assert_eq!(owner(&folder).unwrap(), local_service);
+    // The folder's DACL still grants the user full access, WRITE_OWNER included, so the user
+    // takes it back.
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_eq!(owner(&folder).unwrap(), user);
+    assert_private(&folder);
+}
+
+/// A sandbox folder made by `make_sandbox_dir` under a fresh temp folder.
+fn sandbox_folder(test: &str) -> (TempDir, PathBuf) {
+    let temp = TempDir::new(test);
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    (temp, folder)
+}
+
+#[test]
+fn record_files_get_the_folders_three_entries_as_their_own() {
+    use super::matters::MatterSids;
+
+    let (temp, folder) = sandbox_folder("record-file-ace");
+    let file = temp.file("sandbox/matters.json", r#"{"version":1,"matters":{}}"#);
+    test_dacl::protect_with(&file, "D:P(A;;FA;;;WD)").unwrap();
+    assert!(dacl_sddl(&file).contains(";WD)"));
+    let mut sids = MatterSids::load(temp.path()).unwrap();
+    // Twice: the first save replaces matters.json with a new file, which the second checks.
+    for matter in [MATTER_A, "0190f5c8-7b1a-7c3d-8e4f-0123456789ac"] {
+        sids.sid_for(&matter.parse().unwrap()).unwrap();
+        assert_private(&folder.join("matters.json"));
+        assert_private(&folder.join("matters.lock"));
+    }
+    assert_eq!(MatterSids::load(temp.path()).unwrap().len(), 2);
+    drop(file);
+}
+
+#[test]
+fn a_record_file_owned_by_another_account_is_taken_back() {
+    use super::private_dir::{owner, set_owner};
+    use super::sids::Sid;
+
+    let (temp, _folder) = sandbox_folder("record-file-owner");
+    let file = temp.file("sandbox/matters.json", "{}");
+    if !enable_restore_privilege() {
+        println!("skipped: this token can't give a file away");
+        return;
+    }
+    let local_service = Sid::parse("S-1-5-19").unwrap();
+    set_owner(&file, &local_service).unwrap();
+    assert_eq!(owner(&file).unwrap(), local_service);
+    super::write::check_owned_file(&file).unwrap();
+    assert_eq!(
+        owner(&file).unwrap(),
+        super::record::current_user_sid().unwrap()
+    );
+}
+
+#[test]
+fn a_hard_linked_record_file_is_refused() {
+    let (temp, _folder) = sandbox_folder("record-file-hard-link");
+    let outside = temp.file("outside.json", "{}");
+    let linked = temp.hard_link("sandbox/matters.json", &outside);
+    let error = super::write::check_owned_file(&linked).unwrap_err();
+    assert!(error.to_string().contains("hard links"), "{error}");
+}
+
+#[test]
+fn a_missing_record_file_is_fine() {
+    let (_temp, folder) = sandbox_folder("record-file-missing");
+    super::write::check_owned_file(&folder.join("matters.json")).unwrap();
+}
+
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test makes its junction with cmd's mklink /J, which exits at once"
+)]
+fn a_junction_named_sandbox_is_refused() {
+    let temp = TempDir::new("sandbox-junction");
+    let elsewhere = temp.dir("elsewhere");
+    let junction = temp.path().join("sandbox");
+    let made = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(&junction)
+        .arg(&elsewhere)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let error = super::write::make_sandbox_dir(&junction).unwrap_err();
+    assert!(error.to_string().contains("reparse point"), "{error}");
+    // The folder the junction names kept its DACL: nothing was set through the link.
+    assert!(!dacl_sddl(&elsewhere).starts_with("D:P"));
 }

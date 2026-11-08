@@ -30,7 +30,7 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, state, steps, updates,
+    current, failure, host_stopping, known, matter_of, queue, sign_in, state, steps, updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -103,7 +103,12 @@ pub(super) fn on_prompt_done(
             if fallback {
                 current.limit_read = Some(LimitRead::default());
             }
-            End::failed(error.code(), Some(error.to_string()), None)
+            let text = error.to_string();
+            End::failed(
+                sign_in::code_of(actor, error.code(), &text),
+                Some(text),
+                None,
+            )
         }
     };
     end_turn(actor, thread, end);
@@ -150,6 +155,11 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     if let Some(call) = current.prompt_call.take() {
         call.abort();
     }
+    // Case-law calls from now on count against the between-turns bucket (R24).
+    super::launch_checks::relay::turn_ended(actor, thread);
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     if let Some(timer) = current.cancel_timer.take() {
         timer.abort();
     }
@@ -164,6 +174,8 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         end.detach = current.detach.take();
     }
     let (turn, before) = (current.turn, current.checkpoint_before);
+    let hint =
+        std::mem::take(&mut current.case_law_hint) == crate::connectors::hint::TurnLooks::CaseLaw;
     let expiry = end.expiry;
     let paths = std::mem::take(&mut current.tool_paths);
     current.end = Some(end);
@@ -175,10 +187,17 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     if let Err(error) = expired {
         tracing::warn!(%thread, error = %Cause(&error), "a turn's expiries were not logged");
     }
+    if let Some(state) = state(actor, thread) {
+        // The relay's case-law results no call of this turn took (`sources/case_law.rs`).
+        state.sources.case_law.turn_ended();
+    }
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.permissions.clear();
         agent.elicitations.clear();
         agent.url_elicitations.clear();
+    }
+    if hint && let Some(matter) = actor.threads.get(&thread).map(|entry| entry.row.matter) {
+        super::super::connectors::hint::turn_ended(actor, matter, thread, turn);
     }
     limits::asking_changed(actor);
     let reads = state(actor, thread)
@@ -417,11 +436,17 @@ pub(super) fn after_events(
 /// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
+    let mut requeue = None;
     let ended = state(actor, thread).and_then(|state| {
-        let current = state.current.take()?;
+        let mut current = state.current.take()?;
+        let stopped = state.stopped_for_sign_in.take();
         let close = &state.closing.as_ref()?.close;
         // A turn ended with no close of its own (a host bug lost its matter) is not counted.
-        (close.turn == current.turn).then(|| counting::Ended {
+        if close.turn != current.turn {
+            return None;
+        }
+        requeue = sign_in::requeue_of(&mut current, stopped, close);
+        Some(counting::Ended {
             started: current.started,
             first_words: current.first_words,
             now,
@@ -431,6 +456,9 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     });
     if let Some(ended) = ended {
         counting::answer_ended(actor, thread, &ended);
+    }
+    if let Some(requeue) = requeue {
+        queue::keep_for_sign_in(actor, thread, requeue);
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);

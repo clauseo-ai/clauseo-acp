@@ -67,6 +67,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
     },
     tools: view.tools,
     locked: view.locked,
+    ...(view.plans === undefined ? {} : { plans: view.plans }),
   };
 }
 
@@ -215,6 +216,15 @@ function appEventOf(event: HostEvent): AppEvent | null {
   }
   if (event.threads_changed !== undefined) return { threads_changed: event.threads_changed };
   if (event.browser_install !== undefined) return { browser_install: event.browser_install };
+  if (event.connectors_changed !== undefined)
+    return { connectors_changed: event.connectors_changed };
+  if (event.case_law_hint !== undefined) return { case_law_hint: event.case_law_hint };
+  if (event.folder_scanned !== undefined) return { folder_scanned: event.folder_scanned };
+  if (event.site_blocked !== undefined) return { site_blocked: event.site_blocked };
+  if (event.update_changed !== undefined) return { update_changed: event.update_changed };
+  // UC: as they came; protection_view_changed is R17 PR-B's, not in HostEvent yet
+  if (event.protection_changed !== undefined || "protection_view_changed" in event)
+    return event as AppEvent;
   return null;
 }
 

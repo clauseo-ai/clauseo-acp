@@ -2,6 +2,7 @@
 //! spots an out-of-credit tool result.
 
 use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::config::Origin;
 use crate::error::Error;
@@ -28,15 +29,31 @@ pub struct McpReply {
     pub body: McpBody,
 }
 
-/// An MCP answer's body.
-#[derive(Debug, Clone, PartialEq)]
+/// An MCP answer's body, its JSON raw: checked to be JSON, never built as a tree, so a reply of
+/// up to 8 MB costs about its own size whatever it holds.
+#[derive(Debug, Clone)]
 pub enum McpBody {
-    /// `application/json`: one JSON-RPC message.
-    Json(Value),
-    /// `text/event-stream`: one value per `data:` event.
-    Events(Vec<Value>),
+    /// `application/json`: one JSON-RPC message, as the connector wrote it (trimmed).
+    Json(Box<RawValue>),
+    /// `text/event-stream`: one value per `data:` event. An event of several `data:` lines
+    /// holds them joined with `\n`, which JSON reads as whitespace.
+    Events(Vec<Box<RawValue>>),
     /// No body (202 Accepted).
     Empty,
+}
+
+/// Equal when the raw texts are the same, byte for byte.
+impl PartialEq for McpBody {
+    fn eq(&self, other: &McpBody) -> bool {
+        match (self, other) {
+            (McpBody::Json(left), McpBody::Json(right)) => left.get() == right.get(),
+            (McpBody::Events(left), McpBody::Events(right)) => {
+                left.len() == right.len() && left.iter().zip(right).all(|(a, b)| a.get() == b.get())
+            }
+            (McpBody::Empty, McpBody::Empty) => true,
+            (McpBody::Json(_) | McpBody::Events(_) | McpBody::Empty, _) => false,
+        }
+    }
 }
 
 /// What a `tools/call` result means for the lawyer.
@@ -85,13 +102,14 @@ pub fn classify_tool_result_for(
 }
 
 /// The values of a `text/event-stream` body: one per event with `data:` lines (joined with
-/// `\n`), each parsed as JSON. Comments, `event:`, `id:` and `retry:` lines are skipped.
-pub(crate) fn parse_event_stream(body: &str) -> Result<Vec<Value>, Error> {
+/// `\n`), each checked as JSON and kept raw. Comments, `event:`, `id:` and `retry:` lines are
+/// skipped.
+pub(crate) fn parse_event_stream(body: &str) -> Result<Vec<Box<RawValue>>, Error> {
     let mut values = Vec::new();
     let mut data: Option<String> = None;
     let mut flush = |data: &mut Option<String>| -> Result<(), Error> {
         if let Some(text) = data.take() {
-            let value = serde_json::from_str(&text)
+            let value = crate::calls::raw_json(text)
                 .map_err(|err| crate::error::parse_error("event stream", &err))?;
             values.push(value);
         }

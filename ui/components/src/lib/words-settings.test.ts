@@ -18,8 +18,7 @@ test("the sections and their lines say the design's words in both languages", ()
     "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   );
   expect(st("hi", "How Clauseo looks on this computer.")).toBe("इस कंप्यूटर पर Clauseo कैसा दिखे।");
-  // hi: later, so the Hindi window shows the English
-  expect(st("hi", "Managed by firm")).toBe("Managed by firm");
+  expect(st("hi", "Managed by firm")).toBe("फ़र्म द्वारा प्रबंधित");
   expect(LANGUAGE_NAMES).toEqual({ en: "English", hi: "हिन्दी" });
 });
 
@@ -103,8 +102,10 @@ test("only the sections built so far bring their strings: no later section's nam
   const src = ["./words-settings.ts", "./words-settings.hi.ts"]
     .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
     .join("\n");
-  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates"])
+  for (const later of ["Indian Kanoon", "Updates", "Remembered answers"])
     expect(Object.keys(settingsWords), later).not.toContain(later);
+  // UC built the Safe workspace (R17's part; its remembered answers are UC2's)
+  expect(Object.keys(settingsWords)).toContain("Safe workspace");
   // the design's facts (its version and date) stay in the design
   expect(src).not.toMatch(/3\.0\.4|October/);
 });

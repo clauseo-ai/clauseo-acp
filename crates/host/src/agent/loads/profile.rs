@@ -4,11 +4,16 @@
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site; in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
-//!   included. `additionalDirectories` gains the work folder and the matter notes folder, after any
-//!   hook entries. `settings` gains `disableSkillShellExecution: true` always, and
-//!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login; in forced ask it also
-//!   gains the `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`.
+//!   site, and `mcp__case-law` only in a session that got the `case-law` entry (any hook rule
+//!   for that server is dropped otherwise); in forced ask (`agent/forced_ask.rs`) there is no
+//!   `allowedTools` at all, the hook's included. `additionalDirectories` gains the work folder and
+//!   the matter notes folder, after any hook entries. `settings` gains
+//!   `disableSkillShellExecution: true` always, and `skipWebFetchPreflight: true` on a Bedrock,
+//!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
+//!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
+//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`. These are flag
+//!   settings: they outrank the user's settings, and Claude Code merges every source's
+//!   `permissions.deny`, so no user rule takes one out.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
 //!   (`agent::codex::PROFILE_KEYS`), its tokens filled; then the host's `web_search` (`live` or
 //!   `disabled`) and both folders in `sandbox_workspace_write.writable_roots`.
@@ -28,7 +33,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use clauseo_profile::placeholders::{self, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{self, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
 };
@@ -95,13 +100,18 @@ impl Login {
     }
 }
 
-/// The session's two folders, as UTF-8 text for JSON.
+/// The session's two folders, as UTF-8 text for JSON, and what `{connectors}` becomes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Folders<'a> {
     /// `{work_folder}`, `<data>/run/<session id>/work`.
     pub(crate) work: &'a str,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`.
     pub(crate) notes: &'a str,
+    /// `{connectors}` (R24, decision D6): not a folder, but the session's like them. The
+    /// connectors paragraph in a session that got the `case-law` entry
+    /// (`clauseo_profile::instructions::connectors_part`), else the sentence that says there is no
+    /// case-law database, which [`Folders::of`] starts with: a caller that never says gets that.
+    pub(crate) connectors: &'a str,
 }
 
 impl<'a> Folders<'a> {
@@ -119,7 +129,13 @@ impl<'a> Folders<'a> {
         Ok(Self {
             work: text(work, WORK_FOLDER)?,
             notes: text(notes, MATTER_NOTES)?,
+            connectors: clauseo_profile::instructions::connectors_part(false),
         })
+    }
+
+    /// The same folders, with `{connectors}` filled by `connectors`.
+    pub(crate) fn with_connectors(self, connectors: &'a str) -> Self {
+        Self { connectors, ..self }
     }
 }
 
@@ -137,6 +153,11 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
     pub(crate) forced_ask: bool,
+    /// The data folder's deny rules (`RunFolders::data_deny`).
+    pub(crate) data: &'a crate::agent::data_fence::LaunchDeny,
+    /// The session gets the `case-law` entry (R24): `allowedTools` gains `mcp__case-law`
+    /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
+    pub(crate) case_law: bool,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -156,6 +177,10 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         }
         allowed.retain(|rule| !rule.as_str().is_some_and(is_web_rule));
     }
+    allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
+    if keys.case_law {
+        push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
+    }
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     }
@@ -174,10 +199,36 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
+    deny_data_folder(&mut settings, keys.data);
     if keys.forced_ask {
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
+}
+
+/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`), and
+/// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
+/// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
+/// spelling (a unit test's keys) nothing changes.
+fn deny_data_folder(
+    settings: &mut Map<String, Value>,
+    data: &crate::agent::data_fence::LaunchDeny,
+) {
+    if data.spellings.is_empty() {
+        return;
+    }
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = take_array(&mut permissions, "deny");
+    for rule in crate::agent::data_fence::claude_deny_rules(data) {
+        push_new(&mut deny, &rule);
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
+    let mut allow = take_array(&mut permissions, "allow");
+    for rule in crate::agent::data_fence::claude_allow_rules(data) {
+        push_new(&mut allow, &rule);
+    }
+    permissions.insert("allow".to_owned(), Value::Array(allow));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 
 /// Forced ask's second fence in the flag settings (`agent/forced_ask.rs` [`ASK_RULES`]):
@@ -256,13 +307,17 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
     Ok(())
 }
 
-/// The instructions with `{work_folder}` and `{matter_notes}` filled, in one pass. An
-/// unfillable token is a host bug: `agent.launch_failed`, naming it in the log.
+/// The instructions with `{work_folder}`, `{matter_notes}` and `{connectors}` filled, in one
+/// pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
     placeholders::fill(
         text,
         &IN_INSTRUCTIONS,
-        &[(WORK_FOLDER, folders.work), (MATTER_NOTES, folders.notes)],
+        &[
+            (WORK_FOLDER, folders.work),
+            (MATTER_NOTES, folders.notes),
+            (CONNECTORS, folders.connectors),
+        ],
     )
     .map_err(|unfilled| {
         tracing::error!(

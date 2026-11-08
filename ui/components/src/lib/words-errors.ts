@@ -36,6 +36,7 @@ export type ErrorCode =
   | "store.newer_version"
   | "matter.checkpoint_failed"
   | "matter.folder_missing"
+  | "matter.folder_not_a_matter"
   | "matter.folder_refused"
   | "matter.codex_folder"
   | "matter.file_locked"
@@ -48,9 +49,16 @@ export type ErrorCode =
   | "matter.folder_in_matters_root"
   | "matter.folder_network"
   | "matter.folder_no_permissions"
+  | "matter.folder_too_deep"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
+  | "settings.refused"
+  | "settings.key_stored"
+  | "signin.login_shared"
+  | "signin.firm_managed"
+  | "signin.key_in_use"
+  | "signin.endpoint_in_use"
   | "agent.install_offline"
   | "agent.install_blocked"
   | "agent.install_disk_full"
@@ -64,6 +72,20 @@ export type ErrorCode =
   | "signin.policy_unreadable"
   | "agent.guard_missing"
   | "update.failed"
+  | "signin.agents_still_running"
+  | "agent.keys_loading"
+  | "agent.key_unreadable"
+  | "matter.document_path_too_long"
+  | "matter.protected_link"
+  | "sandbox.setup_refused"
+  | "sandbox.setup_failed"
+  | "sandbox.setup_required"
+  | "sandbox.required"
+  | "sandbox.blocked"
+  | "blocklist.override_off"
+  | "blocklist.notice_expired"
+  | "blocklist.allow_not_saved"
+  | "blocklist.revoke_not_saved"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -100,7 +122,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.checkpoint_failed":
     "Clauseo couldn't save a version of this matter's papers, so this change can't be undone.",
   "matter.folder_missing":
-    "This matter's folder can't be found. It may have moved, or its drive isn't connected.",
+    "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.",
+  "matter.folder_not_a_matter":
+    "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
     "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
@@ -115,14 +139,27 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
     "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+  "matter.folder_too_deep":
+    "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",
+  "settings.refused": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "settings.key_stored":
+    "A key is already kept on this computer. To change it, open Settings, then Plans.",
+  "signin.login_shared":
+    "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.",
+  "signin.firm_managed":
+    "Questions go through your firm's own account, so there's nothing to sign in to here.",
+  "signin.key_in_use":
+    "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+  "signin.endpoint_in_use":
+    "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
   "agent.install_offline": "You're offline. Setting up waits for the connection.",
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
   "agent.install_failed": "Setting up didn't finish. Try again.",
-  "signin.cancelled": "Sign-in was cancelled in the browser.",
+  "signin.cancelled": "Sign-in was cancelled.",
   "signin.link_expired": "The sign-in link expired. Try again.",
   "signin.no_plan": "This account has no plan that works with Clauseo.",
   "signin.device_code_off": "Sign-in with a code is turned off for this ChatGPT account.",
@@ -132,6 +169,43 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
   "agent.guard_missing": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
   "update.failed": "The update didn't install. Try again.",
+  "signin.agents_still_running": "Clauseo is still finishing. Try again in a moment.",
+  "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
+  "agent.key_unreadable":
+    "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
+  "matter.document_path_too_long":
+    "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
+  // provisional: the item's path joins it once PR6 carries it as a field
+  "matter.protected_link":
+    "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.",
+  // provisional (app track, Rohan's batch review): the sandbox's four (decision record 0051), in
+  // design B's "Safe workspace" words
+  "sandbox.setup_refused":
+    "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
+  "sandbox.setup_failed": "The Safe workspace couldn't be set up on this computer. Try again.",
+  "sandbox.setup_required":
+    "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
+  "sandbox.required":
+    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
+  // provisional (app track, Rohan's batch review): in design B's "Safe workspace" words
+  "sandbox.blocked":
+    "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" refused while the firm's policy forbids overriding
+  // the unsafe-site list (decision record 0053)
+  "blocklist.override_off":
+    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" from a blocked-site notice the host no longer
+  // keeps (decision record 0053)
+  "blocklist.notice_expired":
+    "This notice has expired. Open the site again, then allow it from the new notice.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" that lasts until Clauseo
+  // closes, because the host couldn't save it (decision record 0053)
+  "blocklist.allow_not_saved":
+    "This site is allowed until Clauseo closes. Clauseo couldn't save the change, so it will be blocked again next time Clauseo opens.",
+  // provisional (stage E, Rohan's batch review): "Remove" of an allow that lasts until
+  // Clauseo closes, because the host couldn't save that (decision record 0053)
+  "blocklist.revoke_not_saved":
+    "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

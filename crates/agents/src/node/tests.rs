@@ -428,3 +428,18 @@ fn an_archive_without_node_leaves_no_runtime() {
     assert!(!dir.exists());
     assert_eq!(std::fs::read_dir(dir.parent().unwrap()).unwrap().count(), 0);
 }
+
+/// The info line names whose Node and its version, and for the user's only the file name.
+#[test]
+fn the_node_line_names_the_source_the_version_and_only_the_users_file_name() {
+    let user = Path::new("/home/ada/.nvm/versions/node/v24.22.0/bin/node");
+    assert_eq!(
+        node_line(NodeSource::User, user, "v24.22.0"),
+        "node=user version=v24.22.0 program=node"
+    );
+    let pinned = Path::new("/home/ada/data/agents/node/v24.22.0/bin/node");
+    assert_eq!(
+        node_line(NodeSource::Pinned, pinned, "v24.22.0"),
+        "node=pinned version=v24.22.0"
+    );
+}

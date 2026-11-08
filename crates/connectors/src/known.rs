@@ -25,8 +25,14 @@ pub struct KnownConnector {
 /// The production origin every compiled-in URL starts with.
 pub(crate) const PRODUCTION_ORIGIN: &str = "https://data.clauseo.chat";
 
-/// The staging origin, with the same paths as production.
+/// The staging origin, with the same paths as production (feature `staging` only).
+#[cfg(feature = "staging")]
 pub(crate) const STAGING_ORIGIN: &str = "https://data-staging.clauseo.chat";
+
+/// The connector's local test server on the Mac mini (feature `local` only): plain http, the
+/// same paths as production. A fixed address, so a build can be scanned for it.
+#[cfg(feature = "local")]
+pub const LOCAL_ORIGIN: &str = "http://127.0.0.1:8793";
 
 /// Indian Kanoon case law, the one connector at launch.
 pub const CASE_LAW: KnownConnector = KnownConnector {

@@ -12,11 +12,11 @@ use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
     HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PageVia, PermissionAbout,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
     PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry,
-    ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
-    ViewEntry, WebResult,
+    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
+    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
+    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -46,7 +46,9 @@ pub fn header_entry() -> HeaderEntry {
         agent: agent("claude-acp"),
         agent_name: None,
         status: ThreadStatus::Idle,
+        resuming_since: None,
         queue_held: true,
+        queue_held_reason: Some(QueueHoldReason::Paused),
         steer_joins_turn: true,
         tools: vec![],
         snoozed_until: None,
@@ -90,6 +92,7 @@ fn thread_entries() -> Vec<ViewEntry> {
             status: UserMessageStatus::Queued,
             edited: false,
             steer: None,
+            at_head: false,
             ts: Timestamp::new(1_760_000_001_000).unwrap(),
         }),
         ViewEntry::AgentText(agent_text_entry()),
@@ -203,8 +206,9 @@ fn turn_entries() -> Vec<ViewEntry> {
         ViewEntry::Notice(NoticeEntry {
             order: seq(10),
             event: event_id(21),
-            level: NoticeLevel::Warning,
-            text: "Context nearly full".to_owned(),
+            level: NoticeLevel::Info,
+            text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
+            kind: Some(NoticeKind::ContextNotRestored),
             ts: Timestamp::new(1_760_000_005_000).unwrap(),
         }),
         ViewEntry::Marker(MarkerEntry {

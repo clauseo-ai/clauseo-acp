@@ -1,0 +1,58 @@
+{
+  "docs/install/windows.md": {
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup: section 3, Windows asks once)",
+    "pr": 442
+  },
+  "docs/install/macos.md": {
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "stage F (provisional; Rohan batch review)",
+    "pr": 442
+  },
+  "crates/desktop/windows/nsis/English.nsh": {
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "stage F (provisional; Rohan batch review)",
+    "pr": 498,
+    "title": "Messages the Windows installer and uninstaller show",
+    "lines": [
+      "deleteAppDataFailed",
+      "deleteAppDataKept",
+      "deleteAppDataKeptFailed",
+      "deleteAppDataFailedUnnamed",
+      "policyFolderExists",
+      "policyFolderFailed",
+      "removeStillRunning",
+      "removeSkippedSilent",
+      "removeExeMissing",
+      "removeAdminCopyRefused",
+      "setupExeRemoved",
+      "adminCopyAsk",
+      "adminCopyWorking",
+      "adminCopyDone",
+      "adminCopyDeclined",
+      "adminCopyFailed",
+      "adminCopyBlocked",
+      "adminCopyOtherAccount",
+      "adminCopyMachineFailed",
+      "adminCopyNewerKept",
+      "adminCopyAppRunning",
+      "adminCopyStillRunning",
+      "adminCopySkippedSilent"
+    ],
+    "slots": {
+      "$R9": "the data folder",
+      "$R8": "the folder it kept",
+      "$APPDATA": "C:\\ProgramData"
+    }
+  },
+  "crates/desktop/windows/nsis/Hindi.nsh": {
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app thread (provisional Hindi; Rohan batch review)",
+    "pr": 651,
+    "title": "Messages the Windows installer and uninstaller show, in Hindi"
+  }
+}

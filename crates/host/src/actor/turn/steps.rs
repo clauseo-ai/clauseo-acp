@@ -246,8 +246,8 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if !host_stopping(actor) {
         let failed = TurnFailed {
             turn,
-            code: error.code(),
-            detail: Some(error.to_string()),
+            code: super::sign_in::code_of(actor, error.code(), &error.to_string()),
+            detail: Some(error.detail()),
         };
         end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         return;
@@ -341,7 +341,7 @@ pub(super) fn on_before_turn(
             let failed = TurnFailed {
                 turn,
                 code: error.code(),
-                detail: Some(error.to_string()),
+                detail: Some(error.detail()),
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
             return;
@@ -399,7 +399,7 @@ pub(super) fn on_before_turn(
             let failed = TurnFailed {
                 turn,
                 code: error.code(),
-                detail: Some(error.to_string()),
+                detail: Some(error.detail()),
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         }

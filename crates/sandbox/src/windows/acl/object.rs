@@ -1,0 +1,592 @@
+// SPDX-License-Identifier: GPL-3.0-or-later AND Apache-2.0
+// Derived from openai/codex codex-rs/windows-sandbox-rs/src/acl.rs
+// at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1), and its no_reparse_dir.rs
+// at e7f32cf1928a35a9232a633a51c2a03b5a7e2c72 (OBJ_DONT_REPARSE); see PROVENANCE.md
+//! A file or folder opened for the permission writes, never through a link (S15 PR3): a target
+//! or a walk's root by its path (`CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT`), and a walk's
+//! child by its name relative to its folder's handle (`NtCreateFile` with `RootDirectory` and
+//! `FILE_OPEN_REPARSE_POINT`), so a name once checked is never looked up again through a path.
+//! A folder is listed through its handle too (`FileIdBothDirectoryInfo`).
+
+use std::io;
+use std::path::Path;
+
+use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
+use windows::Wdk::Storage::FileSystem::{
+    FILE_OPEN, FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+    NtCreateFile,
+};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, HANDLE, NTSTATUS,
+    OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, RtlNtStatusToDosError, UNICODE_STRING,
+};
+use windows::Win32::Security::{
+    GetKernelObjectSecurity, OBJECT_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    SetKernelObjectSecurity,
+};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, ExtendedFileIdType, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO,
+    FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo,
+    FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    GetVolumePathNameW, OPEN_EXISTING, OpenFileById, READ_CONTROL, ReadFile, SYNCHRONIZE,
+    VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
+};
+use windows::Win32::System::IO::IO_STATUS_BLOCK;
+use windows::core::{PCWSTR, PWSTR};
+
+use crate::windows::folder::verbatim_wide;
+use crate::windows::writer::{ApplyFailure, FileId};
+
+mod listing;
+
+use listing::listed;
+
+/// `IsReparseTagNameSurrogate`: the tag's name-surrogate bit (junctions, symbolic links).
+const NAME_SURROGATE: u32 = 0x2000_0000;
+
+/// What a folder's listing needs besides the base rights.
+const LIST: u32 = FILE_LIST_DIRECTORY.0 | SYNCHRONIZE.0;
+
+/// A file or folder opened by its own name, never what a link names, with the rights it got.
+#[derive(Debug)]
+pub(in crate::windows) struct Object {
+    handle: Handle,
+    pub(in crate::windows) folder: bool,
+    pub(in crate::windows) links: u32,
+    tag: Option<u32>,
+    /// Whether the handle has `WRITE_DAC`.
+    pub(in crate::windows) write_dac: bool,
+    /// Whether the handle has `WRITE_OWNER` (an owner or a label write).
+    pub(in crate::windows) write_owner: bool,
+}
+
+/// One name a folder's listing gave, whether the listing said it is a folder, and the 64-bit
+/// file ID it gave (`FileId`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::windows) struct Child {
+    pub(in crate::windows) name: Vec<u16>,
+    pub(in crate::windows) folder: bool,
+    /// Whether the listing said it is a reparse point (a junction, a link, a placeholder).
+    pub(in crate::windows) reparse: bool,
+    pub(in crate::windows) id: u64,
+}
+
+impl Object {
+    /// Opens `path` itself (`FILE_FLAG_OPEN_REPARSE_POINT`; a cloud placeholder stays
+    /// unhydrated) with `WRITE_DAC | WRITE_OWNER`, then without `WRITE_OWNER`, then read only.
+    pub(in crate::windows) fn open(path: &Path) -> io::Result<Object> {
+        let wide = verbatim_wide(path)?;
+        ladder(0, |access| open_raw(&wide, access))
+    }
+
+    /// [`Object::open`], with the right to list it: a walk's root.
+    pub(in crate::windows) fn open_folder(path: &Path) -> io::Result<Object> {
+        let wide = verbatim_wide(path)?;
+        ladder(LIST, |access| open_raw(&wide, access))
+    }
+
+    /// Opens `name` in this folder relative to its handle, never following a link, with the
+    /// same rights as [`Object::open`]; and the right to list it when `folder` (the listing's
+    /// word for it).
+    pub(in crate::windows) fn open_child(&self, name: &[u16], folder: bool) -> io::Result<Object> {
+        let extra = SYNCHRONIZE.0 | if folder { LIST } else { 0 };
+        ladder(extra, |access| open_at(&self.handle, name, access, true))
+    }
+
+    /// Opens `name` in this folder relative to its handle, as [`Object::open_child`] does, for
+    /// `rights` and its attributes alone (`DELETE`, say, to delete a link itself).
+    pub(in crate::windows) fn open_child_for(&self, name: &[u16], rights: u32) -> io::Result<Self> {
+        let access = rights | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
+        Object::describe(open_at(&self.handle, name, access, true)?, false, false)
+    }
+
+    /// Opens `name` in this folder relative to its handle, never following a link, with exactly
+    /// `READ_CONTROL | WRITE_DAC` (S15 `PR4i`): what an owner is implied to have, and no more,
+    /// so an item whose DACL lets only someone else in still opens for its owner. No
+    /// `SYNCHRONIZE` (the handle is asynchronous, used only for the security calls) and no
+    /// `FILE_READ_ATTRIBUTES`: whether it is a folder and its links come from
+    /// `FileStandardInfo`, which needs no right; whether it is a reparse point isn't read (the
+    /// caller has the listing's word for it), and it is opened itself if it is one.
+    pub(in crate::windows) fn open_owned(&self, name: &[u16]) -> io::Result<Object> {
+        let handle = open_at(&self.handle, name, READ_CONTROL.0 | WRITE_DAC.0, false)?;
+        let mut standard = FILE_STANDARD_INFO::default();
+        // SAFETY: the handle is open and `standard` is valid and writable for its size.
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileStandardInfo,
+                (&raw mut standard).cast(),
+                u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0),
+            )
+        }
+        .map_err(|e| os_error(&e))?;
+        Ok(Object {
+            handle,
+            folder: standard.Directory,
+            links: standard.NumberOfLinks,
+            tag: None,
+            write_dac: true,
+            write_owner: false,
+        })
+    }
+
+    /// The file whose 128-bit ID `id` names, opened by that ID (`OpenFileById`,
+    /// `ExtendedFileIdType`) on the volume holding `path`, wherever its names are now: no path
+    /// is looked up, so no link is followed, and the file itself is opened, never what a
+    /// reparse point on it names. It asks for `READ_CONTROL | FILE_READ_ATTRIBUTES` and
+    /// `rights` alone. The volume is the root of `path` (`GetVolumePathNameW`, which needs no
+    /// file there), and its serial number must be `id`'s, else [`ApplyFailure::Changed`].
+    /// `None` when no file on it has that ID any more (S15 `PR3b` round 5).
+    pub(in crate::windows) fn open_by_id(
+        path: &Path,
+        id: FileId,
+        rights: u32,
+    ) -> io::Result<Option<Object>> {
+        let volume = volume_root(path)?;
+        if id_info(&volume)?.0 != id.volume {
+            return Err(ApplyFailure::Changed.into());
+        }
+        let descriptor = FILE_ID_DESCRIPTOR {
+            dwSize: u32::try_from(size_of::<FILE_ID_DESCRIPTOR>()).unwrap_or(0),
+            Type: ExtendedFileIdType,
+            Anonymous: FILE_ID_DESCRIPTOR_0 {
+                ExtendedFileId: FILE_ID_128 { Identifier: id.id },
+            },
+        };
+        let access = READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0 | rights;
+        let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+        let flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS;
+        // SAFETY: the volume's handle is open and `descriptor` is a valid, live
+        // `FILE_ID_DESCRIPTOR`; no security attributes are passed, and the handle made is owned
+        // by `Handle` from here.
+        let opened =
+            unsafe { OpenFileById(volume.0, &raw const descriptor, access, share, None, flags) };
+        let handle = match opened {
+            Ok(handle) => Handle(handle),
+            Err(error) => {
+                let error = os_error(&error);
+                // An ID no file has is `ERROR_INVALID_PARAMETER` from NTFS, or not found.
+                if error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(87) {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+        };
+        let object = Object::describe(
+            handle,
+            rights & WRITE_DAC.0 != 0,
+            rights & WRITE_OWNER.0 != 0,
+        )?;
+        if object.file_id()? != (id.volume, id.id) {
+            return Err(ApplyFailure::Changed.into());
+        }
+        Ok(Some(object))
+    }
+
+    fn describe(handle: Handle, write_dac: bool, write_owner: bool) -> io::Result<Object> {
+        let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
+        let mut standard = FILE_STANDARD_INFO::default();
+        // SAFETY: the handle is open and each struct is valid and writable for its size.
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileAttributeTagInfo,
+                (&raw mut tag).cast(),
+                u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).unwrap_or(0),
+            )
+            .map_err(|e| os_error(&e))?;
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileStandardInfo,
+                (&raw mut standard).cast(),
+                u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0),
+            )
+            .map_err(|e| os_error(&e))?;
+        }
+        let reparse = tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0;
+        Ok(Object {
+            handle,
+            folder: standard.Directory,
+            links: standard.NumberOfLinks,
+            tag: reparse.then_some(tag.ReparseTag),
+            write_dac,
+            write_owner,
+        })
+    }
+
+    /// Its handle, for a call made elsewhere on what it is open on (the change journal's close
+    /// record, `clean_close/ntfs.rs`).
+    pub(in crate::windows) fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
+    /// Whether it is a reparse point of any kind.
+    pub(in crate::windows) fn reparse(&self) -> bool {
+        self.tag.is_some()
+    }
+
+    /// Whether it is a junction, symbolic link or other name surrogate.
+    pub(in crate::windows) fn name_surrogate(&self) -> bool {
+        self.tag.is_some_and(|tag| tag & NAME_SURROGATE != 0)
+    }
+
+    /// The names in this folder, through its handle, without `.` and `..`.
+    pub(in crate::windows) fn children(&self) -> io::Result<Vec<Child>> {
+        let mut buffer = vec![0_u64; 8192];
+        let size = u32::try_from(buffer.len() * 8).map_err(io::Error::other)?;
+        let mut class = FileIdBothDirectoryRestartInfo;
+        let mut out = Vec::new();
+        loop {
+            // SAFETY: the handle is open and `buffer` is writable for `size` bytes.
+            let read = unsafe {
+                GetFileInformationByHandleEx(self.handle.0, class, buffer.as_mut_ptr().cast(), size)
+            };
+            class = FileIdBothDirectoryInfo;
+            match read {
+                Ok(()) => {}
+                Err(e) if e.code() == ERROR_NO_MORE_FILES.to_hresult() => return Ok(out),
+                Err(e) => return Err(os_error(&e)),
+            }
+            // SAFETY: `buffer` is `size` initialised bytes, and u8 has no alignment.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), size as usize) };
+            listed(bytes, &mut out)?;
+        }
+    }
+
+    /// Its security descriptor, self-relative, holding what `info` asks for.
+    pub(in crate::windows) fn security(&self, info: u32) -> io::Result<Vec<u8>> {
+        kernel_security(&self.handle, info)
+    }
+
+    /// Writes the parts `info` names from the self-relative descriptor `descriptor`, on this
+    /// object alone (`SetKernelObjectSecurity` doesn't propagate).
+    pub(in crate::windows) fn set(
+        &self,
+        info: OBJECT_SECURITY_INFORMATION,
+        descriptor: &[u8],
+    ) -> io::Result<()> {
+        let mut buffer = words(descriptor);
+        // SAFETY: the handle is open; `buffer` holds a valid self-relative descriptor and lives
+        // for the call.
+        unsafe {
+            SetKernelObjectSecurity(
+                self.handle.0,
+                info,
+                PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast()),
+            )
+        }
+        .map_err(|e| os_error(&e))
+    }
+
+    /// Its final path, normalized, with its drive letter (`\\?\C:\...`).
+    pub(in crate::windows) fn normalized(&self) -> io::Result<Vec<u16>> {
+        self.final_path(GETFINALPATHNAMEBYHANDLE_FLAGS(
+            FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0,
+        ))
+    }
+
+    /// Its final path, as `flags` asks.
+    fn final_path(&self, flags: GETFINALPATHNAMEBYHANDLE_FLAGS) -> io::Result<Vec<u16>> {
+        let mut buffer = vec![0u16; 512];
+        loop {
+            // SAFETY: the handle is open and `buffer` is a writable slice of its length.
+            let length = unsafe { GetFinalPathNameByHandleW(self.handle.0, &mut buffer, flags) };
+            match usize::try_from(length).map_err(io::Error::other)? {
+                0 => return Err(io::Error::last_os_error()),
+                n if n < buffer.len() => {
+                    buffer.truncate(n);
+                    return Ok(buffer);
+                }
+                n => buffer.resize(n + 1, 0),
+            }
+        }
+    }
+
+    /// Its volume's serial number and its 128-bit file ID (`FileIdInfo`): the same file under
+    /// any of its names.
+    pub(in crate::windows) fn file_id(&self) -> io::Result<(u64, [u8; 16])> {
+        id_info(&self.handle)
+    }
+
+    /// The plain file `name` in this folder, opened relative to its handle ([`open_at`], never
+    /// through a link) for reading, and read whole; `None` when it is missing. A reparse point,
+    /// a folder, a file with another name, or one over `cap` bytes is refused.
+    pub(in crate::windows) fn read_child(
+        &self,
+        name: &[u16],
+        cap: usize,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0;
+        let handle = match open_at(&self.handle, name, access, true) {
+            Ok(handle) => handle,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let file = Object::describe(handle, false, false)?;
+        if file.folder || file.tag.is_some() || file.links > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a plain file",
+            ));
+        }
+        let mut bytes = vec![0u8; cap.saturating_add(1)];
+        let mut filled = 0;
+        loop {
+            let mut read = 0u32;
+            let room = bytes.get_mut(filled..).unwrap_or_default();
+            // SAFETY: the handle is open for synchronous reads with FILE_READ_DATA; `room` is
+            // a live, writable slice and `read` a live out-pointer.
+            unsafe { ReadFile(file.handle.0, Some(room), Some(&raw mut read), None) }
+                .map_err(|e| os_error(&e))?;
+            if read == 0 {
+                break;
+            }
+            filled += usize::try_from(read).map_err(io::Error::other)?;
+            if filled > cap {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "larger than its cap",
+                ));
+            }
+        }
+        bytes.truncate(filled);
+        Ok(Some(bytes))
+    }
+
+    /// Whether it is a volume's root: its path without the volume is `\` (Codex's
+    /// `ensure_handle_is_not_filesystem_root`).
+    pub(in crate::windows) fn is_volume_root(&self) -> io::Result<bool> {
+        let path = self.final_path(GETFINALPATHNAMEBYHANDLE_FLAGS(VOLUME_NAME_NONE.0))?;
+        Ok(path == [u16::from(b'\\')])
+    }
+}
+
+/// The volume serial number and 128-bit file ID of what `handle` is open on (`FileIdInfo`).
+fn id_info(handle: &Handle) -> io::Result<(u64, [u8; 16])> {
+    let mut info = FILE_ID_INFO::default();
+    // SAFETY: the handle is open and `info` is valid and writable for its size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle.0,
+            FileIdInfo,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
+/// The root folder of the volume holding `path` (`GetVolumePathNameW`, which works whether or
+/// not anything is at `path`), opened for `FILE_READ_ATTRIBUTES` alone: the volume an open by
+/// file ID searches. A mounted folder's volume root is the volume it mounts, so this open
+/// goes through it; [`Object::open_by_id`] checks the serial number it finds.
+fn volume_root(path: &Path) -> io::Result<Handle> {
+    let wide = verbatim_wide(path)?;
+    let mut root = vec![0_u16; wide.len().max(MAX_PATH_WIDE)];
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `root` is writable for its length.
+    unsafe { GetVolumePathNameW(PCWSTR(wide.as_ptr()), &mut root) }.map_err(|e| os_error(&e))?;
+    let end = root.iter().position(|&c| c == 0).unwrap_or(root.len());
+    root.truncate(end);
+    root.push(0);
+    // SAFETY: `root` is NUL-terminated and outlives the call; no security attributes or
+    // template are passed, and the handle is owned by `Handle` from here.
+    unsafe {
+        CreateFileW(
+            PCWSTR(root.as_ptr()),
+            FILE_READ_ATTRIBUTES.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .map(Handle)
+    .map_err(|e| os_error(&e))
+}
+
+/// `MAX_PATH` and its NUL: the least room `GetVolumePathNameW` is given.
+const MAX_PATH_WIDE: usize = 261;
+
+/// Opens with `extra` and the base rights plus `WRITE_DAC | WRITE_OWNER`, then without
+/// `WRITE_OWNER`, then read only, through `open`.
+fn ladder(extra: u32, mut open: impl FnMut(u32) -> io::Result<Handle>) -> io::Result<Object> {
+    let base = READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0 | extra;
+    let mut denied = io::Error::from(io::ErrorKind::PermissionDenied);
+    for (access, write_dac, write_owner) in [
+        (base | WRITE_DAC.0 | WRITE_OWNER.0, true, true),
+        (base | WRITE_DAC.0, true, false),
+        (base, false, false),
+    ] {
+        match open(access) {
+            Ok(handle) => return Object::describe(handle, write_dac, write_owner),
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => denied = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(denied)
+}
+
+/// Opens `wide` (verbatim, NUL-terminated) for `access`, never following a link.
+fn open_raw(wide: &[u16], access: u32) -> io::Result<Handle> {
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; no security attributes or
+    // template are passed, and the handle is owned by `Handle` from here.
+    unsafe {
+        CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            access,
+            share,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .map(Handle)
+    .map_err(|e| os_error(&e))
+}
+
+/// Opens `name` (one path part, no NUL) in the folder `dir` for `access`, relative to its
+/// handle, opening a reparse point itself rather than what it names. `OBJ_DONT_REPARSE` as
+/// well, after Codex's `no_reparse_dir.rs` (`open_no_reparse`, at e7f32cf): any reparse met
+/// on the way fails the open ([`reparse_refused`]) rather than being followed. A `synchronous`
+/// handle (`FILE_SYNCHRONOUS_IO_NONALERT`) needs `SYNCHRONIZE` in `access`; one that isn't is
+/// for the security calls alone.
+pub(in crate::windows) fn open_at(
+    dir: &Handle,
+    name: &[u16],
+    access: u32,
+    synchronous: bool,
+) -> io::Result<Handle> {
+    let bytes = u16::try_from(name.len() * 2)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let unicode = UNICODE_STRING {
+        Length: bytes,
+        MaximumLength: bytes,
+        Buffer: PWSTR(name.as_ptr().cast_mut()),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).unwrap_or(0),
+        RootDirectory: dir.0,
+        ObjectName: &raw const unicode,
+        Attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
+        ..OBJECT_ATTRIBUTES::default()
+    };
+    let mut handle = HANDLE::default();
+    let mut status = IO_STATUS_BLOCK::default();
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    let mut options = FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT;
+    if synchronous {
+        options |= FILE_SYNCHRONOUS_IO_NONALERT;
+    }
+    // SAFETY: `unicode` points into `name`, which outlives the call and is never written;
+    // `attributes` and the out-pointers are live; the folder's handle is open; the handle
+    // made is owned by `Handle` from here.
+    let done = unsafe {
+        NtCreateFile(
+            &raw mut handle,
+            FILE_ACCESS_RIGHTS(access),
+            &raw const attributes,
+            &raw mut status,
+            None,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            share,
+            FILE_OPEN,
+            options,
+            None,
+            0,
+        )
+    };
+    if done.is_err() {
+        return Err(nt_error(done));
+    }
+    Ok(Handle(handle))
+}
+
+/// `ERROR_REPARSE_POINT_ENCOUNTERED`: what `STATUS_REPARSE_POINT_ENCOUNTERED` maps to.
+const REPARSE_ENCOUNTERED: i32 = 4395;
+
+/// Whether an open failed because it met a reparse point it was told not to follow.
+pub(in crate::windows) fn reparse_refused(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(REPARSE_ENCOUNTERED)
+}
+
+/// `bytes` in u64 words, so the descriptor's structures are aligned for the Win32 calls.
+pub(in crate::windows) fn words(bytes: &[u8]) -> Vec<u64> {
+    bytes
+        .chunks(8)
+        .map(|chunk| {
+            let mut word = [0u8; 8];
+            if let Some(slot) = word.get_mut(..chunk.len()) {
+                slot.copy_from_slice(chunk);
+            }
+            u64::from_ne_bytes(word)
+        })
+        .collect()
+}
+
+/// A handle, closed on drop.
+#[derive(Debug)]
+pub(in crate::windows) struct Handle(pub(in crate::windows) HANDLE);
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateFileW, NtCreateFile or OpenProcessToken and is
+        // closed once, here.
+        if let Err(error) = unsafe { CloseHandle(self.0) } {
+            tracing::debug!(code = error.code().0, "CloseHandle failed");
+        }
+    }
+}
+
+/// The security descriptor of the kernel object `handle` is open on (a file, a process, a
+/// token), self-relative, holding what `info` asks for; the handle needs `READ_CONTROL`.
+pub(in crate::windows) fn kernel_security(handle: &Handle, info: u32) -> io::Result<Vec<u8>> {
+    let mut size = 256_u32;
+    for _ in 0..4 {
+        let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+        let mut needed = 0_u32;
+        // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+        // `needed` is a live out-pointer.
+        let read = unsafe {
+            GetKernelObjectSecurity(
+                handle.0,
+                info,
+                Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                size,
+                &raw mut needed,
+            )
+        };
+        match read {
+            Ok(()) => {
+                let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                bytes.truncate(usize::try_from(size).unwrap_or(0));
+                return Ok(bytes);
+            }
+            Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+            Err(e) => return Err(os_error(&e)),
+        }
+    }
+    Err(io::Error::other(
+        "a security descriptor kept growing while it was read",
+    ))
+}
+
+/// The Win32 error `error` carries, as an `io::Error` whose kind follows its code.
+pub(in crate::windows) fn os_error(error: &windows::core::Error) -> io::Error {
+    io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
+}
+
+/// The NT status `status`, as the Win32 error it maps to.
+fn nt_error(status: NTSTATUS) -> io::Error {
+    // SAFETY: RtlNtStatusToDosError only maps a number.
+    let code = unsafe { RtlNtStatusToDosError(status) };
+    io::Error::from_raw_os_error(i32::try_from(code).unwrap_or(i32::MAX))
+}

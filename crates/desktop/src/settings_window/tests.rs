@@ -23,9 +23,9 @@ fn app(bridge: Option<Bridge>) -> tauri::App<MockRuntime> {
 #[test]
 fn opening_twice_gives_one_settings_window_showing_its_page() {
     let app = app(None);
-    open_or_focus(&app).unwrap();
+    open_or_focus(&app, None).unwrap();
     let first = app.get_webview_window(SETTINGS_WINDOW).unwrap();
-    open_or_focus(&app).unwrap();
+    open_or_focus(&app, None).unwrap();
     let windows = app.webview_windows();
     assert_eq!(windows.len(), 1, "{:?}", windows.keys());
     let second = &windows[SETTINGS_WINDOW];
@@ -78,13 +78,16 @@ fn a_second_open_that_fails_leaves_the_first_windows_close_whole() {
     let host = scratch.start(Vec::new());
     let app = app(Some(host.bridge()));
     let bridge = app.state::<Bridge>();
-    open_or_focus(&app).unwrap();
+    open_or_focus(&app, None).unwrap();
     let first = bridge.latest_build(SETTINGS_WINDOW).unwrap();
     let (channel, _page) = collector();
     block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
 
     // The other open's build, past its own check: the label is taken.
-    assert!(build(&app).is_err(), "a second settings window was built");
+    assert!(
+        build(&app, None).is_err(),
+        "a second settings window was built"
+    );
     assert_eq!(bridge.latest_build(SETTINGS_WINDOW), Some(first));
 
     closed(&app, SETTINGS_WINDOW, Some(first));

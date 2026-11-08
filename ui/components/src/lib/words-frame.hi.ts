@@ -15,9 +15,9 @@ export const HI = {
   "Answer ready": "उत्तर तैयार है",
   "Stopped at {time}": "{time} बजे रोका गया",
   "Stopped on {day} at {time}": "{day} को {time} बजे रोका गया",
-  // U16a: a failed answer, until its conversation is seen (hi: later)
-  "Failed at {time}": null,
-  "Failed on {day} at {time}": null,
+  // U16a: a failed answer, until its conversation is seen
+  "Failed at {time}": "{time} बजे विफल",
+  "Failed on {day} at {time}": "{day} को {time} बजे विफल",
   // paused at the plan's limit, until the reset; the usage limit
   "Paused until {time}": "{time} बजे तक रुका है",
   "Paused until {day} {time}": "{day} {time} बजे तक रुका है",
@@ -25,10 +25,10 @@ export const HI = {
   "Limit reached. Continue at {time}?": "सीमा पूरी। {time} बजे जारी\u00a0रखें?",
   "Limit reached. Continue on {day} at {time}?": "सीमा पूरी। {day} को {time} बजे जारी\u00a0रखें?",
   Pinned: "पिन किए गए",
-  // U16a: the group of matters waiting on the lawyer, under Pinned; Recent's day headings (hi: later)
-  "Needs you": null,
-  Today: null,
-  Yesterday: null,
+  // U16a: the group of matters waiting on the lawyer, under Pinned; Recent's day headings
+  "Needs you": "आपकी ज़रूरत है",
+  Today: "आज",
+  Yesterday: "बीता कल",
   // the date groups, by each matter's next date, in this order
   Tomorrow: "कल",
   "This week": "इस सप्ताह",

@@ -140,7 +140,13 @@ pub struct FakeConnector;
 impl FakeConnector {
     /// Binds `127.0.0.1:0` and serves until the handle drops.
     pub fn start(options: FakeOptions) -> io::Result<FakeHandle> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        FakeConnector::start_on(0, options)
+    }
+
+    /// Binds `127.0.0.1:<port>` (0 for any) and serves until the handle drops: the local test
+    /// server's own port, for `Origin::Local`'s tests.
+    pub fn start_on(port: u16, options: FakeOptions) -> io::Result<FakeHandle> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let port = listener.local_addr()?.port();
         let base = format!("http://127.0.0.1:{port}");
         let base_url = Url::parse(&base).map_err(io::Error::other)?;
@@ -168,7 +174,7 @@ struct Shared {
     base_url: Url,
     clock: Arc<dyn Clock>,
     state: Mutex<FakeState>,
-    /// Woken when a recharge is paid, and on stop.
+    /// Woken when a recharge is paid or ended, and on stop.
     paid: Condvar,
     stop: CancelFlag,
 }
@@ -193,6 +199,7 @@ struct FakeState {
     api: api::ApiState,
     fail_next: HashMap<String, VecDeque<u16>>,
     delay_next: HashMap<String, VecDeque<Duration>>,
+    hold_next: HashMap<String, VecDeque<CancelFlag>>,
     inject_next: HashMap<String, VecDeque<Injected>>,
 }
 
@@ -219,10 +226,14 @@ impl FakeState {
             api: api::ApiState::new(),
             fail_next: HashMap::new(),
             delay_next: HashMap::new(),
+            hold_next: HashMap::new(),
             inject_next: HashMap::new(),
         }
     }
 }
+
+/// How often a fake's [`Config`] polls a recharge (production: 3 s), so tests settle quickly.
+pub const FAKE_RECHARGE_INTERVAL: Duration = Duration::from_millis(100);
 
 /// `prefix` and 32 random hex characters.
 fn random_token(prefix: &str) -> String {
@@ -270,8 +281,8 @@ impl FakeHandle {
     }
 
     /// A [`Config`] for this fake: `Origin::Fake`, user agent `Clauseo/0.0.0-test`, no proxy,
-    /// the default timeouts, the fake's own clock, and `state_file` (a [`ScratchDir`]'s
-    /// `state_file()`). Change any field after.
+    /// the default timeouts, recharge polls [`FAKE_RECHARGE_INTERVAL`] apart, the fake's own
+    /// clock, and `state_file` (a [`ScratchDir`]'s `state_file()`). Change any field after.
     pub fn config(&self, state_file: PathBuf) -> Config {
         Config {
             origin: Origin::Fake(self.base_url()),
@@ -279,6 +290,7 @@ impl FakeHandle {
             proxy: ProxyChoice::Direct,
             signin_timeout: SIGNIN_TIMEOUT,
             recharge_deadline: RECHARGE_DEADLINE,
+            recharge_interval: FAKE_RECHARGE_INTERVAL,
             clock: Arc::clone(&self.shared.clock),
             state_file,
         }
@@ -327,6 +339,19 @@ impl FakeHandle {
             .entry(path.to_owned())
             .or_default()
             .push_back(delay);
+    }
+
+    /// The next request to `path` is answered as it arrives but sent only once the flag returned
+    /// is set (or the fake stops): a reply the connector wrote before something else happened,
+    /// delivered after it. Calls queue up.
+    pub fn hold_next(&self, path: &str) -> CancelFlag {
+        let release = CancelFlag::new();
+        self.lock()
+            .hold_next
+            .entry(path.to_owned())
+            .or_default()
+            .push_back(release.clone());
+        release
     }
 
     /// The next request to `path` (no query) gets exactly this status, these headers and this
@@ -468,6 +493,28 @@ impl FakeHandle {
         paid
     }
 
+    /// Ends an unpaid recharge as `expired` and wakes any `wait` poll on it. False for an
+    /// unknown, paid or already ended one.
+    pub fn expire_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "expired")
+    }
+
+    /// Ends an unpaid recharge as `amount_mismatch_held`, as [`FakeHandle::expire_recharge`] does.
+    pub fn hold_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "amount_mismatch_held")
+    }
+
+    /// Ends an unpaid recharge as `cancelled`, as [`FakeHandle::expire_recharge`] does.
+    pub fn cancel_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "cancelled")
+    }
+
+    fn end_recharge(&self, recharge_id: &str, status: &'static str) -> bool {
+        let ended = self.lock().api.end_recharge(recharge_id, status);
+        self.shared.paid.notify_all();
+        ended
+    }
+
     /// The ids of every recharge opened so far, oldest first.
     pub fn recharges(&self) -> Vec<String> {
         self.lock().api.recharge_ids()
@@ -477,6 +524,12 @@ impl FakeHandle {
     /// it.
     pub fn set_pay_url(&self, url: Option<&str>) {
         self.lock().api.pay_url = url.map(str::to_owned);
+    }
+
+    /// An out-of-credit answer opens a new recharge even when one awaits payment (off at start:
+    /// it names the open one), as when that one was opened elsewhere and has lapsed.
+    pub fn open_new_recharge_on_out_of_credit(&self, fresh: bool) {
+        self.lock().api.fresh_recharge = fresh;
     }
 
     /// MCP answers come as `text/event-stream` (one `message` event) instead of JSON.

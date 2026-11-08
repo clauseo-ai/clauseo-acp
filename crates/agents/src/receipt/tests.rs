@@ -161,3 +161,46 @@ fn a_link_in_install_is_removed_without_touching_its_target() {
     assert!(target.exists());
     assert!(std::fs::symlink_metadata(root.join(HASH)).is_err());
 }
+
+/// A link at `<data>/<place>` to a folder outside the data folder: the scan and removal at start
+/// fail, remove nothing, and the folder it points at keeps everything in it.
+#[cfg(unix)]
+fn a_link_on_the_way_to_install(place: &str) {
+    let data = TestDir::new("scan-linked");
+    let outside = TestDir::new("scan-linked-canary");
+    let canary = outside.file("brief.docx", b"privileged");
+    let nested = outside.file("exhibits/a.pdf", b"exhibit");
+    // What `install/` would hold were the link at `agents` or `agents/<id>`.
+    let held = outside.file("claude-acp/install/old/held.txt", b"held");
+    let held_too = outside.file("install/old/held.txt", b"held");
+    let link = place
+        .split('/')
+        .fold(data.0.clone(), |path, part| path.join(part));
+    write::create_dir_all(link.parent().unwrap()).unwrap();
+    write::symlink(&outside.0, &link).unwrap();
+    // As the worker does at start.
+    let result = scan(&data.0, &agent(), HASH, linux()).and_then(|found| remove_stale(&found));
+    for path in [&canary, &nested, &held, &held_too] {
+        assert!(path.is_file(), "{} was removed", path.display());
+    }
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_at_agents_is_never_scanned() {
+    a_link_on_the_way_to_install("agents");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_at_the_agents_folder_is_never_scanned() {
+    a_link_on_the_way_to_install("agents/claude-acp");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_at_install_is_never_scanned() {
+    a_link_on_the_way_to_install("agents/claude-acp/install");
+}

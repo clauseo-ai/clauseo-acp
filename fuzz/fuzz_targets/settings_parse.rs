@@ -120,14 +120,20 @@ fuzz_target!(|data: &[u8]| {
     let _ = effective.warnings();
     let _ = effective.locked().count();
 
-    // 3. The Settings' JSON form reads back as the same Settings.
-    let json = serde_json::to_vec(effective.settings()).expect("Settings serialise");
+    // 3. The Settings' JSON form, without the keys only a policy may set (a `settings.json`
+    // value for one is ignored with a warning, and nothing writes the whole struct to the user's
+    // file), reads back as the same Settings on every other key.
+    let mut value = serde_json::to_value(effective.settings()).expect("Settings serialise");
+    strip_policy_only(&mut value);
+    let json = serde_json::to_vec(&value).expect("Settings serialise");
     let echo = MemFiles::default();
     echo.write_atomic(locations.settings_file(), &json).unwrap();
     let reread = load(&locations, &echo, None);
+    let mut reread_value = serde_json::to_value(reread.settings()).expect("Settings serialise");
+    strip_policy_only(&mut reread_value);
     assert_eq!(
-        reread.settings(),
-        effective.settings(),
+        reread_value,
+        value,
         "Settings JSON does not read back the same: {}",
         String::from_utf8_lossy(&json)
     );
@@ -192,3 +198,20 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 });
+
+/// `value` (the Settings' JSON form) without the keys only a policy may set
+/// (`clauseo_settings::POLICY_ONLY_KEYS`, dotted paths).
+fn strip_policy_only(value: &mut serde_json::Value) {
+    for key in clauseo_settings::POLICY_ONLY_KEYS {
+        let Some((parent, last)) = key.rsplit_once('.') else {
+            continue;
+        };
+        let pointer = format!("/{}", parent.replace('.', "/"));
+        if let Some(object) = value
+            .pointer_mut(&pointer)
+            .and_then(|node| node.as_object_mut())
+        {
+            object.remove(last);
+        }
+    }
+}

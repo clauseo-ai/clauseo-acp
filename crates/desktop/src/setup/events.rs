@@ -1,0 +1,220 @@
+//! Where the setup backend publishes [`SetupEvent`]s and the windows' channels follow them.
+//! Each event is encoded once, as the channel's `setup` message
+//! (`{"setup":{"sign_in_changed":...}}`, `frame::setup_text`), and handed to every follower.
+//!
+//! It keeps the latest `setup_info` and each agent's latest install and sign-in state, so a new
+//! follower (a `subscribe_app`, or a feed restarted after a pause or the watchdog) first gets
+//! `setup_info`, then each agent's install and sign-in state, before any newer event (0048).
+//! Publishing and following take one lock, so nothing published falls between the two.
+//!
+//! Setup events never reach a log: they hold emails, URLs, device codes and install logs. A
+//! sign-in note (S18's `SigninNote`) is logged with [`note`], by its code.
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use clauseo_protocol::{AgentId, SetupEvent, SignIn};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+
+use crate::bridge::lock;
+
+/// The setup events' publisher and the windows' feed of them.
+#[derive(Default)]
+pub(crate) struct SetupEvents {
+    state: Mutex<Latest>,
+}
+
+/// The latest state, and the followers.
+#[derive(Default)]
+struct Latest {
+    /// The latest `setup_info`, encoded.
+    info: Option<Arc<str>>,
+    /// Each agent's latest states, by id.
+    agents: BTreeMap<AgentId, AgentLatest>,
+    /// Each follower's channel; one whose receiver is gone is dropped at the next publish.
+    followers: Vec<UnboundedSender<Arc<str>>>,
+}
+
+/// One agent's latest install and sign-in states, encoded.
+#[derive(Default)]
+struct AgentLatest {
+    install: Option<Arc<str>>,
+    sign_in: Option<Arc<str>>,
+    /// Whether that sign-in state is a running one: `Queued`, `Waiting` or `DeviceCode`.
+    running: bool,
+    /// Whether a `StartSignIn` went to the backend and no sign-in state has been published, nor
+    /// a resting one heard from S18, since (`Setup::start_sign_in`).
+    starting: bool,
+}
+
+impl SetupEvents {
+    /// Publishes `event` to every follower and keeps it as the latest of its kind. An event
+    /// that does not encode (none does) is dropped.
+    pub(crate) fn publish(&self, event: SetupEvent) {
+        let slot = Slot::of(&event);
+        log_event(&event);
+        let Some(text) = crate::frame::setup_text(event) else {
+            tracing::warn!("a setup event did not encode and was dropped");
+            return;
+        };
+        let text: Arc<str> = text.into();
+        let mut latest = lock(&self.state);
+        match slot {
+            Slot::Info => latest.info = Some(Arc::clone(&text)),
+            Slot::Install(agent) => {
+                latest.agents.entry(agent).or_default().install = Some(Arc::clone(&text));
+            }
+            Slot::SignIn(agent, running) => {
+                let entry = latest.agents.entry(agent).or_default();
+                entry.sign_in = Some(Arc::clone(&text));
+                entry.running = running;
+                // A running state is the start's, now joined through `running`; any other is a
+                // resting one, which ends the start (it failed, was cancelled or replaced).
+                entry.starting = false;
+            }
+        }
+        latest
+            .followers
+            .retain(|follower| follower.unbounded_send(Arc::clone(&text)).is_ok());
+    }
+
+    /// A new follower: the latest `setup_info`, then each agent's install and sign-in state,
+    /// then every event published from now on, as channel message texts. Followers whose
+    /// receiver is gone are dropped here, as at each publish.
+    pub(crate) fn follow(&self) -> UnboundedReceiver<Arc<str>> {
+        let (follower, feed) = unbounded();
+        let mut latest = lock(&self.state);
+        let agents = latest
+            .agents
+            .values()
+            .flat_map(|agent| [agent.install.as_ref(), agent.sign_in.as_ref()]);
+        let replay: Vec<Arc<str>> = latest
+            .info
+            .iter()
+            .chain(agents.flatten())
+            .map(Arc::clone)
+            .collect();
+        for text in replay {
+            // The receiver is in hand: an unbounded send to it cannot fail.
+            let _sent = follower.unbounded_send(text);
+        }
+        // A follower whose receiver is gone goes now too, not only at the next publish.
+        latest.followers.retain(|follower| !follower.is_closed());
+        latest.followers.push(follower);
+        feed
+    }
+
+    /// How many followers it holds, closed ones not yet dropped included.
+    #[cfg(test)]
+    pub(crate) fn followers(&self) -> usize {
+        lock(&self.state).followers.len()
+    }
+
+    /// Whether `agent`'s latest sign-in state is a running one.
+    pub(crate) fn sign_in_running(&self, agent: &AgentId) -> bool {
+        lock(&self.state)
+            .agents
+            .get(agent)
+            .is_some_and(|latest| latest.running)
+    }
+
+    /// Marks `agent`'s sign-in as starting and answers `true`, unless one runs or is starting
+    /// (`false`: join it). The mark goes when any sign-in state is published for `agent` (a
+    /// running one is then joined through it; a resting one ends the start), or with
+    /// [`SetupEvents::end_start`]; checked and set under the one lock.
+    pub(crate) fn begin_start(&self, agent: &AgentId) -> bool {
+        let mut latest = lock(&self.state);
+        let entry = latest.agents.entry(agent.clone()).or_default();
+        if entry.running || entry.starting {
+            return false;
+        }
+        entry.starting = true;
+        true
+    }
+
+    /// Removes `agent`'s starting mark: the backend refused the start, the call was dropped, S18
+    /// reported a resting state the composer did not send on (`Compose::signin`), or a key or
+    /// an endpoint cancelled the sign-in (`AgentsBackend::end_sign_in`).
+    pub(crate) fn end_start(&self, agent: &AgentId) {
+        if let Some(entry) = lock(&self.state).agents.get_mut(agent) {
+            entry.starting = false;
+        }
+    }
+}
+
+/// Logs a sign-in note (S18's `SigninNote`: `claude_reuse_fallback`, `codex_link_failed`, and
+/// each sign-in step: `cli_resolved`, `cli_missing`, `login_exited`, `status_confirmed`,
+/// `status_not_confirmed`) for `agent` by its code and its detail (the CLI's file name, the exit
+/// code, or the reason's fixed word), never an email or a path (0048, ruling 5).
+pub(crate) fn note(agent: &AgentId, note: clauseo_agents::SigninNote) {
+    let detail = note.detail().unwrap_or_default();
+    tracing::info!(%agent, note = note.code(), %detail, "sign-in note");
+}
+
+/// Which latest state an event replaces.
+/// How many setup events a run logs (`log_event`).
+const EVENT_LINES: u32 = 100;
+
+/// The setup events logged so far this run.
+static EVENTS_LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// One lifecycle line per setup event published, the first [`EVENT_LINES`] of a run, on the
+/// IPC lines' clock (`ipc.rs`): when each install and sign-in state reached the windows, a
+/// status check's (detection's) answer among them. The event's kind, agent and state kind
+/// only: never an email, a code or a path.
+fn log_event(event: &SetupEvent) {
+    if let SetupEvent::SignInChanged { agent, state } = event {
+        super::status_timing::answered(agent, &state_kind(state));
+    }
+    if EVENTS_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= EVENT_LINES {
+        return;
+    }
+    let (kind, agent, state) = match event {
+        SetupEvent::SetupInfo { .. } => ("setup_info", None, String::new()),
+        SetupEvent::AgentInstallProgress { agent, state } => {
+            ("install", Some(agent), state_kind(state))
+        }
+        SetupEvent::SignInChanged { agent, state } => ("sign_in", Some(agent), state_kind(state)),
+    };
+    let agent = agent.map_or("", AgentId::as_str);
+    tracing::info!(
+        target: crate::ipc::TARGET,
+        at_ms = crate::chooser::trace::at_ms(),
+        kind,
+        agent,
+        state,
+        "setup event"
+    );
+}
+
+/// A state's variant name as the wire spells it: the string, or an object's one key.
+fn state_kind(state: &impl serde::Serialize) -> String {
+    match serde_json::to_value(state) {
+        Ok(serde_json::Value::String(name)) => name,
+        Ok(serde_json::Value::Object(fields)) => fields.keys().next().cloned().unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+enum Slot {
+    Info,
+    Install(AgentId),
+    /// The agent, and whether the state is a running one.
+    SignIn(AgentId, bool),
+}
+
+impl Slot {
+    fn of(event: &SetupEvent) -> Self {
+        match event {
+            SetupEvent::SetupInfo { .. } => Self::Info,
+            SetupEvent::AgentInstallProgress { agent, .. } => Self::Install(agent.clone()),
+            SetupEvent::SignInChanged { agent, state } => Self::SignIn(
+                agent.clone(),
+                matches!(
+                    state,
+                    SignIn::Queued | SignIn::Waiting { .. } | SignIn::DeviceCode { .. }
+                ),
+            ),
+        }
+    }
+}

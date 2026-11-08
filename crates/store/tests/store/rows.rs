@@ -190,6 +190,7 @@ fn matter_row(n: u64, created: i64) -> MatterRow {
         pinned: false,
         last_opened: None,
         forgotten: None,
+        skill_packs: None,
     }
 }
 

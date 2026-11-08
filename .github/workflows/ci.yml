@@ -6,8 +6,12 @@
 #   Node) on a ui change, and on a Rust change Windows x64 clippy only (PR_LINT_ONLY below), so
 #   Windows-only lint errors show on the pull request and not as merge-queue ejections. The other
 #   build entries take the quick skip on an ubuntu runner and report their required checks green.
-# - merge_group: the full OS matrix runs once, here (Linux, Windows x64, macOS ARM64), on what
-#   changes.sh says the queued changes need.
+# - merge_group: the full OS matrix runs once, here (Linux, Windows x64, Windows ARM64, macOS
+#   ARM64), on what changes.sh says the queued changes need. Windows ARM64 (windows-11-arm) runs
+#   Windows x64's tests, elevated tests included, without clippy and the keychain smoke test
+#   (`test_only`: x64's clippy lints the cfg(windows) code, and the nightly run lints ARM64 and
+#   runs its keychain smoke). It is not a required check yet (stage 1 of its return to tier 1),
+#   so a red ARM64 job shows in the queue without ejecting anything.
 # - push to main: nothing (Rohan's CI decision, 2026-11-04). The merge queue already tested the
 #   code. (macOS ARM64 ran on push from 17:20Z to 20:52Z that day, while a GitHub runner shortage
 #   kept it out of the merge-queue requirement.) The `github.event_name != 'push'` guards below are
@@ -32,15 +36,16 @@
 #   The nightly run and a run on demand run the same steps (so main's Rust cache holds what merge
 #   groups build) and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
 # - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test in the merge queue when the
-#   queued changes touch Rust. Tier 2 (Intel macOS, Windows ARM64) runs nightly and on demand only:
-#   on a pull request and in a merge group the matrix leaves it out, and jobs skipped by `if` report
-#   its checks without taking a runner (Intel macOS's below, Windows ARM64's in tier2-pr.yml). The
-#   Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
+#   queued changes touch Rust, and so does Windows ARM64, not yet required (2026-11-08). Tier 2
+#   (Intel macOS) runs nightly and on demand only. On a pull request the matrix leaves Intel macOS
+#   and Windows ARM64 out, and jobs skipped by `if` report their checks without taking a runner
+#   (Intel macOS's below, Windows ARM64's in tier2-pr.yml); a pull request runs nothing on ARM64.
+#   The Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
 # - Rust caches are saved on main only (`save-if`), which with no push run but the macOS one means
 #   the nightly run; pull requests and merge groups restore main's and save nothing,
-#   so they never evict main's entries from the 10 GB Actions cache. Tier 2 saves none: Intel macOS
-#   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused),
-#   Windows ARM64 builds cold.
+#   so they never evict main's entries from the 10 GB Actions cache. Intel macOS saves none: it
+#   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused).
+#   Windows ARM64 keeps no cache and builds cold, in the merge group too.
 # - The mutants job has no matrix, so it is skipped as a whole on pull requests, merge groups and
 #   pushes, where it still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
@@ -143,8 +148,13 @@ jobs:
     name: fast-lane
     # Not on push (Rohan's CI decision, 2026-11-04): the merge queue already ran it on this code.
     if: github.event_name != 'push'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The merge group's Linux build and test job's image (ubuntu-22.04, below), so a test that only
+    # 22.04 fails shows on the pull request: #441's (2026-11-05) passed here on 24.04 and failed
+    # the queue on 22.04.
+    runs-on: ubuntu-22.04
+    # 40, not 30: the apt step is seconds from the .deb cache, but a new runner image misses it once,
+    # and on 2026-11-05 a slow Ubuntu archive took 15 to 30 minutes over a miss (#469, #462).
+    timeout-minutes: 40
     steps:
       # Full history: `cargo xtask check` diffs against the merge-base with origin/main, and a
       # shallow clone has none.
@@ -156,9 +166,13 @@ jobs:
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
-      # clippy builds the desktop crate, which links WebKitGTK.
+      # clippy builds the desktop crate, which links WebKitGTK. ripgrep: xtask check's nextest runs
+      # the host's Codex-fence tests, which run the real rg as Codex's Linux sandbox does and fail
+      # under CI without it (the runner image has no rg).
       - name: Install the Linux system packages Tauri needs
         uses: ./.github/actions/install-tauri-linux-deps
+        with:
+          extra-packages: ripgrep
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -181,27 +195,118 @@ jobs:
       - name: Test the release scripts and release.yml's rules
         run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs
 
-      # Saved on main only, as every Rust cache here.
+      # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
+      # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
+          key: ubuntu-22.04
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Every pinned tool, as prebuilt binaries; nothing is built from source.
+      # Every pinned tool but cargo-mutants, whose prebuilt Linux binary needs glibc 2.39 (22.04 has
+      # 2.35); fast-lane's check never runs it: `cargo xtask mutants` does, in the mutants job on
+      # 24.04. The names come from xtask/src/setup.rs, so a new pin is installed here too.
+      - name: The pinned tools fast-lane uses
+        id: tools
+        run: echo "names=$(cargo xtask setup --list=json | jq -r '[.tools[].name, .binaries[].name] | unique | map(select(. != "cargo-mutants")) | join(" ")')" >> "$GITHUB_OUTPUT"
+
+      # As prebuilt binaries; nothing is built from source.
       - name: Install the pinned tools
         uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: ${{ steps.tools.outputs.names }}
 
       # The pre-push hook's script, alone and through the pinned lefthook with a local remote: a
       # push of deletes only passes without the check, every other push runs it.
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
 
+      # No job that a pull request, review or merge group runs holds actions: write while it checks
+      # out that event's code (workflow-token-test.rb, with its own planted cases).
+      - name: Test the workflows' token rule
+        run: ruby .github/scripts/workflow-token-test.rb
+
+      # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
+      # clean-up (#479's group, 2026-11-05).
+      - name: Test launch-xvfb.sh
+        run: bash .github/scripts/launch-xvfb-test.sh
+
+      # windows-pr-tests.yml's reading of a failed nextest log, against a fake one: a FAIL with a
+      # panic and a TMT are named, a FLAKY test is not.
+      - name: Test windows-pr-failures.sh
+        run: bash .github/scripts/windows-pr-failures-test.sh
+
       # How reducer-bench reads the label bench-ok at run time, against a fake gh.
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh
 
+      # fuzz/ is a workspace of its own, which nothing else builds before the nightly fuzz run: a
+      # new dependency of a fuzzed crate leaves its lock file stale (2026-11-06: clauseo-settings'
+      # plist, nix and unicode-normalization failed the nightly's `cargo fetch --locked`), and a
+      # new field of a struct a target builds breaks the target (the same day: NewSession's and
+      # LoadSession's additional_directories, added on 11-05, failed acp_stdout's build). This
+      # checks every target with --locked, on this job's stable toolchain (run from the root, so
+      # fuzz/rust-toolchain.toml's nightly is not used; the targets need no nightly to check).
+      - name: The fuzz targets compile, against an up-to-date fuzz/Cargo.lock
+        run: |
+          if ! cargo check --locked --manifest-path fuzz/Cargo.toml --bins; then
+            echo "::error title=The fuzz targets do not compile::Run cargo check --manifest-path fuzz/Cargo.toml --bins from the repository root, fix the targets in fuzz/fuzz_targets/, and commit fuzz/Cargo.lock if it changed."
+            exit 1
+          fi
+
+      # The guard's real-Chrome tests (crates/mcp/tests/guard/real_chrome.rs) are Linux-only and skip,
+      # passing, without agent-browser; xtask check's nextest below runs them once these values are
+      # set, as the merge group's Linux build does. Only on a pull request that touches the browser
+      # guard's crate, the agent-browser pin or this file: #549 (2026-11-06) added such a test that
+      # failed first in the merge group, because the pull request's run had skipped it. The tests
+      # run one at a time (nextest's real-chrome group) and the runner's Google Chrome is preinstalled.
+      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
+        if: github.event_name == 'pull_request'
+        env:
+          TARGET: x86_64-unknown-linux-gnu
+        run: |
+          set -euo pipefail
+          # The merge commit's first parent is main; the second, the pull request's head.
+          if ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
+            pin=crates/desktop/agent-browser.toml
+            value() {
+              awk -v table="[$TARGET]" -v key="$1" '
+                $0 == table { inside = 1; next }
+                /^\[/ { inside = 0 }
+                inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+            }
+            url=$(value url)
+            sum=$(value sha256)
+            test -n "$url" && test -n "$sum"
+            curl --fail --silent --show-error --location --retry 3 \
+              --output "$RUNNER_TEMP/agent-browser" "$url"
+            echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
+            chmod +x "$RUNNER_TEMP/agent-browser"
+            test -x /usr/bin/google-chrome
+            echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
+            echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+            echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+          else
+            echo "The browser guard is unchanged: its real-Chrome tests skip here and run in the merge group."
+          fi
+
       - name: cargo xtask check
         run: CI=1 cargo xtask check
+
+      # Every crate as it ships: its library and binaries, with no test target. xtask check's
+      # clippy has --all-targets, and the dev-dependencies turn on the `test-support` feature of
+      # eight crates (agents, connectors, host, matters, process, profile, sandbox, store), so code
+      # that only test-support uses never looks unused there. On 2026-11-06 two imports in
+      # host/src/config.rs that only test-support builders used failed
+      # `cargo clippy -p clauseo-host -- -D warnings` on main (#531). No crate turns on another's
+      # test-support outside dev-dependencies, so this one workspace run lints each crate on the
+      # features it ships with, as clippy -p on that crate alone would.
+      - name: clippy without test targets (no test-support)
+        run: |
+          if ! cargo clippy --workspace -- -D warnings; then
+            echo "::error title=clippy without test targets failed::Run cargo clippy --workspace -- -D warnings. Code that only tests or test-support use goes behind cfg(test) or cfg(feature = \"test-support\")."
+            exit 1
+          fi
 
   # vitest on the newest Node release that "engines.node" allows; see the note at the top.
   vitest-newest-node:
@@ -257,13 +362,20 @@ jobs:
       # One JSON list per event, as in e2e-windows.yml's smoke (Rohan's CI decision, 2026-11-04):
       # - pull_request: the three required checks; Linux and macOS skip on ubuntu, Windows x64
       #   lints only (PR_LINT_ONLY below).
-      # - merge_group: tier 1 and Linux in full. Windows ARM64 left the merge-group requirement
-      #   (2026-11-04) for the nightly run; a break there goes to its owner.
-      # - schedule and workflow_dispatch: everything, tier 2 (Intel macOS, Windows ARM64) included.
-      #   The job tier2-x86_64-apple-darwin below and tier2-pr.yml report tier 2's checks elsewhere.
+      # - merge_group: tier 1 and Linux in full, and Windows ARM64's tests. Windows ARM64 left the
+      #   merge group on 2026-11-04 for the nightly run and is back since 2026-11-08, on
+      #   windows-11-arm (free for a public repository), with Windows x64's tests, elevated tests included, but not clippy
+      #   or the keychain smoke test (`test_only`, about 4.3 min a run; the nightly run does both);
+      #   `build (aarch64-pc-windows-msvc)` is not a required check until its stage 2. In a merge
+      #   group without a Rust change it skips on ubuntu, as the other entries do, so the check
+      #   still reports.
+      # - schedule and workflow_dispatch: everything, Intel macOS included. The job
+      #   tier2-x86_64-apple-darwin below and tier2-pr.yml report the checks the pull request
+      #   matrix leaves out.
       # `native`: built on its own OS, so linted and tested; Intel macOS is cross-compiled on the
-      # arm64 runner, so it is built but not linted or tested. Linux is the oldest glibc we
-      # support; release packages are built there later.
+      # arm64 runner, so it is built but not linted or tested. `test_only`: tested, but no clippy
+      # step and no keychain smoke test runs (Windows ARM64 in a merge group). Linux is the oldest
+      # glibc we support; release packages are built there later.
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
@@ -273,7 +385,8 @@ jobs:
             || github.event_name == 'merge_group'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
-                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
+                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true},
+                 {"target": "aarch64-pc-windows-msvc", "runner": "windows-11-arm", "native": true, "test_only": true}]'
             || '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-apple-darwin", "runner": "macos-15", "native": false},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -335,7 +448,8 @@ jobs:
         if: env.BUILD == 'true' && runner.os == 'Linux'
         uses: ./.github/actions/install-tauri-linux-deps
         with:
-          extra-packages: xvfb
+          # ripgrep for the host's Codex-fence tests in "Test without the network" (see fast-lane).
+          extra-packages: xvfb ripgrep
 
       # A dev-profile check, clippy or nextest embeds no ui (tauri's dev build loads devUrl), so
       # only an app build needs pnpm, Node and the ui workspace.
@@ -383,7 +497,7 @@ jobs:
       # async-channel's std), which hid a macOS compile error in its install example (#258). The
       # example is what the by-hand installs on the Mac mini and clauseo-win-01 run.
       - name: clippy the agents crate on its own features, its example included
-        if: env.BUILD == 'true' && matrix.native
+        if: env.BUILD == 'true' && matrix.native && !matrix.test_only
         run: cargo clippy -p clauseo-agents --all-targets --target "$TARGET" -- -D warnings
 
       # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
@@ -404,9 +518,22 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # The `elevated_` tests (D-B16), as windows-pr-tests.yml's step: ignored everywhere else,
+      # and each skips unless the token is elevated and CLAUSEO_ELEVATED_TESTS=1. Hosted Windows
+      # runners' tokens are elevated (probe #509). One at a time: they make and delete local
+      # accounts, a group and an HKLM key.
+      - name: Elevated tests, one at a time
+        if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --run-ignored only -E "test(/(^|::)elevated_/)" --test-threads 1 --no-tests=fail
+
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
-      # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.
+      # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included
+      # (nightly and on demand; its merge-group entry is test_only and skips this).
       # Linux has no keychain store in the crate (not a product target).
       - name: Keychain smoke test (clauseo-connectors)
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && !matrix.test_only && env.PR_LINT_ONLY != 'true'
@@ -431,10 +558,43 @@ jobs:
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-desktop --features staging-connector --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-desktop --features local-connector --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-connectors --features staging,local --profile ci --no-tests=pass --no-run
+
+      # The guard's real-Chrome regression test (crates/mcp/tests/guard/real_chrome.rs) opens a page
+      # through `clauseo-mcp browser-guard`, the pinned agent-browser and the runner's Google Chrome.
+      # The binary is fetched here, before the network goes, and checked against the desktop's pin
+      # (crates/desktop/agent-browser.toml); the test skips, with a note, only without these values.
+      - name: Fetch agent-browser for the guard's real-Chrome test
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: |
+          pin=crates/desktop/agent-browser.toml
+          value() {
+            awk -v table="[$TARGET]" -v key="$1" '
+              $0 == table { inside = 1; next }
+              /^\[/ { inside = 0 }
+              inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+          }
+          url=$(value url)
+          sum=$(value sha256)
+          test -n "$url" && test -n "$sum"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/agent-browser" "$url"
+          echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/agent-browser"
+          test -x /usr/bin/google-chrome
+          echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
+          echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
 
       # The desktop crate's tests run a second time with the marks feature (the speed scoreboard's
       # build): its portable cases on every Linux run, so the merge queue tests them; the macOS job
-      # runs the macOS ones on main.
+      # runs the macOS ones on main. And once more with staging-connector (docs/connector-staging.md):
+      # the staging build's origin and pay-link tests, and tests/staging_host.rs's scan for the
+      # staging host, which every other run makes sure is absent; the same with local-connector
+      # (the local test server, 127.0.0.1:8793). clauseo-connectors' Origin::Staging and
+      # Origin::Local tests run with its staging and local features, which no dev-dependency
+      # turns on (they would unify into the app binary that scan reads).
       # A new network namespace with only loopback, entered as root and then dropped back to the
       # runner user, without its supplementary groups (docker's socket would reach the network) and
       # with no_new_privs (sudo could otherwise nsenter back out). sudo may replace PATH, HOME and
@@ -456,6 +616,9 @@ jobs:
               echo "uid inside the namespace: $(as_runner id -u)"
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
               as_runner cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-desktop --features staging-connector --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-desktop --features local-connector --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-connectors --features staging,local --profile ci --no-tests=pass
             '
 
       # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist (a plain
@@ -496,7 +659,9 @@ jobs:
   # required check. It never runs: on every other event the matrix builds the target under the same
   # check name. Not in the matrix, so it reports its real name; a skipped matrix job would report
   # "build (${{ matrix.target }})" instead. Windows ARM64's stand-in is in tier2-pr.yml, which runs
-  # on pull requests only, so that in a merge group the real ARM64 job alone reports its check.
+  # on pull requests only (where this matrix leaves ARM64 out), so that in a merge group the real
+  # ARM64 job alone reports its check. Once that check is required, the stand-in's skip passes it on
+  # a pull request and the merge group's real job gates the queue; the two never run together.
   tier2-x86_64-apple-darwin:
     name: build (x86_64-apple-darwin)
     # Never true (no event is named never); actionlint rejects a constant `false`.
@@ -549,9 +714,12 @@ jobs:
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
-      # A mutant in the desktop crate builds and tests it, which links WebKitGTK.
+      # A mutant in the desktop crate builds and tests it, which links WebKitGTK. ripgrep: a mutant
+      # in the host runs its Codex-fence tests (see fast-lane).
       - name: Install the Linux system packages Tauri needs
         uses: ./.github/actions/install-tauri-linux-deps
+        with:
+          extra-packages: ripgrep
 
       # Saves the crate registry downloads and xtask's own build. It does not speed up the mutants:
       # each one builds in a copy of the tree with its own target/.

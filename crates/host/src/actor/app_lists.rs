@@ -282,24 +282,28 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         last_activity: _,
         client,
         next_date,
+        skill_packs,
         pinned,
         last_opened,
         status,
         folder_display,
         folder_state,
         folder_support,
+        protection,
     } = a;
     *matter == b.matter
         && *name == b.name
         && *kind == b.kind
         && *client == b.client
         && *next_date == b.next_date
+        && *skill_packs == b.skill_packs
         && *pinned == b.pinned
         && *last_opened == b.last_opened
         && *status == b.status
         && *folder_display == b.folder_display
         && *folder_state == b.folder_state
         && *folder_support == b.folder_support
+        && *protection == b.protection
 }
 
 /// Whether two thread rows show the same: every field but `last_activity`.
@@ -311,6 +315,7 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         agent,
         status,
         queue_held,
+        queue_held_reason,
         seen,
         snoozed_until,
         done,
@@ -323,6 +328,7 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         && *agent == b.agent
         && *status == b.status
         && *queue_held == b.queue_held
+        && *queue_held_reason == b.queue_held_reason
         && *seen == b.seen
         && *snoozed_until == b.snoozed_until
         && *done == b.done

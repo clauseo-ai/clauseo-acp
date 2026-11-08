@@ -97,6 +97,7 @@ fn a_message_an_event_displaces_is_shown_at_its_new_order() {
     let notice = Notice {
         level: NoticeLevel::Info,
         text: "Context is nearly full.".to_owned(),
+        kind: None,
     };
     let envelope = log.push(notice).unwrap();
     assert_eq!(envelope.seq, seq(4));
@@ -120,6 +121,7 @@ fn thread_of_notices(n: usize) -> Log {
         let notice = Notice {
             level: NoticeLevel::Info,
             text: format!("Notice {at}."),
+            kind: None,
         };
         log.push(notice).unwrap();
     }

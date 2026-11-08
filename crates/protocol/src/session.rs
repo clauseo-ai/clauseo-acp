@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{CompactString, Count, Finite};
+use crate::{CompactString, Count, Finite, MatterPath, PackId};
 
 /// The agent's stable ACP v1 capabilities, plus Clauseo's steering capability.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +278,72 @@ open_unit_enum! {
         Warning,
     }
     test mod notice_level;
+}
+
+open_data_enum! {
+    /// Which notice the host gave, so the app shows it in its own words, in the lawyer's
+    /// language. Host notices get a kind; agent notices never do, and keep their free text.
+    ///
+    /// A plain string for a unit variant; a kind from a newer Clauseo decodes to `Unknown`, and
+    /// the app then shows the notice's `text`. Data, not unit-only, because a later kind carries
+    /// fields.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum NoticeKind {
+        /// The agent started a new session after earlier turns, so it does not remember them.
+        ContextNotRestored = "context_not_restored",
+        /// Papers an undo removed are in the folder again: a sync client put them back
+        /// (`OneDrive` on macOS can, seconds later, as cloud-only placeholders). Clauseo did not
+        /// remove them again.
+        FilesCameBack = "files_came_back" {
+            /// The first of them, at most five, sorted by path bytes.
+            files: Vec<MatterPath>,
+            /// How many more came back beyond `files`.
+            more: u32,
+        },
+        /// A skill pack the launch left out: which pack, and why. The app words it by kind; the
+        /// notice's `text` is the fallback.
+        SkillPackNotLoaded = "skill_pack_not_loaded" {
+            /// The pack's id.
+            pack: PackId,
+            /// Why the launch left it out.
+            reason: PackSkipReason,
+        },
+        _ =>
+        /// A kind from a newer Clauseo; written back as the plain string `kind`.
+        Unknown,
+    }
+    test mod notice_kind with [
+        NoticeKind::ContextNotRestored,
+        NoticeKind::FilesCameBack {
+            files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
+            more: 2,
+        },
+        NoticeKind::SkillPackNotLoaded {
+            pack: PackId::new("nda-kit").unwrap(),
+            reason: PackSkipReason::Changed,
+        },
+    ];
+}
+
+open_unit_enum! {
+    /// Why a launch left a skill pack out: one of six reasons, as the notice names it. Every
+    /// refusal of a pack's files other than a missing folder reads as `invalid`.
+    pub enum PackSkipReason {
+        /// The matter uses the pack, but it is not turned on.
+        NotTurnedOn,
+        /// The skill pack settings on this computer do not admit it.
+        NotAdmitted,
+        /// Its files changed since it was turned on, so it does not load until it is turned on
+        /// again.
+        Changed,
+        /// Clauseo could not find its folder on this computer.
+        Missing,
+        /// Its files are not a valid skill pack.
+        Invalid,
+        /// Past the most packs a launch loads.
+        TooMany,
+    }
+    test mod pack_skip_reason;
 }
 
 open_unit_enum! {

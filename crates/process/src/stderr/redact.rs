@@ -1,5 +1,8 @@
-//! What the stderr tail hides: the home folder, the values of the spec's secret variables, words
-//! starting `sk-` and the word after `Bearer ` (in any case).
+//! What the stderr tail hides: the home folder, the values of the spec's secret variables, the
+//! password of each proxy variable (as written and percent-decoded) and the secrets the spec
+//! names outright (`LaunchSpec::with_redacted`), words starting `sk-`, the word after `Bearer `
+//! (in any case) and any URL's user name and password (`scheme://user:pass@host` becomes
+//! `scheme://***@host`: a proxy URL in the environment may carry them).
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -11,23 +14,41 @@ use std::path::Path;
 const REDACTED: &str = "[redacted]";
 /// A variable whose name holds one of these, in any case, holds a secret.
 const SECRET_NAMES: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
+/// What a URL's user name and password become.
+const USERINFO: &str = "***";
 /// The marker of a bearer token, matched in any case.
 const BEARER: &str = "bearer ";
 /// A shorter value is not redacted: it would hide common words, and guessing it is easy anyway.
 const MIN_SECRET: usize = 8;
 
-/// The rules for one agent, fixed when it starts.
-#[derive(Debug)]
+/// The rules for one agent, fixed when it starts. It keeps the secret values as long as the
+/// agent's handle lives, to redact its tail; its `Debug` counts them and shows none.
 pub(crate) struct Redactor {
     home: Option<String>,
     /// Longest first, so a secret that holds another goes whole.
     secrets: Vec<String>,
 }
 
+impl std::fmt::Debug for Redactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Redactor")
+            .field("home", &self.home.is_some())
+            .field("secrets", &self.secrets.len())
+            .finish()
+    }
+}
+
 impl Redactor {
     /// `home` becomes `~`. The values of `env`'s variables whose names hold `KEY`, `TOKEN`,
-    /// `SECRET` or `PASSWORD`, at least 8 bytes long, become `[redacted]`.
-    pub(crate) fn new(home: Option<&Path>, env: &BTreeMap<OsString, OsString>) -> Redactor {
+    /// `SECRET` or `PASSWORD`, the password of each proxy variable's URL (`HTTPS_PROXY` and
+    /// the like, [`proxy_passwords`]: as written and percent-decoded), and each of `extra`
+    /// (secrets the spec names outright, such as a token the agent reads from a file), at least
+    /// 8 bytes long, become `[redacted]`.
+    pub(crate) fn new(
+        home: Option<&Path>,
+        env: &BTreeMap<OsString, OsString>,
+        extra: &[String],
+    ) -> Redactor {
         let home = home
             .and_then(Path::to_str)
             .filter(|home| !home.is_empty())
@@ -36,6 +57,13 @@ impl Redactor {
             .iter()
             .filter(|(name, value)| is_secret_name(name) && value.len() >= MIN_SECRET)
             .map(|(_, value)| value.to_string_lossy().into_owned())
+            .chain(proxy_passwords(env))
+            .chain(
+                extra
+                    .iter()
+                    .filter(|secret| secret.len() >= MIN_SECRET)
+                    .cloned(),
+            )
             .collect();
         secrets.sort_unstable_by_key(|secret| Reverse(secret.len()));
         secrets.dedup();
@@ -43,7 +71,8 @@ impl Redactor {
     }
 
     /// `text` with every rule applied: secret values first, then the home folder, then `sk-`
-    /// words and the word after `Bearer ` (in any case: `authorization: bearer ..` too).
+    /// words, the word after `Bearer ` (in any case: `authorization: bearer ..` too) and each
+    /// URL's user name and password.
     pub(crate) fn redact(&self, text: &str) -> String {
         let mut text = text.to_owned();
         for secret in &self.secrets {
@@ -57,7 +86,8 @@ impl Redactor {
             text = text.replace(home.as_str(), "~");
         }
         let text = replace_runs(&text, "sk-", Marker::Starts, is_key_char);
-        replace_runs(&text, BEARER, Marker::Precedes, is_token68_char)
+        let text = replace_runs(&text, BEARER, Marker::Precedes, is_token68_char);
+        without_userinfo(&text)
     }
 
     /// `text`, the start of a window that does not hold stderr's start, without what may be the
@@ -65,19 +95,25 @@ impl Redactor {
     ///
     /// At a line start (`mid_line` false) that is the longest end of a secret value that
     /// follows one of its `\n`s, as in a PEM key. Mid-line it is whichever leaves out more of the
-    /// longest end of a secret value and [`without_token_end`] (the end of an `sk-` key or a
-    /// bearer token), and then again the longest end of a value, for a value that began inside
-    /// what that left out. A value may hold any char, so only its own end is left out for it.
+    /// longest end of a secret value, [`without_token_end`] (the end of an `sk-` key or a
+    /// bearer token) and [`without_userinfo_end`] (a URL's user name and password whose
+    /// `scheme://` was cut off), and then again the longest end of a value, for a value that
+    /// began inside what that left out. A value may hold any char, so only its own end is left
+    /// out for it.
     ///
     /// [`redact`]: Redactor::redact
     pub(crate) fn without_cut_secret<'t>(&self, text: &'t str, mid_line: bool) -> &'t str {
         if !mid_line {
             return self.without_value_end(text, true);
         }
-        let rest = [self.without_value_end(text, false), without_token_end(text)]
-            .into_iter()
-            .min_by_key(|rest| rest.len())
-            .unwrap_or(text);
+        let rest = [
+            self.without_value_end(text, false),
+            without_token_end(text),
+            without_userinfo_end(text),
+        ]
+        .into_iter()
+        .min_by_key(|rest| rest.len())
+        .unwrap_or(text);
         self.without_value_end(rest, false)
     }
 
@@ -115,6 +151,98 @@ fn without_token_end(text: &str) -> &str {
         }
         _ => rest,
     }
+}
+
+/// Whether `c` ends a URL's authority (its `user:pass@host:port`) in text.
+fn ends_authority(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '/' | '?' | '#' | '"' | '\'' | '<' | '>' | '`')
+}
+
+/// `text` with each URL's user name and password (all between `://` and the authority's last
+/// `@`) as [`USERINFO`]: `http://u:p@proxy:3128` becomes `http://***@proxy:3128`.
+fn without_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut from = 0;
+    while let Some(found) = text.get(from..).and_then(|rest| rest.find("://")) {
+        let start = from + found + "://".len();
+        let rest = text.get(start..).unwrap_or_default();
+        let authority = rest.find(ends_authority).unwrap_or(rest.len());
+        if let Some(at) = rest.get(..authority).and_then(|auth| auth.rfind('@'))
+            && at > 0
+        {
+            out.push_str(text.get(copied..start).unwrap_or_default());
+            out.push_str(USERINFO);
+            copied = start + at;
+        }
+        from = start + authority;
+    }
+    out.push_str(text.get(copied..).unwrap_or_default());
+    out
+}
+
+/// `text` through the last `@` of the authority-like run it starts with, after any `:` and `/`:
+/// what may be a URL's user name and password whose `scheme://` (or part of it) was cut off.
+/// Text whose first run holds no `@` is all kept.
+fn without_userinfo_end(text: &str) -> &str {
+    let body = text.trim_start_matches([':', '/']);
+    let run = body.find(ends_authority).unwrap_or(body.len());
+    match body.get(..run).and_then(|run| run.rfind('@')) {
+        Some(at) => body.get(at + 1..).unwrap_or_default(),
+        None => text,
+    }
+}
+
+/// The password in each of `env`'s proxy variables (a name ending `_PROXY` in any case, but
+/// `NO_PROXY`), as written and percent-decoded: an agent may print either, and a password with
+/// an unencoded `/` or `#` is not one [`without_userinfo`] finds whole in a URL. The URL may
+/// have no scheme (`user:pass@host:port`). The user info runs to the value's last `@`.
+fn proxy_passwords(env: &BTreeMap<OsString, OsString>) -> Vec<String> {
+    let mut passwords = Vec::new();
+    for (name, value) in env {
+        let name = name.to_string_lossy().to_ascii_uppercase();
+        if !name.ends_with("_PROXY") || name == "NO_PROXY" {
+            continue;
+        }
+        let value = value.to_string_lossy();
+        let rest = value.split_once("://").map_or(&*value, |(_, rest)| rest);
+        let Some((userinfo, _host)) = rest.rsplit_once('@') else {
+            continue;
+        };
+        let Some((_user, password)) = userinfo.split_once(':') else {
+            continue;
+        };
+        if password.is_empty() {
+            continue;
+        }
+        let decoded = percent_decoded(password);
+        passwords.push(password.to_owned());
+        if let Some(decoded) = decoded.filter(|decoded| decoded != password) {
+            passwords.push(decoded);
+        }
+    }
+    passwords
+}
+
+/// `text` with each `%XX` decoded; `None` when the result is not UTF-8.
+fn percent_decoded(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        if let (b'%', Some(decoded)) = (byte, hex) {
+            out.push(decoded);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn is_secret_name(name: &OsStr) -> bool {
@@ -176,4 +304,20 @@ fn is_key_char(c: char) -> bool {
 /// A char of an HTTP bearer token (RFC 6750's `b64token`).
 fn is_token68_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '+' | '/' | '=')
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn the_debug_shows_no_secret_and_no_home() {
+        const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
+        let env = BTreeMap::from([(OsString::from("ANTHROPIC_API_KEY"), OsString::from(KEY))]);
+        let redactor = Redactor::new(Some(Path::new("/home/lawyer")), &env, &[]);
+        let shown = format!("{redactor:?}");
+        assert!(!shown.contains(KEY), "{shown}");
+        assert!(!shown.contains("/home/lawyer"), "{shown}");
+        assert!(redactor.redact(KEY).contains(REDACTED));
+    }
 }

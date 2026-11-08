@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react";
 import {
@@ -48,6 +49,7 @@ import { useOtherWait } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
+import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
@@ -56,6 +58,7 @@ import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { useHold } from "../first-run/hold.ts";
 import type { AskHow, Drafts } from "./session.ts";
+import { ProtectionContext } from "../protection/context.ts";
 
 export function WorkComposer({
   ref,
@@ -71,8 +74,11 @@ export function WorkComposer({
   doing = null,
   asks = null,
   refused,
+  refusedActions,
   failed,
   stopped = null,
+  noteFor,
+  gateYields = false,
   refill = null,
   onAsk,
   onStop,
@@ -109,10 +115,17 @@ export function WorkComposer({
   asks?: "permission" | "question" | null;
   /** The code of a refused command, until the next Ask. */
   refused: string | null;
+  /** Optional: the refused line's way on, such as Locate folder for a folder gone or not the
+   * matter's. */
+  refusedActions?: ReactNode;
   /** The lost stream's line, until Try again brings it back. */
   failed: BreakLine | null;
   /** The stopped answer's line, while nothing runs. */
   stopped?: BreakLine | null;
+  /** UD2: the notice line's note, given the one it would show otherwise (the expired card, the first read's line). */
+  noteFor?: ((fallback: ReactNode) => ReactNode) | undefined;
+  /** UD2: the expired card holds the question and offers the sign-in itself: the gate leaves the field's row. */
+  gateYields?: boolean;
   /** The stopped question, once per break, for an empty field. */
   refill?: { key: EntryId; text: string } | null;
   /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
@@ -142,7 +155,9 @@ export function WorkComposer({
   const agentPlan = useAgentPlan();
   // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
   const hold = useHold(transport);
-  const gated = hold?.gate !== undefined;
+  // UC: the room's protection line, and the firm's hold on send while the open matter has no protection
+  const shield = use(ProtectionContext);
+  const gated = hold?.gate !== undefined && !gateYields;
   const field = useRef<ComposerHandle>(null);
   // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
   // its turn stopped before the answer cleared the field (the refill below)
@@ -210,7 +225,7 @@ export function WorkComposer({
   // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
   // the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     if (busy) {
       queue(asked);
       return;
@@ -227,7 +242,7 @@ export function WorkComposer({
     send(asked, { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
@@ -317,6 +332,7 @@ export function WorkComposer({
                 : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,
+            ...(refusedActions === undefined ? {} : { actions: refusedActions }),
           },
           testId: "error",
         }
@@ -346,12 +362,25 @@ export function WorkComposer({
           : busy
             ? { state: answering, testId: "working" }
             : stopped);
+  const credit =
+    transport === null ? null : (
+      <OutOfCredit
+        transport={transport}
+        conversation={thread ?? draftKey}
+        onFocusField={focusField}
+      />
+    );
   return (
     <Composer
       ref={field}
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
-      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
-      notice={paused === null ? <LimitWarning /> : null}
+      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time. With no
+      // warning, U15's out-of-credit note, hidden by this conversation's thread (or its draft's key before it has one)
+      notice={
+        shield?.blocked === true
+          ? shield.notice
+          : (noteFor ?? same)(paused === null ? <LimitWarning fallback={credit} /> : credit)
+      }
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
@@ -411,8 +440,8 @@ export function WorkComposer({
           )}
         </>
       }
-      disabled={disabled}
-      line={hold?.line ?? false}
+      disabled={disabled || shield?.blocked === true}
+      line={hold?.line ?? (shield === null ? false : shield.line)}
       testIds={{
         field: "composer",
         ask: "send",
@@ -440,3 +469,6 @@ function markOf(v: StreamView | undefined): string | null {
   const said = status === undefined ? "" : typeof status === "string" ? status : "queued";
   return `${said} ${v.latestOutput ?? ""}`;
 }
+
+/** The notice line's note as it stands, with no UD2 note over it. */
+const same = (note: ReactNode): ReactNode => note;

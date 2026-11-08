@@ -3,7 +3,9 @@
 //! step.
 
 mod discard;
+pub use discard::remove_marker_of;
 pub(crate) mod json;
+pub use json::check_marker;
 
 use discard::Fresh;
 
@@ -45,8 +47,8 @@ impl Matter {
     /// Creates matter `new`: its folder (which must not exist; its parents are made), its
     /// `matter.json`, its git dir and a root `import` checkpoint of the empty folder. Refuses,
     /// before anything is made, a folder that is, holds or sits inside the matters root or a
-    /// refused tree, as import does ([`refuse::check_protected`]; `matter.folder_in_matters_root`
-    /// for the data folder).
+    /// refused tree, or on Windows a path too deep to start programs in, as import does
+    /// ([`refuse::check_protected`]; `matter.folder_in_matters_root` for the data folder).
     pub fn create(settings: Settings, new: NewMatter) -> Result<Self, Error> {
         refuse_marker(new.marker)?;
         refuse::check_protected(&new.folder, &settings)?;
@@ -156,8 +158,9 @@ impl Matter {
         Ok(Made::Done(Box::new(matter), summary))
     }
 
-    /// Opens matter `id` in `folder`: `matter.folder_missing` if the folder is gone or its
-    /// `matter.json` is missing, does not read or names another matter. Points the history's
+    /// Opens matter `id` in `folder`: `matter.folder_missing` if the folder is gone, and
+    /// `matter.folder_not_a_matter` if its `matter.json` is missing, does not read or names another
+    /// matter. Points the history's
     /// work tree (`core.worktree`) at `folder` if it named another, rebuilds the timeline from
     /// the trailers, loads the stat cache (rebuilt if it does not match) and, on Windows, hides
     /// `.clauseo` again if it lost the attribute.
@@ -176,7 +179,7 @@ impl Matter {
     ///   it, and a refused tree (`Settings::refused_trees`) or a folder nested with it;
     ///   `matter.folder_missing` (`NoFolder`) for a folder that does not exist;
     /// - a folder whose `.clauseo/matter.json` is missing, does not read or names another
-    ///   matter: `matter.folder_missing` with that reason.
+    ///   matter: `matter.folder_not_a_matter` (`Error::FolderMissing` with that reason).
     ///
     /// Then it opens the matter as [`Matter::open`] does, which points the history's work tree at
     /// `folder`. The host stores `folder` as the matter's path only after `Ok`, and drops any
@@ -215,9 +218,9 @@ impl Matter {
     ///
     /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root, a
     ///   refused tree);
-    /// - a `matter.json` naming another matter: `matter.folder_missing` (`OtherMatter`), never
-    ///   overwritten;
-    /// - a folder the history does not record: `matter.folder_missing` with the reason
+    /// - a `matter.json` naming another matter: `matter.folder_not_a_matter` (`OtherMatter`),
+    ///   never overwritten;
+    /// - a folder the history does not record: `matter.folder_not_a_matter` with the reason
     ///   `open` gave (`NoMatterJson` or `Unreadable`); it moved, so locate it instead;
     /// - a history that does not open or has no checkpoint (`matter.checkpoint_failed`): the
     ///   history is opened before `matter.json` is written.
@@ -286,6 +289,14 @@ impl Matter {
     /// The matter's folder.
     pub fn folder(&self) -> &Path {
         &self.folder
+    }
+
+    /// Of `paths` (files an undo deleted, [`Undone::deleted`]), the ones the folder holds
+    /// again, by their exact names, sorted by path bytes: a sync client put them back. Stats
+    /// only, never reads: a cloud-only placeholder counts as back and is never downloaded. A
+    /// stat that fails otherwise counts as still gone. Needs no writer.
+    pub fn still_gone(&self, paths: &[MatterPath]) -> Vec<MatterPath> {
+        undo::back_again(&self.folder, paths)
     }
 
     /// Every checkpoint, oldest first.
@@ -372,6 +383,9 @@ impl Matter {
     /// the files the step created, renames the temp files into place, and takes an `undo`
     /// checkpoint. A step whose target the `outside-edits` walk finds cloud-only or over the cap
     /// (it changed after the first check, or was not downloaded when read) is kept, not written.
+    /// A deleted file that a sync client puts back before or during the `undo` checkpoint's walk
+    /// is never recorded with its old content: cloud-only it is skipped, downloaded it is read;
+    /// either way [`Undone::resurrected`] names it.
     /// Its ids are single-use: see [`UndoRequest`] for retrying a failed undo.
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
@@ -427,7 +441,8 @@ impl Matter {
     /// it). What an unread subfolder holds is not listed; a checkpoint keeps those files as they
     /// were, so the folder itself is in `unread`. The walk stops at the first entry past
     /// `limit` and never reads a folder that sorts after it. `matter.folder_missing` when the
-    /// folder is gone or its `matter.json` names another matter.
+    /// folder is gone, `matter.folder_not_a_matter` when its `matter.json` is missing, does not
+    /// read or names another matter.
     pub fn papers(&self, limit: usize) -> Result<crate::PaperList, Error> {
         json::check(&self.folder, self.id)?;
         papers::papers(&self.folder, &self.settings, limit)

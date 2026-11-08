@@ -172,6 +172,11 @@ fn write_to_a_document_held_open_without_sharing_is_refused() {
             Some(path("Locked.docx"))
         )
     );
+    // The refused edit wrote nothing: the held document keeps its bytes.
+    assert_eq!(
+        std::fs::read_to_string(folder.join("Locked.docx")).unwrap(),
+        "one"
+    );
     drop(held);
     host.shutdown();
 }

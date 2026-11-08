@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clauseo_protocol::AgentId;
 use serde::{Deserialize, Serialize};
 
+use crate::node::{NodeSource, node_line};
 use crate::platform::Platform;
 use crate::snapshot::AgentEntry;
 use crate::write;
@@ -88,6 +89,17 @@ impl Receipt {
         }
     }
 
+    /// [`node_line`] for the receipt's Node: the pinned one when it is `runtime`, the program
+    /// under the data folder, else the user's.
+    pub(crate) fn node_line(&self, runtime: &Path) -> String {
+        let source = if self.node == runtime {
+            NodeSource::Pinned
+        } else {
+            NodeSource::User
+        };
+        node_line(source, &self.node, &self.node_version)
+    }
+
     /// Whether it is schema 1 and names this agent, `<hash>` and platform.
     pub(crate) fn matches(&self, agent: &AgentId, lock_hash: &str, platform: Platform) -> bool {
         self.schema == SCHEMA
@@ -129,7 +141,10 @@ pub(crate) struct Scan {
 
 /// Sorts `<data_dir>/agents/<id>/install/`: the `hash` folder with a valid receipt is kept;
 /// every other entry (that folder without a valid receipt, `.tmp-*`, other hashes, strays) is
-/// to remove. A missing `install/` is an empty scan.
+/// to remove. A missing `install/` is an empty scan. A link (symbolic link, junction or other
+/// reparse point) or a file at `agents`, `agents/<id>` or `install` fails with `InvalidInput`
+/// and nothing is listed: `read_dir` would follow it, and the removal would empty a folder
+/// outside the data folder.
 pub(crate) fn scan(
     data_dir: &Path,
     agent: &AgentId,
@@ -137,6 +152,9 @@ pub(crate) fn scan(
     platform: Platform,
 ) -> io::Result<Scan> {
     let root = install_root(data_dir, agent);
+    if !write::real_dirs_under(data_dir, &root)? {
+        return Ok(Scan::default());
+    }
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Scan::default()),

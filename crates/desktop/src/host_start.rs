@@ -7,8 +7,10 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use clauseo_host::{HostHandle, HostJoin};
+use clauseo_host::{HostConfig, HostExit, HostHandle, HostJoin};
+use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{ErrorCode, HostError};
+use clauseo_settings::{Effective, Locations, PlatformDirs as _, SystemDirs, SystemFiles};
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared};
 
@@ -91,29 +93,111 @@ impl HostStart {
 }
 
 /// Runs `run` (in the app, `Host::start` with the effective settings) on a thread named
-/// `clauseo-host-start`, its outcome going into `start`'s cell.
+/// `clauseo-host-start`, its outcome going into `start`'s cell. Logs when it ended, by the
+/// chooser's clock (`chooser/trace.rs`): until then every bridge call waits.
 pub(crate) fn start_on_thread(
     start: HostStart,
     run: impl FnOnce() -> Result<(HostHandle, HostJoin), HostError> + Send + 'static,
 ) -> std::io::Result<()> {
     let thread = std::thread::Builder::new()
         .name("clauseo-host-start".to_owned())
-        .spawn(move || start.finish(run()))?;
+        .spawn(move || {
+            let began = crate::open::now();
+            let started = run();
+            let how = if started.is_ok() { "started" } else { "failed" };
+            crate::chooser::trace::mark("host start ended", began, how);
+            start.finish(started);
+        })?;
     // Not joined: the cell carries what it did.
     drop(thread);
     Ok(())
 }
 
-/// Stops the host, blocking: waits for its start, shuts it down and joins its thread. After a
-/// failed start there is nothing to stop.
-pub(crate) fn stop(cell: &HostCell) {
-    if let Ok(host) = futures::executor::block_on(cell.host()) {
+/// Stops the host, blocking: waits for its start, shuts it down and joins its thread, and says
+/// how it ended: `HostExit::Install` when it had already stopped to install an update (0037).
+/// After a failed start there is nothing to stop: `HostExit::Stopped`.
+pub(crate) fn stop(cell: &HostCell) -> HostExit {
+    let host = futures::executor::block_on(cell.host()).ok();
+    if let Some(host) = host {
         // Already stopped or failed: join reports it, and the app exits either way.
         let _stopped = futures::executor::block_on(host.shutdown());
     }
     let join = lock(&cell.join).take();
     if let Some(join) = join {
         let _joined = join.join();
+    }
+    // Resolved once the thread has ended, which the join above waited for.
+    host.map_or(HostExit::Stopped, |host| {
+        futures::executor::block_on(host.exit())
+    })
+}
+
+/// Starts `lookup` (`Locations::with_documents` with the system's folders, or a test's stand-in)
+/// on a thread of its own and gives the receiver its answer comes on, for
+/// `HostConfig::with_documents_later`: the host's start never waits on Documents, which on
+/// Windows may wait 2 s on a share that is down. Marks `began`'s timing line when it answers.
+/// With no thread the sender is dropped, and the host goes on without Documents.
+pub(crate) fn documents_later(
+    locations: Locations,
+    began: std::time::Instant,
+    lookup: impl FnOnce(Locations) -> Locations + Send + 'static,
+) -> oneshot::Receiver<Locations> {
+    let (answer, later) = oneshot::channel();
+    let spawned = std::thread::Builder::new()
+        .name("clauseo-documents".into())
+        .spawn(move || {
+            let located = lookup(locations);
+            let found = if located.default_matters_dir().is_some() {
+                "found"
+            } else {
+                "none"
+            };
+            crate::chooser::trace::mark("host start: Documents looked up", began, found);
+            // The host may be gone (a failed start, a quit); then nobody is left to tell.
+            drop(answer.send(located));
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "no Documents lookup thread: no default matters folder this run");
+    }
+    later
+}
+
+/// The launcher the host starts every agent and plan reader with: it clears the environment
+/// (`SpawnOptions::clear_env`, as `HostConfig::new` requires), so a child gets its spec's
+/// variables and nothing else, and the variables the host drops (`GIT_*`, `SSH_*`, Codex's
+/// dropped names) stay dropped. `home` shows as `~` in stderr tails.
+pub(crate) fn host_launcher(home: Option<std::path::PathBuf>) -> PassthroughLauncher {
+    PassthroughLauncher::new(host_spawn_options(home))
+}
+
+/// [`host_launcher`]'s options: the environment cleared, `home` shown as `~`. S18's sign-in
+/// launcher uses them too (`setup/start.rs`).
+pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptions {
+    let spawn = SpawnOptions::new().clear_env();
+    match home {
+        Some(home) => spawn.home(home),
+        None => spawn,
+    }
+}
+
+/// The effective settings under `locations`, with the system policy sources.
+pub(crate) fn load_effective(locations: &Locations) -> Effective {
+    let sources = clauseo_settings::system_policy_sources();
+    let sources: Vec<&dyn clauseo_settings::PolicySource> =
+        sources.iter().map(AsRef::as_ref).collect();
+    Effective::load(locations, &SystemFiles, &sources)
+}
+
+/// The host's config: the effective settings, the launcher that clears the environment
+/// (`crate::host_launcher`), and the refused folders.
+pub(crate) fn host_config(effective: Effective) -> HostConfig {
+    let launcher = crate::host_launcher(SystemDirs.home());
+    let config = HostConfig::new(effective, Arc::new(launcher))
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
+    // With no path to this executable no guard hook goes; the permission check remains.
+    match std::env::current_exe() {
+        Ok(exe) => config.with_pre_write_guard(exe),
+        Err(_) => config,
     }
 }
 

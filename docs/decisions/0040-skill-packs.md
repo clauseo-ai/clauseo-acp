@@ -1,0 +1,513 @@
+# 0040: Skill packs
+
+## Context
+
+R21 (decision record 0030) and R22 (0031) give both agents a fixed set of skills: R21's `stetdoc`
+and R22's `legal-drafting`, `legal-research` and `matter-brief`. They are compiled in, rendered
+once at app start into Claude's plugin at `<data>/profile/claude-plugin`, and listed in Codex's
+`developer_instructions`. 0031 ends with "lawyer-made skills come back only with their own
+decisions". This is that decision.
+
+Rohan wants skill loading to be general, so that a later Clauseo Hub is just more folders. The host
+and orchestrator agreed the shape on 2026-11-02: a pack is a folder with a manifest; extra packs
+live under the data folder; `profile` checks them; policy decides which may load; the lawyer turns
+packs on, globally and per matter; a pack that changed after it was turned on does not load. The
+orchestrator approved the picks below on 2026-11-05 (`scratch-e/packs-plan.md`, section (b)), and
+added one requirement from Rohan: loading packs must not slow a launch noticeably.
+
+Three facts on main shape the code. The profile's skills are one set shared by every launch
+(`ClauseoProfile::with_skills`). Every session loads the same plugin folder. The `ProfileHook`
+methods take only the agent's id and read no file. Per-matter packs differ from launch to launch
+and can change on disk while the app runs, so they cannot join the shared set or the shared
+folder.
+
+## Decision
+
+### The pack
+
+A pack is a folder holding `clauseo-pack.json`:
+
+```json
+{
+  "format": 1,
+  "id": "nda-kit",
+  "name": "NDA review kit",
+  "version": "1.2.0",
+  "author": "Example Chambers",
+  "source_url": "https://example.org/nda-kit",
+  "licence": "CC-BY-4.0",
+  "last_reviewed": "2026-10-20",
+  "instruction_only": true,
+  "skills": [{"name": "nda-review"}, {"name": "nda-redline"}]
+}
+```
+
+- Every field is required, and an unknown key (at the top or in a skill) refuses the pack.
+  `source_url` must be `https`; Clauseo never fetches it. `last_reviewed` is a calendar date
+  (`clauseo_protocol::Date`). `name`, `version`, `author` and `licence` are display text, 1 to 200
+  characters with no control character, and never go into an agent's instructions or the host log.
+- **Layout.** `skills/<skill>/SKILL.md` and that skill's files, for each listed skill. At the top
+  level, also only `README.md`, `LICENSE`, `LICENSE.md`, `LICENSE.txt` and `NOTICE`. Anything else,
+  including a folder under `skills/` the manifest does not list (even an empty one), refuses the
+  pack. The top-level files are hashed but not rendered.
+- **The built-in pack** has the id `clauseo`. It is compiled in and holds R22's three skills, plus
+  stetdoc's when it loaded. It is not a folder, it has no hash, and its skills keep their names and
+  their plugin exactly as 0031 sets them.
+- **Extra packs** live in `<data>/skill-packs/<id>/` (`ProfilePaths::skill_packs`). The folder's
+  name must equal the manifest's `id`, compared byte for byte against what `read_dir` returns, so
+  a disk that ignores case never matches `NDA-Kit` to `nda-kit`.
+
+### Ids
+
+A pack id matches `^[a-z0-9]+(-[a-z0-9]+)*$`, is 2 to 30 bytes, and is not a Windows device name.
+`clauseo`, every `clauseo-*`, `builtin`, `stetdoc` and each name in `skills::builtin::BUILTIN` are
+reserved. Pack skill names follow the same charset with no `--`. Since neither part may hold `--`,
+the rendered name `<pack>--<skill>` splits one way only, never equals a built-in name (none holds
+`--`), and must fit `NAME_MAX` (64 bytes). `PackId` in `protocol`
+(`crates/protocol/src/details/packs.rs`) checks the shape only. The reserved names are refused by
+`profile::packs::is_pack_id`, which pack folders load with, and by the host, which refuses a
+matter's list holding one as `command.invalid`. A stored list that holds a reserved name still
+reads; the launch skips that id.
+
+### Validation (in `profile`)
+
+A pack is read once, into memory. The checks, the hash, the script test and the render all use
+those bytes, so what is checked is what is copied.
+
+- **Paths.** Each path relative to the pack passes `skills::is_safe_path`: `/`-separated ASCII
+  `[A-Za-z0-9._-]` parts, none hidden, none ending in `.`, no device name, so no `..`, root, drive,
+  `\` or `:`. A name that is not UTF-8 is refused. Two paths that differ only in case refuse the
+  pack. Each path is at most 160 bytes and crosses at most 8 folders.
+- **Links.** Every entry is examined with `symlink_metadata` and never followed. A symlink refuses
+  the pack; on Windows so does any reparse point (`FILE_ATTRIBUTE_REPARSE_POINT`: junctions,
+  symlinks, and cloud placeholders, which a read would fetch from the network). A file with more
+  than one hard link is refused: a hard link to `~/.ssh/id_rsa` would otherwise be copied into a
+  folder the agent reads.
+- **The open.** On Unix the walk goes by file descriptor (`rustix`): each folder is opened
+  relative to its parent's descriptor with `O_DIRECTORY | O_NOFOLLOW` and listed from it, each
+  entry is `lstat`ed and opened relative to the same descriptor with `O_NOFOLLOW`, and the open
+  descriptor must be the device and inode the `lstat` saw, a plain file with one link. No path is
+  resolved twice. On Windows each folder and file is opened with `FILE_FLAG_OPEN_REPARSE_POINT`,
+  and the handle must show no reparse point, one link (`GetFileInformationByHandle`), and a final
+  path (`GetFinalPathNameByHandleW`, normalized) equal to the pack folder's own plus the relative
+  path. So a folder swapped for a link mid-walk reads nothing from outside.
+- **Folders.** Each folder is counted against the 64-folder cap when the walk finds it, and the pack
+  is refused at the 65th. A folder is opened only when the walk takes it from its stack, so the walk
+  holds at most one folder open per depth level, never more than 10 with the pack's own, however
+  many folders wait. Empty folders are not hashed, so without the cap a pack could add folders
+  freely, slowing every launch, without counting as a change.
+- **Scripts or executables.** A file is one unless its extension is on the allow-list (`.md .txt
+  .json .yaml .yml .csv .tsv .docx .xlsx .pdf .png .jpg .jpeg .gif .webp`, compared without case;
+  `LICENSE` and `NOTICE` with no extension) **and** it has no Unix exec bit, does not start with
+  `#!`, and does not start with ELF, PE (`MZ`) or Mach-O magic. It fails closed: a `.xml` reference
+  is refused, and so is a `.md` that starts with `MZ`. A pack holding one is refused unless
+  `skills.allow_scripts` is true. A pack whose manifest says `instruction_only: true` is refused if
+  it holds one, whatever the setting. Allowed script files are copied, never run, and never get the
+  exec bit.
+- **Clauseo never runs a pack's files.** `packs` starts no process (a test reads its sources).
+  Claude keeps `disableSkillShellExecution`.
+- **Shell injection.** Every text file is scanned for `` !` ``, as built-in skills are, and one hit
+  refuses the pack. A file of a binary type on the allow-list (`.docx .xlsx .pdf .png .jpg .jpeg
+  .gif .webp`) is not scanned **when its bytes start with that format's magic** (`PK\x03\x04` for
+  `.docx` and `.xlsx`, `%PDF`, `\x89PNG`, `FF D8 FF` for JPEG, `GIF87a`/`GIF89a`, RIFF with `WEBP`
+  at byte 8): its bytes are compressed or encoded, an agent never loads them as skill text, and
+  random bytes hold those two bytes about once in 64 KiB, so a scan would refuse almost every pack
+  with a template. A "binary" file without its magic, really text, is scanned.
+- **Size.** At most 1 MiB per file, 8 MiB and 256 files per pack, 64 folders per pack (the pack's
+  own not counted, on every OS), 64 KiB for `clauseo-pack.json`, 32 skills per pack, and 16 extra packs per launch (beyond 16, skipped as `TooMany`, in
+  `skills.enabled` order). The size is checked from the metadata before the read and enforced again
+  during it (the read stops one byte past the cap), so a file that grows mid-read is refused.
+- **Frontmatter.** Each `SKILL.md` must be UTF-8, start with a frontmatter whose `name` is its own
+  folder's, and carry a `description` (in any common YAML form, joined to one line, at most 1,024
+  characters, Claude Code's own limit). The description goes through the filter Codex's index
+  uses: any whitespace becomes one space, and every other control, separator or format character
+  and every variation selector is removed, so none reaches Claude's frontmatter; one left empty refuses the pack. It is rendered as `name: <pack>--<skill>` and that
+  description alone, as stetdoc's is, so `allowed-tools`, `hooks` and every other key go. Then the
+  skills renderer's own checks (`skills::check`) run on it. One refused skill refuses the whole
+  pack.
+
+A refused pack has a `Refusal` code (`link`, `hard_link`, `bad_path`, `unlisted`, `too_big`,
+`manifest`, `bad_id`, `id_mismatch`, `script`, `script_in_instruction_only`, `skill`, `missing`,
+`not_a_file`, `io`). Log lines carry the id and the code, never a path or the pack's text (0047).
+
+### The content hash
+
+The hash is `sha256:` followed by 64 lower-case hex digits: the SHA-256 of one stream over every
+file in the pack, the manifest included (`packs::hash`, format `clauseo-pack-hash-v1`):
+
+```text
+"clauseo-pack-hash-v1" 0x00
+for each file, sorted by its path relative to the pack (/-separated, compared as bytes):
+    the path's length in bytes, as a little-endian u64, then the path
+    the file's length in bytes, as a little-endian u64, then its bytes
+```
+
+Every field carries its length, so a NUL inside a file cannot stand for a file boundary and two
+different packs never feed the hasher the same stream (`review_hash_collision_swaps_an_approved_pack`).
+The domain tag keeps a pack's hash apart from any other SHA-256 Clauseo takes. This is not 0031's
+`versions.lock` algorithm (`path 0x00 bytes 0x00`, no lengths), which covers only Clauseo's own
+compiled-in files, is no trust gate, and stays as it is.
+
+- **Turning a pack on** records its hash at that moment in `skills.enabled`, as a map from id to
+  hash: `{"nda-kit": "sha256:…"}`.
+- **At each launch** the hash is computed again from the bytes just read. When it differs, the pack
+  is skipped as `Changed`. Nothing rewrites the setting; the stale hash is the disabled state.
+  Turning the pack on again records the new hash.
+- Built-ins are exempt: compiled in, and pinned by `versions.lock`.
+- The workspace's `sha2` 0.10 uses the CPU's SHA instructions when it finds them at run time
+  (SHA-NI on x86-64, through `cpufeatures`); iris has them.
+
+### Each launch's own copy
+
+There is no cache on disk. Each launch reads, checks, hashes and renders its packs in memory
+(`packs::load`, one thread per pack), then writes them into its own plugin folder from those
+same bytes (`packs::write_packs`, one thread per pack). Each file is a new file with the default
+mode, never an exec bit, and is not synced: the folder is disposable and goes with the run
+folder. No file is shared between launches, so a write through one launch's copy (an agent, or
+anything else that can write the run folder) reaches no other session, running or later, and the
+next launch writes the pack's checked bytes again. Integrity does not rely on the jail.
+
+`packs::load` returns the loaded packs and the skipped ones with a `Skip` reason
+(`Refused(code)`, `Changed`, `TooMany`).
+
+### Settings (PR-B)
+
+A new `skills` section in `settings`. `skills.extra`, `skills.allow_scripts` and
+`skills.curated` are security keys (`leaf::SECURITY_KEYS`); `skills.enabled` is not.
+
+| Key | Values | Default | Who sets it | Fails closed to |
+|---|---|---|---|---|
+| `skills.extra` | `off`, `curated`, `any` | `off` | The lawyer in `settings.json`; a policy value locks it | `off`, locked |
+| `skills.curated` | list of pack ids (`REG_MULTI_SZ` in the registry) | empty | **Policy only** (`leaf::POLICY_ONLY_KEYS`) | empty, locked |
+| `skills.allow_scripts` | boolean | `false` | The lawyer in `settings.json`; a policy value locks it | `false`, locked |
+| `skills.enabled` | map from pack id to `sha256:<64 lowercase hex>` | empty | The lawyer, through `Effective::set_skill_pack` (`SetSkillPack`, PR-E); a policy value replaces the whole map and locks it | not a security key |
+
+- **Any policy value locks its key.** A policy source that cannot be read, or a policy value that
+  does not type, locks `extra` at `off`, `allow_scripts` at `false` and `curated` empty, as for
+  `tools.*`. A `curated` list with any entry that is no pack id is malformed whole: what the firm
+  meant to admit is unknown, so it admits nothing.
+- **Misnamed keys.** `skills.*` goes through the misnamed-key pass (`leaf/misnamed.rs`) like
+  `update.*` and `plans.*`: a policy that names the section in a form this version cannot read
+  (`"skills": "any"`, `Skills`, `skills.enbld`, a top-level `skills.extra`) locks each security
+  key it could stand for off, all three when it could stand for any. A name whose first segment
+  is a known section is about that section, and what follows it is read by the rule below as
+  well: `{"ui": {"tools": {...}}}`, `privacy.mcp` and `matters.install_bundle` lock `tools`,
+  `mcp` and `install`, as on main (the orchestrator's review of #450; an earlier draft let a
+  known first segment hide them). A known section's own keys never lock another (a test runs
+  every key of the schema through the rule). Any other name is read shape-free: normalised (NFKC,
+  format characters such as a zero-width space dropped, lowercase, everything but letters and
+  digits dropped), it locks a security section's keys off when it holds the section's name,
+  when a segment at a section's place (the top level, directly under an unknown wrapper, or
+  directly under a known section with no security key, such as `ui`) still holds a character
+  outside ASCII (`ѕkіlls` with Cyrillic letters, failing closed with no table of look-alike
+  letters to keep; a top-level `टिप्पणी` locks every security key; a deeper key such as
+  `{"_comment": {"note": {"café": 1}}}`, or a key under a security section, is read by the
+  other rules alone, orchestrator's review of #450), or when, from its start or the start of any word
+  in it (after any character that is not a letter or digit, or at a capital after a small
+  letter), its first `n - 1`, `n` or `n + 1` characters are near the section, `n` being the
+  section's length: `skill`, `skils`, `tool`, `instal`, `mpc`, `clauseo.skills.extra`,
+  `skill_extra`, `SkillExtra`, `skill:extra`, `ToolBrowser`, `x.skils.extra`. Near means
+  within 1 edit for a section of 4 characters or fewer (`mcp`, so `app` and `tmp` lock
+  nothing) and 2 above, where an edit inserts, deletes or replaces one character or swaps two
+  adjacent ones (host's re-check of #450). The security sections come from `SECURITY_KEYS`,
+  and a test keeps every two known sections further apart than either's distance, and no known
+  section starting like or holding another security section. This over-locks on purpose,
+  failing closed: `foo.tools_note`, `toolbar` and `skillful` lock their sections, since what
+  such a name meant is unknown; any shape left past this rule is accepted residue. The keys nested in
+  an unknown `policy.json` section, through objects and arrays, count as later segments too, so
+  `{"clauseo": [{"skills": {...}}]}` locks `skills` with the same reason; an unknown section
+  whose value cannot be read whole (a number too big for an `f64`, nesting past 128 levels)
+  makes the file malformed. Managed preferences run the same rule: the shim asks for every key
+  the domain's files in `/Library/Managed Preferences` hold (where forced values live), not only
+  the known names, and a forced misnamed key or a
+  forced dictionary such as `skills` holding `extra` locks the section, nested dictionaries
+  included. The files read are the computer's and the login user's; one that exists but cannot
+  be read or is no property list dictionary makes managed preferences unreadable, so every
+  security key locks off (`source_unreadable`); a symlinked file is read through the link. The names come from one read of the files
+  and the values from a later read through CFPreferences, so a configuration profile added
+  between the two can miss a misnamed key until the next load. Policy sources only: in the lawyer's `settings.json` a misspelt section stays a
+  warning.
+- **Duplicate keys.** A key twice in one object, at any level of a `policy.json`, makes the source
+  malformed, as a syntax error does: it is dropped whole and every security key locks off
+  (`Error::DuplicateKey`, naming the place, never the key). So is a `policy.json` the duplicate
+  check cannot walk to its end, though it parses (`1e400`, nesting past 128 levels): a duplicate
+  behind that place would go unseen. A registry `REG_SZ` JSON value (`mcp.servers`,
+  `plans.<id>`) that holds a duplicate locks that key's section's security keys off
+  (`mcp.servers` empty, no plan at all), with a `duplicate_key` reason; the rest of the
+  registry stands. Managed preferences cannot hold duplicates. In the lawyer's `settings.json`
+  the last copy wins, with a warning. On main both the misspelt-section rule and the duplicate
+  rule failed open (a misspelt security section in a policy locked nothing, and a key written
+  twice in `policy.json` silently took its last copy); those two gaps predate this record and
+  affect `tools.*` on main as well.
+- **Lock reasons.** `Effective::lock_reasons` gives one `LockReason` per cause, never English:
+  the keys it locked, the cause (`source_unreadable`, `malformed_value`, `misnamed_section`,
+  `duplicate_key`; a plain policy value has none), the source by kind (`policy.json`,
+  `registry`, `managed preferences`, never a path, 0047), the section only when it is a plain
+  word (`[a-z][a-z0-9_]{0,31}`, #411's rule) and its place: the index of its entry among the
+  source's entries in document order, from 1 (the registry's and managed preferences' values,
+  `policy.json`'s top-level entries, so a key inside a section takes the section's place), or the
+  second copy's line for a duplicate in `policy.json`. The host logs one `warn` line per
+  cause at start-up, and again only when the set changes. A later protocol change mirrors it for
+  the app as `LockReason { keys, cause, source }`.
+- **Policy-only keys.** `skills.curated` is the first entry of `leaf::POLICY_ONLY_KEYS`, beside
+  `OFF_ONLY_KEYS`: a `settings.json` value is ignored, with a warning where it sits, and never
+  admits anything. Without a policy the list is empty, so `extra: curated` admits nothing.
+- **`skills.enabled` is typed in the leaf.** Each id follows the id rule above (a private copy of
+  `profile`'s `is_pack_id` in `settings`, held to `profile`'s accept and refuse table by
+  `the_pack_id_rule_matches_profile` until PR-C moves the rule to `PackId`), and each value is
+  `sha256:<64 lowercase hex>`; anything else is refused. A bad entry is dropped with a warning and
+  the rest load. The warning follows #411's rule: it quotes the id only when it is id-shaped,
+  else gives the entry's place (`skills.enabled.<id 2>`), and never quotes a hash or pasted text.
+- `Effective::set_skill_pack(files, id, Option<hash>)` records or removes one entry in the user's
+  `settings.json`, then in memory. It is refused with `Error::Locked` while `skills.enabled` is
+  locked, and with `Error::Refused` (naming the key, never the value) for a bad id or hash.
+
+`off` loads no extra pack. `curated` loads only ids on `skills.curated`. `any` loads every pack
+that passes validation. Built-ins load whatever these say.
+
+### Per matter
+
+Matter details gain `skill_packs: Option<Vec<PackId>>`, persisted as H5 persists `client` and
+`next_date`. In `UpdateMatter` it is a `FieldChange`: missing leaves it, `null` clears it, and a
+list sets it. The list holds at most 32 ids with no duplicates; an empty list is valid. It is
+stored in a new column (store migration `0005`, JSON text) and returned on `MatterSummary`.
+
+- Missing means the matter uses `skills.enabled`. An empty list means no extra pack for this
+  matter.
+- **A matter's list picks from the packs turned on in `skills.enabled`.** It carries no hashes. An
+  id that is not turned on is skipped as `NotTurnedOn`. So a matter can narrow the global list, not
+  widen it, and turning a pack on (with its hash) stays the one trust step.
+- **Forgetting a matter keeps its list, as H5 keeps `client` and `next_date`**, and unforget
+  restores it with the other details. Restoring it cannot bring back an untrusted pack: the list
+  only narrows the packs turned on in `skills.enabled` whose recorded hash still matches the bytes
+  on disk, so a pack turned off, or changed, since the forget stays out.
+- No UI in this work. The app thread reviews the `bindings.ts` change.
+
+Per matter, as built (PR-C): the wire types are `PackId` (a checked id) and `PackList` (at most 32
+ids, no duplicates, checked on decode), both in `protocol`. The store keeps the list in a new
+column (migration `0005_matter_skill_packs.sql`, JSON text, NULL for every matter before it).
+A reserved id in a matter's list is refused on `UpdateMatter` (`command.invalid`). Forget keeps
+the list and unforget restores it as it was. Narrowing to `skills.enabled` and the
+hash check are left to the launch (PR-D).
+
+### Loading, rendering and the launch
+
+- **On the actor:** the launch's `PackRequest`: the ids that apply (the matter's list, or
+  `skills.enabled`), each with its recorded hash, plus the effective `extra`, `curated` and
+  `allow_scripts`. It is pure data, and no pack file is read on the actor.
+- **On the launch-prep thread,** after the built-in skills are written: `packs::load` (read, check,
+  hash against the record, render in memory), then `packs::write_packs` into **a plugin of the
+  launch's own**, `run/<session id>/skill-packs/`, created fresh. That folder holds
+  `.claude-plugin/plugin.json` (named `clauseo-packs`) and `skills/<pack>--<skill>/`, each file
+  this launch's own copy, written from memory. It must not exist before; the run folder is removed on every way out, so a
+  pack that was turned off or skipped is never left loading, and two matters running at once each
+  see only their own packs. A failed write removes the folder, is a warning, and the launch goes on
+  with the built-ins.
+- `write_packs` returns a `PacksWritten` token (private fields, made only there) with the skills it
+  wrote.
+- **Claude** gets a second `plugins` entry naming the launch's pack plugin
+  (`ClauseoProfile::session_meta_with_packs`), only with a token that wrote a skill.
+- **Codex** gets one index (`ClauseoProfile::codex_keys_with_packs`): the built-in lines first,
+  exactly as 0031 renders them (only with `SkillsWritten`), then one line per pack skill (only with
+  `PacksWritten`): `- <pack>--<skill> (<description>): <path>`. Each description is cut to 24 words
+  and to 200 characters (at a character boundary, `…` included, so text with no whitespace is cut
+  too), and filtered as 0031 filters paths (control and format characters, variation selectors,
+  line and paragraph separators, host placeholders); a description that fails gives no use text.
+  Lines stop at 40 entries, 600 words or 4,800 characters for the whole index, heading included;
+  the built-in lines come first and are never cut, and the count of pack lines dropped is logged.
+
+### Speed
+
+Measured on iris with the ignored test `timing_load_and_write`
+(`crates/profile/tests/packs/timing.rs`), release build, page cache warm, 15 launches each,
+median / slowest. Targets are for the whole of `load` and `write_packs`:
+
+| Case | `load` | `write_packs` | Launch | Target |
+|---|---|---|---|---|
+| 2 packs, 3 skills each, 29 KiB | 0.43–0.46 / 0.64–0.75 ms | 0.74–0.75 / 0.86–1.0 ms | 1.2 / 1.4–1.6 ms | 50 ms |
+| 16 packs at the caps, 253 files and 7.9 MiB each, 125 MiB | 61–65 / 182–216 ms | 52–53 / 57–61 ms | 115–119 / 237–271 ms | 200 ms |
+
+(Three runs, load average about 1.) At the caps the median launch meets the target, but the slowest
+does not: it is the first of the 15 launches, right after the packs were written, where `load`
+alone takes about 200 to 300 ms; the later launches stay near the median. No per-launch total cap
+is added; that is a decision for the host. A debug build is far slower at the caps, since the
+workspace's dev profile compiles dependencies, `sha2` among them, without optimisation.
+
+Through the host (PR-D), the ignored test `timing_launch_with_packs`
+(`crates/host/tests/host/packs_timing.rs`) times a prompt to its agent's spawn, which holds the
+whole launch prep, on iris in a release build: 9 launches per case after one warm-up, three runs,
+median / slowest of what packs add over the same launch with none:
+
+| Case | Added to the launch | Target |
+|---|---|---|
+| 2 packs, 3 skills each, about 30 KB | 0.7–1.4 / 0.6–1.4 ms | 50 ms |
+| 16 packs at the caps, 125 MiB | 131–149 / 142–169 ms | 200 ms |
+
+### Turning packs on, and reporting a skipped pack
+
+- `HostCommand::SetSkillPack { id, on }` (PR-E). Turning on checks the policy on the actor, then
+  reads, checks and hashes the pack off the actor (`packs::inspect`), then writes `skills.enabled`
+  on the actor, as `SetToolSettings` writes. It is refused with a code when policy does not admit
+  the pack, the pack is invalid, or `skills.enabled` is locked. Turning off removes the entry.
+  PR-E names the refusal code: either stage D's `settings.refused` (#436), with the reason in
+  `ListSkillPacks`'s status, or a new `skills.pack_refused`. The choice is made with the host
+  before PR-E.
+- `Query::ListSkillPacks` (PR-E) gives each installed pack's manifest fields, its current hash and
+  its state: `On`, `Off`, `Changed`, `NotAdmitted` or `Refused(code)`. The later UI reads it.
+- **A skipped pack:** a host log line holding the id and the reason code, with no path or pack text
+  (0047), once per launch. Plus one `Notice` warning in the thread per skipped pack, naming it by id:
+  `Clauseo didn't load the skill pack "nda-kit". Its files changed after it was turned on. Turn
+  it on again to use it.` Each thread is told
+  each skipped pack and reason once for the host's run: a relaunch or a new agent session does
+  not repeat it, so an agent that restarts in a loop cannot fill the thread. Each thread keeps its
+  own record, so another thread is still told, and a new reason for the same pack (`not_admitted`,
+  then `changed`) is told once more. The log line stays per launch. The thread view already shows notices.
+
+### Turning packs on (PR-E)
+
+This settles the code question above: **no new error code.** It supersedes the first bullet's
+"either ... or".
+
+- **`HostCommand::SetSkillPack { id, on }`**, from the settings window only, as the other
+  `Set*` switches are (the desktop bridge refuses it from the main window and any other,
+  `command.invalid`). `ListSkillPacks` is read by both the main window (the matter picker)
+  and the settings window (the Skills pane). Code:
+  `crates/host/src/actor/settings/packs.rs`.
+  - **On.** On the actor, from the effective settings: the lock, then the admission. Then the pack
+    is read off the actor on a `clauseo-codex-fs` thread, waited on for the launch wait (30 s):
+    `packs::inspect_twice` runs `inspect` twice and keeps the pack only when both reads hash
+    the same, so a pack edited mid-read is told apart from one that read whole. Back on the
+    actor, the lock and the admission are checked again (a policy reload may have come in), and
+    a pack holding a script is refused (`settings.refused`, `script`) if `skills.allow_scripts`
+    is off by then; then `Effective::set_skill_pack(id, Some(hash))`.
+  - **Off.** `set_skill_pack(id, None)` on the actor.
+  - **Last command wins.** Every `SetSkillPack` bumps a per-id generation on the actor, and an
+    `on`'s read writes only if the id's generation is still the one it started with. An `on`
+    overtaken by a later `on` or `off` for the same pack writes nothing and still answers
+    `Done`: its request was superseded, not refused. So an `off` sent during an `on`'s read
+    leaves the pack off, and two racing `on`s record one hash.
+  - A change to `skills.enabled` sends `SettingsChanged` to every app subscriber, as the other
+    settings commands do; a write that changes nothing sends nothing.
+- **Codes:**
+
+  | Case | Code |
+  |---|---|
+  | `skills.enabled` locked by policy (on or off) | `settings.locked` |
+  | `skills.extra` locked by policy (at `off`, or at `curated` with the id not in the firm's `skills.curated`) | `settings.locked` |
+  | `skills.curated` set by policy and the id not in it, `skills.extra` `curated` | `settings.locked` |
+  | The lawyer's own unlocked `skills.extra` `off` (or `curated` with no firm list) | `settings.refused` |
+  | The pack's folder is missing | `settings.refused` |
+  | The pack is invalid (any `packs::Refusal`) | `settings.refused` |
+  | The pack changed while it was read | `settings.refused` |
+  | The read did not answer within the wait | `internal` |
+
+  Neither code is retryable; the app offers to turn it on again from `ListSkillPacks`'s `changed` row,
+  not from the code. "A firm decided" is per branch (`Effective::is_locked`, which also holds
+  when a policy source fails closed): for `skills.extra` `off`, policy locks `skills.extra`; for
+  `curated` leaving the id out, policy locks `skills.extra` or sets `skills.curated`. A firm's
+  `skills.curated` alone does not make the lawyer's own `off` the firm's: `settings.refused`.
+- **What a message and a log line hold.** A refusal's message names the pack by its id alone
+  (a `PackId`, so no pack text) and ends with a reason code in parentheses, such as
+  `skill pack nda-kit cannot be turned on (script)`; never the manifest's text, a file name or a
+  path. The host's log line holds the id and the error code; the turning on or off itself is
+  logged with the id and `on`.
+- **`HostQuery::ListSkillPacks`** answers `QueryResult::SkillPacks(Vec<PackStatus>)`, built off
+  the actor (`crates/host/src/actor/query/skill_packs.rs`): one status per entry of
+  `<data>/skill-packs/` that is a folder (or a link, listed as `invalid`, `link`) whose name is
+  a `PackId`, plus one per id in `skills.enabled` with no folder, sorted by id. A folder whose
+  name is no `PackId` is not listed (it has no id to show) and is logged by count. Each pack is
+  read with `inspect_twice`.
+  - `PackStatus { id, name, version, author, licence, source_url, last_reviewed,
+    instruction_only, state, reason, hash }`. The manifest's fields and `hash` are there only
+    when the pack read whole; each string passes `packs::listed` (0031's listable filter: no
+    control, format or other unlisted character) capped at the manifest's own caps (200
+    characters, 2,048 for `source_url`), and is left out when it fails.
+  - `state`, a closed enum (view type, 0002), first match wins:
+
+    | State | When | `reason` |
+    |---|---|---|
+    | `not_admitted` | `skills.extra` / `skills.curated` do not admit the id | `not_admitted { by_policy }` |
+    | `invalid` | `inspect` refused it, `missing` included (a pack turned on whose folder is gone) | `invalid { kind }` |
+    | `changed` | it changed while it was read, or its hash is not the one `skills.enabled` holds | none |
+    | `on` | turned on with the hash it has now | none |
+    | `off` | valid, admitted, not turned on | none |
+
+  - `kind` is `PackRefusal`, a closed mirror of `packs::Refusal` one for one (`missing`,
+    `link`, `hard_link`, `not_a_file`, `bad_path`, `unlisted`, `too_big`, `manifest`,
+    `bad_id`, `id_mismatch`, `script`, `script_in_instruction_only`, `skill`, `io`); the
+    `From` is in `profile`, where the match is exhaustive.
+- **Cost.** Each pack is read twice, so turning one on reads at most 16 MiB, and the list at most
+  16 MiB per folder, all off the actor. The list lists the packs folder once and finds each pack
+  in that listing, so it is linear in the folders, and it reads at most 256 packs, the first by
+  id (folders and `skills.enabled` ids together); the rest are left out of the answer and logged
+  by count alone, never by name or path (`MAX_LISTED`, `crates/host/src/actor/query/skill_packs.rs`).
+
+### Tier C: the source folder
+
+With no sandbox (tier C) the pack's source under `<data>/skill-packs` is fenced off by
+Claude's deny rules and the host's auto-deny (decision record 0030, "The data folder fence").
+The deny rules cover Claude's file tools and the file commands Claude Code recognises in Bash,
+not a script Claude writes that opens the file itself. Only the jail (tiers A and B, which hide
+`<data>`) or an OS sandbox stops that. The launch's own copy under `<data>/run/<id>` stays
+readable.
+
+Each Claude launch also writes `syncClaudeAiSkills: false` into Claude Code's user settings in
+Clauseo's own Claude home (`<data>/agents/claude-acp/home/settings.json`, G11), keeping any
+other key there, so the account's claude.ai skills are neither synced nor loaded beside the
+packs. There is no switch for it.
+
+### Windows
+
+Beyond the rules above: any reparse point is refused, the link count and final path are read from
+the open handle, and the 160-byte relative-path cap keeps rendered paths short. A data folder too
+long for `MAX_PATH` gets a failed write: a warning, with the packs left out. Claude and Codex read
+the rendered paths themselves, so Clauseo does not rely on `\\?\` long paths.
+
+### Budgets
+
+0031's table is amended: Codex's skills index is at most 150 words for the built-ins, and at most
+600 words, 4,800 characters and 40 entries in total, so Codex's `developer_instructions` can reach about 2,050 words.
+The 1,500-word test still covers the text both agents share, and 0031's index test still covers the
+built-ins alone.
+
+### The code
+
+- `profile` (PR-A, with this record): `packs` (`manifest`, `read`, `windows`, `scripts`, `render`,
+  `hash`, `plugin`, `index`), `ProfilePaths::skill_packs`,
+  `ClaudeOptions::with_pack_plugin`, `ClauseoProfile::session_meta_with_packs`,
+  and `codex_keys_with_packs`.
+- `settings` (PR-B): the `skills` section and keys, the policy-only keys, and
+  `Effective::set_skill_pack`.
+- `protocol`, `store` and `host` (PR-C): `PackId`, the `skill_packs` field, migration `0005`, and
+  the forget and unforget tests that show the list is kept.
+- `host` and `desktop` (PR-D): `PackRequest`, `ProfileHook::pack_write`, `load` and `write_packs`
+  on the prep thread, the plugin and index wiring, the log line and
+  the notice.
+- `protocol`, `host` and `profile` (PR-E): `SetSkillPack`, `ListSkillPacks` and the refusal codes.
+
+## Consequences
+
+- A Hub needs no new loading code. It installs folders under `<data>/skill-packs/` and, for firms,
+  a policy with `skills.extra: curated` and a `skills.curated` list.
+- Clauseo never runs a pack's files. With `skills.allow_scripts` true, the agent can still run what
+  a pack ships, through its own shell and under its jail. That setting is the firm's or the
+  lawyer's explicit choice, off by default and off whenever policy cannot be read.
+- A pack's descriptions reach Codex's `developer_instructions` and Claude's skill list. Turning a
+  pack on, and policy, are the gate. The untrusted-content rule (0031) covers what the agent reads
+  in a pack's files.
+- Each launch writes its own copy of its packs. Stage C should let each jail read its own
+  `run/<session id>/skill-packs/`; a write there changes only that launch's copy, so the packs'
+  integrity does not depend on the jail. At the caps a launch writes about 125 MiB to the page
+  cache.
+- A change to a pack's files after it was turned on keeps it out of every launch until the lawyer
+  turns it on again.
+- The pack format is `format: 1` and the hash `clauseo-pack-hash-v1`. A change to the manifest,
+  the hash or the layout needs its own record.
+
+## Status
+
+proposed
+
+## Date
+
+2026-11-05

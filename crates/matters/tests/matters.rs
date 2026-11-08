@@ -109,3 +109,8 @@ mod papers;
 #[cfg(test)]
 #[path = "matters/devanagari.rs"]
 mod devanagari;
+
+#[cfg(test)]
+#[cfg(windows)]
+#[path = "matters/word_no_owner.rs"]
+mod word_no_owner;

@@ -528,6 +528,16 @@ pub fn installed(
     }
 }
 
+/// A `Failed` install of `kind` for tests, with no space figures and an empty log.
+pub fn failed(agent: &clauseo_protocol::AgentId, kind: crate::FailureKind) -> crate::InstallState {
+    crate::InstallState::Failed(crate::Failure {
+        kind,
+        need_mb: None,
+        free_mb: None,
+        log: crate::InstallLog::new(agent),
+    })
+}
+
 /// Writes `bytes` to `path`, making its folder, replacing any file there.
 pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {

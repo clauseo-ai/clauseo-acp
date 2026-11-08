@@ -4,8 +4,9 @@
 //! The hook sees only the agent's id, so anything that differs per session goes out as a
 //! token. The host fills [`IN_INSTRUCTIONS`] in `_meta.systemPrompt.append` and in Codex's
 //! `developer_instructions`, and [`IN_SERVERS`] in every argument and variable of the
-//! `browser` entry, both with [`fill`]. `{author}` is not here: the profile fills it itself
-//! (`instructions::Instructions::compose`), since it knows the author when it is built.
+//! `browser` and `case-law` entries, both with [`fill`]. `{author}` is not here: the profile
+//! fills it itself (`instructions::Instructions::compose`), since it knows the author when it is
+//! built.
 //!
 //! This module is the one home of the token strings and of the fill: the host depends on
 //! `clauseo-profile` and calls [`fill`] with these constants, with no copy of its own
@@ -50,12 +51,27 @@ pub const CDP_PORT: &str = "{cdp_port}";
 /// `--daemon-port`. Unfillable (no port claimed): the host drops `browser`.
 pub const DAEMON_PORT: &str = "{daemon_port}";
 
+/// The connectors paragraph (R24, decision D6): right after the tools part, with no separator.
+/// The host fills it with [`crate::instructions::connectors_part`]: a blank line and the
+/// paragraph in a session that got the `case-law` entry; in any other, a blank line and the
+/// sentence that says the session has no case-law database. Instructions only.
+pub const CONNECTORS: &str = "{connectors}";
+
+/// The port of the session's case-law relay, as `CLAUSEO_RELAY=127.0.0.1:{relay_port}` (R24).
+/// Unfillable (no relay): the host drops `case-law`.
+pub const RELAY_PORT: &str = "{relay_port}";
+/// The session's relay token file, `<data>/run/<session id>/relay-token`, as
+/// `CLAUSEO_RELAY_TOKEN_FILE` (R24): a path, never the token. The host fills it with a
+/// `dunce`-simplified path. Unfillable (no relay): the host drops `case-law`.
+pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
+
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
-pub const IN_INSTRUCTIONS: [&str; 2] = [WORK_FOLDER, MATTER_NOTES];
-/// The tokens the host fills in the `browser` entry. The entry holds [`SOCKET_DIR`] on macOS
-/// and Linux only and [`DAEMON_PORT`] on Windows only; the host fills whichever it finds.
-pub const IN_SERVERS: [&str; 8] = [
+pub const IN_INSTRUCTIONS: [&str; 3] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS];
+/// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
+/// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
+/// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
+pub const IN_SERVERS: [&str; 10] = [
     BROWSER_DIR,
     PROXY_PORT,
     SESSION_ID,
@@ -64,6 +80,8 @@ pub const IN_SERVERS: [&str; 8] = [
     STREAM_PORT,
     CDP_PORT,
     DAEMON_PORT,
+    RELAY_PORT,
+    RELAY_TOKEN_FILE,
 ];
 
 /// A token in `tokens` that [`fill`] had no value for.
@@ -128,9 +146,9 @@ mod tests {
         );
         assert_eq!(
             fill(
-                "{work_folder}{matter_notes}",
+                "{work_folder}{matter_notes}{connectors}",
                 &IN_INSTRUCTIONS,
-                &[(WORK_FOLDER, "w"), (MATTER_NOTES, "m")]
+                &[(WORK_FOLDER, "w"), (MATTER_NOTES, "m"), (CONNECTORS, "")]
             )
             .as_deref(),
             Ok("wm")

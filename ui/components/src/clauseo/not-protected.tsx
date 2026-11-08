@@ -12,17 +12,33 @@ import { Say } from "./say.tsx";
 export function NotProtectedMark({
   short = false,
   meaning,
+  onPress,
 }: {
   short?: boolean;
+  /** Optional: a press explains it (UC's note, from the toolbar); the mark is then a button. */
+  onPress?: (() => void) | undefined;
   /** What Not protected means where it isn't protection switched off. When the workspace couldn't
-   * be set up, or Windows was told no, Clauseo falls back to asking before each change, and the caller says so in its
-   * own words: "Clauseo asks before each change in this matter." Without it, the sentence about protection switched
-   * off stands. */
+   * be set up, or Windows was told no, Clauseo can read any file the lawyer can open and asks before changing anything
+   * outside the matter's folder, and the caller says so in its own words: "Clauseo can read any file you can open on
+   * this computer, and asks before changing anything outside the matter's folder." Without it, the sentence about
+   * protection switched off stands. */
   meaning?: string;
 }) {
   const w = useToolbarWords();
+  const Tag = onPress === undefined ? "span" : "button";
   return (
-    <span className="np-mark" data-short={short ? "" : undefined}>
+    <Tag
+      className="np-mark"
+      data-short={short ? "" : undefined}
+      {...(onPress === undefined
+        ? {}
+        : {
+            type: "button" as const,
+            onClick: onPress,
+            "aria-haspopup": "dialog" as const,
+            "data-testid": "protection-mark",
+          })}
+    >
       <IconNotProtected size={14} className="np-icon" />
       <span className="np-words">
         <b className="np-name">{short ? w.v("Not protected") : w.v("Not protected.")}</b>
@@ -35,6 +51,6 @@ export function NotProtectedMark({
           </>
         )}
       </span>
-    </span>
+    </Tag>
   );
 }

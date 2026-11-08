@@ -71,6 +71,43 @@ pub(crate) fn create_private_dirs_under(data_dir: &Path, target: &Path) -> io::R
     Ok(())
 }
 
+/// Whether `target` and every folder between `data_dir` and it is a real folder, read with
+/// `symlink_metadata` (which follows nothing), as [`create_private_dirs_under`] checks them:
+/// `Ok(false)` when one is missing, `InvalidInput` when one is a symbolic link, a junction or
+/// other reparse point, or a file, or when `target` is not under `data_dir`. A scan or removal
+/// under `target` runs only on `Ok(true)`, so it never reaches through a link out of the data
+/// folder. `data_dir` itself may be a link. (It changes nothing; it lives here beside the
+/// writes' link rule.)
+pub(crate) fn real_dirs_under(data_dir: &Path, target: &Path) -> io::Result<bool> {
+    let below = target.strip_prefix(data_dir).map_err(|_outside| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the folder is not under the data folder",
+        )
+    })?;
+    let mut at = data_dir.to_owned();
+    for part in below.components() {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the folder's path leaves the data folder",
+            ));
+        }
+        at.push(part);
+        let meta = match std::fs::symlink_metadata(&at) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+            meta => meta?,
+        };
+        if !meta.is_dir() || is_reparse_point(&meta) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a link or a file stands where a folder goes",
+            ));
+        }
+    }
+    Ok(true)
+}
+
 /// Sets the real folder `path` (`meta` its `symlink_metadata`, checked not a link) to 0700 when
 /// it is not already, as host's `make_private_dir` does.
 #[cfg(unix)]

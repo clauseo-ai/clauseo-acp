@@ -43,6 +43,31 @@ pub enum Denial {
         /// How many.
         count: u32,
     },
+    /// The egress proxy refused a connection because the firm's proxy lookup failed: the
+    /// settings name a PAC URL or a static proxy, or the PAC script would not run, and no route
+    /// for the host from the last 10 minutes was left to reuse (decision record 0039). Going
+    /// direct would pass around the firm's proxy.
+    UpstreamUnavailable {
+        /// The host name (or address) the agent asked for.
+        host: String,
+        /// The port it asked for.
+        port: u16,
+    },
+    /// A connection the egress proxy refused because the host is on the block list (ADR 0053).
+    /// No allowlist entry lets one through.
+    Blocked {
+        /// The host the agent asked for, as the proxy reads it (lowercase, ASCII, no trailing
+        /// dot; an address without brackets).
+        host: String,
+        /// The port it asked for.
+        port: u16,
+        /// The list entry that matched: the host or a parent domain, or `[address]`.
+        listed: String,
+        /// Why the entry is listed.
+        tag: clauseo_blocklist::Tag,
+        /// When the list that matched was made.
+        generated: clauseo_blocklist::Generated,
+    },
 }
 
 /// The kind of file access refused.

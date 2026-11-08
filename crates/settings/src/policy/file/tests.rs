@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::Leaf;
 use crate::policy::{FilePolicy, PolicyRead, PolicySource};
-use crate::schema::{Density, Theme};
+use crate::schema::Theme;
 use crate::testing::MemFiles;
 use crate::warning::{Origin, Position, WarningKind};
 use std::path::{Path, PathBuf};
@@ -98,25 +98,33 @@ fn system_policy_absent_on_clean_machine() {
     }
 }
 
+// Unlike settings.json, which keeps the last copy: which copy the firm meant is unknown.
 #[test]
-fn a_key_set_twice_keeps_its_last_value_as_in_settings_json() {
+fn a_key_set_twice_at_any_level_is_an_error_naming_its_place() {
+    for (text, line, column) in [
+        (
+            r#"{"ui": {"theme": "purple", "density": "compact", "theme": "dark"}}"#,
+            1,
+            56,
+        ),
+        ("{\"ui\": {\"theme\": \"dark\"},\n \"ui\": {}}", 2, 5),
+        (
+            r#"{"mcp": {"servers": {"a": {"command": "/a", "command": "/b"}}}}"#,
+            1,
+            53,
+        ),
+    ] {
+        match parse(Path::new(PATH), text.as_bytes()) {
+            Err(Error::DuplicateKey {
+                line: l, column: c, ..
+            }) => assert_eq!((l, c), (line, column), "{text}"),
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+    // The same key in two objects is no duplicate.
     let values = parse(
         Path::new(PATH),
-        br#"{"ui": {"theme": "purple", "density": "compact", "theme": "dark"}}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        values.into_parts().0,
-        [Leaf::Density(Density::Compact), Leaf::Theme(Theme::Dark)]
+        br#"{"mcp": {"servers": {"a": {"command": "/a"}, "b": {"command": "/b"}}}}"#,
     );
-    // The other order: the last value does not type, so the key is locked at its default.
-    let values = parse(
-        Path::new(PATH),
-        br#"{"ui": {"theme": "dark", "theme": "purple"}}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        values.into_parts().0,
-        [Leaf::Refused("ui.theme".to_owned())]
-    );
+    assert!(values.is_ok(), "{values:?}");
 }

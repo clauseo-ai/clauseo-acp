@@ -1,6 +1,7 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin, type ViteBuilder } from "vite";
 import { configDefaults } from "vitest/config";
@@ -66,14 +67,35 @@ function devCspHeader(): Plugin {
 
 /**
  * The production `csp` as a page's meta tag can carry it: without `frame-ancestors`, which a meta tag may not hold
- * (browsers ignore it there and log a warning). Everything else unchanged.
+ * (browsers ignore it there and log a warning), and with `styles`, the hash sources of the page's own inline
+ * <style> elements ([inlineStyleHashes]), added to `style-src`. Everything else unchanged.
  */
-export function metaCsp(csp: string): string {
+export function metaCsp(csp: string, styles: string[] = []): string {
   return csp
     .split(";")
     .map((directive) => directive.trim())
     .filter((directive) => directive.length > 0 && directive.split(/\s+/)[0] !== "frame-ancestors")
+    .map((directive) =>
+      styles.length > 0 && directive.split(/\s+/)[0] === "style-src"
+        ? [directive, ...styles].join(" ")
+        : directive,
+    )
     .join("; ");
+}
+
+/**
+ * The CSP hash source (`'sha256-…'`) of each inline <style> in `html`, its text as built. index.html's first paint
+ * is the only one. Tauri's header allows it by the nonce it adds when it serves the page; the meta tag, which Tauri
+ * leaves as it is, needs exactly this hash.
+ */
+export function inlineStyleHashes(html: string): string[] {
+  return [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => {
+    const hex = createHash("sha256")
+      .update(new TextEncoder().encode(m[1] ?? ""))
+      .digest("hex");
+    const bytes = (hex.match(/../g) ?? []).map((pair) => Number.parseInt(pair, 16));
+    return `'sha256-${btoa(String.fromCharCode(...bytes))}'`;
+  });
 }
 
 /** A page's `<meta charset>`, which the HTML prescan must find in the page's first 1024 bytes. */
@@ -86,11 +108,13 @@ const attr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "
  * The production CSP from tauri.conf.json (its one home), less `frame-ancestors`, as a built page's first element after
  * its `<meta charset>` (which stays first, inside the prescan's 1024 bytes) and so before any script, style or link, so
  * a page served without Tauri's header (`vite preview`, the WebKit probe) runs under the same policy and a runtime
- * <style>, a style attribute or an HTML string write shows up as a violation. Build only: the dev server sends its own
+ * <style>, a style attribute or an HTML string write shows up as a violation. Its style-src adds the hash of each of the
+ * page's own inline <style> elements as built ([inlineStyleHashes]), and nothing else. Build only: the dev server sends its own
  * looser policy as a header (devCspHeader).
  */
 export function cspMeta(): Plugin {
-  const tag = `<meta http-equiv="Content-Security-Policy" content="${attr(metaCsp(tauriConf.app.security.csp))}">`;
+  const tag = (html: string) =>
+    `<meta http-equiv="Content-Security-Policy" content="${attr(metaCsp(tauriConf.app.security.csp, inlineStyleHashes(html)))}">`;
   return {
     name: "clauseo-csp-meta",
     apply: "build",
@@ -101,7 +125,7 @@ export function cspMeta(): Plugin {
         if (charset === null)
           throw new Error("the page has no <meta charset> for the CSP meta to follow");
         const at = charset.index + charset[0].length;
-        return `${html.slice(0, at)}\n    ${tag}${html.slice(at)}`;
+        return `${html.slice(0, at)}\n    ${tag(html)}${html.slice(at)}`;
       },
     },
   };
@@ -157,8 +181,9 @@ function probeEntry(): Plugin {
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
  * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
- * popover only those and the line; UD1's first run only the first load (U2's form, which it shares with New matter, it
- * loads lazily itself, as Start a new matter is pressed). The Hindi words (ui/components' words-hi.ts, every words
+ * popover only those and the line; UD2's first read's start only the first load and the small
+ * chunks it shares with the list (isLazyShared); U17's tool result block only those
+ * and the list. The Hindi words (ui/components' words-hi.ts, every words
  * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
  * The dialogs that share the dialog primitives are
  * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
@@ -176,16 +201,30 @@ export const BARE_CHUNKS = [
   "find-results",
   "tool-line-room",
   "tool-popover",
-  "first-run",
+  "result",
+  "first-read-start",
   "words-hi",
 ];
+
+/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2) and the Safe workspace's (UC)
+ * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
+export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace"];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
  * the first load with New matter's dialog (room.tsx, lazy), these three import them: New matter, change-note-ask and
  * versions-chunk. Their preloads fetch the primitives in parallel, not in a waterfall after the click. vite-config.test.ts
  * checks that only the chunks importing one of these carry a preload list. */
-export const PRELOADED_CHUNKS = ["new-matter", "change-note-ask", "versions-chunk"];
+export const PRELOADED_CHUNKS = [
+  "new-matter",
+  "change-note-ask",
+  "versions-chunk",
+  // UC: the Not protected note, the set-up confirm and the firm's notice, which take the alert dialog's primitives;
+  // UD1's first run takes its Safe workspace step from this chunk too, loaded on its way (note-load.ts)
+  "note-chunk",
+  // 0053: the unsafe-site allow's confirm, behind a notice's press (room/thread/site-blocked.tsx)
+  "site-allow-confirm",
+];
 
 const HELPER = "__vitePreload(() => ";
 const DEPS = ", __VITE_PRELOAD__)";
@@ -195,7 +234,10 @@ const DEPS = ", __VITE_PRELOAD__)";
  * `import("./<chunk>-` for a chunk in BARE_CHUNKS replaced by `<body>`. The body can run past the import
  * (`import(...).then(...)`), so its end is found by counting brackets, skipping string literals.
  */
-export function unwrapPreloads(code: string, chunks: readonly string[] = BARE_CHUNKS): string {
+export function unwrapPreloads(
+  code: string,
+  chunks: readonly string[] = [...BARE_CHUNKS, ...SETTINGS_BARE_CHUNKS],
+): string {
   let out = "";
   let at = 0;
   for (;;) {

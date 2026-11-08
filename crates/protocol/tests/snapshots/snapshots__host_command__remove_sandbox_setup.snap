@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::RemoveSandboxSetup {}"
+---
+{
+  "remove_sandbox_setup": {}
+}

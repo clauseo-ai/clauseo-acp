@@ -125,6 +125,19 @@ pub fn use_of(name: &str) -> Option<&'static str> {
 /// only neutralises Markdown: the model still reads the path's words, which the lawyer's data
 /// folder chooses (decision record 0031).
 pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
+    index_text(&index_lines(skills_root, rendered))
+}
+
+/// The index's text for `lines`: the heading, the rule and the lines; empty with no line.
+pub(crate) fn index_text(lines: &[String]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
+}
+
+/// [`codex_index`]'s lines, one per skill whose path may be listed.
+pub(crate) fn index_lines(skills_root: &Path, rendered: &Rendered) -> Vec<String> {
     let mut lines = Vec::new();
     for skill in rendered.skills() {
         let path = skills_root.join(skill.name()).join(SKILL_MD);
@@ -141,18 +154,22 @@ pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
         };
         lines.push(line);
     }
-    if lines.is_empty() {
-        return String::new();
-    }
-    format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
+    lines
 }
 
-/// Whether `path` may go in the index (see [`codex_index`]).
-fn is_listable(path: &str) -> bool {
-    !path
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') || is_format(c))
-        && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
+/// Whether `path` may go in the index (see [`codex_index`]); a pack's description too.
+pub(crate) fn is_listable(path: &str) -> bool {
+    !path.chars().any(is_unlisted_char) && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
+}
+
+/// Whether `c` never goes into an agent's instructions or a skill's frontmatter: a control
+/// character, a line or paragraph separator, a format character, or a variation selector
+/// (U+FE00 to U+FE0F and U+E0100 to U+E01EF, which are not format characters but are as
+/// invisible).
+pub(crate) fn is_unlisted_char(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{2028}' | '\u{2029}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
+        || is_format(c)
 }
 
 /// Whether `c` is a Unicode format character (general category Cf): bidi controls, zero-width

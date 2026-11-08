@@ -91,6 +91,74 @@ fn with_a_credential_link() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
+/// M4: the credential link gets read and `file-write-data`; every other write to it (chmod,
+/// chflags, xattr, chown, setugid, times, ACL) is denied after every allow that covers it, with
+/// data, unlink and create allowed back. Seatbelt applies the last match.
+#[test]
+fn the_credential_link_takes_data_writes_but_not_metadata() {
+    let w = World::new("profile-credential-link-metadata");
+    let policy = w
+        .builder()
+        .credential_link(w.at("data/agent-state/m1/codex/auth.json"))
+        .read_only_in_state(w.at("data/agent-state/m1/codex/config.toml"))
+        .build()
+        .unwrap();
+    let text = SeatbeltProfile::new(&policy, TAG)
+        .unwrap()
+        .text()
+        .to_owned();
+    let link = "(literal (param \"CREDENTIAL_LINK\"))";
+    let allow = format!("(allow file-read* file-write-data\n  {link})");
+    assert_eq!(text.matches(&allow).count(), 2, "{text}");
+    for rule in text
+        .split("\n(")
+        .filter(|r| r.starts_with("allow file-read* file-write*"))
+    {
+        assert!(!rule.contains("CREDENTIAL_LINK"), "{rule}");
+    }
+    let deny = format!("(deny file-write*\n  {link}\n  (with message \"{TAG}\"))");
+    let back = format!("(allow file-write-data file-write-unlink file-write-create\n  {link})");
+    let deny_at = text.find(&deny).expect(&text);
+    let back_at = text.find(&back).expect(&text);
+    assert!(deny_at < back_at, "{text}");
+    // After the last allow of the state folder, so the deny wins; before its read-only denies.
+    let last_state = text.rfind("(subpath (param \"STATE\"))").unwrap();
+    assert!(deny_at > last_state, "{text}");
+    let read_only_at = text.find("; Read-only in the state folder").expect(&text);
+    assert!(back_at < read_only_at, "{text}");
+    assert_eq!(text.matches(link).count(), 4, "{text}");
+}
+
+/// The session's temp folder, `data/run/s1/tmp`: read and write as a subpath, in the allows
+/// and again after the hidden data dir; the run folder above it gets only metadata (its path
+/// resolves), never a read or write rule.
+#[test]
+fn with_a_session_tmpdir() {
+    let w = World::new("profile-session-tmpdir");
+    w.dir.dir("data/run/s1");
+    let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
+    let text = w.render(&policy);
+    let rw = "(allow file-read* file-write*\n  (subpath (param \"TMPDIR\")))";
+    assert_eq!(text.matches(rw).count(), 2, "{text}");
+    let hidden_at = text.find("; Hidden paths").expect(&text);
+    assert!(text.rfind(rw).unwrap() > hidden_at, "{text}");
+    assert!(text.contains("TMPDIR = <root>/data/run/s1/tmp\n"), "{text}");
+    let run = dunce::canonicalize(w.at("data/run/s1")).unwrap();
+    let parent = run.parent().unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    for (name, path) in profile.params() {
+        assert!(
+            path != &run && path != parent,
+            "{name} names the run folder or its parent"
+        );
+        assert!(
+            name == "TMPDIR" || !path.starts_with(&run),
+            "{name} is in the run folder"
+        );
+    }
+    insta::assert_snapshot!(text);
+}
+
 #[test]
 fn with_a_browser_socket_folder() {
     let w = World::new("profile-browser-sockets");
@@ -154,6 +222,34 @@ fn with_read_only_paths_in_the_matter() {
         .build()
         .unwrap();
     insta::assert_snapshot!(w.render(&policy));
+}
+
+/// S15 `PR4a2`: a nested `.mcp.json` is in `read_only_in_matter` and comes out as a subpath in
+/// the profile's write deny of the matter's read-only paths.
+#[test]
+fn a_nested_mcp_json_is_write_denied() {
+    let w = World::new("profile-nested-mcp");
+    w.dir.file("matter/sub/.mcp.json", "{}");
+    let policy = w.builder().build().unwrap();
+    let mcp = dunce::canonicalize(w.at("matter"))
+        .unwrap()
+        .join("sub/.mcp.json");
+    let rule = PathRule::Subpath(mcp.clone());
+    assert!(policy.read_only_in_matter().contains(&rule));
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    let (name, _) = profile
+        .params()
+        .iter()
+        .find(|(name, path)| name.starts_with("READ_ONLY_") && *path == mcp)
+        .unwrap();
+    let text = profile.text();
+    let (_, block) = text.split_once("; Read-only in the matter").unwrap();
+    let (block, _) = block.split_once("(with message").unwrap();
+    assert!(block.contains("(deny file-write*"), "{block}");
+    assert!(
+        block.contains(&format!("(subpath (param \"{name}\"))")),
+        "{block}"
+    );
 }
 
 #[test]

@@ -1,5 +1,5 @@
-//! OS lookups that miss the cache: one per key at a time, at most four at once, and the bounded
-//! thread a Windows lookup runs on.
+//! OS lookups that miss the cache: one per key at a time, at most eight at once (a miss past them
+//! waits for a slot), and the bounded thread a Windows lookup runs on.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,7 +8,10 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::Scheme::Https;
-use super::super::{Env, Lookup, OS_LOOKUPS_MOST, Route, Upstream, bounded};
+use super::super::{
+    Answer, Env, FailKind, Failure, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer,
+    bounded,
+};
 use super::{FakeClock, http};
 
 /// A lookup whose OS answer waits for the test: each call reports its host on `arrived` and
@@ -21,6 +24,11 @@ struct Gated {
 }
 
 fn gated() -> Gated {
+    gated_meaning(Failure::Unmeant)
+}
+
+/// [`gated`], with `failure` what the settings show when a lookup fails without asking the OS.
+fn gated_meaning(failure: Failure) -> Gated {
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);
     let (arrived_tx, arrived) = mpsc::channel();
@@ -40,7 +48,8 @@ fn gated() -> Gated {
         },
         FakeClock::default(),
     )
-    .unwrap();
+    .unwrap()
+    .with_intent(move || failure);
     Gated {
         lookup: Arc::new(lookup),
         calls,
@@ -75,8 +84,30 @@ fn a_second_miss_for_the_same_host_waits_for_the_first_lookup() {
     );
 }
 
+/// Desktop's resolver asks about its 5 hosts at once: 8 slots hold them with room to spare.
 #[test]
-fn past_four_lookups_at_once_a_miss_goes_direct_uncached() {
+fn eight_lookups_hold_desktops_five_targets() {
+    assert_eq!(OS_LOOKUPS_MOST, 8);
+    let gated = gated();
+    let running: Vec<_> = (0..5)
+        .map(|i| route_on_thread(&gated.lookup, &format!("h{i}.test")))
+        .collect();
+    for _ in 0..5 {
+        gated.arrived.recv().unwrap();
+    }
+    assert_eq!(gated.calls.load(Ordering::SeqCst), 5, "none went direct");
+    for _ in 0..5 {
+        gated.release.send(()).unwrap();
+    }
+    for handle in running {
+        assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
+    }
+}
+
+/// Past eight lookups at once a miss waits for a slot; with none freed in time it goes direct,
+/// uncached.
+#[test]
+fn past_eight_lookups_at_once_a_miss_waits_then_fails_uncached() {
     let gated = gated();
     let running: Vec<_> = (0..OS_LOOKUPS_MOST)
         .map(|i| {
@@ -85,22 +116,80 @@ fn past_four_lookups_at_once_a_miss_goes_direct_uncached() {
             handle
         })
         .collect();
-    assert_eq!(OS_LOOKUPS_MOST, 4);
-    assert_eq!(gated.lookup.route(Https, "fifth.test", 443), Route::Direct);
-    assert_eq!(gated.calls.load(Ordering::SeqCst), 4, "the fifth never ran");
+    // It waits up to `OS_SLOT_WAIT` for a slot, then fails (a connection goes direct), kept
+    // apart from an OS `DIRECT`.
+    assert_eq!(
+        gated.lookup.answer(Https, "ninth.test", 443),
+        UpstreamAnswer::Failed(FailKind::Other)
+    );
+    assert_eq!(
+        gated.calls.load(Ordering::SeqCst),
+        OS_LOOKUPS_MOST,
+        "the ninth never ran"
+    );
     for _ in 0..OS_LOOKUPS_MOST {
         gated.release.send(()).unwrap();
     }
     for handle in running {
         assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
     }
-    // The direct answer was not cached: the next miss asks the OS.
+    // The failure was not cached: the next miss asks the OS.
     gated.release.send(()).unwrap();
     assert_eq!(
-        gated.lookup.route(Https, "fifth.test", 443),
+        gated.lookup.route(Https, "ninth.test", 443),
         http("os-proxy", 1)
     );
-    assert_eq!(gated.calls.load(Ordering::SeqCst), 5);
+    assert_eq!(gated.calls.load(Ordering::SeqCst), OS_LOOKUPS_MOST + 1);
+}
+
+/// A miss failed for want of a slot carries what the settings show, so the egress proxy refuses
+/// rather than going direct when they name a proxy.
+#[test]
+fn a_miss_past_the_slots_carries_the_settings_meaning() {
+    let gated = gated_meaning(Failure::MeantProxy);
+    let running: Vec<_> = (0..OS_LOOKUPS_MOST)
+        .map(|i| {
+            let handle = route_on_thread(&gated.lookup, &format!("h{i}.test"));
+            gated.arrived.recv().unwrap();
+            handle
+        })
+        .collect();
+    let decided = gated.lookup.decide(Https, "ninth.test", 443);
+    assert_eq!(
+        decided.answer,
+        Answer::Failed(Failure::MeantProxy, FailKind::Other)
+    );
+    assert_eq!(decided.got, None);
+    for _ in 0..OS_LOOKUPS_MOST {
+        gated.release.send(()).unwrap();
+    }
+    for handle in running {
+        assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
+    }
+}
+
+/// A miss that finds every slot busy runs once one frees within the wait.
+#[test]
+fn a_miss_runs_when_a_slot_frees_within_the_wait() {
+    let gated = gated();
+    let running: Vec<_> = (0..OS_LOOKUPS_MOST)
+        .map(|i| {
+            let handle = route_on_thread(&gated.lookup, &format!("h{i}.test"));
+            gated.arrived.recv().unwrap();
+            handle
+        })
+        .collect();
+    let ninth = route_on_thread(&gated.lookup, "ninth.test");
+    gated.release.send(()).unwrap();
+    // One slot freed: the ninth runs and waits on its own release.
+    assert_eq!(gated.arrived.recv().unwrap(), "ninth.test");
+    for _ in 0..OS_LOOKUPS_MOST {
+        gated.release.send(()).unwrap();
+    }
+    assert_eq!(ninth.join().unwrap(), http("os-proxy", 1));
+    for handle in running {
+        assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
+    }
 }
 
 #[test]
@@ -127,7 +216,7 @@ fn a_lookup_that_panics_gives_its_thread_slot_back() {
     static THREADS: AtomicUsize = AtomicUsize::new(0);
     // The thread unwinds: its slot guard drops before the answer's sender, so by the time the
     // waiter sees the sender gone, the count is back to zero.
-    let failed = bounded(Duration::from_secs(10), &THREADS, 1, || {
+    let failed: Result<Route, String> = bounded(Duration::from_secs(10), &THREADS, 1, || {
         std::panic::resume_unwind(Box::new("the OS lookup failed"))
     });
     assert!(failed.is_err());

@@ -282,7 +282,8 @@ fn cancel_agent_turn(actor: &mut Actor, thread: ThreadId) {
 }
 
 /// The steer moves to a new turn at the queue's head, which starts once the steered turn has
-/// ended: one commit of `SteerResolved { Requeued }` and `TurnQueued` behind the steered turn.
+/// ended: one commit of `SteerResolved { Requeued }` and `TurnQueued` behind the steered turn,
+/// marked `at_head` so a restart keeps it at the head too (`restore.rs`).
 fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) {
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
@@ -305,8 +306,10 @@ fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) {
 fn log_requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) -> Result<(), Error> {
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
+    // `at_head`: the live queue puts it at the head, and a restart does the same.
     let waits = TurnQueued::new(thread, turn, thread, Some(ask.turn))
-        .map_err(|error| Error::Internal(error.to_string()))?;
+        .map_err(|error| Error::Internal(error.to_string()))?
+        .at_head();
     let resolved = SteerResolved {
         message: ask.message,
         outcome: SteerOutcome::Requeued { turn },

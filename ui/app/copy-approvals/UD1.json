@@ -63,11 +63,14 @@
     "by": "design"
   },
   "UD1-11": {
-    "en": "Getting {name} ready. About {mb} MB.",
-    "hi": "{name} तैयार हो रहा है। लगभग {mb} MB।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "en": "Needs a download of about {mb} MB",
+    "hi": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-12": {
     "en": "{name} is ready",
@@ -77,26 +80,34 @@
     "by": "design"
   },
   "UD1-13": {
-    "en": "Setting up {name} on this computer.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Setting up {name}…",
+    "hi": "{name} सेट अप हो रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-05",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-14": {
     "en": "Use the system proxy",
-    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
   },
   "UD1-15": {
-    "en": "Ask your IT team",
-    "hi": "अपनी IT टीम से कहें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)"
   },
   "UD1-16": {
     "en": "Message copied",
@@ -184,11 +195,14 @@
   },
   "UD1-28": {
     "en": "Your browser opens when {name} is ready.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-29": {
     "en": "Your browser opens when you reconnect.",
@@ -220,50 +234,65 @@
   },
   "UD1-33": {
     "en": "Kept in this Mac's Keychain.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस Mac के Keychain में रखी है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-34": {
     "en": "Kept in Windows Credential Manager.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Windows Credential Manager में रखी है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-35": {
     "en": "Kept in this computer's keyring.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर के keyring में रखी है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-36": {
     "en": "This computer has no keyring to keep an API key in.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर में API key रखने के लिए कोई keyring नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-37": {
     "en": "Sign in with an Anthropic Console account",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Anthropic Console खाते से साइन इन करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-38": {
-    "en": "Finish signing in in your browser",
+    "en": "Finish signing in with your browser.",
     "hi": "अपने ब्राउज़र में साइन इन पूरा करें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-39": {
     "en": "Didn't open?",
@@ -316,19 +345,25 @@
   },
   "UD1-46": {
     "en": "Signed in as {email}",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{email} के रूप में साइन इन",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-47": {
     "en": "Signed in to {name}",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{name} में साइन इन",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-48": {
     "en": "Using an API key, billed to its own account",
@@ -339,11 +374,14 @@
   },
   "UD1-49": {
     "en": "Using your firm's account",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "आपकी फ़र्म का खाता इस्तेमाल हो रहा है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-50": {
     "en": "The sign-in link expired at {time}.",
@@ -382,202 +420,363 @@
   },
   "UD1-55": {
     "en": "Clauseo found your {name} account ({email}) from {app} and will use it here.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo को {app} से आपका {name} खाता ({email}) मिला है। वह इसे यहाँ इस्तेमाल करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-56": {
     "en": "Clauseo found your {name} account from {app} and will use it here.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo को {app} से आपका {name} खाता मिला है। वह इसे यहाँ इस्तेमाल करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-57": {
     "en": "Use it",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इसे इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-58": {
     "en": "Sign in with a different account",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "किसी दूसरे खाते से साइन इन करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-59": {
     "en": "A different account signs in to Clauseo only. {app} stays as it is.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "दूसरा खाता केवल Clauseo में साइन इन करता है। {app} जैसा है वैसा रहता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-60": {
     "en": "Signed in through {app} as {email} · {plan}",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{app} के ज़रिए {email} के रूप में साइन इन · {plan}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-61": {
     "en": "Signed in through {app} as {email}",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{app} के ज़रिए {email} के रूप में साइन इन",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-62": {
     "en": "Signed in through {app}",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{app} के ज़रिए साइन इन",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-63": {
     "en": "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर पर Claude Code आपकी अपनी Claude सेटिंग्स से साइन इन करता है, जिन्हें Clauseo आपके मामलों से दूर रखता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-64": {
     "en": "Codex on this computer keeps its sign-in where Clauseo can't share it.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर पर Codex अपना साइन इन ऐसी जगह रखता है जहाँ से Clauseo उसे साझा नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-65": {
-    "en": "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "hi": "Clauseo का सुरक्षित कार्यक्षेत्र अभी Windows पर Claude Code का साइन-इन साझा नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UD1-66": {
     "en": "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर पर {app} से साइन आउट हो गया है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-67": {
     "en": "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर पर {app} अब दूसरा खाता इस्तेमाल करता है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-68": {
     "en": "Codex's sign-in on this computer changed, so Clauseo stopped using it.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इस कंप्यूटर पर Codex का साइन इन बदल गया, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-69": {
     "en": "{app}'s sign-in stopped working here, so Clauseo stopped using it.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "{app} का साइन इन यहाँ काम नहीं कर रहा, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-70": {
     "en": "Use a code instead",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इसके बजाय कोड इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-71": {
     "en": "Sign in to ChatGPT on that page and enter this code.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "उस पेज पर ChatGPT में साइन इन करें और यह कोड डालें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-72": {
     "en": "The code works until {time}.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "यह कोड {time} बजे तक काम करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-73": {
     "en": "Copy",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "कॉपी करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-74": {
     "en": "Open page",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "पेज खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-75": {
     "en": "To turn it on, open ChatGPT, then Settings, then Security, and turn on Enable device code sign-in for Codex, Excel, PowerPoint, and Word. Then choose Try again.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इसे चालू करने के लिए ChatGPT खोलें, फिर Settings, फिर Security, और Enable device code sign-in for Codex, Excel, PowerPoint, and Word चालू करें। इसके बाद 'फिर से प्रयास करें' चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-76": {
     "en": "Sign in in the browser instead",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "इसके बजाय ब्राउज़र में साइन इन करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-77": {
     "en": "Sign-in didn't finish.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "साइन इन पूरा नहीं हुआ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-78": {
     "en": "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.",
-    "hi": null,
-    "hi_status": "later",
-    "status": "provisional",
+    "hi": "Clauseo {name} के लिए आपकी फ़र्म की सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-79": {
-    "en": "Ask your IT team.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Your firm manages these settings.",
+    "hi": "ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-05",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "UD1-80": {
+    "en": "Switching accounts.",
+    "hi": "खाता बदला जा रहा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-81": {
+    "en": "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.",
+    "hi": "Clauseo अभी पुराना लॉगिन बंद कर रहा है। यह अपने आप प्रयास करता रहता है, इसलिए आपको कुछ नहीं करना है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-82": {
+    "en": "If this goes on, quit Clauseo and open it again.",
+    "hi": "अगर ऐसा चलता रहे, तो Clauseo बंद करके फिर से खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-83": {
+    "en": "Clauseo is still switching accounts. Try again in a moment.",
+    "hi": "Clauseo अभी खाता बदल रहा है। थोड़ी देर में फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-84": {
+    "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+    "hi": "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-85": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-86": {
+    "en": "Use the system proxy",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-87": {
+    "en": "Use the system proxy",
+    "hi": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-88": {
+    "en": "Getting {name} ready… {done} MB of {total} MB",
+    "hi": "{name} तैयार हो रहा है… {total} MB में से {done} MB",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   }
 }

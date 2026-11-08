@@ -15,6 +15,7 @@ use crate::Timer;
 use crate::descendants::{Descendants, Snapshot};
 #[cfg(unix)]
 use crate::descendants::{Proc, kill_all};
+use crate::live::Live;
 use crate::os::{Root, Tree};
 use crate::stderr::{self, Redactor, SharedRing};
 use crate::stdin::StdinSlot;
@@ -43,6 +44,8 @@ pub struct Handle {
     /// Whether the tree has been sent its kill, so `Drop` sends none: on Unix a group id can be
     /// reused once the group is gone.
     tree_killed: bool,
+    /// The start's count (`live.rs`), given back when the handle drops, after the tree's kill.
+    _live: Live,
 }
 
 impl Handle {
@@ -53,6 +56,7 @@ impl Handle {
         stdin: StdinSlot,
         ring: SharedRing,
         redactor: Arc<Redactor>,
+        live: Live,
     ) -> Handle {
         Handle {
             child,
@@ -63,12 +67,18 @@ impl Handle {
             stdin,
             stderr: StderrSource { ring, redactor },
             tree_killed: false,
+            _live: live,
         }
     }
 
     /// The agent's process id.
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// A [`TreeWatch`] on the agent's tree, which outlives the handle.
+    pub fn tree_watch(&self) -> TreeWatch {
+        TreeWatch(crate::os::watch(&self.tree))
     }
 
     /// The agent's descendants, to list and end while it runs (see [`Descendants`]).
@@ -172,6 +182,22 @@ impl Drop for Handle {
     /// a descendant outside the group outlives a handle dropped without a shutdown.
     fn drop(&mut self) {
         self.kill_tree();
+    }
+}
+
+/// Asks whether an agent's tree is gone, from any thread, after its [`Handle`] has dropped:
+/// on Unix its process group is empty, the agent reaped included; on Windows its Job Object
+/// holds no running process. It sends nothing; the tree's kill is the handle's.
+///
+/// On Windows it holds the job open, so the job's kill-on-close waits for it too; the handle
+/// has always sent the job its `TerminateJobObject` by the time it drops.
+#[derive(Debug, Clone)]
+pub struct TreeWatch(crate::os::Watch);
+
+impl TreeWatch {
+    /// Whether the tree is gone. A blocking-free OS query; poll it.
+    pub fn gone(&self) -> bool {
+        self.0.gone()
     }
 }
 

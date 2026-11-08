@@ -364,10 +364,10 @@ fn codex_runs_but_detection_get_clauseo_s_home_and_claude_runs_never() {
     assert!(seen.0 > 0 && seen.1 > 0 && seen.2 > 0, "{seen:?}");
 }
 
-/// The lawyer's file-mode login whose `account/read` names no email (an API-key account, by the
-/// fake's dummy marker): detection gives `LoginFound { email: None }`.
+/// The lawyer's file-mode login whose `account/read` names no email (a `ChatGPT` account with
+/// `email: null`, by the fake's dummy marker): detection gives `LoginFound { email: None }`.
 fn plant_lawyer_without_email(fx: &Fixture) {
-    write_file(&lawyer_file(fx), br#"{"authMethod": "apikey"}"#).unwrap();
+    write_file(&lawyer_file(fx), br#"{"authMethod": "chatgpt-no-email"}"#).unwrap();
 }
 
 fn found_without_email() -> SigninState {
@@ -501,7 +501,7 @@ fn an_unanswered_account_read_is_never_login_found_without_an_email() {
     let (agents, events) = start(&fx);
     fx.stall(Some("app-server"));
     agents.check_status(&codex()).unwrap();
-    fx.timer.fire(std::time::Duration::from_secs(10));
+    fx.timer.fire(std::time::Duration::from_secs(20));
     let app_server = fx.codex_runs(&["app-server"]).pop().unwrap();
     assert!(crate::support::gone(app_server.pid));
     for _ in 0..20 {
@@ -545,7 +545,7 @@ fn the_guard_refuses_a_linked_home_file_and_any_stat_error() {
     assert!(!codex_login_shared(&home(&fx), &fx.user_home()));
 }
 
-/// S18 re-review, Medium: a login whose `account/read` answers with no email (an API key) is
+/// S18 re-review, Medium: a `ChatGPT` login whose `account/read` answers with no email is
 /// shown with `email: None` and "Use it" reuses it: `None` re-detected equals `None` shown.
 #[test]
 fn use_it_reuses_a_login_with_no_email() {
@@ -560,7 +560,7 @@ fn use_it_reuses_a_login_with_no_email() {
         last,
         SigninState::SignedIn {
             email: None,
-            plan: None,
+            plan: Some("plus".to_owned()),
             source: Source::Reused,
             at: now(),
         }

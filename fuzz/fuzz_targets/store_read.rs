@@ -137,6 +137,7 @@ fn fixture() -> &'static Fixture {
             pinned: false,
             last_opened: None,
             forgotten: None,
+            skill_packs: None,
         };
         let thread_row = ThreadRow {
             id: thread_id,

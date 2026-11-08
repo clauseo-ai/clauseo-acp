@@ -3,6 +3,7 @@
 //
 //   node .github/scripts/sidecars.mjs <target-triple>
 //   node .github/scripts/sidecars.mjs --check   (the overlay is only bundle.externalBin, clauseo- names)
+//   node .github/scripts/sidecars.mjs --setup-exe <target-triple>   (that exe only; prints its path)
 //
 // release.yml's sidecar seam runs it in each `build` leg, after the installs and before any
 // secret. For the target it:
@@ -19,12 +20,15 @@
 //
 // Cargo runs with the job's own environment (RUSTFLAGS and the CARGO_PROFILE_RELEASE_* flags),
 // so a sidecar gets the same release flags as the app, and its .pdb, .dSYM or .dwp lands in
-// target/<triple>/release beside the app's.
+// target/<triple>/release beside the app's. The setup exe adds only path remaps to those flags,
+// and SOURCE_DATE_EPOCH, for a reproducible build (reproducibleEnv); it has no .pdb
+// (crates/sandbox/build.rs).
 //
 // Node built-ins only. Tests: sidecars.test.mjs next to this file (ci.yml's fast lane).
 
 import { spawnSync } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchAgentBrowser } from "../../crates/desktop/sidecars/agent-browser.mjs";
@@ -53,6 +57,69 @@ const cargoBin = (pkg) => async (triple, ctx) => {
 };
 
 /**
+ * Builds one named [[bin]] of a workspace package for the target and returns where cargo left it.
+ * @param {string} pkg the cargo package
+ * @param {string} bin the binary, named in the package's Cargo.toml
+ */
+const cargoPackageBin = (pkg, bin) => async (triple, ctx) => {
+  ctx.cargo(["build", "--release", "--locked", "-p", pkg, "--bin", bin, "--target", triple]);
+  return join(ctx.targetDir, triple, "release", `${bin}${exe(triple)}`);
+};
+
+/**
+ * The extra environment of a reproducible build: the job's rustflags (CARGO_ENCODED_RUSTFLAGS,
+ * else RUSTFLAGS) and --remap-path-prefix for the repo root, cargo's home and the target dir, so
+ * the target's crates carry no absolute path from the runner (a dependency's panic location, an
+ * OUT_DIR file). Under --target, rustflags never reach the host's proc macros and build scripts,
+ * so the exe is reproducible at one build path only (crates/sandbox/build.rs). rustc applies the last prefix that matches, so the target dir,
+ * inside the root, comes after it. CARGO_ENCODED_RUSTFLAGS (0x1f between flags) keeps a path
+ * with spaces whole. Cargo hashes rustflags into its artifacts' names, so this build sits beside
+ * the app's, not over it.
+ * SOURCE_DATE_EPOCH is the commit's time (the job's own, when it sets one), for any build
+ * script or tool that would stamp a date. The linker's half (/Brepro, /DEBUG:NONE) is in
+ * crates/sandbox/build.rs; the toolchain is rust-toolchain.toml's, which rustup and cargo honour
+ * in the repo.
+ *
+ * @param {{ root: string, targetDir: string, commitTime: string, env?: NodeJS.ProcessEnv }} where
+ * @returns {{ CARGO_ENCODED_RUSTFLAGS: string, SOURCE_DATE_EPOCH: string }}
+ */
+export function reproducibleEnv({ root, targetDir, commitTime, env = process.env }) {
+  const inherited = env.CARGO_ENCODED_RUSTFLAGS
+    ? env.CARGO_ENCODED_RUSTFLAGS.split("\x1f")
+    : (env.RUSTFLAGS ?? "").split(/\s+/).filter((flag) => flag !== "");
+  const cargoHome = env.CARGO_HOME ?? join(homedir(), ".cargo");
+  const remaps = [
+    [root, "/clauseo"],
+    [cargoHome, "/cargo"],
+    [targetDir, "/target"],
+  ].map(([from, to]) => `--remap-path-prefix=${from}=${to}`);
+  return {
+    CARGO_ENCODED_RUSTFLAGS: [...inherited, ...remaps].join("\x1f"),
+    SOURCE_DATE_EPOCH: env.SOURCE_DATE_EPOCH ?? commitTime,
+  };
+}
+
+/** HEAD's commit time in Unix seconds, from git in `root`; throws when git fails. */
+function gitCommitTime(root) {
+  const result = spawnSync("git", ["log", "-1", "--format=%ct"], { cwd: root, encoding: "utf8" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`git log failed in ${root}: ${result.stderr.trim()}`);
+  return result.stdout.trim();
+}
+
+/**
+ * The elevated setup exe: built as cargoPackageBin builds it, reproducibly (reproducibleEnv).
+ * setup-exe-repro.yml builds it twice from clean and compares the two.
+ */
+const setupExe = async (triple, ctx) => {
+  const bin = "clauseo-sandbox-setup";
+  const args = ["build", "--release", "--locked", "-p", "clauseo-sandbox", "--bin", bin, "--target", triple];
+  const commitTime = (ctx.commitTime ?? gitCommitTime)(ctx.root);
+  ctx.cargo(args, reproducibleEnv({ root: ctx.root, targetDir: ctx.targetDir, commitTime }));
+  return join(ctx.targetDir, triple, "release", `${bin}${exe(triple)}`);
+};
+
+/**
  * Fetches the pinned agent-browser straight to its destination; null when the pin says none.
  * The pin and the download keep upstream's asset names; only the installed name has the prefix.
  */
@@ -72,7 +139,15 @@ export const SIDECARS = [
   // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
   // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
   // with -C target-feature=+crt-static on Windows (S20-sidecars.md, "Release flags").
-  // S15 adds its rows here: clauseo-sandbox-setup and clauseo-sandbox-run, Windows targets only.
+  // S15's set-up tool, a [[bin]] of the clauseo-sandbox package. Tauri bundles it beside
+  // Clauseo.exe as clauseo-sandbox-setup.exe; hooks.nsh runs it in NSIS_HOOK_PREUNINSTALL, and
+  // the NSIS template deletes it after that hook.
+  {
+    name: "clauseo-sandbox-setup",
+    targets: RELEASE_TARGETS.filter(isWindows),
+    place: setupExe,
+  },
+  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only.
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
@@ -94,10 +169,10 @@ export function overlayProblem(overlay) {
   return bad.length > 0 ? `each entry must start with binaries/${PREFIX}: ${JSON.stringify(bad)}` : null;
 }
 
-/** Runs cargo in the repo root with the inherited environment; throws on failure. */
-function runCargo(args) {
+/** Runs cargo in the repo root with the inherited environment and `extra`; throws on failure. */
+function runCargo(args, extra = {}) {
   console.log(`$ cargo ${args.join(" ")}`);
-  const result = spawnSync("cargo", args, { cwd: ROOT, stdio: "inherit" });
+  const result = spawnSync("cargo", args, { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...extra } });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`cargo ${args.join(" ")} failed (exit ${result.status})`);
 }
@@ -106,9 +181,10 @@ function runCargo(args) {
  * Places every sidecar for `triple` and writes the overlay. Returns the overlay's externalBin.
  *
  * @param {string} triple a target in RELEASE_TARGETS
- * @param {{ root?: string, cargo?: (args: string[]) => void, targetDir?: string,
+ * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,
  *   fetchAgentBrowser?: typeof fetchAgentBrowser, agentBrowserOptions?: object,
- *   sidecars?: typeof SIDECARS }} [options] the tests replace cargo, the fetch and the root
+ *   sidecars?: typeof SIDECARS, commitTime?: (root: string) => string }} [options] the tests
+ *   replace cargo, the fetch, the root and git's commit time
  * @returns {Promise<string[]>}
  */
 export async function placeSidecars(triple, options = {}) {
@@ -121,6 +197,8 @@ export async function placeSidecars(triple, options = {}) {
   }
   const root = options.root ?? ROOT;
   const ctx = {
+    root,
+    commitTime: options.commitTime,
     cargo: options.cargo ?? runCargo,
     targetDir: resolve(root, options.targetDir ?? process.env.CARGO_TARGET_DIR ?? "target"),
     fetchAgentBrowser: options.fetchAgentBrowser ?? fetchAgentBrowser,
@@ -161,19 +239,43 @@ export async function placeSidecars(triple, options = {}) {
   return externalBin;
 }
 
+/**
+ * Builds only the setup exe for a Windows `triple`, reproducibly, and returns its path; nothing
+ * is placed and no overlay is written. setup-exe-repro.yml runs it twice, in target/ wiped
+ * between the two.
+ *
+ * @param {string} triple a Windows target in RELEASE_TARGETS
+ * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,
+ *   commitTime?: (root: string) => string }} [options] the tests replace cargo, the root and git
+ * @returns {Promise<string>}
+ */
+export async function buildSetupExe(triple, options = {}) {
+  if (!RELEASE_TARGETS.filter(isWindows).includes(triple)) {
+    throw new Error(`sidecars: the setup exe ships on the Windows release targets only, not ${triple}`);
+  }
+  const root = options.root ?? ROOT;
+  const targetDir = resolve(root, options.targetDir ?? process.env.CARGO_TARGET_DIR ?? "target");
+  return setupExe(triple, { root, targetDir, commitTime: options.commitTime, cargo: options.cargo ?? runCargo });
+}
+
+const USAGE = "usage: node .github/scripts/sidecars.mjs <target-triple> | --check | --setup-exe <target-triple>";
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const [triple, ...extra] = process.argv.slice(2);
-  if (!triple || extra.length > 0) {
-    console.error("usage: node .github/scripts/sidecars.mjs <target-triple> | --check");
+  const [first, ...rest] = process.argv.slice(2);
+  const setup = first === "--setup-exe";
+  if (!first || rest.length !== (setup ? 1 : 0)) {
+    console.error(USAGE);
     process.exit(2);
   }
   try {
-    if (triple === "--check") {
+    if (setup) {
+      console.log(await buildSetupExe(rest[0]));
+    } else if (first === "--check") {
       const problem = overlayProblem(JSON.parse(await readFile(OVERLAY, "utf8")));
       if (problem !== null) throw new Error(`crates/desktop/release/sidecars.generated.json: ${problem}`);
       console.log("crates/desktop/release/sidecars.generated.json holds only bundle.externalBin, clauseo- names");
     } else {
-      await placeSidecars(triple);
+      await placeSidecars(first);
     }
   } catch (error) {
     console.error(`::error::${error.message}`);

@@ -114,6 +114,7 @@ impl State {
     /// Reads the counts folder into memory and starts saving. The id is made when missing.
     fn load(&mut self) -> io::Result<()> {
         self.mode = Mode::Saving;
+        self.store.check_root()?;
         let install = if let Some(id) = self.store.read_install() {
             id
         } else {

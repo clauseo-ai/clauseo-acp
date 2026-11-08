@@ -1,0 +1,387 @@
+//! The deletion itself: the two folders checked, then each emptied a level at a time, every
+//! entry removed by std (a link as a link, a folder with `remove_dir_all`), descending by hand
+//! only toward the folder that stays. See the contract in `delete_app_data.rs`.
+
+use std::ffi::OsStr;
+use std::fs::Metadata;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+use clauseo_settings::{IDENTIFIER, KnownFolder, PlatformDirs};
+
+use super::ops::LinkVerdict;
+use super::{DELETED, FAILED, KEPT_AND_FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
+
+/// The sandbox's folder under the local data folder: S15's records (its ledger, the matter
+/// SIDs, and the clean-close records of S15's third PR, part d), which its `--remove` needs.
+/// Kept whole unless `--sandbox-removed`, so a record added there later is kept too.
+pub(super) const SANDBOX_DIR: &str = clauseo_sandbox::windows::matters::SANDBOX_DIR;
+/// Where tier B moves the lawyer's protected names aside, under the local data folder, one name
+/// per level: `<data>\sandbox\set-aside\<matter>\<timestamp>\…` (S15, #464). The one place
+/// its location is written; the hook's message path is held to it by a test.
+pub(super) const SET_ASIDE_PATH: [&str; 2] = [SANDBOX_DIR, clauseo_sandbox::windows::SET_ASIDE_DIR];
+
+/// Deletes both data folders as `mode` says, the known folders from `dirs`; answers the exit
+/// code.
+pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write) -> i32 {
+    let folders = [KnownFolder::LocalAppData, KnownFolder::RoamingAppData].map(|folder| {
+        dirs.known_folder(folder)
+            .map(|known| (known.join(IDENTIFIER), known))
+            .ok_or(folder)
+    });
+    let mut present = Vec::new();
+    for (index, folder) in folders.into_iter().enumerate() {
+        let (root, known) = match folder {
+            Ok(found) => found,
+            Err(folder) => {
+                say(
+                    stderr,
+                    &format!("Windows gave no {folder:?} folder. Nothing deleted."),
+                );
+                return FAILED;
+            }
+        };
+        match check(&known, &root) {
+            Ok(true) => present.push((index == 0, root)),
+            Ok(false) => {}
+            Err(why) => {
+                say(
+                    stderr,
+                    &format!("{}: {why}. Nothing deleted.", root.display()),
+                );
+                return FAILED;
+            }
+        }
+    }
+    let mut report = Report::new(stderr);
+    let mut kept = None;
+    for (local, root) in present {
+        // The way down to the folder that stays, in the local folder only: `sandbox` whole
+        // unless S15's removal ran, else a `set-aside` that holds anything.
+        let toward: &[&str] = match (local, mode.sandbox_removed) {
+            (false, _) => &[],
+            (true, false) => &[SANDBOX_DIR],
+            (true, true) => &SET_ASIDE_PATH,
+        };
+        // `sandbox` stays whole; the set-aside stays unless it is empty.
+        let whole = !mode.sandbox_removed;
+        if let Ok(left) = empty_folder(&root, toward, whole, &mut report) {
+            if left.gone() {
+                remove_emptied(&root, &mut report);
+            }
+            if local {
+                kept = left.kept;
+            }
+        }
+    }
+    // With --sandbox-removed only the set-aside can stay; without it, `sandbox`.
+    match (kept, report.failures > 0) {
+        (Some(_), true) => KEPT_AND_FAILED,
+        (Some(_), false) if mode.sandbox_removed => KEPT_SET_ASIDE,
+        (Some(_), false) => KEPT_SANDBOX,
+        (None, true) => FAILED,
+        (None, false) => DELETED,
+    }
+}
+
+/// Whether `root` is there to delete: `Ok(false)` when it does not exist, the reason it is
+/// refused otherwise. It must be `known`'s child named [`IDENTIFIER`], a real folder (no reparse
+/// point), whose real path is directly in `known`'s real path.
+pub(super) fn check(known: &Path, root: &Path) -> Result<bool, String> {
+    if !known.is_absolute() {
+        return Err(format!("{} is not an absolute path", known.display()));
+    }
+    if root.parent() != Some(known) || root.file_name() != Some(OsStr::new(IDENTIFIER)) {
+        return Err(format!("not {IDENTIFIER} directly in {}", known.display()));
+    }
+    let meta = match std::fs::symlink_metadata(root) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("could not be read ({error})")),
+    };
+    if is_link(&meta) {
+        return Err("is a link (a junction or a symbolic link)".to_owned());
+    }
+    if !meta.is_dir() {
+        return Err("is not a folder".to_owned());
+    }
+    let real = |path: &Path| {
+        dunce::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))
+    };
+    // Both without a `\\?\` prefix: `dunce` keeps it only on a path it cannot shorten (past
+    // 260 characters), so the data folder could have it while its known folder does not.
+    let (real_known, real_root) = (plain(&real(known)?), plain(&real(root)?));
+    if real_root.parent() != Some(real_known.as_path()) {
+        return Err(format!(
+            "its real path {} is not directly in {}",
+            real_root.display(),
+            real_known.display()
+        ));
+    }
+    Ok(true)
+}
+
+/// `path` without a verbatim prefix: `\\?\C:\…` as `C:\…`, `\\?\UNC\server\share\…` as
+/// `\\server\share\…`; any other path as it is (every path off Windows).
+pub(super) fn plain(path: &Path) -> PathBuf {
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path.to_owned();
+    };
+    let mut out = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => std::ffi::OsString::from(format!("{}:", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut unc = std::ffi::OsString::from(r"\\");
+            unc.push(server);
+            unc.push(r"\");
+            unc.push(share);
+            unc
+        }
+        _ => return path.to_owned(),
+    };
+    out.push(components.as_path().as_os_str());
+    PathBuf::from(out)
+}
+
+/// Removes everything in `folder` but the folder that stays, which `toward` names below it
+/// (`[]` for none). `folder` is first held open by handle, which also says it is no reparse
+/// point (`ops::pin_folder`); while it is held it cannot be renamed, deleted or replaced. Each
+/// entry not on the way down is removed by std, never entered here: a reparse point as a link,
+/// a folder with `remove_dir_all` (which opens nothing through a link), a file with
+/// `remove_file`. Only the folder on the way down is entered, the same way. What is at the end
+/// of the way down stays whole with `whole` (`sandbox`, not looked into), but a `sandbox` that is
+/// a link is then unlinked by handle and reported ([`unlink_sandbox`]); without it (the
+/// set-aside), a real folder stays unless it holds only bookkeeping (`set_aside::clear`), and a
+/// link or a file goes like any other entry. Answers what is left
+/// in it ([`Left`]); `Err` when `folder` was not entered (reported).
+fn empty_folder(
+    folder: &Path,
+    toward: &[&str],
+    whole: bool,
+    report: &mut Report<'_>,
+) -> Result<Left, ()> {
+    // Held until the folder's entries are done, then closed.
+    let _pinned = match ops::pin_folder(folder) {
+        Ok(pinned) => pinned,
+        Err(error) => {
+            report.fail(folder, &error);
+            return Err(());
+        }
+    };
+    let mut left = Left::default();
+    for (path, meta) in entries(folder, report) {
+        // Windows file names ignore case: `Sandbox` is `sandbox`. What stays is the entry as
+        // listed.
+        let next = toward.split_first().filter(|(name, _)| named(&path, name));
+        if let Some((_, rest)) = next {
+            if rest.is_empty() && whole && is_link(&meta) {
+                // `sandbox` itself a link, with no --sandbox-removed: S15's records are not
+                // behind it, so it is unlinked by handle, reported, and nothing is kept.
+                left.add(unlink_sandbox(path, report));
+                continue;
+            }
+            if rest.is_empty() && whole {
+                // `sandbox`, whatever it is, is not looked into.
+                left.kept = Some(path);
+                continue;
+            }
+            if rest.is_empty() && !is_link(&meta) && meta.is_dir() {
+                // The set-aside: kept unless it holds only bookkeeping (`set_aside.rs`).
+                left.add(super::set_aside::clear(path, report));
+                continue;
+            }
+            if !rest.is_empty() && !is_link(&meta) && meta.is_dir() {
+                if let Ok(below) = empty_folder(&path, rest, whole, report) {
+                    if below.gone() {
+                        remove_emptied(&path, report);
+                    }
+                    left.add(below);
+                }
+                continue;
+            }
+            // A link or a file: removed like any other entry.
+        }
+        remove_entry(&path, &meta, report);
+    }
+    Ok(left)
+}
+
+/// What [`empty_folder`] left in a folder on purpose.
+#[derive(Default)]
+pub(super) struct Left {
+    /// The folder that stays, the uninstaller names it as kept: `sandbox`, or the set-aside.
+    pub(super) kept: Option<PathBuf>,
+    /// Something else that must not go and is no kept folder: a linked `sandbox` that is a
+    /// reparse point of another kind, or one the handle could not open, or a set-aside's
+    /// bookkeeping that could not go (each reported).
+    pub(super) held: bool,
+}
+
+impl Left {
+    /// Whether nothing was left, so the folder itself goes ([`remove_emptied`]): never
+    /// through std's `remove_dir_all` over something held, which would enter a reparse point
+    /// that is no link.
+    fn gone(&self) -> bool {
+        self.kept.is_none() && !self.held
+    }
+
+    /// Adds what was left further down.
+    fn add(&mut self, below: Self) {
+        self.kept = below.kept.or(self.kept.take());
+        self.held |= below.held;
+    }
+}
+
+/// Unlinks `sandbox`, listed as a reparse point, by handle (`ops::unlink_name_surrogate`), and
+/// reports it: a failure each way, since S15's records were not where they should be. Answers
+/// what is left: `sandbox` kept only when the handle found a real folder after all (it stays
+/// whole, as `sandbox` does). A link removed leaves nothing; a reparse point of another kind,
+/// or one not opened, is held but never kept, so the uninstaller never calls it the kept folder
+/// and the run fails ([`FAILED`]) unless a real folder was kept.
+fn unlink_sandbox(path: PathBuf, report: &mut Report<'_>) -> Left {
+    let held = Left {
+        kept: None,
+        held: true,
+    };
+    match ops::unlink_name_surrogate(&path) {
+        Ok(LinkVerdict::NotALink) => Left {
+            kept: Some(path),
+            held: false,
+        },
+        Ok(LinkVerdict::Unlinked) => {
+            report.note(
+                &path,
+                "was a link (a junction or a symbolic link), not the sandbox's folder: removed \
+                 as a link, nothing it points at touched or kept",
+            );
+            Left::default()
+        }
+        Ok(LinkVerdict::Kept(tag)) => {
+            report.note(
+                &path,
+                &format!("is a reparse point of another kind (tag {tag:#010x}): kept, not deleted"),
+            );
+            held
+        }
+        Err(error) => {
+            report.fail(&path, &error);
+            held
+        }
+    }
+}
+
+/// Whether `path`'s last name is `name`, ignoring case as Windows does.
+fn named(path: &Path, name: &str) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|listed| listed.eq_ignore_ascii_case(name))
+}
+
+/// Removes one entry by std: a reparse point as a link, a folder with `remove_dir_all`, a file
+/// with `remove_file`. Whatever fails is reported, and nothing below it is tried by path.
+fn remove_entry(path: &Path, meta: &Metadata, report: &mut Report<'_>) {
+    let removed = if is_link(meta) {
+        ops::remove_link(path, meta)
+    } else if meta.is_dir() {
+        ops::remove_dir_all(path)
+    } else {
+        ops::remove_file(path)
+    };
+    report.check(path, removed);
+}
+
+/// Removes the folder `folder`, emptied by [`empty_folder`], with std's `remove_dir_all` (by
+/// handle, read-only included). When something is left in it, that was already reported.
+fn remove_emptied(folder: &Path, report: &mut Report<'_>) {
+    if let Err(error) = ops::remove_dir_all(folder) {
+        let empty = std::fs::read_dir(folder).is_ok_and(|mut left| left.next().is_none());
+        if empty {
+            report.fail(folder, &error);
+        }
+    }
+}
+
+/// `folder`'s entries with their own metadata (a link's, never its target's). A failure to list
+/// or to read an entry is reported, and the entry skipped.
+fn entries(folder: &Path, report: &mut Report<'_>) -> Vec<(PathBuf, Metadata)> {
+    let listed = match std::fs::read_dir(folder) {
+        Ok(listed) => listed,
+        Err(error) => {
+            report.fail(folder, &error);
+            return Vec::new();
+        }
+    };
+    let mut found = Vec::new();
+    for entry in listed {
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(error) => {
+                report.fail(folder, &error);
+                continue;
+            }
+        };
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) => found.push((path, meta)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => report.fail(&path, &error),
+        }
+    }
+    found
+}
+
+/// `FILE_ATTRIBUTE_REPARSE_POINT`.
+#[cfg(windows)]
+pub(super) const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// Whether `meta` (from `symlink_metadata`) is a reparse point of any kind: a junction, a
+/// symbolic link to a folder or a file, a mount point.
+#[cfg(windows)]
+pub(super) fn is_link(meta: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+/// Whether `meta` (from `symlink_metadata`) is a symbolic link: the tests' stand-in off Windows.
+#[cfg(not(windows))]
+pub(super) fn is_link(meta: &Metadata) -> bool {
+    meta.file_type().is_symlink()
+}
+
+/// What failed, counted and written one line each.
+pub(super) struct Report<'a> {
+    stderr: &'a mut dyn Write,
+    pub(super) failures: usize,
+}
+
+impl<'a> Report<'a> {
+    fn new(stderr: &'a mut dyn Write) -> Self {
+        Self {
+            stderr,
+            failures: 0,
+        }
+    }
+
+    /// Counts and writes a failure at `path`.
+    pub(super) fn fail(&mut self, path: &Path, error: &io::Error) {
+        self.failures += 1;
+        say(
+            self.stderr,
+            &format!("{}: could not delete it ({error})", path.display()),
+        );
+    }
+
+    /// Counts a failure at `path` that was no error, and writes what happened.
+    pub(super) fn note(&mut self, path: &Path, what: &str) {
+        self.failures += 1;
+        say(self.stderr, &format!("{}: {what}", path.display()));
+    }
+
+    /// Reports `result`'s failure at `path`, if any; a path already gone is no failure.
+    fn check(&mut self, path: &Path, result: io::Result<()>) {
+        match result {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => self.fail(path, &error),
+            _ => {}
+        }
+    }
+}

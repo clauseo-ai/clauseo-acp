@@ -18,7 +18,11 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 struct Hook(Value, BTreeMap<OsString, OsString>);
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         self.0.as_object().cloned()
     }
 
@@ -140,6 +144,28 @@ fn a_policy_list_replaces_the_users() {
     let policy = json!({"mcp": {"servers": {
         "firm": {"command": command(&bin, "firm"), "enabled": true},
         "alpha": {"command": command(&bin, "alpha"), "enabled": false},
+    }}});
+    dir.set_policy(&policy.to_string());
+    let host = start(&dir, 0, None);
+    one_turn(&dir, &host);
+    host.shutdown();
+}
+
+/// R24 (decision D7): a firm's policy server named `case-law` (the name of Clauseo's case-law
+/// connector, in any case) is dropped when settings load, so the launch carries the firm's other
+/// server alone: the same `mcp-policy` scenario, which accepts only `firm`, passes.
+#[test]
+fn a_policy_server_named_case_law_never_reaches_the_launch() {
+    let dir = Dir::new("mcp_policy_case_law", &[]);
+    let bin = dir.folder("bin", &[]);
+    let user = json!({"mcp": {"servers": {
+        "case-law": {"command": command(&bin, "mine"), "enabled": true},
+    }}});
+    dir.set_settings(&[(FAKE, Scenario::Local("mcp-policy"))], user);
+    let policy = json!({"mcp": {"servers": {
+        "firm": {"command": command(&bin, "firm"), "enabled": true},
+        "case-law": {"command": command(&bin, "firm-case-law"), "enabled": true},
+        "CASE-LAW": {"command": command(&bin, "firm-case-law"), "enabled": true},
     }}});
     dir.set_policy(&policy.to_string());
     let host = start(&dir, 0, None);

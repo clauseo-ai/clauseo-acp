@@ -3,12 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContextUsage, ThreadStatus, ToolState};
+use super::{ContextUsage, QueueHoldReason, ThreadStatus, ToolState};
 use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeLevel, PageVia,
+    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
     PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
     RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
     Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
@@ -38,11 +38,23 @@ pub struct HeaderEntry {
     pub agent_name: Option<CompactString>,
     /// Where it stands.
     pub status: ThreadStatus,
+    /// When the thread began a turn to resume after an idle stop: the `ts` of the `UserMessage`
+    /// that set `Starting` from `IdleStopped`. Set by the reducer only, from the folded events,
+    /// never from a clock. Cleared when the status leaves `Starting` (the turn started, ended,
+    /// failed, or the thread was archived or detached) and by the next `AgentSessionAttached`.
+    /// Missing reads as `None`, so a header written before the field still decodes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resuming_since: Option<Timestamp>,
     /// Whether the thread's queue is held: its queued turns wait for `ResumeQueue`. Filled by
     /// the host; also true after a restart, when every turn that never started comes back held.
     /// Missing reads as `false`, so a header written before the field still decodes.
     #[serde(default)]
     pub queue_held: bool,
+    /// Why the queue waits, the most specific reason that applies; set only while `queue_held`
+    /// is true. Filled by the host, as `queue_held` is. Missing reads as `None`, so a header
+    /// written before the field still decodes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_held_reason: Option<QueueHoldReason>,
     /// Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
     /// true only for an agent whose steer adds to the answer, which needs both of
     /// [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False
@@ -122,6 +134,12 @@ pub struct UserMessageEntry {
     /// Where a steered message went, once resolved.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub steer: Option<SteerOutcome>,
+    /// Its turn was put back at the head of the queue (its `TurnQueued` is `at_head`,
+    /// decision record 0048, P4b): while queued it goes before the prompts that joined the queue
+    /// in `order`, the latest put back first, as the host runs them. False is written as a
+    /// missing field and a missing field reads as false, so an older view orders as before.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub at_head: bool,
     /// When it was sent (display only; the `UserMessage` envelope's `ts`).
     pub ts: Timestamp,
 }
@@ -429,8 +447,11 @@ pub struct NoticeEntry {
     pub event: EventId,
     /// How loud.
     pub level: NoticeLevel,
-    /// The text.
+    /// The text: shown when `kind` is absent or one this version does not know.
     pub text: String,
+    /// Which host notice it is, for the app's own words; absent for an agent notice.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub kind: Option<NoticeKind>,
     /// When it was logged (display only; the `Notice` envelope's `ts`).
     pub ts: Timestamp,
 }

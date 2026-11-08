@@ -7,16 +7,30 @@
 //! the privacy switches. Of the updater's four (0037), `main` sends `InstallUpdate`,
 //! `CancelScheduledUpdate` and `CheckForUpdate` (its "Restart to update" row), and the settings
 //! window `SetUpdateMode` and `CheckForUpdate`: settings never installs, main never changes the
-//! mode.
+//! mode. Of the connector commands (R24, `connector_main` and `connector_settings`), `main`
+//! sends only `DismissCaseLawHint` and `RefreshBalance`: it shows agent output, so it never adds
+//! a connector or a key, spends credits, opens a pay link, signs out or removes; its hint and
+//! banner open Settings at the connector (`open_settings` with `section: "connectors"`), whose
+//! window sends the rest. The sandbox's two commands (0051, R17 PR-B1), `RetryProtection` and
+//! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
+//! main window's protection notice. Neither carries a field, and the host holds each answer
+//! until the set-up (with its administrator prompt) ends.
+//! Of the unsafe-site override's two (0053, PR 2), `main` sends
+//! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
+//! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
+//! agent shows or runs, may lift a block.
 
-use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its
-/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), and for its
-/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), any other window nothing.
+/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its Skills
+/// pane `SetSkillPack` (0040), for its
+/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
+/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
+/// the connector commands but the hint's (R24), for its protection section `RetryProtection`
+/// and `RemoveSandboxSetup` (0051), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -26,13 +40,24 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             HostCommand::SetUiSettings { .. }
             | HostCommand::SetToolSettings { .. }
             | HostCommand::SetPrivacySettings { .. }
+            // Skills (0040, PR-E): turning a pack on or off is a setting; the id is checked
+            // by its type, the pack by the host.
+            | HostCommand::SetSkillPack { .. }
             | HostCommand::RefreshLimits { .. }
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
-            | HostCommand::CheckForUpdate {} => Ok(()),
+            | HostCommand::CheckForUpdate {}
+            // Protection (0051): retrying the set-up, or removing it.
+            | HostCommand::RetryProtection {}
+            | HostCommand::RemoveSandboxSetup {}
+            // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
+            | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+            HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, refresh_limits, set_update_mode and check_for_update",
+                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site \
+                 and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -91,7 +116,14 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // taking a scheduled install back, and "Check again"; settings may not install (0037).
         | HostCommand::InstallUpdate { .. }
         | HostCommand::CancelScheduledUpdate {}
-        | HostCommand::CheckForUpdate {} => Ok(()),
+        | HostCommand::CheckForUpdate {}
+        // 0051: the protection notice's "Set up" and the removal; no field to check.
+        | HostCommand::RetryProtection {}
+        | HostCommand::RemoveSandboxSetup {}
+        // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
+        // The host allows only the host of a notice it sent, and refuses while policy forbids.
+        | HostCommand::AllowBlockedSite { .. }
+        | HostCommand::RevokeAllowedSite { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
@@ -114,6 +146,53 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // The mode lives in the settings window only, as the other switches do.
         HostCommand::SetUpdateMode { .. } => Err(invalid(
             "the update mode is set from the settings window only",
+        )),
+        // Skill packs are turned on and off in the settings window's Skills pane only, as the
+        // other switches are (least privilege, 0040); the matter picker only reads them.
+        HostCommand::SetSkillPack { .. } => Err(invalid(
+            "skill packs are turned on and off from the settings window only",
+        )),
+        // R24: the room's hint and the balance only; the rest is the settings window's.
+        HostCommand::Connector(connector) => connector_main(connector),
+    }
+}
+
+/// The connector commands `main` may send (R24, the app review of #470): dismissing the case-law
+/// hint and refreshing the balance. One arm per command and no catch-all, as in `admit_main`.
+fn connector_main(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::DismissCaseLawHint { .. } | ConnectorCommand::RefreshBalance { .. } => {
+            Ok(())
+        }
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::OpenPayLink { .. } => Err(invalid(
+            "the main window sends only dismiss_case_law_hint and refresh_balance of the \
+             connector commands; the rest are sent from Settings",
+        )),
+    }
+}
+
+/// The connector commands the settings window's Connectors section may send: all but the
+/// room's hint, which it never shows. One arm per command and no catch-all.
+fn connector_settings(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::RefreshBalance { .. }
+        // The pay link the host holds, behind the native confirm; the room's banner opens
+        // Settings at the connector, which sends it.
+        | ConnectorCommand::OpenPayLink { .. } => Ok(()),
+        ConnectorCommand::DismissCaseLawHint { .. } => Err(invalid(
+            "the case-law hint is dismissed from the main window",
         )),
     }
 }

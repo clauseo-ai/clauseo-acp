@@ -28,8 +28,27 @@ fn no_policy_reports_absent() {
     assert_eq!(effective.data_dir(), Path::new("/data"));
     assert_eq!(effective.locations(), &locations());
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         Path::new("/data/Documents/Clauseo")
+    );
+}
+
+/// Issue #365: with no Documents folder there is no default matters folder, until
+/// `matters.default_location` gives one.
+#[test]
+fn no_documents_leaves_the_default_matters_dir_unset() {
+    let at = locations().without_default_matters_dir();
+    let effective = Effective::load(&at, &MemFiles::default(), &[&absent()]);
+    assert_eq!(effective.default_matters_dir(), None);
+    assert_eq!(effective.data_dir(), Path::new("/data"));
+    let files = user(&format!(
+        r#"{{"matters": {{"default_location": "{}"}}}}"#,
+        abs_json("cases")
+    ));
+    let effective = Effective::load(&at, &files, &[&absent()]);
+    assert_eq!(
+        effective.default_matters_dir(),
+        Some(abs("cases").as_path())
     );
 }
 
@@ -205,7 +224,7 @@ fn the_default_location_setting_moves_new_matters() {
         abs_json("cases")
     );
     let effective = Effective::load(&locations(), &user(&text), &[]);
-    assert_eq!(effective.default_matters_dir(), abs("cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("cases"));
 }
 
 #[test]
@@ -277,13 +296,16 @@ fn only_a_source_that_sets_a_valid_value_is_applied() {
     assert_eq!(effective.settings().ui.theme, Theme::Light);
 }
 
+// The lawyer's own file: the last copy wins, with a warning at the second copy (a
+// `policy.json` that repeats a key is dropped whole: `effective/policy_shape_tests.rs`).
 #[test]
 fn a_repeated_key_takes_its_last_value_valid_or_not() {
     // The last value is valid: it wins over the earlier one.
     let files = user(r#"{"ui": {"theme": "purple", "theme": "dark"}}"#);
     let effective = Effective::load(&locations(), &files, &[]);
     assert_eq!(effective.settings().ui.theme, Theme::Dark);
-    assert_eq!(effective.warnings().len(), 1, "{:?}", effective.warnings());
+    assert_eq!(effective.warnings().len(), 2, "{:?}", effective.warnings());
+    assert_eq!(effective.warnings()[0].kind, WarningKind::DuplicateKey);
 
     // The last value does not type: the key is the default, though an earlier value was valid.
     let files = user(r#"{"ui": {"theme": "dark", "theme": "purple"}}"#);
@@ -292,7 +314,10 @@ fn a_repeated_key_takes_its_last_value_valid_or_not() {
     assert!(
         matches!(
             effective.warnings(),
-            [Warning { kind: WarningKind::InvalidValue { key, .. }, .. }] if key == "ui.theme"
+            [
+                Warning { kind: WarningKind::DuplicateKey, .. },
+                Warning { kind: WarningKind::InvalidValue { key, .. }, .. },
+            ] if key == "ui.theme"
         ),
         "{:?}",
         effective.warnings()
@@ -306,7 +331,16 @@ fn a_repeated_section_is_its_last_copy_on_load() {
     let effective = Effective::load(&locations(), &files, &[]);
     assert_eq!(effective.settings().ui.theme, Theme::System);
     assert_eq!(effective.settings().ui.density, Density::Compact);
-    assert_eq!(effective.warnings(), []);
+    let duplicate = |effective: &Effective| {
+        matches!(
+            effective.warnings(),
+            [Warning {
+                kind: WarningKind::DuplicateKey,
+                ..
+            }]
+        )
+    };
+    assert!(duplicate(&effective), "{:?}", effective.warnings());
 
     // The first `agents` copy's ids are gone, the last copy's stand.
     let text = format!(
@@ -320,7 +354,7 @@ fn a_repeated_section_is_its_last_copy_on_load() {
         effective.agent("codex").map(|codex| codex.command.clone()),
         Some(abs("user/codex").display().to_string())
     );
-    assert_eq!(effective.warnings(), []);
+    assert!(duplicate(&effective), "{:?}", effective.warnings());
 }
 
 /// Locations for a run whose data folder `CLAUSEO_DATA_DIR` named: `tmp/clauseo-ci`.
@@ -344,7 +378,7 @@ fn data_dir_override_without_a_default_location_uses_beside_the_data_folder() {
     let effective = Effective::load(&at, &MemFiles::default(), &[&absent()]);
     assert_eq!(effective.data_dir(), abs("tmp/clauseo-ci"));
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         abs("tmp/clauseo-ci-matters")
     );
 }
@@ -357,7 +391,7 @@ fn data_dir_override_with_a_user_default_location_uses_it() {
         abs_json("cases")
     );
     let effective = Effective::load(&at, &user_at(&at, &text), &[&absent()]);
-    assert_eq!(effective.default_matters_dir(), abs("cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("cases"));
 }
 
 #[test]
@@ -375,7 +409,7 @@ fn data_dir_override_with_a_policy_default_location_policy_wins() {
         ),
     );
     let effective = Effective::load(&at, &user_at(&at, &user_text), &[&firm]);
-    assert_eq!(effective.default_matters_dir(), abs("firm-cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("firm-cases"));
     assert!(effective.is_locked("matters.default_location"));
 }
 
@@ -388,7 +422,7 @@ fn no_data_dir_override_keeps_documents_clauseo() {
     let locations = Locations::resolve_for(Os::Linux, &dirs, &FakeEnv::default()).unwrap();
     let effective = Effective::load(&locations, &MemFiles::default(), &[&absent()]);
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         abs("home/ada/Documents/Clauseo")
     );
 }

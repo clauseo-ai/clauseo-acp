@@ -106,3 +106,48 @@ pub(crate) fn item(rig: &Rig) -> Option<serde_json::Value> {
         .peek("case-law")
         .map(|bytes| serde_json::from_slice(&bytes).unwrap())
 }
+
+/// An armed lookup's two ends: it entered, and its release.
+type Held = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+
+/// A route lookup that, once armed, holds its next caller until released: a WPAD miss.
+#[derive(Clone, Default)]
+pub(crate) struct SlowRoute {
+    armed: Arc<std::sync::Mutex<Option<Held>>>,
+}
+
+impl SlowRoute {
+    /// The resolver: `Direct`, after holding the armed call.
+    pub(crate) fn resolver(&self) -> clauseo_connectors::ProxyResolver {
+        let armed = Arc::clone(&self.armed);
+        clauseo_connectors::ProxyResolver::new(move || {
+            let held = armed.lock().unwrap().take();
+            if let Some((entered, release)) = held {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+            Ok(clauseo_connectors::ProxyChoice::Direct)
+        })
+    }
+
+    /// Arms the next lookup; returns (it entered, release it).
+    pub(crate) fn arm(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        *self.armed.lock().unwrap() = Some((entered_tx, release_rx));
+        (entered, release)
+    }
+}
+
+/// Runs `work` on a thread and fails if it does not end within 10 s of real time (a deadline
+/// for a test that would otherwise hang, not a synchronisation).
+pub(crate) fn ends_while_held<T: Send + 'static>(
+    what: &str,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (done, ended) = std::sync::mpsc::channel();
+    thread::spawn(move || done.send(work()).unwrap());
+    ended
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_else(|_| panic!("{what} waited for another caller's route lookup"))
+}

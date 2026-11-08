@@ -21,6 +21,9 @@ pub(super) enum StopCause {
     Asked,
     /// It starts again in its matter's new folder: `Restarting`.
     Restarting,
+    /// It had nothing pending for the idle limit, or the live-agents cap needed its place
+    /// (`idle.rs`): `IdleStopped`.
+    IdleStopped,
     /// Its connection was already gone when the stop came, which only ends a process that
     /// outlived its pipes: the exit report's reason, as if it had exited first.
     Closed,
@@ -53,6 +56,32 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     for item in waiting {
         fail_waiting(actor, thread, &item, &Error::Closed);
     }
+    // The session is ending: its case-law relay refuses from now on (R24).
+    launch_checks::relay::end_for(actor, thread);
+}
+
+/// Stops `thread`'s agent for idling (`idle.rs`) with the shutdown ladder: its `Ended` logs
+/// `AgentSessionDetached { reason: IdleStopped }`, unless its connection was already gone.
+pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage != Stage::Stopping
+    {
+        agent.stop_cause = StopCause::IdleStopped;
+    }
+    stop(actor, thread);
+}
+
+/// Stops `thread`'s agent for a sign-in hold or restart (`sign_in.rs`). An idle stop already
+/// under way becomes the hold's own stop: its `Ended` logs `Closed`, once, not `IdleStopped`,
+/// so the thread shows the hold beside its queue, not an idle stop.
+pub(in super::super) fn hold_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage == Stage::Stopping
+        && agent.stop_cause == StopCause::IdleStopped
+    {
+        agent.stop_cause = StopCause::Asked;
+    }
+    stop(actor, thread);
 }
 
 /// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
@@ -63,16 +92,25 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
+    super::super::idle::ended(actor, thread);
     // Its pending questions went with it.
     super::super::super::limits::asking_changed(actor);
-    launch_checks::remove_run(actor, thread);
+    launch_checks::remove_run(actor, thread, agent.link.tree_watch());
     let Agent {
         session,
         waiting,
         after_stop,
         stop_cause,
+        denied_data_folder,
         ..
     } = *agent;
+    let unresponsive = matches!(
+        ended,
+        Ended::Stopped {
+            step: StopStep::Unresponsive,
+            ..
+        }
+    );
     let reason = match ended {
         Ended::Exited(reason) => reason,
         Ended::Stopped { step, report } => {
@@ -83,13 +121,21 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             match stop_cause {
                 StopCause::Asked => DetachReason::Closed,
                 StopCause::Restarting => DetachReason::Restarting,
+                StopCause::IdleStopped => DetachReason::IdleStopped,
                 // It was gone before the stop: the exit is its own, not a close.
                 StopCause::Closed => report,
             }
         }
     };
     let (kind, code) = reason_kind(&reason);
-    tracing::info!(target: LIFECYCLE, %thread, kind, ?code, "agent ended");
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        kind,
+        ?code,
+        denied_data_folder,
+        "agent ended"
+    );
     let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);
@@ -138,6 +184,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     if !after_stop.is_empty() {
         start(actor, thread, after_stop);
     }
+    super::super::sign_in::agent_ended(actor, thread, unresponsive);
     actor.release(StreamId::Thread(thread));
 }
 

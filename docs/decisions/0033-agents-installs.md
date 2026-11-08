@@ -143,7 +143,12 @@ which npm 11 would otherwise apply to the `file:` tarballs (npm 10 accepts the f
 copies each tarball it reads into the private cache, so the cache folder stays. No proxy and no
 CA file reach npm (no `--proxy`, `--https-proxy`, `--cafile` or
 `NODE_EXTRA_CA_CERTS`): npm never uses the network here, and a proxy's password on a command line is
-visible to other local users. Each npm run gets `NODE_OPTIONS` set empty. Each run is raced against
+visible to other local users. No install, sign-in, reader or agent process gets `NODE_OPTIONS` or
+`NODE_PATH`, whichever Node runs it: `clauseo_process::spawn_in_tree` drops both from the
+inherited environment and the spec, and the builders that copy an environment drop them too.
+Each install and each start logs one info line naming its Node, `node=user version=v24.22.0
+program=node` or `node=pinned version=v24.22.0`, with only the file name of the user's Node.
+Each run is raced against
 a pause and a 10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An
 `ENOSPC` code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written
 last. npm runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child
@@ -205,6 +210,22 @@ starts its work only after a paused one has stopped. There is one worker thread 
 install, and a job lock makes the jobs run one after another. Every job event is sent under the
 lock `pause` takes, and dropped once the job is paused or superseded.
 
+**Quitting** (#386). `npm ci` leads its own process group, and a pause, a cancel or the drop of
+its handle kills that group; so does the end of the job's thread once it sees a cancel. Every job
+thread's handle is kept. `Agents::shutdown(wait)`, which the app's quit calls for at most 3 s
+before it stops the host, closes the worker to new jobs, cancels every install and sign-in job and
+joins their threads within `wait`. Dropping `Agents` does the same without the wait. In case the
+app dies without either:
+- **Linux:** the install and sign-in launchers' children set SIGKILL as their parent-death signal
+  (`SpawnOptions::end_with_parent`, `PR_SET_PDEATHSIG` from `pre_exec`). It reaches npm itself;
+  npm's own children are left, which `--ignore-scripts` makes few. The signal follows the thread
+  that started the child, which is the job's thread, alive until its child is killed.
+- **Windows:** every child is in a Job Object with kill-on-close (`clauseo-process`), which ends
+  its whole tree when the app's handle closes, however the app ends.
+- **macOS:** the bounded wait only. A crash or a `kill -9` of the app during `npm ci` leaves npm
+  running until it finishes or fails by itself; its temp folder goes at the next start's
+  clean-up. Accepted as a residual risk.
+
 Between processes, each job holds an exclusive lock on `agents/.lock` (`File::try_lock`) from
 its start until just before its last event. A lock another process holds means another Clauseo
 is installing: the job fails at once with a log line saying so, and a retry works once that one
@@ -212,6 +233,29 @@ is done (the simpler choice; the single-instance plugin makes it rare). The star
 stale install folders runs only with the lock held, and is skipped without it. The data folder
 and the bundle must be absolute paths; a relative one fails the install with a line naming the
 setting, and start-up neither cleans nor reads anything under a relative data folder.
+
+**When an install starts: only at first use.** Nothing downloads until the lawyer chooses an
+agent or signs in to it. There is no first-run install: a fresh computer, with nothing installed
+and nothing managed, shows each agent's card with its size (`Missing { download_bytes }`) and
+fetches nothing. Desktop starts an install from three presses only, and nothing else calls
+`Agents::install` or `Agents::retry`:
+1. `InstallAgent`, the lawyer choosing a card. It asks no confirm: the card showed the size.
+2. `RetryAgentInstall` on a failed, waiting or paused install.
+3. A sign-in (`StartSignIn`, `UseDeviceCode`, `UseDifferentAccount`) on an agent not installed.
+   It starts or joins the install and is kept as a pending press (the agent, the method and
+   Claude's console flag), shown `Queued`; the command answers `Done`. At the install's
+   `Ready` it runs through the same gate and checks as a direct press, checked then, so a key,
+   an endpoint or a policy set meanwhile refuses it as usual. `Waiting` keeps it; `Failed`,
+   `Paused` or `Managed` drops it (a fresh press is needed), as does `CancelSignIn`, which
+   leaves the install running, and a key or an endpoint taking over. A second press replaces
+   the first. It is memory only: nothing of it outlives a quit. S18's own queue (a sign-in
+   waits `Queued` until the install is `Ready`) still serves the sign-in host's wait; desktop
+   hands S18 no sign-in for an agent not installed, since S18 would keep it through a failure
+   and run it with no new check.
+
+A policy that pre-selects or requires agents, a policy reload, a settings change, a managed
+agent and an update start no install either: the agent waits for first use. A firm's bundle or
+mirror install works as before, from the same first use.
 
 **Firm IT mode.**
 1. An id in `managed` (policy sets `agents.<id>`) is IT's runtime. Nothing is installed for it
@@ -237,6 +281,69 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    use_system_proxy: true)` adds the OS's static proxy setting (Windows' Internet Settings,
    macOS's `scutil --proxy`; Linux has none) and keeps it for later installs. PAC files and
    authenticating proxies wait for G10.
+
+   S17's firm proxy (desktop's `setup/network.rs`) is the caller's one resolver, which the
+   installs, the sign-ins and the agents' launches all take. First match wins:
+   `network.upstream_proxy` (a policy's over the lawyer's), then `HTTPS_PROXY`, `https_proxy`,
+   `ALL_PROXY` or `all_proxy` (never `HTTP_PROXY`, which is for plain `http://`), then the OS's
+   proxy behind one switch, `OS_FALLBACK` (on): the sandbox's `Upstream::System` lookup (macOS
+   `CFNetwork`, Windows `WinHTTP`, PAC and WPAD included, bounded and cached there), asked per
+   target: the registry (or the firm's mirror) for installs, the agent's first sign-in host for its
+   sign-in, its primary API host (`api.anthropic.com` or a Claude plan's endpoint,
+   `api.openai.com`) for its launches. The targets are asked all at once, within one budget of 5 s
+   for the whole resolution (a lookup past it, or one that failed or found no free slot, has no
+   answer: in a first route, or one asking the OS about other hosts, it counts as direct until it
+   answers, then the route is made again with its answer, no new lookup, unless another route was
+   made since; when the OS is asked about the same hosts as the last route (a refresh, or a
+   settings change that leaves them, an entry's variables or a CA file, say) it keeps the last
+   route's answer for up to 10 minutes from when a real lookup last gave it, as long as a kept
+   proxy still takes a TCP connection: it is probed, its host resolved and connected to and the
+   connection closed with nothing sent, at most 1 s and within the budget, and one that does not
+   answer goes direct at once, so a laptop whose VPN dropped, its PAC on an internal server failing
+   with it, is not left on a dead proxy; one `DIRECT` over a proxy that still answers keeps the
+   proxy for that resolve, and the next `DIRECT` turns it off), on desktop's network thread, which
+   starts with the setup thread, beside the keys' load and never on the window's start path. A PAC
+   `DIRECT` is no
+   proxy, and an empty value is unset. The CA files are `network.ca_certs` alone. `Agents` starts
+   with the settings' and the environment's route and then takes the OS's, every `SettingsChanged`
+   resolves again, and so does the network thread once the route is 60 s old (each install try
+   first asks for a fresh route, waiting at most the 5 s budget, and within the 60 s takes it as it
+   is, with no OS lookup): `Agents::set_network` hands the result to the next sign-in job
+   (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a proxy gets `NO_PROXY` with the
+   loopback names, where its OAuth callback listens, and every sign-in run gets
+   `NODE_USE_SYSTEM_CA=1` and Codex's CA as `CODEX_CA_CERTIFICATE`) and to every install try, a
+   running job's next one too (each try reads the current network as it makes its client, so one
+   waiting offline goes through a proxy set meanwhile), and the launch hook adds `HTTPS_PROXY`,
+   `HTTP_PROXY` and `NO_PROXY` (loopback) and the CA file under sign-in's variable
+   (`NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, the path as it is; never `SSL_CERT_FILE`, which
+   the tools in an agent's shell take to replace the system roots, so a launcher's or an inherited
+   one stays) and `NODE_USE_SYSTEM_CA=1`, so Node trusts the OS's store too (unless this process's
+   environment sets it, which the launch inherits), each on its own and never over a variable the
+   firm plan's `env` or the agent's own entry sets (the proxy still comes beside an entry's or a
+   plan's own `NO_PROXY`, which keeps its entries and gets the loopback names it lacks, so the
+   agent's calls to Clauseo's MCP relay on 127.0.0.1 stay off the proxy; an `ALL_PROXY` there keeps
+   both proxies out). An agent's stderr tail shows any URL's user name and password as `***`, and
+   the password of every proxy variable in a run's environment, as written and percent-decoded, a
+   URL with no scheme included, as `[redacted]`. The log names the source (`policy`, `setting`,
+   `env`, `os` or `none`) with each proxy's scheme, host and port only. An install, retry or
+   sign-in pressed before the OS's first answer lands waits for it (at
+   most until 5 s after the setup's start), so its first try never goes direct, and the start's
+   `agent.keys_loading` launch refusal stays until then too, so no agent launched at start goes
+   direct. Known limits, until the sandbox's local forwarder (S16) carries the agents' own traffic:
+   one fixed proxy serves a launch's every host, the OS's answer for the agent's primary API host,
+   so a PAC script's fallbacks and other per-host answers, and the OS's bypass list, are not
+   applied to it; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log
+   says `os` for both; a launch takes the route as the slot holds it and never waits, and the
+   sandbox keeps each OS answer for 60 s, so after a network change (office, home, VPN) a new
+   launch may take the old proxy for up to about 2 minutes (the route's 60 s, then a refresh that
+   may read the sandbox's cached answer). A running agent keeps the proxy it launched with: the
+   refresh reaches new launches, installs and sign-ins. A tier-C agent keeps its launch's
+   `HTTPS_PROXY` for its whole run, while a tier-B agent goes through S16's egress proxy, which
+   resolves the upstream per connection. After changing networks, an agent that stops answering is
+   restarted by ending its thread's turn or reopening the matter. Chaining
+   the sandbox's egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives
+   it `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
+   `https://` setting, which that proxy cannot chain to, is logged once per change.
 
 ## Consequences
 
@@ -265,6 +372,11 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
   lock's `integrity` lets `npm ci --offline` read the checked tarballs in place with the same
   integrity check, proved by an install test that swaps a tarball after the download's check and
   sees `EINTEGRITY`.
+
+- 2026-11-07: no install before first use. The first-run install of Claude (desktop's pump,
+  once every agent had its first state with none installed or managed) is gone, and so is
+  `InstallAgent`'s native confirm; a sign-in pressed before the install starts it and waits
+  for its `Ready` (see "When an install starts").
 
 ## Status
 

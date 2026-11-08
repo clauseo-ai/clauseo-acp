@@ -1,0 +1,67 @@
+/* Connectors (U15), apart from settings.css so the copy review page (review.css) can take it without the window's
+   frame sheets: settings.css imports this file. The block's lines, the balance as Plan and usage's tile (usage.css's
+   set-window-tile), a row of actions with the first leading, the packs and the key under the balance, and a day's
+   spend with its credits at the row's end. Low credit speaks in primary, never amber or red. */
+@layer components {
+  .set-connectors {
+    display: grid;
+    gap: var(--s7);
+  }
+  .set-cn-body {
+    display: grid;
+    justify-items: start;
+    gap: var(--s3);
+    min-width: 0;
+  }
+  .set-cn-body > * {
+    max-width: 100%;
+  }
+  .set-cn-body .set-note {
+    margin-top: 0;
+  }
+  .set-cn-balance {
+    min-width: min(100%, var(--size-menu));
+  }
+  .set-cn-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s2);
+  }
+  .set-cn-add,
+  .set-cn-unread {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+  }
+  .set-cn-pay,
+  .set-cn-packs,
+  .set-cn-key {
+    display: grid;
+    gap: var(--s3);
+    width: 100%;
+  }
+  .set-cn-details > summary {
+    cursor: default;
+  }
+  .set-cn-details > p {
+    margin-top: var(--s1);
+  }
+  .set-cn-spend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s1) var(--s4);
+  }
+  .set-cn-figure {
+    @apply text-ui text-muted tabular-nums;
+  }
+  .set-cn-sends {
+    display: grid;
+    gap: var(--s1-5);
+    padding-inline-start: var(--s4);
+    list-style: disc;
+  }
+}

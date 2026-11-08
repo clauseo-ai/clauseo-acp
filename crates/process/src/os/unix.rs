@@ -20,9 +20,16 @@ use super::linux as listing;
 use super::macos as listing;
 
 /// Puts the agent in a new process group whose id is its own pid, so a signal to the group
-/// reaches every process it starts that stays in the group. Safe std, no `pre_exec`.
-pub(crate) fn prepare(command: &mut Command, _opts: &SpawnOptions) {
+/// reaches every process it starts that stays in the group. Safe std, no `pre_exec`, except on
+/// Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
+pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
     command.process_group(0);
+    #[cfg(target_os = "linux")]
+    if opts.end_with_parent {
+        listing::end_with_parent(command);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = opts;
 }
 
 /// The agent's process group.
@@ -61,6 +68,28 @@ impl Tree {
 
     fn signal(&self, signal: Signal) -> bool {
         matches!(killpg(self.group, signal), Ok(()) | Err(Errno::ESRCH))
+    }
+}
+
+/// A [`Watch`] on `tree`'s group.
+pub(crate) fn watch(tree: &Tree) -> Watch {
+    Watch { group: tree.group }
+}
+
+/// Asks whether the agent's group is gone, from any thread and after the [`Tree`] dropped.
+#[derive(Debug, Clone)]
+pub(crate) struct Watch {
+    group: Pid,
+}
+
+impl Watch {
+    /// Whether no process is left in the group: `killpg(group, 0)` answers `ESRCH`. A zombie
+    /// still counts, so the agent itself (the group's leader) has been reaped too. Once it is
+    /// reaped its pid, the group's id, can be reused by an unrelated group, and then this never
+    /// answers true: the caller's wait runs into its cap and fails closed. A descendant that
+    /// called `setsid` or `setpgid` has left the group, and this does not see it.
+    pub(crate) fn gone(&self) -> bool {
+        matches!(killpg(self.group, None), Err(Errno::ESRCH))
     }
 }
 

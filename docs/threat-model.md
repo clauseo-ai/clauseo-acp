@@ -49,6 +49,12 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
   the thirteen commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
   against the code and the capabilities
+- `built`: `quit_app` takes no arguments and only `main` and the settings window are granted it.
+  It calls `app.exit(0)`, which goes through `RunEvent::ExitRequested` and `stop_host_then_exit`:
+  the agents' stop steps and the sign-in cancel run first, the same graceful quit as Cmd+Q, never
+  an exit without the stop. The worst script can do with it is quit the app, which closing the
+  window already allows. The Get the installer button calls it once the release page opened, so
+  no agent's Job Object is left while the elevated installer runs (design B)
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
@@ -64,6 +70,25 @@ converted document. From there they can call any IPC command the page can reach.
   matter's folder or the app data folder ([0026](decisions/0026-open-and-reveal.md))
 - `built` for "always allow", the folder picker and external links: escalations only through
   native dialogs drawn by Rust, never a webview confirm; `designed` for the rest
+- `built`: On Windows, when a known folder its own folder dialog shows sits on a share that does
+  not answer (the dialog would block about 21 s), `pick_folder_or_choose` opens an in-app chooser
+  instead (`crates/desktop/src/chooser.rs`). The page moves only by indices into listings the
+  desktop made, or to a typed path: a drive path (no `..`, `\\?\`, `\\.\`, relative path, alternate
+  stream or device name, and through no link, hidden or system folder), or a share only on a server
+  this machine already uses (a mapped drive's or a known folder's; never one with `@` or `%`, a
+  loopback or an administrative `c$` share), so script cannot make the app connect to a server of its choosing.
+  Choosing ends in a native confirm with the full path and Cancel focused, then the bridge's
+  unchanged `pick_folder` issues the ref: script never gets a folder admitted without the lawyer.
+  Known gap: on such a machine, script in the page can, without the lawyer seeing it, open up to 20
+  sessions a run (at most 3 a minute; past that the pick draws the native dialog), each of up to
+  300 listings of 2,000 folder names, and so read local folder names under the drives and home,
+  the user's name under `C:\Users` among them (no files, hidden, system or link folders), and
+  list shares on servers the machine already uses. The CSP keeps fetch, XHR, WebSocket, images
+  and forms on the app's own origins, and `window.open` is denied (wry's default with no
+  new-window handler), but an XSS can still carry those names off the machine by navigating the
+  window to an outside address (no navigation guard: neither window builder sets `on_navigation`,
+  `crates/desktop/src/lib.rs` `open_main_window`) and likely through a `dns-prefetch` link, which
+  no CSP directive covers
 - `built`: Links go through one `open_external`: https or http to a public host (no credentials,
   no localhost, loopback, private or link-local address, no overlong name), or mailto to plain
   `local@domain` addresses with at most a subject and a body, after a native confirm that names the
@@ -79,8 +104,28 @@ converted document. From there they can call any IPC command the page can reach.
   link between the check and the open, and so open a document of a listed type outside the matter;
   and script in the page can open the matter's documents without a click
   ([0026](decisions/0026-open-and-reveal.md))
-- `designed`: The webview never navigates (no navigation guard yet; every link click is cancelled
-  in the renderer)
+- `built`: The webview never navigates away from the app: both windows refuse any top-level
+  navigation but the app's own origin, `about:blank` and `about:srcdoc` (and `devUrl` in a
+  development build only), so page script cannot send data out with `location.href` or a
+  `meta refresh` (`crates/desktop/src/navigation.rs`); every link click is also cancelled in the
+  renderer
+- `built`: On Windows the webview resolves no host name: both windows start WebView2 with
+  `--host-resolver-rules="MAP * ~NOTFOUND"` (`crates/desktop/src/navigation/browser_args.rs`), so neither a
+  refused navigation's host nor a `<link rel=dns-prefetch>` or `preconnect` target reaches a DNS
+  query; on a Windows VM no `msedgewebview2` process made any lookup for any of the four. The
+  app's pages need no name: they come from `https://tauri.localhost` through interception, and
+  every network request is made by Rust. A set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, which
+  WebView2 takes in place of the app's arguments, gets the rule added at its end as
+  `main` starts (Chromium takes the last of a repeated switch, so it wins over the variable's own
+  rules). Residual: an `AdditionalBrowserArguments` policy value for the app's exe under `HKCU`
+  or `HKLM` `Software\Policies\Microsoft\Edge\WebView2` is documented as replacing the app's
+  arguments, which would drop the rule (WebView2 157 on the Windows VM merged them instead, and
+  the rule held, 2026-11-07); only something already running with the lawyer's rights, or the firm's admin, can
+  set one, and the app logs a warning naming the hive (never the value) when one is set. Known
+  gap: on macOS (WKWebView) a refused navigation's host and
+  `dns-prefetch`/`preconnect` targets can still put a name of the page's choosing into a DNS
+  query (and, for preconnect, a TLS handshake), with no WKWebView API to turn that off, to be
+  closed before the Mac release
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
 
 ## Agents
@@ -155,6 +200,11 @@ anything the agent starts.
 - `built` (macOS): A refused file read or write reaches a denial sink through the unified log
   watcher; `designed`: the denial event and card, and widening access restarts the agent only if
   the lawyer accepts (R18)
+- `built` (macOS, Linux, tier C): Codex's own sandbox denies its shell the data folder's
+  Clauseo-only paths, every other session's run folder and every other matter's notes, later ones
+  included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
+  path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
+  can't enforce a read deny (until S15)
 
 ## Egress proxy
 
@@ -164,12 +214,13 @@ lawyer's documents somewhere.
 **What stops them.**
 
 - `designed`: The sandbox allows no network except Clauseo's local proxy; raw sockets are refused
-- `built`: One proxy per agent launch on two loopback listeners. It carries CONNECT to port 443
-  and plain `http://` to port 80 of a host on the launch's allowlist, and refuses every other
-  form, scheme and port; `designed`: the allowlists measured per agent and login kind (G8b)
+- `built`: One proxy per agent launch on one or two loopback listeners. It carries CONNECT to
+  port 443 and plain `http://` to port 80 of a host on the launch's allowlist, and refuses every
+  other form, scheme and port; `designed`: the allowlists measured per agent and login kind (G8b)
 - `built`: The agent listener takes only its launch's token (32 random bytes, compared in
-  constant time, never logged or sent upstream); the browser listener takes no token and is held
-  to its matter by the jail's port rule
+  constant time, never logged or sent upstream); the browser listener takes no token, is bound
+  only for a launch with the browser (never on tier B), and is held to its matter by the jail's
+  port rule
 - `built`: Loopback ports for the browser are claimed per session (`ports::claim_port`, and
   `claim_port_at` for agent-browser's Windows daemon port) in a process-wide registry, so no two
   launches of this host get the same port. On macOS and Linux a port is retired once its claim

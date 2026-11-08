@@ -1,5 +1,5 @@
 //! The test's folder under the temp folder, the session id and the inputs from the environment.
-//! Chrome's temp profile folders are looked for here too.
+//! The guard's Chrome profile is looked for here too.
 
 #![expect(
     clippy::disallowed_methods,
@@ -7,14 +7,14 @@
               wall clock"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use clauseo_sandbox::ports::{self, PortClaim};
 
-/// Chrome's temp profile folder, made under the temp folder
-/// (agent-browser v0.41.1 `cli/src/native/cdp/chrome.rs:545-546`).
-pub(crate) const PROFILE_PREFIX: &str = "agent-browser-chrome-";
+/// The start of the name of the Chrome profile the guard starts, `<--cwd>/chrome-profile-<run id>`,
+/// made fresh for each guard run and deleted at its exit (`crates/mcp/src/browser_guard/runs.rs`).
+pub(crate) const PROFILE_PREFIX: &str = "chrome-profile-";
 
 /// The absolute path in variable `name`, which must name an existing file.
 pub(crate) fn env_file(name: &str) -> PathBuf {
@@ -59,8 +59,8 @@ impl Scratch {
         Self {
             root,
             session,
-            cdp: ports::claim_port().expect("claim the CDP port"),
-            stream: ports::claim_port().expect("claim the stream port"),
+            cdp: ports::claim_browser_port().expect("claim the CDP port"),
+            stream: ports::claim_browser_port().expect("claim the stream port"),
             daemon,
             #[cfg(unix)]
             socket_dir: clauseo_sandbox::BrowserSocketDir::create()
@@ -83,8 +83,8 @@ impl Scratch {
 
 /// macOS and Linux: `base` as the session, no daemon port. Windows: `base` and a counter,
 /// counted up until agent-browser's daemon port for the name (the host's
-/// `browser::session::daemon_port_of`, copied: it is crate-private) is one `claim_port_at`
-/// takes in the jail's range.
+/// `browser::session::daemon_port_of`, copied: it is crate-private) is one
+/// `claim_browser_port_at` takes (any port outside tier B's range that isn't held).
 fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
     if cfg!(unix) {
         return (base.to_owned(), None);
@@ -96,36 +96,9 @@ fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
             hash = (hash << 5).wrapping_sub(hash).wrapping_add(c as i32);
         }
         let port = u16::try_from(49_152 + hash.unsigned_abs() % 16_383).expect("a port");
-        if ports::WINDOWS_PORTS.contains(&port)
-            && let Ok(claim) = ports::claim_port_at(port)
-        {
+        if let Ok(claim) = ports::claim_browser_port_at(port) {
             return (name, Some(claim));
         }
     }
     panic!("no session name gave a daemon port in the jail's range");
-}
-
-/// Every folder under `root` whose name starts with [`PROFILE_PREFIX`].
-pub(crate) fn profiles(root: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(folder) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                if entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(PROFILE_PREFIX)
-                {
-                    found.push(path.clone());
-                }
-                pending.push(path);
-            }
-        }
-    }
-    found
 }

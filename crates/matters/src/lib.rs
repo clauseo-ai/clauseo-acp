@@ -17,15 +17,18 @@
 //! # Interface
 //!
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one, and
-//!   [`Matter::discard`] undoes a create or import the host could not record;
+//!   [`Matter::discard`] undoes a create or import the host could not record, and
+//!   [`remove_marker_of`] removes its `matter.json` again if a sync client put it back;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
 //!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does,
 //!   and [`check_place`] runs import's place check (drive root, refused list) alone, and
-//!   [`check_protected`] its protected-tree check (matters root, refused trees);
+//!   [`check_protected`] its protected-tree check (matters root, refused trees, on Windows a
+//!   path too deep to start programs in, [`is_too_deep`]);
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
 //!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
-//!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
+//!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]),
+//!   and [`Matter::still_gone`] says which files it deleted are back;
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
 //!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
@@ -40,7 +43,8 @@
 //!   The host asks them before letting an agent write a file. An owner file a crashed Word left
 //!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
 //! - With the `test-support` feature, [`test_support::pretend_word_running_since_epoch`], for
-//!   tests that plant an owner file and need it held through the stale rule.
+//!   tests that plant an owner file and need it held through the stale rule, and
+//!   [`test_support::bring_back_after_delete`], a sync client putting back a file just deleted.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
 //!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
@@ -125,6 +129,7 @@ mod folder_scan;
 mod fsync;
 mod history;
 mod locks;
+mod long_path;
 mod matter;
 mod no_download;
 mod papers;
@@ -151,11 +156,11 @@ pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
     HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, matter_path_in,
 };
-pub use matter::Matter;
+pub use matter::{Matter, check_marker, remove_marker_of};
 pub use papers::{Paper, PaperList};
-pub use place::{Place, place};
+pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
-pub use refuse::{check_place, check_protected, same_or_nested};
+pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,

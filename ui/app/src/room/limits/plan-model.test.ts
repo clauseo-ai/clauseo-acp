@@ -9,13 +9,16 @@ import type {
   LimitMeter,
   LimitWindowView,
   MeterTone,
+  SignIn,
 } from "../../transport/protocol.ts";
 import {
   bandOf,
   forgetShownResets,
   lookOf,
   meterLine,
+  nameOnlyLine,
   planLine,
+  planNamedBy,
   shareLeft,
   warningKey,
 } from "./plan-model.ts";
@@ -266,5 +269,46 @@ describe("the reset the line shows", () => {
   test("a reset that moves five minutes shows the new time", () => {
     expect(status(RESET)).toBe("Plenty left until the 6:10 pm reset");
     expect(status(RESET + 5 * 60_000)).toBe("Plenty left until the 6:15 pm reset");
+  });
+});
+
+describe("the header names the plan only while signed in", () => {
+  const at = NOW;
+  test("signed in by a plan login with its plan: named", () => {
+    const signIn: SignIn = { signed_in: { method: "plan", plan: "Claude Max", source: "own", at } };
+    expect(planNamedBy(signIn)).toBe(true);
+  });
+  test("signed in by a key or the firm's endpoint: named, with no plan of its own", () => {
+    expect(planNamedBy({ signed_in: { method: "api_key", source: "own", at } })).toBe(true);
+    expect(planNamedBy({ signed_in: { method: "firm", source: "reused", at } })).toBe(true);
+  });
+  test("signed in by a plan login whose plan is not named: still named, the limits' line stands", () => {
+    expect(planNamedBy({ signed_in: { method: "plan", source: "own", at } })).toBe(true);
+  });
+  test("signed out, signing in, switching, failed, or nothing heard: not named", () => {
+    const others: (SignIn | undefined)[] = [
+      undefined,
+      { signed_out: {} },
+      { signed_out: { found: "none_found" } },
+      "queued",
+      { waiting: { since: at, nudge: false } },
+      { device_code: { url: "https://x.test", code: "AB-1", expires_at: at } },
+      { login_found: { from: "claude_code" } },
+      { switching: { since: at, stuck: false } },
+      { failed: { code: "signin.cancelled", at } },
+    ];
+    for (const signIn of others) expect(planNamedBy(signIn), JSON.stringify(signIn)).toBe(false);
+  });
+  test("the name alone: the agent's name, no meter, no status, no card", () => {
+    expect(nameOnlyLine("claude", "not_applicable")).toEqual({
+      name: "Claude",
+      left: 0,
+      valueText: "",
+      status: "",
+      state: "plenty",
+      look: "bare",
+      freshness: "not_applicable",
+    });
+    expect(nameOnlyLine("codex", "none").name).toBe("ChatGPT");
   });
 });

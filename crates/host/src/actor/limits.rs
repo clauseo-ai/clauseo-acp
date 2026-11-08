@@ -41,7 +41,7 @@ use std::time::Duration;
 use clauseo_acp::{LimitSignal, LimitStatus};
 use clauseo_limits::{
     Action, Input as ModelInput, LimitHit, Limits, LiveSignal, LiveStatus, ProcessReaders,
-    ReadLimits, ReadOutcome,
+    ReadFailure, ReadLimits, ReadOutcome,
 };
 use clauseo_protocol::{
     AccountLimits, AgentId, AgentKind, HostEvent, LimitsView, Principal, RefreshWhy, ThreadId,
@@ -65,11 +65,6 @@ pub(crate) use stops::{
     busy as stops_busy, committed as stop_committed, decide_now as decide_stops_now,
     holds as holds_stop, retry as retry_stops, stop_later,
 };
-
-/// The agent id whose home the host launches Codex with, as `CODEX_HOME`
-/// (`turn/launch_checks.rs` takes `Locations::agent_home` of the thread's agent id, which is
-/// this one for every Codex thread).
-const CODEX_AGENT: &str = "codex-acp";
 
 /// How long the Codex fallback (`turn/end.rs`) and a Codex pending stop wait for a read: the
 /// Codex reader's own deadline (`LIMIT` in `clauseo_limits`' `readers/codex.rs`, 10 s). A read
@@ -111,6 +106,9 @@ pub(crate) struct LimitsHost {
     stops: Vec<stops::PendingStop>,
     /// The number the next read started gets.
     next_read: u64,
+    /// The agents whose read `sandbox.required` refused, each logged once (decision record
+    /// 0051): no reader runs outside the jail until R17 PR-D/E runs it inside.
+    refused_reads: Vec<AgentKind>,
 }
 
 /// What the actor's own tasks and the limits subscriptions post back.
@@ -145,6 +143,7 @@ impl LimitsHost {
             asking: BTreeMap::new(),
             stops: Vec::new(),
             next_read: 0,
+            refused_reads: Vec::new(),
         }
     }
 }
@@ -156,7 +155,7 @@ pub(crate) fn default_reader(
     launcher: &Arc<dyn clauseo_process::Launcher>,
     clock: &Arc<dyn Clock>,
 ) -> Arc<dyn ReadLimits> {
-    let codex_home = effective.locations().agent_home(CODEX_AGENT);
+    let codex_home = effective.locations().agent_home(AgentKind::Codex.id());
     Arc::new(ProcessReaders::new(
         effective,
         codex_home,
@@ -260,6 +259,12 @@ pub(crate) fn refresh(actor: &mut Actor, agent: Option<AgentKind>, why: RefreshW
         RefreshWhy::TryAgain => ModelInput::TryAgain { agent },
     };
     feed(actor, input);
+}
+
+/// `HostHandle::limits_login_changed`: one `Input::LoginChanged`, a read at once past any age
+/// or back-off (a read in flight is followed by another), the deadlines left as they were.
+pub(crate) fn login_changed(actor: &mut Actor, agent: AgentKind) {
+    feed(actor, ModelInput::LoginChanged { agent });
 }
 
 /// A rate-limit signal of `thread`'s agent, in a turn or outside one: `Input::Live` for the
@@ -392,9 +397,28 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
 }
 
 /// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
+/// Under `sandbox.required` no reader starts (it would run outside the jail, 0051): the read
+/// fails at once, so the plan-limits line shows it could not read.
 fn start_read(actor: &mut Actor, agent: AgentKind) {
     let number = actor.limits.next_read;
     actor.limits.next_read = number.saturating_add(1);
+    if actor.effective.settings().sandbox.required {
+        if !actor.limits.refused_reads.contains(&agent) {
+            actor.limits.refused_reads.push(agent);
+            tracing::info!(?agent, "limits not read: the firm requires the sandbox");
+        }
+        let outcome = ReadOutcome::Failed(ReadFailure::LaunchFailed(
+            "the firm requires the sandbox".to_owned(),
+        ));
+        actor.spawn_post(async move {
+            Input::Limits(LimitsInput::Read {
+                agent,
+                outcome,
+                number,
+            })
+        });
+        return;
+    }
     let read = actor.limits.reader.read(agent);
     actor.spawn_post(async move {
         let outcome = read.await;

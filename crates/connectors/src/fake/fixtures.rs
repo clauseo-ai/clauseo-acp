@@ -52,6 +52,38 @@ const FILES: &[(&str, &str)] = &[
         "recharge-paid.json",
         include_str!("../../fixtures/recharge-paid.json"),
     ),
+    (
+        "recharge-get-awaiting.json",
+        include_str!("../../fixtures/recharge-get-awaiting.json"),
+    ),
+    (
+        "recharge-get-paid.json",
+        include_str!("../../fixtures/recharge-get-paid.json"),
+    ),
+    (
+        "recharge-get-expired.json",
+        include_str!("../../fixtures/recharge-get-expired.json"),
+    ),
+    (
+        "recharge-get-held.json",
+        include_str!("../../fixtures/recharge-get-held.json"),
+    ),
+    (
+        "recharge-get-awaiting-with-id.json",
+        include_str!("../../fixtures/recharge-get-awaiting-with-id.json"),
+    ),
+    (
+        "recharge-get-paid-with-id.json",
+        include_str!("../../fixtures/recharge-get-paid-with-id.json"),
+    ),
+    (
+        "recharge-get-expired-with-id.json",
+        include_str!("../../fixtures/recharge-get-expired-with-id.json"),
+    ),
+    (
+        "recharge-get-held-with-id.json",
+        include_str!("../../fixtures/recharge-get-held-with-id.json"),
+    ),
     ("api-402.json", include_str!("../../fixtures/api-402.json")),
     (
         "mcp/initialize.json",

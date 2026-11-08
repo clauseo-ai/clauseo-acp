@@ -12,15 +12,18 @@ import type {
   HostError,
   HostEvent,
   HostQuery,
+  OpenedFile,
   PatchBatch,
   PermissionRequestId,
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SettingsSection,
   StreamId,
   ThreadId,
   ViewPosition,
 } from "./protocol.ts";
+import type { SendMarks } from "../start-marks.ts";
 
 export type { DisplayInfo };
 
@@ -45,20 +48,28 @@ export interface HostTransport {
     request: PermissionRequestId,
     option: AgentChoiceId,
   ): Promise<void>;
-  /** The native folder dialog: the folder's ref and its home-relative display; `null` when the lawyer cancels it. */
+  /** The native folder dialog, or on Windows Clauseo's own chooser when that dialog would stall (chooser.ts): the
+   * folder's ref and its home-relative display; `null` when the lawyer cancels. */
   pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
   /** Opens a web or mail link (https, http, mailto) in the default browser or mail app, after the host's native
    * confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
    * `command.invalid`. */
   openExternal(url: string): Promise<void>;
-  /** Opens a matter document with its default app. */
-  openFile(file: FileRefId): Promise<void>;
+  /** Quits Clauseo the way Cmd+Q does: the agents' installs and sign-ins stop, then the host, and
+   * the app ends. Resolves once the host has the request; the window is gone after it. */
+  quitApp(): Promise<void>;
+  /** Opens a matter document with its default app; `protected_view` says Word opened it in Protected View (a Word
+   * document whose path is too long for Word, opened by its folders' short names on Windows). */
+  openFile(file: FileRefId): Promise<OpenedFile>;
   /** Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
   reveal(target: RevealTarget): Promise<void>;
-  /** Opens the settings window, or brings it to the front when it is open already (H14's `open_settings`). Only a
-   * transport whose host has that window carries it: the desktop one; the room draws no Settings button without it. */
-  openSettings?: (() => Promise<void>) | undefined;
+  /** Opens the settings window, or brings it to the front when it is open already (H14's `open_settings`), at
+   * `section` when named (R24: the case-law hint and the out-of-credit note open "connectors"). Only a transport whose
+   * host has that window carries it: the desktop one; the room draws no Settings button without it. */
+  openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
+  /** Sends the room's start-up marks to host.log, once, in the background (start-marks.ts); only the desktop's. */
+  pageMarks?: SendMarks | undefined;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
    * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last
@@ -128,6 +139,7 @@ export class NullTransport implements HostTransport {
   pickFolder = nothing;
   displayInfo = nothing;
   openExternal = nothing;
+  quitApp = nothing;
   openFile = nothing;
   reveal = nothing;
   subscribe(): () => void {

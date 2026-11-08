@@ -101,7 +101,7 @@ test("a network drive: Not protected, and its notice says Claude asks and Codex 
   expect(info()).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside this folder. For full protection, move the matter to a folder on this computer.",
+      "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
     ),
   );
   expect(h.one("folder-it")).toBeNull();

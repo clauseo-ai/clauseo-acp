@@ -1,9 +1,10 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
-// (U2's form, in place). The plan gets ready from the first second, on the working line at the foot where the composer
-// will stand, with the fine print under it; and the anonymous counts Clauseo sends by default, said plainly, with the
-// switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
-import { useId, type ReactNode } from "react";
+// (U2's form, in place). The plan's install shows on the working line at the foot where the composer will stand (its
+// size and Sign in until the lawyer presses it, since nothing downloads before then), with the fine print under it;
+// and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
+// brief), and so does the Safe workspace's line: no screen names it before UC.
+import { useId, type ReactNode, type Ref } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
@@ -12,9 +13,10 @@ import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
 import { Lockup } from "../lockup.tsx";
 import { Say } from "../say.tsx";
-import { WorkingLine, type WorkingState } from "../working-line.tsx";
+import { WorkingLine, WorkingSaid, type WorkingState } from "../working-line.tsx";
 import { WRAP } from "./classes.ts";
 import { Done, DocumentsLine } from "./parts.tsx";
+import { PickerLine } from "../picker-line.tsx";
 import { cn } from "../../lib/cn.ts";
 
 /** The counts switch: on by default; `locked` when the firm's policy keeps counts off: shown off, with no control. */
@@ -29,8 +31,10 @@ export function Welcome({
   onNewMatter,
   form,
   error,
+  opening,
   onWhatsSent,
   testIds = {},
+  openRef,
 }: {
   /** The plan's name, "Claude" or "ChatGPT". */
   name: string;
@@ -45,9 +49,13 @@ export function Welcome({
   form?: ReactNode;
   /** A folder refused, said under the question in the language. */
   error?: ReactNode;
+  /** The folder picker is on its way (its pick has run 300 ms): its line shows under the button. */
+  opening?: boolean | undefined;
   /** What's sent, where the app can show the privacy settings. */
   onWhatsSent?: (() => void) | undefined;
   testIds?: { counts?: string; open?: string; newMatter?: string };
+  /** The primary button, Open the folder for a matter, as it mounts: the app's start-up mark. */
+  openRef?: Ref<HTMLButtonElement> | undefined;
 }) {
   const w = useFirstLaunchWords();
   const heading = useId();
@@ -80,6 +88,7 @@ export function Welcome({
                   className={cn(WRAP, "min-h-control-large max-w-full py-s2")}
                   onClick={onOpenFolder}
                   data-testid={testIds.open}
+                  ref={openRef}
                 >
                   <IconOpen size={16} />
                   {w("Open the folder for a matter")}
@@ -89,6 +98,7 @@ export function Welcome({
                     {error}
                   </p>
                 )}
+                {opening && <PickerLine />}
                 <p className="text-small text-muted">
                   <Say>
                     {w(
@@ -114,6 +124,12 @@ export function Welcome({
       </div>
       <div className="fl-foot">
         <div className="fl-foot-col">
+          {/* the install's live region, mounted as the foot is, so each state change is said once,
+              in place; the bytes on the line are seen, not read at every tick (the composer's
+              region, room-entry, does the same) */}
+          <span className="sr-only" role="status" data-testid="install-said">
+            {install !== null && <WorkingSaid state={install} />}
+          </span>
           {install !== null ? (
             <div className="room-entry fl-foot-well" data-working="">
               <WorkingLine state={install} />

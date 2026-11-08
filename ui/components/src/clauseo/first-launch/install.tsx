@@ -14,9 +14,18 @@ import { InstallBar as Bar } from "./parts.tsx";
 
 /** Where the install is, as the line shows it. The app reads it from the host's `InstallProgress`. */
 export type InstallView =
-  /** Not here yet, about to download or paused: the size it will download, in MB. */
+  /** Not here yet, about to download or paused: the size it will download, about, in MB. 0 when
+   * no size is known, and then the line says nothing. */
   | { kind: "missing"; mb: number }
-  | { kind: "downloading"; mb: number; received: number; total: number }
+  /** Downloading: the bytes for the bar, and the whole MB the words say (done never above
+   * total). */
+  | {
+      kind: "downloading";
+      received: number;
+      total: number;
+      doneMb: number;
+      totalMb: number;
+    }
   | { kind: "installing" }
   | { kind: "offline" }
   | { kind: "blocked"; hosts: readonly string[] }
@@ -32,9 +41,19 @@ export type InstallActs = {
   /** What was copied for the failure on screen now: the line reads it back. */
   copied: "message" | "log" | null;
   setCopied: (what: "message" | "log") => void;
+  /** Where no gate stands beside the line (the first screen, Settings' Plans): the room gate's Sign in, offered while
+   * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
+   * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
+  signIn?: (() => void) | undefined;
 };
 
-export type InstallTestIds = { line?: string; retry?: string; proxy?: string; askIt?: string };
+export type InstallTestIds = {
+  line?: string;
+  retry?: string;
+  proxy?: string;
+  askIt?: string;
+  signIn?: string;
+};
 
 /** The working line for the install, in the language, or null when there is nothing to say (no install known, ready,
  * managed). A plain function, no hook: the first run builds it outside render too, as the setup store changes. */
@@ -64,16 +83,52 @@ export function installLine(
       {w("Try again")}
     </Button>
   );
+  /** Goes through the OS's proxy this time: the words and the handler the Blocked view has. */
+  const proxyButton = (kind: "tone" | "quiet") => (
+    <Button
+      kind={kind}
+      size="small"
+      className="working-act"
+      onClick={acts.proxy}
+      data-testid={ids.proxy}
+    >
+      {w("Use the system proxy")}
+    </Button>
+  );
   switch (view.kind) {
-    case "missing": {
-      const words = w("Getting {name} ready. About {mb} MB.", { name, mb: view.mb });
-      return { kind: "wait", words, pill: null, actions: wrap(null) };
-    }
+    case "missing":
+      // no size to say (a download of no bytes): no line at all, so the next state is a change
+      // the reader hears
+      if (view.mb === 0) return null;
+      return {
+        kind: "wait",
+        words: w("Needs a download of about {mb} MB", { mb: view.mb }),
+        pill: null,
+        actions: wrap(
+          acts.signIn === undefined ? null : (
+            <Button
+              kind="tone"
+              size="small"
+              className="working-act"
+              onClick={acts.signIn}
+              data-testid={ids.signIn}
+            >
+              {w("Sign in")}
+            </Button>
+          ),
+        ),
+      };
     case "downloading": {
-      const words = w("Getting {name} ready. About {mb} MB.", { name, mb: view.mb });
+      const words = w("Getting {name} ready… {done} MB of {total} MB", {
+        name,
+        done: view.doneMb,
+        total: view.totalMb,
+      });
       return {
         kind: "wait",
         words,
+        // the bytes move every 250 ms: the live region hears only that the download goes on
+        said: w("Getting {name} ready…", { name }),
         pill: null,
         actions: wrap(<Bar received={view.received} total={view.total} words={words} />),
       };
@@ -81,7 +136,7 @@ export function installLine(
     case "installing":
       return {
         kind: "wait",
-        words: w("Setting up {name} on this computer.", { name }),
+        words: w("Setting up {name}…", { name }),
         pill: null,
         working: true,
         actions: wrap(null),
@@ -92,7 +147,12 @@ export function installLine(
         words: errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
-        actions: wrap(null),
+        actions: wrap(
+          <>
+            {retry}
+            {proxyButton("quiet")}
+          </>,
+        ),
       };
     case "blocked": {
       const message = w(
@@ -106,15 +166,7 @@ export function installLine(
         code: "agent.install_blocked",
         actions: wrap(
           <>
-            <Button
-              kind="tone"
-              size="small"
-              className="working-act"
-              onClick={acts.proxy}
-              data-testid={ids.proxy}
-            >
-              {w("Use the system proxy")}
-            </Button>
+            {proxyButton("tone")}
             <Button
               kind="quiet"
               size="small"
@@ -125,7 +177,7 @@ export function installLine(
                 acts.setCopied("message");
               }}
             >
-              {acts.copied === "message" ? w("Message copied") : w("Ask your IT team")}
+              {acts.copied === "message" ? w("Message copied") : w("Copy details for IT")}
             </Button>
           </>,
         ),
@@ -158,6 +210,7 @@ export function installLine(
         actions: wrap(
           <>
             {retry}
+            {proxyButton("quiet")}
             <Button
               kind="quiet"
               size="small"

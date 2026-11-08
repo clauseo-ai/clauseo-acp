@@ -10,7 +10,9 @@
 //! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
-//! sources, paths, formats and the merge rule.
+//! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
+//! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
+//! browser.
 //!
 //! # Interface
 //!
@@ -24,8 +26,8 @@
 //! [`Effective::policy`], [`Effective::policy_present`], [`Effective::is_locked`],
 //! [`Effective::warnings`], [`Effective::apply_ui_patch`], [`Effective::apply_tools_patch`],
 //! [`Effective::check_privacy_patch`], [`Effective::apply_privacy_patch`],
-//! [`Effective::apply_update_mode`], [`Effective::set_agent_launch`], [`Effective::set_plan`]
-//! and [`Effective::plan`]. Every input is a trait:
+//! [`Effective::apply_update_mode`], [`Effective::set_agent_launch`], [`Effective::set_plan`],
+//! [`Effective::set_skill_pack`] and [`Effective::plan`]. Every input is a trait:
 //! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
 //! and [`SystemFiles`] over the OS. The
 //! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
@@ -36,20 +38,30 @@
 //! with [`Effective::apply_privacy_patch`] the same way, and the lawyer's `update.mode` is an
 //! [`UpdateChoice`], applied with [`Effective::apply_update_mode`]. The host writes an
 //! installed agent's launch entry with [`Effective::set_agent_launch`] and a firm plan with
-//! [`Effective::set_plan`] (decision record 0048), never from a webview's choice. Everything
+//! [`Effective::set_plan`] (decision record 0048), never from a webview's choice, and turns a
+//! skill pack on or off with [`Effective::set_skill_pack`] (decision record 0040). Everything
 //! else takes effect on the next start. [`Locations::update_marker`] and
 //! [`Locations::updates_dir`] name the updater's files, so the host joins no paths of its own.
 //!
 //! # Invariants
 //!
-//! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
-//!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
-//!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
-//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
+//! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be read
+//!   is a [`Warning`] (with path, line and column where there is one) and defaults stand in. A
+//!   policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and locks
+//!   each security key (`mcp.servers`, `tools.web_search`, `tools.browser`, `tools.connectors`,
 //!   `privacy.counts`, `privacy.crash_reports`, `update.mode`, `install.bundle`,
-//!   `install.registry` and every `plans.<id>`) off: the list empty, each switch `false`, the
-//!   update mode `none`, each install key unset and no plan, so no endpoint the lawyer chose
-//!   stands in for the firm's (decision record 0048).
+//!   `install.registry`, every `plans.<id>`, `skills.extra`, `skills.allow_scripts`,
+//!   `skills.curated`, `sandbox.required`, `sandbox.allow_unprotected_auto` and the three
+//!   `network` keys) off: the list empty, each switch `false`, the update mode `none`, each
+//!   install key unset, no plan, so no endpoint the lawyer chose stands in for the firm's (decision
+//!   record 0048), no extra skill pack and none curated (decision record 0040), the sandbox not
+//!   required and no auto mode outside it, no proxy but the OS's, no CA file and no added domain
+//!   (decision record 0051).
+//! - Only a policy sets `skills.curated` and `network.allowed_domains`: a `settings.json`
+//!   value is ignored with a warning.
+//!   A `skills.enabled` entry whose id is no pack id or whose value is not
+//!   `sha256:<64 lowercase hex>` is left out with a warning that quotes the id only when it is
+//!   id-shaped, else gives its place; no message quotes a hash.
 //! - A policy may set `update.mode` to any of `auto`, `notify` and `none`, and locks it. The app
 //!   writes only `auto` or `notify` ([`UpdateChoice`], [`Effective::apply_update_mode`]).
 //! - A plan variable's name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, in any case, is
@@ -66,8 +78,9 @@
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
 //!   warning and still locks the key, at its default (an agent: with no entry), or off for a
 //!   security key.
-//! - The MCP server name `browser` ([`RESERVED_MCP_SERVER`]) is Clauseo's own: an entry of that
-//!   name in `settings.json` or a policy is left out with a warning; the rest of the list loads.
+//! - The MCP server names `browser` and `case-law` ([`RESERVED_MCP_SERVERS`]) are Clauseo's own:
+//!   an entry of either name, in any case, in `settings.json` or a policy is left out with a
+//!   warning; the rest of the list loads.
 //! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
 //!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
@@ -85,8 +98,10 @@
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
-//!   relative `command` or a value that does not type is left out with a warning; `enabled`
-//!   is `false` unless set.
+//!   name holding `__` or ending in `_` (Claude splits `mcp__<server>__<tool>` at the first
+//!   `__` after `mcp__`), a reserved name (`browser`, `case-law`, in any case), a relative
+//!   `command` or a value that does not type is left out with a warning; `enabled` is `false`
+//!   unless set.
 //! - Tests read and write no real folder: every input is injected.
 //!
 //! # Depends on
@@ -99,6 +114,7 @@
 //! `effective.rs` (`Effective::load`), then `leaf.rs` (how a key's value is typed), then
 //! `policy.rs`.
 
+pub mod chromium_policy;
 mod dirs;
 mod effective;
 mod error;
@@ -106,10 +122,13 @@ mod files;
 mod json;
 mod leaf;
 mod locations;
+mod lock_reason;
+mod network;
 mod plans;
 pub mod policy;
 mod privacy;
 mod schema;
+mod skills;
 mod system;
 #[cfg(test)]
 mod testing;
@@ -123,20 +142,23 @@ pub use dirs::refused_folders;
 pub use effective::{Effective, EntryWrite};
 pub use error::Error;
 pub use files::{Files, SystemFiles};
-pub use leaf::RESERVED_MCP_SERVER;
+pub use leaf::{POLICY_ONLY_KEYS, RESERVED_MCP_SERVERS, reserved_mcp_server};
 pub use locations::{
-    DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
+    DATA_DIR_VAR, DATA_ENTRIES, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs,
+    SETTINGS_FILE,
 };
-pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped};
+pub use lock_reason::{LockCause, LockReason, SourceKind};
+pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped, web_address_ok};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,
 };
 pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
-    McpServerLaunch, McpSettings, Motion, Plan, PlanProvider, PrivacySettings, Settings, Theme,
-    ToolsSettings, UiSettings, UpdateMode, UpdateSettings, json_schema,
+    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, Language, Lite,
+    MattersSettings, McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider,
+    PrivacySettings, SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings,
+    UiSettings, UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

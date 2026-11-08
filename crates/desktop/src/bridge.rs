@@ -6,7 +6,8 @@
 //!
 //! A window's entry lives from its page's `open_stream` until the window is destroyed
 //! (`close_window`, from `settings_window::on_destroyed`): then its channel, pumps, app pump and
-//! watchdog go. What a window may dispatch or query depends on its label (`admit.rs`, `query`).
+//! watchdog go. What a window may dispatch or query depends on its label (`admit.rs`, `query`),
+//! and so does which setup commands it may send (`setup.rs`, which the bridge holds).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
@@ -18,7 +19,7 @@ use clauseo_host::HostHandle;
 use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
     HostCommand, HostError, HostQuery, Language, PermissionEntry, PermissionRequestId, Principal,
-    QueryResult, RefreshWhy, StreamId, ThreadId, ViewPosition,
+    QueryResult, RefreshWhy, SetupCommand, StreamId, ThreadId, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -27,6 +28,7 @@ use crate::frame::Frame;
 use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
 use crate::settings_window::SETTINGS_WINDOW;
+use crate::setup::Setup;
 
 mod admit;
 mod permission;
@@ -83,6 +85,8 @@ pub(crate) struct Bridge {
     issued: Mutex<HashSet<FolderRefId>>,
     /// The settings window's `RefreshLimits`, at most one per agent per 10 s.
     refreshes: RefreshThrottle,
+    /// The `setup` command's path and its events (`setup.rs`, 0048).
+    setup: Setup,
 }
 
 /// Locks `mutex`, taking the data of one a panicking holder left: every critical section here
@@ -97,8 +101,19 @@ fn invalid(message: impl Into<String>) -> HostError {
 }
 
 impl Bridge {
-    /// A bridge to the host whose start lands in `cell`, with no window yet.
+    /// Tests: a bridge to the host whose start lands in `cell`, with no window yet, and setup
+    /// on an unscripted `StubBackend`, silent; the app's bridge is [`Bridge::with_setup`]
+    /// with the backend over `Agents`.
+    #[cfg(test)]
     pub(crate) fn new(cell: Arc<HostCell>) -> Self {
+        Self::with_setup(
+            cell,
+            Setup::new(Arc::new(crate::setup::StubBackend::default())),
+        )
+    }
+
+    /// [`Bridge::new`] with `setup` answering the `setup` command.
+    pub(crate) fn with_setup(cell: Arc<HostCell>, setup: Setup) -> Self {
         Self {
             cell,
             windows: Mutex::new(HashMap::new()),
@@ -107,7 +122,17 @@ impl Bridge {
             closed: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
             refreshes: RefreshThrottle::default(),
+            setup,
         }
+    }
+
+    /// Runs the window `label`'s setup command (`setup.rs`): its allow-list first.
+    pub(crate) async fn setup(
+        &self,
+        label: &str,
+        command: SetupCommand,
+    ) -> Result<CommandOutcome, HostError> {
+        self.setup.run(label, command).await
     }
 
     /// The host's cell, for exit.
@@ -190,8 +215,10 @@ impl Bridge {
 
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
-    /// until the bridge rules on it. The `settings` window reads the settings (0028) and the
-    /// updater's state (0037) alone, and any other window nothing.
+    /// until the bridge rules on it. The `settings` window reads the settings (0028), the
+    /// updater's state (0037), the skill packs (0040), the protection view (0051) and the
+    /// allowed sites (0053) alone, and
+    /// any other window nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -199,10 +226,19 @@ impl Bridge {
     ) -> Result<QueryResult, HostError> {
         match label {
             crate::MAIN_WINDOW => {}
-            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings | HostQuery::GetUpdate) => {}
+            SETTINGS_WINDOW
+                if matches!(
+                    query,
+                    HostQuery::GetSettings
+                        | HostQuery::GetUpdate
+                        | HostQuery::ListSkillPacks
+                        | HostQuery::Protection
+                        | HostQuery::AllowedSites
+                ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
-                    "the settings window reads only the settings and the update state",
+                    "the settings window reads only the settings, the update state, the skill \
+                     packs, the protection view and the allowed sites",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -222,7 +258,14 @@ impl Bridge {
             | HostQuery::GetUpdate
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
-            | HostQuery::ListPapers { .. } => {}
+            | HostQuery::ListPapers { .. }
+            // The skill packs and their states (0040): reads the packs folder, writes nothing.
+            // Both windows show them: Settings' Skills pane and the main window's matter picker.
+            | HostQuery::ListSkillPacks
+            // The sandbox's view (0051): the host's cache, read only. Both windows show it.
+            | HostQuery::Protection
+            // The sites allowed despite the block list (0053, PR 2): stored state, no paths.
+            | HostQuery::AllowedSites => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.
@@ -253,7 +296,8 @@ impl Bridge {
         // Numbered before the wait: the order the calls arrived in, not the order they wake.
         let number = self.opens.fetch_add(1, Ordering::Relaxed);
         let host = self.host().await?;
-        let window = Window::open(host.clone(), channel, pump::AppEvents::of(label));
+        let app_events = pump::AppEvents::of(label);
+        let window = Window::open(host.clone(), channel, app_events, self.setup.events());
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
         let dead = lock(&self.closed)
@@ -352,14 +396,24 @@ impl Bridge {
             .inspect_err(|_| pump::forget(&window, restart))
     }
 
-    /// Follows the app-wide events on the window's channel (`pump::follow_feed`).
+    /// Follows the app-wide events on the window's channel (`pump::follow_feed`), and for a
+    /// window that may send setup commands the setup events too, which start with the latest
+    /// states (0048).
     pub(crate) async fn subscribe_app(&self, label: &str) -> Result<(), HostError> {
         let window = self.window(label)?;
         let host = self.host().await?;
-        let restart = pump::follow_feed(&window, Feed::App);
-        pump::start_feed(host, &window, Feed::App, restart, false)
-            .await
-            .inspect_err(|_| pump::forget_feed(&window, Feed::App, restart))
+        let feeds: &[Feed] = if crate::setup::may_setup(label) {
+            &[Feed::App, Feed::Setup]
+        } else {
+            &[Feed::App]
+        };
+        for &feed in feeds {
+            let restart = pump::follow_feed(&window, feed);
+            pump::start_feed(host, &window, feed, restart, false)
+                .await
+                .inspect_err(|_| pump::forget_feed(&window, feed, restart))?;
+        }
+        Ok(())
     }
 
     /// Stops following `stream` on the window's channel.
@@ -432,6 +486,12 @@ impl Bridge {
         let folder = self.host().await?.register_folder(path).await?;
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))
+    }
+
+    /// Tests: the folder refs issued so far.
+    #[cfg(test)]
+    pub(crate) fn issued(&self) -> HashSet<FolderRefId> {
+        lock(&self.issued).clone()
     }
 }
 

@@ -6,8 +6,8 @@ use clauseo_protocol::{
     TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
-use super::queue::{mark_prompt, settle_prompt};
-use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
+use super::queue::{mark_prompt, mark_put_back, settle_prompt};
+use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
 use crate::order::insert_entry;
@@ -34,17 +34,32 @@ pub(super) fn settled_status(state: &ThreadState) -> ThreadStatus {
     }
 }
 
-pub(super) fn detached(state: &mut ThreadState, reason: &DetachReason, out: &mut Applied) {
+/// The agent's session detached at `ts`. A thread idle-stopped while its next prompt waited
+/// for the agent (the prompt came during the stop, so the thread is `Starting`) stays
+/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`.
+pub(super) fn detached(
+    state: &mut ThreadState,
+    reason: &DetachReason,
+    ts: Timestamp,
+    out: &mut Applied,
+) {
     let status = match reason {
         DetachReason::Exited { .. } | DetachReason::Unknown { .. } => ThreadStatus::AgentExited,
         DetachReason::Closed => ThreadStatus::Idle,
-        DetachReason::Restarting | DetachReason::IdleStopped => {
+        DetachReason::IdleStopped => ThreadStatus::IdleStopped,
+        DetachReason::Restarting => {
             not_yet(out, "agent_session_detached");
             return;
         }
     };
     if state.running.is_some() {
         state.after_turn = Some(status);
+        return;
+    }
+    if status == ThreadStatus::IdleStopped && state.status() == ThreadStatus::Starting {
+        update_header(state, "agent_session_detached", out, |h| {
+            h.resuming_since.is_none() && set(&mut h.resuming_since, Some(ts))
+        });
         return;
     }
     match state.status() {
@@ -83,6 +98,7 @@ pub(super) fn user_message(
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
+        at_head: false,
         ts,
     };
     push_user_upsert(&mut out.changes, &entry);
@@ -93,16 +109,26 @@ pub(super) fn user_message(
     }
     insert_entry(state, seq, ViewEntry::UserMessage(entry), out);
     if state.running.is_none() {
+        // A prompt that moves an idle-stopped thread to `Starting` begins a resume, timed by
+        // this event. `after_turn` can hold a stop only while a turn runs, so it is not
+        // reachable here, but it counts the same.
+        let resumes = state.status() == ThreadStatus::IdleStopped
+            || state.after_turn == Some(ThreadStatus::IdleStopped);
         state.turn = Some(event.turn);
         state.after_turn = None;
-        set_status(state, "user_message", out, ThreadStatus::Starting);
+        update_header(state, "user_message", out, |h| {
+            let status = set(&mut h.status, ThreadStatus::Starting);
+            let since = resumes && set(&mut h.resuming_since, Some(ts));
+            status | since
+        });
     }
 }
 
 /// A turn waits. Behind another thread's writer it gives `Queued { behind }`, also as the turn's
 /// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
 /// `TurnEnded` before it starts (a cancel) settles the status; its prompt has left the thread's
-/// queue (`Sent`). Behind its own thread its prompt shows `Queued`, and it leaves the status
+/// queue (`Sent`). Behind its own thread its prompt shows `Queued` (and `at_head` when the turn
+/// was put back at the head, `queued_order.rs`), and it leaves the status
 /// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked).
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
@@ -111,7 +137,11 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
     } else {
         UserMessageStatus::Sent
     };
-    mark_prompt(state, event.turn(), status, out);
+    if behind == state.thread && event.is_at_head() {
+        mark_put_back(state, event.turn(), out);
+    } else {
+        mark_prompt(state, event.turn(), status, out);
+    }
     if behind != state.thread {
         if state.running.is_none() {
             state.turn = Some(event.turn());

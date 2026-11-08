@@ -1,0 +1,347 @@
+//! The set-up's owner (D-B2): the Windows user who asked for the set-up, taken from the token of
+//! the process that started the elevated one, never from an argument. Under over-the-shoulder
+//! elevation the elevated process runs as the administrator who typed the password, so its own
+//! user is the wrong owner; the parent's token user is the one who asked.
+//!
+//! The parent is the one Windows recorded for this process (`InheritedFromUniqueProcessId`;
+//! the `AppInfo` service sets the caller as the parent of an elevated process). The app's
+//! `--parent <pid>` must name that same process; the uninstaller's hook passes none, and the
+//! recorded one is used. A process ID can be reused once its process has gone, so the process
+//! opened under it must have been created no later than this one; one created later is another
+//! process that took the ID, and is refused.
+//!
+//! [`Owner::impersonate`] makes the calling thread act as the owner until the guard it returns
+//! drops, a panic's unwinding included. `secrets.bin` is written that way (`PR4g`), so its DPAPI
+//! blobs, the file and its DACL are the owner's. The checks below are pure and tested on every
+//! OS; the token calls are in `owner/token.rs` (Windows).
+
+use super::machine::MachineError;
+
+pub(crate) mod installer;
+#[cfg(windows)]
+mod process;
+#[cfg(windows)]
+mod token;
+
+#[cfg(windows)]
+pub(crate) use token::this_process;
+#[cfg(all(windows, test))]
+pub(crate) use token::thread_has_token;
+
+/// The Medium mandatory level's relative id (`S-1-16-8192`): a standard user's.
+pub(crate) const MEDIUM_RID: u32 = 0x2000;
+
+/// Whether a token holds more than a standard user's and must be lowered before `--remove`
+/// acts with it on the owner's files (S15 `PR4j`): a full elevated token (`full`),
+/// Administrators enabled (`admins`), or an integrity level (`integrity`, its relative id)
+/// above Medium. A per-machine uninstall's parent is the elevated uninstaller, and the ledger it
+/// would act on is a file malware running as the owner can write.
+pub(crate) fn needs_lowering(full: bool, admins: bool, integrity: u32) -> bool {
+    full || admins || integrity > MEDIUM_RID
+}
+
+/// The process to take the owner from: `recorded`, the parent Windows recorded for this process.
+/// `claimed` (the app's `--parent`) must be that process; with none, `recorded` is used. 0 (no
+/// parent recorded) is refused.
+fn parent_to_open(claimed: Option<u32>, recorded: u32) -> Result<u32, MachineError> {
+    if recorded == 0 {
+        return Err(MachineError::Other(
+            "Windows recorded no parent process for the set-up".to_owned(),
+        ));
+    }
+    match claimed {
+        Some(claimed) if claimed != recorded => Err(MachineError::Other(format!(
+            "the set-up was told its parent is process {claimed}, but Windows recorded {recorded}"
+        ))),
+        _ => Ok(recorded),
+    }
+}
+
+/// Refuses a parent not created strictly before this process (`parent_created` at or above
+/// `own_created`, both in `FILETIME` units): its ID was reused by another process once the
+/// real parent had gone. The same time is refused too, so an ID reused within one tick of the
+/// clock is caught; a real parent started this process, so it was created earlier.
+fn check_created(parent_created: u64, own_created: u64) -> Result<(), MachineError> {
+    if parent_created >= own_created {
+        return Err(MachineError::Other(
+            "the set-up's parent process has gone and its process ID was reused".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// The owner: its SID and an impersonation token for it. Its `Debug` shows the SID only.
+#[cfg(windows)]
+pub struct Owner {
+    /// The token user of the verified parent.
+    sid: crate::windows::sids::Sid,
+    /// A duplicate of the parent's token, at `SecurityImpersonation`.
+    token: token::Token,
+}
+
+#[cfg(windows)]
+impl Owner {
+    /// The owner from this process's verified parent, as the module says. `claimed` is the
+    /// app's `--parent <pid>`, or `None` from the uninstaller's hook.
+    pub fn of_parent(claimed: Option<u32>) -> Result<Owner, MachineError> {
+        let pid = parent_to_open(claimed, token::recorded_parent()?)?;
+        let process = token::Process::open(pid)?;
+        check_created(process.created()?, token::own_created()?)?;
+        let token = token::Token::impersonation_of(&process)?;
+        let sid = token.user()?;
+        Ok(Owner { sid, token })
+    }
+
+    /// The lawyer a per-user `--adopt` sets up: this process's recorded parent (the elevated
+    /// installer) and that one's recorded parent (the unelevated installer), held open while
+    /// they are read, and [`installer::installer_owner`]'s checks on them with `claimed`
+    /// (`--owner-sid`). The owner's token is the unelevated installer's.
+    pub fn of_installer(claimed: &crate::windows::sids::Sid) -> Result<Owner, MachineError> {
+        let own = token::own_created()?;
+        let instance = token::Process::open(parent_to_open(None, token::recorded_parent()?)?)?;
+        let outer = token::Process::open(parent_to_open(None, instance.recorded_parent()?)?)?;
+        let instance_token = token::Token::impersonation_of(&instance)?;
+        let outer_token = token::Token::impersonation_of(&outer)?;
+        let facts = |process: &token::Process, token: &token::Token| {
+            Ok::<_, MachineError>(installer::Facts {
+                created: process.created()?,
+                image: process.image()?,
+                user: token.user()?,
+                elevated: token.elevated()?,
+            })
+        };
+        let sid = installer::installer_owner(
+            own,
+            &facts(&instance, &instance_token)?,
+            &facts(&outer, &outer_token)?,
+            claimed,
+        )?;
+        Ok(Owner {
+            sid,
+            token: outer_token,
+        })
+    }
+
+    /// This process's own user as the owner: for tests, which have no parent to trust.
+    #[cfg(test)]
+    pub(crate) fn of_this_process() -> Result<Owner, MachineError> {
+        let token = token::Token::impersonation_of(&token::Process::current())?;
+        let sid = token.user()?;
+        Ok(Owner { sid, token })
+    }
+
+    /// Whether the owner's token holds more than a standard user's ([`needs_lowering`]).
+    pub fn elevated(&self) -> Result<bool, MachineError> {
+        self.token.elevated()
+    }
+
+    /// The owner with a standard user's copy of its token: Administrators deny-only, Medium
+    /// integrity, checked after. `--remove` acts on the owner's files only with a token that
+    /// isn't elevated, this one or the parent's own.
+    pub fn lowered(&self) -> Result<Owner, MachineError> {
+        Ok(Owner {
+            sid: self.sid.clone(),
+            token: self.token.lowered()?,
+        })
+    }
+
+    /// The owner's SID: the record's `OwnerSid` and the marker's `user_sid`.
+    pub fn sid(&self) -> &crate::windows::sids::Sid {
+        &self.sid
+    }
+
+    /// Makes the calling thread act as the owner until the returned guard drops. Checked after:
+    /// the thread's token must name the owner at `SecurityImpersonation` or above (Windows gives
+    /// a weaker level, with no error, to a caller that may not impersonate); otherwise the
+    /// thread goes back to itself and this fails. Not nested: a second guard on the same thread
+    /// would end both on its drop.
+    pub fn impersonate(&self) -> Result<Impersonating<'_>, MachineError> {
+        self.token.impersonate(&self.sid)?;
+        Ok(Impersonating {
+            _owner: std::marker::PhantomData,
+            _thread: std::marker::PhantomData,
+        })
+    }
+
+    /// Runs `f` on the calling thread acting as the owner, then makes the thread itself again
+    /// ([`Owner::impersonate`]'s guard, which also reverts if `f` panics). Every write under
+    /// `<data_dir>\sandbox\` from the elevated process goes through this, so each file and its
+    /// DACL are the owner's. A failed impersonation is the `Err`, and `f` doesn't run.
+    pub fn run_as<T>(&self, f: impl FnOnce() -> T) -> Result<T, MachineError> {
+        let _as_owner = self.impersonate()?;
+        Ok(f())
+    }
+
+    /// Whether the owner's token has Administrators, enabled or deny-only (a UAC-filtered
+    /// administrator's): a user who can elevate. Read acting as the owner (`TokenGroups` of the
+    /// thread's token); a failure is the `Err`, which callers take as no.
+    pub fn in_administrators(&self) -> Result<bool, MachineError> {
+        let groups = self
+            .run_as(crate::windows::record::current_token_groups)?
+            .map_err(|error| MachineError::Other(format!("the owner's groups: {error}")))?;
+        let admins = crate::windows::sids::Sid::parse("S-1-5-32-544")
+            .map_err(|error| MachineError::Other(error.to_string()))?;
+        Ok(groups.contains(&crate::windows::acl_bytes::sid_bytes(&admins)))
+    }
+
+    /// What the owner's own token gets on a file whose security descriptor (owner, group, DACL
+    /// and label, self-relative) is `descriptor`: what the owner's unelevated hand-back can do
+    /// there. `--reclaim` takes only what the owner can't hand back (S15 `PR4i`).
+    pub fn granted(&self, descriptor: &[u8]) -> Result<u32, MachineError> {
+        self.token.granted(descriptor)
+    }
+}
+
+#[cfg(windows)]
+impl std::fmt::Debug for Owner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Owner")
+            .field("sid", &self.sid)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The calling thread acting as the owner; dropping it (a panic's unwinding included) makes the
+/// thread itself again. Bound to the thread that made it: neither `Send` nor `Sync`.
+#[cfg(windows)]
+#[must_use = "the thread acts as the owner only while the guard lives"]
+#[derive(Debug)]
+pub struct Impersonating<'o> {
+    /// The owner whose token the thread holds.
+    _owner: std::marker::PhantomData<&'o Owner>,
+    /// A raw pointer: not `Send`, not `Sync`.
+    _thread: std::marker::PhantomData<*const ()>,
+}
+
+#[cfg(windows)]
+impl Drop for Impersonating<'_> {
+    fn drop(&mut self) {
+        if !token::revert() {
+            // A thread that can't stop acting as the owner can't be trusted with any elevated
+            // step after this one; nothing safe is left but to stop the process.
+            std::process::abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_recorded_parent_is_used_and_a_claimed_one_must_match_it() {
+        assert_eq!(parent_to_open(None, 4242), Ok(4242));
+        assert_eq!(parent_to_open(Some(4242), 4242), Ok(4242));
+        let other = parent_to_open(Some(17), 4242).unwrap_err();
+        assert!(other.to_string().contains("17"), "{other}");
+        assert!(other.to_string().contains("4242"), "{other}");
+        assert!(parent_to_open(None, 0).is_err());
+        assert!(parent_to_open(Some(0), 0).is_err());
+    }
+
+    #[test]
+    fn a_token_is_lowered_when_elevated_admin_or_above_medium() {
+        assert!(!needs_lowering(false, false, MEDIUM_RID));
+        assert!(!needs_lowering(false, false, 0x1000), "Low");
+        assert!(
+            needs_lowering(true, false, MEDIUM_RID),
+            "a full elevated token"
+        );
+        assert!(
+            needs_lowering(false, true, MEDIUM_RID),
+            "Administrators enabled"
+        );
+        assert!(needs_lowering(false, false, 0x3000), "High");
+        assert!(needs_lowering(false, true, 0x4000), "SYSTEM");
+    }
+
+    #[test]
+    fn a_parent_created_after_this_process_is_a_reused_id() {
+        assert_eq!(check_created(100, 200), Ok(()));
+        assert_eq!(check_created(199, 200), Ok(()));
+        let reused = check_created(201, 200).unwrap_err();
+        assert!(reused.to_string().contains("reused"), "{reused}");
+        // The same tick: an ID reused at once is refused, never taken for the parent.
+        let same = check_created(200, 200).unwrap_err();
+        assert!(same.to_string().contains("reused"), "{same}");
+    }
+
+    /// Windows CI, unelevated: the runner's parent (nextest) runs as the same user.
+    #[cfg(windows)]
+    mod windows {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use super::super::token::thread_has_token;
+        use super::*;
+        use crate::windows::record::current_user_sid;
+
+        #[test]
+        fn the_owner_is_the_parents_token_user_and_a_wrong_parent_is_refused() {
+            let owner = Owner::of_parent(None).unwrap();
+            assert_eq!(owner.sid(), &current_user_sid().unwrap());
+            assert!(!format!("{owner:?}").contains("token"), "{owner:?}");
+            let wrong = Owner::of_parent(Some(std::process::id())).unwrap_err();
+            assert!(wrong.to_string().contains("parent"), "{wrong}");
+        }
+
+        #[test]
+        fn the_guard_acts_as_the_owner_and_reverts_on_drop_and_on_panic() {
+            let owner = Owner::of_this_process().unwrap();
+            assert!(!thread_has_token());
+            let guard = owner.impersonate().unwrap();
+            assert!(thread_has_token());
+            assert_eq!(&current_user_sid().unwrap(), owner.sid());
+            drop(guard);
+            assert!(!thread_has_token());
+            let unwound = catch_unwind(AssertUnwindSafe(|| {
+                let _guard = owner.impersonate().unwrap();
+                assert!(thread_has_token());
+                panic!("a step failed while acting as the owner");
+            }));
+            assert!(unwound.is_err());
+            assert!(!thread_has_token(), "the guard reverted during the unwind");
+        }
+
+        #[test]
+        fn the_lowered_owner_acts_as_a_standard_user() {
+            // CI's runner is an unfiltered administrator: its own token is elevated.
+            let owner = Owner::of_this_process().unwrap();
+            let lowered = owner.lowered().unwrap();
+            assert_eq!(lowered.sid(), owner.sid());
+            let standard = lowered.run_as(super::super::token::thread_is_standard);
+            assert_eq!(standard, Ok(true));
+            // No privilege of the elevated token is carried, SeChangeNotifyPrivilege aside.
+            let extra = lowered.run_as(super::super::token::thread_extra_privileges);
+            assert_eq!(extra, Ok(Some(0)));
+            assert!(!thread_has_token());
+        }
+
+        #[test]
+        fn run_as_runs_as_the_owner_then_reverts() {
+            let owner = Owner::of_this_process().unwrap();
+            let inside = owner
+                .run_as(|| (thread_has_token(), current_user_sid().unwrap()))
+                .unwrap();
+            assert_eq!(inside, (true, owner.sid().clone()));
+            assert!(!thread_has_token());
+            let unwound = catch_unwind(AssertUnwindSafe(|| {
+                owner.run_as(|| panic!("a write failed while acting as the owner"))
+            }));
+            assert!(unwound.is_err());
+            assert!(!thread_has_token(), "run_as reverted during the unwind");
+        }
+
+        #[test]
+        #[ignore = "elevated: CI's elevated step only (CLAUSEO_ELEVATED_TESTS=1)"]
+        fn elevated_the_owner_from_the_parent_is_impersonated_and_reverted() {
+            if !crate::windows::test_acl::elevated_tests_enabled() {
+                return;
+            }
+            let owner = Owner::of_parent(None).unwrap();
+            let guard = owner.impersonate().unwrap();
+            assert_eq!(&current_user_sid().unwrap(), owner.sid());
+            drop(guard);
+            assert!(!thread_has_token());
+        }
+    }
+}

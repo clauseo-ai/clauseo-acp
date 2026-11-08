@@ -1,0 +1,120 @@
+// UC: the Not protected note in the room, the chunk note-load.ts loads: the cause's body
+// (components' protection.tsx), its retry through the set-up confirm where Windows' administrator
+// prompt follows (setup.tsx), the waiting line in the button's place and a refusal's words under
+// the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
+// installer the retry gives way to its line and, on a personal install, "Get the installer". When
+// the matter becomes protected the note closes. While the firm requires the Safe workspace
+// (ProtectionView.required) the body says the firm's line for the cause (required-words.ts), never
+// that Clauseo works without it, and the note waits for a press: the firm's notice already says it
+// in the composer. The firm's notice (required.tsx) rides in the same chunk.
+import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
+import { openInstallerPage, repairPage } from "./installer.ts";
+import { useEffect, useState } from "react";
+import type { MatterId } from "../../transport/protocol.ts";
+import { explainDue, markExplained } from "./explained.ts";
+import type { ProtectionStore } from "../../store/protection.ts";
+import { useProtection } from "../../store/protection-run.ts";
+import type { HostTransport } from "../../transport/host-transport.ts";
+import type { Cause } from "./causes.ts";
+import { retryProtection } from "./commands.ts";
+import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
+import { canRetry } from "./view.ts";
+import { named1385, poolOf, whyOf } from "./detail.ts";
+import { requiredWords } from "./required-words.ts";
+
+/** The note's `why` for a cause: a missing admin copy reads as not set up yet. */
+const noteWhy = (cause: Cause): NoteWhy =>
+  blockOf(cause) === "admin_copy_missing"
+    ? "needs_set_up"
+    : blockOf(cause) !== null
+      ? "blocked"
+      : cause.group === "setup"
+        ? (cause.name as NoteWhy)
+        : cause.group === "off"
+          ? "off"
+          : cause.group === "pool"
+            ? "pool"
+            : whyOf(cause) === "not_built"
+              ? "not_built"
+              : "cant";
+
+export function ProtectionNote({
+  transport,
+  store,
+  matterId,
+  matter,
+  cause,
+  open,
+  onClose,
+}: {
+  /** The open matter, for "explained once": the note mounts once per matter and cause group (its key). */
+  matterId: MatterId;
+  transport: HostTransport;
+  store: ProtectionStore;
+  /** The matter's name as filed. */
+  matter: string;
+  /** The open matter's cause; null once it is protected (or not known), which closes the note. */
+  cause: Cause | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const display = useDisplay();
+  const { lang } = display;
+  const state = useProtection(store);
+  const { press, confirm } = useSetUpPress(
+    state,
+    cause,
+    () => void retryProtection(transport, store),
+  );
+  // the first time a room opens on a matter in this state it opens by itself (explained.ts), and is marked explained
+  // at once, so the next room doesn't open it again
+  // a build without protection (every real build until desktop wires it in) reads calmly: the mark and the line say
+  // it, and the note waits for a press
+  const [auto, setAuto] = useState(
+    () => cause !== null && whyOf(cause) !== "not_built" && explainDue(cause.group, matterId),
+  );
+  // the firm's requirement: the composer's notice says it, so the note opens only on a press, and stays unexplained
+  const required = state.view?.required === true;
+  const group = cause?.group ?? null;
+  useEffect(() => {
+    if (auto && !required && group !== null) markExplained(group, matterId);
+  }, [auto, required, group, matterId]);
+  const close = () => {
+    setAuto(false);
+    onClose();
+  };
+  const gone = cause === null;
+  useEffect(() => {
+    if (gone && open) onClose();
+  }, [gone, open, onClose]);
+  if (cause === null) return null;
+  const repair = needsInstaller(cause);
+  const retry = !repair && canRetry(cause);
+  const block = blockLine(lang, cause);
+  const page = repair && !firmInstall(state.view, state.managedBy) ? repairPage(display) : null;
+  const extra = [
+    ...(block === null ? [] : [block]),
+    ...(repair ? [repairLine(lang, state.view, state.managedBy)] : []),
+  ];
+  return (
+    <>
+      <NotProtectedNote
+        open={open || (auto && !required)}
+        matter={matter}
+        why={noteWhy(cause)}
+        required={required ? requiredWords(lang, cause) : null}
+        {...(cause.group === "pool" ? { pool: poolOf(cause), addRoom: retry } : {})}
+        named1385={named1385(cause)}
+        waiting={retry ? waitingWords(lang, state, cause) : null}
+        failed={retry ? failedWords(lang, state) : null}
+        extra={extra}
+        onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
+        onClose={close}
+        onProtect={retry ? press : undefined}
+      />
+      {confirm}
+    </>
+  );
+}

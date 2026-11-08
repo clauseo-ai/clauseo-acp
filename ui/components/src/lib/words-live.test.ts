@@ -126,13 +126,13 @@ test("every error code has a sentence with Hindi or Hindi later, and none says a
     }
 });
 
-test("folder rights' words are English only for now, and none says agent, token or session", () => {
+test("folder rights' words have their Hindi, and none says agent, token or session", () => {
   for (const k of Object.keys(fr.hi) as FolderKey[]) {
-    expect(fr.hi[k], k).toBeNull();
+    expect(fr.hi[k], k).not.toBeNull();
     expect(fr("en", k), k).not.toMatch(BANNED_EN);
   }
   for (const k of Object.keys(frc.hi) as FolderCardKey[]) {
-    expect(frc.hi[k], k).toBeNull();
+    expect(frc.hi[k], k).not.toBeNull();
     expect(frc("en", k), k).not.toMatch(BANNED_EN);
   }
 });
@@ -188,15 +188,14 @@ const PLANNED_LINES = [
     "This version of the AI doesn't work with Clauseo.",
     "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
   ],
-  // hi: later, so its Hindi columns hold the English that errorWords falls back to
   [
     "agent.guard_missing",
     "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
-    "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "Clauseo यहाँ ChatGPT को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
     "Clauseo can't start gemini safely here. Reinstall Clauseo.",
-    "Clauseo can't start gemini safely here. Reinstall Clauseo.",
+    "Clauseo यहाँ gemini को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
     "Clauseo can't start the AI safely here. Reinstall Clauseo.",
-    "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+    "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
   ],
 ] as const;
 

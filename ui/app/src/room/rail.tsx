@@ -9,7 +9,15 @@
 // (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
 // sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
 // or the window came back, so a snooze whose time has come ends at the next render with no timer.
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   Rail,
   type FindSearch,
@@ -20,6 +28,7 @@ import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conv
 import { RailSwitch } from "@clauseo/components/clauseo/rail-switch.tsx";
 import { RailRecent } from "@clauseo/components/clauseo/rail-recent.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -29,6 +38,7 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
+import { locatable } from "./act-refusals.ts";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
 import type { TriageStatus } from "./triage.ts";
@@ -41,6 +51,7 @@ import { clockOf, dayOf, groupMatters } from "./when.ts";
 import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rail-snooze.tsx";
 import { preloadSnooze } from "./snooze-load.ts";
 import { useRailClock } from "./sweep.ts";
+import { notProtected } from "./protection/causes.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
@@ -124,6 +135,7 @@ export function RoomRail({
   newMatterRef,
   onEscape,
   onSettings,
+  notice,
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
@@ -153,9 +165,13 @@ export function RoomRail({
   /** Settings at the rail's foot, pressed; left out where there is no settings window to open (outside the desktop
    * app), and the rail draws no Settings. */
   onSettings?: (() => void) | undefined;
+  /** Optional: what the room says about Clauseo itself (R23's update notice), at the rail's foot above Scratch matter. */
+  notice?: ReactNode;
 }) {
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
+  const { refusals } = matters;
+  const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
   const zone = view.zone;
   // the last moment the pointer came or went, or the window came back
   const [stamp, setStamp] = useRailClock(transport, zone);
@@ -165,13 +181,17 @@ export function RoomRail({
   // where the pointer and the focus are, as the last events said, for a line that arrives later (rail-snooze.tsx)
   const onRail = useRef({ pointer: false, focus: false });
   const snooze = useSnooze(transport, () => onRail.current.pointer || onRail.current.focus);
-  // Snooze and Done's later chunk, warmed once the rail is up and the page is idle (at mount where there's no idle callback)
+  // Snooze and Done's later chunk, warmed once a matter is open and the page is idle (at once where there's no idle
+  // callback): never at boot or under the welcome, which has no conversation to snooze. The pointer or the focus on
+  // the rail still starts it sooner
+  const matterOpen = view.open !== null;
   useEffect(() => {
-    // no idle callback (WebKit's WKWebView): at mount, as the thread chunk is warmed
+    if (!matterOpen) return;
+    // no idle callback (WebKit's WKWebView): at once, as the thread chunk is warmed
     if (typeof requestIdleCallback !== "function") return void preloadSnooze();
     const idle = requestIdleCallback(() => void preloadSnooze());
     return () => cancelIdleCallback(idle);
-  }, []);
+  }, [matterOpen]);
   const sc = { snooze, now, zone, lang: w.lang };
   const detailed = view.detailed;
   const [triager] = useState(() => new RailTriage());
@@ -204,10 +224,15 @@ export function RoomRail({
             m.next_date,
           )
         : null;
+    // a refused Show in Finder says why on the row's note line until the next try (act-refusals.ts)
+    const said = refused.get(m.matter);
+    const revealed = said?.act === "reveal" ? said.code : null;
+    const findFolder = m.folder_state === "missing" || locatable(revealed);
     return {
       id: m.matter,
       name: m.name,
-      note: "",
+      note: revealed === null ? "" : errorWords(w.lang, revealed),
+      locateAsked: locatable(revealed),
       hint:
         m.folder_display === undefined || m.folder_display === "" ? "" : isolate(m.folder_display),
       current,
@@ -217,6 +242,8 @@ export function RoomRail({
       ...(current ? { state: "idle" as const } : stateWords(triaged?.status, now, zone, w.lang)),
       ...(behind === null ? {} : { where: behind.title ?? untitled }),
       testIds: { row: "matter-row" },
+      // UC: Not protected, as the row has it now (matters.ts takes protection_changed onto it)
+      unprotected: notProtected(m.protection),
       // the open matter's conversations, once its list is in
       ...matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter)),
       ...(split !== null
@@ -251,9 +278,7 @@ export function RoomRail({
             pinned: m.pinned,
             onPin: (pinned: boolean) => void matters.pin(m.matter, pinned),
             onRemove: () => void matters.forget(m.matter),
-            ...(m.folder_state === "missing"
-              ? { onLocate: () => void matters.locate(m.matter) }
-              : {}),
+            ...(findFolder ? { onLocate: () => void matters.locate(m.matter) } : {}),
           }
         : {}),
     };
@@ -404,6 +429,7 @@ export function RoomRail({
       }}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
+      {...(notice === undefined ? {} : { notice })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );

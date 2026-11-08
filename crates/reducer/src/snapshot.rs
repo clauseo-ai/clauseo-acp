@@ -28,7 +28,7 @@ use crate::{Error, StreamState};
 /// events. Bump it with any change to a state field, to how it serialises, or to how events fold
 /// into it (a snapshot folded under the old rule holds the old result): the insta test
 /// `snapshot_shape_is_pinned` fails on a shape change, not on a fold-rule change.
-pub const REDUCER_SCHEMA_VERSION: u32 = 8;
+pub const REDUCER_SCHEMA_VERSION: u32 = 11;
 
 /// A snapshot as read: the schema it was written with and the state.
 #[derive(Debug, Clone, PartialEq)]
@@ -165,14 +165,15 @@ impl Serialize for ThreadState {
     }
 }
 
-/// The header as the fold left it: `queue_held` is the host's flag, set after each load
-/// ([`crate::set_queue_held`]), so a snapshot writes it `false` and still equals the fold of the
-/// log. Copies the header only while the flag is set.
+/// The header as the fold left it: `queue_held` and its reason are the host's, set after each
+/// load ([`crate::set_queue_held`]), so a snapshot writes them `false` and `None` and still
+/// equals the fold of the log. Copies the header only while either is set.
 fn unheld(header: Option<&HeaderEntry>) -> Option<std::borrow::Cow<'_, HeaderEntry>> {
     header.map(|header| {
-        if header.queue_held {
+        if header.queue_held || header.queue_held_reason.is_some() {
             std::borrow::Cow::Owned(HeaderEntry {
                 queue_held: false,
+                queue_held_reason: None,
                 ..header.clone()
             })
         } else {

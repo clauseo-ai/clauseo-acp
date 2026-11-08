@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use clauseo_process::Timer;
@@ -122,8 +123,23 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             }
             Source::Fetch(fetch_job) => {
                 if fetcher.is_none() {
+                    // The network now, not the job's start's: a fresh one from the caller when it
+                    // has one (its route resolved again past 60 s), else the last
+                    // `set_network` gave, so a try after a change (one waiting offline, say)
+                    // goes through the new proxy.
+                    let mut install = config.install.clone();
+                    let fresh = config
+                        .install
+                        .refresh
+                        .as_ref()
+                        .and_then(|refresh| refresh());
+                    let network = fresh.unwrap_or_else(|| {
+                        let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
+                        network.clone()
+                    });
+                    install.set_network(network);
                     fetcher = Some(Fetcher::new(
-                        &config.install,
+                        &install,
                         &job.ticket.agent,
                         job.system_proxy.as_deref(),
                         &config.data_dir,
@@ -332,12 +348,16 @@ impl Progress {
 
 /// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
 /// cache's contents. A file that will not go is left; the next install reuses or replaces it.
+/// The cache goes only when no link stands at `agents` or `npm-cache`.
 pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
     for path in &fetched.downloaded {
         drop(write::remove_file(path));
         drop(write::remove_file(&part_path(path)));
     }
-    drop(write::remove_dir_all(&npm_cache(&config.data_dir)));
+    let cache = npm_cache(&config.data_dir);
+    if write::real_dirs_under(&config.data_dir, &cache).unwrap_or(false) {
+        drop(write::remove_dir_all(&cache));
+    }
 }
 
 /// Whether the Windows path `path` is on a share: `\\server\share\…`, `\\?\UNC\…` or

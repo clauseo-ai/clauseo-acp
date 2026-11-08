@@ -60,8 +60,12 @@
 //!     `~`). So while a document is open in Word, `cat Contract.docx | grep x > notes.txt`,
 //!     `cp Contract.docx copy.docx` and `pandoc Contract.docx -o summary.md` go on, but `echo
 //!     Contract.docx`, `grep x Contract.docx`, `less Contract.docx`, `cat Contract.docx; rm x`
-//!     or `python -c` naming it is refused, with the held-open reason. The agent's own Read tool
-//!     is not checked.
+//!     or `python -c` naming it is refused, with the held-open reason. Word opening a document
+//!     through a short (8.3) folder path, which it does when the full path is over 259 units,
+//!     creates no `~$` owner file, so this backstop cannot see such a document: it lists only the
+//!     files beside an owner file. The path layer's sharing probe
+//!     ([`clauseo_matters::held_open_at`], a no-share open that fails) still refuses it, and so
+//!     does the OS's own sharing violation on any write. The agent's own Read tool is not checked.
 //!   - stetdoc and textutil (`names::stetdoc`, read with stetdoc v0.9.1's options and their
 //!     arity, so a flag's value is never taken for the document): `view`, `inspect`, `check`,
 //!     `lookup`, `capabilities` and `skills` only read; an output (`-o`, `--output`, `-oX`,
@@ -162,8 +166,11 @@ use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 use codex::{has_codex_part, in_codex_folder, patch_targets};
+// The data folder fence reads a command's `sh -c` scripts as this guard does
+// (`agent/data_fence/command.rs`).
+pub(crate) use shell::script as shell_script;
 use shell::{resolutions, shell_targets};
-use words::Escape;
+pub(crate) use words::Escape;
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
 /// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).

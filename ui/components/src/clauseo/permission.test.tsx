@@ -433,6 +433,43 @@ test("the paper glyph stands only when a paper is named", async () => {
   expect(host?.querySelector(".perm-icon")).not.toBeNull();
 });
 
+test("with no glyph before the ask, its lines and answers start under its first word; with one, past it", async () => {
+  const lines = ".perm-title, .perm-reason, .perm-error";
+  const said = {
+    title: "Write the plan",
+    reason: "Its own folder",
+    error: "That didn't go through.",
+  };
+  await show({ ...said, paper: null });
+  expect($(".perm").hasAttribute("data-plain")).toBe(true);
+  const plain = [...(host?.querySelectorAll(lines) ?? [])];
+  expect(plain).toHaveLength(3);
+  for (const p of plain) expect(p.className).not.toContain("perm-indent");
+  await act(async () => root?.unmount());
+  host?.remove();
+  await show(said);
+  expect($(".perm").hasAttribute("data-plain")).toBe(false);
+  for (const p of host?.querySelectorAll(lines) ?? [])
+    expect(p.className).toContain("pl-(--perm-indent)");
+});
+
+test("all four answers stand in two columns in their reading order; fewer keep the one wrapping row", async () => {
+  await show({ offered: ["once", "always", "deny", "never"] });
+  expect($(".perm-actions").classList.contains("perm-actions-pairs")).toBe(true);
+  expect(
+    [...(host?.querySelectorAll(".perm-actions button") ?? [])].map((b) => b.textContent),
+  ).toEqual([
+    "Allow onceEnter",
+    "Always for this matterCtrl Enter",
+    "Don't allowEsc",
+    "Don't allow for this matter",
+  ]);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await show({ offered: ["once", "always", "deny"] });
+  expect($(".perm-actions").classList.contains("perm-actions-pairs")).toBe(false);
+});
+
 test("the folded line is never announced as live, and the glyph-less one is marked to line up", async () => {
   await show({ state: "gone" });
   expect($(".perm-done").getAttribute("aria-live")).toBe("off");

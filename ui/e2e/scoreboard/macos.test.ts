@@ -67,6 +67,7 @@ test("a play's settings start fake_agent on the scoreboard scenario at --pace-ms
     CLAUSEO_DATA_DIR: scratch.dataDir,
     E2E_MATTER_DIR: scratch.matterDir,
     E2E_CONFIRM_ALWAYS: "accept",
+    E2E_AGENTS_MANAGED: "",
     MARKS_OUT: join(scratch.root, "run.json"),
   });
   // Every folder is under the scratch root, never the real data folder.

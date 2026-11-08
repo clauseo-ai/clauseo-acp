@@ -24,11 +24,14 @@
 //!   arm in [`refuse`] (`leaf/reset.rs`), which sets the value it is locked at when its policy
 //!   is unknown;
 //! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
-//!   ignores a policy `true` for it, with a warning).
+//!   ignores a policy `true` for it, with a warning);
+//! - for a key only a policy may set, its name in [`POLICY_ONLY_KEYS`] (`settings.json`'s value
+//!   is ignored, with a warning).
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
 
+mod mcp;
 #[cfg(test)]
 mod mcp_tests;
 mod misnamed;
@@ -38,27 +41,29 @@ mod security_tests;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use misnamed::typed_policy;
+pub(crate) use misnamed::{Places, typed_policy};
 
 use crate::plans::{self, plan_id};
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings, Theme,
-    UpdateMode,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings,
+    SkillsExtra, Theme, UpdateMode,
 };
 use crate::warning::{Origin, Warning, WarningKind};
+use crate::{network, skills};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-pub(crate) use reset::refuse;
+use mcp::mcp_servers;
 use reset::reset;
+pub(crate) use reset::{locked_word, refuse};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 15] = [
+pub(crate) const KEYS: [(&str, Kind); 28] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -69,30 +74,64 @@ pub(crate) const KEYS: [(&str, Kind); 15] = [
     ("ui.motion", Kind::String),
     ("tools.web_search", Kind::Boolean),
     ("tools.browser", Kind::Boolean),
+    ("tools.connectors", Kind::Boolean),
     ("privacy.counts", Kind::Boolean),
     ("privacy.crash_reports", Kind::Boolean),
     ("update.mode", Kind::String),
     ("install.bundle", Kind::String),
     ("install.registry", Kind::String),
+    ("skills.extra", Kind::String),
+    ("skills.curated", Kind::StringArray),
+    ("skills.allow_scripts", Kind::Boolean),
+    ("skills.enabled", Kind::Object),
+    ("sandbox.required", Kind::Boolean),
+    ("sandbox.allow_unprotected_auto", Kind::Boolean),
+    ("network.upstream_proxy", Kind::String),
+    ("network.ca_certs", Kind::Object),
+    ("network.allowed_domains", Kind::StringArray),
+    ("network.allow_unsafe_site_override", Kind::Boolean),
+    ("network.unsafe_site_list_updates", Kind::Boolean),
+    (
+        "browser.allow_when_remote_debugging_disabled",
+        Kind::Boolean,
+    ),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
 /// fetches and runs. A policy source that cannot be read locks each off with [`refuse`] (ADR
 /// 0009, R21; the `privacy` keys, decision record 0036; `update.mode` at `none`, R23): its value
-/// there is unknown, and the user's must not stand in. Off is not always the default: both
+/// there is unknown, and the user's must not stand in. Off is not always the default: the
 /// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
-/// default would fail open. `plans.` stands for every `plans.<id>` (decision record 0048):
-/// locked, no plan stands, so no endpoint the lawyer chose does.
-pub(crate) const SECURITY_KEYS: [&str; 9] = [
+/// default would fail open (`tools.connectors` lets a connector spend the lawyer's credits,
+/// R24). `plans.` stands for every `plans.<id>` (decision record 0048):
+/// locked, no plan stands, so no endpoint the lawyer chose does. The three `skills` keys lock
+/// at no extra pack, none from a list, and no script (decision record 0040). The `sandbox` keys
+/// lock at not required and no auto mode outside the sandbox, and the `network` keys at no proxy
+/// (so the OS's), no CA file and no added domain (decision record 0051), and at no allowing a
+/// site the block list names, and block list updates on: an unreadable policy must not stop them.
+/// The `browser` key locks at no browser where the firm turned remote debugging off.
+pub(crate) const SECURITY_KEYS: [&str; 21] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
+    "tools.connectors",
     "privacy.counts",
     "privacy.crash_reports",
     "update.mode",
     "install.bundle",
     "install.registry",
     "plans.",
+    "skills.extra",
+    "skills.allow_scripts",
+    "skills.curated",
+    "sandbox.required",
+    "sandbox.allow_unprotected_auto",
+    "network.upstream_proxy",
+    "network.ca_certs",
+    "network.allowed_domains",
+    "network.allow_unsafe_site_override",
+    "network.unsafe_site_list_updates",
+    "browser.allow_when_remote_debugging_disabled",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -100,19 +139,39 @@ pub(crate) const SECURITY_KEYS: [&str; 9] = [
 /// `false` locks it, as any policy value does.
 pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_reports"];
 
-/// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
-/// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
-/// own entry under it.
-pub const RESERVED_MCP_SERVER: &str = "browser";
+/// The keys only a policy may set (decision record 0040): a `settings.json` value for one is
+/// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
+/// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
+/// firm's (0051), so without a policy it is empty; so is the firm's update off-switch (0053),
+/// and the firm's leave for the browser where it turned remote debugging off.
+pub const POLICY_ONLY_KEYS: [&str; 4] = [
+    "skills.curated",
+    "network.allowed_domains",
+    "network.unsafe_site_list_updates",
+    "browser.allow_when_remote_debugging_disabled",
+];
+
+/// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
+/// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of
+/// these names, in any case, in `settings.json` or a policy, is left out with a warning; the host
+/// adds its own entry under it, so a firm's or the lawyer's server can never take its place or
+/// inherit what Clauseo grants its own (Claude's pre-allow). Since Claude splits a tool name
+/// `mcp__<server>__<tool>` at `__`, no server name may hold `__` at all ([`mcp_servers`]).
+pub const RESERVED_MCP_SERVERS: [(&str, &str); 2] = [
+    ("browser", "Clauseo's own browser"),
+    ("case-law", "Clauseo's case-law connector"),
+];
+
+/// The entry of [`RESERVED_MCP_SERVERS`] that `name` is, in any case: the reserved name and what
+/// it is kept for.
+pub fn reserved_mcp_server(name: &str) -> Option<(&'static str, &'static str)> {
+    RESERVED_MCP_SERVERS
+        .into_iter()
+        .find(|(reserved, _)| name.eq_ignore_ascii_case(reserved))
+}
 
 /// The fields an [`AgentLaunch`] reads; any other is an unknown key.
 const AGENT_FIELDS: [&str; 3] = ["command", "args", "env"];
-
-/// The fields an [`McpServerLaunch`] reads; any other is an unknown key.
-const MCP_SERVER_FIELDS: [&str; 4] = ["command", "args", "env", "enabled"];
-
-/// The longest MCP server name.
-const MCP_NAME_MAX: usize = 64;
 
 /// A key and its value as a source holds it, before typing.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,12 +196,27 @@ pub(crate) enum Leaf {
     Motion(Motion),
     WebSearch(bool),
     Browser(bool),
+    Connectors(bool),
     Counts(bool),
     CrashReports(bool),
     UpdateMode(UpdateMode),
     Plan(String, Plan),
     Bundle(Option<PathBuf>),
     Registry(Option<String>),
+    SkillsExtra(SkillsExtra),
+    Curated(Vec<String>),
+    AllowScripts(bool),
+    /// The whole `skills.enabled` map: a policy value replaces the user's map, never merges.
+    SkillsEnabled(BTreeMap<String, String>),
+    SandboxRequired(bool),
+    AllowUnprotectedAuto(bool),
+    UpstreamProxy(Option<String>),
+    /// The whole `network.ca_certs` map: a policy value replaces the user's map, never merges.
+    CaCerts(BTreeMap<String, PathBuf>),
+    AllowedDomains(Vec<String>),
+    SiteOverride(bool),
+    ListUpdates(bool),
+    BrowserWhenRdOff(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -153,6 +227,25 @@ pub(crate) enum Leaf {
 /// The agent id in an `agents.<id>` key.
 pub(crate) fn agent_id(key: &str) -> Option<&str> {
     key.strip_prefix("agents.").filter(|id| !id.is_empty())
+}
+
+/// `raws` from `settings.json` without the keys only a policy may set ([`POLICY_ONLY_KEYS`]):
+/// each such value gets a warning where it sits, and is left out before it is typed.
+pub(crate) fn without_policy_only(raws: Vec<Raw>, warnings: &mut Vec<Warning>) -> Vec<Raw> {
+    let (ignored, kept): (Vec<Raw>, Vec<Raw>) = raws
+        .into_iter()
+        .partition(|raw| POLICY_ONLY_KEYS.contains(&raw.key.as_str()));
+    warnings.extend(ignored.into_iter().map(|raw| Warning {
+        kind: WarningKind::InvalidValue {
+            message: format!(
+                "only a policy can set {}, so this value is ignored and admits nothing",
+                raw.key
+            ),
+            key: raw.key,
+        },
+        origin: raw.origin,
+    }));
+    kept
 }
 
 /// Types every raw value of a source, in order, with one rule for every source. A value that
@@ -235,11 +328,32 @@ impl Leaf {
             "ui.motion" => typed_value(key, value).map(Leaf::Motion),
             "tools.web_search" => typed_value(key, value).map(Leaf::WebSearch),
             "tools.browser" => typed_value(key, value).map(Leaf::Browser),
+            "tools.connectors" => typed_value(key, value).map(Leaf::Connectors),
             "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
             "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
             "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
             "install.bundle" => plans::bundle(key, value).map(Leaf::Bundle),
             "install.registry" => plans::registry(key, value).map(Leaf::Registry),
+            "skills.extra" => typed_value(key, value).map(Leaf::SkillsExtra),
+            "skills.curated" => skills::curated(key, value).map(Leaf::Curated),
+            "skills.allow_scripts" => typed_value(key, value).map(Leaf::AllowScripts),
+            "skills.enabled" => skills::enabled(key, value, unknown).map(Leaf::SkillsEnabled),
+            "sandbox.required" => typed_value(key, value).map(Leaf::SandboxRequired),
+            "sandbox.allow_unprotected_auto" => {
+                typed_value(key, value).map(Leaf::AllowUnprotectedAuto)
+            }
+            "network.upstream_proxy" => {
+                network::upstream_proxy(key, value).map(Leaf::UpstreamProxy)
+            }
+            "network.ca_certs" => network::ca_certs(key, value, unknown).map(Leaf::CaCerts),
+            "network.allowed_domains" => {
+                network::allowed_domains(key, value, unknown).map(Leaf::AllowedDomains)
+            }
+            "network.allow_unsafe_site_override" => typed_value(key, value).map(Leaf::SiteOverride),
+            "network.unsafe_site_list_updates" => typed_value(key, value).map(Leaf::ListUpdates),
+            "browser.allow_when_remote_debugging_disabled" => {
+                typed_value(key, value).map(Leaf::BrowserWhenRdOff)
+            }
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -264,12 +378,25 @@ impl Leaf {
             Leaf::Motion(_) => "ui.motion".to_owned(),
             Leaf::WebSearch(_) => "tools.web_search".to_owned(),
             Leaf::Browser(_) => "tools.browser".to_owned(),
+            Leaf::Connectors(_) => "tools.connectors".to_owned(),
             Leaf::Counts(_) => "privacy.counts".to_owned(),
             Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
             Leaf::UpdateMode(_) => "update.mode".to_owned(),
             Leaf::Plan(id, _) => format!("plans.{id}"),
             Leaf::Bundle(_) => "install.bundle".to_owned(),
             Leaf::Registry(_) => "install.registry".to_owned(),
+            Leaf::SkillsExtra(_) => "skills.extra".to_owned(),
+            Leaf::Curated(_) => "skills.curated".to_owned(),
+            Leaf::AllowScripts(_) => "skills.allow_scripts".to_owned(),
+            Leaf::SkillsEnabled(_) => "skills.enabled".to_owned(),
+            Leaf::SandboxRequired(_) => "sandbox.required".to_owned(),
+            Leaf::AllowUnprotectedAuto(_) => "sandbox.allow_unprotected_auto".to_owned(),
+            Leaf::UpstreamProxy(_) => "network.upstream_proxy".to_owned(),
+            Leaf::CaCerts(_) => "network.ca_certs".to_owned(),
+            Leaf::AllowedDomains(_) => "network.allowed_domains".to_owned(),
+            Leaf::SiteOverride(_) => "network.allow_unsafe_site_override".to_owned(),
+            Leaf::ListUpdates(_) => "network.unsafe_site_list_updates".to_owned(),
+            Leaf::BrowserWhenRdOff(_) => "browser.allow_when_remote_debugging_disabled".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -304,6 +431,7 @@ impl Leaf {
             Leaf::Motion(motion) => settings.ui.motion = motion,
             Leaf::WebSearch(on) => settings.tools.web_search = on,
             Leaf::Browser(on) => settings.tools.browser = on,
+            Leaf::Connectors(on) => settings.tools.connectors = on,
             Leaf::Counts(on) => settings.privacy.counts = on,
             Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
             Leaf::UpdateMode(mode) => settings.update.mode = mode,
@@ -312,6 +440,20 @@ impl Leaf {
             }
             Leaf::Bundle(path) => settings.install.bundle = path,
             Leaf::Registry(url) => settings.install.registry = url,
+            Leaf::SkillsExtra(extra) => settings.skills.extra = extra,
+            Leaf::Curated(ids) => settings.skills.curated = ids,
+            Leaf::AllowScripts(on) => settings.skills.allow_scripts = on,
+            Leaf::SkillsEnabled(packs) => settings.skills.enabled = packs,
+            Leaf::SandboxRequired(on) => settings.sandbox.required = on,
+            Leaf::AllowUnprotectedAuto(on) => settings.sandbox.allow_unprotected_auto = on,
+            Leaf::UpstreamProxy(url) => settings.network.upstream_proxy = url,
+            Leaf::CaCerts(certs) => settings.network.ca_certs = certs,
+            Leaf::AllowedDomains(hosts) => settings.network.allowed_domains = hosts,
+            Leaf::SiteOverride(on) => settings.network.allow_unsafe_site_override = on,
+            Leaf::ListUpdates(on) => settings.network.unsafe_site_list_updates = on,
+            Leaf::BrowserWhenRdOff(on) => {
+                settings.browser.allow_when_remote_debugging_disabled = on;
+            }
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
@@ -354,76 +496,38 @@ fn agent(
     }
 }
 
-/// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
-/// list empty). Inside it, an entry with a bad name, the reserved name [`RESERVED_MCP_SERVER`], a
-/// value that does not type or a relative `command` is left out with a warning in `dropped`, and
-/// the other entries load.
-fn mcp_servers(
-    key: &str,
-    value: Value,
-    dropped: &mut Vec<WarningKind>,
-) -> Result<BTreeMap<String, McpServerLaunch>, WarningKind> {
-    let Value::Object(entries) = value else {
-        return Err(WarningKind::InvalidValue {
-            key: key.to_owned(),
-            message: "it must be an object from server name to server".to_owned(),
-        });
-    };
-    let mut servers = BTreeMap::new();
-    for (name, entry) in entries {
-        let entry_key = format!("{key}.{name}");
-        if !mcp_name_ok(&name) {
-            dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!("a server name is 1 to {MCP_NAME_MAX} letters, digits, _ or -"),
-            });
-            continue;
-        }
-        if name.eq_ignore_ascii_case(RESERVED_MCP_SERVER) {
-            dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!(
-                    "the server name {RESERVED_MCP_SERVER} is reserved for Clauseo's own browser"
-                ),
-            });
-            continue;
-        }
-        if let Value::Object(fields) = &entry {
-            dropped.extend(
-                fields
-                    .keys()
-                    .filter(|field| !MCP_SERVER_FIELDS.contains(&field.as_str()))
-                    .map(|field| WarningKind::UnknownKey {
-                        key: format!("{entry_key}.{field}"),
-                    }),
-            );
-        }
-        match typed_value::<McpServerLaunch>(&entry_key, entry) {
-            Ok(server) if Path::new(&server.command).is_absolute() => {
-                servers.insert(name, server);
-            }
-            Ok(server) => dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!("{} is not an absolute path", server.command),
-            }),
-            Err(kind) => dropped.push(kind),
-        }
-    }
-    Ok(servers)
-}
-
-/// Whether `name` is 1 to [`MCP_NAME_MAX`] ASCII letters, digits, `_` or `-`.
-fn mcp_name_ok(name: &str) -> bool {
-    (1..=MCP_NAME_MAX).contains(&name.len())
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-}
-
-/// Reads a JSON value as `T`, naming the key when it cannot.
+/// Reads a JSON value as `T`, naming the key when it cannot. The warning names the value's
+/// type and what was expected, never the value: serde's `invalid type: string "yes", expected a
+/// boolean` becomes `invalid type: string, expected a boolean`, since a value can hold a path or
+/// an address (0047).
 fn typed_value<T: DeserializeOwned>(key: &str, value: Value) -> Result<T, WarningKind> {
     serde_json::from_value(value).map_err(|error| WarningKind::InvalidValue {
         key: key.to_owned(),
-        message: error.to_string(),
+        message: without_value(&error.to_string()),
     })
+}
+
+/// serde's message with each value it quotes before its last `, expected ` left out: a
+/// `` `...` `` or `"..."` and the space before it. The expected part names only types, variants
+/// and fields, so it stays; a message with no `, expected ` (`missing field ...`) stays whole.
+fn without_value(message: &str) -> String {
+    let Some((found, expected)) = message.rsplit_once(", expected ") else {
+        return message.to_owned();
+    };
+    let mut kept = String::with_capacity(found.len());
+    let mut quote = None;
+    for c in found.chars() {
+        match quote {
+            Some(open) if c == open => quote = None,
+            Some(_) => {}
+            None if c == '`' || c == '"' => {
+                quote = Some(c);
+                if kept.ends_with(' ') {
+                    kept.pop();
+                }
+            }
+            None => kept.push(c),
+        }
+    }
+    format!("{kept}, expected {expected}")
 }

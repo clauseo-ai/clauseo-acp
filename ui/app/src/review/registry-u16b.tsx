@@ -66,7 +66,9 @@ export const U16B: Entry[] = [
   entry("RO-03", w("Next back {when}"), () => <RoomTriage />),
   // the shelf open: each row's time, Joshi v. Joshi snoozed whole, Wake now, and behind the info icon why sooner
   entry("RO-04", wl("Back sooner if Clauseo needs you or an answer finishes."), () => (
-    <RoomTriage acts={[...SHELF, { hover: '[data-testid="rail-shelf"] .room-fold-info button' }]} />
+    <RoomTriage
+      acts={[...SHELF, { hover: '[data-testid="rail-shelf"] .room-fold-head .room-info' }]}
+    />
   )),
   entry("RO-05", wl("Until {when}"), () => <RoomTriage acts={SHELF} />),
   entry("RO-06", wl("Whole matter"), () => <RoomTriage acts={SHELF} />),
@@ -101,7 +103,9 @@ export const U16B: Entry[] = [
     "RO-17",
     wl("Conversations you've read, with nothing waiting, move here each morning."),
     () => (
-      <RoomTriage acts={[...FOLD, { hover: '[data-testid="done-fold"] .room-fold-info button' }]} />
+      <RoomTriage
+        acts={[...FOLD, { hover: '[data-testid="done-fold"] .room-fold-head .room-info' }]}
+      />
     ),
   ),
   // a time tomorrow, in the line and on the shelf

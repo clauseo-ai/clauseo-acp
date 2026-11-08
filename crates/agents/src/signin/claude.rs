@@ -35,7 +35,7 @@ use crate::signin::env::{RunKind, Shim};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
 use crate::signin::shim::UrlFile;
-use crate::signin::{PasteCode, SigninCode, SigninState, Source};
+use crate::signin::{PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
 use crate::status::{ClaudeStatus, Identity, claude_signed_in, parse_claude_status};
 
 /// The time between status polls during a login.
@@ -146,16 +146,40 @@ pub(crate) async fn sign_in<T: Timer + Send + Sync>(
             Either::Right((Either::Right((never, _)), _)) => match never {},
         }
     };
+    // The log's steps: how the login ended, then whether the status confirmed it.
+    match &first {
+        First::Ran(Ok(Ran {
+            ended: Ended::Exited(code),
+            ..
+        })) => job.note(SigninNote::LoginExited { code: *code }),
+        First::Ran(Err(_)) => job.note(SigninNote::LoginExited { code: None }),
+        First::Ran(Ok(_)) | First::Confirmed(_) => {}
+    }
+    let confirmed = |identity| {
+        job.note(SigninNote::StatusConfirmed);
+        signed_in(job, identity)
+    };
     let last = match first {
-        First::Confirmed(identity) => signed_in(job, identity),
+        First::Confirmed(identity) => confirmed(identity),
         First::Ran(Err(_)) => job.failed(SigninCode::Failed),
         First::Ran(Ok(ran)) => match ran.ended {
             Ended::Cancelled => job.failed(SigninCode::Cancelled),
             Ended::TimedOut => job.failed(SigninCode::LinkExpired),
             Ended::Exited(Some(0)) => match status(job, cancel).await {
-                Some(Some(identity)) => signed_in(job, identity),
-                _ if cancel.is_cancelled() => job.failed(SigninCode::Cancelled),
-                _ => job.failed(SigninCode::Failed),
+                Some(Some(identity)) => confirmed(identity),
+                said => {
+                    let reason = if said.is_some() {
+                        Unconfirmed::SignedOut
+                    } else {
+                        Unconfirmed::NoAnswer
+                    };
+                    job.note(SigninNote::StatusNotConfirmed { reason });
+                    if cancel.is_cancelled() {
+                        job.failed(SigninCode::Cancelled)
+                    } else {
+                        job.failed(SigninCode::Failed)
+                    }
+                }
             },
             Ended::Exited(_) if denied.load(Ordering::SeqCst) => job.failed(SigninCode::Cancelled),
             Ended::Exited(_) => job.failed(SigninCode::Failed),

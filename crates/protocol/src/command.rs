@@ -16,20 +16,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
-    ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Timestamp,
-    Title, ToolsPatch, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
+    CommandId, Date, Delivery, ElicitationId, ElicitationResponse, FieldChange, FileDecision,
+    FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock,
+    RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
 use crate::{InstallWhen, UpdateMode};
 
+mod connectors;
+mod outcome;
 mod validate;
 
+pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
+pub use outcome::CommandOutcome;
 pub use validate::{
-    MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES, MAX_PATH_LIST_BYTES,
-    MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, ValidatedCommand,
+    MAX_ALLOWED_HOST_BYTES, MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES,
+    MAX_PATH_LIST_BYTES, MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES,
+    ValidatedCommand,
 };
 
 /// Most turns queued in one thread. A `SendPrompt` that would queue one more is refused with
@@ -191,7 +196,9 @@ pub enum HostCommand {
         next_date: Option<Date>,
     },
     /// Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
-    /// `next_date`), a value sets it. A command that changes nothing answers `Done` too.
+    /// `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
+    /// for `skill_packs` means no pack for the matter). A command that changes nothing answers
+    /// `Done` too.
     UpdateMatter {
         /// The matter.
         matter: MatterId,
@@ -203,6 +210,10 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
         #[cfg_attr(feature = "specta", specta(type = Option<Option<Date>>))]
         next_date: FieldChange<Date>,
+        /// The skill packs the matter may load, from those turned on (decision record 0040).
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<PackList>>))]
+        skill_packs: FieldChange<PackList>,
         /// Whether it is pinned to the top of the rail.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<bool>,
@@ -224,9 +235,10 @@ pub enum HostCommand {
     /// host accepts the folder only when its `.clauseo/matter.json` names this matter, then
     /// stores it as the matter's folder and logs `matter_relocated`; it answers `Done`.
     /// Refused while a turn or an undo holds the matter's writer (`matter.turn_running`); a
-    /// folder with no marker, an unreadable one or one naming another matter is
-    /// `matter.folder_missing`; a folder import would refuse, or one that is, holds or sits
-    /// inside another matter's folder, is `matter.folder_refused`. A refusal changes nothing.
+    /// folder that is not there is `matter.folder_missing`; one with no marker, an unreadable one
+    /// or one naming another matter is `matter.folder_not_a_matter`; a folder import would
+    /// refuse, or one that is, holds or sits inside another matter's folder, is
+    /// `matter.folder_refused`. A refusal changes nothing.
     RelocateMatter {
         /// The matter.
         matter: MatterId,
@@ -425,6 +437,22 @@ pub enum HostCommand {
         /// The switches to change.
         patch: ToolsPatch,
     },
+    /// Turn the skill pack `id` on or off (decision record 0040); answers `Done`, and every
+    /// app subscriber gets `HostEvent::SettingsChanged` when `skills.enabled` changed. On:
+    /// the pack must be admitted by `skills.extra` (and `skills.curated`), then it is read and
+    /// hashed off the host thread and its hash recorded. Refused with `settings.locked` when
+    /// the firm's policy locks `skills.enabled` or decides the pack is not admitted, and with
+    /// `settings.refused` when the lawyer's own `skills.extra` does not admit it, or the pack
+    /// is missing, invalid or changed while it was read; `ListSkillPacks` gives the reason.
+    /// Off: removes its entry, refused only while `skills.enabled` is locked. Nothing changes
+    /// on a refusal, and its message names no pack text but the id. Only the settings
+    /// window sends it.
+    SetSkillPack {
+        /// The pack.
+        id: PackId,
+        /// Whether to turn it on.
+        on: bool,
+    },
     /// Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
     /// and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
     /// firm's policy sets is refused whole with `settings.locked`; nothing changes. Before the
@@ -506,44 +534,46 @@ pub enum HostCommand {
         /// The new mode.
         mode: UpdateMode,
     },
-}
-
-/// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
-/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
-/// `InstallBrowser`, `CancelBrowserInstall` and the four update commands answer `Done`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum CommandOutcome {
-    /// Done; nothing new to name.
-    Done,
-    /// The matter was made.
-    MatterCreated {
-        /// The new matter.
-        matter: MatterId,
+    /// The data connectors and the case-law hint (R24, `command/connectors.rs`). None stores a
+    /// receipt; each answers `Done`, and the state reaches app subscribers as
+    /// `HostEvent::ConnectorsChanged`. JSON: `{"connector": {"add": {"id": "case-law"}}}`.
+    Connector(ConnectorCommand),
+    /// Try the sandbox's set-up or check again (decision record 0051): the set-up, with its
+    /// administrator prompt, when `ProtectionView::retry_asks_admin`, else a check. Answered
+    /// when it ends: `Done`, `sandbox.setup_refused` or `sandbox.setup_failed`; a second one
+    /// while it runs joins it. Each matter whose protection changes gets
+    /// `HostEvent::ProtectionChanged`. No receipt. `command.invalid` with no sandbox, or while a
+    /// removal runs. JSON: `{"retry_protection": {}}`.
+    RetryProtection {},
+    /// Remove the sandbox's set-up from this computer, after one administrator prompt (decision
+    /// record 0051); each matter then gets `HostEvent::ProtectionChanged`. Answered as
+    /// `RetryProtection` is. No receipt. `command.invalid` with no set-up, or while a set-up
+    /// runs. JSON: `{"remove_sandbox_setup": {}}`.
+    RemoveSandboxSetup {},
+    /// Allow the site a `HostEvent::SiteBlocked` notice named, although the unsafe-site block
+    /// list names it (decision record 0053, PR 2): the exact host the notice named, for the
+    /// notice's matter (`Matter`) or every matter (`Always`). Running agents get it at their
+    /// next request. A `block_id` the host no longer keeps (it keeps each thread's latest 64
+    /// notices) is `blocklist.notice_expired`; while `network.allow_unsafe_site_override` is
+    /// off, `blocklist.override_off`. Answers `Done`, with no receipt. Only the main window
+    /// sends it. JSON: `{"allow_blocked_site": {"block_id": "…", "scope": "matter"}}`.
+    AllowBlockedSite {
+        /// The notice's id.
+        block_id: BlockedSiteId,
+        /// How far the allow reaches.
+        scope: AllowScope,
     },
-    /// The thread was made.
-    ThreadCreated {
-        /// The new thread.
-        thread: ThreadId,
-    },
-    /// The prompt was taken (queued, sent now or steered).
-    PromptAccepted {
-        /// The turn that answers it (for a steer, until a `SteerResolved` says otherwise).
-        turn: TurnId,
-        /// The prompt's message.
-        message: MessageId,
-    },
-    /// The step was undone.
-    StepUndone {
-        /// The checkpoint the undo wrote.
-        checkpoint: CheckpointId,
-    },
-    /// The version was restored.
-    VersionRestored {
-        /// The checkpoint the restore wrote.
-        checkpoint: CheckpointId,
+    /// Take an allow back: the block list refuses `host` again at the next request. `matter`
+    /// names the matter of a `Matter` allow and is left out for `Always`. Taking back an allow
+    /// that is not there does nothing. Answers `Done`, with no receipt; allowed whatever the
+    /// policy says. The main and settings windows send it.
+    RevokeAllowedSite {
+        /// The host, exactly as `HostQuery::AllowedSites` lists it.
+        host: String,
+        /// The allow's scope.
+        scope: AllowScope,
+        /// The allow's matter, for `Matter`; left out for `Always`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        matter: Option<MatterId>,
     },
 }

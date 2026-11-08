@@ -948,10 +948,20 @@ dependencies = [
  "sha2 0.10.9",
  "tar",
  "thiserror 2.0.21",
+ "tracing",
  "ureq",
  "windows",
  "zeroize",
  "zip",
+]
+
+[[package]]
+name = "clauseo-blocklist"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "minisign-verify",
+ "serde",
 ]
 
 [[package]]
@@ -1011,6 +1021,10 @@ name = "clauseo-desktop"
 version = "0.0.0"
 dependencies = [
  "async-io",
+ "base64 0.22.1",
+ "clauseo-agents",
+ "clauseo-blocklist",
+ "clauseo-connectors",
  "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
@@ -1018,19 +1032,24 @@ dependencies = [
  "clauseo-process",
  "clauseo-profile",
  "clauseo-protocol",
+ "clauseo-sandbox",
  "clauseo-settings",
  "dunce",
  "flate2",
  "futures",
  "libc",
  "memchr",
+ "minisign-verify",
+ "nix",
  "objc2-core-foundation",
  "reqwest",
  "rfd",
+ "ring",
  "rustls",
  "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "specta",
  "specta-typescript",
  "tauri",
@@ -1045,11 +1064,15 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-runtime",
  "tauri-specta",
+ "tempfile",
+ "tokio",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "windows",
+ "zeroize",
 ]
 
 [[package]]
@@ -1069,6 +1092,8 @@ dependencies = [
  "async-channel",
  "async-io",
  "clauseo-acp",
+ "clauseo-blocklist",
+ "clauseo-connectors",
  "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
@@ -1087,18 +1112,23 @@ dependencies = [
  "flate2",
  "futures",
  "getrandom 0.3.4",
+ "nix",
  "proptest",
  "quick-xml",
  "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
+ "socket2",
  "thiserror 2.0.21",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
+ "url",
  "uuid",
  "windows",
+ "zeroize",
 ]
 
 [[package]]
@@ -1117,6 +1147,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -1142,6 +1173,10 @@ dependencies = [
 name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
+ "clauseo-mcp",
+ "libc",
+ "nix",
+ "serde",
  "serde_json",
  "windows",
 ]
@@ -1175,10 +1210,12 @@ dependencies = [
  "dunce",
  "futures",
  "insta",
+ "rustix",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "tracing",
+ "windows",
 ]
 
 [[package]]
@@ -1233,21 +1270,27 @@ dependencies = [
  "base64 0.22.1",
  "blocking",
  "caseless",
+ "clauseo-blocklist",
  "clauseo-fake_agent",
  "clauseo-process",
  "clauseo-protocol",
  "dunce",
+ "embed-resource",
  "futures",
  "getrandom 0.3.4",
  "httparse",
  "insta",
+ "minisign-verify",
  "nix",
  "objc2-cf-network",
  "objc2-core-foundation",
  "psl",
+ "ring",
  "rustix",
+ "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "socket2",
  "subtle",
  "thiserror 2.0.21",
@@ -1255,6 +1298,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "windows",
+ "zeroize",
 ]
 
 [[package]]
@@ -1271,6 +1315,7 @@ name = "clauseo-settings"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "nix",
  "objc2-core-foundation",
  "plist",
  "schemars 1.2.3",
@@ -1278,6 +1323,9 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-normalization",
  "windows",
 ]
 
@@ -4283,6 +4331,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -7124,6 +7173,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "windows-sys 0.61.2",
 ]

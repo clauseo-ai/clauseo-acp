@@ -153,6 +153,7 @@ async fn answer(client: &AcpClient, event: &AcpEvent) {
 fn new_session() -> NewSession {
     NewSession {
         cwd: PathBuf::from("/matters/fuzz"),
+        additional_directories: Vec::new(),
         mcp_servers: Vec::new(),
         meta: None,
     }
@@ -200,6 +201,7 @@ fuzz_target!(|data: &[u8]| {
                     .load_session(LoadSession {
                         session: start.session,
                         cwd: PathBuf::from("/matters/fuzz"),
+                        additional_directories: Vec::new(),
                         mcp_servers: Vec::new(),
                         meta: None,
                     })

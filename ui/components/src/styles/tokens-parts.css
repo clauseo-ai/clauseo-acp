@@ -237,7 +237,7 @@
   --view-h: 100vh;
   --view-dh: 100dvh; /* the visible height, under a phone's own bars */
   /* the window and its columns */
-  --rail-w: clamp(200px, 15vw, 224px); /* the rail */
+  --rail-w: clamp(240px, 18vw, 264px); /* the rail */
   --pane-w: clamp(352px, 28vw, 416px); /* the wall */
   --pane-w-mid: 400px; /* the wall at 1000 to 1199 px */
   --thread-pad-mid: 36px; /* the work's sides at 1000 to 1199 px */

@@ -169,6 +169,11 @@
     padding: 0 0 0 var(--s0-5);
     height: calc(var(--lh-field) * var(--k));
     margin: 0;
+    /* the row gives the field its width (flex: 1 from a basis of 0), so this width changes nothing drawn. It lets
+       WebKit stop a keystroke's layout at the field, which it does for a clipping box of set width and height, but
+       never for a text field that is a flex item: without it each key laid out the whole page and the window's grid
+       repainted the room's centre whole, its shadow too (#117, WKWebView trace) */
+    width: 0;
   }
   /* with no Add papers before it, the words stand clear of the well's rounded edge: 6 px of the well and 10 here,
      the corner's own 16 */

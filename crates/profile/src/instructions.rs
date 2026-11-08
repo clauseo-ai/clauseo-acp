@@ -10,6 +10,28 @@ pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 /// `{matter_notes}`, which the host fills per session.
 pub const LEGAL: &str = include_str!("../assets/instructions/legal.md");
 
+/// The connectors paragraph (R24): what a session with the `case-law` entry is told about the
+/// case-law tools. At most 80 words. The host puts it in place of `{connectors}` through
+/// [`connectors_part`].
+pub const CONNECTORS: &str = include_str!("../assets/instructions/connectors.txt");
+
+/// What a session without the `case-law` entry is told instead: it has no case-law database.
+pub const CONNECTORS_NONE: &str = include_str!("../assets/instructions/connectors-none.txt");
+
+/// The most words [`CONNECTORS`] may hold.
+pub const CONNECTORS_MAX_WORDS: usize = 80;
+
+/// What the host fills `{connectors}` with: a blank line and [`CONNECTORS`] in a session that
+/// got the `case-law` entry (`with_case_law`), else a blank line and [`CONNECTORS_NONE`]. Only
+/// this part says whether the session has a case-law database, so the two never meet.
+pub fn connectors_part(with_case_law: bool) -> &'static str {
+    static WITH: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!("\n\n{}", CONNECTORS.trim()));
+    static WITHOUT: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!("\n\n{}", CONNECTORS_NONE.trim()));
+    if with_case_law { &WITH } else { &WITHOUT }
+}
+
 /// The token the profile fills with the author's name.
 pub const AUTHOR: &str = "{author}";
 
@@ -31,9 +53,18 @@ impl Instructions {
         Self { parts: vec![TOOLS] }
     }
 
-    /// The launch instructions: the tools part, then R22's legal part.
+    /// The launch instructions: the tools part, `{connectors}` (R24), then R22's legal part.
     pub fn launch() -> Self {
-        Self::tools().with_part(LEGAL)
+        Self::tools().with_connectors().with_part(LEGAL)
+    }
+
+    /// These parts with `{connectors}` after them, joined with no separator: the host fills
+    /// it with a blank line and the paragraph, or with the sentence that says there is no
+    /// case-law database ([`connectors_part`]).
+    #[must_use]
+    pub fn with_connectors(mut self) -> Self {
+        self.parts.push(crate::placeholders::CONNECTORS);
+        self
     }
 
     /// These parts with `part` after them (R22: the legal part).
@@ -43,15 +74,18 @@ impl Instructions {
         self
     }
 
-    /// The parts, each trimmed, joined by one blank line, with `{author}` filled by
-    /// [`author_name`]`(author)`. `{work_folder}` and `{matter_notes}` stay for the host.
+    /// The parts, each trimmed, joined by one blank line (`{connectors}` by none), with
+    /// `{author}` filled by [`author_name`]`(author)`. `{work_folder}`, `{matter_notes}` and
+    /// `{connectors}` stay for the host.
     pub fn compose(&self, author: &str) -> String {
-        let text = self
-            .parts
-            .iter()
-            .map(|part| part.trim())
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let mut text = String::new();
+        for part in &self.parts {
+            let part = part.trim();
+            if !text.is_empty() && part != crate::placeholders::CONNECTORS {
+                text.push_str("\n\n");
+            }
+            text.push_str(part);
+        }
         let author = author_name(author);
         crate::placeholders::fill(&text, &[AUTHOR], &[(AUTHOR, &author)]).unwrap_or(text)
     }

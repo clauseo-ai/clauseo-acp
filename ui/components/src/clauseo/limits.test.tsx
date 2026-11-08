@@ -88,6 +88,8 @@ describe("the limit's note", () => {
     expect(txt(limit?.querySelector(".lim-word"))).toContain("Waiting for you");
     // the line follows the actions unless it's a confirmation
     expect(limit?.querySelector(".lim-note-go")?.lastElementChild?.className).toBe("lim-note-line");
+    // said as it comes: a refused press's words land there
+    expect(limit?.querySelector(".lim-note-line")?.getAttribute("role")).toBe("status");
     expect(txt(limit?.querySelector(".lim-note-other"))).toContain("Ask ChatGPT instead");
     // a note with nothing to do draws no action row
     expect(choice?.querySelector(".lim-note-go")).toBeNull();
@@ -103,6 +105,18 @@ describe("the limit's note", () => {
     );
     expect(document.querySelector(".lim-field-note .lim-field-icon")).not.toBeNull();
     expect(document.querySelector(".lim-field-rest")).toBeNull();
+    expect(document.querySelector(".lim-field-end")).toBeNull();
+    await act(async () =>
+      root?.render(
+        <FieldNotice lead="Out of case-law credits." end={<button type="button">x</button>} />,
+      ),
+    );
+    expect(document.querySelector(".lim-field-note > .lim-field-end > button")).not.toBeNull();
+    // the action follows the last sentence, inside it
+    await act(async () =>
+      root?.render(<FieldNotice lead="Out." rest="Add more." action={<a href="#c">Add</a>} />),
+    );
+    expect(document.querySelector(".lim-field-rest > a")?.textContent).toBe("Add");
   });
 
   test("a day's line, a way on, and the band across the work say what they're given", async () => {

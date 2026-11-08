@@ -6,8 +6,8 @@
 //! (`Index::unstarted`), so marking one never walks the transcript.
 
 use clauseo_protocol::{
-    AgentCapabilities, AgentId, AgentKind, EntryId, QueuedPromptEdited, SteerOutcome,
-    SteerResolved, Timestamp, ToolCallStatus, TurnId, UserMessageStatus, ViewEntry,
+    AgentCapabilities, AgentId, AgentKind, EntryId, QueueHoldReason, QueuedPromptEdited,
+    SteerOutcome, SteerResolved, Timestamp, ToolCallStatus, TurnId, UserMessageStatus, ViewEntry,
 };
 
 use super::{set, set_vec, update_header};
@@ -49,13 +49,31 @@ pub(super) fn mark_prompt(
     status: UserMessageStatus,
     out: &mut Applied,
 ) {
+    mark(state, turn, status, false, out);
+}
+
+/// `turn` was put back at the head of its thread's queue (an `at_head` `TurnQueued`): its
+/// prompt shows `Queued` and `at_head`, with one `Upsert` when either changed.
+pub(super) fn mark_put_back(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    mark(state, turn, UserMessageStatus::Queued, true, out);
+}
+
+/// Sets the status of `turn`'s unstarted prompt, and its `at_head` when `at_head` is true.
+fn mark(
+    state: &mut ThreadState,
+    turn: TurnId,
+    status: UserMessageStatus,
+    at_head: bool,
+    out: &mut Applied,
+) {
     let Some(order) = state.index.unstarted(turn) else {
         return;
     };
-    if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order)
-        && set(&mut prompt.status, status)
-    {
-        push_user_upsert(&mut out.changes, prompt);
+    if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order) {
+        let changed = set(&mut prompt.status, status) | (at_head && set(&mut prompt.at_head, true));
+        if changed {
+            push_user_upsert(&mut out.changes, prompt);
+        }
     }
 }
 
@@ -192,11 +210,16 @@ pub(super) fn final_time(status: ToolCallStatus, ts: Timestamp) -> Option<Timest
     is_final(status).then_some(ts)
 }
 
-/// `queue_held` as the host sets it (the fold never does: the host keeps the flag in memory
-/// and logs nothing for it). Returns the header's `Upsert` when it changed.
-pub(crate) fn set_queue_held(state: &mut ThreadState, held: bool) -> Option<ViewChange> {
+/// `queue_held` and its reason as the host sets them (the fold never does: the host keeps them
+/// in memory and logs nothing for them). Returns the header's `Upsert` when either changed.
+pub(crate) fn set_queue_held(
+    state: &mut ThreadState,
+    hold: Option<QueueHoldReason>,
+) -> Option<ViewChange> {
     let header = state.header.as_mut()?;
-    if !set(&mut header.queue_held, held) {
+    let held = set(&mut header.queue_held, hold.is_some());
+    let reason = set(&mut header.queue_held_reason, hold);
+    if !(held || reason) {
         return None;
     }
     Some(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(

@@ -3,6 +3,7 @@
 import type { Lang } from "../lib/display.ts";
 import { isolate } from "../lib/bidi.ts";
 import { mt } from "../lib/words-matters.ts";
+import { ERROR_WORDS, errorWords } from "../lib/words-errors.ts";
 
 const EN_MONTHS = [
   "january",
@@ -74,7 +75,8 @@ export function nextDateError(lang: Lang, text: string): string | null {
  * folder's display ("Documents/Acme", "C:\\"), isolated in the line, and for matter.folder_is_matter the name of the
  * matter that has the folder, when the matters list has it. matter.folder_refused, which doesn't say why, takes a line
  * true of every reason the host gives it: a folder already a matter, an unreadable matter file, the matters' own
- * folder, a drive, the home folder, a system folder. H5's codes each say their reason. */
+ * folder, a drive, the home folder, a system folder. H5's codes each say their reason; any other matter.folder_ code
+ * words-errors has a line for gives that line, in the language; every other code gives the generic line. */
 export function createErrorLine(
   lang: Lang,
   code: string,
@@ -122,6 +124,9 @@ export function createErrorLine(
         mt(lang, "It may be locked, or on a drive that's no longer connected."),
       );
     default:
-      return mt(lang, "Clauseo couldn't create the matter. Try again, or choose another folder.");
+      // a folder refusal with its own line in words-errors says the host's reason; anything else gives the generic line
+      return code.startsWith("matter.folder_") && Object.hasOwn(ERROR_WORDS, code)
+        ? errorWords(lang, code)
+        : mt(lang, "Clauseo couldn't create the matter. Try again, or choose another folder.");
   }
 }

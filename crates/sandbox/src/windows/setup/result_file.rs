@@ -1,0 +1,266 @@
+//! `<data_dir>\sandbox\setup-result.json` (S15 `PR4h`, D-B4): what the setup exe tells the app
+//! after `--set-up` or `--reclaim`, since `ShellExecuteExW` gives it no output, only an exit
+//! code. `{ exit, step, cause }`: the exit code again, and for a failure the step and the
+//! cause in words firm IT can act on. The exe writes it as the owner (`Owner::run_as`), so the
+//! file and its DACL are the owner's; `UserSetup` removes it before each run and reads it after.
+//!
+//! [`outcome`] turns the exit code and the file into what `SandboxSetup::run` returns. Pure
+//! apart from the file's read and write: tested on every OS.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use super::outcome::{DATA_DIR_NOT_OWNED, SetupExit, SetupFailure, SetupReport};
+use crate::windows::matters::SANDBOX_DIR;
+use crate::windows::write;
+use crate::{Blocked, SetupError, SetupState};
+
+/// The file's name, in `<data_dir>\sandbox\`.
+pub const RESULT_FILE: &str = "setup-result.json";
+
+/// What one run of the exe ended with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupResult {
+    /// The exit code ([`SetupExit::as_code`]).
+    pub exit: u8,
+    /// Where it failed ([`Step`](super::Step)'s words); none when it didn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    /// Why; none when it didn't fail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    /// The setting that blocked it, when one did (D-B4): what `UserSetup::state` reports until
+    /// a later set-up succeeds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<Blocked>,
+    /// For `--reclaim`, how many items it gave the owner (S15 `PR4i`): the app hands back
+    /// what was taken even when the clean-up failed partway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken: Option<u64>,
+    /// The failure's Windows error code, when it had one (`--adopt`'s, `explain::Code`).
+    /// Appended: older readers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<u32>,
+    /// What [`SetupResult::code`] is: `win32` or `hresult`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// When it was written, in seconds since 1970 ([`write`] stamps it), so a result an
+    /// earlier run left isn't read as this run's ([`of_run`]). None in a file an older exe
+    /// wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+}
+
+impl SetupResult {
+    /// The result of a set-up the engine ran.
+    pub fn of(outcome: &Result<SetupReport, SetupFailure>) -> SetupResult {
+        match outcome {
+            Ok(_) => SetupResult {
+                exit: SetupExit::Done.as_code(),
+                step: None,
+                cause: None,
+                blocked: None,
+                taken: None,
+                code: None,
+                kind: None,
+                at: None,
+            },
+            Err(failure) => SetupResult {
+                exit: failure.exit.as_code(),
+                step: Some(failure.step.to_string()),
+                cause: Some(failure.cause.clone()),
+                blocked: failure.blocked(),
+                taken: None,
+                code: None,
+                kind: None,
+                at: None,
+            },
+        }
+    }
+
+    /// A failure before or around the engine: `exit` at `step`, because of `cause`.
+    pub fn failed(exit: SetupExit, step: &str, cause: impl Into<String>) -> SetupResult {
+        SetupResult {
+            exit: exit.as_code(),
+            step: Some(step.to_owned()),
+            cause: Some(cause.into()),
+            blocked: None,
+            taken: None,
+            code: None,
+            kind: None,
+            at: None,
+        }
+    }
+}
+
+/// The file's path under `data_dir`.
+pub fn path(data_dir: &Path) -> PathBuf {
+    data_dir.join(SANDBOX_DIR).join(RESULT_FILE)
+}
+
+/// Seconds since 1970 now; 0 if the clock is before it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the result file's stamp is the wall clock's, read once per write or run"
+)]
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+/// Writes `result`, stamped with the time ([`SetupResult::at`]), atomically, as `marker::write`
+/// writes `setup.json`: the folder made if missing, the old file checked first and the new one
+/// after (`write::check_owned_file`). The exe calls it acting as the owner.
+pub fn write(data_dir: &Path, result: &SetupResult) -> io::Result<()> {
+    let file = path(data_dir);
+    let stamped = SetupResult {
+        at: Some(now_secs()),
+        ..result.clone()
+    };
+    let mut bytes = serde_json::to_vec_pretty(&stamped).map_err(io::Error::other)?;
+    bytes.push(b'\n');
+    if let Some(folder) = file.parent() {
+        write::make_sandbox_dir(folder)?;
+    }
+    write::check_owned_file(&file)?;
+    write::write_atomic(&file, &bytes)?;
+    write::check_owned_file(&file)
+}
+
+/// The most a result file may hold: far more than any result, so a larger one is not one.
+pub const RESULT_CAP: u64 = 64 * 1024;
+
+/// Reads the file through the one handle its checks go through (`write::read_owned_file`):
+/// `Ok(None)` when it is missing; why when it can't be read or parsed, is a link, has a second
+/// hard link, or holds more than [`RESULT_CAP`] bytes.
+#[cfg(any(windows, test))]
+pub fn read(data_dir: &Path) -> Result<Option<SetupResult>, String> {
+    match write::read_owned_file(&path(data_dir), RESULT_CAP) {
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        Ok(None) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// `read`, as [`read`] gave it, kept only when it can be this run's: one stamped before the
+/// run started (`started`, [`now_secs`] then) is an earlier run's, read as none. One with no
+/// stamp, from an older exe, is kept: the app removes the file before each run anyway.
+pub fn of_run(
+    read: Result<Option<SetupResult>, String>,
+    started: u64,
+) -> Result<Option<SetupResult>, String> {
+    read.map(|result| result.filter(|result| result.at.is_none_or(|at| at >= started)))
+}
+
+/// Removes the file, so a run that writes none isn't read as the last one's. Missing is fine.
+#[cfg(any(windows, test))]
+pub fn remove(data_dir: &Path) -> io::Result<()> {
+    write::remove_owned_file(&path(data_dir))
+}
+
+/// What a run of the exe means for the app, from its exit `code` and the result file as
+/// [`read`] gave it after the run (`None` for `--remove`, which writes none). 0 is done,
+/// whatever the file says. Any other code fails; the file's step and cause say why when it
+/// matches the code, else the code's own words do, naming the code.
+pub fn outcome(
+    code: u32,
+    result: Option<&Result<Option<SetupResult>, String>>,
+) -> Result<(), SetupError> {
+    let exit = SetupExit::from_code(code);
+    if exit == Some(SetupExit::Done) {
+        return Ok(());
+    }
+    if let Some(Ok(Some(told))) = result
+        && u32::from(told.exit) == code
+        && let Some(blocked) = told.blocked
+    {
+        return Err(SetupError::Blocked(blocked));
+    }
+    let told = match result {
+        Some(Ok(Some(told))) if u32::from(told.exit) == code => {
+            told.cause.as_ref().map(|cause| match &told.step {
+                Some(step) => format!("{step}: {cause}"),
+                None => cause.clone(),
+            })
+        }
+        _ => None,
+    };
+    let unread = match result {
+        Some(Err(why)) => format!("; its result can't be read ({why})"),
+        Some(Ok(_)) if told.is_none() => "; it left no result".to_owned(),
+        _ => String::new(),
+    };
+    let words = match exit {
+        Some(SetupExit::OtherOwner) => {
+            "another Windows user set Clauseo's protection up on this computer".to_owned()
+        }
+        Some(SetupExit::LockHeld) => "another set-up is running on this computer".to_owned(),
+        Some(SetupExit::DataDirNotOwned) => {
+            return Err(SetupError::Failed(DATA_DIR_NOT_OWNED.to_owned()));
+        }
+        Some(SetupExit::Usage) => {
+            format!("Clauseo's set-up program was started wrongly (exit {code})")
+        }
+        Some(SetupExit::RemovedPartly) => {
+            format!("Clauseo's set-up program removed only part of the protection (exit {code})")
+        }
+        // `--adopt`'s own refusals; the app never runs `--adopt`, so a code from it is a failure.
+        Some(
+            SetupExit::Failed
+            | SetupExit::Done
+            | SetupExit::NotElevated
+            | SetupExit::NotAdminCopy
+            | SetupExit::Downgrade
+            | SetupExit::AdminCopyLeft,
+        )
+        | None => {
+            format!("Clauseo's set-up program failed (exit {code})")
+        }
+    };
+    Err(SetupError::Failed(match told {
+        Some(told) => format!("{words}: {told}"),
+        None => format!("{words}{unread}"),
+    }))
+}
+
+/// The set-up state `UserSetup::state` reports: `state`, read from the marker and record,
+/// unless it is [`SetupState::Needed`] or [`SetupState::Outdated`] and the last result (as
+/// [`read_unchanged`] gave it) says a setting blocked that run; then [`SetupState::Blocked`]. Every
+/// other state comes first, so a stale block never hides a pool another user owns, a removal
+/// that stopped part way, records that can't be read, or a Ready set-up. A later set-up that
+/// succeeds writes a result with no block.
+pub fn state_with(state: SetupState, last: &Result<Option<SetupResult>, String>) -> SetupState {
+    match (state, last) {
+        (
+            SetupState::Needed | SetupState::Outdated { .. },
+            Ok(Some(SetupResult {
+                blocked: Some(blocked),
+                ..
+            })),
+        ) => SetupState::Blocked(*blocked),
+        (state, _) => state,
+    }
+}
+
+/// Reads the file for `state`, which never writes: through one handle opened for reading only,
+/// with nothing repaired (`write::read_owned_file_unchanged`). A file that isn't this user's
+/// alone (its DACL or owner, or on other systems its mode) is ignored, as no result; only
+/// `run`'s [`read`] repairs it. A link or a second hard link is refused, as by [`read`].
+#[cfg(any(windows, test))]
+pub fn read_unchanged(data_dir: &Path) -> Result<Option<SetupResult>, String> {
+    match write::read_owned_file_unchanged(&path(data_dir), RESULT_CAP) {
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        Ok(None) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -274,7 +274,7 @@ fn is_assignment(word: &str) -> bool {
 /// `-c`-style option of `sh`, `bash`, `zsh`, `dash` or `ksh` (`-c`, `-lc`, `-ec`), the arguments
 /// after `-c` or `-Command` of `pwsh` or `powershell`, or the arguments of `eval` (in this
 /// shell). One level only: a script's own scripts are not read.
-pub(super) fn script(words: &[String], escape: Escape) -> Option<(String, Escape)> {
+pub(crate) fn script(words: &[String], escape: Escape) -> Option<(String, Escape)> {
     let (program, args) = command_words(words).split_first()?;
     let name = program
         .rsplit(['/', '\\'])

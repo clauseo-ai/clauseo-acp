@@ -214,6 +214,7 @@ pub(crate) fn thread_facts(actor: &Actor, thread: &ThreadEntry) -> ThreadFacts {
 /// permission of it waits (which the row does not show but the matter's status does).
 pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSummary, bool) {
     let read = read(actor, thread);
+    let hold = super::turn::queue_hold(actor, thread.row.id);
     let summary = ThreadSummary {
         thread: thread.row.id,
         matter: thread.row.matter,
@@ -223,7 +224,8 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
             .or_else(|| thread.row.title.as_deref().map(CompactString::from)),
         agent: thread.row.agent.clone(),
         status: read.status,
-        queue_held: super::turn::queue_held(actor, thread.row.id),
+        queue_held: hold.is_some(),
+        queue_held_reason: hold,
         seen: seen(thread),
         snoozed_until: read.header.and_then(|header| header.snoozed_until),
         done: read.header.is_some_and(|header| header.done),
@@ -270,6 +272,7 @@ fn matter_row(
         last_activity: newest(own, activity),
         client: row.client.clone(),
         next_date: row.next_date,
+        skill_packs: row.skill_packs.clone(),
         pinned: row.pinned,
         last_opened: row.last_opened,
         status: matter_status(facts),
@@ -284,6 +287,9 @@ fn matter_row(
         // As the folder check last answered at the create or an agent launch
         // (`agent/folder_support.rs`): read from memory, never checked here.
         folder_support: actor.folder_supports.get(&row.id).copied(),
+        // The computer's, from the cache (decision record 0051): per-matter causes come later
+        // (R18's switch, PR-E's pool).
+        protection: Some(actor.protection.computer().clone()),
     }
 }
 

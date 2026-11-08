@@ -2,9 +2,10 @@
 // chunk (slot.tsx) sets the hold; the composer reads it (thread/work-composer.tsx): the gate in the field's row while
 // the conversation's plan isn't signed in, the install's working line, and the room's line under the field. Until the
 // chunk sets one there is none, so a lawyer whose plan is signed in sends without waiting for the chunk, and a host
-// with no setup wire (no event ever arrives) never holds a question back.
+// whose setup events have not arrived never holds a question back.
 import { useSyncExternalStore, type ReactNode } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
+import type { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 
 export type Hold = { gate?: ReactNode; working?: WorkingState | null; line?: ReactNode };
 
@@ -42,3 +43,33 @@ export function useHold(transport: object | null): Hold | null {
 /** Whether the transport carries the setup wire (store/setup.ts's SetupSource): only then does the first run load. */
 export const hasSetup = (transport: object): boolean =>
   typeof (transport as { onSetup?: unknown }).onSetup === "function";
+
+/** UD2's expired sign-in card, which the first run's chunk gives as it loads (it holds the setup store and the gate the
+ * card shows), so the thread's chunk, which places it, shares no chunk with the first run's; null before. */
+export type NoticeFrame = typeof NoticeCard;
+export type ExpiredCardProps = {
+  transport: object;
+  agent: string;
+  failedAt: number;
+  /** The note's frame, the thread chunk's NoticeCard: the card's own chunk shares none of the thread's. */
+  frame: NoticeFrame;
+};
+/** Makes the card's element: the component itself stays the first run's. */
+export type ExpiredCardOf = (props: ExpiredCardProps) => ReactNode;
+let expiredCard: ExpiredCardOf | null = null;
+const cardHeard = new Set<() => void>();
+
+export function provideExpiredCard(card: ExpiredCardOf): void {
+  expiredCard = card;
+  for (const heard of cardHeard) heard();
+}
+
+const readCard = () => expiredCard;
+const hearCard = (heard: () => void) => {
+  cardHeard.add(heard);
+  return () => void cardHeard.delete(heard);
+};
+
+/** The card, once the first run's chunk is in. */
+export const useExpiredCard = (): ExpiredCardOf | null =>
+  useSyncExternalStore(hearCard, readCard, readCard);

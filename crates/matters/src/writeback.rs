@@ -246,7 +246,11 @@ pub(crate) fn writable(
 /// Deleting before renaming matters on a case- or normalisation-insensitive file system: undoing
 /// a rename of `Brief.txt` to `brief.txt` deletes `brief.txt`, which is the same file as
 /// `Brief.txt` there; deleting after the rename would remove what was just put back.
-pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error> {
+///
+/// Returns the paths of the deletions made (or found gone already), in `ops`' order: what the
+/// caller's next walk should find missing. A sync client may put one back at once (undo's
+/// `resurrected`).
+pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath>, Error> {
     let mut made = Vec::new();
     let staged = match stage_all(core, folder, ops, &mut made) {
         Ok(staged) => staged,
@@ -260,12 +264,16 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
             return Err(err);
         }
     };
+    let mut deleted = Vec::new();
     for op in ops {
         if let Op::Delete(path) = op {
             let abs = folder.join(path.as_str());
             match write::remove_file(&abs) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+                Ok(()) => deleted.push(path.clone()),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                    deleted.push(path.clone());
+                    continue;
+                }
                 Err(err) => return Err(held_or(folder, path, Error::io("delete", abs, err))),
             }
             let dir = abs.parent().unwrap_or(folder);
@@ -298,7 +306,8 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
     // macOS: the syncs above reach the drive but not past its cache, and the checkpoint's
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
-    fsync::full_flush_dir(folder).map_err(|err| Error::io("sync", folder, err))
+    fsync::full_flush_dir(folder).map_err(|err| Error::io("sync", folder, err))?;
+    Ok(deleted)
 }
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;

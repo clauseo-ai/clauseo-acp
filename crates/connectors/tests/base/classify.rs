@@ -1,9 +1,9 @@
 //! `classify_tool_result` on the MCP fixtures.
 
 use clauseo_connectors::fake::fixture;
-use clauseo_connectors::{
-    CASE_LAW, Origin, ToolOutcome, classify_tool_result, classify_tool_result_for,
-};
+use clauseo_connectors::{CASE_LAW, ToolOutcome, classify_tool_result};
+#[cfg(feature = "staging")]
+use clauseo_connectors::{Origin, classify_tool_result_for};
 use serde_json::{Value, json};
 
 fn load(name: &str) -> Value {
@@ -76,6 +76,7 @@ fn ordinary_results_are_ok_and_other_errors_are_other() {
     );
 }
 
+#[cfg(feature = "staging")]
 #[test]
 fn under_staging_only_the_staging_pay_link_is_kept() {
     let result = load("mcp/insufficient-credits-result.json");

@@ -1,18 +1,19 @@
 // Closing the app as a user would: WM_CLOSE posted straight to its main window. `taskkill` without
 // /F cannot do it on CI: it only closes visible top-level windows, and in session 0 (services,
 // GitHub's runners) no window is visible, so it fails with "can only be terminated forcefully".
-// The window is found by its class, `Tauri Window`, among the top-level windows the app's PID owns.
+// The window is found by its class, `ClauseoMainWindow`, among the top-level windows the app's PID
+// owns.
 
 import { powershellScript } from "./memory.ts";
 
-/** The window class tao gives a Tauri window. */
-export const WINDOW_CLASS = "Tauri Window";
+/** The main window's class, which lib.rs sets (MAIN_WINDOW_CLASS; a Rust test holds them equal). */
+export const WINDOW_CLASS = "ClauseoMainWindow";
 
 /** WM_CLOSE. */
 const WM_CLOSE = 0x0010;
 
 /**
- * The PowerShell that posts WM_CLOSE to every `Tauri Window` top-level window `pid` owns and
+ * The PowerShell that posts WM_CLOSE to every `ClauseoMainWindow` top-level window `pid` owns and
  * prints how many it posted to. A failed PostMessage throws with the Win32 error.
  */
 export function closeScript(pid: number): string {
@@ -56,7 +57,7 @@ export function parsePosted(stdout: string): number {
 
 /**
  * Posts WM_CLOSE to the app's main window. Throws, naming why, if PowerShell fails or `pid` owns
- * no `Tauri Window`.
+ * no `ClauseoMainWindow`.
  */
 export async function closeWindow(pid: number): Promise<void> {
   const posted = parsePosted(await powershellScript(closeScript(pid)));

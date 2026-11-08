@@ -12,7 +12,10 @@ pub trait Files {
 
     /// Replaces the file whole: a reader sees the old bytes or the new ones, never a mix.
     /// Creates the parent folder when it is missing. When `path` is a symlink, the file it
-    /// points to is replaced and the link stays; on Unix the file keeps its permissions.
+    /// points to is replaced and the link stays; on Unix the file keeps its permissions. On
+    /// Unix the parent folder is synced after the rename, so the new name survives a power cut;
+    /// once the rename has happened, a folder that will not sync is logged, not returned, since
+    /// the file is already in place.
     fn write_atomic(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
 }
 
@@ -70,7 +73,18 @@ impl Files for SystemFiles {
             file.sync_all()
         });
         match written.and_then(|()| fs::rename(&temp, path)) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // The file is in place now: a folder that will not sync is logged, not returned,
+                // so the caller never counts a write that landed as a failed one.
+                #[cfg(unix)]
+                {
+                    if let Err(error) = sync_dir(dir) {
+                        let kind = error.kind();
+                        tracing::warn!(?kind, "the folder was not synced after a write");
+                    }
+                }
+                Ok(())
+            }
             Err(error) => {
                 // The write already failed; a temporary file left behind is only litter.
                 drop(fs::remove_file(&temp));
@@ -78,6 +92,20 @@ impl Files for SystemFiles {
             }
         }
     }
+}
+
+/// Makes the rename in `dir` durable: after a power loss a rename the folder never recorded
+/// is lost, and the file with it. Only Unix syncs a folder; Windows needs nothing, so the call
+/// is Unix-only.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    // A bare file name has an empty parent; the working folder is the one to sync.
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    fs::File::open(dir)?.sync_all()
 }
 
 /// The file `path` names after following every symlink, or `path` when it is no symlink. A link

@@ -1,5 +1,6 @@
 //! The filter end to end: the echo stub logs every line it receives, so each test shows both what
-//! the agent got back and what reached the child.
+//! the agent got back and what reached the child. Until a tool call starts the browser, each
+//! request reaches a one-shot echo stub (the guard's lazy start), which logs it the same way.
 
 use serde_json::{Value, json};
 
@@ -12,6 +13,8 @@ struct Session {
     next_id: u64,
     /// Every line the child must have received, in order.
     forwarded: Vec<Value>,
+    /// Whether a tool call started the browser, so the guard sends its close request at the end.
+    started: bool,
 }
 
 impl Session {
@@ -31,6 +34,7 @@ impl Session {
             guard,
             next_id: 0,
             forwarded: Vec::new(),
+            started: false,
         }
     }
 
@@ -63,6 +67,13 @@ impl Session {
         let answer = self.guard.read();
         assert_eq!(answer["result"]["received"], *message, "{answer}");
         self.forwarded.push(message.clone());
+        self.started |= message["method"] == "tools/call";
+    }
+
+    /// Starts the browser (Chrome's stand-in and the echo stub that keeps running) with a call.
+    fn start_browser(&mut self) {
+        let open = self.tool_call(&json!({"url": "https://example.com"}));
+        self.passes(&open);
     }
 
     /// Sends a raw line the guard must answer itself, and returns the answer.
@@ -71,8 +82,8 @@ impl Session {
         self.guard.read()
     }
 
-    /// Closes the agent's side and checks the child got exactly the forwarded lines, then the
-    /// guard's close request, whose reply never reached the agent.
+    /// Closes the agent's side and checks the child got exactly the forwarded lines, then, if the
+    /// browser runs, the guard's close request, whose reply never reached the agent.
     fn finish(self) {
         self.finish_with(Some(0));
     }
@@ -83,11 +94,13 @@ impl Session {
         assert_eq!(status.code(), code);
         assert_eq!(rest, "", "the close reply is swallowed");
         let mut expected = self.forwarded;
-        expected.push(json!({
-            "jsonrpc": "2.0",
-            "id": "clauseo-guard-close",
-            "method": "tools/call",
-            "params": {"name": "agent_browser_close", "arguments": {}},
+        expected.extend(self.started.then(|| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": "clauseo-guard-close",
+                "method": "tools/call",
+                "params": {"name": "agent_browser_close", "arguments": {}},
+            })
         }));
         assert_eq!(self.scratch.received(), expected);
     }
@@ -198,6 +211,8 @@ fn malformed_lines_batches_and_duplicates() {
 #[test]
 fn a_refused_notification_is_dropped_and_an_allowed_one_passes() {
     let mut session = Session::start("filter_notify");
+    // A stopped browser drops notifications, as agent-browser does; a running one gets them.
+    session.start_browser();
     let refused = json!({"jsonrpc": "2.0", "method": "tools/call",
         "params": {"name": "agent_browser_open", "arguments": {"headed": true}}});
     session.guard.send(&refused);
@@ -236,16 +251,31 @@ fn allowed_calls_tools_list_and_initialize_reach_the_child_unchanged() {
     session.finish();
 }
 
+/// Whether the one-shot answering a stopped browser's request exits or the running child does.
 #[test]
 fn when_the_child_exits_first_the_guard_exits_with_its_code() {
-    let mut session = Session::start("filter_child_exits");
-    session
-        .guard
-        .send(&json!({"jsonrpc": "2.0", "id": 1, "method": "stub/exit"}));
-    // stdin stays open: the guard ends because the child did, and sends no close request.
-    assert_eq!(session.guard.read_rest(), "");
-    assert_eq!(session.guard.wait().code(), Some(7));
-    assert_eq!(session.scratch.received().len(), 1);
+    for running in [false, true] {
+        let mut session = Session::start(&format!("filter_child_exits_{running}"));
+        if running {
+            session.start_browser();
+        }
+        let exit = json!({"jsonrpc": "2.0", "id": "x", "method": "stub/exit"});
+        session.guard.send(&exit);
+        // stdin stays open: the guard ends because the child did, and sends no close request.
+        // The running child left the call in flight, which the guard answers with an error.
+        let rest = session.guard.read_rest();
+        if running {
+            let answer: Value = serde_json::from_str(rest.trim_end()).unwrap();
+            assert_eq!(answer["id"], "x", "{rest}");
+            assert_eq!(answer["error"]["code"], -32603, "{rest}");
+        } else {
+            assert_eq!(rest, "");
+        }
+        assert_eq!(session.guard.wait().code(), Some(7), "running: {running}");
+        let received = session.scratch.received();
+        assert_eq!(received.last(), Some(&exit), "running: {running}");
+        assert_eq!(received.len(), 1 + usize::from(running));
+    }
 }
 
 #[test]
@@ -302,7 +332,7 @@ fn the_review_rules_end_to_end() {
 #[test]
 fn an_unanswered_close_request_times_out_and_the_guard_still_exits() {
     let mut session = Session::start_with("filter_close_timeout", &["ignore-close"]);
-    session.passes(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    session.start_browser();
     // Without the close wait's limit the guard would never close the stub's stdin, and the stub
     // would never exit; nextest's slow-timeout would end the test.
     session.finish();
@@ -311,7 +341,7 @@ fn an_unanswered_close_request_times_out_and_the_guard_still_exits() {
 #[test]
 fn a_child_that_outlives_its_stdin_is_killed() {
     let mut session = Session::start_with("filter_exit_timeout", &["hang"]);
-    session.passes(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    session.start_browser();
     session.guard.close_stdin();
     assert_eq!(
         session.guard.read_rest(),

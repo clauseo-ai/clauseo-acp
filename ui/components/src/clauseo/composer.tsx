@@ -229,7 +229,7 @@ export function Composer<V extends string = string>({
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | null>(null);
   // fits the field to its words; `grow` after an input event, when words only put in can only keep or grow it
-  const fitRef = useRef<(grow?: boolean) => void>(() => {});
+  const fitRef = useRef<(grow?: boolean, kind?: string) => void>(() => {});
   // the words as the field was last fitted to them
   const fitted = useRef(initial);
   // the menu's chunk is asked for as the field is first focused with commands to list, with what the field held
@@ -282,17 +282,19 @@ export function Composer<V extends string = string>({
     };
     // a whole fit once typing pauses, after fits that only grew the field
     let settle: ReturnType<typeof setTimeout> | undefined;
-    const fit = (grow = false) => {
+    const fit = (grow = false, kind = "") => {
       clearTimeout(settle);
       settle = undefined;
       const was = fitted.current;
-      fitted.current = a.value;
+      // macOS commits a dead key's mark by taking it out and putting it back, in one task: no fit between (#117 L)
+      const out = kind === "deleteCompositionText";
+      if (!out) fitted.current = a.value;
       // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
       // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
       // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
-      // conjunct can narrow a line enough to lose one, which a scroll height never shows: so once typing pauses, a
-      // field taller than one line is fitted whole
-      if (grow && one > 0 && insertedOnly(was, a.value)) {
+      // conjunct can narrow a line enough to lose one, which a scroll height never shows, and a mark can go for good:
+      // so once typing pauses, a field taller than one line is fitted whole
+      if (grow && one > 0 && (out || insertedOnly(was, a.value))) {
         const h = a.scrollHeight;
         if (h > a.clientHeight + (a.style.height === "" ? 4 : 0))
           set(`${Math.min(h, one * 6)}px`, h > one * 6);
@@ -329,10 +331,10 @@ export function Composer<V extends string = string>({
   }, [lang, textSize]);
   // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
   // whether it holds any, and tell the room
-  const changed = (typed = false) => {
+  const changed = (typed = false, kind?: string) => {
     const a = area.current;
     if (a === null) return;
-    fitRef.current(typed);
+    fitRef.current(typed, kind);
     tokenSync.current?.();
     setEmpty(a.value.trim() === "");
     onInput?.(a.value);
@@ -481,7 +483,7 @@ export function Composer<V extends string = string>({
               held.current = e.currentTarget.value;
               setArmed(e.currentTarget);
             }}
-            onInput={() => changed(true)}
+            onInput={(e) => changed(true, (e.nativeEvent as InputEvent).inputType)}
             onCompositionStart={() => {
               composing.current = true;
             }}

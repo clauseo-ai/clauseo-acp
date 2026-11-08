@@ -4,7 +4,9 @@
 //! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
 //! Clauseo's mode; then the attach commit, the held replay and the work that waited. When
 //! `initialize` gave the agent a title, its name is logged first (`AgentNamed`,
-//! `log_agent_name`), so a failed `session/new` leaves it in the thread.
+//! `log_agent_name`), so a failed `session/new` leaves it in the thread. A Codex agent with a
+//! key that answers a session call with auth-required gets its one `authenticate` first
+//! (`key_retry.rs`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,13 +14,14 @@ use std::sync::Arc;
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
-    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeLevel,
-    StreamId, ThreadId, ViewEntry,
+    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeKind,
+    NoticeLevel, StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{Stage, call, launch_failed, run_waiting};
+use super::key_retry;
 use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
@@ -26,9 +29,10 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::sent::SentView;
 
-/// The notice a thread gets when its agent starts a new session after earlier turns.
-const CONTEXT_NOT_RESTORED: &str = "The agent started a new session for this thread, so it \
-     does not remember the earlier turns.";
+/// The fallback words of the notice a thread gets when its agent starts a new session after
+/// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
+const CONTEXT_NOT_RESTORED: &str = "Clauseo doesn't remember the earlier questions and answers \
+     in this conversation. Include what it needs from them in your next question.";
 
 pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInfo) {
     let stored = actor
@@ -92,10 +96,11 @@ pub(super) fn on_replay_log(
     }
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    let (Some(session), Ok(cwd), Ok((meta, mcp_servers)), Stage::Loading) =
+    let (Some(session), Ok(cwd), Ok((meta, mcp_servers, additional_directories)), Stage::Loading) =
         (session, cwd, loads, agent.stage)
     else {
         return;
@@ -118,10 +123,13 @@ pub(super) fn on_replay_log(
         let request = LoadSession {
             session,
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.load_session(request).await;
+        let result = retry
+            .run(&client, || client.load_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: true,
@@ -137,12 +145,15 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         .get(&thread)
         .and_then(|entry| entry.row.acp_session_id.clone());
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
-    let (Some(session), Ok((cwd, (meta, mcp_servers)))) = (session, started) else {
+    let (Some(session), Ok((cwd, (meta, mcp_servers, additional_directories)))) =
+        (session, started)
+    else {
         new_session(actor, thread);
         return;
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -160,10 +171,13 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         let request = LoadSession {
             session,
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.resume_session(request).await;
+        let result = retry
+            .run(&client, || client.resume_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: true,
@@ -174,7 +188,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
 
 pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
-    let (cwd, (meta, mcp_servers)) = match started {
+    let (cwd, (meta, mcp_servers, additional_directories)) = match started {
         Ok(started) => started,
         Err(error) => {
             launch_failed(actor, thread, &error);
@@ -183,6 +197,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -199,10 +214,13 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         }
         let request = NewSession {
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.new_session(request).await;
+        let result = retry
+            .run(&client, || client.new_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: false,
@@ -216,14 +234,14 @@ fn matter_of(actor: &Actor, thread: ThreadId) -> Option<MatterId> {
     actor.threads.get(&thread).map(|entry| entry.row.matter)
 }
 
-/// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for
-/// both: the profile hook's `_meta` with the host's switches over it, and the servers the
-/// lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present). See
-/// `agent/loads.rs` and `profile_loads.rs`.
+/// The `_meta`, MCP servers and extra roots for `thread`'s `session/new` or `session/load`,
+/// the same for both: the profile hook's `_meta` with the host's switches over it, the servers
+/// the lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present),
+/// and Codex's `additionalDirectories`. See `agent/loads.rs` and `profile_loads.rs`.
 fn session_loads(
     actor: &mut Actor,
     thread: ThreadId,
-) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
+) -> Result<super::profile_loads::SessionLoads, Error> {
     let matter = folder(actor, thread)?;
     super::profile_loads::session_loads(actor, thread, &matter)
 }
@@ -471,8 +489,13 @@ fn attach_commit(
             Notice {
                 level: NoticeLevel::Info,
                 text: CONTEXT_NOT_RESTORED.to_owned(),
+                kind: Some(NoticeKind::ContextNotRestored),
             },
         )?;
+    }
+    // The skill packs the launch left out, each pack and reason told once per thread (0040).
+    for notice in super::launch_checks::pack_notices(actor, thread) {
+        out.push(actor, notice)?;
     }
     let now = actor.now().wall;
     let entry = actor

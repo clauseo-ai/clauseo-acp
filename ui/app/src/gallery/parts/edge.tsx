@@ -107,6 +107,18 @@ export function EdgeParts() {
       <Sample name="NotProtectedNote, couldn't be set up">
         <NoteSample why="setup" />
       </Sample>
+      <Sample name="NotProtectedNote, not set up yet (UC)">
+        <NoteSample why="needs_set_up" />
+      </Sample>
+      <Sample name="NotProtectedNote, set-up failed (UC)">
+        <NoteSample why="set_up_failed" />
+      </Sample>
+      <Sample name="NotProtectedNote, this computer can't (UC)">
+        <NoteSample why="cant" />
+      </Sample>
+      <Sample name="NotProtectedNote, every protected space in use (UC)">
+        <NoteSample why="pool" />
+      </Sample>
       <Sample name="NotProtectedMark, full">
         <NotProtectedMark />
       </Sample>

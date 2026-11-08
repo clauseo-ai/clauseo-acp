@@ -216,6 +216,42 @@ test("an approval with hi: null needs hi_status later, and hi_status only goes w
   });
 });
 
+test("an approved English with a provisional Hindi validates, and passes the gate as approved", () => {
+  const row = {
+    en: "Archived. Read only.",
+    hi: "संग्रहीत। केवल पढ़ने के लिए।",
+    hi_status: "provisional",
+    hi_at: "2026-11-06",
+    hi_by: "app track (provisional; Hindi-speaking lawyer to review)",
+    status: "approved",
+    at: "2026-11-04",
+    by: "Rohan",
+  } as const;
+  expect(parseApprovals({ "AR-01": row })).toEqual({ "AR-01": row });
+  expect(statusOf({ en: row.en, hi: row.hi }, row)).toBe("approved");
+  // a provisional English takes a provisional Hindi the same way
+  expect(() =>
+    parseApprovals({
+      "AR-01": { ...row, status: "provisional", at: "2026-11-05", by: "app track" },
+    }),
+  ).not.toThrow();
+  // a provisional Hindi needs its Hindi, its date and who added it
+  expect(() => parseApprovals({ "AR-01": { ...row, hi: null } })).toThrow(/AR-01/);
+  for (const field of ["hi_at", "hi_by"] as const) {
+    const { [field]: _, ...missing } = row;
+    expect(() => parseApprovals({ "AR-01": missing }), field).toThrow(/AR-01/);
+  }
+  expect(() => parseApprovals({ "AR-01": { ...row, hi_at: "6 Nov" } })).toThrow(/AR-01/);
+  expect(() => parseApprovals({ "AR-01": { ...row, hi_by: " " } })).toThrow(/AR-01/);
+  // hi_at and hi_by go with hi_status provisional only
+  const { hi_status: _, ...noStatus } = row;
+  expect(() => parseApprovals({ "AR-01": noStatus })).toThrow(/AR-01/);
+  expect(() => parseApprovals({ "AR-01": { ...row, hi: null, hi_status: "later" } })).toThrow(
+    /AR-01/,
+  );
+  expect(() => parseApprovals({ "AR-01": { ...row, hi_status: "soon" } })).toThrow(/AR-01/);
+});
+
 // provisional: words that follow DESIGN.md, in use before Rohan's batch review.
 const provisional = (en: string, hi: string | null): Approval => ({
   en,

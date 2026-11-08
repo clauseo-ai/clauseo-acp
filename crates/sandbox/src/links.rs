@@ -1,4 +1,5 @@
-//! The one walk of the matter per launch: links that lead outside it, and every `.git` in it.
+//! The one walk of the matter per launch: links that lead outside it, and every `.git` and other
+//! [`PROTECTED_AT_ANY_DEPTH`] name in it.
 
 use std::collections::BTreeMap;
 use std::fs::{self, FileType};
@@ -7,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::Error;
 use crate::policy::{same, under};
+use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -42,12 +43,14 @@ pub struct LinkFinding {
     pub target: Option<PathBuf>,
 }
 
-/// What one walk of the matter found: the links of [`scan_links`] and every `.git`.
+/// What one walk of the matter found: the links of [`scan_links`], every `.git`, and every other
+/// [`PROTECTED_AT_ANY_DEPTH`] name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatterScan {
     links: Vec<LinkFinding>,
     git: Vec<PathBuf>,
     git_dirs: Vec<PathBuf>,
+    nested: Vec<PathBuf>,
     /// Files with more than one name, every name of which is in the matter: each group's
     /// names, sorted. Not findings; the policy checks that no group joins a read-only name
     /// to a writable one.
@@ -59,6 +62,7 @@ pub(crate) struct ScanParts {
     pub(crate) links: Vec<LinkFinding>,
     pub(crate) git: Vec<PathBuf>,
     pub(crate) git_dirs: Vec<PathBuf>,
+    pub(crate) nested: Vec<PathBuf>,
     pub(crate) linked: Vec<Vec<PathBuf>>,
 }
 
@@ -82,6 +86,15 @@ impl MatterScan {
         &self.git_dirs
     }
 
+    /// Every `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md` in the matter at any depth, root
+    /// included, in any letter case (the other [`PROTECTED_AT_ANY_DEPTH`] names), sorted: a
+    /// folder, a file, or a link to something in the matter. Found by name in the listings the
+    /// walk reads anyway, so no probe is added. None is listed inside a `.git` folder, whose
+    /// names the walk doesn't read; one inside another is, and the policy drops it.
+    pub fn nested(&self) -> &[PathBuf] {
+        &self.nested
+    }
+
     /// Adds `more` findings (from an earlier scan, say) to this one's.
     pub(crate) fn add_links(&mut self, more: Vec<LinkFinding>) {
         // Duplicates are dropped when the policy makes the findings canonical.
@@ -94,6 +107,7 @@ impl MatterScan {
             links: self.links,
             git: self.git,
             git_dirs: self.git_dirs,
+            nested: self.nested,
             linked: self.linked,
         }
     }
@@ -133,9 +147,10 @@ struct Walk {
 }
 
 /// The one walk of `matter`: [`scan_links`]'s findings and every `.git`, with the folders the
-/// `.git` files name. A sub-folder that cannot be read is skipped with a warning: the agent
-/// runs as the same user, so it cannot read it either (and a file whose other name is in it
-/// counts as linked outside). Fails if `matter` cannot be resolved or listed.
+/// `.git` files name, and every other [`PROTECTED_AT_ANY_DEPTH`] name. A sub-folder that
+/// cannot be read is skipped with a warning: the agent runs as the same user, so it cannot read
+/// it either (and a file whose other name is in it counts as linked outside). Fails if `matter`
+/// cannot be resolved or listed.
 pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     let matter = dunce::canonicalize(matter).map_err(Error::Probe)?;
     let mut walk = Walk {
@@ -192,13 +207,23 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git.sort();
     scan.git_dirs.sort();
     scan.git_dirs.dedup();
+    scan.nested.sort();
     Ok(scan)
 }
 
 impl Walk {
     /// One entry of the walk outside any `.git` folder.
     fn visit(&mut self, matter: &Path, path: PathBuf, kind: FileType, entry: &fs::DirEntry) {
-        let is_git = entry.file_name().eq_ignore_ascii_case(".git");
+        let name = entry.file_name();
+        let is_git = name.eq_ignore_ascii_case(".git");
+        // The other names write-denied at any depth: one name check per entry listed.
+        let nested = !is_git
+            && PROTECTED_AT_ANY_DEPTH
+                .iter()
+                .any(|protected| name.eq_ignore_ascii_case(protected));
+        if nested && !kind.is_symlink() {
+            self.scan.nested.push(path.clone());
+        }
         if kind.is_symlink() {
             match symlink_finding(matter, &path, kind) {
                 Some(finding) => self.scan.links.push(finding),
@@ -209,6 +234,8 @@ impl Walk {
                     }
                     self.scan.git.push(path);
                 }
+                // One to something in the matter, as a `.git` link is: the deny is on its name.
+                None if nested => self.scan.nested.push(path),
                 None => {}
             }
         } else if kind.is_dir() {

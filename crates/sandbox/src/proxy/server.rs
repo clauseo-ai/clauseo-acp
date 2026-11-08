@@ -1,5 +1,8 @@
 //! The proxy thread: the executor, the two accept loops, the rate cap's tick, and each request's
-//! checks up to the connect.
+//! checks up to the connect. The block list's check, the lawyer's allowed sites first, is in
+//! `server/blocked.rs`.
+
+mod route;
 
 use std::cell::{Cell, RefCell};
 use std::net::{SocketAddr, TcpListener};
@@ -22,12 +25,16 @@ use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
 use crate::proxy::token::Token;
-use crate::proxy::upstream::{Lookup, Route, Scheme};
+use crate::proxy::upstream::{Lookup, Route};
 use crate::proxy::{
     Allowlist, Exchange, Limits, Listener, Record, Shared, SharedClock, Unopened, Verdict, connect,
     http,
 };
 use crate::{CappedSink, Denial, DenialSink, HostRefusal, Reachability};
+
+mod blocked;
+
+pub(crate) use blocked::listed;
 
 /// Failures in a row before the proxy reports the network unreachable.
 const FAILURES_UNREACHABLE: u32 = 3;
@@ -38,6 +45,8 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 pub(crate) struct Parts {
     pub(crate) shared: Arc<Shared>,
     pub(crate) silent: Allowlist,
+    pub(crate) block: Arc<clauseo_blocklist::Current>,
+    pub(crate) allowed: Arc<clauseo_blocklist::Allowed>,
     pub(crate) token: Token,
     pub(crate) denials: Arc<dyn DenialSink>,
     pub(crate) clock: SharedClock,
@@ -51,6 +60,8 @@ pub(crate) struct Parts {
 pub(crate) struct Ctx {
     pub(crate) shared: Arc<Shared>,
     silent: Allowlist,
+    block: Arc<clauseo_blocklist::Current>,
+    allowed: Arc<clauseo_blocklist::Allowed>,
     token: Token,
     sink: CappedSink<Arc<dyn DenialSink>, SharedClock>,
     pub(crate) net: Arc<dyn Network>,
@@ -59,6 +70,8 @@ pub(crate) struct Ctx {
     pub(crate) limits: Limits,
     reach: RefCell<Reach>,
     pub(crate) load: Rc<Load>,
+    /// Each host's last good route, for a failed lookup.
+    remembered: route::Remembered,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -73,12 +86,14 @@ struct Reach {
 pub(crate) fn run(
     parts: Parts,
     agent: &Async<TcpListener>,
-    browser: &Async<TcpListener>,
+    browser: Option<&Async<TcpListener>>,
     stopped: oneshot::Receiver<()>,
 ) {
     let ctx = Rc::new(Ctx {
         shared: parts.shared,
         silent: parts.silent,
+        block: parts.block,
+        allowed: parts.allowed,
         token: parts.token,
         sink: CappedSink::with_clock(parts.denials, parts.clock),
         net: parts.net,
@@ -87,12 +102,18 @@ pub(crate) fn run(
         limits: parts.limits,
         reach: RefCell::new(Reach::default()),
         load: Rc::new(Load::default()),
+        remembered: route::Remembered::default(),
     });
     let executor = LocalExecutor::new();
     async_io::block_on(executor.run(async {
         let work = join3(
             accept(&executor, &ctx, agent, Listener::Agent),
-            accept(&executor, &ctx, browser, Listener::Browser),
+            async {
+                match browser {
+                    Some(browser) => accept(&executor, &ctx, browser, Listener::Browser).await,
+                    None => std::future::pending().await,
+                }
+            },
             ticks(&ctx),
         );
         select(pin!(work), stopped).await;
@@ -240,9 +261,12 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
         return true;
     }
     match ctx.check(&request, exchange) {
-        Ok(target) => ctx.carry(client, request, head, target, exchange).await,
-        Err(status) => {
-            ctx.answer(client, exchange, status, exchange.verdict, "")
+        Ok((target, generation)) => {
+            ctx.carry(client, request, head, (target, generation), exchange)
+                .await;
+        }
+        Err((status, extra)) => {
+            ctx.answer(client, exchange, status, exchange.verdict, &extra)
                 .await;
         }
     }
@@ -250,10 +274,15 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
 }
 
 impl Ctx {
-    /// The checks that need no network: form and scheme, the silent list, port, a private IP
-    /// literal or `localhost` name, and the allowlist. Fills the exchange's host, port and
-    /// verdict; `Err` is the status to answer.
-    fn check(&self, request: &Request, exchange: &mut Exchange) -> Result<Target, u16> {
+    /// The checks that need no network: form and scheme, the silent list, the block list, port,
+    /// a private IP literal or `localhost` name, and the allowlist. Fills the exchange's host,
+    /// port and verdict; `Err` is the status to answer and its extra header lines. `Ok` carries
+    /// the allowed set's generation the block list was asked under, for the tunnel's opening.
+    fn check(
+        &self,
+        request: &Request,
+        exchange: &mut Exchange,
+    ) -> Result<(Target, u64), (u16, String)> {
         let target = classify(request).map_err(|refusal| {
             exchange.host.clone_from(&refusal.host);
             exchange.port = refusal.port;
@@ -261,14 +290,20 @@ impl Ctx {
                 Some(why) => self.refuse(exchange, why, false),
                 None => exchange.verdict = Verdict::BadRequest,
             }
-            refusal.status
+            (refusal.status, String::new())
         })?;
         exchange.host = target.name.text();
         exchange.port = target.port;
         if self.silent.contains_name(&target.name) {
             exchange.verdict = Verdict::Silent;
             tracing::info!(host = %target.name, "egress: refused (silent list)");
-            return Err(403);
+            return Err((403, String::new()));
+        }
+        // Read before the set the list check reads, so an unchanged value at the tunnel's
+        // opening means no revoke came between.
+        let generation = self.allowed.generation();
+        if let Some(extra) = blocked::blocked(self, request, &target, exchange) {
+            return Err((403, extra));
         }
         let required = if matches!(target.kind, Kind::Connect) {
             443
@@ -277,46 +312,36 @@ impl Ctx {
         };
         if target.port != required {
             self.refuse(exchange, HostRefusal::Port, false);
-            return Err(403);
+            return Err((403, String::new()));
         }
         // Before the allowlist, so no entry can let a private literal or `localhost` through.
         if target.name.is_private() {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
-            return Err(403);
+            return Err((403, String::new()));
         }
         if !self.shared.live().allow.contains_name(&target.name) {
             let shared = target.name.is_shared_hosting();
             self.refuse(exchange, HostRefusal::NotAllowed, shared);
-            return Err(403);
+            return Err((403, String::new()));
         }
-        Ok(target)
+        Ok((target, generation))
     }
 
-    /// The route, the address check, the tunnel slot, then the relay.
+    /// The route, the address check, the tunnel slot, then the relay. A host whose allow was
+    /// revoked since the list check while the list still names it is refused as listed.
     async fn carry(
         &self,
         client: &Stream,
         request: Request,
         head: Head,
-        target: Target,
+        (target, generation): (Target, u64),
         exchange: &mut Exchange,
     ) {
-        let route = {
-            let lookup = Arc::clone(&self.lookup);
-            let host = target.name.text();
-            let port = target.port;
-            let scheme = if matches!(target.kind, Kind::Connect) {
-                Scheme::Https
-            } else {
-                Scheme::Http
-            };
-            let lookup = blocking::unblock(move || lookup.route(scheme, &host, port));
-            within(self.limits.connect, lookup)
-                .await
-                .unwrap_or_else(|| {
-                    tracing::warn!("egress: upstream lookup too slow; going direct");
-                    Route::Direct
-                })
+        // The same status as an upstream that fails; the denial names the cause.
+        let Some(route) = route::route(self, &target, exchange).await else {
+            return self
+                .answer(client, exchange, 502, Verdict::Failed, "")
+                .await;
         };
         let way = match route {
             Route::Direct => match self.resolve(&target, exchange).await {
@@ -336,8 +361,21 @@ impl Ctx {
                 Way::Upstream { host, port }
             }
         };
-        let (id, registration) = match self.shared.open(&target.name, self.limits.tunnels) {
+        let still = |name: &Name| blocked::still_open(self, name, generation);
+        let (id, registration) = match self.shared.open(&target.name, self.limits.tunnels, still) {
             Ok(opened) => opened,
+            Err(Unopened::Blocked) => {
+                if let Some(extra) = blocked::blocked(self, &request, &target, exchange) {
+                    return self
+                        .answer(client, exchange, 403, Verdict::Blocked, &extra)
+                        .await;
+                }
+                // Allowed again since: refused all the same, as a revoke mid-connect is.
+                self.refuse(exchange, HostRefusal::NotAllowed, false);
+                return self
+                    .answer(client, exchange, 403, Verdict::Refused, "")
+                    .await;
+            }
             Err(Unopened::NotAllowed) => {
                 self.refuse(
                     exchange,

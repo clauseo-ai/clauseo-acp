@@ -37,11 +37,16 @@ pub(crate) const SESSION: &str = "AGENT_BROWSER_SESSION";
 pub(crate) const SOCKET_DIR: &str = "AGENT_BROWSER_SOCKET_DIR";
 /// The stream server's port, claimed by the host for the session.
 pub(crate) const STREAM_PORT: &str = "AGENT_BROWSER_STREAM_PORT";
-/// Chrome's extra arguments: [`WEBRTC_ARG`], then `--remote-debugging-port=<--cdp-port>`, one
-/// per line (agent-browser splits the value at newlines, `flags.rs` `split_launch_args`, and
-/// Chrome takes the last of a repeated switch, so the port wins over agent-browser's own
-/// `--remote-debugging-port=0`).
+/// Chrome's extra arguments, were agent-browser to launch one: only [`WEBRTC_ARG`]. With
+/// [`CDP`] set it never does; the guard starts Chrome (`chrome.rs`). The debugging port is no
+/// longer pinned here: past agent-browser's own `--remote-debugging-port=0` it stopped Chrome
+/// writing the `DevToolsActivePort` file agent-browser waits for (decision record 0029).
 pub(crate) const ARGS: &str = "AGENT_BROWSER_ARGS";
+/// The browser endpoint of the Chrome the guard started, `ws://127.0.0.1:<--cdp-port>/devtools/
+/// browser/<id>`, read from Chrome's stderr. A full `ws://` value: agent-browser connects to it
+/// directly (`browser.rs:2920-2923`), where a bare port would send its `/json/version` lookup
+/// through the egress proxy (`discovery.rs:307-308`, a plain reqwest client).
+pub(crate) const CDP: &str = "AGENT_BROWSER_CDP";
 /// Keeps WebRTC's UDP off every path but the proxy.
 pub(crate) const WEBRTC_ARG: &str = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp";
 /// The lowest port the guard accepts from the host: below it are the privileged ports.
@@ -193,16 +198,14 @@ impl fmt::Display for EnvError {
     }
 }
 
-/// The child's whole environment, with `cdp_port` (`--cdp-port`, checked already) in
-/// [`ARGS`]. Fails on the first required variable that is missing or invalid, in the order
-/// config, proxy, executable path, session, socket folder (Unix only), stream port; never falls
-/// back. The Unix socket folder is checked here only for being absolute; `socket.rs` checks
-/// the folder itself.
+/// The child's whole environment but [`CDP`], which [`set_cdp`] adds once Chrome is up. Fails
+/// on the first required variable that is missing or invalid, in the order config, proxy,
+/// executable path, session, socket folder (Unix only), stream port; never falls back. The Unix
+/// socket folder is checked here only for being absolute; `socket.rs` checks the folder itself.
 pub(crate) fn build(
     source: &Source,
     os: Os,
     cwd: &Path,
-    cdp_port: u16,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
     let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
     let proxy = required(
@@ -238,7 +241,6 @@ pub(crate) fn build(
         |v, _| port_of(v).is_some(),
         Problem::NotPort,
     )?;
-    let args = format!("{WEBRTC_ARG}\n--remote-debugging-port={cdp_port}");
 
     let mut env = BTreeMap::new();
     let mut set = |name: &str, value: &OsStr| {
@@ -250,7 +252,7 @@ pub(crate) fn build(
     set(SESSION, session);
     set(SOCKET_DIR, &socket_dir);
     set(STREAM_PORT, stream_port);
-    set(ARGS, OsStr::new(&args));
+    set(ARGS, OsStr::new(WEBRTC_ARG));
     for (name, value) in FIXED {
         set(name, OsStr::new(value));
     }
@@ -292,6 +294,20 @@ pub(crate) fn build(
         }
     }
     Ok(env)
+}
+
+/// Adds [`CDP`]: the browser endpoint `chrome.rs` read and checked.
+pub(crate) fn set_cdp(env: &mut BTreeMap<String, OsString>, endpoint: &str) {
+    env.insert(CDP.to_owned(), OsString::from(endpoint));
+}
+
+/// Chrome's environment: the child's without agent-browser's own variables, so Chrome gets the
+/// same `HOME`, temp folder, `PATH`, locale and proxy variables (its proxy is set by flag).
+pub(crate) fn chrome_env(env: &BTreeMap<String, OsString>) -> BTreeMap<String, OsString> {
+    env.iter()
+        .filter(|(name, _)| !name.starts_with("AGENT_BROWSER_"))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
 }
 
 fn required<'a>(

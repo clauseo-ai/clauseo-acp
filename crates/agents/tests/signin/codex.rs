@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, TcpListener};
 use std::time::Duration;
 
 use clauseo_agents::testing::write_file;
-use clauseo_agents::{Agents, Method, SigninCode, SigninState, Source, is_sign_in_again};
+use clauseo_agents::{Agents, Found, Method, SigninCode, SigninState, Source, is_sign_in_again};
 
 use crate::support::{Events, Fixture, POLL, REMOTE_HINTS, Seen, codex, eventually, now};
 
@@ -228,8 +228,16 @@ fn codex_runs_get_their_home_the_file_store_and_ssl_cert_file() {
         assert_eq!(run.args[1..3], STORE, "{:?}", run.args);
         assert_eq!(get(&run.env, "CODEX_HOME").as_deref(), Some(home));
         assert_eq!(
+            get(&run.env, "CODEX_CA_CERTIFICATE"),
+            Some(ca.clone().into_os_string())
+        );
+        assert_ne!(
             get(&run.env, "SSL_CERT_FILE"),
             Some(ca.clone().into_os_string())
+        );
+        assert_eq!(
+            get(&run.env, "NODE_USE_SYSTEM_CA").as_deref(),
+            Some(OsStr::new("1"))
         );
         assert_eq!(get(&run.env, "CODEX_API_KEY"), Some(OsString::new()));
         assert_eq!(get(&run.env, "NODE_EXTRA_CA_CERTS"), None);
@@ -241,7 +249,10 @@ fn codex_runs_get_their_home_the_file_store_and_ssl_cert_file() {
     }
     // The child's own view agrees.
     let names = fx.env_names();
-    assert!(names.contains(&"SSL_CERT_FILE".to_owned()), "{names:?}");
+    assert!(
+        names.contains(&"CODEX_CA_CERTIFICATE".to_owned()),
+        "{names:?}"
+    );
     assert!(
         !names
             .iter()
@@ -335,7 +346,10 @@ fn codex_sign_out_runs_logout_then_status() {
     assert_eq!(logouts.len(), 1);
     assert_eq!(logouts[0].args[1..3], STORE);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none);
 }
 
 #[test]

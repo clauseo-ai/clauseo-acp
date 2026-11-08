@@ -10,6 +10,7 @@
 //! install-test stalls of S18). A launched process's end shows as the next event or launch.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -352,6 +353,18 @@ impl Fixture {
         (agents, Events(events))
     }
 
+    /// Starts `Agents` on the fixture with a launcher that adds `extra` to each spec's variables
+    /// before it starts it, and reads each agent's first state.
+    pub(crate) fn start_adding_env(&self, extra: BTreeMap<OsString, OsString>) -> (Agents, Events) {
+        let launcher: Arc<dyn Launcher> = Arc::new(AddingEnv {
+            inner: PassthroughLauncher::new(SpawnOptions::new()),
+            extra,
+        });
+        trace(format_args!("fixture: Agents::start, adding env"));
+        let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
+        (agents, Events(events))
+    }
+
     /// The requests made for package `name`'s tarball.
     pub(crate) fn requests_for(&self, name: &str) -> Vec<clauseo_agents::testing::Request> {
         let path = tarball_path(name);
@@ -387,6 +400,26 @@ impl<F: Fn(&LaunchSpec) + Send + Sync> Launcher for Hooked<F> {
             Err(err) => trace(format_args!("launch: failed in {ms} ms: {what}: {err}")),
         }
         launched
+    }
+}
+
+/// The passthrough launcher, with `extra` added to each spec's variables.
+struct AddingEnv {
+    inner: PassthroughLauncher,
+    extra: BTreeMap<OsString, OsString>,
+}
+
+impl Launcher for AddingEnv {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        let mut env = spec.env().clone();
+        env.extend(self.extra.clone());
+        let spec = LaunchSpec::new(
+            spec.program().to_owned(),
+            spec.args().to_vec(),
+            env,
+            spec.cwd().to_owned(),
+        )?;
+        self.inner.launch(&spec)
     }
 }
 

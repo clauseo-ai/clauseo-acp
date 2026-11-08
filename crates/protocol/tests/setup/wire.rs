@@ -240,6 +240,14 @@ fn every_sign_in() -> Vec<SignIn> {
             code: ErrorCode::AgentAuthRequired,
             at: at(6),
         },
+        SignIn::Switching {
+            since: at(1_700_000_000_000),
+            stuck: false,
+        },
+        SignIn::Switching {
+            since: at(9),
+            stuck: true,
+        },
     ];
     states.extend(FoundLogin::ALL.map(|found| SignIn::SignedOut { found: Some(found) }));
     for method in SignInMethod::ALL {
@@ -353,12 +361,40 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SignInChanged {
                 agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::NoneFound),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"none_found"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::ReuseOff),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"reuse_off"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
                 state: SignIn::Failed {
                     code: ErrorCode::SigninLinkExpired,
                     at: at(9),
                 },
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":{"failed":{"code":"signin.link_expired","at":9}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::Switching {
+                    since: at(9),
+                    stuck: true,
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"switching":{"since":9,"stuck":true}}}}"#,
         ),
         (
             SetupEvent::AgentInstallProgress {

@@ -9,6 +9,7 @@ import type {
   AgentId,
   AvailableCommand,
   CommandOutcome,
+  ConnectorsState,
   ErrorCode,
   FolderSupportKind,
   LimitsView,
@@ -22,6 +23,7 @@ import {
   type NextErrorCode,
   type NextHostError,
   type PaperSummary,
+  type SiteBlocked,
 } from "../room/host-next.ts";
 import { detailed, fakeNext, railStates, railThreads } from "../room/fake-next.ts";
 
@@ -79,6 +81,10 @@ export type ThreadState = {
   undoLocked?: string[];
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
+  /** open_file says Word opened the file in Protected View, as for a path too long for Word (U9). */
+  protectedView?: boolean;
+  /** open_file is refused with this code, as matter.document_path_too_long for a path too long for Word (U9). */
+  openRefused?: string;
   /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
    * refused, or with the list stopping short (truncated). Without it, the list answers in full. */
   papersAnswer?: "pending" | "failed" | "truncated";
@@ -87,7 +93,36 @@ export type ThreadState = {
   limits?: LimitsView;
   /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
   folder?: FolderSupportKind;
+  /** The connectors' state on the app feed (U15): the out-of-credit note, the hint's "from" price. With it the room
+   * has the settings window, which the hint and the note open. */
+  connectors?: ConnectorsState;
+  /** Whether the host sends the case-law hint for the thread's TURN (U15), after `connectors`. */
+  hint?: boolean;
+  /** How read_blob answers, by hash (U17): with the blob's text, never ("pending"), or refused. */
+  blobs?: Record<string, { text: string } | "pending" | "refused">;
+  /** The unsafe-site list's notices on the app feed (0053), and the code an allow is refused
+   * with. */
+  blocked?: { sites: SiteBlocked[]; refuse?: ErrorCode };
 };
+
+/** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
+const connectorsNext = (state: ThreadState, connectors: ConnectorsState): FakeNextHost => ({
+  parts: ["app"],
+  query: () => ({ threads: [] }),
+  first: () => [
+    { connectors_changed: connectors },
+    ...(state.hint === true
+      ? [{ case_law_hint: { matter: MATTER.matter, thread: THREAD, turn: TURN } }]
+      : []),
+  ],
+});
+
+/** The app feed of a state with the unsafe-site list's notices (0053), as the host sent them. */
+const blockedNext = (sites: readonly SiteBlocked[]): FakeNextHost => ({
+  parts: ["app"],
+  query: () => ({ threads: [] }),
+  first: () => sites.map((site) => ({ site_blocked: site })),
+});
 
 const refusal = (code: ErrorCode) => ({
   code,
@@ -135,6 +170,11 @@ export function threadHost(state: ThreadState): FakeTransport {
         return {
           threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
         };
+      const blob = typeof query === "object" ? query.read_blob : undefined;
+      const got = blob === undefined ? undefined : state.blobs?.[blob.hash];
+      if (got === "pending") return new Promise(() => {});
+      if (got === "refused") throw refusal("store.io");
+      if (got !== undefined) return { blob: { offset: 0, end: got.text.length, text: got.text } };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },
     dispatch: (envelope): CommandOutcome => {
@@ -143,6 +183,9 @@ export function threadHost(state: ThreadState): FakeTransport {
         if (state.refuse !== undefined) throw refusal(state.refuse);
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
+      const refuseAllow = state.blocked?.refuse;
+      if (command.allow_blocked_site !== undefined && refuseAllow !== undefined)
+        throw refusal(refuseAllow);
       if (command.undo_step !== undefined && state.undoRefused !== undefined)
         throw state.undoLocked === undefined
           ? refusal(state.undoRefused)
@@ -177,13 +220,28 @@ export function threadHost(state: ThreadState): FakeTransport {
           );
         }
       }),
-    ...(state.papers !== undefined || state.papersAnswer !== undefined
-      ? { next: papersNext(state) }
-      : state.restart === true
-        ? {
-            next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"],
-          }
-        : {}),
+    ...(state.protectedView === true ? { openFile: () => ({ protected_view: true }) } : {}),
+    ...(state.openRefused !== undefined
+      ? {
+          openFile: () => {
+            throw { code: state.openRefused, message: "refused", retryable: false };
+          },
+        }
+      : {}),
+    ...(state.connectors !== undefined
+      ? { next: connectorsNext(state, state.connectors), openSettings: () => {} }
+      : state.papers !== undefined || state.papersAnswer !== undefined
+        ? { next: papersNext(state) }
+        : state.blocked !== undefined
+          ? { next: blockedNext(state.blocked.sites) }
+          : state.restart === true
+            ? {
+                next: {
+                  parts: ["restart"],
+                  query: () => ({ threads: [] }),
+                } satisfies FakeHost["next"],
+              }
+            : {}),
   });
   if (state.limits !== undefined) transport.limitsChanged(state.limits);
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});
