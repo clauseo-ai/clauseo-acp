@@ -135,9 +135,10 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
     let fail = sandbox.fail_spawn;
     #[cfg(not(feature = "test-support"))]
     let fail = false;
+    let data_dir = actor.effective.data_dir().to_path_buf();
     let spawned = spawn(fail, move || {
         let outcome = run(work, setup.as_deref());
-        let observed = observe(Some(&sandbox));
+        let observed = observe(Some(&sandbox), &data_dir);
         report.send(Ended::Ran { outcome, observed });
     });
     if let Err(error) = spawned {
@@ -173,9 +174,9 @@ fn spawn(fail: bool, body: impl FnOnce() + Send + 'static) -> std::io::Result<()
 fn run(work: ProtectionWork, setup: Option<&dyn SandboxSetup>) -> Option<Result<(), SetupError>> {
     match work {
         ProtectionWork::SetUp => setup.map(SandboxSetup::run),
-        // TODO(R17-E): a removal ends what still runs as a pool user (tier B's sessions). While
-        // it runs the cache still says `Protected { tier: B }`, so PR-E must refuse launches
-        // while a removal runs.
+        // A removal ends what still runs as a pool user (tier B's sessions). While it runs the
+        // cache still says `Protected { tier: B }`, so launches are refused with
+        // `sandbox.removing` (`protection::refusal`).
         ProtectionWork::Remove => setup.map(SandboxSetup::remove),
         ProtectionWork::Check | ProtectionWork::Unknown => None,
     }

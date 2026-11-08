@@ -51,6 +51,8 @@ pub(crate) struct FakeSetup {
     panics: bool,
     pub(crate) run_calls: AtomicUsize,
     pub(crate) remove_calls: AtomicUsize,
+    /// The matters `forget_matter()` was called for, and the names of the threads it ran on.
+    pub(crate) forgotten: Mutex<Vec<(clauseo_protocol::MatterId, String)>>,
     /// The names of the threads `state()`, `run()` and `remove()` were called on.
     pub(crate) threads: Mutex<Vec<String>>,
 }
@@ -109,7 +111,9 @@ impl SandboxSetup for FakeSetup {
         self.runs.next()
     }
 
-    fn forget_matter(&self, _matter: &clauseo_protocol::MatterId) -> Result<(), SetupError> {
+    fn forget_matter(&self, matter: &clauseo_protocol::MatterId) -> Result<(), SetupError> {
+        let name = std::thread::current().name().unwrap_or("").to_owned();
+        self.forgotten.lock().unwrap().push((*matter, name));
         Ok(())
     }
 
@@ -177,6 +181,7 @@ pub(crate) fn rig(plan: Plan) -> Rig {
         panics: plan.panics,
         run_calls: AtomicUsize::new(0),
         remove_calls: AtomicUsize::new(0),
+        forgotten: Mutex::new(Vec::new()),
         threads: Mutex::new(Vec::new()),
     });
     let script = Arc::new(Script::new(plan.detections));

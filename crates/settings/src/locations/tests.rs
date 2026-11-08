@@ -22,6 +22,7 @@ fn windows_dirs_without(missing: Option<KnownFolder>) -> FakeDirs {
     ];
     FakeDirs {
         home: Some(PathBuf::from("/C/Users/ada")),
+        codex_home: None,
         known: known
             .into_iter()
             .filter(|&(folder, _)| Some(folder) != missing)
@@ -406,6 +407,7 @@ fn agent_home_refuses_an_empty_agent_id() {
 #[test]
 fn resolve_uses_this_os() {
     let dirs = FakeDirs {
+        codex_home: None,
         home: Some(PathBuf::from("/h")),
         known: vec![
             (KnownFolder::LocalAppData, PathBuf::from("/l")),

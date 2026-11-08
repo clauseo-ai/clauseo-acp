@@ -2,7 +2,8 @@
 //! sandbox's detection, the view `HostQuery::Protection` answers and
 //! `HostEvent::ProtectionViewChanged` carries, each matter's protection (the computer's, until
 //! R18's switch and PR-E's pool), and `sandbox.required`'s refusals. The two commands that
-//! change it run in `protection/work.rs`.
+//! change it run in `protection/work.rs`; a forgotten matter's sandbox state goes in
+//! `protection/forget.rs`.
 //!
 //! - The cache is never filled on the actor: `detect` reads files and the registry, and macOS'
 //!   first call starts `sandbox-exec`. `Host::start` detects once on its calling thread before
@@ -16,9 +17,11 @@
 //!   `ProtectionChanged`, no app catch-up carries it: the query gives the current view.
 //! - A change of the computer's protection sends `ProtectionChanged` for every listed matter.
 
+use std::path::Path;
+
 use clauseo_protocol::{
     ErrorCode, HostEvent, NotProtectedCause, Protection, ProtectionTier, ProtectionView,
-    UnsupportedWhy,
+    ProtectionWork, Timestamp, UnsupportedWhy,
 };
 use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, SetupState, Tier};
 
@@ -26,14 +29,17 @@ use super::Actor;
 use crate::config::Sandbox;
 use crate::error::Error;
 
+pub(super) mod forget;
+mod set_up_at;
 pub(super) mod work;
 
-/// What one detection found: the computer's protection, and whether a retry would run the
-/// set-up (`retry_asks_admin`).
+/// What one detection found: the computer's protection, whether a retry would run the set-up
+/// (`retry_asks_admin`), and when a finished set-up finished (`set_up_at`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Observed {
     pub(crate) computer: Protection,
     pub(crate) asks_admin: bool,
+    pub(crate) set_up_at: Option<Timestamp>,
 }
 
 /// The protection state the actor holds.
@@ -80,11 +86,19 @@ impl ProtectionHost {
         &self.observed.computer
     }
 
+    /// Whether the set-up's removal runs.
+    fn removing(&self) -> bool {
+        self.running
+            .as_ref()
+            .is_some_and(|running| running.work() == ProtectionWork::Remove)
+    }
+
     /// The view under the settings `required` and `auto` (`sandbox.allow_unprotected_auto`).
     fn view(&self, required: bool, auto: bool) -> ProtectionView {
         let mut view = ProtectionView::new(self.observed.computer.clone(), required, auto);
         view.in_progress = self.running.as_ref().map(work::Running::work);
         view.retry_asks_admin = self.observed.asks_admin;
+        view.set_up_at = self.observed.set_up_at;
         view
     }
 
@@ -108,8 +122,9 @@ impl ProtectionHost {
 }
 
 /// Detects this computer's protection through `sandbox`, on the calling thread: never the
-/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer.
-pub(crate) fn observe(sandbox: Option<&Sandbox>) -> Observed {
+/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A set-up that is
+/// done gives its time from its marker in `data_dir` (`set_up_at`).
+pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
     let Some(sandbox) = sandbox else {
         return Observed {
             computer: Protection::NotProtected {
@@ -118,16 +133,19 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>) -> Observed {
                 },
             },
             asks_admin: false,
+            set_up_at: None,
         };
     };
     let detection = (sandbox.detect)();
-    let asks_admin = sandbox
-        .setup
-        .as_ref()
-        .is_some_and(|setup| asks_admin(&setup.state()));
+    let state = sandbox.setup.as_ref().map(|setup| setup.state());
+    let set_up_at = match state {
+        Some(SetupState::Ready) => set_up_at::read(data_dir),
+        _ => None,
+    };
     Observed {
         computer: protection_of(&detection),
-        asks_admin,
+        asks_admin: state.as_ref().is_some_and(asks_admin),
+        set_up_at,
     }
 }
 
@@ -250,7 +268,18 @@ fn matters_changed(actor: &mut Actor) {
 /// `sandbox.pool_owned`. Every other cause refuses only under `sandbox.required`:
 /// `sandbox.setup_required` when the set-up would fix it (`NeedsSetUp`, `SetUpRefused`),
 /// `sandbox.required` otherwise.
+///
+/// While the sandbox's set-up is being removed (`RemoveSandboxSetup`, the view's `in_progress:
+/// remove`), every launch and `CreateThread` is refused with `sandbox.removing` (retryable)
+/// first: the cache still says what the computer had before, and the removal ends what runs as
+/// a pool user.
 pub(crate) fn refusal(actor: &Actor) -> Option<Error> {
+    if actor.protection.removing() {
+        return Some(Error::refused(
+            ErrorCode::SandboxRemoving,
+            "the sandbox's set-up is being removed; try again when it ends",
+        ));
+    }
     let Protection::NotProtected { cause } = actor.protection.computer() else {
         return None;
     };

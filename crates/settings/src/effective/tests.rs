@@ -362,6 +362,7 @@ fn overridden() -> Locations {
     let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/clauseo-ci"))]);
     let dirs = FakeDirs {
         home: Some(abs("home/ada")),
+        codex_home: None,
         known: Vec::new(),
     };
     Locations::resolve_for(Os::Linux, &dirs, &env).unwrap()
@@ -416,6 +417,7 @@ fn data_dir_override_with_a_policy_default_location_policy_wins() {
 #[test]
 fn no_data_dir_override_keeps_documents_clauseo() {
     let dirs = FakeDirs {
+        codex_home: None,
         home: Some(abs("home/ada")),
         known: Vec::new(),
     };

@@ -242,7 +242,8 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
     let (exit, exited) = futures::channel::oneshot::channel::<HostExit>();
     let post = internal.clone();
     // The first detection, here on the calling thread: never on the actor (`protection.rs`).
-    let config = (protection::observe(config.sandbox()), config);
+    let first = protection::observe(config.sandbox(), config.effective.data_dir());
+    let config = (first, config);
     let thread = thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || run(config, request_rx, (post, internal_rx), ready, exit))

@@ -18,7 +18,8 @@ export type ProtectionKey = keyof typeof HI;
 /** A protection string in the language, its slots filled. */
 export const pw = wordsOf("protection");
 
-/** R17 PR-E's code for a full pool under `sandbox.required`; its words are words-errors.ts's. */
+/** R17 PR-E's code for a full pool, refused whatever `sandbox.required` says; its words are
+ * words-errors.ts's. */
 export const POOL_FULL_CODE = "sandbox.pool_full";
 
 /** #639's code for a Safe workspace something on this computer stops; not in ErrorCode on this
