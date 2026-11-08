@@ -96,11 +96,11 @@ test("install lines: a failed set-up says the download worked and has its own co
   const log = ["result: setup_failed after 3 tries"];
   const setup = installLine("en", { kind: "failed", log, setup: true }, "Claude", ACTS);
   if (setup === null || setup.kind !== "wait") throw new Error("no wait line");
-  expect(setup.words).toBe(
-    "Claude was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
-  );
+  expect(setup.words).toBe("Claude was downloaded, but setting it up didn't finish. Try again.");
   expect(setup.code).toBe("agent.install_setup_failed");
-  expect(linesOf("hi", { kind: "failed", log, setup: true }).words).toContain("डाउनलोड हो गया");
+  expect(linesOf("hi", { kind: "failed", log, setup: true }).words).toBe(
+    "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  );
   const codex = installLine("en", { kind: "failed", log, setup: true }, "Codex", ACTS);
   if (codex === null || codex.kind !== "wait") throw new Error("no wait line");
   expect(codex.words).toMatch(/^Codex was downloaded, but setting it up didn't finish/);
@@ -121,11 +121,12 @@ test("install lines: a failed set-up offers Try again and Details, not the syste
   expect(setup).toContain("Details");
   expect(setup).not.toContain("Use the system proxy");
   // the proxy button alone goes: the card's other buttons stay (it had no Ask-IT button), and the
-  // words keep the ask-your-IT path for a failure that keeps happening
+  // words end on Try again, never on asking IT
   expect(setup.match(/<button/g)?.length).toBe(2);
   const words = installLine("en", { kind: "failed", log: ["x"], setup: true }, "Claude", ACTS);
   if (words === null || words.kind !== "wait") throw new Error("no wait line");
-  expect(words.words).toContain("ask your IT team to check your security software");
+  expect(words.words).toMatch(/Try again\.$/);
+  expect(words.words).not.toMatch(/\bIT\b/);
   const download = actions(false);
   expect(download).toContain("Use the system proxy");
   expect(download.match(/<button/g)?.length).toBe(3);

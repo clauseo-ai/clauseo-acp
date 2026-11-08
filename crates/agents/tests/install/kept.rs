@@ -8,6 +8,7 @@
     reason = "the tests poll for the job's first back-off and spoil the kept tree on disk"
 )]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use clauseo_agents::InstallState;
 
-use crate::resume::{BACKOFF_FIRST, DEADLINE, rename_fault, start};
+use crate::resume::{BACKOFF_FIRST, DEADLINE, files_under, rename_fault, start};
 use crate::support::{A_PACKAGES, Fixture, agent_a};
 
 /// The rename's in-place waits: doubling to 8 s, then 8 s until 55.75 s.
@@ -191,6 +192,50 @@ fn a_rename_never_allowed_keeps_the_tree_and_a_retry_renames_it_alone() {
     for name in A_PACKAGES {
         assert_eq!(fx.requests_for(name).len(), 1, "{name}: one download");
     }
+}
+
+/// The rename-only Retry's `Ready` cleans up as a full try's does: the downloads and the npm
+/// cache the failed tries kept (for a full try, should the kept tree fail its check) are gone.
+#[test]
+fn a_retry_that_renames_the_kept_tree_alone_removes_the_downloads_and_the_npm_cache() {
+    let mut fx = Fixture::new("resume-kept-clean-up");
+    let allowed = Arc::new(AtomicBool::new(false));
+    let open = Arc::clone(&allowed);
+    let fault =
+        move || (!open.load(Ordering::SeqCst)).then(|| std::io::Error::other("the folder is held"));
+    fx.config.install.rename_fault = Some(Arc::new(fault));
+    let ci_runs = Arc::new(AtomicUsize::new(0));
+    let (agents, events) = start(&fx, &[], &ci_runs);
+    agents.install(&agent_a());
+    fx.timer.fire_next(BACKOFF_FIRST);
+    fx.timer.fire_next(Duration::from_secs(8));
+    let (_, last) = events.until_end(&agent_a());
+    let InstallState::Failed(failure) = last else {
+        panic!("{last:?}");
+    };
+    assert_eq!(failure.kind.code(), "agent.install_setup_failed");
+    let agents_dir = fx.data.path().join("agents");
+    let (downloads, cache) = (agents_dir.join("downloads"), agents_dir.join("npm-cache"));
+    assert!(
+        !files_under(&downloads).is_empty(),
+        "the failed tries keep their downloads"
+    );
+    assert!(
+        !files_under(&cache).is_empty(),
+        "the failed tries keep npm's cache"
+    );
+
+    allowed.store(true, Ordering::SeqCst);
+    agents.retry(&agent_a(), false);
+    let (_, last) = events.until_end(&agent_a());
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    assert_eq!(ci_runs.load(Ordering::SeqCst), 1, "the Retry only renamed");
+    assert_eq!(
+        files_under(&downloads),
+        BTreeMap::new(),
+        "the downloads are gone after Ready"
+    );
+    assert!(!cache.exists(), "the npm cache is gone after Ready");
 }
 
 /// (c): the first try's rename fails once, keeping its finished tree; `spoil` then breaks the

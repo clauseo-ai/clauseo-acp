@@ -156,7 +156,7 @@ fn fake_pid(fx: &Fixture, n: usize) -> u32 {
 }
 
 /// Every file under `dir` by its path below `dir`, with its size; nothing when it is missing.
-fn files_under(dir: &Path) -> BTreeMap<String, u64> {
+pub(crate) fn files_under(dir: &Path) -> BTreeMap<String, u64> {
     let mut found = BTreeMap::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(folder) = stack.pop() {
