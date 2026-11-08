@@ -323,6 +323,7 @@ impl Machine {
             "S!=" => a != b,
             "=" => number(&a) == number(&b),
             "<>" => number(&a) != number(&b),
+            ">=" => number(&a) >= number(&b),
             _ => panic!("an operator this interpreter doesn't know: {cond}"),
         }
     }
