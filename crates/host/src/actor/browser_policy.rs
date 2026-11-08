@@ -9,13 +9,20 @@
 //!   off the actor: the registry and the policy files are never read here) and answers `Done`,
 //!   with no receipt and no log line. While one runs it answers `Done` and starts nothing: the
 //!   running read's event answers both.
+//! - Each read has a number and a deadline on the host clock ([`READ_WAIT`]). A read still
+//!   running then (a registry or file read that hangs) ends as `Unreadable`, and the next "Try
+//!   again" starts a new read; the late answer, its number no longer current, is dropped.
 //! - The read's end: `Unreadable`, `Blocked` or `Clear`. On `Blocked`, every header that showed
 //!   `BrowserPolicyUnreadable` shows `BrowserBlockedByPolicy` (`header_tools::policy_blocked`).
 //!   `Unreadable` and `Clear` change no header: each says what its session has.
-//! - Once the app has heard a state, a launch whose prep found the policy blocking keeps it
-//!   current ([`on_launch_read`]), so an earlier `Clear` does not outlive a later read error.
+//! - Once the app has heard a state, each launch that read the policy keeps it current
+//!   ([`on_launch_read`]): an earlier `Clear` does not outlive a later read error, nor an
+//!   `Unreadable` a later clean read.
 
 use std::sync::Arc;
+use std::time::Duration;
+
+use futures::future::AbortHandle;
 
 use clauseo_protocol::{BrowserPolicyState, CommandOutcome, HostEvent, ToolsUnavailableReason};
 
@@ -27,13 +34,30 @@ use crate::error::Error;
 /// The read thread's name.
 const THREAD_NAME: &str = "clauseo-browser-policy";
 
+/// How long a read may run, on the host clock, before it counts as `Unreadable`.
+pub(crate) const READ_WAIT: Duration = Duration::from_secs(10);
+
 /// The re-read's state on the actor.
 #[derive(Debug, Default)]
 pub(crate) struct PolicyCheck {
-    /// Whether a read runs.
-    running: bool,
+    /// The last read's number; each read takes the next.
+    last: u64,
+    /// The running read: its number and its deadline's timer.
+    running: Option<(u64, AbortHandle)>,
     /// The latest state published, in every app catch-up.
     latest: Option<BrowserPolicyState>,
+}
+
+/// What reaches the actor for a read, by its number.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PolicyInput {
+    /// The read ended: why the browser would stay off, or `None`.
+    Read {
+        read: u64,
+        found: Option<ToolsUnavailableReason>,
+    },
+    /// The read's deadline passed.
+    TimedOut { read: u64 },
 }
 
 /// `RecheckBrowserPolicy`: the read starts and the command answers; while one runs, it joins.
@@ -43,9 +67,10 @@ pub(super) fn recheck(actor: &mut Actor, ctx: &CommandCtx) {
 }
 
 fn begin(actor: &mut Actor) -> Result<(), Error> {
-    if actor.browser_policy.running {
+    if actor.browser_policy.running.is_some() {
         return Ok(());
     }
+    let read = actor.browser_policy.last + 1;
     let rd_policy = Arc::clone(&actor.wiring.rd_policy);
     let allowed_anyway = actor
         .effective
@@ -57,27 +82,41 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
             let found = rd_policy.recheck(allowed_anyway);
-            let _gone = post.try_send(Input::BrowserPolicy(found));
+            let _gone = post.try_send(Input::BrowserPolicy(PolicyInput::Read { read, found }));
         })
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;
-    actor.browser_policy.running = true;
+    let deadline = actor.post_after(
+        READ_WAIT,
+        Input::BrowserPolicy(PolicyInput::TimedOut { read }),
+    );
+    actor.browser_policy.last = read;
+    actor.browser_policy.running = Some((read, deadline));
     publish(actor, BrowserPolicyState::Checking);
     Ok(())
 }
 
-/// The read's end, from its thread: why the browser would stay off, or `None`.
-pub(super) fn on_read(actor: &mut Actor, found: Option<ToolsUnavailableReason>) {
-    actor.browser_policy.running = false;
-    settle(actor, state_of(found));
-}
-
-/// A launch prep found the firm's browser policy blocking (`blocked`, its reason): once the app
-/// has heard a state, and no re-read runs, that state follows the launch's read.
-pub(crate) fn on_launch_read(actor: &mut Actor, blocked: ToolsUnavailableReason) {
-    if actor.browser_policy.running || actor.browser_policy.latest.is_none() {
+/// A read's end or its deadline. Only the running read's counts: a late answer is dropped.
+pub(super) fn on_input(actor: &mut Actor, input: PolicyInput) {
+    let (read, state) = match input {
+        PolicyInput::Read { read, found } => (read, state_of(found)),
+        PolicyInput::TimedOut { read } => (read, BrowserPolicyState::Unreadable),
+    };
+    if actor.browser_policy.running.as_ref().map(|(n, _)| *n) != Some(read) {
         return;
     }
-    let state = state_of(Some(blocked));
+    if let Some((_, deadline)) = actor.browser_policy.running.take() {
+        deadline.abort();
+    }
+    settle(actor, state);
+}
+
+/// A launch prep read the firm's browser policy and found `found` (why it blocks, or `None`):
+/// once the app has heard a state, and no re-read runs, that state follows the launch's read.
+pub(crate) fn on_launch_read(actor: &mut Actor, found: Option<ToolsUnavailableReason>) {
+    if actor.browser_policy.running.is_some() || actor.browser_policy.latest.is_none() {
+        return;
+    }
+    let state = state_of(found);
     if actor.browser_policy.latest != Some(state) {
         settle(actor, state);
     }

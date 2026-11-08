@@ -100,18 +100,21 @@ impl BrowserPrep {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return Prepared::default();
         }
-        if let Some(reason) = self.rd_policy.check(self.allowed_anyway) {
-            return Prepared {
-                policy_block: Some(reason),
-                ..Prepared::default()
-            };
+        let policy_block = self.rd_policy.check(self.allowed_anyway);
+        let read = Prepared {
+            policy_read: true,
+            policy_block,
+            ..Prepared::default()
+        };
+        if policy_block.is_some() {
+            return read;
         }
         if self.sidecars.iter().any(|sidecar| !sidecar.is_file()) {
             tracing::warn!("a browser sidecar is missing; the session has no browser");
-            return Prepared::default();
+            return read;
         }
         let Some(chrome) = self.chrome.find_with_config(data) else {
-            return Prepared::default();
+            return read;
         };
         let claimed = BrowserSession::claim(
             session_id,
@@ -128,7 +131,7 @@ impl BrowserPrep {
                 Prepared {
                     chrome: Some(chrome),
                     session: Some(Arc::new(session)),
-                    policy_block: None,
+                    ..read
                 }
             }
             Err(error) => {
@@ -138,7 +141,7 @@ impl BrowserPrep {
                 );
                 Prepared {
                     chrome: Some(chrome),
-                    ..Prepared::default()
+                    ..read
                 }
             }
         }
@@ -154,6 +157,8 @@ pub(super) struct Prepared {
     pub(super) session: Option<Arc<BrowserSession>>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
     pub(super) policy_block: Option<ToolsUnavailableReason>,
+    /// Whether the firm's browser policy was read for this launch (`actor/browser_policy.rs`).
+    pub(super) policy_read: bool,
 }
 
 /// How long a launch prep waits for a browser slot that a running removal may free

@@ -505,7 +505,7 @@ impl Actor {
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
             Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
-            Input::BrowserPolicy(found) => browser_policy::on_read(self, found),
+            Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
             Input::Connector(input) => connectors::on_input(self, *input),
