@@ -1910,16 +1910,17 @@ limit, 12 hours, is a backstop only. A failed registration doesn't fail the set-
 reporter is a diagnostic with a fallback, and the next set-up tries again. `--remove` deletes
 it first in step 8, before the stop task and the record. `--remove --uninstall` deletes it in
 `refresh::TEARDOWN` after the stop task. Both go through `unregister_task`, which for this task
-disables it, ends a running watcher (`IRegisteredTask::Stop`), stops the session by name, and
-then deletes it. The runner starts it with `refresh::request_watch` (as the lawyer, through
+disables it, ends a running watcher (`IRegisteredTask::Stop`), stops the session by name,
+deletes the published name (`HKLM\SOFTWARE\Clauseo\SandboxWatch`), and then deletes it. The
+runner starts it with `refresh::request_watch` (as the lawyer, through
 `FRFX`).
 
 **The watcher** (`setup::watch`, pure steps over the `Watcher` trait, Windows glue in
 `windows_trace.rs` and `windows_pipe.rs`):
 
 1. It refuses unless it runs as LOCAL SYSTEM from the admin copy (70).
-2. It reads `PoolSids` and `OwnerSid` from the record (71 when unreadable). Nothing comes from
-   the lawyer. An empty pool is nothing to watch (0).
+2. It reads `PoolSids` and `OwnerSid` from the record (71 when missing or unreadable). Nothing
+   comes from the lawyer. An empty pool is nothing to watch (0).
 3. Every pool SID must pass `--stop`'s pool-user check (72).
 4. It stops any session named `ClauseoSandboxWatch` (`ControlTraceW`), so a crash leaves
    nothing behind past the next start. It then starts that session in real time (64 KB
@@ -1942,49 +1943,87 @@ then deletes it. The runner starts it with `refresh::request_watch` (as the lawy
   from.
 - **OperationEnd (24)** carries `Irp, ExtraInformation, Status`. IRPs are reused, so each pool
   Create pairs with the next OperationEnd of its `Irp`. The pending map holds at most 4,096,
-  oldest evicted. `Status == 0xC0000022` makes a record.
+  oldest evicted. `Status == 0xC0000022` makes a record. Each pending Create keeps its
+  `EventHeader.TimeStamp`. An OperationEnd stamped before it ends an earlier use of the IRP
+  (real-time buffers are per CPU, so delivery can be out of order), and pairs with nothing.
+- **Versions.** Only Create v1 and OperationEnd v0 are read, the versions the spike recorded on
+  WS2025 26100 and the offsets were written for. Any other version is skipped and counted, and
+  the count is logged once as the consumer ends (a count only).
+- **Long names.** A pool Create whose `FileName` is over 4,096 UTF-16 units is dropped, not
+  truncated (a cut path would mislead), and counted in `dropped`.
 - **Parsing.** Payloads are read at fixed offsets, with lengths checked, not through TDH. The
   consumer sees every OperationEnd on the machine (10⁴ a second during a build), and a TDH
   lookup per event would cost more than the whole consumer does now.
 - **Access.** The access comes from `CreateOptions`: any disposition but `FILE_OPEN`, or
   `FILE_DELETE_ON_CLOSE`, is `write`. A plain open is `unknown`, since a Create has no
   `DesiredAccess`, and part B works it out with `AuthzAccessCheck`.
-- **Paths.** `FileName` is always the full `\Device\HarddiskVolumeN\…` path. It is mapped
+- **Paths.** `FileName` is always the full `\Device\…` path. A local volume's is mapped
   through `QueryDosDeviceW` over the drive letters, listed again on a miss at most once a
-  second, and `\Device\Mup\` becomes `\\`. Any other device, or a volume with no letter, is
-  dropped, as macOS drops `/dev`.
+  second, to `C:\…`. **Every other device path is flagged `net` and never made usable.** A pool
+  user picks the paths it opens, and part B checks a refused path's access as the lawyer
+  (`AuthzAccessCheck`). A usable UNC path there would mean an SMB connection, with the lawyer's
+  credentials, to a server the agent chose: an NTLM leak or relay. So `\Device\Mup\…`,
+  `\Device\LanmanRedirector\;Z:<id>\…`, `\Device\WebDavRedirector\…`, any `\;X:<id>\`
+  redirector form, and any device that isn't a known local volume (one with no letter, a named
+  pipe) are sent with `"net":true`. Their `path` is for display only: `\\server\share\…` with
+  the redirector's parts stripped, or the NT path. Part B must never open or check a `net`
+  path. A path not under `\Device\` is dropped.
 
 **The pipe.** `\\.\pipe\clauseo-sandbox-watch-<32 hex>`, 128 random bits per run.
 - **Descriptor:** `O:SYD:P(A;;FA;;;SY)(A;;FR;;;<OwnerSid>)S:(ML;;NWNR;;;ME)`. Only the record's
   owner may open it, read only. The first instance uses `FILE_FLAG_FIRST_PIPE_INSTANCE`, every
-  instance uses `PIPE_REJECT_REMOTE_CLIENTS`, and at most 8 instances exist.
+  instance uses `PIPE_REJECT_REMOTE_CLIENTS`, and at most 8 instances exist. It is
+  `PIPE_ACCESS_OUTBOUND`: the server only writes.
+- **The instances never reach zero** (`instances.rs`). A name lives while one instance is open.
+  At zero, a pool user spinning on `CreateNamedPipeW` with the published name could make the next
+  instance under their own descriptor and read every refusal. So an accepted listener leaves the
+  listening slot only once its replacement is made, a failed connect closes only after its
+  replacement, each poll listens again before it prunes the clients that left (a client that
+  connects and leaves within one poll is closed with a listener open), and before the last
+  instance closes a listener is made. Each later instance's owner is read from its handle
+  (`GetSecurityInfo`) and must be SYSTEM. A later instance that can't be made or isn't SYSTEM's,
+  or a count that reaches zero all the same, deletes the published name and exits 74; the next
+  run starts under a new random name with `FILE_FLAG_FIRST_PIPE_INSTANCE`. Fake-pipe tests walk
+  accept, client-gone, failed-connect, failed-listen and send-drops-all sequences, at the 8-instance
+  cap too.
 - **The name** is published as `PipeName` (`REG_SZ`) in `HKLM\SOFTWARE\Clauseo\SandboxWatch`
-  (64-bit view). Each run deletes the key and makes it again, volatile, with
-  `O:SYD:P(A;;KA;;;SY)(A;;KR;;;BA)(A;;KR;;;BU)`, so only SYSTEM can point a client anywhere.
+  (64-bit view). Each run makes the key, volatile, with
+  `O:SYD:P(A;;KA;;;SY)(A;;KR;;;BA)(A;;KR;;;BU)`, so only SYSTEM can point a client anywhere. A key
+  already there and owned by SYSTEM is a killed run's (`IGNORE_NEW` lets one instance run), and
+  is deleted and made again. One with any other owner exits 74.
   #733's SetUp pipe uses a fixed name, so this is the pattern its M2 will follow. The run
-  deletes the key as it exits; a crash leaves a name that names no pipe, and a restart clears
-  the key.
+  deletes the key as it exits, and the task's removal deletes it too. A killed watcher (it is
+  built with `panic = "abort"`, so a panic is a kill) leaves a name that names no pipe, which
+  the next start replaces, and a restart clears.
 - **Squatting.** A pool user can't make an instance of the live pipe: the DACL holds back
   `FILE_CREATE_PIPE_INSTANCE`. After a crash, a pool user could make a pipe under the stale
   name. So the client (part B) checks, as SetUp's client does, that the pipe's server is owned
   by SYSTEM before it reads a byte, and only opens a name `protocol::is_pipe_name` accepts.
 - **Lines.** UTF-8 JSON, one per `\n`. A refusal is `{"v":1,"sid":"S-1-5-21-…","pid":1234,
   "path":"C:\\…","access":"read"|"write"|"unknown"}`. What the rate dropped since the last
-  such line is `{"v":1,"dropped":n}`. `read` is reserved: this side never sends it today.
-  `protocol::Line::parse` reads both and refuses other versions. The client never writes.
-- **Rate.** At most 200 refusals a second at the source. The rest, and any the consumer's
-  1,024-record channel had no room for, go as one `dropped` line when the second ends. The
+  such line is `{"v":1,"dropped":n}`. `read` is reserved: this side never sends it today. A
+  refusal flagged as network adds `"net":true`. The field is optional and false when absent, so
+  `v` stays 1. `protocol::Line::parse` reads both and refuses other versions. The client never
+  writes.
+- **Rate.** At most 200 refusals a second at the source. The rest, any the consumer's
+  1,024-record channel had no room for, the long names it dropped, and what ETW itself lost go
+  as one `dropped` line when the second ends. ETW's losses come from a `ControlTraceW`
+  (`EVENT_TRACE_CONTROL_QUERY`) every 5 s: what `EventsLost` and `RealTimeBuffersLost` grew
+  by. A lost event may have been a refusal. The
   runner's own cap is 20 a second.
 
 **Lifetime** (`lifetime.rs`, the orchestrator's condition). The watcher runs only while a
 client is connected. It exits if no client connects within 30 s of its start, and 3 s after
-the last client leaves (a client back within the 3 s keeps it). Whatever the clients do, it
+the last client leaves (a client back within the 3 s keeps it). Every 5 s it reads the record's
+`OwnerSid` again: another owner, or no record, deletes the published name and exits 0, so a
+running watcher never serves a previous owner after a new set-up. Whatever the clients do, it
 ends after 11 hours, inside the task's 12, so it stops its session itself rather than be killed
 with it running. On every exit it deletes the published name, closes the pipe, stops the
 session and waits for the consumer thread. A trace that ends on its own exits 75. A watcher
-that is killed (the owner may end the task) leaves its session enabled. The kernel still
-generates events, which no one reads, until the next start, `--remove`, or a restart; sessions
-don't survive a restart.
+that is killed (the owner may end the task, and a panic aborts) leaves its session enabled
+and its key. The kernel still generates events, which no one reads, until the next start
+(which stops the session and replaces the key), `--remove` (which does both), or a restart;
+sessions and the volatile key don't survive a restart.
 
 **Privacy.** A non-pool event is dropped in-process, in the callback. It is never stored,
 logged, persisted or sent. The output channel only ever carries a pool user's refusal, and the
@@ -2005,13 +2044,13 @@ flush.
 
 | Code | Meaning |
 |---|---|
-| 0 | served until the last client left, no client came, the run reached 11 h, or no pool is recorded |
+| 0 | served until the last client left, no client came, the run reached 11 h, the record's owner changed, or the pool is empty |
 | 68 | the provider's 8 sessions are taken (`ERROR_NO_SYSTEM_RESOURCES`); part B falls back to the host-side source |
 | 70 | not LOCAL SYSTEM, or not run from the admin copy |
-| 71 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed |
+| 71 | there is no record, it can't be read, or its `PoolSids` or `OwnerSid` is malformed |
 | 72 | a SID in `PoolSids` isn't a pool user |
 | 73 | the session couldn't be started, the provider enabled, or the consumer opened |
-| 74 | the pipe couldn't be made, its name published, or its clients polled |
+| 74 | the pipe couldn't be made, its name published, or its clients polled; a later instance couldn't be made or isn't SYSTEM's; or the key is someone else's |
 | 75 | the trace ended while serving |
 
 **Rows to check on the VM** (open):
@@ -2021,10 +2060,13 @@ flush.
 | W1 | Lifetime after a run ends: the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | open |
 | W2 | Lifetime after a crash: kill the watcher with `taskkill /f`; the session is left; the next `--watch` stops it first, and `--remove` stops it | open |
 | W3 | Defender (RTP on, no exclusions) and an EDR if available: no detection, no alert for the session or the task | open |
-| W4 | Windows 10 22H2 Home and Windows 11 Home: the task registers, the session starts, refusals arrive with the SID item | open |
+| W4 | Windows 10 22H2 Home and Windows 11 Home: the task registers, the session starts, refusals arrive with the SID item, Create is v1 and OperationEnd v0, and no "unknown version" line is logged (the count is 0) | open |
 | W5 | Provider full: hold 8 sessions on Kernel-File, then `--watch` exits 68 and leaves no session | open |
 | W6 | Pipe squatting: a pool user makes `clauseo-sandbox-watch-<hex>` first (stale name after W2); the watcher's first instance is refused, and part B's SYSTEM-owner check refuses the squatter's pipe | open |
 | W7 | Cost re-measure: 10 `npm ci` on/off pairs in ABBA order, first runs included, as spike pass 2; consumer CPU, kernel-side total and lost events | open |
+| W8 | Squatting after a client-gone: a pool user spins `CreateNamedPipeW` on the published name while the runner connects and disconnects over and over (and while all clients drop at once); the pool user's pipe never receives a line, and the watcher either serves on or exits 74 with the key gone | open |
+| W9 | A killed watcher: `taskkill /f` it while serving; the key and session are left; the next start replaces the key, stops the session and serves, and `--remove` deletes both | open |
+| W10 | After W9 with no consumer, `%SystemRoot%\System32\LogFiles\WMI\RtBackup` holds no `ClauseoSandboxWatch` spill, or the next start removes it | open |
 
 ### The launcher (PR6 interface)
 
