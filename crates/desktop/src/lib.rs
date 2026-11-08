@@ -428,6 +428,7 @@ fn start_host<R: Runtime>(
         });
         let config = connectors::with_connectors(config, app.clone(), &data_dir);
         let config = blocklist::with_blocklist(&app, config);
+        let config = dialogs::ask::with_dialogs(config, &app);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

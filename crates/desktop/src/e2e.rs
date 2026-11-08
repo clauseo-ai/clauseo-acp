@@ -10,6 +10,8 @@
 //!   folder dialog, and the "always allow" confirm answers `E2E_CONFIRM_ALWAYS` (`accept` or
 //!   `decline`) instead of drawing its dialog. Either variable unset or empty (any other value,
 //!   for the confirm) draws the dialog as usual, for runs by hand.
+//! - On every OS, R18's widening questions and picker answer from `E2E_DIALOG_ANSWERS` and
+//!   `E2E_DIALOG_PICKS` when either is set and not empty (`dialogs/ask/script.rs`).
 //! - Setup takes the installs of the agents named in `E2E_AGENTS_MANAGED` (comma-separated ids)
 //!   as the firm's (`Managed`), as a firm policy locking `agents.<id>` does: the e2e app's agents
 //!   are `fake_agent`, so nothing is installed and a sign-in starts at once. Unset or empty
