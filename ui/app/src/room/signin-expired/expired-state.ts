@@ -20,7 +20,8 @@ export type Expired =
 /** The card's state for the agent's sign-in, the failed turn's step at `failedAt`. A plan login signed in after the
  * failure is "signed in again"; one signed in before it is the login that expired. */
 export function expiredOf(signIn: SignIn | undefined, failedAt: Timestamp): Expired {
-  if (signIn === undefined || signIn === "queued")
+  // still checking the sign-in: the card as it stood, expired
+  if (signIn === undefined || typeof signIn === "string")
     return signIn === "queued" ? { kind: "waiting" } : { kind: "expired" };
   if (signIn.signed_in !== undefined) {
     const s = signIn.signed_in;

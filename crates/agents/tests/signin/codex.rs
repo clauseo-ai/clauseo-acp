@@ -128,7 +128,13 @@ fn port_1455_taken_gives_port_busy_and_try_again_waits_for_it() {
     let (seen, last) = events.until_end();
     assert_eq!(states(&seen), [failed(SigninCode::PortBusy)]);
     assert_eq!(last, failed(SigninCode::PortBusy));
-    assert_eq!(fx.launches(), [], "no run starts while the port is taken");
+    // Only the quick status check before the sign-in ran: no login while the port is taken.
+    assert_eq!(
+        fx.codex_runs(&["login"]),
+        [],
+        "no login starts while the port is taken"
+    );
+    assert_eq!(fx.launches().len(), 1);
     agents.try_again(&codex()).unwrap();
     let polls = || {
         fx.timer
@@ -140,7 +146,7 @@ fn port_1455_taken_gives_port_busy_and_try_again_waits_for_it() {
     eventually("the first probe failed", || polls() == 1);
     fx.timer.fire(PORT_POLL);
     eventually("the second probe failed", || polls() == 2);
-    assert_eq!(fx.launches(), []);
+    assert_eq!(fx.launches().len(), 1);
     assert_eq!(agents.signin_state(&codex()), Some(last));
     drop(listener);
     fx.timer.fire(PORT_POLL);
@@ -284,7 +290,8 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     );
     let _ = login;
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
-    assert_eq!(fx.codex_runs(&["login", "status"]), []);
+    // The one status run is the quick check before the login, which said signed out.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 1);
     assert_eq!(fx.codex_runs(&["app-server"]), []);
 }
 
@@ -306,15 +313,17 @@ fn a_codex_run_that_exits_before_sign_in_fails_or_is_cancelled() {
 #[test]
 fn no_status_runs_once_a_poll_confirms_the_codex_sign_in() {
     let fx = Fixture::new("codex-confirmed", "never");
-    plant(&fx);
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     events.until(|state| *state == waiting());
+    // The login is made after the quick check before the login said signed out.
+    plant(&fx);
     fx.timer.fire(POLL);
     assert_eq!(events.until_end().1, signed_in());
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
     let runs = fx.launches().len();
-    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 1);
+    // The quick check's, then the poll's.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 2);
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(fx.codex_runs(&["login"])[0].pid));
     #[cfg(target_os = "linux")]

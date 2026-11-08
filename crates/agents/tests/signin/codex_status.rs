@@ -125,24 +125,6 @@ fn with_no_lawyer_home_an_unconfirmed_login_is_not_removed() {
     assert!(home(&fx).join("auth.json").is_file());
 }
 
-/// Reads Codex's events until its job ends with no state (`SigninUnchanged`), and gives every
-/// sign-in state sent meanwhile.
-#[cfg(unix)]
-fn states_until_unchanged(events: &Events) -> Vec<SigninState> {
-    let mut states = Vec::new();
-    for _ in 0..4000 {
-        for event in events.drain() {
-            match event {
-                AgentsEvent::Signin { agent, state } if agent == codex() => states.push(state),
-                AgentsEvent::SigninUnchanged { agent } if agent == codex() => return states,
-                _ => {}
-            }
-        }
-        pause();
-    }
-    panic!("never: SigninUnchanged; states {states:?}");
-}
-
 /// The `login status` runs started so far.
 #[cfg(unix)]
 fn statuses(fx: &Fixture) -> usize {
@@ -161,8 +143,10 @@ fn time_out_statuses(fx: &Fixture, before: usize, count: usize) {
     }
 }
 
-/// A startup status whose `login status` never answers is killed at its 15 s limit and asked
-/// once more; killed again, nothing is sent.
+/// A startup status whose `login status` never answers shows `Checking`; it is killed at its
+/// 15 s limit and asked once more, and the check is retried with the 10 s retry's limit (Codex's
+/// own 15 s, which is longer) and the 20 s one, each asked twice. Killed every time, it shows
+/// Sign in: never signed in, never failed, never nothing.
 #[cfg(unix)]
 #[test]
 fn a_startup_status_that_times_out_is_neither_signed_in_nor_failed() {
@@ -172,11 +156,21 @@ fn a_startup_status_that_times_out_is_neither_signed_in_nor_failed() {
     fx.stall(Some("status"));
     let before = statuses(&fx);
     agents.check_status(&codex()).unwrap();
-    time_out_statuses(&fx, before, 2);
-    // The job ends with no state, and says so (review L5): `end_job`'s `SigninUnchanged`.
-    assert_eq!(states_until_unchanged(&events), []);
-    assert_eq!(agents.signin_state(&codex()), None);
-    assert_eq!(statuses(&fx), before + 2, "asked twice");
+    time_out_statuses(&fx, before, 4);
+    for n in 5..=6 {
+        crate::support::eventually("the status ran", || statuses(&fx) >= before + n);
+        fx.timer.fire(std::time::Duration::from_secs(20));
+    }
+    let (seen, last) = events.until_end();
+    assert_eq!(last, SigninState::SignedOut { found: None });
+    assert_eq!(
+        seen,
+        [
+            crate::support::Seen::State(SigninState::Checking),
+            crate::support::Seen::State(SigninState::SignedOut { found: None }),
+        ]
+    );
+    assert_eq!(statuses(&fx), before + 6, "asked twice at each limit");
 }
 
 /// Review H1: a first status that times out is asked once more, and an answer then counts.
@@ -197,8 +191,8 @@ fn a_status_that_times_out_once_is_asked_again() {
     assert_eq!(fx.codex_runs(&["login", "status"]).len(), 2);
 }
 
-/// Review H1: a fresh install whose status never answers stays signed out: nothing is sent,
-/// never `SignedIn`, and no `login-source` is written.
+/// Review H1: a fresh install whose status never answers stays signed out: only `Checking` is
+/// sent while it is asked again, never `SignedIn`, and no `login-source` is written.
 #[cfg(unix)]
 #[test]
 fn a_fresh_install_whose_status_never_answers_stays_signed_out() {
@@ -214,8 +208,8 @@ fn a_fresh_install_whose_status_never_answers_stays_signed_out() {
     let before = statuses(&fx);
     agents.check_status(&codex()).unwrap();
     time_out_statuses(&fx, before, 2);
-    assert_eq!(states_through(&events, kept()), []);
-    assert_eq!(agents.signin_state(&codex()), None);
+    assert_eq!(states_through(&events, kept()), [SigninState::Checking]);
+    assert_eq!(agents.signin_state(&codex()), Some(SigninState::Checking));
     assert!(!login_source(&fx).exists());
 }
 

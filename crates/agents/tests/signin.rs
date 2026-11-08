@@ -28,6 +28,10 @@ mod codex_cli;
 mod codex_status;
 
 #[cfg(test)]
+#[path = "signin/status_retry.rs"]
+mod status_retry;
+
+#[cfg(test)]
 #[path = "signin/queued.rs"]
 mod queued;
 

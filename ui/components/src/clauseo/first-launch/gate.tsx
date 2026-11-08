@@ -34,6 +34,7 @@ export type Plan = "claude" | "chatgpt";
  * gate's own, the panel and the paste field the lawyer opened. Times are already clock words in the language. */
 export type GateView =
   | { kind: "signed-out"; found?: Found | undefined }
+  | { kind: "checking" }
   | { kind: "queued"; offline: boolean }
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
@@ -187,6 +188,14 @@ export function Gate({
                 </Ways>
               )}
         </>
+      );
+      break;
+    case "checking":
+      // the sign-in status check is still running (its retries are silent): nothing to press yet, and never an empty well
+      body = (
+        <Act>
+          <Say>{w("Checking whether you're signed in to {name}…", { name })}</Say>
+        </Act>
       );
       break;
     case "queued":

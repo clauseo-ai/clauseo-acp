@@ -134,6 +134,7 @@ const found = (
 const SWITCHING: Scene = {
   events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: false } })],
 };
+const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
 const SWITCH_CONFLICT: Scene = {
@@ -512,6 +513,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
   // Getting {name} ready…, never these bytes
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
+  // UD1-89: the sign-in status check still running, at start and through its silent retries
+  ["Checking whether you're signed in to {name}…", CHECKING, "signin-checking"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
