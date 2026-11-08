@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
-pub(crate) use git::{PROBE_PREFIX, args_with_probe};
+#[cfg(target_os = "macos")]
+pub(crate) use git::PROBE_PREFIX;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use git::args_with_probe;
 
 use crate::{Error, Loopback, PathRule, Policy};
 

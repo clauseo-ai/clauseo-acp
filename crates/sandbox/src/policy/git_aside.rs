@@ -6,10 +6,11 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use super::build::{beneath_existing, refuse};
-use super::{PathRule, Policy, same, under};
+use super::{PathRule, Policy, under};
 use crate::Error;
 use crate::policy::opens_as;
 
+#[cfg(target_os = "macos")]
 /// The folder at the root of another volume that the git watch sets aside into there.
 const VOLUME_FOLDER: &str = ".clauseo";
 
@@ -78,7 +79,11 @@ pub(super) fn finish(policy: Policy) -> Result<Policy, Error> {
     let mut policy = check_git_set_aside(policy)?;
     policy.git.commondir =
         commondir_targets(&policy.read_only_in_matter, &policy.read_only_in_matter);
-    policy.git.volume = volume_set_aside(policy.matter(), policy.git_set_aside(), &reach(&policy))?;
+    #[cfg(target_os = "macos")]
+    {
+        let reach = reach(&policy);
+        policy.git.volume = volume_set_aside(policy.matter(), policy.git_set_aside(), &reach)?;
+    }
     Ok(policy)
 }
 
@@ -149,6 +154,7 @@ fn commondir_of(dir: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+#[cfg(target_os = "macos")]
 /// The volume set-aside folder for `matter` when its volume is another than `set_aside`'s,
 /// local, and the folder can serve: inside no path the agent reaches but the matter, and in
 /// the matter only as the volume's own root. Refused when the volumes can't be read.
@@ -164,6 +170,7 @@ fn volume_set_aside(
         return Ok(None);
     };
     let dir = root.join(VOLUME_FOLDER);
+    let same = super::same;
     let meets = |p: &Path| !same(p, matter) && (under(&dir, p) || under(p, &dir));
     if let Some(p) = reach.iter().find(|p| meets(p)) {
         return refuse(format!(
@@ -223,12 +230,6 @@ fn other_volume_root(matter: &Path, set_aside: &Path) -> Result<Option<PathBuf>,
         .map(|&c| c.to_ne_bytes()[0])
         .collect();
     Ok(Some(PathBuf::from(std::ffi::OsStr::from_bytes(&name))))
-}
-
-/// Off macOS there is no git watch.
-#[cfg(not(target_os = "macos"))]
-fn other_volume_root(_: &Path, _: &Path) -> Result<Option<PathBuf>, Error> {
-    Ok(None)
 }
 
 /// The git set-aside folder's rules: inside a hidden path, and neither inside nor holding the

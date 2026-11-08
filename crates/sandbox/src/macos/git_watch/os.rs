@@ -154,8 +154,14 @@ pub(crate) struct Lock(#[expect(dead_code, reason = "held for its flock")] fs::F
     reason = "the matter state file's lock, in the git set-aside folder outside the jail"
 )]
 pub(crate) fn lock(path: &Path) -> io::Result<Lock> {
+    // Only the `matters` folder: the set-aside folder above it was made at the launch, and one
+    // removed since is not made again.
     if let Some(dir) = path.parent() {
-        Real.make_dirs(dir)?;
+        match Real.make_dir(dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
     }
     let file = fs::OpenOptions::new()
         .read(true)

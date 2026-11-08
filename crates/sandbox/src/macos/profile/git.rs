@@ -2,12 +2,11 @@
 //! `.git` or `HEAD` made in the session's temp or notes folder, nothing git reads made at a
 //! launch repository's `commondir` target, and the git watch's set-aside folders denied whole.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::names::{GIT_NAME_REGEX, HEAD_REGEX};
 use super::params::Params;
-use super::{SeatbeltProfile, Writer, literal, subpath};
+use super::{Writer, literal, subpath};
 use crate::Policy;
 
 /// The parameter naming the launch's probe: the one Mach name the profile allows looking up
@@ -20,12 +19,16 @@ pub(crate) const PROBE_PREFIX: &str = "chat.clauseo.session.";
 
 /// [`SeatbeltProfile::args`] with `probe` for the [`SESSION_PROBE`] parameter: one name for
 /// each launch, so each launch's processes are told apart.
-pub(crate) fn args_with_probe(profile: &SeatbeltProfile, probe: &str) -> Vec<OsString> {
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn args_with_probe(
+    profile: &super::SeatbeltProfile,
+    probe: &str,
+) -> Vec<std::ffi::OsString> {
     let mut args = profile.args();
     let ours = format!("{SESSION_PROBE}=");
     for arg in &mut args {
         if arg.to_str().is_some_and(|text| text.starts_with(&ours)) {
-            *arg = OsString::from(format!("{ours}{probe}"));
+            *arg = std::ffi::OsString::from(format!("{ours}{probe}"));
         }
     }
     args
