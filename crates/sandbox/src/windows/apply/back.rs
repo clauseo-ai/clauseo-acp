@@ -328,21 +328,27 @@ pub fn forget_matter(
 /// launch never leaves that launch's grants applied.
 ///
 /// First, every fence deny a session lifted for a read of a whole matter folder is put back
-/// (`lifts.rs`, R18): a crash left it off.
+/// (`lifts.rs`, R18): a crash left it off. Then every read of another matter is taken back with
+/// the `removing` entries, each from the item its entry recorded, found by its ID wherever it
+/// is now (R18): no session runs at start, so each one a crashed run left goes now rather than at
+/// its matter's next launch.
 pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconciled, Error> {
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
     // R18: at start no session runs, so every lifted fence deny goes back.
     if let Err(error) = super::lifts::restore(ledger, acl, |_| true) {
         tracing::warn!(%error, "a lifted fence deny wasn't put back at start");
     }
-    let pending = ledger.pending().map_err(failed)?;
+    // R18: a read is taken back below, never marked `applied`.
+    let read = |e: &Entry| e.kind == PathKind::OtherMatterRead;
+    let pending: Vec<Entry> = ledger.pending().map_err(failed)?;
+    let pending = pending.into_iter().filter(|e| !read(e));
     let owed: BTreeSet<MatterId> = ledger
         .handbacks_owed()
         .into_iter()
         .map(|o| o.matter)
         .collect();
     let mut done = Reconciled::default();
-    let removing = |e: &Entry| (e.state == EntryState::Removing).then_some(Take::Remove);
+    let removing = |e: &Entry| (e.state == EntryState::Removing || read(e)).then_some(Take::Remove);
     let taken = take_back(ledger, None, acl, removing).map_err(failed)?;
     done.unchecked += taken.kept;
     done.removed += taken.shared;
@@ -359,18 +365,40 @@ pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconci
         }
     }
     let mut walked: BTreeMap<PathBuf, bool> = BTreeMap::new();
+    // Each entry's tree where it is now (`tree_of`); one not found isn't settled.
+    let mut roots: BTreeMap<EntryId, Option<PathBuf>> = BTreeMap::new();
     for entry in there.iter().chain(&gone).chain(&taken.removed) {
-        if entry.inherit == Inherit::ThisOnly || walked.contains_key(&entry.path) {
+        if entry.inherit == Inherit::ThisOnly {
             continue;
         }
-        let ok = acl
-            .propagate(&entry.path, reach_of(entry.inherit), None)
-            .inspect_err(|failure| tracing::warn!(%failure, "a reconcile walk failed"))
-            .is_ok();
-        walked.insert(entry.path.clone(), ok);
+        let root = match tree_of(acl, entry) {
+            Ok(root) => root,
+            Err(failure) => {
+                tracing::warn!(%failure, "a reconcile entry's file wasn't found by its ID");
+                continue;
+            }
+        };
+        roots.insert(entry.id, root.clone());
+        let Some(root) = root.filter(|root| !walked.contains_key(root)) else {
+            continue;
+        };
+        let ok = match acl.propagate(&root, reach_of(entry.inherit), None) {
+            Ok(_) => true,
+            Err(failure) if root_gone(&root, failure) => true,
+            Err(failure) => {
+                tracing::warn!(%failure, "a reconcile walk failed");
+                false
+            }
+        };
+        walked.insert(root, ok);
     }
     let settled = |entry: &&Entry| {
-        entry.inherit == Inherit::ThisOnly || walked.get(&entry.path).copied().unwrap_or(false)
+        entry.inherit == Inherit::ThisOnly
+            || match roots.get(&entry.id) {
+                Some(Some(root)) => walked.get(root).copied().unwrap_or(false),
+                Some(None) => true,
+                None => false,
+            }
     };
     let deny = |entry: &&Entry| entry.rights.is_deny();
     let owes = |entry: &&Entry| owed.contains(&entry.matter);

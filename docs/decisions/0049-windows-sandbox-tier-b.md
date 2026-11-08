@@ -2488,13 +2488,13 @@ naming dead SIDs (K10).
   until that relaunch plans the grant's own allows: narrowing fails closed.
 - **After a crash:** the matter's next launch takes back, before it records anything, each read
   entry naming its subjects that its plan doesn't list (`apply_checked`). `forget_matter` takes
-  them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short
-  and puts back every lifted deny, but leaves the reading matter's `applied` read allows until
-  its next launch or its forget: it can't tell a live session's from a dead one's. That is
-  bounded: the runner's Job Object kills every agent when the host exits, so no agent outlives
-  the host to use them, and the pool user serves no other matter meanwhile.
-  Until then the reuse check (`Ledger::grants_sid`) keeps the pool user from serving another
-  matter. The set-aside, `--reclaim` and the clean-close record don't take part: they cover the
+  them back with the matter's other entries. `reconcile`, at start, puts back every lifted deny
+  and then takes back every read allow, each by its recorded file ID (R18 LOW 3): no session
+  runs at start, as the lift's restore there already assumes. A read whose removal or walk fails
+  stays `removing` for the next try. Test:
+  `start_takes_back_every_read_a_crashed_run_left_wherever_its_item_went`. Until the reads go,
+  the reuse check (`Ledger::grants_sid`) keeps the pool user from serving another matter.
+  The set-aside, `--reclaim` and the clean-close record don't take part: they cover the
   launch's own trees.
 
 **Unmeasured: PR6's VM rows.** Nothing in this section has run on real NTFS. The rows, each as
@@ -2514,7 +2514,8 @@ the reading session's pool user:
   user's read at the run's end, on the folder and on its files, where it went;
 - a granted folder deleted during the run: the run's end succeeds and drops its entries;
 - a granted folder replaced by a new one at the same path: the new one keeps its entries and the
-  old one, moved aside, loses the read.
+  old one, moved aside, loses the read;
+- after a killed run, `reconcile` at start removes every read, a moved folder's included.
 
 ### The launcher (PR6 interface)
 

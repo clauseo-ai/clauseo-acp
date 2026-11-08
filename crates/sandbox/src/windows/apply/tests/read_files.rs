@@ -218,3 +218,24 @@ fn an_older_ledgers_read_with_no_file_loads_and_is_written_again_with_one() {
     end(&w, &mut ledger, &mut acl);
     assert_eq!(allows_in_other(&w, &acl), Vec::<Key>::new());
 }
+
+#[test]
+fn start_takes_back_every_read_a_crashed_run_left_wherever_its_item_went() {
+    let w = World::new("files-start");
+    w.other_tree();
+    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+    // The run crashes: no end. Its folder was moved meanwhile.
+    launch(&w, &mut ledger, &mut acl, &[("other/m2/docs", false)]);
+    let moved = move_docs(&w, &mut acl, "other/m2/moved");
+    acl.walks.clear();
+
+    let mut ledger = super::ledger(&w);
+    let done = reconcile(&mut ledger, &mut acl).unwrap();
+    assert_eq!(done.removed, 4, "two entries on each folder");
+    assert_eq!(done.unchecked, 0);
+    assert_eq!(read_entries(&ledger), Vec::<Entry>::new());
+    assert_eq!(allows_in_other(&w, &acl), Vec::<Key>::new());
+    assert!(acl.walks.iter().any(|(r, _, _)| *r == moved));
+    // The launch's other entries stay.
+    assert!(ledger.entries().any(|e| e.kind == PathKind::Matter));
+}
