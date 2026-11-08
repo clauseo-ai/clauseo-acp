@@ -2,7 +2,8 @@
 //! self-relative security descriptor read strictly, edited for one group's deny, and written
 //! back with its parts in the order it had. Pure; tested on every OS.
 //!
-//! Layout, little-endian: `SECURITY_DESCRIPTOR_RELATIVE` (revision 1, a pad byte, the control
+//! Layout, little-endian: `SECURITY_DESCRIPTOR_RELATIVE` (revision 1, the resource manager's
+//! control byte (`Sbz1`, kept as read), the control
 //! word, then the offsets of the owner, group, SACL and DACL), each `ACL` (revision, size, count,
 //! then its entries), each entry (type, flags, size, mask, then for the plain types the SID).
 //! COM requires an owner and a group, so a descriptor without either is refused, as is one with
@@ -13,10 +14,9 @@ use crate::windows::sids::Sid;
 /// The deny's rights: `CCDCLCSWRP`, `COM_RIGHTS_EXECUTE` and the local and remote launch and
 /// activation rights.
 pub const DENY_MASK: u32 = 0x1F;
-/// The rights a deny already there must hold to count: `COM_RIGHTS_EXECUTE`,
-/// `COM_RIGHTS_EXECUTE_LOCAL` and `COM_RIGHTS_ACTIVATE_LOCAL`, the ones wslservice's own
-/// descriptor grants (`0xB`).
-pub const NEEDED_MASK: u32 = 0xB;
+/// The rights a deny already there must hold to count: all of [`DENY_MASK`], so one without
+/// the remote rights gets ours put before it.
+pub const NEEDED_MASK: u32 = DENY_MASK;
 
 /// `SE_SELF_RELATIVE`.
 const SELF_RELATIVE: u16 = 0x8000;
@@ -52,6 +52,8 @@ enum Part {
 /// A launch permission, parsed.
 #[derive(Debug, Clone)]
 pub struct LaunchSd {
+    /// The resource manager's control byte (`Sbz1`), as read.
+    rm: u8,
     /// The control word, as read.
     control: u16,
     /// The owner SID's bytes.
@@ -72,7 +74,8 @@ pub struct LaunchSd {
 /// are laid out in.
 impl PartialEq for LaunchSd {
     fn eq(&self, other: &Self) -> bool {
-        self.control == other.control
+        self.rm == other.rm
+            && self.control == other.control
             && self.owner == other.owner
             && self.group == other.group
             && self.sacl == other.sacl
@@ -132,6 +135,7 @@ impl LaunchSd {
         }
         placed.sort_by_key(|(at, _)| *at);
         Ok(LaunchSd {
+            rm: bytes.get(1).copied().unwrap_or(0),
             control,
             owner,
             group,
@@ -154,6 +158,7 @@ impl LaunchSd {
             .map(|sid| ace(ALLOWED, DENY_MASK, &sid_bytes(&sid)))
             .collect();
         LaunchSd {
+            rm: 0,
             control: SELF_RELATIVE | DACL_PRESENT,
             owner: administrators.clone(),
             group: administrators,
@@ -166,7 +171,7 @@ impl LaunchSd {
 
     /// The descriptor as self-relative bytes, its parts in the order they were read.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = vec![1, 0];
+        let mut out = vec![1, self.rm];
         let mut control = self.control | SELF_RELATIVE | DACL_PRESENT;
         if self.sacl.is_some() {
             control |= SACL_PRESENT;

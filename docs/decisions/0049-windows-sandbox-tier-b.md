@@ -2016,8 +2016,9 @@ self-relative, an owner and a group, a DACL that isn't NULL, every size and SID 
 bounds; anything else is refused and never written) and gets `(D;;CCDCLCSWRP;;;G)` at DACL index
 0, with the owner, the group, every other entry and any SACL kept, and the parts laid out in the
 order they had, so taking the deny off gives back the same bytes. Nothing is written when a
-deny for the group holding at least `0xB` (execute, local launch, local activation) already
-comes before every allow. A missing value is built from
+deny for the group holding all of `0x1F` already comes before every allow (a weaker one, say
+without the remote rights, gets ours put before it). The header's resource-manager control byte
+is kept as read, and an ACL may be revision 2 or 4 (`ACL_REVISION_DS`); any other is refused. A missing value is built from
 `HKLM\SOFTWARE\Microsoft\Ole\DefaultLaunchPermission`, or, without one, from COM's built-in
 default (`O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCLCSWRP;;;IU)(A;;CCDCLCSWRP;;;SY)`, which grants
 INTERACTIVE, and a seclogon pool token is INTERACTIVE), then denied. The new bytes are parsed
