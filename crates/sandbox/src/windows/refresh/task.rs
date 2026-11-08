@@ -25,13 +25,14 @@ use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ILogonTrigger, ITaskFolder, ITaskService, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE,
-    TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST,
-    TASK_TRIGGER_LOGON, TaskScheduler,
+    IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
+    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
+use super::last_run::{LastRun, last_run};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, SET_ASIDE_NAME, STAGED_NAME, sandbox_dir};
 use super::{SystemTask, action_path, staging, task_sddl};
@@ -395,6 +396,33 @@ pub fn request_pool_stop() -> bool {
 /// `rules::task_sddl`): the Task Scheduler starts a task only for a caller with execute access,
 /// and refused the owner holding `FR` alone (CI run 42416074600).
 fn run_task(task: SystemTask) -> Result<(), TaskError> {
+    with_task(task, |task| {
+        // SAFETY: a live task and an empty VARIANT: no parameters.
+        unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
+        Ok(())
+    })
+}
+
+/// The refresh task's last run: its last result and last run time
+/// (`IRegisteredTask::LastTaskResult`, `LastRunTime`), read as whoever calls it, through the
+/// path [`request_admin_refresh`] takes; the desktop logs it at start-up (`last_run.rs`).
+/// [`TaskError::NotRegistered`] as there. Blocks on COM calls: call it off the UI thread.
+pub fn last_refresh_run() -> Result<LastRun, TaskError> {
+    with_task(SystemTask::Refresh, |task| {
+        // SAFETY: a live task; both read a value into memory the call owns.
+        let code =
+            unsafe { task.LastTaskResult() }.map_err(com("IRegisteredTask::LastTaskResult"))?;
+        // SAFETY: as above.
+        let at = unsafe { task.LastRunTime() }.map_err(com("IRegisteredTask::LastRunTime"))?;
+        Ok(last_run(code, at))
+    })
+}
+
+/// Runs `then` on the registered `task`, inside a COM apartment that outlives it.
+fn with_task<T>(
+    task: SystemTask,
+    then: impl FnOnce(&IRegisteredTask) -> Result<T, TaskError>,
+) -> Result<T, TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
     let path = format!("{TASK_FOLDER}\\{}", task.name());
@@ -407,7 +435,5 @@ fn run_task(task: SystemTask) -> Result<(), TaskError> {
         Err(error) if missing(&error) => return Err(TaskError::NotRegistered),
         Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
     };
-    // SAFETY: a live task and an empty VARIANT: no parameters.
-    unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
-    Ok(())
+    then(&task)
 }

@@ -5,7 +5,8 @@
 //! `\Clauseo\SandboxRefresh` to run (`request_admin_refresh`), which blocks on COM, so it never
 //! runs on the main thread or an async worker. Nothing waits for the thread or joins it: the
 //! window, the host and the welcome screen never wait on it. It shows nothing; each outcome is
-//! one line in host.log (target [`TARGET`]).
+//! one line in host.log (target [`TARGET`]). Before the compare it logs the task's last run
+//! (`last_refresh_run`), so a refresh that keeps failing shows in host.log.
 
 /// The log target: host.log keeps `clauseo_*::lifecycle` INFO lines.
 #[cfg(windows)]
@@ -58,12 +59,45 @@ pub(crate) fn spawn() {
     }
 }
 
-/// The thread's work: read, compare, and ask the task when the copy changed.
+/// One line for the refresh task's last run: its label, code and local time, at info, or at
+/// warn for a failure or an unknown code (`last_run::last_run_label`). A failed read is one
+/// debug line; nothing else depends on it.
+#[cfg(windows)]
+fn log_last_run() {
+    use clauseo_sandbox::windows::refresh::last_refresh_run;
+    use clauseo_sandbox::windows::refresh::last_run::{
+        LastRun, LastRunLevel, last_run_label, ole_date_text,
+    };
+    let run = match last_refresh_run() {
+        Ok(run) => run,
+        Err(err) => {
+            tracing::debug!(target: TARGET, %err, "admin refresh: the last run couldn't be read");
+            return;
+        }
+    };
+    let (label, level) = last_run_label(run);
+    let (code, at) = match run {
+        LastRun::NeverRun => (None, None),
+        LastRun::Ran { code, at } => (Some(code), ole_date_text(at)),
+    };
+    let at = at.unwrap_or_default();
+    match level {
+        LastRunLevel::Info => {
+            tracing::info!(target: TARGET, label, ?code, at, "admin refresh: last run");
+        }
+        LastRunLevel::Warn => {
+            tracing::warn!(target: TARGET, label, ?code, at, "admin refresh: last run");
+        }
+    }
+}
+
+/// The thread's work: log the last run, read, compare, and ask the task when the copy changed.
 #[cfg(windows)]
 fn run() {
     use clauseo_sandbox::windows::refresh::{
         TaskError, installed_setup_sha256, recorded_admin_copy_sha256, request_admin_refresh,
     };
+    log_last_run();
     let recorded = match recorded_admin_copy_sha256() {
         Ok(recorded) => recorded,
         Err(err) => {
