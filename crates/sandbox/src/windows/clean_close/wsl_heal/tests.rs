@@ -327,3 +327,54 @@ fn a_missing_deny_asks_the_deny_task_and_a_pending_upgrade_the_upgrade_task() {
     heal(&mut task.checks(script), &task, &none).unwrap();
     assert_eq!((task.requests.get(), task.upgrade_requests.get()), (1, 1));
 }
+
+#[test]
+fn a_restored_deny_waits_for_an_upgrade_run_already_going_on() {
+    // The lawyer's own upgrade run is installing; the deny task puts the deny back at 1 s.
+    let mut task = FakeTask::new();
+    let done = LastRun::Ran {
+        code: 0,
+        at: 46_334.6,
+    };
+    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING)), (secs(100.0), Ok(done))];
+    let seen = Cell::new(0);
+    let script = vec![(secs(0.0), MISSING), (secs(1.0), DENIED)];
+    let found = heal(&mut task.checks(script), &task, &counter(&seen));
+    assert_eq!(found, Ok((Found::Denied(2), WslHealed::DenyRestored)));
+    assert_eq!(task.elapsed_now(), secs(100.0));
+    let asked = (task.requests.get(), task.upgrade_requests.get());
+    assert_eq!((seen.get(), asked), (1, (1, 0)));
+    // Still running at the upgrade's limit: refused, as the upgrade branch refuses.
+    let mut task = FakeTask::new();
+    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING))];
+    let script = vec![(secs(0.0), MISSING), (secs(1.0), DENIED)];
+    let found = heal(&mut task.checks(script), &task, &none);
+    assert_eq!(found.unwrap_err().blocked, Blocked::WslUpgradePending);
+    assert!(task.elapsed_now() >= UPGRADE_RUNNING_WAIT);
+}
+
+#[test]
+fn a_run_that_left_msiexec_installing_refuses_the_launch() {
+    let still = LastRun::Ran {
+        code: i32::from(WslUpgradeExit::StillInstalling.as_code()),
+        at: 46_334.6,
+    };
+    for script in [
+        vec![(secs(0.0), PENDING)],
+        // The MSI's version already written, the deny verified: still refused.
+        vec![(secs(0.0), PENDING), (secs(200.0), DENIED)],
+    ] {
+        let mut task = FakeTask::new();
+        task.upgrade_last = vec![
+            (secs(0.0), Ok(LastRun::NeverRun)),
+            (secs(1.0), Ok(RUNNING)),
+            (secs(241.0), Ok(still)),
+        ];
+        let found = heal(&mut task.checks(script), &task, &none);
+        let Err(Refused { blocked, why }) = found else {
+            panic!("{found:?}");
+        };
+        assert_eq!(blocked, Blocked::WslUpgradePending);
+        assert!(why.contains("StillInstalling (67)"), "{why}");
+    }
+}
