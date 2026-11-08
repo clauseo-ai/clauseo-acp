@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use super::*;
 use crate::windows::setup::pool_steps::Pool;
 
+mod principals;
+
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
 
@@ -42,6 +44,10 @@ struct Fake {
     folders: BTreeMap<String, Folder>,
     /// The accounts `LookupAccountNameW` resolves.
     accounts: BTreeMap<String, Sid>,
+    /// The local accounts' names `LookupAccountSidW` gives, by SID.
+    names: BTreeMap<Sid, String>,
+    /// This computer's names.
+    computer: Vec<String>,
     /// Task names whose delete fails.
     delete_refuse: Vec<String>,
     /// The BITS jobs' owners; `Err` when the list can't be read.
@@ -66,6 +72,8 @@ impl Fake {
             not_pool: false,
             folders,
             accounts: BTreeMap::new(),
+            names: BTreeMap::new(),
+            computer: vec!["PC-7".to_owned(), "pc-7.firm.example".to_owned()],
             delete_refuse: Vec::new(),
             jobs: Ok(Vec::new()),
             jobs_refuse: Vec::new(),
@@ -206,6 +214,15 @@ impl Sweeper for Fake {
         found.ok_or_else(|| "LookupAccountNameW found no such account".to_owned())
     }
 
+    fn account_name(&mut self, sid: &Sid) -> Result<String, Failed> {
+        let found = self.names.get(sid).cloned();
+        found.ok_or_else(|| "no local account has the SID".to_owned())
+    }
+
+    fn computer_names(&mut self) -> Vec<String> {
+        self.computer.clone()
+    }
+
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
         if self.delete_refuse.iter().any(|refused| refused == name) {
             return Err("ITaskFolder::DeleteTask failed (0x80070005)".to_owned());
@@ -266,26 +283,29 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
     assert_eq!(
         line,
         "the sandbox's task sweep: 2 pool users, 1 folders and 13 tasks read (1 with no user or \
-         group), 3 of the pool's tasks deleted, 0 unreadable, 0 not deleted, 0 BITS jobs \
-         cancelled, 0 not"
+         group), 3 of the pool's tasks deleted, 0 unreadable, 0 skipped (no SID, not a pool \
+         name), 0 not deleted, 0 BITS jobs cancelled, 0 not"
     );
 }
 
 #[test]
 fn the_service_names_map_to_their_sids_in_any_case_and_nothing_else_does() {
     let mut fake = Fake::new(&[1010]);
+    let names = Names::default();
     for (name, want) in [
         ("LocalSystem", "S-1-5-18"),
         ("LOCALSERVICE", "S-1-5-19"),
         ("networkservice", "S-1-5-20"),
         ("S-1-5-21-1-2-3-1010", "S-1-5-21-1-2-3-1010"),
     ] {
-        assert_eq!(sid_of(&mut fake, name), Ok(Sid::parse(want).unwrap()));
+        let sid = Sid::parse(want).unwrap();
+        assert_eq!(resolve(&mut fake, &names, name), Resolved::Sid(sid));
     }
     assert_eq!(fake.lookups(), Vec::<&str>::new());
     // Anything else is looked up, a near spelling or a domain-qualified name too.
     for name in ["Local System", r"NT AUTHORITY\LocalSystem", "SYSTEM"] {
-        assert!(sid_of(&mut fake, name).is_err(), "{name}");
+        let found = resolve(&mut fake, &names, name);
+        assert!(matches!(found, Resolved::Skipped(_)), "{name}");
     }
     assert_eq!(fake.lookups().len(), 3);
 }
@@ -295,7 +315,7 @@ fn an_unreadable_principal_is_54_and_the_pools_other_tasks_still_go() {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\", "first", user("S-1-5-21-1-2-3-1010"));
     fake.unread("\\", "unread");
-    fake.task("\\", "unknown-name", user("gone-user"));
+    fake.unread("\\", "unread-too");
     fake.task("\\", "last", group("S-1-5-21-1-2-3-1010"));
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
     assert_eq!(SweepExit::TasksLeft.as_code(), 54);
@@ -366,9 +386,10 @@ fn a_failed_delete_is_54_and_the_task_is_counted() {
     assert_eq!(fake.deleted(), ["\\goes"]);
     let line = &fake.logged[0].1;
     assert!(
-        line.contains("1 of the pool's tasks deleted, 0 unreadable, 1 not deleted"),
+        line.contains("1 of the pool's tasks deleted, 0 unreadable, 0 skipped"),
         "{line}"
     );
+    assert!(line.contains("not a pool name), 1 not deleted"), "{line}");
 }
 
 #[test]
@@ -478,7 +499,8 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     fake.accounts.insert("ClauseoSb01".to_owned(), sid(1010));
     fake.task("\\Secret", "MatterTask", user("ClauseoSb01"));
     fake.task("\\Secret", "Stuck", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\Secret", "Unread", user("unknown-person"));
+    fake.unread("\\Secret", "Unread");
+    fake.task("\\Secret", "Skipped", user("unknown-person"));
     fake.delete_refuse = vec!["Stuck".to_owned()];
     fake.jobs = Ok(vec![Some(sid(1010)), None]);
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
@@ -489,6 +511,7 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
         "MatterTask",
         "Stuck",
         "Unread",
+        "Skipped",
         "ClauseoSb",
         "unknown",
     ] {
@@ -496,9 +519,10 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     }
     // Counts only.
     assert!(
-        line.contains("1 of the pool's tasks deleted, 1 unreadable, 1 not deleted"),
+        line.contains("1 of the pool's tasks deleted, 1 unreadable, 1 skipped"),
         "{line}"
     );
+    assert!(line.contains("pool name), 1 not deleted"), "{line}");
     assert!(line.contains("1 BITS jobs cancelled, 1 not"), "{line}");
 }
 
