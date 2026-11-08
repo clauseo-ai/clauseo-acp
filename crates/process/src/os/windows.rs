@@ -46,7 +46,12 @@ use windows::core::{PCWSTR, PWSTR};
 
 use crate::descendants::Proc;
 use crate::{Error, SpawnOptions};
-use job::{Held, alive, hold_listed, in_job, job_pids, open};
+use job::{Held, accounting, alive, hold_in_job, hold_listed, in_job, job_pids, open};
+
+/// Every process the job has held, from its accounting; `None` when the query fails.
+fn total(job: &OwnedHandle) -> Option<u32> {
+    accounting(job).map(|(_, total)| total)
+}
 
 /// The exit code `TerminateJobObject` gives the processes it ends, and `terminate` the listed
 /// processes it ends one by one: one nothing else uses (std's `Child::kill` gives 1), so a test
@@ -98,10 +103,18 @@ impl Tree {
     /// The job's processes are held first ([`hold_listed`]): `TerminateJobObject` sets the job's
     /// count of running processes to 0 at once, while each process is still ending and holds its
     /// handles (its working folder, its sockets), and only a handle to it says when it has exited.
+    /// A process that joins between the listing and the terminate moves the job's total, and is
+    /// then held from the system's process list ([`hold_in_job`]): the job's own list, read again
+    /// after the terminate, may already leave it out.
     pub(crate) fn kill(&self) -> bool {
+        let before = total(&self.job);
         hold_listed(&self.job, &self.held);
         // SAFETY: `self.job()` is the job handle `self` owns, open until `self` drops.
-        unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok()
+        let ended = unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok();
+        if before.is_none() || total(&self.job) != before {
+            hold_in_job(&self.job, &self.held);
+        }
+        ended
     }
 
     /// A tree whose kill Windows refuses: a new, empty job's handle with no access rights, so
