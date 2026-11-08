@@ -67,8 +67,14 @@ pub struct WslRemoved {
 /// read back and checked after. A target whose key isn't there (a class names an `AppID` with
 /// no key) is listed as failed, so the log says why the launch check refuses. One that fails is listed
 /// in [`WslApplied::failed`] and the rest go on; a failure to find the targets or read the record
-/// is the error.
+/// is the error. So is a `group` that isn't a local group's ([`local_group`]): nothing is
+/// written for it.
 pub fn apply(reg: &mut impl WslWrite, group: &Sid) -> Result<WslApplied, WslError> {
+    if !local_group(group) {
+        return Err(WslError(
+            "the record's GroupSid isn't a local group's SID, so no deny was written".to_owned(),
+        ));
+    }
     let resolved = resolve(reg)?;
     let mut applied = WslApplied {
         targets: resolved.app_ids.len(),
@@ -86,6 +92,21 @@ pub fn apply(reg: &mut impl WslWrite, group: &Sid) -> Result<WslApplied, WslErro
         }
     }
     Ok(applied)
+}
+
+/// Whether `group` can be the pool group's SID: an account SID of this machine,
+/// `S-1-5-21-<a>-<b>-<c>-<rid>`, with a relative id from 1000 up (below are the built-in
+/// accounts and groups: Administrator 500, Guest 501, ...). Everyone (`S-1-1-0`), Authenticated
+/// Users (`S-1-5-11`), INTERACTIVE (`S-1-5-4`), `BUILTIN\...` (`S-1-5-32-*`) and every other
+/// well-known SID fail it: a deny for one of them would shut the lawyer out of WSL.
+pub fn local_group(group: &Sid) -> bool {
+    let Some(rest) = group.as_str().strip_prefix("S-1-5-21-") else {
+        return false;
+    };
+    let parts: Vec<&str> = rest.split('-').collect();
+    let numbers = parts.iter().all(|part| part.parse::<u32>().is_ok());
+    let rid = parts.last().and_then(|rid| rid.parse::<u32>().ok());
+    parts.len() == 4 && numbers && rid.is_some_and(|rid| rid >= 1000)
 }
 
 /// What [`apply_one`] did.
