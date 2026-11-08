@@ -40,6 +40,17 @@ pub(super) fn event_line(
     text
 }
 
+/// A line the set-up task's server writes to the Event Log itself (`serve.rs`, some ending in an
+/// error's words), held to the same rule as the lines above: itself when it names no path or
+/// account, [`WITHHELD`] otherwise.
+pub(super) fn fixed_words(line: &str) -> &str {
+    if names_something(line) {
+        WITHHELD
+    } else {
+        line
+    }
+}
+
 /// Whether `message` looks like it names a path (a drive, a backslash, a slash, a UNC or
 /// `\\?\` prefix) or an account (a SID's `S-1-`).
 fn names_something(message: &str) -> bool {
@@ -75,6 +86,18 @@ mod tests {
                 !line.contains("rohan") && !line.contains("S-1-5-21"),
                 "{line}"
             );
+        }
+    }
+
+    #[test]
+    fn a_serve_set_up_line_keeps_its_words_unless_its_error_names_a_path_or_an_account() {
+        let plain = "--serve-set-up: the pipe: Access is denied. (os error 5)";
+        assert_eq!(fixed_words(plain), plain);
+        for named in [
+            r"--serve-set-up: this process: C:\Users\rohan\x.exe isn't the admin copy",
+            "--serve-set-up: the record: S-1-5-21-1-2-3-1001 isn't a pool user",
+        ] {
+            assert_eq!(fixed_words(named), WITHHELD, "{named}");
         }
     }
 }

@@ -13,6 +13,7 @@ use crate::windows::marker::setup_state;
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{Kind, sid_of};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
+use crate::windows::setup::event_line::fixed_words;
 use crate::windows::setup::exe::{owners_data_dir, run_set_up_in};
 use crate::windows::setup::lock::{Held, SetupMutex};
 use crate::windows::setup::machine::MachineError;
@@ -145,7 +146,8 @@ impl Host for WindowsHost {
     }
 
     fn log(&mut self, error: bool, line: &str) {
-        event_log(error, line);
+        // An error's words may name a path or an account: such a line is withheld.
+        event_log(error, fixed_words(line));
     }
 
     fn elapsed(&mut self) -> Duration {
@@ -168,7 +170,7 @@ impl Host for WindowsHost {
                 "--serve-set-up: clearing the pipe's name: {}",
                 unread(&error)
             );
-            event_log(true, &line);
+            event_log(true, fixed_words(&line));
         }
     }
 }
