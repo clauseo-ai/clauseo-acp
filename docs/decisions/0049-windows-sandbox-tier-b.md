@@ -2220,16 +2220,81 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    proper (`SETUP_VALUES`, each sequence before its next), deleted with the record by
    `--remove`, and every write opens the key without making it.
 
+**Group-principal tasks** (`sweep/group.rs`). A task whose principal is a group runs for any
+of the group's members, and a pool user may be one. The sweep treats as a group task one whose
+principal is a `GroupId` alone, or a `UserId` that resolves to a group's SID (`LookupAccountSidW`
+gives a group, an alias or a well-known group; SYSTEM, LOCAL SERVICE and NETWORK SERVICE count
+as users, and a SID whose kind can't be read counts as a group). The design doesn't depend on
+Windows refusing a standard user's group-principal registration (Q4, below): a group task is
+judged by the owner its security descriptor names, read as every task's owner is
+(`GetSecurityDescriptor`, and the file-trust rules for a file read instead; a task SYSTEM's
+listing hides is 56 whatever its group, owner or file):
+- a pool owner makes it the pool's: deleted, and 56 when the delete fails;
+- an owner that can't be read (unreadable, ownerless, over its cap) is 56;
+- a readable owner that isn't a pool SID (an administrator, SYSTEM, another user) leaves it,
+  ignored.
+
+So a pool owner or an unreadable owner is never accepted for a group task. Whether the group
+can hold a pool account is worked out once per distinct group SID a run, for the log alone.
+The answer is yes for Everyone (`S-1-1-0`), Authenticated Users (`S-1-5-11`), INTERACTIVE
+(`S-1-5-4`), Users (`S-1-5-32-545`), LOCAL (`S-1-2-0`), CONSOLE LOGON (`S-1-2-1`) and the
+record's `GroupSid` (`ClauseoSandboxUsers`; every group counts while that can't be read). It is
+also yes for a local group whose members (`NetLocalGroupGetMembers`) include a pool SID or one
+of those groups, and when the lookup fails. It is no for a group no pool user's token may hold
+(Administrators, the service accounts, a service's SID, another domain's). The answer changes
+no decision, since a pool owner or an unreadable one is refused either way. The task's
+`Author` (`RegistrationInfo`) is never trusted, because its registrant writes it: it is written
+to the admin-only log for a group task left at 56, cleaned as a path is, and nothing more. A
+vendor's group task with an odd descriptor therefore blocks launches like any other 56 until an administrator clears
+it. Availability for such residue comes from the planned recycle (P2), not from a skip.
+
+**Q4 (not measured; the sweep's rule doesn't depend on it): can a standard user register a
+group-principal task?** Microsoft's documentation describes group principals but doesn't say
+who may register one:
+- "IPrincipal::put_GroupId"
+  (https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iprincipal-put_groupid):
+  "the identifier of the user group that is required to run the tasks that are associated with
+  the principal". "GroupId (principalType) Element"
+  (https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-groupid-principaltype-element)
+  adds "You cannot specify a group identifier and a user identifier at the same time".
+- "TASK_LOGON_TYPE enumeration"
+  (https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_logon_type)
+  gives `TASK_LOGON_GROUP` as "Group activation. The groupId field specifies the group." The
+  MS-TSCH protocol specification's `TASK_LOGON_TYPE` entry
+  (https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tsch/6daca1c9-6766-46f4-9378-5f5a9260c967)
+  says such a task "can run for any member of the security group".
+- "Security Contexts for Tasks"
+  (https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks)
+  says a group can't be the security context of a task registered with `TASK_LOGON_S4U` or
+  `TASK_LOGON_PASSWORD`. "ITaskFolder::RegisterTaskDefinition"
+  (https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-itaskfolder-registertaskdefinition)
+  says a task registered with a group as `userId` and `TASK_LOGON_INTERACTIVE_TOKEN`
+  registers "but the task will not run", and that only a member of the Administrators group
+  can create a task with a boot trigger.
+- Whether a standard user may register a task whose principal is a group, its own or not:
+  documentation unclear. None of these pages, nor "Task Security Hardening", states it.
+
+What it implies: per MS-TSCH, a group task is like an interactive-token task (no password
+stored) that can run for any member of the group, so one naming Users could run as a pool
+user. If Windows let a pool user register one, its owner is expected to be that pool user (the
+owner tests under "Risks" check that a standard user can't make it anyone else), and the rule
+above deletes it; an owner it can't read is 56. If Windows refuses it, the rule costs nothing.
+The elevated registration test (`elevated_a_standard_user_cant_register_a_task_for_another_principal`)
+still covers the `UserId` case, which the trusted-file skip rests on. Its `GroupId` half no
+longer bears on the sweep.
+
 It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
 process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
 Event Log line of counts (pool users, folders and tasks read, the pool's tasks deleted,
-unreadable, skipped and not deleted, running instances stopped and not, BITS jobs cancelled
-and not). Every local user can read the Application log, so it names no task and no SID;
+unreadable, skipped and not deleted, not listed, group tasks deleted, ignored and left at 56
+with how many name a group a pool user may be in, running instances stopped and not, BITS jobs
+cancelled and not). Every local user can read the Application log, so it names no task and no SID;
 when tasks keep the run at 56 it gives their count and whether the admin-only log holds
 them. Those tasks (a hidden task, a pool task not deleted, an unreadable or unresolved one or
 one naming no one, a folder or key there again, a pool task new to the second walk) are
-named in `%ProgramData%\Clauseo\Sandbox\sweep-admin.log` alone, so an administrator can find
-what blocks launches (`sweep::log_path`, `sweep/windows_sweeper/admin_log.rs`). The
+named in `%ProgramData%\Clauseo\Sandbox\sweep-admin.log` alone (a group task left at 56
+among them, with the `Author` it gives, cleaned as a path is and marked as never trusted), so
+an administrator can find what blocks launches (`sweep::log_path`, `sweep/windows_sweeper/admin_log.rs`). The
 Application log is where the sweep's line went before, and its DACL lets every local user
 read it, so it can't hold them. `%ProgramData%` is the known folder, never the environment.
 `Clauseo` is made, when missing, as the installer makes it (`hooks.nsh`'s
@@ -2265,7 +2330,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), on the listings' second read a task file and the Task Scheduler's cache hold a task the listing didn't give (always), a task file with no cache key is a pool user's or its owner can't be read, a cache key with no task file holds a task that can run (or whether it can can't be told), a task new to the second walk is the pool's, a folder or key gone mid-listing is there again, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted (a group task whose owner can't be read or that a pool user owns and wasn't deleted, a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), on the listings' second read a task file and the Task Scheduler's cache hold a task the listing didn't give (always), a task file with no cache key is a pool user's or its owner can't be read, a cache key with no task file holds a task that can run (or whether it can can't be told), a task new to the second walk is the pool's, a folder or key gone mid-listing is there again, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
@@ -2345,7 +2410,14 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   `<UserId>` with `InteractiveToken` and no password, then one holding
   `<GroupId>S-1-5-32-545</GroupId>`: expect both refused, while the same user's own task
   registers. If either registers, a trusted file naming someone else proves nothing, and the
-  fallback must be 56 for it.
+  fallback must be 56 for it. The `GroupId` one doesn't bear on the sweep: a group task needs
+  a readable owner that isn't a pool SID either way (Q4).
+- VM row (not run), the normal flow with groups: run an agent session whose pool user
+  registers a task for itself (as the sweep's fixtures in `setup/sweep/windows_tests.rs` do),
+  and, as an administrator, register a task with `GroupId=Users` (`S-1-5-32-545`). End the
+  session. Expect the run 0, the pool user's task deleted, the administrator's task left, and
+  the log line counting 0 group tasks deleted, 1 ignored, 0 left (1 naming a group a pool user
+  may be in).
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.
