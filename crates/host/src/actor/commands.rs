@@ -435,7 +435,7 @@ fn create_thread(
             format!("no agent {agent} in the settings"),
         ));
     }
-    if let Some(refused) = super::protection::refusal(actor) {
+    if let Some(refused) = super::protection::launch_refusal(actor) {
         return Err(refused);
     }
     let now = actor.now();

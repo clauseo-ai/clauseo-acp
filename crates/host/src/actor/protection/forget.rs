@@ -31,7 +31,7 @@ use std::time::Duration;
 use clauseo_protocol::MatterId;
 
 pub(crate) use self::threads::Report;
-use self::threads::Write;
+use self::threads::{Job, Write};
 use crate::actor::input::Input;
 use crate::actor::{Actor, HostPhase, turn};
 
@@ -53,7 +53,7 @@ pub(crate) enum ForgetInput {
 #[derive(Debug, Default)]
 pub(crate) struct Forgets {
     /// The writer's queue; `None` with no set-up, or once its thread is gone.
-    writer: Option<mpsc::Sender<Write>>,
+    writer: Option<mpsc::Sender<Job>>,
     /// The walker's queue; `None` likewise.
     walker: Option<mpsc::Sender<MatterId>>,
     /// Owed matters whose walk waits for their agents to be gone.
@@ -84,7 +84,7 @@ pub(in crate::actor) fn start(actor: &mut Actor) {
         .join(threads::FOLDER)
         .join(threads::FILE);
     let abandoned = Arc::clone(&actor.protection.forgets.abandoned);
-    let (writer, writes) = mpsc::channel::<Write>();
+    let (writer, writes) = mpsc::channel::<Job>();
     let post = actor.post.clone();
     let stop = Arc::clone(&abandoned);
     let started = std::thread::Builder::new()
@@ -120,9 +120,14 @@ fn send(post: &async_channel::Sender<Input>, report: Report) {
 /// `matter` was forgotten (its commit is durable): recorded as owed, then walked once that
 /// write is back and its agents are gone.
 pub(in crate::actor) fn matter_forgotten(actor: &mut Actor, matter: MatterId) {
+    let now = actor.now().wall;
     let forgets = &mut actor.protection.forgets;
     if let Some(writer) = &forgets.writer {
-        if writer.send(Write::Owe(matter)).is_ok() {
+        let job = Job {
+            write: Write::Owe(matter),
+            now,
+        };
+        if writer.send(job).is_ok() {
             forgets.writes += 1;
             return;
         }
@@ -177,11 +182,12 @@ pub(in crate::actor) fn on_input(actor: &mut Actor, input: ForgetInput) {
 
 /// Sends `write` to the writer, counted until it is back.
 fn write(actor: &mut Actor, write: Write) {
+    let now = actor.now().wall;
     let forgets = &mut actor.protection.forgets;
     let Some(writer) = &forgets.writer else {
         return;
     };
-    if writer.send(write).is_ok() {
+    if writer.send(Job { write, now }).is_ok() {
         forgets.writes += 1;
     } else {
         forgets.writer = None;

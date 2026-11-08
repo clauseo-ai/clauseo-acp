@@ -1,8 +1,8 @@
 //! Detection: the macOS and Linux probes as before, and Windows' rules through `decide`, which
 //! runs on every OS with a fake set-up.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use clauseo_protocol::MatterId;
 
@@ -66,10 +66,82 @@ fn tier_b() -> Detection {
     }
 }
 
+/// Off macOS and Windows the detection settles (no jail here), so it is cached.
 #[test]
 fn detection_is_cached_and_matches_the_probe() {
     assert_eq!(detect(None), probe(None));
     assert_eq!(detect(None), detect(None));
+}
+
+#[test]
+fn a_failed_probe_is_never_cached_and_a_success_is() {
+    let cell = OnceLock::new();
+    let probes = AtomicUsize::new(0);
+    let failed = || {
+        probes.fetch_add(1, Ordering::SeqCst);
+        Detection::none(NoSandbox::ProbeFailed(
+            "sandbox-exec exited with 1".to_owned(),
+        ))
+    };
+    for _ in 0..2 {
+        let found = cached(&cell, failed, Detection::settled);
+        assert!(matches!(found.reason, Some(NoSandbox::ProbeFailed(_))));
+    }
+    assert_eq!(probes.load(Ordering::SeqCst), 2, "each call probes again");
+    let tier_a = Detection {
+        tier: Tier::A,
+        reason: None,
+    };
+    let ok = || {
+        probes.fetch_add(1, Ordering::SeqCst);
+        tier_a.clone()
+    };
+    assert_eq!(cached(&cell, ok, Detection::settled), tier_a);
+    assert_eq!(cached(&cell, ok, Detection::settled), tier_a);
+    assert_eq!(probes.load(Ordering::SeqCst), 3, "the success is cached");
+}
+
+#[test]
+fn only_a_jail_or_no_jail_here_settles() {
+    let tier_a = Detection {
+        tier: Tier::A,
+        reason: None,
+    };
+    assert!(tier_a.settled());
+    assert!(Detection::none(NoSandbox::UnsupportedOs).settled());
+    assert!(!Detection::none(NoSandbox::ProbeFailed("x".to_owned())).settled());
+    assert!(!Detection::none(NoSandbox::NeedsSetUp).settled());
+    assert!(
+        !Detection::none(NoSandbox::NotBuilt).settled(),
+        "nothing gives it"
+    );
+}
+
+#[test]
+fn windows_facts_are_cached_only_once_the_build_reads() {
+    let unread = OsFacts {
+        arm64: false,
+        build: Err("CurrentBuildNumber: not a number".to_owned()),
+    };
+    assert!(!unread.settled());
+    assert!(windows_11().settled());
+    let arm = OsFacts {
+        arm64: true,
+        build: Err("x".to_owned()),
+    };
+    assert!(arm.settled(), "ARM64 is tier C whatever the build");
+    let cell = OnceLock::new();
+    let reads = AtomicUsize::new(0);
+    let facts = [unread, windows_11()];
+    let read = || facts[reads.fetch_add(1, Ordering::SeqCst).min(1)].clone();
+    assert!(cached(&cell, read, OsFacts::settled).build.is_err());
+    assert_eq!(cached(&cell, read, OsFacts::settled), windows_11());
+    assert_eq!(cached(&cell, read, OsFacts::settled), windows_11());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "the unread build was read again, once"
+    );
 }
 
 #[test]
@@ -109,6 +181,8 @@ fn builds_before_windows_10_22h2_are_unsupported() {
     }
 }
 
+/// An unreadable build fails closed as a failed probe, before the set-up is asked: never a
+/// set-up's state, even on a computer never set up.
 #[test]
 fn an_unreadable_build_is_a_failed_probe() {
     let os = OsFacts {
@@ -123,6 +197,15 @@ fn an_unreadable_build_is_a_failed_probe() {
         ))
     );
     assert_eq!(setup.reads(), 0, "the set-up is not asked on an unknown OS");
+    let never = FakeSetup::new(SetupState::Needed);
+    assert!(matches!(
+        decide(&os, Some(&never)).reason,
+        Some(NoSandbox::ProbeFailed(_))
+    ));
+    assert!(matches!(
+        decide(&os, None).reason,
+        Some(NoSandbox::ProbeFailed(_))
+    ));
 }
 
 #[test]

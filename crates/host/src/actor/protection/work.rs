@@ -5,8 +5,10 @@
 //!
 //! - A command's answer is held until its work ends; no receipt is stored.
 //! - A second `RetryProtection` while a set-up or a check runs joins it: the same answer, and no
-//!   second run. A second `RemoveSandboxSetup` joins a removal the same way. One kind while the
-//!   other runs is `command.invalid` at once.
+//!   second run. A second `RemoveSandboxSetup` joins a removal the same way. A
+//!   `RemoveSandboxSetup` while a check runs (a "Try again", or the re-probe a refused launch
+//!   starts) waits behind it: the removal starts when the check ends. Any other kind while one
+//!   runs is `command.invalid` at once.
 //! - After the work the thread detects again and reads the set-up's state; the actor takes both
 //!   into its cache, sends the view and the matters' `ProtectionChanged`, then answers.
 //! - Shutdown never waits for the thread (the elevated step is a process of its own): the held
@@ -38,12 +40,19 @@ pub(crate) struct Running {
     id: u64,
     work: ProtectionWork,
     waiters: Vec<CommandId>,
+    /// `RemoveSandboxSetup`s waiting for this check to end, then answered by the removal.
+    then_remove: Vec<CommandId>,
 }
 
 impl Running {
     /// What runs.
     pub(super) fn work(&self) -> ProtectionWork {
         self.work
+    }
+
+    /// Whether a removal waits for this check to end.
+    pub(super) fn removal_queued(&self) -> bool {
+        !self.then_remove.is_empty()
     }
 }
 
@@ -102,6 +111,10 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
         return Err(invalid("this build of Clauseo has no sandbox"));
     };
     if let Some(running) = &mut host.running {
+        if running.work == ProtectionWork::Check && asked == Asked::Remove {
+            running.then_remove.push(id);
+            return Ok(());
+        }
         let joins = match running.work {
             ProtectionWork::SetUp | ProtectionWork::Check => asked == Asked::Retry,
             ProtectionWork::Remove => asked == Asked::Remove,
@@ -120,6 +133,32 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
         Asked::Retry => ProtectionWork::Check,
         Asked::Remove => ProtectionWork::Remove,
     };
+    start(actor, sandbox, work, vec![id])
+}
+
+/// A check that no command asked for: the re-probe a launch refused for `ProbeFailed` starts
+/// (`protection::launch_refusal`). Nothing waits on its answer. False when it did not start (no
+/// seam, work already running, or no thread).
+pub(in crate::actor) fn reprobe(actor: &mut Actor) -> bool {
+    let host = &actor.protection;
+    let Some(sandbox) = host.sandbox.clone() else {
+        return false;
+    };
+    if host.running.is_some() {
+        return false;
+    }
+    tracing::info!("a launch refused for a failed sandbox check checks again");
+    start(actor, sandbox, ProtectionWork::Check, Vec::new()).is_ok()
+}
+
+/// Starts `work` on its thread, `waiters` answered at its end.
+fn start(
+    actor: &mut Actor,
+    sandbox: crate::config::Sandbox,
+    work: ProtectionWork,
+    waiters: Vec<CommandId>,
+) -> Result<(), Error> {
+    let host = &mut actor.protection;
     let setup = sandbox.setup.clone();
     if work == ProtectionWork::Remove && setup.is_none() {
         return Err(invalid("this computer's sandbox has no set-up to remove"));
@@ -151,7 +190,8 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
     actor.protection.running = Some(Running {
         id: work_id,
         work,
-        waiters: vec![id],
+        waiters,
+        then_remove: Vec::new(),
     });
     tracing::info!(work = work_name(work), "the sandbox work started");
     super::publish_view(actor);
@@ -256,6 +296,24 @@ pub(in crate::actor) fn on_done(actor: &mut Actor, done: Done) {
     for waiter in running.waiters {
         actor.finish_command(waiter, answer.result());
     }
+    if !running.then_remove.is_empty() {
+        start_queued_removal(actor, running.then_remove);
+    }
+}
+
+/// The removal that waited for a check: started now for `waiters`, or each refused with the
+/// code a `RemoveSandboxSetup` alone would get (no set-up to remove, no thread).
+fn start_queued_removal(actor: &mut Actor, waiters: Vec<CommandId>) {
+    let Some(sandbox) = actor.protection.sandbox.clone() else {
+        return;
+    };
+    if let Err(error) = start(actor, sandbox, ProtectionWork::Remove, waiters.clone()) {
+        let code = error.code();
+        for waiter in waiters {
+            let refused = Error::refused(code, "the sandbox's set-up removal could not start");
+            actor.finish_command(waiter, Err(refused));
+        }
+    }
 }
 
 /// The answer to `work` that ended with `outcome`, the computer then `protected` or not.
@@ -295,7 +353,7 @@ fn answer(
 /// Shutdown: the held answers get `Closed`, and the thread is left to end on its own.
 pub(in crate::actor) fn shutdown(actor: &mut Actor) {
     if let Some(running) = actor.protection.running.take() {
-        for waiter in running.waiters {
+        for waiter in running.waiters.into_iter().chain(running.then_remove) {
             actor.finish_command(waiter, Err(Error::Closed));
         }
     }

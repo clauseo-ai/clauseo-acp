@@ -5,8 +5,11 @@
 //!
 //! The file is `{"v":1,"matters":["<matter id>", ...]}`, written whole and atomically
 //! (`write::replace_private_file`, as `blocklist/allowed.json` is). It names matter ids only. A
-//! file that is missing, does not read, is over [`CAP`], or is of another version counts as no
-//! forget owed (logged by its kind): the worst a damaged file does is leave a forget undone.
+//! file that is missing, does not read, is over [`CAP`], does not parse, or is of another version
+//! counts as no forget owed (logged by its kind): the worst a damaged file does is leave a forget
+//! undone. One that exists but was rejected is set aside before the first write would replace
+//! it, to `owed_forgets.json.rejected-<UTC time>` (`crate::set_aside`, as `allowed.json` is),
+//! logged once; a set-aside that fails leaves it in place, and the run writes nothing.
 //!
 //! Once the stop gave up on them (`abandoned`), neither thread writes or walks again: what is
 //! still owed stays on disk for the next start's replay.
@@ -17,7 +20,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use clauseo_protocol::MatterId;
+use clauseo_protocol::{MatterId, Timestamp};
 use clauseo_sandbox::{SandboxSetup, SetupError};
 use serde::{Deserialize, Serialize};
 
@@ -33,12 +36,22 @@ pub(crate) const FILE: &str = "owed_forgets.json";
 const VERSION: u32 = 1;
 /// The most bytes the file is read to: far past any real list.
 const CAP: u64 = 1 << 20;
+/// How many set-aside files are kept.
+const KEEP_REJECTED: usize = 3;
 
 #[derive(Serialize, Deserialize)]
 struct OnDisk {
     v: u32,
     #[serde(default)]
     matters: BTreeSet<MatterId>,
+}
+
+/// A change to the file, with the host clock's time it was asked (`now`, which names a
+/// rejected file set aside).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Job {
+    pub(super) write: Write,
+    pub(super) now: Timestamp,
 }
 
 /// A change to the file.
@@ -67,12 +80,13 @@ pub(crate) enum Report {
 pub(super) fn write_owed(
     path: &Path,
     abandoned: &AtomicBool,
-    writes: &mpsc::Receiver<Write>,
+    writes: &mpsc::Receiver<Job>,
     post: &dyn Fn(Report),
 ) {
-    let mut owed = read(path);
+    let (mut owed, mut rejected) = read(path);
+    let mut writing = true;
     post(Report::Read(owed.iter().copied().collect()));
-    for write in writes {
+    for Job { write, now } in writes {
         if abandoned.load(Ordering::SeqCst) {
             return;
         }
@@ -80,7 +94,13 @@ pub(super) fn write_owed(
             Write::Owe(matter) => owed.insert(matter),
             Write::Drop(matter) => owed.remove(&matter),
         };
-        if changed && let Err(error) = save(path, &owed) {
+        if changed && let Some(reason) = rejected.take() {
+            writing = set_aside(path, reason, now);
+        }
+        if changed
+            && writing
+            && let Err(error) = save(path, &owed)
+        {
             tracing::warn!(
                 kind = ?error.kind(),
                 "the sandbox's owed forgets were not saved"
@@ -132,17 +152,45 @@ const fn kind(error: &SetupError) -> &'static str {
     }
 }
 
-/// The forgets owed on disk; none when the file is missing or unusable (logged).
-fn read(path: &Path) -> BTreeSet<MatterId> {
+/// Sets the rejected file aside before the first write, logged once with `reason`; whether the
+/// run may write (not when the file could not be moved, so it is never replaced).
+fn set_aside(path: &Path, reason: &'static str, now: Timestamp) -> bool {
+    match crate::set_aside::set_aside(path, now) {
+        Ok(name) => {
+            tracing::warn!(
+                reason,
+                name,
+                "the sandbox's rejected owed forgets were set aside"
+            );
+            crate::set_aside::prune(path, KEEP_REJECTED);
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+        Err(error) => {
+            tracing::warn!(
+                reason,
+                kind = ?error.kind(),
+                "the sandbox's rejected owed forgets were not set aside, so not replaced; \
+                 forgets made now are not recorded"
+            );
+            false
+        }
+    }
+}
+
+/// The forgets owed on disk; none when the file is missing or unusable (logged), with why a file
+/// that is there was rejected, so the first write sets it aside.
+fn read(path: &Path) -> (BTreeSet<MatterId>, Option<&'static str>) {
+    let rejected = |reason| (BTreeSet::new(), Some(reason));
     let mut bytes = Vec::new();
     let read = std::fs::File::open(path)
         .and_then(|file| file.take(CAP.saturating_add(1)).read_to_end(&mut bytes));
     match read {
         Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return BTreeSet::new(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return (BTreeSet::new(), None),
         Err(error) => {
             tracing::warn!(kind = ?error.kind(), "the sandbox's owed forgets do not read");
-            return BTreeSet::new();
+            return rejected("unreadable");
         }
     }
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > CAP {
@@ -150,20 +198,20 @@ fn read(path: &Path) -> BTreeSet<MatterId> {
             cap = CAP,
             "the sandbox's owed forgets are over their size cap"
         );
-        return BTreeSet::new();
+        return rejected("over_cap");
     }
     match serde_json::from_slice::<OnDisk>(&bytes) {
-        Ok(disk) if disk.v == VERSION => disk.matters,
+        Ok(disk) if disk.v == VERSION => (disk.matters, None),
         Ok(disk) => {
             tracing::warn!(
                 version = disk.v,
                 "the sandbox's owed forgets are of another version"
             );
-            BTreeSet::new()
+            rejected("other_version")
         }
         Err(_unsaid) => {
             tracing::warn!("the sandbox's owed forgets do not parse");
-            BTreeSet::new()
+            rejected("unparsable")
         }
     }
 }

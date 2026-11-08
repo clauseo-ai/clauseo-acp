@@ -86,7 +86,8 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
             // Home and the refused folders ask Windows for known folders, which may wait on a
             // share: read on the session's own thread, so the answer goes back at once.
             let asked = move || {
-                let mut refused = clauseo_settings::refused_folders(&SystemDirs);
+                let mut refused =
+                    clauseo_settings::refused_folders(&SystemDirs, &crate::host_start::resolved);
                 refused.push(data);
                 (SystemDirs.home(), refused)
             };

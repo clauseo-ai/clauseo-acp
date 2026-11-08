@@ -5,6 +5,7 @@
 //! failed start every call gets that start's error (`store.newer_version`, `store.corrupt`, ...).
 //! Exit waits for the start too, then stops the host ([`stop`]).
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use clauseo_host::{HostConfig, HostExit, HostHandle, HostJoin};
@@ -193,12 +194,29 @@ pub(crate) fn load_effective(locations: &Locations) -> Effective {
 pub(crate) fn host_config(effective: Effective) -> HostConfig {
     let launcher = crate::host_launcher(SystemDirs.home());
     let config = HostConfig::new(effective, Arc::new(launcher))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs))
-        .with_refused_trees(clauseo_settings::refused_trees(&SystemDirs));
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs, &resolved))
+        .with_refused_trees(clauseo_settings::refused_trees(&SystemDirs, &resolved));
     // With no path to this executable no guard hook goes; the permission check remains.
     match std::env::current_exe() {
         Ok(exe) => config.with_pre_write_guard(exe),
         Err(_) => config,
+    }
+}
+
+/// `path`'s real path, for the refused folders' `CODEX_HOME` guard (`clauseo_settings::Resolve`):
+/// canonicalised; when it does not exist, its deepest existing ancestor canonicalised with the
+/// rest appended as written (as `matters::same_or_nested` resolves). `None` when a missing part
+/// has no name (`..`) or no ancestor resolves. Reads the disk: never on the host's actor.
+pub(crate) fn resolved(path: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(mut real) = dunce::canonicalize(base) {
+            real.extend(rest.iter().rev());
+            return Some(real);
+        }
+        rest.push(base.file_name()?.to_owned());
+        base = base.parent()?;
     }
 }
 

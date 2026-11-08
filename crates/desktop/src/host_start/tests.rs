@@ -228,3 +228,64 @@ fn a_lookup_without_documents_answers_none() {
     let later = documents_later(early, crate::open::now(), |at| at);
     assert_eq!(block_on(later).unwrap().default_matters_dir(), None);
 }
+
+/// R17 PR-E follow-up: the real resolver behind the `CODEX_HOME` guard. A symlink to home, its
+/// `..`, a `..` form inside home, one past a missing folder, and (where folders ignore case)
+/// another case of home all resolve to home or above, so `CODEX_HOME` is ignored; one inside
+/// home, through the link or not, is kept as written. Unix: the scratch's symlink.
+#[cfg(unix)]
+#[test]
+fn a_codex_home_that_resolves_to_home_or_above_is_ignored() {
+    use std::path::PathBuf;
+
+    use clauseo_settings::{KnownFolder, PlatformDirs};
+
+    struct Dirs {
+        home: PathBuf,
+        codex: PathBuf,
+    }
+
+    impl PlatformDirs for Dirs {
+        fn home(&self) -> Option<PathBuf> {
+            Some(self.home.clone())
+        }
+
+        fn known_folder(&self, _: KnownFolder) -> Option<PathBuf> {
+            None
+        }
+
+        fn codex_home(&self) -> Option<PathBuf> {
+            Some(self.codex.clone())
+        }
+    }
+
+    let scratch = Scratch::folder("codex-home-resolved", &["home/sub"]);
+    let home = scratch.path().join("home");
+    let link = scratch.link(&home, "link");
+    let trees = |codex: PathBuf| {
+        let dirs = Dirs {
+            home: home.clone(),
+            codex,
+        };
+        clauseo_settings::refused_trees(&dirs, &resolved)
+    };
+    let mut ignored = vec![
+        link.clone(),
+        link.join(".."),
+        home.join("sub").join(".."),
+        home.join("missing").join(".."),
+        home.join("sub").join("..").join(".."),
+    ];
+    if cfg!(target_os = "macos") {
+        ignored.push(PathBuf::from(home.to_string_lossy().to_uppercase()));
+    }
+    for codex in ignored {
+        let found = trees(codex.clone());
+        assert_eq!(found, vec![home.join(".codex")], "{}", codex.display());
+    }
+    for kept in [home.join("work").join("codex"), link.join("codex")] {
+        assert_eq!(trees(kept.clone()), vec![home.join(".codex"), kept]);
+    }
+    assert_eq!(resolved(&home.join("missing").join("..")), None);
+    assert_eq!(resolved(&link), dunce::canonicalize(&home).ok());
+}

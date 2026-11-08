@@ -82,10 +82,11 @@ enum_with_names! {
 
 open_data_enum! {
     /// Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
-    /// `Unknown`. Six causes refuse `CreateThread` and a turn's launch whatever
+    /// `Unknown`. Seven causes refuse `CreateThread` and a turn's launch whatever
     /// `sandbox.required` or `sandbox.allow_unprotected_auto` say, as a computer whose sandbox
-    /// is set up but can't be used now, or is broken (R17 PR-E, fail closed): `Blocked`,
-    /// `OtherAccount`, `SetUpFailed` and `Unknown` with `sandbox.blocked`, `PoolFull` with
+    /// is set up but can't be used now, is broken, or can't be confirmed (R17 PR-E, fail
+    /// closed): `Blocked`, `OtherAccount`, `SetUpFailed`, `ProbeFailed` and `Unknown` with
+    /// `sandbox.blocked`, `PoolFull` with
     /// `sandbox.pool_full` and `PoolOwned` with `sandbox.pool_owned`. The rest, a sandbox not
     /// set up at all or switched off, depend on `sandbox.required` (decision record 0051): when
     /// it is false they run the agents at tier C, in the ask modes (auto only when
@@ -95,7 +96,8 @@ open_data_enum! {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum NotProtectedCause {
         /// This computer has no sandbox Clauseo can use: `why` says which case (an OS without
-        /// one, Windows on ARM, or a build without the sandbox). A data variant since R17 PR-B1:
+        /// one, including a Mac without `sandbox-exec`, Windows on ARM, or a build without the
+        /// sandbox). A data variant since R17 PR-B1:
         /// `{"unsupported": {"why": "os"}}`; no released build wrote the plain string.
         Unsupported = "unsupported" {
             /// Which case.
@@ -107,7 +109,7 @@ open_data_enum! {
         /// The set-up was asked for, and the lawyer declined the administrator prompt or Windows
         /// refused to raise it.
         SetUpRefused = "set_up_refused",
-        /// The set-up, or the check that the sandbox works, failed: no agent starts on this
+        /// Windows' set-up failed, or its records can't be read: no agent starts on this
         /// computer whatever either setting says, `sandbox.blocked`, until a set-up repairs it.
         SetUpFailed = "set_up_failed",
         /// Every agent user of the set-up pool is taken, so this matter has no sandbox until one
@@ -158,6 +160,11 @@ open_data_enum! {
         /// A sandbox user still owns an item in this matter's folder, because its hand-back
         /// failed, so no agent starts in it: `sandbox.pool_owned`.
         PoolOwned = "pool_owned",
+        /// The sandbox should exist here, but the check that it works could not confirm it
+        /// (macOS' `sandbox-exec` failed or hung, Windows' build can't be read), so no agent
+        /// starts on this computer whatever either setting says: `sandbox.blocked`. Never
+        /// cached: "Try again" (`RetryProtection`) checks again, as does the next start.
+        ProbeFailed = "probe_failed",
         _ =>
         /// A cause from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -186,6 +193,7 @@ open_data_enum! {
         },
         NotProtectedCause::OtherAccount,
         NotProtectedCause::PoolOwned,
+        NotProtectedCause::ProbeFailed,
     ];
 }
 

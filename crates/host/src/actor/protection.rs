@@ -56,6 +56,12 @@ pub(crate) struct ProtectionHost {
     sent: Option<ProtectionView>,
     /// The forgotten matters' forgets owed and running (`forget.rs`).
     forgets: forget::Forgets,
+    /// A launch or `CreateThread` was refused for `ProbeFailed` since the last [`tick`],
+    /// which then starts a re-probe ([`launch_refusal`]). A `Cell`: refusals are decided
+    /// through `&Actor`.
+    reprobe_wanted: std::cell::Cell<bool>,
+    /// When the last re-probe a refusal asked for started, on the host clock's monotonic time.
+    reprobed_at: Option<std::time::Duration>,
 }
 
 impl ProtectionHost {
@@ -68,6 +74,8 @@ impl ProtectionHost {
             next_work: 0,
             sent: None,
             forgets: forget::Forgets::default(),
+            reprobe_wanted: std::cell::Cell::new(false),
+            reprobed_at: None,
         }
     }
 
@@ -76,11 +84,11 @@ impl ProtectionHost {
         &self.observed.computer
     }
 
-    /// Whether the set-up's removal runs.
+    /// Whether the set-up's removal runs, or waits for a check to end.
     fn removing(&self) -> bool {
-        self.running
-            .as_ref()
-            .is_some_and(|running| running.work() == ProtectionWork::Remove)
+        self.running.as_ref().is_some_and(|running| {
+            running.work() == ProtectionWork::Remove || running.removal_queued()
+        })
     }
 
     /// The view under the settings `required` and `auto` (`sandbox.allow_unprotected_auto`).
@@ -112,7 +120,8 @@ impl ProtectionHost {
 }
 
 /// Detects this computer's protection through `sandbox`, on the calling thread: never the
-/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A set-up that is
+/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A failed probe
+/// asks no administrator whatever the set-up's state: its retry is a check. A set-up that is
 /// done gives its time from its marker in `data_dir` (`set_up_at`).
 pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
     let Some(sandbox) = sandbox else {
@@ -132,9 +141,18 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
         Some(SetupState::Ready) => set_up_at::read(data_dir),
         _ => None,
     };
+    let computer = protection_of(&detection);
+    // A check that could not confirm the sandbox is checked again, never fixed by a set-up's
+    // administrator prompt: `RetryProtection` then only detects again.
+    let probe_failed = matches!(
+        computer,
+        Protection::NotProtected {
+            cause: NotProtectedCause::ProbeFailed
+        }
+    );
     Observed {
-        computer: protection_of(&detection),
-        asks_admin: state.as_ref().is_some_and(asks_admin),
+        computer,
+        asks_admin: !probe_failed && state.as_ref().is_some_and(asks_admin),
         set_up_at,
     }
 }
@@ -177,7 +195,12 @@ pub(crate) fn protection_of(detection: &Detection) -> Protection {
         },
         Some(NoSandbox::NeedsSetUp) => NotProtectedCause::NeedsSetUp,
         Some(NoSandbox::SetUpRefused) => NotProtectedCause::SetUpRefused,
-        Some(NoSandbox::ProbeFailed(_)) => failed("probe_failed"),
+        // The check could not confirm the sandbox (R17 PR-E's follow-up): fails closed with its
+        // own cause, never cached by the sandbox, so `RetryProtection` checks again.
+        Some(NoSandbox::ProbeFailed(_)) => {
+            tracing::warn!("the sandbox check could not confirm the sandbox works");
+            NotProtectedCause::ProbeFailed
+        }
         Some(NoSandbox::SetUpFailed(why)) if why == SET_UP_BY_OTHER_USER => {
             NotProtectedCause::OtherAccount
         }
@@ -229,10 +252,15 @@ pub(super) fn publish_view(actor: &mut Actor) {
     }
 }
 
-/// After every input: an owed forget whose matter's agents are gone starts (`forget.rs`), and
-/// when either protection setting changed, the new view goes out.
+/// How often a refused launch may start a re-probe of a failed probe, on the host clock.
+pub(crate) const REPROBE_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// After every input: an owed forget whose matter's agents are gone starts (`forget.rs`), a
+/// re-probe a refused launch asked for starts ([`launch_refusal`]), and when either protection
+/// setting changed, the new view goes out.
 pub(super) fn tick(actor: &mut Actor) {
     forget::tick(actor);
+    reprobe(actor);
     let (required, auto) = settings(actor);
     if actor.protection.settings_moved(required, auto) {
         publish_view(actor);
@@ -267,15 +295,16 @@ pub(crate) fn tier(actor: &Actor) -> Option<ProtectionTier> {
 
 /// The refusal of `CreateThread` and of a turn's launch by this computer's protection: none
 /// when it is protected. A computer that has the sandbox but can't use it now, or whose set-up
-/// is in place but broken, refuses whatever `sandbox.required` or
-/// `sandbox.allow_unprotected_auto` say (R17 PR-E, fail closed; that setting covers only a
-/// computer without the sandbox set up): `Blocked`, `OtherAccount`, `SetUpFailed` (a failed
-/// set-up or check, a probe that failed, no reason, a reason this host does not know) and
-/// `Unknown` with `sandbox.blocked`, `PoolFull` with `sandbox.pool_full`, `PoolOwned` with
+/// is in place but broken, or whose check could not confirm it, refuses whatever
+/// `sandbox.required` or `sandbox.allow_unprotected_auto` say (R17 PR-E, fail closed; that
+/// setting covers only a computer without the sandbox set up): `Blocked`, `OtherAccount`,
+/// `SetUpFailed` (a failed set-up, no reason, a reason this host does not know), `ProbeFailed`
+/// and `Unknown` with `sandbox.blocked`, `PoolFull` with `sandbox.pool_full`, `PoolOwned` with
 /// `sandbox.pool_owned`. Only a sandbox not set up at all (`NeedsSetUp`, `SetUpRefused`,
 /// `Unsupported`) or switched off refuses only under `sandbox.required`:
 /// `sandbox.setup_required` when the set-up would fix it (`NeedsSetUp`, `SetUpRefused`),
-/// `sandbox.required` otherwise. The app words each from the cause.
+/// `sandbox.required` otherwise. The app words each from the cause. A launch attempt goes
+/// through [`launch_refusal`], which also re-probes a failed probe.
 ///
 /// While the sandbox's set-up is being removed (`RemoveSandboxSetup`, the view's `in_progress:
 /// remove`), every launch and `CreateThread` is refused with `sandbox.removing` (retryable)
@@ -294,6 +323,45 @@ pub(crate) fn refusal(actor: &Actor) -> Option<Error> {
     refusal_of(cause, actor.effective.settings().sandbox.required)
 }
 
+/// [`refusal`] for a launch attempt: `CreateThread` and a turn's launch
+/// (`turn/sign_in.rs`'s `launch_refusal`). A refusal for `ProbeFailed` also asks for a
+/// re-probe, so a flaky check heals without the lawyer finding "Try again": the same off-actor
+/// check `RetryProtection` runs (`work.rs`), started by the next [`tick`] when no work runs
+/// and none started in the last [`REPROBE_EVERY`] on the host clock. This attempt is still
+/// refused (fail closed); a passing check updates the view, so the next send launches.
+pub(crate) fn launch_refusal(actor: &Actor) -> Option<Error> {
+    let refused = refusal(actor)?;
+    if matches!(
+        actor.protection.computer(),
+        Protection::NotProtected {
+            cause: NotProtectedCause::ProbeFailed
+        }
+    ) && !actor.protection.removing()
+    {
+        actor.protection.reprobe_wanted.set(true);
+    }
+    Some(refused)
+}
+
+/// Starts the re-probe a refused launch asked for, at most one at a time and no more often than
+/// every [`REPROBE_EVERY`]; a request inside that window is dropped (the next refusal asks again).
+fn reprobe(actor: &mut Actor) {
+    if !actor.protection.reprobe_wanted.replace(false) || actor.protection.running.is_some() {
+        return;
+    }
+    let now = actor.clock.now().mono;
+    let recent = actor
+        .protection
+        .reprobed_at
+        .is_some_and(|at| now.saturating_sub(at) < REPROBE_EVERY);
+    if recent {
+        return;
+    }
+    if work::reprobe(actor) {
+        actor.protection.reprobed_at = Some(now);
+    }
+}
+
 /// [`refusal`] for `cause`, under `sandbox.required` = `required`.
 fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
     match cause {
@@ -301,6 +369,12 @@ fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
             return Some(Error::refused(
                 ErrorCode::SandboxBlocked,
                 "a setting only whoever looks after this computer can change blocks the sandbox",
+            ));
+        }
+        NotProtectedCause::ProbeFailed => {
+            return Some(Error::refused(
+                ErrorCode::SandboxBlocked,
+                "the check that the sandbox works could not confirm it; try again",
             ));
         }
         NotProtectedCause::SetUpFailed | NotProtectedCause::Unknown { .. } => {
@@ -338,6 +412,7 @@ fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
         ),
         NotProtectedCause::Unsupported { .. }
         | NotProtectedCause::SetUpFailed
+        | NotProtectedCause::ProbeFailed
         | NotProtectedCause::PoolFull { .. }
         | NotProtectedCause::Blocked { .. }
         | NotProtectedCause::OtherAccount

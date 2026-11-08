@@ -21,12 +21,12 @@
 //! - A file the start rejected (unreadable, over the cap, unparsable, no item, a mismatch) is
 //!   set aside at the run's first write, never at the start: moved to
 //!   `allowed.json.rejected-<UTC time>` beside it (a counter after a taken name), without ever
-//!   replacing a file, and logged with the reason and the new name; only the latest
+//!   replacing a file (`crate::set_aside`), and logged with the reason and the new name; only
+//!   the latest
 //!   [`KEEP_REJECTED`] are kept. The temp-file sweep (`.clauseo-*.new`) never takes them, and
 //!   the agent's fence denies the whole folder. A move that fails writes nothing, as above.
 
 use std::fmt::Write as _;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -42,8 +42,6 @@ use crate::log_file::Cause;
 pub(crate) const ACCOUNT: &str = "blocklist-allowed-sha256";
 /// How many set-aside files are kept; older ones are removed at each new one.
 pub(crate) const KEEP_REJECTED: usize = 3;
-/// The set-aside files' name before their time.
-const REJECTED: &str = "allowed.json.rejected-";
 
 /// The lowercase hex sha256 of `body`, the bytes the item holds.
 pub(crate) fn digest(body: &[u8]) -> String {
@@ -215,11 +213,11 @@ impl Writer {
             return Err(false);
         }
         if let Some(reason) = self.set_aside {
-            match set_aside_file(&self.path, job.now) {
+            match crate::set_aside::set_aside(&self.path, job.now) {
                 Ok(name) => {
                     tracing::warn!(reason, name, "blocklist: allowed.json set aside, rejected");
                     self.set_aside = None;
-                    prune_rejected(&self.path);
+                    crate::set_aside::prune(&self.path, KEEP_REJECTED);
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -298,66 +296,4 @@ impl Writer {
             }
         }
     }
-}
-
-/// Moves the file at `path` to `<REJECTED><UTC now, YYYYMMDDTHHMMSSZ>` beside it, with `-<n>`
-/// after a name already taken, never replacing a file. Returns the new file name.
-fn set_aside_file(path: &Path, now: Timestamp) -> io::Result<String> {
-    let folder = path.parent().unwrap_or(path);
-    let stem = format!("{REJECTED}{}", utc_stamp(now));
-    for n in 0..100_u32 {
-        let name = if n == 0 {
-            stem.clone()
-        } else {
-            format!("{stem}-{n}")
-        };
-        match crate::write::move_file_no_replace(path, &folder.join(&name)) {
-            Ok(()) => return Ok(name),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "every set-aside name is taken",
-    ))
-}
-
-/// Removes all but the latest [`KEEP_REJECTED`] set-aside files beside `path` (by name, which
-/// starts with the time). One that does not go is logged and left.
-fn prune_rejected(path: &Path) {
-    let folder = path.parent().unwrap_or(path);
-    let Ok(entries) = std::fs::read_dir(folder) else {
-        return;
-    };
-    let mut names: Vec<String> = entries
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| name.starts_with(REJECTED))
-        .collect();
-    names.sort_by_key(|name| sort_key(name));
-    let old = names.len().saturating_sub(KEEP_REJECTED);
-    for name in names.iter().take(old) {
-        if let Err(error) = crate::write::remove_old_file(&folder.join(name)) {
-            tracing::warn!(name, error = %Cause(&error), "blocklist: old set-aside file kept");
-        }
-    }
-}
-
-/// A set-aside name's order: its time, then its counter as a number.
-fn sort_key(name: &str) -> (String, u32) {
-    let rest = name.trim_start_matches(REJECTED);
-    match rest.split_once('-') {
-        Some((time, n)) => (time.to_owned(), n.parse().unwrap_or(0)),
-        None => (rest.to_owned(), 0),
-    }
-}
-
-/// `now` as `YYYYMMDDTHHMMSSZ`, in UTC.
-fn utc_stamp(now: Timestamp) -> String {
-    let secs = now.as_millis().div_euclid(1000);
-    let (year, month, day) = crate::connectors::civil_from_days(secs.div_euclid(86_400));
-    let time = secs.rem_euclid(86_400);
-    let (hour, minute, second) = (time / 3600, time % 3600 / 60, time % 60);
-    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}Z")
 }

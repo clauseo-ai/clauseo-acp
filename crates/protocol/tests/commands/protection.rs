@@ -113,6 +113,7 @@ fn every_tier_and_cause_has_its_wire_form() {
         (NotProtectedCause::NeedsSetUp, r#""needs_set_up""#),
         (NotProtectedCause::SetUpRefused, r#""set_up_refused""#),
         (NotProtectedCause::SetUpFailed, r#""set_up_failed""#),
+        (NotProtectedCause::ProbeFailed, r#""probe_failed""#),
         (
             NotProtectedCause::PoolFull {
                 size: 8,
@@ -256,6 +257,7 @@ fn the_view_takes_its_tier_from_the_computer() {
     for cause in [
         NotProtectedCause::NeedsSetUp,
         NotProtectedCause::SetUpFailed,
+        NotProtectedCause::ProbeFailed,
     ] {
         let view = ProtectionView::new(Protection::NotProtected { cause }, false, true);
         assert_eq!(view.tier, ProtectionTier::C);

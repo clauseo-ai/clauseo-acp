@@ -109,7 +109,9 @@ pub(crate) fn run(wanted: Wanted, adapter: Adapter, env: &BTreeMap<String, Strin
         spawn = spawn.home(home);
     }
     let config = HostConfig::new(effective, Arc::new(PassthroughLauncher::new(spawn)))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs))
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs, &|path| {
+            dunce::canonicalize(path).ok()
+        }))
         .with_limits_reader(Arc::new(NoReader));
     let (handle, join) = Host::start(config).unwrap_or_else(|e| panic!("Host::start: {e}"));
     let asked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
