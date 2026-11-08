@@ -8,8 +8,9 @@
 //!   (`settings_window.rs`, `docs/decisions/0028-settings-window.md`). `settings` is made on
 //!   open and destroyed on close; a window's destruction drops its stream, and `main`'s
 //!   destroys `settings`, so closing `main` still ends the app.
-//! - Setup opens the window first, then starts the host on a thread of its own
-//!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
+//! - Setup starts the host on a thread of its own (`host_start.rs`), then opens the window, so the
+//!   host starts while `WebView2` builds the window (that build holds the main thread), and the
+//!   webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. That thread starts
 //!   the Documents lookup on one more (`host_start::documents_later`: a share may be down), which
 //!   the host takes when it answers; the host runs with the effective settings (`Effective::load`,
@@ -327,8 +328,9 @@ pub fn run() -> tauri::Result<()> {
             app.manage(counts::CountsState::default());
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
-            open_main_window(app)?;
+            // The host's thread before the window: it starts while WebView2 builds the window.
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
+            open_main_window(app)?;
             Ok(())
         })
         .build(context)?;

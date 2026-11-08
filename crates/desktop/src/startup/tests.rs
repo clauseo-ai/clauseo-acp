@@ -57,3 +57,19 @@ fn only_the_page_or_the_root_counts_as_the_page() {
         assert!(!is_page(path), "{path}");
     }
 }
+
+/// The setup's two last steps in `lib.rs`, in order: the host's thread is spawned before the
+/// main window's build, which holds the main thread while `WebView2` starts. Read from the
+/// source: the setup runs only on a real event loop.
+#[test]
+fn the_setup_spawns_the_host_before_it_builds_the_window() {
+    let lib = include_str!("../lib.rs");
+    let at = |needle: &str| {
+        let found: Vec<_> = lib.match_indices(needle).map(|(at, _)| at).collect();
+        assert_eq!(found.len(), 1, "{needle} once in lib.rs");
+        found[0]
+    };
+    let host = at("            start_host(app.handle().clone(), start,");
+    let window = at("            open_main_window(app)?;");
+    assert!(host < window, "the host's thread first, then the window");
+}

@@ -4,10 +4,11 @@
 //! command's `ipc::lifecycle` line use too). Never a path, a URL or any of the lawyer's data.
 //!
 //! - [`TARGET`] (`clauseo_desktop::startup::lifecycle`): `run` entered (logged once the log is up,
-//!   at its own `at_ms`, 0), the `WebView2` runtime checked, the main window's build started and
-//!   done (on Windows the done line comes after `WebView2`'s environment and controller exist), the
-//!   host thread spawned, the event loop ready (`RunEvent::Ready`), the first response the app's
-//!   protocol built (`index_html` says whether it was the page; the hook runs on Tauri's async
+//!   at its own `at_ms`, 0), the `WebView2` runtime checked, the host thread spawned (before the
+//!   window: `lib.rs`'s setup), the main window's build started and done (on Windows the done
+//!   line comes after `WebView2`'s environment and controller exist), the event loop ready
+//!   (`RunEvent::Ready`), the first response the app's protocol built (`index_html` says whether
+//!   it was the page; the hook runs on Tauri's async
 //!   runtime as the response is ready, before `WebView2` gets it back on the main thread), and
 //!   the main window's page load started and finished.
 //! - [`PAGE_TARGET`] (`clauseo_desktop::page::lifecycle`): the page's own marks
