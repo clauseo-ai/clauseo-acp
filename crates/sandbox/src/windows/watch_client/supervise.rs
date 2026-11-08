@@ -71,7 +71,8 @@ fn wait_until<W: Watch>(shared: &Shared<W>, generation: u64, at: Duration) -> bo
 /// once more after [`RETRIGGER_AFTER`].
 fn connect<W: Watch>(shared: &Shared<W>, generation: u64) -> Result<W::Pipe, (Down, String)> {
     if shared.watch.turned_off() {
-        let line = "the denial reporter is turned off by policy (DenialReporter is 0)";
+        let line = "the denial reporter is turned off by policy \
+                    (DenialReporter is 0, or not a readable DWORD)";
         return Err((Down::TurnedOff, line.to_owned()));
     }
     request(shared)?;

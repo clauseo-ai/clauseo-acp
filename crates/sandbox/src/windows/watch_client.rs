@@ -106,8 +106,16 @@ pub const TICK: Duration = Duration::from_secs(1);
 pub const LINE_CAP: usize = 256 * 1024;
 /// The policy key IT may set to turn the reporter off, under `HKLM`.
 pub const POLICY_KEY: &str = r"SOFTWARE\Policies\Clauseo\Sandbox";
-/// Its `DWORD` value: 0 turns the reporter off; anything else, or none, leaves it on.
+/// Its `DWORD` value: 0 turns the reporter off, and so does a value of another type or one that
+/// can't be read ([`policy_says_off`]); none, or a `DWORD` other than 0, leaves it on.
 pub const POLICY_VALUE: &str = "DenialReporter";
+
+/// Whether IT's switch, read as a `DWORD` (`Ok(None)`: absent; `Err`: present but of another
+/// type, such as a `REG_SZ "0"`, or unreadable), turns the reporter off. Fails closed: only an
+/// absent value or a `DWORD` other than 0 leaves it on.
+pub fn policy_says_off<E>(read: &Result<Option<u32>, E>) -> bool {
+    !matches!(read, Ok(None | Some(1..)))
+}
 /// The watcher's exit code when the provider's sessions are taken (`WatchExit::ProviderFull`).
 pub const PROVIDER_FULL: u32 = 68;
 

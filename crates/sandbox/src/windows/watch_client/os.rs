@@ -34,7 +34,7 @@ use windows::Win32::System::Threading::{Sleep, WaitForSingleObject};
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::verify::{ServerFacts, check_server};
-use super::{ConnectError, POLICY_KEY, POLICY_VALUE, Pipe, StartError, Watch};
+use super::{ConnectError, POLICY_KEY, POLICY_VALUE, Pipe, StartError, Watch, policy_says_off};
 use crate::windows::acl::authz::{self, Checker};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::admin_copy::{self, os as admin_os};
@@ -114,22 +114,20 @@ impl Watch for OsWatch {
     }
 
     fn turned_off(&self) -> bool {
-        /// A value that isn't a `DWORD` (a `REG_SZ "0"`, say) was logged as ignored.
-        static IGNORED: AtomicBool = AtomicBool::new(false);
+        /// A value that isn't a readable `DWORD` (a `REG_SZ "0"`, say) was logged as off.
+        static LOGGED: AtomicBool = AtomicBool::new(false);
         let key = HSTRING::from(POLICY_KEY);
         let value = HSTRING::from(POLICY_VALUE);
-        match read_dword(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr())) {
-            Ok(read) => read == Some(0),
-            Err(error) => {
-                if !IGNORED.swap(true, Ordering::Relaxed) {
-                    tracing::warn!(
-                        %error,
-                        "the denial reporter's policy DenialReporter isn't a readable DWORD: ignored"
-                    );
-                }
-                false
-            }
+        let read = read_dword(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr()));
+        if let Err(error) = &read
+            && !LOGGED.swap(true, Ordering::Relaxed)
+        {
+            tracing::warn!(
+                %error,
+                "the denial reporter's policy DenialReporter isn't a readable DWORD: treated as off"
+            );
         }
+        policy_says_off(&read)
     }
 
     fn last_exit(&self) -> Option<u32> {

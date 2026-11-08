@@ -2122,9 +2122,10 @@ and exits by itself after its 3 s grace.
 1. reads IT's off switch, `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\DenialReporter` (64-bit
    view). A `DWORD` 0 means the task is never started: the reporter is `Down(TurnedOff)` ("turned
    off by policy"), logged once, and the host-side source reports alone. It is read again at
-   each retry, so a change applies within a minute. A value of another type (a `REG_SZ "0"`,
-   say) is ignored and logged once as ignored. Only the client reads the switch; the watcher
-   doesn't. So a run started by hand (Task Scheduler, `schtasks /run`) still runs, and a
+   each retry, so a change applies within a minute. A value present but of another type (a
+   `REG_SZ "0"`, say) or unreadable counts as off too, logged once as treated as off; only an
+   absent value or a `DWORD` other than 0 leaves the reporter on. Only the client reads the
+   switch; the watcher doesn't. So a run started by hand (Task Scheduler, `schtasks /run`) still runs, and a
    connection already open when IT sets the switch stays open until it ends;
 2. starts `\Clauseo\SandboxWatch` (`refresh::request_watch`);
 3. polls `HKLM\SOFTWARE\Clauseo\SandboxWatch` every 100 ms, for up to 5 s, and opens only a

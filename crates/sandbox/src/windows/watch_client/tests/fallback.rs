@@ -206,3 +206,16 @@ fn turned_off_by_policy_never_starts_the_task_and_is_logged_once() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors[0].contains("turned off by policy"));
 }
+
+#[test]
+fn the_off_switch_fails_closed_on_a_value_of_another_type_or_one_unreadable() {
+    use crate::windows::watch_client::policy_says_off;
+    // On: absent, or a DWORD other than 0.
+    assert!(!policy_says_off::<()>(&Ok(None)));
+    assert!(!policy_says_off::<()>(&Ok(Some(1))));
+    assert!(!policy_says_off::<()>(&Ok(Some(u32::MAX))));
+    // Off: a DWORD 0, a value of another type (a REG_SZ "0"), or one that can't be read.
+    assert!(policy_says_off::<()>(&Ok(Some(0))));
+    assert!(policy_says_off(&Err("wrong type")));
+    assert!(policy_says_off(&Err("access denied")));
+}
