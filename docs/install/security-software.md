@@ -1,6 +1,8 @@
-# When security software stops an agent's set-up
+# When security software stops an AI tool's set-up
 
-The first time you choose an AI agent such as Claude or ChatGPT, Clauseo downloads its files and
+[हिन्दी में पढ़ें](security-software.hi.md)
+
+The first time you choose an AI tool such as Claude or ChatGPT, Clauseo downloads its files and
 sets them up on your computer. Sometimes the download works, but the set-up doesn't finish. Clauseo
 then shows a message that starts like this:
 
@@ -10,15 +12,15 @@ For ChatGPT, the message names Codex, the ChatGPT tool Clauseo uses.
 
 Check on the laptop pass: the message's final wording, in English and Hindi.
 
-This page says why that happens and what to do, in the order to try it.
+Try the steps below in order.
 
 ## Why it happens
 
 Security software, such as Windows Security (also called Microsoft Defender) or an antivirus your
 firm installed, checks new files as they arrive. While it checks them, Clauseo can't move them into
-place. Now and then it holds a file for too long, or takes it away because it doesn't know it.
+place. Now and then it holds a file for too long, or removes it because it doesn't recognise it.
 
-Clauseo has already tried the set-up more than once by itself before it shows this message.
+Before it shows this message, Clauseo has already tried the set-up three times by itself.
 
 ## 1. Wait a minute, then choose Try again
 
@@ -31,34 +33,44 @@ this is usually quicker than the first time.
 A restart ends anything that may still be holding the files. Open Clauseo again and choose
 **Try again**.
 
+Check on the laptop pass: after a restart, whether the message and its **Try again** are still
+there, or whether the lawyer has to choose the AI tool again.
+
 ## 3. Look in your security software's list of blocked files
 
-If it still doesn't finish, your security software may have taken one of the agent's files away.
+If it still doesn't finish, your security software may have removed one of the AI tool's files.
 Most security software keeps a list of what it blocked or removed, and lets you put a file back.
 
-Clauseo keeps each agent's files in its own folder on your computer, in a folder called `agents`
-inside a folder called `ai.clauseo.desktop`. Look for a blocked file whose location includes
-`ai.clauseo.desktop`. The file is often called `node.exe` (on a Mac, `node`).
+Clauseo keeps the AI tools' files in a folder called `agents`, inside a folder called
+`ai.clauseo.desktop`. Look for a blocked file whose location includes `ai.clauseo.desktop`. The
+file is often called `node.exe`, or `node` on a Mac.
 
 ### On Windows, with Windows Security
+
+Windows may ask for an administrator's password along the way. Whoever looks after this computer
+can enter it.
 
 1. Open the Start menu, type **Windows Security** and open it.
 2. Click **Virus & threat protection**.
 3. Under **Current threats**, click **Protection history**.
-4. Click an item from about the time you set up the agent. Its details show the file's location.
+4. Click an item from about the time Clauseo set up the AI tool. Its details show the file's
+   location.
 5. If the location includes `ai.clauseo.desktop`, click **Actions**, then **Restore** or
-   **Allow on device**, whichever it shows. If Windows asks for an administrator's password,
-   whoever looks after this computer can enter it.
+   **Allow on device**, whichever it shows.
 6. Go back to Clauseo and choose **Try again**.
 
-Check on the laptop pass: the exact names of these pages and buttons on Windows 11 and Windows 10,
-and whether Restore asks for an administrator's password.
+If no item's location includes `ai.clauseo.desktop`, Windows Security didn't block Clauseo. If you
+use another antivirus, look there as below. If not, write to us (see Who to write to).
 
-> Screenshot to come: Windows Security's Protection history, with a Clauseo agent file.
+Check on the laptop pass: the exact names of these pages and buttons on Windows 11 and Windows 10,
+and whether opening an item's details or Restore asks for an administrator's password.
+
+> Screenshot to come: Windows Security's Protection history, with a Clauseo file.
 <!-- img/windows-protection-history.png -->
 
 If you use a different antivirus on Windows, open it and look for a list called something like
-**Quarantine**, **History** or **Recent activity**. Look for the same folder there.
+**Quarantine**, **History** or **Recent activity**. Look there for a file whose location includes
+`ai.clauseo.desktop`, restore it, then choose **Try again** in Clauseo.
 
 ### On a Mac
 
@@ -67,20 +79,20 @@ your firm did, open it and look for a list called something like **Quarantine**,
 **Recent activity**. Look for a file whose location includes `ai.clauseo.desktop`, restore it, then
 choose **Try again** in Clauseo.
 
-Check on the laptop pass: whether the Mac's own protection ever removes an agent's files, and
+Check on the laptop pass: whether the Mac's own protection ever removes an AI tool's files, and
 what the lawyer sees if it does.
 
 ### On a computer your firm gave you
 
 Your firm manages the security software, and it may not let you restore files yourself. If you
 don't see a list, or it won't let you restore the file, send this page to your firm's IT team. The
-next section tells them how to allow Clauseo's agent files.
+next section tells them how to allow the AI tools' files.
 
 ## For your firm's IT team
 
 The agent install downloads every file, checks each against its digest, then unpacks them with
 `npm ci` and renames the result into place. `agent.install_setup_failed` means the downloads and
-checks passed and that last part failed after three tries; on our Windows test machine, Defender
+checks passed and that last part failed after three tries. On our Windows test machine, Defender
 held the fresh files and the rename got `Access is denied`. Clauseo retries sharing and lock
 errors in place before it counts a try.
 
@@ -107,11 +119,11 @@ Check on the laptop pass: the programs in Claude's and Codex's packages on each 
 their paths under `node_modules`.
 
 **What to allow.** Restore anything quarantined from these folders by its path, then allow the
-`agents` folder, or the programs above, in your antivirus, EDR or application control. It is a
-user-writable folder, so an exclusion there also covers anything else that could write to it;
-scope it to `agents` rather than the whole data folder where your product allows. At an
-administrator's prompt, `%LOCALAPPDATA%` is the administrator's folder, so name the lawyer's:
-`C:\Users\<user>\AppData\Local\ai.clauseo.desktop\agents`.
+`agents` folder, or the programs above, in your antivirus, EDR or application control. It's a
+user-writable folder, so an exclusion there also covers anything else that could write to it.
+Where your product allows, scope the exclusion to `agents`, not the whole data folder. At an
+administrator's prompt, `%LOCALAPPDATA%` is the administrator's folder, so name the user's own
+folder: `C:\Users\<user>\AppData\Local\ai.clauseo.desktop\agents`.
 
 [Clauseo for firm IT](../firm-it.md) has the rest: AppLocker and WDAC rules for this folder in
 [section 3](../firm-it.md#3-applocker-and-wdac), and what to do when Windows security removes
