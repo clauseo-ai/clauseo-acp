@@ -180,7 +180,7 @@ test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_sy
   expect(text()).toContain("Your network is blocking the download.");
   await press(byId("install-proxy"));
   expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
-  expect(byId("install-ask-it")?.textContent).toBe("Ask your IT team");
+  expect(byId("install-ask-it")?.textContent).toBe("Copy details for IT");
   await press(byId("install-ask-it"));
   expect(writeText).toHaveBeenCalledWith(
     "Clauseo needs to download Claude to work. Please allow these addresses on the firm's network: registry.npmjs.org, nodejs.org.",
