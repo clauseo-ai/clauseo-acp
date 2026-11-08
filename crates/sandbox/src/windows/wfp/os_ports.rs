@@ -4,13 +4,14 @@
 //!   properties `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts` (the class behind
 //!   `Get-NetTCPSetting` and `netsh int ipv4 show dynamicport tcp`; learn.microsoft.com,
 //!   windows/win32/fwp/wmi/nettcpipprov/msft-nettcpsetting), every setting's range;
-//! - the excluded ports, by test binds (`ports::refused_ports` says why there is no list to
-//!   read);
+//! - the excluded ports, by test binds that never listen (`ports/reserved.rs` says why there
+//!   is no list to read);
 //! - the TCP listeners, from `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER`, IPv4 and
 //!   IPv6, any address, each with its process's program (`QueryFullProcessImageNameW`);
 //! - for the slot claims and the browser's gate (`ports.rs`): every TCP socket's local port
 //!   (`TCP_TABLE_OWNER_PID_ALL`), the listeners' processes, and whether a process is in a Job
-//!   Object (`IsProcessInJob`).
+//!   Object ([`WindowsJobProbe`]: a handle first, then the listeners with their bind times,
+//!   `TCP_TABLE_OWNER_MODULE_LISTENER`, then `IsProcessInJob` on the handle).
 
 #![expect(
     unsafe_code,
@@ -21,10 +22,11 @@ use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_CLASS,
-    TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
+    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_MODULE, MIB_TCP6TABLE_OWNER_PID,
+    MIB_TCPTABLE_OWNER_MODULE, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_CLASS,
+    TCP_TABLE_OWNER_MODULE_LISTENER, TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows::Win32::System::Com::{
@@ -35,7 +37,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 use windows::Win32::System::Variant::{VARIANT, VT_I2, VT_I4, VT_UI2, VariantClear};
 use windows::Win32::System::Wmi::{
@@ -46,7 +49,7 @@ use windows::core::{BOOL, BSTR, HRESULT, PCWSTR, PWSTR, w};
 
 use super::check::NetworkGap;
 use super::port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
-use crate::ports::{TIER_B_PORTS, refused_ports};
+use crate::ports::{BoundListener, JobProbe, TIER_B_PORTS, refused_ports};
 
 /// `ERROR_INSUFFICIENT_BUFFER`.
 const INSUFFICIENT_BUFFER: u32 = 122;
@@ -268,20 +271,107 @@ fn every_row(class: TCP_TABLE_CLASS) -> Result<Vec<(u16, u32)>, NetworkGap> {
     Ok(found)
 }
 
-/// Whether process `pid` is in the Job Object `job`; `None` when it can't be opened or asked.
-/// A gate, not the boundary: the pid is read from the TCP table first, so a process that exited
-/// and whose pid Windows gave to another in between is asked about instead.
-pub(crate) fn process_in_job(pid: u32, job: std::os::windows::io::RawHandle) -> Option<bool> {
-    // SAFETY: an ordinary open; the handle is closed below.
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
-    let mut inside = BOOL::default();
-    // SAFETY: `process` is open; `job` is the caller's live job handle, borrowed for the call;
-    // `inside` is a live out-pointer.
-    let asked = unsafe { IsProcessInJob(process, Some(HANDLE(job)), &raw mut inside) };
-    // SAFETY: opened above, closed once.
-    drop(unsafe { CloseHandle(process) });
-    asked.ok()?;
-    Some(inside.as_bool())
+/// An open process handle, closed on drop.
+pub(crate) struct OpenedProcess(HANDLE);
+
+impl Drop for OpenedProcess {
+    fn drop(&mut self) {
+        // SAFETY: opened by `WindowsJobProbe::open`, closed once.
+        drop(unsafe { CloseHandle(self.0) });
+    }
+}
+
+/// The browser gate's questions (`ports::listener_in_job`) against Windows and the launch's
+/// Job Object, borrowed for the probe's life.
+pub(crate) struct WindowsJobProbe<'a> {
+    job: std::os::windows::io::BorrowedHandle<'a>,
+}
+
+impl<'a> WindowsJobProbe<'a> {
+    /// A probe against `job` (which needs `JOB_OBJECT_QUERY`).
+    pub(crate) fn new(job: std::os::windows::io::BorrowedHandle<'a>) -> Self {
+        WindowsJobProbe { job }
+    }
+}
+
+impl JobProbe for WindowsJobProbe<'_> {
+    type Process = OpenedProcess;
+
+    fn open(&mut self, pid: u32) -> Option<OpenedProcess> {
+        // SAFETY: an ordinary open; `OpenedProcess` closes the handle.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+        Some(OpenedProcess(handle))
+    }
+
+    fn listeners(&mut self) -> Option<Vec<BoundListener>> {
+        let mut found = Vec::new();
+        for family in [AF_INET.0, AF_INET6.0] {
+            let table = table(family, TCP_TABLE_OWNER_MODULE_LISTENER).ok()?;
+            found.extend(module_rows(&table, family == AF_INET6.0));
+        }
+        Some(found)
+    }
+
+    fn created(&mut self, process: &OpenedProcess) -> Option<u64> {
+        let (mut created, mut exited, mut kernel, mut user) = Default::default();
+        // SAFETY: `process` is open; the four are live out-pointers.
+        unsafe {
+            GetProcessTimes(
+                process.0,
+                &raw mut created,
+                &raw mut exited,
+                &raw mut kernel,
+                &raw mut user,
+            )
+        }
+        .ok()?;
+        let FILETIME {
+            dwLowDateTime: low,
+            dwHighDateTime: high,
+        } = created;
+        Some(u64::from(high) << 32 | u64::from(low))
+    }
+
+    fn in_job(&mut self, process: &OpenedProcess) -> Option<bool> {
+        use std::os::windows::io::AsRawHandle;
+        let mut inside = BOOL::default();
+        let job = HANDLE(self.job.as_raw_handle());
+        // SAFETY: `process` is open; `job` is the caller's live job handle, borrowed;
+        // `inside` is a live out-pointer.
+        unsafe { IsProcessInJob(process.0, Some(job), &raw mut inside) }.ok()?;
+        Some(inside.as_bool())
+    }
+}
+
+/// Each listener row's port, process and bind time, from a `TCP_TABLE_OWNER_MODULE_LISTENER`
+/// table [`table`] filled.
+fn module_rows(table: &[u64], v6: bool) -> Vec<BoundListener> {
+    let port = |raw: u32| u16::from_be(u16::try_from(raw & 0xFFFF).unwrap_or(0));
+    let row = |raw_port: u32, pid: u32, stamp: i64| BoundListener {
+        port: port(raw_port),
+        pid,
+        bound_at: u64::try_from(stamp).unwrap_or(0),
+    };
+    if table.is_empty() {
+        return Vec::new();
+    }
+    // SAFETY: GetExtendedTcpTable wrote the family's table at the start of the aligned buffer:
+    // its count, then that many rows.
+    unsafe {
+        if v6 {
+            let head = &*table.as_ptr().cast::<MIB_TCP6TABLE_OWNER_MODULE>();
+            let all = std::slice::from_raw_parts(head.table.as_ptr(), head.dwNumEntries as usize);
+            all.iter()
+                .map(|r| row(r.dwLocalPort, r.dwOwningPid, r.liCreateTimestamp))
+                .collect()
+        } else {
+            let head = &*table.as_ptr().cast::<MIB_TCPTABLE_OWNER_MODULE>();
+            let all = std::slice::from_raw_parts(head.table.as_ptr(), head.dwNumEntries as usize);
+            all.iter()
+                .map(|r| row(r.dwLocalPort, r.dwOwningPid, r.liCreateTimestamp))
+                .collect()
+        }
+    }
 }
 
 /// `GetExtendedTcpTable`'s `class` table for `family`, in an aligned buffer.

@@ -60,9 +60,9 @@ pub use grant_probe::{GrantProbe, foreign_test_filter, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
-pub use os_ports::{check_ports, dynamic_port_ranges};
+pub(crate) use os_ports::{WindowsJobProbe, listener_rows, ports_in_use};
 #[cfg(windows)]
-pub(crate) use os_ports::{listener_rows, ports_in_use, process_in_job};
+pub use os_ports::{check_ports, dynamic_port_ranges};
 #[cfg(windows)]
 pub use permit::{check_launch, check_launch_in, check_slot};
 pub use port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};

@@ -45,18 +45,22 @@ use std::ops::RangeInclusive;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 mod gate;
+#[cfg(any(windows, test))]
+mod reserved;
 mod slot;
 
-pub use gate::{BrowserOff, idle_at_launch, in_job_gate};
+pub use gate::{BoundListener, BrowserOff, JobProbe, idle_at_launch, in_job_gate, listener_in_job};
 #[cfg(windows)]
 pub use gate::{check_browser_job, check_browser_ports};
+#[cfg(windows)]
+pub(crate) use reserved::refused_ports;
 pub use slot::{DAEMON_BLOCK, HOST_BLOCK, POOL_BLOCK, SLOT_PORTS, Slot};
 
 /// Blocks H and P together, the slots' ports below Windows' dynamic range (49152 by default),
 /// so the OS never hands them to another program's port-0 bind; clear of the listeners known
 /// to sit below it (`WinRM` 47001, the `ASP.NET` state service 42424, `EtherNet/IP` 44818,
-/// `BACnet` 47808, SQL Server's browser 1434). IANA's registry for 46200-46611 is still to be
-/// checked (0049). Set-up and every tier-B launch refuse a machine whose dynamic range, or
+/// `BACnet` 47808, SQL Server's browser 1434). IANA registers one port in them, `inedo` 46336
+/// (0049). Set-up and every tier-B launch refuse a machine whose dynamic range, or
 /// whose excluded port ranges (Hyper-V, WSL, Docker), overlap it, or where another program
 /// listens in it (`wfp::check_ports`). Block D sits inside the dynamic range by design
 /// ([`DAEMON_BLOCK`]).
@@ -306,35 +310,6 @@ fn slot_exhausted(ports: &RangeInclusive<u16>, what: &str, last: Option<&io::Err
             ports.end()
         ),
     )
-}
-
-/// The ports of [`TIER_B_PORTS`] Windows refuses to bind on `127.0.0.1` or `::1`
-/// (`PermissionDenied`, `WSAEACCES`): an excluded port range (Hyper-V, WSL and Docker reserve
-/// them). Ports in `listening`, which a listener holds, and ports this process holds are
-/// skipped; each test bind closes at once. Windows publishes no call that lists the excluded
-/// ranges (`netsh int ipv4 show excludedportrange` reads the TCP/IP stack's private store), and
-/// the documented reservation calls, `CreatePersistentTcpPortReservation` and
-/// `LookupPersistentTcpPortReservation`, only make or look up one exact range, so a bind is the
-/// test.
-#[cfg(windows)]
-pub(crate) fn refused_ports(listening: &BTreeSet<u16>) -> Vec<u16> {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-    let held = Held::lock();
-    let refused = |port: u16| {
-        [
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
-        ]
-        .into_iter()
-        .any(|ip| {
-            matches!(TcpListener::bind((ip, port)),
-                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
-        })
-    };
-    TIER_B_PORTS
-        .filter(|port| !listening.contains(port) && !held.contains(*port))
-        .filter(|port| refused(*port))
-        .collect()
 }
 
 /// How many binds may land on a held or slot port before a browser claim gives up.
