@@ -104,7 +104,10 @@ fn elevated_install_extend_check_and_remove() {
     let report = install(&ns, &setup(&[a.clone(), b.clone()])).unwrap();
     // WFP's filters are all there whatever the firewall says (it is only reported). This also
     // shows WFP takes NOT_EQUAL over a descriptor and a port range.
-    assert_eq!(report.filters, 12 + 2 * 7);
+    assert_eq!(
+        report.filters,
+        12 + 2 * usize::from(super::slot_filters::SLOT_FILTERS)
+    );
     eprintln!("firewall: {:?}", report.firewall);
     let engine = Engine::open(false, "Clauseo sandbox test DACLs").unwrap();
     for object in [
