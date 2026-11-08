@@ -196,6 +196,86 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
     assert_eq!(check(&fs), Err(Blocked::AdminCopyChanged));
 }
 
+/// A protected DACL no lock-down writes, so a descriptor left alone reads back as it was: the
+/// locked folder's inheritable entries don't reach it.
+const OWN_FILE: &str = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)";
+
+/// [`OWN_FILE`] for a folder and what is made in it.
+const OWN_FOLDER: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FR;;;BU)";
+
+/// The admin copy given a second name outside the admin folder (a hard link): the lock-down
+/// refuses it, as `os::lock_handle` says, and never locks it; the descriptor both names share
+/// reads back as it was, and both names stay.
+#[test]
+#[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
+fn elevated_the_lock_down_refuses_a_file_with_two_names_and_leaves_it() {
+    use super::lock_tree_os::lock_tree;
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let dir = TempDir::new("admin-copy-hard-link");
+    let exe = dir.file(r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe", "MZ");
+    let sandbox = exe.parent().unwrap().to_path_buf();
+    protect_with(&exe, OWN_FILE).unwrap();
+    let other = dir.hard_link("elsewhere.exe", &exe);
+    let before = os::security(&other).unwrap();
+    for refused in [lock_tree(&sandbox, None), lock_down_tree(&sandbox, &exe)] {
+        let error = refused.unwrap_err();
+        assert!(error.to_string().contains("more than one name"), "{error}");
+        assert_eq!(
+            os::security(&other).unwrap(),
+            before,
+            "the other name's, untouched"
+        );
+        assert_eq!(os::security(&exe).unwrap(), before, "the copy's, untouched");
+        assert!(!locked(&os::security(&exe).unwrap(), false));
+        assert_eq!(os::found(&exe).unwrap(), Found::File);
+        assert_eq!(os::found(&other).unwrap(), Found::File);
+    }
+}
+
+/// A junction in the admin folder, to a folder outside it: the lock-down's walk deletes the
+/// junction as itself and never follows it, so the folder it names and the file in it keep
+/// their descriptors; the admin folder itself being a junction is refused, nothing changed.
+#[test]
+#[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
+fn elevated_the_lock_down_never_follows_a_junction_in_the_admin_folder() {
+    use super::lock_tree_os::lock_tree;
+    use crate::windows::test_junction::junction;
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let dir = TempDir::new("admin-copy-junction");
+    let exe = dir.file(r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe", "MZ");
+    let sandbox = exe.parent().unwrap().to_path_buf();
+    let target = dir.dir("target");
+    protect_with(&target, OWN_FOLDER).unwrap();
+    let inner = dir.file(r"target\inner.txt", "the lawyer's");
+    let (folder_before, file_before) = (
+        os::security(&target).unwrap(),
+        os::security(&inner).unwrap(),
+    );
+    let untouched = || {
+        assert_eq!(os::security(&target).unwrap(), folder_before);
+        assert_eq!(os::security(&inner).unwrap(), file_before);
+        assert_eq!(os::found(&inner).unwrap(), Found::File);
+    };
+    // Below the admin folder: deleted as itself, the rest locked.
+    let link = sandbox.join("linked");
+    junction(&link, &target).unwrap();
+    lock_tree(&sandbox, None).unwrap();
+    assert_eq!(os::found(&link).unwrap(), Found::Missing);
+    assert!(locked(&os::security(&sandbox).unwrap(), true));
+    assert!(locked(&os::security(&exe).unwrap(), false));
+    untouched();
+    // The admin folder itself a junction: refused, and the junction stays.
+    let root = dir.path().join("root-link");
+    junction(&root, &target).unwrap();
+    assert!(lock_tree(&root, None).is_err());
+    assert_eq!(os::found(&root).unwrap(), Found::Link);
+    untouched();
+}
+
 /// `path` made SYSTEM's alone, owner and protected DACL, as a refresh made `staging\` under the
 /// old `STAGING_SDDL`; `SeRestorePrivilege` back as it was after.
 fn system_only(path: &Path, folder: bool) {
