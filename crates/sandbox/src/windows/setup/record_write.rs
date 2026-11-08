@@ -22,6 +22,7 @@ use windows::core::{HSTRING, PCWSTR};
 
 use super::MachineError;
 use super::lock::Descriptor;
+use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
     CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
@@ -271,7 +272,8 @@ pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
     delete_values(key, &ADMIN_VALUES)
 }
 
-/// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it.
+/// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it, and the
+/// vendor key above it when that is left empty too ([`record_key::delete_emptied`]).
 fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
     let subkey = HSTRING::from(key);
     let mut opened = HKEY::default();
@@ -286,7 +288,7 @@ fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
         )
     };
     if open == ERROR_FILE_NOT_FOUND {
-        return Ok(());
+        return record_key::delete_emptied(&mut Hklm, key);
     }
     check("RegOpenKeyExW", open)?;
     let opened = Key(opened);
@@ -298,37 +300,65 @@ fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
             check("RegDeleteValueW", deleted)?;
         }
     }
-    let (mut subkeys, mut values) = (0u32, 0u32);
-    // SAFETY: the key is open with KEY_QUERY_VALUE; the two counts are live out-pointers and
-    // every other out-pointer is left null.
-    let queried = unsafe {
-        RegQueryInfoKeyW(
-            opened.0,
-            None,
-            None,
-            None,
-            Some(&raw mut subkeys),
-            None,
-            None,
-            Some(&raw mut values),
-            None,
-            None,
-            None,
-            None,
-        )
-    };
-    check("RegQueryInfoKeyW", queried)?;
     drop(opened);
-    if subkeys > 0 || values > 0 {
-        return Ok(());
+    record_key::delete_emptied(&mut Hklm, key)
+}
+
+/// `HKLM` in the 64-bit view, as [`record_key`] reads and deletes its keys.
+struct Hklm;
+
+impl Keys for Hklm {
+    fn counts(&mut self, key: &str) -> Result<Option<Counts>, MachineError> {
+        let subkey = HSTRING::from(key);
+        let mut opened = HKEY::default();
+        // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
+        let open = unsafe {
+            RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                &subkey,
+                None,
+                KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+                &raw mut opened,
+            )
+        };
+        if open == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        check("RegOpenKeyExW", open)?;
+        let opened = Key(opened);
+        let (mut subkeys, mut values) = (0u32, 0u32);
+        // SAFETY: the key is open with KEY_QUERY_VALUE; the two counts are live out-pointers
+        // and every other out-pointer is left null.
+        let queried = unsafe {
+            RegQueryInfoKeyW(
+                opened.0,
+                None,
+                None,
+                None,
+                Some(&raw mut subkeys),
+                None,
+                None,
+                Some(&raw mut values),
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        check("RegQueryInfoKeyW", queried)?;
+        Ok(Some(Counts { subkeys, values }))
     }
-    // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
-    // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
-    let deleted = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
-    if deleted == ERROR_FILE_NOT_FOUND {
-        return Ok(());
+
+    fn delete(&mut self, key: &str) -> Result<(), MachineError> {
+        let subkey = HSTRING::from(key);
+        // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
+        let deleted =
+            unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
+        if deleted == ERROR_FILE_NOT_FOUND {
+            return Ok(());
+        }
+        check("RegDeleteKeyExW", deleted)
     }
-    check("RegDeleteKeyExW", deleted)
 }
 
 /// Sets `name` on the open key `opened` to `value`.
