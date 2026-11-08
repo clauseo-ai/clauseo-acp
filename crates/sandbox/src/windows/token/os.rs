@@ -328,13 +328,16 @@ pub(in crate::windows) fn shut_threads(sddl: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Shuts this runner's primary token to everyone but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`),
-/// the inner runner's first act, before it opens a pipe: the launch, which names the desktop user
-/// [`shut_self`] then adds, hasn't arrived yet.
-pub(in crate::windows) fn shut_token_first(token: &Handle) -> io::Result<()> {
+/// The inner runner's first act, before it opens a pipe: shuts its primary token to everyone
+/// but `SYSTEM` and `desktop_user`'s `TOKEN_QUERY` (`token::runner_token_first_sddl`), for the
+/// outer's full check before its go.
+pub(in crate::windows) fn shut_inner_token_first(
+    token: &Handle,
+    desktop_user: &Sid,
+) -> io::Result<()> {
     set_kernel_dacl(
         token.0,
-        &LocalDescriptor::new(super::RUNNER_TOKEN_FIRST_SDDL)?,
+        &LocalDescriptor::new(&super::runner_token_first_sddl(desktop_user))?,
     )
 }
 

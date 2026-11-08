@@ -190,8 +190,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     };
     let agent_desktop = AgentDesktop::create(&message.pool_name, &password, &sids)
         .map_err(|(call, e)| station_failure(call, &e))?;
-    // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
-    // first act is the sweep of every other process of the pool user's. The job's one handle stays
+    // The logon, the user's check, the job, the shut, the resume, then the full check before the
+    // go (`start.rs`); the inner's first act after the go is the sweep of every other process of
+    // the pool user's. The job's one handle stays
     // this process's, so the job's processes end with it.
     let mut steps = Start {
         pool_name: &message.pool_name,
@@ -204,6 +205,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: &steps.cwd,
         station_desktop: &agent_desktop.path,
         job,
+        ctl: pipes
+            .first()
+            .ok_or_else(|| Failure::new(RunExit::Pipe, "four pipes expected"))?,
     };
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {
@@ -240,19 +244,18 @@ fn serve(
     let Ok([ctl, stdin, stdout, stderr]) = <[ServerPipe; 4]>::try_from(pipes) else {
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
-    // The client is the inner runner's process, whose token user was checked before it ran. It
-    // connects once its first-act sweep and cleanup are done; one that exited first said why in
-    // its exit code.
-    if let Err(failure) = accept(&ctl, inner, FIRST_CONNECT) {
-        return Err(inner_exit(inner).unwrap_or(failure));
-    }
+    // `ctl`'s client is the inner runner's process, connected already (`steps.rs`'s `confirm`):
+    // its token's user was checked before it ran, and its whole token before its go. It reads the
+    // launch once its first-act sweep and cleanup are done.
     if let Err(error) = write_frame(&ctl, launch) {
         // An inner whose first-act sweep failed reported it and exited without reading.
         let failure = Failure::new(RunExit::Pipe, os("ctl write", &error));
         return Err(reported(&ctl, inner, end).unwrap_or(failure));
     }
-    for pipe in [&stdin, &stdout, &stderr] {
-        if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
+    // stdin waits as long as `ctl` once did: the inner opens it after its first-act sweep.
+    let waits = [FIRST_CONNECT, NEXT_CONNECT, NEXT_CONNECT];
+    for (pipe, timeout) in [&stdin, &stdout, &stderr].into_iter().zip(waits) {
+        if let Err(failure) = accept(pipe, inner, timeout) {
             // An inner runner that failed before it opened its pipes said why on `ctl`.
             return Err(reported(&ctl, inner, end).unwrap_or(failure));
         }

@@ -10,8 +10,10 @@
 //!   `CreateProcessWithLogonW` gives the runner's pool logon a fresh logon SID of its own, made
 //!   per run, rather than the desktop user's; the deny-only entry is that one, read from the
 //!   runner's own token. Deny-only, it opens nothing the runner itself or another run's processes
-//!   hold through it (PR0 (a) and (d)); the runner's token DACL names it, not the desktop user,
-//!   which is why the outer reads the inner's user without the token (`runner/inner_user.rs`).
+//!   hold through it (PR0 (a) and (d)). The runner's token DACL as made names it, not the desktop
+//!   user, so the outer reads the suspended inner's user without the token
+//!   (`runner/inner_user.rs`), and the inner's first act grants the desktop user `TOKEN_QUERY`
+//!   for the outer's full check before its go (`runner/start.rs`).
 //! - **Low integrity** (`S-1-16-4096`): the agent writes nothing labelled higher; the matter,
 //!   state and notes folders carry the Low label PR3 writes.
 //! - **Default DACL:** the pool user and `SYSTEM` with full access, and the desktop user with
@@ -220,10 +222,25 @@ pub fn runner_default_dacl(desktop_user: &Sid) -> String {
     format!("D:(A;;GA;;;SY)(A;;0x100000;;;{desktop_user})(A;;RC;;;OW)")
 }
 
-/// The inner runner's primary token's DACL from its first instruction until the launch arrives:
-/// `SYSTEM` full and `OWNER RIGHTS` held to `READ_CONTROL`, nobody else. [`runner_token_sddl`]
-/// adds the desktop user's `TOKEN_QUERY` once the launch names them.
+/// The entries every runner token's DACL starts from: `SYSTEM` full and `OWNER RIGHTS` held to
+/// `READ_CONTROL`, nobody else. The inner runner's first DACL adds the desktop user's
+/// `TOKEN_QUERY` ([`runner_token_first_sddl`]).
 pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
+
+/// `TOKEN_QUERY`: the one right the desktop user gets on the inner runner's token before the
+/// launch, for the outer's full check (`runner/outer/steps.rs`). No `TOKEN_DUPLICATE`,
+/// `TOKEN_IMPERSONATE`, `TOKEN_ADJUST_*` or `WRITE_DAC`.
+pub const RUNNER_TOKEN_QUERY: u32 = 0x0000_0008;
+
+/// The inner runner's primary token's DACL from its first instruction until the launch arrives:
+/// [`RUNNER_TOKEN_FIRST_SDDL`]'s entries and `TOKEN_QUERY` for exactly `desktop_user` (from
+/// `--inner`), so the outer, as that user, can open the token for its full check after the
+/// resume: on the agent's own station the token the Secondary Logon service makes names a fresh
+/// logon SID and not the desktop user. [`runner_token_sddl`] keeps that entry once the launch
+/// arrives.
+pub fn runner_token_first_sddl(desktop_user: &Sid) -> String {
+    format!("{RUNNER_TOKEN_FIRST_SDDL}(A;;0x{RUNNER_TOKEN_QUERY:x};;;{desktop_user})")
+}
 
 /// `SYSTEM`'s rights on the agent's window station: `WINSTA_ALL_ACCESS` (`0x37F`) and the
 /// standard rights (`0xF0000`).

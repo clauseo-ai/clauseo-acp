@@ -226,8 +226,13 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
         runner_default_dacl(&desktop),
         runner_thread_sddl(&desktop).replacen("D:P", "D:", 1)
     );
-    // Before the launch arrives the token names SYSTEM alone.
+    // Before the launch arrives the inner's token adds to SYSTEM's entries TOKEN_QUERY (0x8) for
+    // exactly the desktop user, nothing broader.
     assert_eq!(RUNNER_TOKEN_FIRST_SDDL, "D:P(A;;GA;;;SY)(A;;RC;;;OW)");
+    assert_eq!(
+        runner_token_first_sddl(&desktop),
+        format!("D:P(A;;GA;;;SY)(A;;RC;;;OW)(A;;0x8;;;{desktop})")
+    );
 }
 
 #[test]

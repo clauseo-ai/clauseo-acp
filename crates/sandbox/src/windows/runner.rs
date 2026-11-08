@@ -345,15 +345,19 @@ pub fn is_launch_name(name: &str) -> bool {
 pub enum Mode {
     /// `--launch <file>`: the outer runner.
     Launch(PathBuf),
-    /// `--inner <pipe base>`: the inner runner.
-    Inner(String),
+    /// `--inner <pipe base> <desktop user's SID>`: the inner runner, which grants that user
+    /// `TOKEN_QUERY` on its token first (`token::runner_token_first_sddl`).
+    Inner(String, Sid),
 }
 
 /// The mode `args` (the arguments after the program) name; `None` for any other command line.
 pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
     match args {
         [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
-        [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
+        [flag, base, user] if flag == "--inner" => {
+            let user = Sid::parse(user.to_str()?).ok()?;
+            base.to_str().map(|base| Mode::Inner(base.to_owned(), user))
+        }
         _ => None,
     }
 }
@@ -458,10 +462,14 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// The inner runner couldn't grant the desktop user `TOKEN_QUERY` on its own token, its
+    /// first act (`token::runner_token_first_sddl`), so the outer can't make its full check: the
+    /// launch is refused before the inner does anything else.
+    TokenGrant,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 20] = [
+    const ALL: [RunExit; 21] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -482,6 +490,7 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
+        RunExit::TokenGrant,
     ];
 
     /// The exit code.
@@ -525,7 +534,8 @@ impl RunExit {
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable
             | RunExit::AwaitingStop
-            | RunExit::AwaitingSweep => None,
+            | RunExit::AwaitingSweep
+            | RunExit::TokenGrant => None,
         }
     }
 }
