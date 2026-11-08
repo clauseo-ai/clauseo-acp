@@ -187,13 +187,15 @@ impl Clock for SystemClock {
 }
 
 /// The rate cap: a [`DenialSink`] that passes at most [`DENIALS_PER_WINDOW`] denials per
-/// [`DENIAL_WINDOW`] to its inner sink. A window starts at the first denial after the last one
-/// ended. The excess is counted and reaches the inner sink as one [`Denial::Dropped`] when the
-/// next window starts (at the next denial, before it) or at the first [`CappedSink::tick`]
-/// after the window ends, whichever is first; the owner calls `tick` from its own timer so a
-/// burst's count is not held until the next denial. [`DenialSink::upstream`] passes through
-/// uncapped. Safe from many threads: the count is behind a mutex, and the inner sink is
-/// called after the mutex is released, so it may block or call back.
+/// [`DENIAL_WINDOW`] to its inner sink, and as many [`Denial::Blocked`] again on a budget of
+/// their own, so other refusals never starve the block list's notices. A window starts at the
+/// first denial after the last one ended. The excess is counted and reaches the inner sink as
+/// one [`Denial::Dropped`] when the next window starts (at the next denial, before it) or at
+/// the first [`CappedSink::tick`] after the window ends, whichever is first; the owner calls
+/// `tick` from its own timer so a burst's count is not held until the next denial.
+/// [`DenialSink::upstream`] passes through uncapped. Safe from many threads: the count is
+/// behind a mutex, and the inner sink is called after the mutex is released, so it may block
+/// or call back.
 #[derive(Debug)]
 pub struct CappedSink<S, C = SystemClock> {
     inner: S,
@@ -206,8 +208,10 @@ pub struct CappedSink<S, C = SystemClock> {
 struct Window {
     /// When it started; `None` before the first denial and after a `tick` ended it.
     start: Option<Duration>,
-    /// Denials passed on in it.
+    /// Denials passed on in it, [`Denial::Blocked`] apart.
     passed: u32,
+    /// [`Denial::Blocked`] passed on in it.
+    blocked: u32,
     /// Denials held back in it.
     dropped: u32,
 }
@@ -271,9 +275,14 @@ impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
             if window.start.is_none() {
                 window.start = Some(now);
             }
-            let pass = window.passed < DENIALS_PER_WINDOW;
+            let used = if matches!(d, Denial::Blocked { .. }) {
+                &mut window.blocked
+            } else {
+                &mut window.passed
+            };
+            let pass = *used < DENIALS_PER_WINDOW;
             if pass {
-                window.passed += 1;
+                *used += 1;
             } else {
                 window.dropped = window.dropped.saturating_add(1);
             }
