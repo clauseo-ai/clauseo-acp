@@ -608,7 +608,13 @@ ask, could close even those: a later option, not this change.
   identity. A data folder that is itself on the network (app data redirected to a share) is
   never touched for its identity: a path that resolves locally can't lie in it, and every
   network path, a link to one included, is refused anyway, so the fence neither captures its
-  identity nor blocks every request. Callers that go on to touch a path (the held-open check,
+  identity nor blocks every request. A local data folder whose own identity, or a parent's,
+  can't be read is compared by names only (the walk still resolves links, junctions and 8.3
+  names to their long text), never by blocking every request; only those folders can bring
+  this, and an unreadable identity a request leads to refuses that request. The host reads the
+  failing identity again at each check, logs once when names-only starts and once when it
+  clears (no path), and sets `ProtectionView::data_fence_names_only` for the app to show.
+  Callers that go on to touch a path (the held-open check,
   the after-turn tool paths, the pre-write guard) use the walked path, never the agent's text
   again.
 - **The reason the agent sees.** ACP's answer to `session/request_permission` carries an

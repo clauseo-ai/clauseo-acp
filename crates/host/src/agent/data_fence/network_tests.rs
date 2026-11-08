@@ -24,6 +24,7 @@ pub(super) fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
         paths: paths.iter().map(PathBuf::from).collect(),
         roots: Vec::new(),
         words: Vec::new(),
+        health: super::DataFenceHealth::default(),
     }
 }
 

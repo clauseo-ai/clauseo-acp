@@ -11,8 +11,9 @@
 //! - With no seam the computer is `Unsupported { why: not_built }`, never what
 //!   `clauseo_sandbox::detect` would say on its own (tier A on macOS, with nothing jailing).
 //! - The view goes to every app subscriber whenever it changes: the detection, the work in
-//!   progress, `retry_asks_admin`, or either setting (the loop's [`tick`] compares the
-//!   settings after every input, so any path that changes them is covered). Like
+//!   progress, `retry_asks_admin`, either setting, or the data fence's names-only flag (the
+//!   loop's [`tick`] compares the settings and the flag after every input, so any path that
+//!   changes them is covered; a fence check runs on a matter thread, whose reply is an input). Like
 //!   `ProtectionChanged`, no app catch-up carries it: the query gives the current view.
 //! - A change of the computer's protection sends `ProtectionChanged` for every listed matter.
 
@@ -23,6 +24,7 @@ use clauseo_protocol::{
 use clauseo_sandbox::{Detection, NoSandbox, SetupState, Tier};
 
 use super::Actor;
+use crate::agent::data_fence::DataFenceHealth;
 use crate::config::Sandbox;
 use crate::error::Error;
 
@@ -48,6 +50,9 @@ pub(crate) struct ProtectionHost {
     next_work: u64,
     /// The view last sent to app subscribers (at start, the start's view).
     sent: Option<ProtectionView>,
+    /// The data fence's health, shared with every fence check (`agent/data_fence/health.rs`):
+    /// the actor only loads its flag, never touching the disk.
+    data_fence: DataFenceHealth,
 }
 
 impl ProtectionHost {
@@ -59,7 +64,13 @@ impl ProtectionHost {
             running: None,
             next_work: 0,
             sent: None,
+            data_fence: DataFenceHealth::default(),
         }
+    }
+
+    /// The data fence's health, for each permission request's fence check.
+    pub(crate) fn data_fence(&self) -> &DataFenceHealth {
+        &self.data_fence
     }
 
     /// The computer's protection now.
@@ -72,6 +83,7 @@ impl ProtectionHost {
         let mut view = ProtectionView::new(self.observed.computer.clone(), required, auto);
         view.in_progress = self.running.as_ref().map(work::Running::work);
         view.retry_asks_admin = self.observed.asks_admin;
+        view.data_fence_names_only = self.data_fence.names_only();
         view
     }
 
@@ -86,11 +98,15 @@ impl ProtectionHost {
         Some(view)
     }
 
-    /// Whether the settings moved from the view last sent.
-    fn settings_moved(&self, required: bool, auto: bool) -> bool {
-        self.sent
-            .as_ref()
-            .is_none_or(|sent| sent.required != required || sent.unprotected_auto_allowed != auto)
+    /// Whether the settings, or the data fence's names-only flag, moved from the view last
+    /// sent.
+    fn moved(&self, required: bool, auto: bool) -> bool {
+        let names_only = self.data_fence.names_only();
+        self.sent.as_ref().is_none_or(|sent| {
+            sent.required != required
+                || sent.unprotected_auto_allowed != auto
+                || sent.data_fence_names_only != names_only
+        })
     }
 }
 
@@ -198,10 +214,11 @@ pub(super) fn publish_view(actor: &mut Actor) {
     }
 }
 
-/// After every input: when either protection setting changed, the new view goes out.
+/// After every input: when either protection setting changed, or the data fence started or
+/// stopped comparing by names only (a fence check's reply is an input), the new view goes out.
 pub(super) fn tick(actor: &mut Actor) {
     let (required, auto) = settings(actor);
-    if actor.protection.settings_moved(required, auto) {
+    if actor.protection.moved(required, auto) {
         publish_view(actor);
     }
 }

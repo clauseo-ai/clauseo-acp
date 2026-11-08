@@ -11,19 +11,55 @@
 //! - `<data>`'s own identity and its folders' above it (the host's own folders, which a search
 //!   root is compared with): when one can't be read, nothing can be compared with it, and
 //!   refusing every path or search for it would refuse every local matter. The text compare
-//!   still runs; the identity compare with that one folder is off for the decision, and that is
-//!   logged (never silent).
+//!   still runs; the identity compare with that one folder is off, the host's
+//!   [`DataFenceHealth`] says so (logged once as it starts and clears, and
+//!   `ProtectionView::data_fence_names_only`), and each check reads it again. Only these
+//!   folders, the host's configured data folder resolved and its parents, can bring this
+//!   fallback: an identity a request leads to that can't be read refuses that request.
 
 use std::cell::Cell;
 use std::path::Path;
 
+use super::health::{Captured, DataFenceHealth, Id};
 use crate::network_paths::resolve::{Fs, no_such_name};
 
-/// One file's identity.
-type Id = (u64, u128);
-
-/// An identity that could not be read (logged by [`DataIdentity::read`]).
+/// An identity that could not be read.
 struct Unreadable;
+
+/// `path`'s identity on `fs`, `None` for no such name ([`no_such_name`]), not logged.
+fn identity_of(fs: &dyn Fs, path: &Path) -> Result<Option<Id>, Unreadable> {
+    match fs.identity(path) {
+        Ok(id) => Ok(Some(id)),
+        Err(error) if no_such_name(&error) => Ok(None),
+        Err(_) => Err(Unreadable),
+    }
+}
+
+/// The identities of `real_data` and its folders above it, read now. The first that can't be
+/// read is `failing` (the health logs when that starts and clears, never a path).
+fn read_line(fs: &dyn Fs, real_data: &Path) -> Captured {
+    let mut captured = Captured {
+        real_data: real_data.to_owned(),
+        ..Captured::default()
+    };
+    for (index, folder) in real_data.ancestors().enumerate() {
+        match identity_of(fs, folder) {
+            Ok(id) => {
+                if index == 0 {
+                    captured.data = id;
+                }
+                captured.line.extend(id);
+            }
+            Err(Unreadable) => {
+                if captured.failing.is_none() {
+                    captured.failing = Some(folder.to_owned());
+                }
+            }
+        }
+    }
+    captured.complete = captured.failing.is_none() && captured.data.is_some();
+    captured
+}
 
 /// `<data>`'s identity and its folders', read once per decision.
 pub(super) struct DataIdentity<'a> {
@@ -43,32 +79,36 @@ pub(super) struct DataIdentity<'a> {
 
 impl<'a> DataIdentity<'a> {
     /// `real_data`'s identity and its folders' on `fs`, each kept for the decisions it serves
-    /// (the module's list).
-    pub(super) fn capture(fs: &'a dyn Fs, real_data: &'a Path) -> Self {
+    /// (the module's list), through the host's `health`: a complete capture kept from an
+    /// earlier check is used as it is; while one of them can't be read, that one is read again
+    /// (one read), and only once it reads is every one read again. Only `real_data` (the host's
+    /// data folder, resolved) and its parents are read here, never anything a request names.
+    pub(super) fn capture(fs: &'a dyn Fs, real_data: &'a Path, health: &DataFenceHealth) -> Self {
+        let captured = match health.kept(real_data) {
+            Some(kept) if kept.complete => kept,
+            Some(kept) => {
+                let retried = kept
+                    .failing
+                    .as_deref()
+                    .map(|folder| identity_of(fs, folder));
+                if matches!(retried, Some(Err(Unreadable))) {
+                    kept
+                } else {
+                    let fresh = read_line(fs, real_data);
+                    health.record(fresh.clone());
+                    fresh
+                }
+            }
+            None => {
+                let fresh = read_line(fs, real_data);
+                health.record(fresh.clone());
+                fresh
+            }
+        };
         let mut me = Self::none(fs);
         me.real_data = Some(real_data);
-        me.data = me.read(real_data).unwrap_or_else(|Unreadable| {
-            tracing::warn!(
-                "the data folder's identity could not be read; its paths are compared by text"
-            );
-            None
-        });
-        let mut line_unreadable = false;
-        for folder in real_data.ancestors().skip(1) {
-            match me.read(folder) {
-                Ok(id) => me.line.extend(id),
-                Err(Unreadable) => line_unreadable = true,
-            }
-        }
-        if line_unreadable {
-            tracing::warn!(
-                "a data folder's parent's identity could not be read; searches are compared with \
-                 it by text"
-            );
-        }
-        me.line.extend(me.data);
-        // The host's own folders' read errors are logged above; a path's are its own.
-        me.unreadable.set(false);
+        me.data = captured.data;
+        me.line = captured.line;
         me
     }
 

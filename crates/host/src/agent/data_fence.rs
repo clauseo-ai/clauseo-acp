@@ -43,6 +43,7 @@ use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
+pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 
@@ -233,6 +234,9 @@ pub(crate) struct FenceCheck {
     /// Every word of the request's shell command ([`candidates_words`]), searched for the data
     /// folder's text.
     pub(crate) words: Vec<String>,
+    /// The host's data-fence health: the data folder's identity kept once read, retried while
+    /// it can't be, and whether the fence compares by names only.
+    pub(crate) health: DataFenceHealth,
 }
 
 impl FenceCheck {
@@ -258,7 +262,8 @@ impl FenceCheck {
     /// folder that is itself on the network (redirected app data) is never touched for its
     /// identity: a path that resolves locally can't be in it, and every network path is refused.
     /// A path whose identity can't be read is refused; the data folder's own identity, when it
-    /// can't be read, is compared by text alone, logged ([`DataIdentity`]).
+    /// can't be read, is compared by text alone, and [`Self::health`] says so
+    /// ([`DataIdentity`]).
     pub(crate) fn touches_data_on(&self, insensitive: bool, disk: &Disk<'_>) -> bool {
         let anything = !self.paths.is_empty() || !self.words.is_empty() || !self.roots.is_empty();
         let home = self.home.as_deref();
@@ -274,7 +279,7 @@ impl FenceCheck {
         let identity = if network_data {
             DataIdentity::none(disk.fs)
         } else {
-            DataIdentity::capture(disk.fs, &real_data)
+            DataIdentity::capture(disk.fs, &real_data, &self.health)
         };
         let data = key(&real_data, insensitive);
         let own = if network_data {
@@ -439,11 +444,14 @@ mod bypass_tests;
 mod command;
 #[cfg(test)]
 mod command_tests;
+mod health;
 mod identity;
 mod input;
 mod launch;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(test)]
+mod names_only_tests;
 #[cfg(test)]
 mod network_forms_tests;
 #[cfg(test)]
@@ -454,6 +462,9 @@ mod search;
 mod search_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_names_only_tests;
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_real_tests;

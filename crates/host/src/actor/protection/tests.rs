@@ -122,16 +122,50 @@ fn a_change_of_either_setting_gives_the_new_view_once() {
     let mut host = ProtectionHost::new(None, observe(None));
     let first = host.take_changed(false, false).unwrap();
     assert!(!first.required && !first.unprotected_auto_allowed);
-    assert!(!host.settings_moved(false, false));
+    assert!(!host.moved(false, false));
     assert_eq!(host.take_changed(false, false), None);
 
-    assert!(host.settings_moved(true, false));
+    assert!(host.moved(true, false));
     let required = host.take_changed(true, false).unwrap();
     assert!(required.required && !required.unprotected_auto_allowed);
-    assert!(!host.settings_moved(true, false));
+    assert!(!host.moved(true, false));
 
-    assert!(host.settings_moved(true, true));
+    assert!(host.moved(true, true));
     let auto = host.take_changed(true, true).unwrap();
     assert!(auto.unprotected_auto_allowed);
     assert_eq!(host.take_changed(true, true), None);
+}
+
+/// #766: when the data fence starts comparing by names only (a fence check on a matter thread
+/// found the data folder's identity unreadable), the loop's hook gives the view with the flag
+/// once, and again once it clears.
+#[test]
+fn the_data_fence_names_only_flag_gives_the_new_view_once_each_way() {
+    let mut host = ProtectionHost::new(None, observe(None));
+    assert!(
+        !host
+            .take_changed(false, false)
+            .unwrap()
+            .data_fence_names_only
+    );
+    let fence = host.data_fence().clone();
+    fence.set_names_only(true);
+    assert!(host.moved(false, false));
+    assert!(
+        host.take_changed(false, false)
+            .unwrap()
+            .data_fence_names_only
+    );
+    assert!(!host.moved(false, false));
+    fence.set_names_only(true);
+    assert!(!host.moved(false, false));
+    fence.set_names_only(false);
+    assert!(host.moved(false, false));
+    assert!(
+        !host
+            .take_changed(false, false)
+            .unwrap()
+            .data_fence_names_only
+    );
+    assert_eq!(host.take_changed(false, false), None);
 }

@@ -162,6 +162,7 @@ fn fence_check(
         paths,
         roots,
         words,
+        health: actor.protection.data_fence().clone(),
     }))
 }
 
