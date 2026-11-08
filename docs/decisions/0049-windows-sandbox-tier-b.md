@@ -708,7 +708,7 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   the administrator's path below; a per-user run exits 3, nothing touched. Anything left keeps
   the record.
 - **The ledger, as an administrator for an absent owner** (per-machine; no impersonation): the
-  ledger is read from a `DataDir` the owner owns, opened relative to its checked `sandbox`
+  ledger is read from a `DataDir` owned as below, opened relative to its checked `sandbox`
   folder's handle, and never written. The only change is removing one access entry, for an entry
   that names a recorded pool SID or the group, is no label, records no file by ID, lies in a
   matter folder the ledger records (not a drive's root), and whose folder, checked right before,
@@ -725,6 +725,15 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   writing there; that is accepted, since the tool keeps its records consistent at every step and
   reinstalling then uninstalling recovers.
 - **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
+- **The data folder's owner.** On both paths `DataDir` and its `sandbox\` must be owned by the
+  record's owner, Administrators or SYSTEM: the rule `sandbox\` is made and repaired by
+  (`private_dir::owner_allowed`). An elevated process makes Administrators the owner of what it
+  creates (the built-in Administrator, or any admin with UAC off), and requiring the owner alone
+  failed those removals with exit 4, the record, the group and the folder left (GitHub run
+  42464948955). Any other owner (a pool user, another account, Everyone) still refuses.
+- **VM rows.** With UAC off, and as the built-in Administrator: set-up, a launch, then the
+  uninstall exits 0 and leaves no record, no `ClauseoSandboxUsers` group, no pool account and no
+  `sandbox\` when the box is ticked.
 
 **Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
 even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which

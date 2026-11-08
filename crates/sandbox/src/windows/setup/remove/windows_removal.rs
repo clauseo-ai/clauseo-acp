@@ -7,9 +7,11 @@
 //! The record's `DataDir` is a path the owner can influence. Before any use it is held to the
 //! plain drive path `--data-dir` is held to (`args::data_dir_of`), then resolved one component
 //! at a time with no junction or link (`private_dir::resolve_folder`), and only its final path
-//! is used. As the owner, the folder must be the owner's own (as `--data-dir`'s is); for an
-//! administrator acting for an absent owner, the folder and its `sandbox` folder must be owned
-//! by the record's owner, and the ledger is only read. Causes name the kind of a failure, never
+//! is used. Either way the folder and its `sandbox` folder must be owned as the rest of the
+//! sandbox accepts (`private_dir::owner_allowed`): by the record's owner, Administrators or
+//! SYSTEM, since an elevated process makes Administrators the owner of what it creates (the
+//! built-in Administrator, or UAC off). For an administrator acting for an absent owner, the
+//! ledger is only read. Causes name the kind of a failure, never
 //! the path.
 //!
 //! The owner is acted as only with a standard user's token (`remove::acting_token`): the
@@ -43,7 +45,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
-use crate::windows::private_dir::resolve_folder;
+use crate::windows::private_dir::{owner_allowed, resolve_folder};
 use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
@@ -113,7 +115,7 @@ fn kind_of(what: &str, error: &io::Error) -> MachineError {
 }
 
 /// The record's `data_dir`, checked as the module says, its owner (and its `sandbox` folder's)
-/// required to be `owner`: its final path; `None` when the folder or `sandbox` is missing.
+/// held to [`owned_as_allowed`]: its final path; `None` when the folder or `sandbox` is missing.
 fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, MachineError> {
     // The usage error quotes the path, which no cause here carries.
     let Ok(plain) = args::data_dir_of(Some(data_dir.as_os_str().to_owned())) else {
@@ -129,16 +131,25 @@ fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, Mac
     let Some((folder, folder_owner)) = resolve(&plain, "the record's data folder")? else {
         return Ok(None);
     };
-    let not_owned =
-        || MachineError::Other("the record's data folder isn't its owner's own".to_owned());
-    if folder_owner != *owner {
-        return Err(not_owned());
-    }
+    owned_as_allowed(&folder_owner, owner)?;
     let sandbox = folder.join(SANDBOX_DIR);
     match resolve(&sandbox, "the data folder's sandbox folder")? {
         None => Ok(None),
-        Some((_, sandbox_owner)) if sandbox_owner != *owner => Err(not_owned()),
-        Some(_) => Ok(Some(folder)),
+        Some((_, sandbox_owner)) => owned_as_allowed(&sandbox_owner, owner).map(|()| Some(folder)),
+    }
+}
+
+/// Whether `found`, the owner of the data folder or of its `sandbox` folder, may own it for the
+/// record's `owner`: the rule the sandbox folder is made and repaired by (`owner_allowed`:
+/// `owner`, Administrators or SYSTEM). Anyone else (a pool user, another account, Everyone)
+/// could have planted the ledger, so the folder is refused.
+fn owned_as_allowed(found: &Sid, owner: &Sid) -> Result<(), MachineError> {
+    if owner_allowed(found, owner) {
+        Ok(())
+    } else {
+        Err(MachineError::Other(
+            "the record's data folder isn't its owner's own".to_owned(),
+        ))
     }
 }
 
@@ -386,5 +397,43 @@ impl Removal for WindowsRemoval {
             ))),
             Err(error) => Err(kind_of("a matter's folder check", &error)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::owned_as_allowed;
+    use crate::windows::sids::Sid;
+
+    const OWNER: &str = "S-1-5-21-1000000001-1000000002-1000000003-1001";
+
+    fn allowed(found: &str) -> bool {
+        owned_as_allowed(&Sid::parse(found).unwrap(), &Sid::parse(OWNER).unwrap()).is_ok()
+    }
+
+    #[test]
+    fn the_records_owner_may_own_the_data_folder() {
+        assert!(allowed(OWNER));
+    }
+
+    #[test]
+    fn administrators_may_own_the_data_folder() {
+        assert!(allowed("S-1-5-32-544"));
+    }
+
+    #[test]
+    fn system_may_own_the_data_folder() {
+        assert!(allowed("S-1-5-18"));
+    }
+
+    #[test]
+    fn a_pool_user_may_not_own_the_data_folder() {
+        assert!(!allowed("S-1-5-21-1000000001-1000000002-1000000003-1042"));
+    }
+
+    #[test]
+    fn another_user_may_not_own_the_data_folder() {
+        assert!(!allowed("S-1-5-21-2000000001-2000000002-2000000003-1001"));
+        assert!(!allowed("S-1-1-0"));
     }
 }
