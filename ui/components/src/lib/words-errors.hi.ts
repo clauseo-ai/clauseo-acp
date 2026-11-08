@@ -147,6 +147,8 @@ export const HI = {
     "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
   "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
+  "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.":
+    "Clauseo पिछली बार बंद होने के बाद अभी भी सुरक्षित कार्यक्षेत्र को व्यवस्थित कर रहा है। थोड़ी देर में फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

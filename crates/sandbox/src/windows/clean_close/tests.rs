@@ -224,7 +224,7 @@ fn a_marker_still_awaiting_a_sweep_refuses_the_launch_and_keeps_the_record() {
     assert_eq!(asked, 1);
     assert_eq!(
         Error::UncleanSession(why).code(),
-        ErrorCode::AgentLaunchFailed
+        ErrorCode::SandboxCleaningUp
     );
     // Nothing else was read or removed: the next launch still finds the clean close.
     assert!(s.record_exists());

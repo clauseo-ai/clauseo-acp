@@ -149,7 +149,9 @@ impl Error {
     /// caller falls back to the tier it can get); a failed probe is unexpected, so it is
     /// `Internal`. Tier B's network set-up missing or stale is `sandbox.setup_required`, since
     /// running the set-up again fixes it; any other network refusal is a failed launch.
-    /// A block only an administrator can lift is `SandboxBlocked`, not retryable.
+    /// A block only an administrator can lift is `SandboxBlocked`, not retryable. An earlier
+    /// session's clean-up not yet finished is `SandboxCleaningUp`, retryable: a later launch
+    /// checks again.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -163,9 +165,9 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
-            | Error::UncleanSession(_)
             | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
+            Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
@@ -236,5 +238,10 @@ mod tests {
             changed.to_string().starts_with("the sandbox can't run: "),
             "{changed}"
         );
+        let unclean = Error::UncleanSession("the sweep didn't finish within 15 s".to_owned());
+        assert_eq!(unclean.code(), ErrorCode::SandboxCleaningUp);
+        assert_eq!(unclean.code().as_str(), "sandbox.cleaning_up");
+        assert!(unclean.code().is_retryable(), "a later launch checks again");
+        assert_eq!(unclean.cause(), None);
     }
 }

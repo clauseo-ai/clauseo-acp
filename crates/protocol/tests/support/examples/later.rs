@@ -97,6 +97,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::SandboxCleaningUp,
+            "the sandbox's clean-up after an earlier session isn't finished",
+        ),
     ]
 }
 
