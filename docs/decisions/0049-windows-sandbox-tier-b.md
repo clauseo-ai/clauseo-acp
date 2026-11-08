@@ -2117,7 +2117,8 @@ time, each holding the set-up lock for a moment (a set-up that meets it then fai
 be run again). A start while it runs is queued (`TASK_INSTANCES_QUEUE`, `SystemTask::instances`; the
 other tasks drop it): a second install's start event during a held run still gives a run after it,
 and the launch check's request isn't lost. A forged flood only chains re-check runs, each bounded by
-the budget and, with no install, ending after the floor.
+the budget and, with no install, ending after the floor; pool users can write the Application log,
+so they can start such runs, but queued runs execute one at a time and only re-check the deny.
 It shares the other tasks' principal, descriptor (owned by Administrators, the
 owner `FRFX`) and folder, stops after 6 minutes (`PT6M`), and is registered and removed with
 them: `--adopt` registers it per user after `\Clauseo\SandboxStop` (`refresh::TASKS`), a
