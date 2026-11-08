@@ -129,28 +129,31 @@ pub enum GitOutcome {
 
 impl Denial {
     /// The agent's refusal line, for the denials that carry one: [`Denial::GitSetAside`].
+    /// Its path is shown with [`shown`].
     pub fn refusal(&self) -> Option<String> {
         let Denial::GitSetAside { path, what, .. } = self else {
             return None;
         };
-        let path = path.display();
+        let path = shown(path);
         Some(match what {
             GitItem::OutsideLink => format!(
-                "Clauseo ended this session and set aside {path}: an agent can't leave a link \
-                 inside a matter that leads outside it."
+                "Clauseo ended this session and set aside {path}: a link inside a matter can't \
+                 lead outside it."
             ),
             GitItem::DotGit
             | GitItem::BareRepo
             | GitItem::BareRepoHead
             | GitItem::CommonDirPart => format!(
-                "Clauseo ended this session and set aside {path}: an agent can't make a git \
-                 repository inside a matter."
+                "Clauseo ended this session and set aside {path}: a matter can't hold a git \
+                 repository while a session runs."
             ),
         })
     }
 
     /// The lawyer's notice, for the denials that carry one: [`Denial::GitSetAside`] and
-    /// [`Denial::GitWatchLost`].
+    /// [`Denial::GitWatchLost`]. The agent runs as the lawyer's own user, so no one can tell
+    /// who made the item: the notice says what appeared and what Clauseo did, and blames no
+    /// one. Every path is shown with [`shown`].
     pub fn notice(&self) -> Option<String> {
         if *self == Denial::GitWatchLost {
             return Some(
@@ -168,49 +171,80 @@ impl Denial {
         else {
             return None;
         };
-        let at = path.display();
-        let first = match (what, session_ended) {
-            (GitItem::OutsideLink, true) => {
-                format!("The AI tool left a link at {at} that leads outside the matter.")
+        let at = shown(path);
+        let item = match what {
+            GitItem::DotGit | GitItem::BareRepo => "A Git folder",
+            GitItem::BareRepoHead => "A Git HEAD file",
+            GitItem::CommonDirPart => "A part of a Git folder",
+            GitItem::OutsideLink => "A link leading outside the matter",
+        };
+        let when = if *session_ended {
+            "while an AI tool was running"
+        } else {
+            "during an AI session Clauseo could not finish checking"
+        };
+        let why = match what {
+            GitItem::OutsideLink => {
+                "because Git folders can run programs when opened, and a link can lead to one"
             }
-            (GitItem::OutsideLink, false) => format!(
-                "An AI tool left a link at {at} that leads outside the matter, in a session \
-                 Clauseo could not finish checking."
-            ),
-            (_, true) => {
-                format!("The AI tool tried to put a code repository in the matter at {at}.")
-            }
-            (_, false) => format!(
-                "An AI tool put a code repository in the matter at {at}, in a session Clauseo \
-                 could not finish checking."
-            ),
+            GitItem::DotGit
+            | GitItem::BareRepo
+            | GitItem::BareRepoHead
+            | GitItem::CommonDirPart => "because Git folders can run programs when opened",
         };
         let stopped = if *session_ended {
-            "Clauseo stopped it and "
+            "Clauseo stopped the session and "
         } else {
             "Clauseo "
         };
         let then = match outcome {
             GitOutcome::Moved(to) => format!(
-                "moved it to {}. If you made it yourself, you can move it back: the session \
-                 has ended.",
-                to.display()
+                "{stopped}moved it to {}, {why}. If you put it there yourself, you can move it \
+                 back from there.",
+                shown(to)
             ),
             GitOutcome::RenamedInPlace(to) => format!(
-                "renamed it to {} where it is, as it could not move off the matter's disk, so \
-                 your git tools no longer read it.",
-                to.display()
+                "{stopped}renamed it to {} where it is, as it could not be moved off the \
+                 matter's disk, {why}.",
+                shown(to)
             ),
-            GitOutcome::LinkRemoved { target } => {
-                format!("removed the link, which led to {}.", target.display())
-            }
+            GitOutcome::LinkRemoved { target } => format!(
+                "{stopped}removed the link, which led to {}, {why}.",
+                shown(target)
+            ),
+            GitOutcome::Stuck if *session_ended => format!(
+                "Clauseo stopped the session, {why}, but could not move or rename it. Clauseo \
+                 won't start an AI tool in this matter until {at} is moved out of it."
+            ),
             GitOutcome::Stuck => format!(
-                "could not move or rename it. Clauseo won't start an AI tool in this matter \
-                 until {at} is moved out of it."
+                "Clauseo could not move or rename it, and won't start an AI tool in this \
+                 matter until {at} is moved out of it."
             ),
         };
-        Some(format!("{first} {stopped}{then}"))
+        Some(format!(
+            "{item} appeared in the matter at {at} {when}. {then}"
+        ))
     }
+}
+
+/// `path` as a notice shows it: each control character and each bidirectional control
+/// (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069), and each line or paragraph
+/// separator, is replaced by its escape (`\u{202e}`), so a crafted name can neither break the
+/// line nor turn the text around.
+fn shown(path: &std::path::Path) -> String {
+    let mut out = String::new();
+    for c in path.to_string_lossy().chars() {
+        let bidi = matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        );
+        if c.is_control() || bidi || matches!(c, '\u{2028}' | '\u{2029}') {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The kind of file access refused.

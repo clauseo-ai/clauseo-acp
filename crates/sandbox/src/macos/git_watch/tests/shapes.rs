@@ -1,6 +1,6 @@
 //! The repository and link shapes: a bare layout (new, or in a folder that existed), a lone
 //! `HEAD`, a clonefile'd tree, links out of the matter, and the words the agent and the lawyer
-//! get.
+//! get, with every path shown made safe.
 
 use std::path::PathBuf;
 
@@ -248,8 +248,8 @@ fn the_agent_gets_a_plain_refusal_line() {
     let notices = notices.taken();
     assert_eq!(
         notices[0].refusal().unwrap(),
-        "Clauseo ended this session and set aside foo/.git: an agent can't make a git \
-         repository inside a matter."
+        "Clauseo ended this session and set aside foo/.git: a matter can't hold a git \
+         repository while a session runs."
     );
     let link = Denial::GitSetAside {
         path: PathBuf::from("foo"),
@@ -257,12 +257,16 @@ fn the_agent_gets_a_plain_refusal_line() {
         outcome: GitOutcome::Stuck,
         session_ended: true,
     };
-    assert!(link.refusal().unwrap().contains("a link inside a matter"));
+    assert!(
+        link.refusal()
+            .unwrap()
+            .contains("a link inside a matter can't lead outside")
+    );
     assert_eq!(Denial::Dropped { count: 1 }.refusal(), None);
 }
 
 #[test]
-fn the_lawyer_notice_says_what_happened_in_plain_words() {
+fn the_lawyer_notice_says_what_appeared_and_blames_no_one() {
     let notice = |path: &str, what, outcome, session_ended| {
         Denial::GitSetAside {
             path: PathBuf::from(path),
@@ -276,27 +280,78 @@ fn the_lawyer_notice_says_what_happened_in_plain_words() {
     let moved = GitOutcome::Moved(PathBuf::from("/data/git-set-aside/x/item"));
     assert_eq!(
         notice("Clients/Acme/.git", GitItem::DotGit, moved.clone(), true),
-        "The AI tool tried to put a code repository in the matter at Clients/Acme/.git. \
-         Clauseo stopped it and moved it to /data/git-set-aside/x/item. If you made it \
-         yourself, you can move it back: the session has ended."
+        "A Git folder appeared in the matter at Clients/Acme/.git while an AI tool was \
+         running. Clauseo stopped the session and moved it to /data/git-set-aside/x/item, \
+         because Git folders can run programs when opened. If you put it there yourself, you \
+         can move it back from there."
     );
-    assert!(
-        notice("a", GitItem::BareRepo, moved, false)
-            .contains("in a session Clauseo could not finish checking. Clauseo moved it to")
+    assert_eq!(
+        notice("a", GitItem::BareRepo, moved, false),
+        "A Git folder appeared in the matter at a during an AI session Clauseo could not \
+         finish checking. Clauseo moved it to /data/git-set-aside/x/item, because Git folders \
+         can run programs when opened. If you put it there yourself, you can move it back \
+         from there."
     );
     let link = GitOutcome::LinkRemoved {
         target: PathBuf::from("/Users/x/secrets"),
     };
     assert_eq!(
         notice("a/link", GitItem::OutsideLink, link, true),
-        "The AI tool left a link at a/link that leads outside the matter. Clauseo stopped it \
-         and removed the link, which led to /Users/x/secrets."
+        "A link leading outside the matter appeared in the matter at a/link while an AI tool \
+         was running. Clauseo stopped the session and removed the link, which led to \
+         /Users/x/secrets, because Git folders can run programs when opened, and a link can \
+         lead to one."
     );
     let renamed = GitOutcome::RenamedInPlace(PathBuf::from("/m/.git-set-aside-by-clauseo-1f"));
-    assert!(notice(".git", GitItem::DotGit, renamed, true).contains("renamed it to /m/.git-set"));
-    assert!(
-        notice("x/HEAD", GitItem::BareRepoHead, GitOutcome::Stuck, true)
-            .ends_with("won't start an AI tool in this matter until x/HEAD is moved out of it.")
+    let text = notice(".git", GitItem::DotGit, renamed, true);
+    assert!(text.contains("renamed it to /m/.git-set"), "{text}");
+    assert!(!text.contains("move it back"), "{text}");
+    assert_eq!(
+        notice("x/HEAD", GitItem::BareRepoHead, GitOutcome::Stuck, true),
+        "A Git HEAD file appeared in the matter at x/HEAD while an AI tool was running. \
+         Clauseo stopped the session, because Git folders can run programs when opened, but \
+         could not move or rename it. Clauseo won't start an AI tool in this matter until \
+         x/HEAD is moved out of it."
     );
+    for text in [
+        notice("a", GitItem::CommonDirPart, GitOutcome::Stuck, false),
+        notice("a", GitItem::DotGit, GitOutcome::Stuck, true),
+    ] {
+        for blame in ["The AI tool", "tried to", "you made", "If you made"] {
+            assert!(!text.contains(blame), "{text}");
+        }
+    }
     assert_eq!(Denial::Dropped { count: 1 }.notice(), None);
+}
+
+#[test]
+fn every_path_a_notice_shows_has_its_controls_replaced_visibly() {
+    let crafted = "a\u{202E}txt.exe\nb\u{2066}c\u{200F}\u{061C}\u{7}\u{2028}";
+    let shown = r"a\u{202e}txt.exe\u{a}b\u{2066}c\u{200f}\u{61c}\u{7}\u{2028}";
+    let denial = Denial::GitSetAside {
+        path: PathBuf::from(crafted),
+        what: GitItem::DotGit,
+        outcome: GitOutcome::Moved(PathBuf::from(format!("/data/x/{crafted}"))),
+        session_ended: true,
+    };
+    let notice = denial.notice().unwrap();
+    assert_eq!(notice.matches(shown).count(), 2, "{notice}");
+    let refusal = denial.refusal().unwrap();
+    assert!(refusal.contains(shown), "{refusal}");
+    for text in [notice, refusal] {
+        assert!(
+            !text.chars().any(|c| c.is_control()
+                || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')),
+            "{text:?}"
+        );
+    }
+    let link = Denial::GitSetAside {
+        path: PathBuf::from("l"),
+        what: GitItem::OutsideLink,
+        outcome: GitOutcome::LinkRemoved {
+            target: PathBuf::from("/x\u{202D}y"),
+        },
+        session_ended: false,
+    };
+    assert!(link.notice().unwrap().contains(r"/x\u{202d}y"));
 }
