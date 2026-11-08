@@ -1,17 +1,19 @@
 //! The vendor key on the real registry (Windows, elevated), under `SOFTWARE\ClauseoTest`, never the
 //! real vendor key: a fresh root is pinned; a weak root is taken over with the subkeys under it
-//! (a planted one, the installer-shaped key, a planted `Sandbox`, a real link child); a link
-//! parent is refused.
+//! (Users' plants, one shutting out Administrators and denying SYSTEM, an admin-owned key denying
+//! both, the installer-shaped key, a planted `Sandbox`, a real link child whose unprotected
+//! target stays byte for byte); a link parent is refused.
 #![expect(
     unsafe_code,
     reason = "FFI to the registry's tree delete and value calls"
 )]
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_LINK,
-    REG_OPTION_CREATE_LINK, REG_SZ, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteTreeW,
-    RegOpenKeyExW, RegSetValueExW,
+    REG_OPTION_CREATE_LINK, REG_SAM_FLAGS, REG_SZ, RegCreateKeyExW, RegDeleteKeyExW,
+    RegDeleteTreeW, RegOpenKeyExW, RegSetKeySecurity, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -19,6 +21,7 @@ use super::os::{Key, Registry};
 use super::security::Security;
 use super::{Report, Tree, VENDOR_SDDL, VendorFault, ensure};
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
+use crate::windows::setup::lock::Descriptor;
 use crate::windows::setup::record_values::RECORD_SDDL;
 use crate::windows::setup::record_write::{self, check, create_key_with, key_sddl, read_texts};
 use crate::windows::test_acl::elevated_tests_enabled;
@@ -32,8 +35,17 @@ const WEAK: &str = "O:BUD:P(A;CI;KA;;;BU)(A;CI;KA;;;BA)(A;CI;KA;;;SY)";
 /// A subkey Users own, with Administrators let in so a plant can be made under it.
 const PLANT: &str = "O:BUD:P(A;;KA;;;BU)(A;;KA;;;BA)";
 
+/// A plant's DACL with no ACE for Administrators and a DENY one for SYSTEM.
+const SHUT: &str = "D:P(D;;KA;;;SY)(A;;KR;;;BU)";
+
+/// A DACL denying SYSTEM and Administrators everything.
+const DENY_BOTH: &str = "D:P(D;;KA;;;SY)(D;;KA;;;BA)";
+
 /// A key Administrators own, with Administrators let in: the installer's shape.
 const ADMIN_KEY: &str = "O:BAD:P(A;CI;KA;;;BA)";
+
+/// A link's target's own DACL, unprotected, so it would take any ACE propagated through the link.
+const TARGET: &str = "O:BAD:(A;;KA;;;BA)";
 
 /// Deletes [`TEST_ROOT`] and everything under it, when cleared and when dropped.
 struct Clear;
@@ -116,6 +128,38 @@ fn set_string(path: &str, name: &str, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Replaces the DACL of the key `path` (which lets Administrators in) with the protected
+/// `dacl`, keeping its owner.
+fn set_dacl(path: &str, dacl: &str) -> Result<(), String> {
+    /// `WRITE_DAC`.
+    const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
+    let descriptor = Descriptor::from_sddl(dacl).map_err(|error| error.to_string())?;
+    let subkey = HSTRING::from(path);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `key` is a live out-pointer, owned below.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            WRITE_DAC | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    check("RegOpenKeyExW", opened).map_err(|error| error.to_string())?;
+    let key = record_write::Key(key);
+    // SAFETY: the key is open with WRITE_DAC; the descriptor is valid for the call.
+    let set = unsafe {
+        RegSetKeySecurity(
+            key.0,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            descriptor.0,
+        )
+    };
+    check("RegSetKeySecurity", set).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// Deletes the key `path` (one level, no subkeys), as the installer's uninstall does.
 fn delete_key(path: &str) -> u32 {
     let subkey = HSTRING::from(path);
@@ -124,9 +168,9 @@ fn delete_key(path: &str) -> u32 {
     deleted.0
 }
 
-/// Whether the key `path` is there, following no link: a link is there while it is.
-fn present(tree: &mut Registry, root: &Key, name: &str) -> Result<bool, String> {
-    Ok(tree.open_child(root, name)?.is_some())
+/// Whether the key `name` under `root` is there, following no link.
+fn present(tree: &mut Registry, root: &Key, name: &str) -> bool {
+    tree.open_child(root, name).is_ok()
 }
 
 #[test]
@@ -141,7 +185,7 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
     let _held = Privileges::enable(&RECLAIM).unwrap();
     let path = format!("{TEST_ROOT}\\Vendor");
     let target = format!("{TEST_ROOT}\\Target");
-    create_key_with(&target, "O:BAD:P(A;;KA;;;BA)").unwrap();
+    create_key_with(&target, TARGET).unwrap();
 
     // A key made fresh gets the pinned SD, with its effective DACL.
     let made = ensure(&mut Registry::at(&path), &path).unwrap();
@@ -160,41 +204,52 @@ fn elevated_a_fresh_key_is_pinned_a_weak_one_is_taken_over_and_a_link_child_goes
     create_key_with(&format!("{path}\\Clauseo"), ADMIN_KEY).unwrap();
     create_key_with(&format!("{path}\\Sandbox"), PLANT).unwrap();
     set_string(&format!("{path}\\Sandbox"), "PoolSids", "planted").unwrap();
-    // A real link under the root, pointing at Target.
+    // A plant that shuts Administrators out and denies SYSTEM, and an admin-owned key that
+    // denies both.
+    create_key_with(&format!("{path}\\Shut"), PLANT).unwrap();
+    set_dacl(&format!("{path}\\Shut"), SHUT).unwrap();
+    create_key_with(&format!("{path}\\Denied"), ADMIN_KEY).unwrap();
+    set_dacl(&format!("{path}\\Denied"), DENY_BOTH).unwrap();
+    // A real link under the root, pointing at Target, whose SD is read as it was.
     make_link(&format!("{path}\\LinkChild"), &nt_path(&target)).unwrap();
+    let target_before = key_sddl(&target).unwrap();
 
     let report = ensure(&mut Registry::at(&path), &path).unwrap();
     assert!(report.weaker_from.is_some(), "{report:?}");
     assert_eq!(report.removed, [format!("{path}\\LinkChild")]);
     assert_eq!(report.recreated, [format!("{path}\\Sandbox")]);
-    assert!(report.taken_over.contains(&format!("{path}\\Planted")));
-    assert!(
-        report
-            .taken_over
-            .contains(&format!("{path}\\Planted\\Nested"))
+    assert_eq!(
+        report.planted,
+        [
+            format!("{path}\\Planted"),
+            format!("{path}\\Sandbox"),
+            format!("{path}\\Shut")
+        ]
     );
-    assert!(report.taken_over.contains(&format!("{path}\\Clauseo")));
+    assert_eq!(
+        report.taken_over,
+        [format!("{path}\\Clauseo"), format!("{path}\\Denied")]
+    );
 
     let mut tree = Registry::at(&path);
     let root = tree.open_root().unwrap().unwrap();
-    assert!(
-        !present(&mut tree, &root, "LinkChild").unwrap(),
-        "the link is gone"
+    for gone in ["LinkChild", "Planted", "Shut"] {
+        assert!(!present(&mut tree, &root, gone), "{gone} is gone");
+    }
+    assert_eq!(
+        key_sddl(&target).unwrap(),
+        target_before,
+        "the link's target is untouched, byte for byte"
     );
-    assert!(key_sddl(&target).is_ok(), "the link's target is untouched");
     let repaired = Security::parse(&key_sddl(&path).unwrap());
     assert_eq!(repaired, Security::parse(VENDOR_SDDL));
     // The taken-over subkeys inherit the root's DACL: SYSTEM and Administrators full, Users read.
-    for kept in ["Planted", "Planted\\Nested", "Clauseo"] {
+    // Exactly those, and nothing else.
+    for kept in ["Clauseo", "Denied"] {
         let security = Security::parse(&key_sddl(&format!("{path}\\{kept}")).unwrap());
-        assert!(
-            security.trusted_owner(),
-            "{kept}: owned by SYSTEM or Administrators"
-        );
-        assert!(security.grants("SY", "KA"), "{kept}: SYSTEM full");
-        assert!(security.grants("BA", "KA"), "{kept}: Administrators full");
-        assert!(security.grants("BU", "KR"), "{kept}: Users read");
-        assert!(!security.grants("BU", "KA"), "{kept}: no Users write");
+        assert_eq!(security.owner, "S-1-5-18", "{kept}: owned by SYSTEM");
+        assert!(!security.protected, "{kept}: inherits");
+        assert!(security.is_vendor_set(), "{kept}: {security:?}");
     }
     // The planted Sandbox is gone and made again empty with its own SD, its value gone.
     let sandbox = Security::parse(&key_sddl(&format!("{path}\\Sandbox")).unwrap());
@@ -228,8 +283,8 @@ fn elevated_an_installer_shaped_key_still_reads_writes_and_deletes_after_a_takeo
     );
     let security = Security::parse(&key_sddl(&path).unwrap());
     assert!(
-        security.grants("BA", "KA"),
-        "Administrators keep full control"
+        security.is_vendor_set(),
+        "SYSTEM and Administrators full, Users read, nothing else: {security:?}"
     );
     assert_eq!(
         delete_key(&path),

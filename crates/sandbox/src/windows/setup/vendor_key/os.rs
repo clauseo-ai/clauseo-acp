@@ -1,50 +1,47 @@
 //! The registry under [`super`]'s [`Tree`](super::Tree), in the 64-bit view. A key is opened by
 //! name from its parent's handle with `NtOpenKeyEx`, with `OBJ_OPENLINK` and
-//! `REG_OPTION_OPEN_LINK`, so a link is opened and never followed. A read asks for backup intent
-//! under the privileges [`secure`](super::secure) holds. A take-over opens with full access, and
-//! when that's denied, takes ownership on a `WRITE_OWNER` handle first. The security is written
-//! with `SetSecurityInfo`, which applies inheritance to an unprotected DACL (`RegSetKeySecurity`
-//! doesn't). Keys are deleted only through the handle they were taken over on.
+//! `REG_OPTION_OPEN_LINK`, so a link is opened and never followed; only the root's link check
+//! opens it once following, to read its name. A read asks for backup intent under the privileges
+//! [`secure`](super::secure) holds. A take-over follows [`take_over_steps`]: owner, then DACL,
+//! then the rest, each on a handle opened for that alone, so no DENY ACE stops it. Every write
+//! is `RegSetKeySecurity` on the key's own handle, which neither computes nor propagates
+//! inheritance. Keys are deleted only through the handle they were taken over on. A key not
+//! found or deleted (`STATUS_KEY_DELETED`, `ERROR_KEY_DELETED`) is [`Miss::Gone`].
 #![expect(
     unsafe_code,
     reason = "FFI to the NT and Win32 registry and security calls"
 )]
 
-use std::ptr::null_mut;
-
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
-use windows::Wdk::System::Registry::{NtDeleteKey, NtOpenKeyEx};
+use windows::Wdk::System::Registry::{KeyNameInformation, NtDeleteKey, NtOpenKeyEx, NtQueryKey};
 use windows::Win32::Foundation::{
-    ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, NTSTATUS, OBJ_CASE_INSENSITIVE,
-    OBJ_OPENLINK, STATUS_ACCESS_DENIED, STATUS_OBJECT_NAME_NOT_FOUND, UNICODE_STRING, WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_KEY_DELETED, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE, HLOCAL,
+    LocalFree, NTSTATUS, OBJ_CASE_INSENSITIVE, OBJ_OPENLINK, OBJECT_ATTRIBUTE_FLAGS,
+    STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL, STATUS_KEY_DELETED,
+    STATUS_OBJECT_NAME_NOT_FOUND, STATUS_OBJECT_PATH_NOT_FOUND, UNICODE_STRING, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1, SE_REGISTRY_KEY,
-    SetSecurityInfo,
+    ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+    ConvertStringSidToSidW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    DACL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_WOW64_64KEY, REG_LINK,
     REG_OPTION_BACKUP_RESTORE, REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK, REG_VALUE_TYPE,
-    RegCloseKey, RegCreateKeyExW, RegEnumKeyExW, RegGetKeySecurity, RegQueryValueExW,
+    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegGetKeySecurity,
+    RegQueryValueExW, RegSetKeySecurity,
 };
-use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-use super::{Tree, VENDOR_SDDL};
+use super::security::take_over_steps;
+use super::{Miss, Tree, VENDOR_SDDL};
+use crate::windows::setup::admin_member::in_administrators;
 use crate::windows::setup::lock::Descriptor;
-
-/// `READ_CONTROL`, which the security reads need.
-const READ_CONTROL: u32 = 0x0002_0000;
-
-/// `WRITE_OWNER`, which a take-over needs before it can change the owner.
-const WRITE_OWNER: u32 = 0x0008_0000;
-
-/// Full access, in the 64-bit view.
-const FULL: u32 = KEY_ALL_ACCESS.0 | KEY_WOW64_64KEY.0;
+use crate::windows::sids::Sid;
 
 /// Read access, in the 64-bit view.
 const READ: u32 = KEY_READ.0 | KEY_WOW64_64KEY.0;
@@ -92,51 +89,72 @@ impl Registry {
 impl Tree for Registry {
     type Key = Key;
 
-    fn open_root(&mut self) -> Result<Option<Key>, String> {
-        open(None, &self.nt_path(), READ, READ_OPTIONS)
-            .map_err(|status| nt_error("NtOpenKeyEx", status))
+    fn open_root(&mut self) -> Result<Option<Key>, Miss> {
+        match open(None, &self.nt_path(), READ, READ_OPTIONS, false) {
+            Ok(key) => Ok(Some(key)),
+            Err(Miss::Gone) => Ok(None),
+            Err(miss) => Err(miss),
+        }
     }
 
-    fn create_root(&mut self) -> Result<(), String> {
+    fn create_root(&mut self) -> Result<(), Miss> {
         create(None, &self.path, VENDOR_SDDL).map(|_key| ())
     }
 
-    fn take_over_root(&mut self, sddl: &str) -> Result<Key, String> {
-        take_over(None, &self.nt_path(), sddl)?.ok_or_else(|| "the vendor key is gone".to_owned())
+    fn take_over_root(&mut self, sddl: &str) -> Result<Key, Miss> {
+        take_over(None, &self.nt_path(), sddl)
     }
 
-    fn open_child(&mut self, parent: &Key, name: &str) -> Result<Option<Key>, String> {
-        open(Some(parent), name, READ, READ_OPTIONS)
-            .map_err(|status| nt_error("NtOpenKeyEx", status))
+    fn root_leads_elsewhere(&mut self, key: &Key) -> Result<bool, Miss> {
+        let own = key_name(key)?;
+        let followed = match open(
+            None,
+            &self.nt_path(),
+            READ,
+            REG_OPTION_BACKUP_RESTORE.0,
+            true,
+        ) {
+            Ok(followed) => followed,
+            // A link to nothing is still a link.
+            Err(Miss::Gone) => return Ok(true),
+            Err(miss) => return Err(miss),
+        };
+        Ok(!key_name(&followed)?.eq_ignore_ascii_case(&own))
     }
 
-    fn take_over_child(
-        &mut self,
-        parent: &Key,
-        name: &str,
-        sddl: &str,
-    ) -> Result<Option<Key>, String> {
+    fn open_child(&mut self, parent: &Key, name: &str) -> Result<Key, Miss> {
+        open(Some(parent), name, READ, READ_OPTIONS, false)
+    }
+
+    fn take_over_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, Miss> {
         take_over(Some(parent), name, sddl)
     }
 
-    fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<Key, String> {
-        create(Some(parent), name, sddl)
+    fn create_child(&mut self, parent: &Key, name: &str, sddl: &str) -> Result<(), Miss> {
+        create(Some(parent), name, sddl).map(|_key| ())
     }
 
-    fn is_link(&mut self, key: &Key) -> Result<bool, String> {
+    fn has_link_value(&mut self, key: &Key) -> Result<bool, Miss> {
         let name = HSTRING::from(LINK_VALUE);
         let mut kind = REG_VALUE_TYPE::default();
         // SAFETY: the key is open; the name is NUL-terminated; `kind` is a live out-pointer and
         // no data is asked for.
         let got = unsafe { RegQueryValueExW(key.0, &name, None, Some(&raw mut kind), None, None) };
-        if got == windows::Win32::Foundation::ERROR_FILE_NOT_FOUND {
+        if got == ERROR_FILE_NOT_FOUND {
             return Ok(false);
         }
         check("RegQueryValueExW", got)?;
         Ok(kind == REG_LINK)
     }
 
-    fn sddl(&mut self, key: &Key) -> Result<String, String> {
+    fn delete_link_value(&mut self, key: &Key) -> Result<(), Miss> {
+        let name = HSTRING::from(LINK_VALUE);
+        // SAFETY: the key is open with full access; the name is NUL-terminated.
+        let deleted = unsafe { RegDeleteValueW(key.0, &name) };
+        check("RegDeleteValueW", deleted)
+    }
+
+    fn sddl(&mut self, key: &Key) -> Result<String, Miss> {
         let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
         let mut size = 0u32;
         // SAFETY: no buffer asks only for the size, which is written to `size`.
@@ -158,19 +176,19 @@ impl Tree for Registry {
                 None,
             )
         };
-        converted.map_err(|error| error.to_string())?;
+        converted.map_err(|error| Miss::Failed(error.to_string()))?;
         // SAFETY: the conversion wrote a NUL-terminated string.
-        let sddl = unsafe { text.to_string() }.map_err(|error| error.to_string());
+        let sddl = unsafe { text.to_string() }.map_err(|error| Miss::Failed(error.to_string()));
         // SAFETY: allocated by the conversion with LocalAlloc, freed once.
         unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
         sddl
     }
 
-    fn set_sddl(&mut self, key: &Key, sddl: &str) -> Result<(), String> {
-        set_security(key, sddl)
+    fn set_sddl(&mut self, key: &Key, sddl: &str) -> Result<(), Miss> {
+        write(key, sddl)
     }
 
-    fn subkeys(&mut self, key: &Key) -> Result<Vec<String>, String> {
+    fn subkeys(&mut self, key: &Key) -> Result<Vec<String>, Miss> {
         let mut names = Vec::new();
         for index in 0u32.. {
             let mut name = [0u16; 256];
@@ -201,57 +219,126 @@ impl Tree for Registry {
         Ok(names)
     }
 
-    fn delete(&mut self, key: Key) -> Result<(), String> {
+    fn delete(&mut self, key: Key) -> Result<(), Miss> {
         // SAFETY: the handle is open with DELETE (`KEY_ALL_ACCESS`), and `NtDeleteKey` takes no
         // other pointer. `key` closes it after this call, once.
         let status = unsafe { NtDeleteKey(HANDLE(key.0.0)) };
-        if status.is_err() {
-            return Err(nt_error("NtDeleteKey", status));
-        }
-        Ok(())
+        nt_check("NtDeleteKey", status)
+    }
+
+    fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
+        let sid = Sid::parse(&sid_text(sid)?).map_err(|error| error.to_string())?;
+        in_administrators(&sid).map_err(|error| error.to_string())
     }
 }
 
-/// `name` opened without following a link, with `access` and `options`: an absolute NT path
-/// when `parent` is `None`, else a name under `parent`. `None` when it is missing.
+/// `name` opened with `access` and `options`, following a link only when `follow`: an absolute
+/// NT path when `parent` is `None`, else a name under `parent`.
 fn open(
     parent: Option<&Key>,
     name: &str,
     access: u32,
     options: u32,
-) -> Result<Option<Key>, NTSTATUS> {
+    follow: bool,
+) -> Result<Key, Miss> {
     let units: Vec<u16> = name.encode_utf16().collect();
-    // Key names are at most 255 characters, so the length always fits.
+    // Key paths here are far shorter than 32,767 characters, so the length always fits.
     let bytes = u16::try_from(units.len() * 2).unwrap_or(u16::MAX);
     let text = UNICODE_STRING {
         Length: bytes,
         MaximumLength: bytes,
         Buffer: PWSTR(units.as_ptr().cast_mut()),
     };
+    let link = if follow {
+        OBJECT_ATTRIBUTE_FLAGS::default()
+    } else {
+        OBJ_OPENLINK
+    };
     let attributes = OBJECT_ATTRIBUTES {
         Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).unwrap_or(0),
         RootDirectory: parent.map_or(HANDLE::default(), |key| HANDLE(key.0.0)),
         ObjectName: &raw const text,
-        Attributes: OBJ_CASE_INSENSITIVE | OBJ_OPENLINK,
+        Attributes: OBJ_CASE_INSENSITIVE | link,
         ..OBJECT_ATTRIBUTES::default()
+    };
+    let options = if follow {
+        options & !REG_OPTION_OPEN_LINK.0
+    } else {
+        options
     };
     let mut handle = HANDLE::default();
     // SAFETY: `text` points into `units`, which lives for the call and is never written;
     // `attributes` and `handle` are live; the parent's handle, when there is one, is open. The
     // handle made is owned by `Key` from here.
     let status = unsafe { NtOpenKeyEx(&raw mut handle, access, &raw const attributes, options) };
-    if status == STATUS_OBJECT_NAME_NOT_FOUND {
-        return Ok(None);
+    nt_check("NtOpenKeyEx", status)?;
+    Ok(Key(HKEY(handle.0)))
+}
+
+/// The key's full NT name (`NtQueryKey`, `KeyNameInformation`), which needs no access right.
+fn key_name(key: &Key) -> Result<String, Miss> {
+    let mut size = 0u32;
+    // SAFETY: no buffer asks only for the size, written to `size`.
+    let sized = unsafe { NtQueryKey(HANDLE(key.0.0), KeyNameInformation, None, 0, &raw mut size) };
+    if sized != STATUS_BUFFER_TOO_SMALL && sized != STATUS_BUFFER_OVERFLOW {
+        nt_check("NtQueryKey", sized)?;
     }
-    if status.is_err() {
-        return Err(status);
+    // u32 words: KEY_NAME_INFORMATION is a u32 length, then that many bytes of UTF-16.
+    let mut buffer = vec![0u32; usize::try_from(size).unwrap_or(0).div_ceil(4).max(1)];
+    let length = u32::try_from(buffer.len() * 4).unwrap_or(u32::MAX);
+    // SAFETY: `buffer` is live, writable and `length` bytes long for the call.
+    let status = unsafe {
+        NtQueryKey(
+            HANDLE(key.0.0),
+            KeyNameInformation,
+            Some(buffer.as_mut_ptr().cast()),
+            length,
+            &raw mut size,
+        )
+    };
+    nt_check("NtQueryKey", status)?;
+    let bytes = usize::try_from(buffer.first().copied().unwrap_or(0)).unwrap_or(0);
+    let units: Vec<u16> = buffer
+        .get(1..)
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|word| {
+            let [a, b, c, d] = word.to_le_bytes();
+            [u16::from_le_bytes([a, b]), u16::from_le_bytes([c, d])]
+        })
+        .take(bytes / 2)
+        .collect();
+    Ok(String::from_utf16_lossy(&units))
+}
+
+/// A SID's text in the `S-1-...` form, an SDDL alias (`LA`, `DA`) converted.
+fn sid_text(text: &str) -> Result<String, String> {
+    if text.starts_with("S-1-") {
+        return Ok(text.to_owned());
     }
-    Ok(Some(Key(HKEY(handle.0))))
+    let wide = HSTRING::from(text);
+    let mut sid = PSID::default();
+    // SAFETY: `wide` is NUL-terminated and lives for the call; `sid` is a live out-pointer,
+    // freed below.
+    unsafe { ConvertStringSidToSidW(PCWSTR(wide.as_ptr()), &raw mut sid) }
+        .map_err(|error| error.to_string())?;
+    let mut out = PWSTR::null();
+    // SAFETY: `sid` is valid until freed below; `out` is a live out-pointer, freed below.
+    let converted = unsafe { ConvertSidToStringSidW(sid, &raw mut out) };
+    // SAFETY: allocated by ConvertStringSidToSidW with LocalAlloc, freed once.
+    unsafe { LocalFree(Some(HLOCAL(sid.0))) };
+    converted.map_err(|error| error.to_string())?;
+    // SAFETY: the conversion wrote a NUL-terminated string.
+    let found = unsafe { out.to_string() }.map_err(|error| error.to_string());
+    // SAFETY: allocated by ConvertSidToStringSidW with LocalAlloc, freed once.
+    unsafe { LocalFree(Some(HLOCAL(out.0.cast()))) };
+    found
 }
 
 /// `name` made under `parent` (or at the root's path when `parent` is `None`) with `sddl`.
-fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, String> {
-    let descriptor = Descriptor::from_sddl(sddl).map_err(|error| error.to_string())?;
+fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
+    let descriptor =
+        Descriptor::from_sddl(sddl).map_err(|error| Miss::Failed(error.to_string()))?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(0),
         lpSecurityDescriptor: descriptor.0.0,
@@ -280,99 +367,75 @@ fn create(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, String> {
     Ok(Key(opened))
 }
 
-/// `name` taken over with `sddl`, opened for writing: `None` when it is gone. The key is opened
-/// with full access first; when that's denied, the owner becomes Administrators on a
-/// `WRITE_OWNER` handle first ([`owned_then_open`]).
-fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Option<Key>, String> {
-    let opened = match open(parent, name, FULL, NO_FOLLOW) {
-        Err(status) if status == STATUS_ACCESS_DENIED => owned_then_open(parent, name)?,
-        other => other.map_err(|status| nt_error("NtOpenKeyEx", status))?,
-    };
-    let Some(key) = opened else {
-        return Ok(None);
-    };
-    set_security(&key, sddl)?;
-    Ok(Some(key))
+/// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing. Each step opens
+/// the key afresh with its access alone and writes its part of the SD.
+fn take_over(parent: Option<&Key>, name: &str, sddl: &str) -> Result<Key, Miss> {
+    let mut opened = None;
+    for step in take_over_steps(sddl) {
+        drop(opened.take());
+        let key = open(parent, name, step.access, NO_FOLLOW, false)?;
+        write(&key, &step.sddl)?;
+        opened = Some(key);
+    }
+    opened.ok_or_else(|| Miss::Failed("a take-over has no steps".to_owned()))
 }
 
-/// The take-over of a key the caller may not open for writing: its owner becomes
-/// Administrators, on a `WRITE_OWNER` handle that `SeTakeOwnershipPrivilege` gives, and then the
-/// key opens for writing as its owner.
-fn owned_then_open(parent: Option<&Key>, name: &str) -> Result<Option<Key>, String> {
-    let owner = open(
-        parent,
-        name,
-        READ_CONTROL | WRITE_OWNER | KEY_WOW64_64KEY.0,
-        NO_FOLLOW,
-    )
-    .map_err(|status| nt_error("NtOpenKeyEx", status))?;
-    let Some(owner) = owner else {
-        return Ok(None);
-    };
-    set_security(&owner, "O:BA")?;
-    drop(owner);
-    open(parent, name, FULL, NO_FOLLOW).map_err(|status| nt_error("NtOpenKeyEx", status))
-}
-
-/// Sets `key`'s owner, and its DACL and its protection when `sddl` has a DACL, with
-/// `SetSecurityInfo`, which applies inheritance to an unprotected DACL.
-fn set_security(key: &Key, sddl: &str) -> Result<(), String> {
-    let descriptor = Descriptor::from_sddl(sddl).map_err(|error| error.to_string())?;
-    let mut owner = PSID::default();
-    let mut defaulted = BOOL::default();
-    // SAFETY: the descriptor is valid for the call; `owner` and `defaulted` are live
-    // out-pointers; `owner` points into the descriptor, which lives until this function ends.
-    unsafe { GetSecurityDescriptorOwner(descriptor.0, &raw mut owner, &raw mut defaulted) }
-        .map_err(|error| error.to_string())?;
-    let mut info = OWNER_SECURITY_INFORMATION;
-    let mut dacl_ptr: Option<*const ACL> = None;
+/// What `sddl` sets: the owner when it has one, and the DACL with its protection when it has
+/// one.
+fn parts(sddl: &str) -> OBJECT_SECURITY_INFORMATION {
+    let mut info = OBJECT_SECURITY_INFORMATION(0);
+    if sddl.contains("O:") {
+        info |= OWNER_SECURITY_INFORMATION;
+    }
     if let Some(rest) = sddl.split("D:").nth(1) {
-        let mut present = BOOL::default();
-        let mut dacl: *mut ACL = null_mut();
-        // SAFETY: as for the owner; `dacl` points into the descriptor too.
-        unsafe {
-            GetSecurityDescriptorDacl(
-                descriptor.0,
-                &raw mut present,
-                &raw mut dacl,
-                &raw mut defaulted,
-            )
-        }
-        .map_err(|error| error.to_string())?;
         let control = if rest.starts_with('P') {
             PROTECTED_DACL_SECURITY_INFORMATION
         } else {
             UNPROTECTED_DACL_SECURITY_INFORMATION
         };
-        info = info | DACL_SECURITY_INFORMATION | control;
-        dacl_ptr = Some(dacl.cast_const());
+        info |= DACL_SECURITY_INFORMATION | control;
     }
-    // SAFETY: the key is open for WRITE_OWNER (and WRITE_DAC when the DACL is set); the owner and
-    // the DACL point into `descriptor`, which lives for the call.
-    let set = unsafe {
-        SetSecurityInfo(
-            HANDLE(key.0.0),
-            SE_REGISTRY_KEY,
-            info,
-            Some(owner),
-            None,
-            dacl_ptr,
-            None,
-        )
-    };
-    check("SetSecurityInfo", set)
+    info
 }
 
-/// A registry call's result as `Ok`, or its error naming `call`.
-fn check(call: &'static str, code: WIN32_ERROR) -> Result<(), String> {
-    if code == ERROR_SUCCESS {
-        Ok(())
-    } else {
-        Err(format!("{call} failed (error {})", code.0))
+/// Writes `sddl`'s owner and DACL to `key` with `RegSetKeySecurity`: as given, with no
+/// inheritance computed and nothing passed down to the subkeys.
+fn write(key: &Key, sddl: &str) -> Result<(), Miss> {
+    let descriptor =
+        Descriptor::from_sddl(sddl).map_err(|error| Miss::Failed(error.to_string()))?;
+    // SAFETY: the key is open for what `sddl` sets (WRITE_OWNER, WRITE_DAC); the descriptor is
+    // valid and self-relative for the call.
+    let set = unsafe { RegSetKeySecurity(key.0, parts(sddl), descriptor.0) };
+    check("RegSetKeySecurity", set)
+}
+
+/// A registry call's result: `Ok`, [`Miss::Gone`] for a deleted key, or its error naming
+/// `call`.
+fn check(call: &'static str, code: WIN32_ERROR) -> Result<(), Miss> {
+    match code {
+        ERROR_SUCCESS => Ok(()),
+        ERROR_KEY_DELETED => Err(Miss::Gone),
+        _ => Err(Miss::Failed(format!("{call} failed (error {})", code.0))),
     }
 }
 
-/// An NT call's failure, as its status.
-fn nt_error(call: &'static str, status: NTSTATUS) -> String {
-    format!("{call} failed (status {:#010x})", status.0.cast_unsigned())
+/// An NT call's result: `Ok`, [`Miss::Gone`] for a key not found or deleted, or its status
+/// naming `call`.
+fn nt_check(call: &'static str, status: NTSTATUS) -> Result<(), Miss> {
+    if status.is_ok() {
+        return Ok(());
+    }
+    if [
+        STATUS_OBJECT_NAME_NOT_FOUND,
+        STATUS_OBJECT_PATH_NOT_FOUND,
+        STATUS_KEY_DELETED,
+    ]
+    .contains(&status)
+    {
+        return Err(Miss::Gone);
+    }
+    Err(Miss::Failed(format!(
+        "{call} failed (status {:#010x})",
+        status.0.cast_unsigned()
+    )))
 }

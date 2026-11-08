@@ -2,7 +2,7 @@
 //! the DACL's ACEs in order, read from SDDL. The inheritance-control flags (`AI`, `AR`), the
 //! order of an ACE's flags, and the owner's alias or SID form don't count: a key Windows wrote as
 //! `O:SYD:PAI(A;CIOI;..)` is the key `O:S-1-5-18D:P(A;OICI;..)` describes.
-//! Pure, tested on every OS.
+//! And the steps a take-over opens a key with ([`take_over_steps`]). Pure, tested on every OS.
 
 /// A key's security, compared structurally.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,11 +18,57 @@ pub(super) struct Security {
 /// One ACE: its type, its flags, its rights, its object GUIDs and its SID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Ace {
-    kind: String,
-    flags: String,
-    rights: String,
-    objects: String,
-    sid: String,
+    pub(super) kind: String,
+    pub(super) flags: String,
+    pub(super) rights: String,
+    pub(super) objects: String,
+    pub(super) sid: String,
+}
+
+/// `READ_CONTROL`: reads a key's security.
+pub(super) const READ_CONTROL: u32 = 0x0002_0000;
+
+/// `WRITE_DAC`: writes a key's DACL; its owner has it whatever the DACL says.
+pub(super) const WRITE_DAC: u32 = 0x0004_0000;
+
+/// `WRITE_OWNER`: writes a key's owner; `SeTakeOwnershipPrivilege` gives it whatever the DACL
+/// says.
+pub(super) const WRITE_OWNER: u32 = 0x0008_0000;
+
+/// `KEY_ALL_ACCESS`.
+pub(super) const KEY_ALL: u32 = 0x000F_003F;
+
+/// One step of a take-over: the key opened with `access` alone, and `sddl`'s parts written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Step {
+    pub(super) access: u32,
+    pub(super) sddl: String,
+}
+
+/// How a key is taken over with `sddl`, whatever its DACL denies. Set-up runs as an elevated
+/// administrator, not as SYSTEM, so:
+///
+/// 1. `WRITE_OWNER` alone, which `SeTakeOwnershipPrivilege` grants past any DENY ACE: the owner
+///    becomes Administrators, a group in set-up's token;
+/// 2. `READ_CONTROL | WRITE_DAC`, which the owner has past any DENY ACE: `sddl`'s DACL replaces
+///    the old one;
+/// 3. full access, which that DACL grants: `sddl` whole, owner SYSTEM included.
+pub(super) fn take_over_steps(sddl: &str) -> [Step; 3] {
+    let dacl = section(sddl, "D:", &["S:"]);
+    [
+        Step {
+            access: WRITE_OWNER,
+            sddl: "O:BA".to_owned(),
+        },
+        Step {
+            access: READ_CONTROL | WRITE_DAC,
+            sddl: format!("D:{dacl}"),
+        },
+        Step {
+            access: KEY_ALL,
+            sddl: sddl.to_owned(),
+        },
+    ]
 }
 
 /// The SDDL aliases Clauseo's keys and their owners use, and the SIDs they stand for.
@@ -58,15 +104,39 @@ impl Security {
         }
     }
 
-    /// Whether an allow ACE gives `sid` exactly the rights `rights` (`KA`, `KR`), whatever its
-    /// flags.
+    /// The DACL as (SID, rights) of allow ACEs, sorted; `None` when it holds any other kind.
     #[cfg(test)]
-    pub(super) fn grants(&self, sid: &str, rights: &str) -> bool {
-        let sid = normalize_sid(sid);
-        let rights = rights.to_ascii_uppercase();
+    pub(super) fn allowed(&self) -> Option<Vec<(String, String)>> {
+        let mut allowed = Vec::new();
+        for ace in &self.aces {
+            if ace.kind != "A" {
+                return None;
+            }
+            allowed.push((ace.sid.clone(), ace.rights.clone()));
+        }
+        allowed.sort();
+        Some(allowed)
+    }
+
+    /// Whether the DACL is exactly SYSTEM full, Administrators full and Users read, allow ACEs
+    /// only, whatever their flags.
+    #[cfg(test)]
+    pub(super) fn is_vendor_set(&self) -> bool {
+        let expected = [("SY", "KA"), ("BA", "KA"), ("BU", "KR")];
+        let mut expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(sid, rights)| (normalize_sid(sid), (*rights).to_owned()))
+            .collect();
+        expected.sort();
+        self.allowed() == Some(expected)
+    }
+
+    /// Whether an allow ACE lets Users, Authenticated Users or Everyone do more than read.
+    pub(super) fn users_may_write(&self) -> bool {
+        let broad = [ALIASES[2].1, ALIASES[3].1, ALIASES[5].1];
         self.aces
             .iter()
-            .any(|ace| ace.kind == "A" && ace.sid == sid && ace.rights == rights)
+            .any(|ace| ace.kind == "A" && broad.contains(&ace.sid.as_str()) && ace.rights != "KR")
     }
 
     /// Whether the owner is SYSTEM or Administrators.

@@ -1,21 +1,30 @@
 //! `HKLM\SOFTWARE\Clauseo`, the parent of every Clauseo machine key, secured before set-up uses
 //! it. A key that Windows makes takes its parent's default security, which can let Users make
-//! subkeys there, and a key an earlier run left may be owned by anyone. So [`ensure`] refuses a
-//! link at the root, then takes the root over (owner SYSTEM, the protected SYSTEM and
-//! Administrators DACL [`VENDOR_SDDL`]) before it walks anything. Each subkey under it is taken
-//! over before its own subkeys are read: owner SYSTEM and an unprotected DACL with no ACE of its
-//! own, so it inherits the root's. A link is the one thing deleted, after it is taken over and
-//! given a protected SYSTEM and Administrators SD on its own handle. `Sandbox` gets its own SD
-//! instead, and when its owner isn't SYSTEM or Administrators it is deleted with everything under
-//! it and made again empty, since its values can't be trusted. The walk is pure here, against
-//! [`Tree`]; `os.rs` is the registry, and [`secure`] is set-up's entry. Tested on every OS
-//! against a fake tree.
+//! subkeys there, and a key an earlier run left may be owned by anyone. So [`ensure`]:
+//!
+//! 1. takes the root over with [`VENDOR_SDDL`], then checks it for a link: a key whose
+//!    `SymbolicLinkValue` leads elsewhere is refused; one whose value leads back to itself only
+//!    holds a fake value, which is deleted;
+//! 2. walks every subkey, each taken over (owner SYSTEM, a protected SYSTEM and Administrators
+//!    DACL, [`LOCKED_SDDL`]) before its own subkeys are read, and then:
+//!    - a key holding a link value (a link, or a fake one) is deleted with what is under it;
+//!    - a key owned by anyone but SYSTEM, Administrators or a member of Administrators was
+//!      planted, and is deleted with what is under it, which also voids the planter's open
+//!      handles. A key whose owner can't be resolved is kept, unless it is one the SYSTEM side
+//!      trusts ([`pinned`]);
+//!    - every other key is kept: a pinned one gets its own SD, the rest [`INHERITED_SDDL`]. Its
+//!      values are kept: only an administrator owned it, and the installer checks its own value;
+//!    - a pinned key that ends deleted, for any reason, is made again empty with its own SD.
+//!
+//! Every write is `RegSetKeySecurity` on the key's own handle, which passes nothing down to the
+//! subkeys, so no write can reach through a link. A key deleted under the walk is done. The walk
+//! is pure here, against [`Tree`]; `os.rs` is the registry, and [`secure`] is set-up's entry.
+//! Tested on every OS against a fake tree.
 
 use std::collections::VecDeque;
 
 #[cfg(windows)]
 use super::MachineError;
-#[cfg(windows)]
 #[cfg(windows)]
 use super::record_key::VENDOR_KEY;
 use super::record_values::RECORD_SDDL;
@@ -32,25 +41,21 @@ mod tests;
 mod windows_tests;
 
 /// The pinned security of `HKLM\SOFTWARE\Clauseo`: owned by SYSTEM, a protected DACL giving
-/// SYSTEM and Administrators full control and Users read, and no subkey for anyone else. The
-/// `OI` and `CI` ACEs reach a subkey that inherits from it.
+/// SYSTEM and Administrators full control and Users read, and no subkey for anyone else.
 pub(super) const VENDOR_SDDL: &str = "O:SYD:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)(A;OICI;KR;;;BU)";
 
-/// What a subkey taken over gets: owner SYSTEM and an unprotected DACL with no ACE of its own,
-/// so `SetSecurityInfo` gives it the root's inheritable ACEs.
-pub(super) const INHERIT_SDDL: &str = "O:SYD:AI";
+/// What a key kept under the root ends with: owner SYSTEM and an unprotected DACL holding the
+/// root's ACEs as inherited ones, as Windows would compute them, written out so nothing is
+/// computed or propagated.
+pub(super) const INHERITED_SDDL: &str =
+    "O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)";
 
-/// What a link gets on its own handle before it is deleted: owner SYSTEM, and a protected DACL
-/// that lets only SYSTEM and Administrators in.
-pub(super) const LINK_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)";
+/// What each subkey gets first, before anything under it is read: owner SYSTEM and a protected
+/// DACL that lets only SYSTEM and Administrators in.
+pub(super) const LOCKED_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)";
 
 /// The record's subkey under the vendor key (`record_write.rs`).
 const RECORD_NAME: &str = "Sandbox";
-
-/// The installer's subkey, `Clauseo\Clauseo`: the install folder, read on reinstall and upgrade.
-/// It is taken over like any other key and never deleted; its name is not logged as an
-/// admin-owned key.
-const INSTALLER_NAME: &str = "Clauseo";
 
 /// Why `HKLM\SOFTWARE\Clauseo` couldn't be secured; set-up stops on any of them.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -69,207 +74,358 @@ pub(super) enum VendorFault {
     CleanUp(String),
 }
 
+/// Why a registry call on a key didn't do what it was asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Miss {
+    /// The key isn't there, or was deleted while open: what was to be done to it is done.
+    Gone,
+    /// The call failed; the Windows call's text.
+    Failed(String),
+}
+
 /// What [`ensure`] changed, for the log. Paths are under `HKLM`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Report {
     /// The root's SDDL when it differed structurally from [`VENDOR_SDDL`].
     pub(super) weaker_from: Option<String>,
-    /// The links deleted.
+    /// Whether the root held a fake link value, deleted.
+    pub(super) fake_root_link: bool,
+    /// The keys holding a link value, deleted.
     pub(super) removed: Vec<String>,
-    /// The subkeys taken over, other than the pinned ones.
-    pub(super) taken_over: Vec<String>,
-    /// The pinned subkeys whose SD differed and was set back.
-    pub(super) resecured: Vec<String>,
-    /// The pinned subkeys owned by someone else, deleted with what was under them and made again
-    /// empty.
+    /// The keys owned by someone other than an administrator, deleted.
+    pub(super) planted: Vec<String>,
+    /// The pinned keys deleted for any reason, made again empty.
     pub(super) recreated: Vec<String>,
-    /// The subkeys that were owned by SYSTEM or Administrators before the take-over.
+    /// The pinned keys kept whose SD differed and was set back.
+    pub(super) resecured: Vec<String>,
+    /// The other keys kept, taken over.
+    pub(super) taken_over: Vec<String>,
+    /// The keys kept whose owner was an administrator other than SYSTEM and Administrators.
     pub(super) admin_owned: Vec<String>,
+    /// The keys kept whose owner couldn't be resolved, with why.
+    pub(super) unresolved: Vec<(String, String)>,
+    /// The keys kept whose DACL let Users, Authenticated Users or Everyone do more than read.
+    pub(super) users_could_write: Vec<String>,
 }
 
 /// The registry under `HKLM\SOFTWARE\Clauseo`, through handles. A key is opened by name from its
-/// parent's handle and never followed through a link. A key that is gone is `None`, which the
-/// walk takes as done. Errors are the Windows call's text.
+/// parent's handle and never followed through a link.
 pub(super) trait Tree {
     /// An open key.
     type Key;
     /// The root, read, not following a link; `None` when it is missing.
-    fn open_root(&mut self) -> Result<Option<Self::Key>, String>;
+    fn open_root(&mut self) -> Result<Option<Self::Key>, Miss>;
     /// Makes the root with [`VENDOR_SDDL`].
-    fn create_root(&mut self) -> Result<(), String>;
+    fn create_root(&mut self) -> Result<(), Miss>;
     /// Takes the root over with `sddl`, and returns it open for writing.
-    fn take_over_root(&mut self, sddl: &str) -> Result<Self::Key, String>;
-    /// Subkey `name` of `parent`, read, not following a link; `None` when it is gone.
-    fn open_child(&mut self, parent: &Self::Key, name: &str) -> Result<Option<Self::Key>, String>;
-    /// Takes subkey `name` of `parent` over with `sddl`, and returns it open for writing; `None`
-    /// when it is gone.
+    fn take_over_root(&mut self, sddl: &str) -> Result<Self::Key, Miss>;
+    /// Whether the root, opened following links, is a different key from `key` (the root opened
+    /// as itself): a real link. A link that leads nowhere is one.
+    fn root_leads_elsewhere(&mut self, key: &Self::Key) -> Result<bool, Miss>;
+    /// Subkey `name` of `parent`, read, not following a link.
+    fn open_child(&mut self, parent: &Self::Key, name: &str) -> Result<Self::Key, Miss>;
+    /// Takes subkey `name` of `parent` over with `sddl`, and returns it open for writing.
     fn take_over_child(
         &mut self,
         parent: &Self::Key,
         name: &str,
         sddl: &str,
-    ) -> Result<Option<Self::Key>, String>;
-    /// Makes subkey `name` of `parent` with `sddl`, and returns it open for writing.
-    fn create_child(
-        &mut self,
-        parent: &Self::Key,
-        name: &str,
-        sddl: &str,
-    ) -> Result<Self::Key, String>;
-    /// Whether the key is a registry link.
-    fn is_link(&mut self, key: &Self::Key) -> Result<bool, String>;
+    ) -> Result<Self::Key, Miss>;
+    /// Makes subkey `name` of `parent` with `sddl`.
+    fn create_child(&mut self, parent: &Self::Key, name: &str, sddl: &str) -> Result<(), Miss>;
+    /// Whether the key holds a `SymbolicLinkValue` of type `REG_LINK`.
+    fn has_link_value(&mut self, key: &Self::Key) -> Result<bool, Miss>;
+    /// Deletes the key's `SymbolicLinkValue`.
+    fn delete_link_value(&mut self, key: &Self::Key) -> Result<(), Miss>;
     /// The key's owner and DACL as SDDL.
-    fn sddl(&mut self, key: &Self::Key) -> Result<String, String>;
-    /// Sets the owner and DACL of an open key to those of `sddl`.
-    fn set_sddl(&mut self, key: &Self::Key, sddl: &str) -> Result<(), String>;
+    fn sddl(&mut self, key: &Self::Key) -> Result<String, Miss>;
+    /// Sets the owner and DACL of an open key to those of `sddl`, passing nothing down.
+    fn set_sddl(&mut self, key: &Self::Key, sddl: &str) -> Result<(), Miss>;
     /// The names of the key's subkeys.
-    fn subkeys(&mut self, key: &Self::Key) -> Result<Vec<String>, String>;
+    fn subkeys(&mut self, key: &Self::Key) -> Result<Vec<String>, Miss>;
     /// Deletes the key `key` is open on, through that handle.
-    fn delete(&mut self, key: Self::Key) -> Result<(), String>;
+    fn delete(&mut self, key: Self::Key) -> Result<(), Miss>;
+    /// Whether the account `sid` (SDDL form) is in Administrators, directly or through a group;
+    /// the error says why it couldn't be told.
+    fn in_administrators(&mut self, sid: &str) -> Result<bool, String>;
 }
 
-/// The pinned SD of a Clauseo subkey that has one.
-// TODO(SandboxWatch): #749 adds `SandboxWatch` here at rebase, once it merges; it is not on main.
-fn pinned_child(name: &str) -> Option<String> {
-    name.eq_ignore_ascii_case(RECORD_NAME)
+/// The pinned SD of a key the SYSTEM side reads and trusts, by its path under the root.
+// TODO(SandboxWatch, MachineLaunch): #749 adds `SandboxWatch`, and `Sandbox\MachineLaunch`
+// joins once it lands; neither is on main.
+fn pinned(relative: &str) -> Option<String> {
+    relative
+        .eq_ignore_ascii_case(RECORD_NAME)
         .then(|| format!("O:BA{RECORD_SDDL}"))
 }
 
 /// Secures the vendor key at `path` (set-up's is [`VENDOR_KEY`]) as the module says, and returns
-/// what it changed. Any fault stops it: set-up must not go on under a root it couldn't secure.
+/// what it changed. Any fault stops it: set-up must not go on under a root it couldn't secure. A
+/// root deleted under the walk is walked once more from the start.
 pub(super) fn ensure<T: Tree>(tree: &mut T, path: &str) -> Result<Report, VendorFault> {
-    let mut report = Report::default();
-    if let Some(found) = tree.open_root().map_err(VendorFault::Open)? {
-        if tree.is_link(&found).map_err(VendorFault::Open)? {
-            return Err(VendorFault::Link);
-        }
-        let before = tree.sddl(&found).map_err(VendorFault::Open)?;
-        if Security::parse(&before) != Security::parse(VENDOR_SDDL) {
-            report.weaker_from = Some(before);
-        }
-    } else {
-        tree.create_root().map_err(VendorFault::Secure)?;
+    match ensure_once(tree, path)? {
+        Some(report) => Ok(report),
+        None => ensure_once(tree, path)?
+            .ok_or_else(|| VendorFault::Open("it was deleted twice during set-up".to_owned())),
     }
-    let root = tree
-        .take_over_root(VENDOR_SDDL)
-        .map_err(VendorFault::Secure)?;
-    clean(tree, root, path, &mut report)?;
-    Ok(report)
 }
 
-/// One key on the walk: its handle (taken over), its path, and its subkeys not yet visited.
+/// One pass of [`ensure`]; `None` when the root was deleted under it.
+fn ensure_once<T: Tree>(tree: &mut T, path: &str) -> Result<Option<Report>, VendorFault> {
+    let mut report = Report::default();
+    match tree.open_root() {
+        Ok(Some(found)) => {
+            let before = tree.sddl(&found).map_err(open_fault)?;
+            if Security::parse(&before) != Security::parse(VENDOR_SDDL) {
+                report.weaker_from = Some(before);
+            }
+        }
+        Ok(None) | Err(Miss::Gone) => tree.create_root().map_err(secure_fault)?,
+        Err(Miss::Failed(error)) => return Err(VendorFault::Open(error)),
+    }
+    let root = match tree.take_over_root(VENDOR_SDDL) {
+        Ok(root) => root,
+        Err(Miss::Gone) => return Ok(None),
+        Err(Miss::Failed(error)) => return Err(VendorFault::Secure(error)),
+    };
+    match tree.has_link_value(&root) {
+        Ok(false) => {}
+        Ok(true) => {
+            if tree.root_leads_elsewhere(&root).map_err(open_fault)? {
+                return Err(VendorFault::Link);
+            }
+            tree.delete_link_value(&root).map_err(clean_fault)?;
+            report.fake_root_link = true;
+        }
+        Err(Miss::Gone) => return Ok(None),
+        Err(Miss::Failed(error)) => return Err(VendorFault::Open(error)),
+    }
+    let root = clean(tree, root, path, &mut report)?;
+    // The root still there is the walk finished; one deleted under it is walked again.
+    match tree.sddl(&root) {
+        Ok(_) => Ok(Some(report)),
+        Err(Miss::Gone) => Ok(None),
+        Err(Miss::Failed(error)) => Err(VendorFault::Open(error)),
+    }
+}
+
+fn open_fault(miss: Miss) -> VendorFault {
+    VendorFault::Open(text(miss))
+}
+
+fn secure_fault(miss: Miss) -> VendorFault {
+    VendorFault::Secure(text(miss))
+}
+
+fn clean_fault(miss: Miss) -> VendorFault {
+    VendorFault::CleanUp(text(miss))
+}
+
+fn text(miss: Miss) -> String {
+    match miss {
+        Miss::Gone => "the key was deleted".to_owned(),
+        Miss::Failed(error) => error,
+    }
+}
+
+/// `Ok(None)` for a key that is gone, `Ok(Some)` for a result, and a fault made by `fault`.
+fn unless_gone<V>(
+    result: Result<V, Miss>,
+    fault: fn(String) -> VendorFault,
+) -> Result<Option<V>, VendorFault> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(Miss::Gone) => Ok(None),
+        Err(Miss::Failed(error)) => Err(fault(error)),
+    }
+}
+
+/// One key on the walk: its handle (taken over), its path under `HKLM`, its path under the root,
+/// and its subkeys not yet visited.
 struct Frame<K> {
     key: K,
     path: String,
+    relative: String,
     names: VecDeque<String>,
 }
 
-/// Walks every subkey under `root` with an explicit stack, depth first. Each child is taken over
-/// before its own subkeys are read, so its previous owner can't add to them mid-walk. A link is
-/// deleted. A pinned key owned by anyone but SYSTEM or Administrators is deleted with everything
-/// under it and made again empty. Everything else is kept, taken over.
+/// A key's paths: under `HKLM`, and under the root.
+struct At {
+    path: String,
+    relative: String,
+}
+
+/// Walks every subkey under `root` with an explicit stack, depth first, as the module says, and
+/// gives `root` back.
 fn clean<T: Tree>(
     tree: &mut T,
     root: T::Key,
     path: &str,
     report: &mut Report,
-) -> Result<(), VendorFault> {
-    let names = tree.subkeys(&root).map_err(VendorFault::CleanUp)?;
+) -> Result<T::Key, VendorFault> {
+    let names = unless_gone(tree.subkeys(&root), VendorFault::CleanUp)?.unwrap_or_default();
     let mut stack = vec![Frame {
         key: root,
         path: path.to_owned(),
+        relative: String::new(),
         names: names.into(),
     }];
-    while let Some(frame) = stack.last_mut() {
+    loop {
+        let Some(frame) = stack.last_mut() else {
+            return Err(VendorFault::CleanUp(
+                "the walk ended without its root".to_owned(),
+            ));
+        };
         let Some(name) = frame.names.pop_front() else {
-            stack.pop();
-            continue;
-        };
-        let child_path = format!("{}\\{name}", frame.path);
-        // What the child was before the take-over: its owner, and its SD for the pinned check.
-        let before = match tree
-            .open_child(&frame.key, &name)
-            .map_err(VendorFault::CleanUp)?
-        {
-            Some(read) => Security::parse(&tree.sddl(&read).map_err(VendorFault::CleanUp)?),
-            None => continue,
-        };
-        let pinned = pinned_child(&name);
-        let target = pinned.as_deref().unwrap_or(INHERIT_SDDL);
-        let Some(key) = tree
-            .take_over_child(&frame.key, &name, target)
-            .map_err(VendorFault::Secure)?
-        else {
-            continue;
-        };
-        if tree.is_link(&key).map_err(VendorFault::CleanUp)? {
-            tree.set_sddl(&key, LINK_SDDL)
-                .map_err(VendorFault::Secure)?;
-            tree.delete(key).map_err(VendorFault::CleanUp)?;
-            report.removed.push(child_path);
-            continue;
-        }
-        if let Some(pinned) = pinned.as_deref()
-            && !before.trusted_owner()
-        {
-            // A planted pinned key: its values are not trusted, so it goes and comes back empty.
-            drain(tree, key, &child_path)?;
-            tree.create_child(&frame.key, &name, pinned)
-                .map_err(VendorFault::Secure)?;
-            report.recreated.push(child_path);
-            continue;
-        }
-        match pinned {
-            Some(_) if before != Security::parse(target) => {
-                report.resecured.push(child_path.clone());
+            if let Some(done) = stack.pop()
+                && stack.is_empty()
+            {
+                return Ok(done.key);
             }
-            Some(_) => {}
+            continue;
+        };
+        let child = At {
+            path: format!("{}\\{name}", frame.path),
+            relative: if frame.relative.is_empty() {
+                name.clone()
+            } else {
+                format!("{}\\{name}", frame.relative)
+            },
+        };
+        let pinned = pinned(&child.relative);
+        let kept = visit(tree, &frame.key, &name, &child, pinned.as_deref(), report)?;
+        match kept {
+            Some(frame) => stack.push(frame),
             None => {
-                if before.trusted_owner() && !name.eq_ignore_ascii_case(INSTALLER_NAME) {
-                    report.admin_owned.push(child_path.clone());
+                if let Some(pinned) = pinned.as_deref()
+                    && let Some(parent) = stack.last()
+                    && unless_gone(
+                        tree.create_child(&parent.key, &name, pinned),
+                        VendorFault::Secure,
+                    )?
+                    .is_some()
+                {
+                    report.recreated.push(child.path);
                 }
-                report.taken_over.push(child_path.clone());
             }
         }
-        let names = tree.subkeys(&key).map_err(VendorFault::CleanUp)?;
-        stack.push(Frame {
-            key,
-            path: child_path,
-            names: names.into(),
-        });
     }
-    Ok(())
 }
 
-/// Deletes `key` and everything under it, children first. Each child is taken over before its
-/// own subkeys are read, as [`clean`] does, and a child that is gone is done.
-fn drain<T: Tree>(tree: &mut T, key: T::Key, path: &str) -> Result<(), VendorFault> {
-    let names = tree.subkeys(&key).map_err(VendorFault::CleanUp)?;
-    let mut stack = vec![Frame {
+/// Visits subkey `name` of `parent` (`at` gives its paths): its frame when it is kept, `None`
+/// when it is gone, deleted under the walk or by it.
+fn visit<T: Tree>(
+    tree: &mut T,
+    parent: &T::Key,
+    name: &str,
+    at: &At,
+    pinned: Option<&str>,
+    report: &mut Report,
+) -> Result<Option<Frame<T::Key>>, VendorFault> {
+    // What the child was before the take-over.
+    let Some(read) = unless_gone(tree.open_child(parent, name), VendorFault::CleanUp)? else {
+        return Ok(None);
+    };
+    let Some(before) = unless_gone(tree.sddl(&read), VendorFault::CleanUp)? else {
+        return Ok(None);
+    };
+    drop(read);
+    let before = Security::parse(&before);
+    let owner = if before.trusted_owner() {
+        Owner::Admin
+    } else {
+        match tree.in_administrators(&before.owner) {
+            Ok(true) => Owner::OtherAdmin,
+            Ok(false) => Owner::Planter,
+            Err(why) => Owner::Unresolved(why),
+        }
+    };
+    let Some(key) = unless_gone(
+        tree.take_over_child(parent, name, LOCKED_SDDL),
+        VendorFault::Secure,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(link) = unless_gone(tree.has_link_value(&key), VendorFault::CleanUp)? else {
+        return Ok(None);
+    };
+    // The SYSTEM side's keys get no benefit of the doubt.
+    let planted = match &owner {
+        Owner::Planter => true,
+        Owner::Unresolved(_) => pinned.is_some(),
+        Owner::Admin | Owner::OtherAdmin => false,
+    };
+    if link || planted {
+        drain(tree, key)?;
+        if link {
+            report.removed.push(at.path.clone());
+        } else {
+            report.planted.push(at.path.clone());
+        }
+        return Ok(None);
+    }
+    let target = pinned.unwrap_or(INHERITED_SDDL);
+    if unless_gone(tree.set_sddl(&key, target), VendorFault::Secure)?.is_none() {
+        return Ok(None);
+    }
+    if before.users_may_write() {
+        report.users_could_write.push(at.path.clone());
+    }
+    match owner {
+        Owner::OtherAdmin => report.admin_owned.push(at.path.clone()),
+        Owner::Unresolved(why) => report.unresolved.push((at.path.clone(), why)),
+        Owner::Admin | Owner::Planter => {}
+    }
+    if pinned.is_some() {
+        if before != Security::parse(target) {
+            report.resecured.push(at.path.clone());
+        }
+    } else {
+        report.taken_over.push(at.path.clone());
+    }
+    let names = unless_gone(tree.subkeys(&key), VendorFault::CleanUp)?.unwrap_or_default();
+    Ok(Some(Frame {
         key,
-        path: path.to_owned(),
+        path: at.path.clone(),
+        relative: at.relative.clone(),
         names: names.into(),
-    }];
-    while let Some(frame) = stack.last_mut() {
-        let Some(name) = frame.names.pop_front() else {
-            if let Some(done) = stack.pop() {
-                tree.delete(done.key).map_err(VendorFault::CleanUp)?;
+    }))
+}
+
+/// Who owned a key before the take-over.
+enum Owner {
+    /// SYSTEM or Administrators.
+    Admin,
+    /// An account in Administrators.
+    OtherAdmin,
+    /// Anyone else.
+    Planter,
+    /// An account whose membership couldn't be told, with why.
+    Unresolved(String),
+}
+
+/// Deletes `key` and everything under it, bottom up through handles. Each child is taken over
+/// (for `DELETE`) before its own subkeys are read; one that is gone is done.
+fn drain<T: Tree>(tree: &mut T, key: T::Key) -> Result<(), VendorFault> {
+    let names = unless_gone(tree.subkeys(&key), VendorFault::CleanUp)?.unwrap_or_default();
+    let mut stack = vec![(key, VecDeque::from(names))];
+    while let Some((parent, names)) = stack.last_mut() {
+        let Some(name) = names.pop_front() else {
+            if let Some((done, _)) = stack.pop() {
+                unless_gone(tree.delete(done), VendorFault::CleanUp)?;
             }
             continue;
         };
-        let child_path = format!("{}\\{name}", frame.path);
-        let Some(child) = tree
-            .take_over_child(&frame.key, &name, INHERIT_SDDL)
-            .map_err(VendorFault::Secure)?
+        let Some(child) = unless_gone(
+            tree.take_over_child(parent, &name, LOCKED_SDDL),
+            VendorFault::Secure,
+        )?
         else {
             continue;
         };
-        let names = tree.subkeys(&child).map_err(VendorFault::CleanUp)?;
-        stack.push(Frame {
-            key: child,
-            path: child_path,
-            names: names.into(),
-        });
+        let names = unless_gone(tree.subkeys(&child), VendorFault::CleanUp)?.unwrap_or_default();
+        stack.push((child, names.into()));
     }
     Ok(())
 }
@@ -284,29 +440,62 @@ pub(super) fn secure() -> Result<(), MachineError> {
         .map_err(|error| fault(format!("its privileges weren't enabled: {error}")))?;
     let report = ensure(&mut os::Registry::at(VENDOR_KEY), VENDOR_KEY)
         .map_err(|found| fault(found.to_string()))?;
+    log(&report);
+    Ok(())
+}
+
+/// One log line per kind of change in `report`.
+#[cfg(windows)]
+fn log(report: &Report) {
     if let Some(from) = &report.weaker_from {
         tracing::warn!(was = %from, "HKLM\\SOFTWARE\\Clauseo was weaker than its pinned security");
     }
-    for key in &report.removed {
-        tracing::warn!(%key, "deleted a link under the vendor key");
+    if report.fake_root_link {
+        tracing::warn!("deleted a link value from the vendor key that led back to itself");
     }
-    for key in &report.recreated {
-        tracing::warn!(%key, "deleted a pinned key owned by someone else and made it again empty");
+    let lists = [
+        (
+            &report.removed,
+            "deleted keys holding a link value under the vendor key",
+        ),
+        (
+            &report.planted,
+            "deleted keys under the vendor key owned by a non-administrator",
+        ),
+        (
+            &report.recreated,
+            "made Clauseo keys under the vendor key again, empty",
+        ),
+        (
+            &report.resecured,
+            "set Clauseo keys under the vendor key back to their security",
+        ),
+        (
+            &report.users_could_write,
+            "kept keys under the vendor key that Users could write",
+        ),
+    ];
+    for (keys, what) in lists {
+        if !keys.is_empty() {
+            tracing::warn!(?keys, "{what}");
+        }
     }
-    for key in &report.resecured {
-        tracing::warn!(%key, "set a Clauseo key under the vendor key back to its pinned security");
+    if !report.unresolved.is_empty() {
+        tracing::warn!(
+            keys = ?report.unresolved,
+            "kept keys under the vendor key whose owner couldn't be resolved"
+        );
     }
     if !report.admin_owned.is_empty() {
         tracing::info!(
             keys = ?report.admin_owned,
-            "admin-owned keys under the vendor key, taken over"
+            "kept keys under the vendor key owned by an administrator's account"
         );
     }
     if !report.taken_over.is_empty() {
         tracing::info!(
             count = report.taken_over.len(),
-            "took over subkeys of the vendor key: owner SYSTEM, inheriting its DACL"
+            "took over subkeys of the vendor key: owner SYSTEM, the root's DACL"
         );
     }
-    Ok(())
 }

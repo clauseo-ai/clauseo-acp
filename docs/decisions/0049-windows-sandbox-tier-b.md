@@ -292,12 +292,18 @@ build 26100):
     writes the key.
   - `HKLM\SOFTWARE\Clauseo`, the parent of those keys, is taken over by set-up: owner SYSTEM and
     the protected DACL `O:SYD:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)(A;OICI;KR;;;BU)`, so no one else
-    can make a subkey there. A link at the root is refused. Every subkey under it is taken over
-    before its own subkeys are read (owner SYSTEM, inheriting the root's DACL), so no key left by an
-    earlier run or a user keeps its old owner. Only a link is deleted. `Sandbox` keeps its own
-    SD and its values only while an administrator owns it; otherwise it is deleted with what is
-    under it and made again empty. The installer's `Clauseo\Clauseo` is taken over, never deleted.
-    A failure stops set-up with `MachineError::VendorKey` (`setup/vendor_key.rs`).
+    can make a subkey there. A root whose `SymbolicLinkValue` leads to another key is refused; a
+    value that leads back to the root itself is deleted. Every subkey is taken over before its own
+    subkeys are read (owner first, then the DACL, then full access, so no DENY ACE stops it). A
+    key holding a link value, or owned by anyone but SYSTEM, Administrators or a member of
+    Administrators, is deleted with its subtree. Every other key is kept with
+    `O:SYD:AI(A;OICIID;KA;;;SY)(A;OICIID;KA;;;BA)(A;OICIID;KR;;;BU)`, written out on its own
+    handle: no write uses `SetSecurityInfo`, whose propagation could reach through a link. A key
+    whose owner can't be resolved is kept and logged, except the keys the SYSTEM side trusts
+    (`Sandbox`), which are deleted; any of those deleted for any reason is made again empty with
+    its own SD. Accepted: a kept key's values stay, including the installer's install folder in
+    `Clauseo\Clauseo`, since only an administrator owned it and the installer checks its own
+    value. A failure stops set-up with `MachineError::VendorKey` (`setup/vendor_key.rs`).
   - The local group `ClauseoSandboxUsers`, holding every pool user (PR4).
   - `<data_dir>\sandbox\matters.json`, replaced whole and atomically and refused, never
     rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's
