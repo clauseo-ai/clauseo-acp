@@ -89,6 +89,15 @@ fn place(browser: Browser, scope: Scope) -> Place {
     Place { browser, scope }
 }
 
+/// What `read` found at the one entry for `browser` and `scope`.
+fn at(read: &RemoteDebugging, browser: Browser, scope: Scope) -> Found {
+    read.found
+        .iter()
+        .find(|(found_at, _)| *found_at == place(browser, scope))
+        .map(|(_, found)| found.clone())
+        .expect("the place was read")
+}
+
 /// Every place in `read` says absent.
 fn all_absent(read: &RemoteDebugging) -> bool {
     read.found.iter().all(|(_, found)| *found == Found::Absent)
@@ -177,11 +186,21 @@ fn each_managed_preferences_file_turns_it_off_when_false() {
             Browser::Edge,
             Scope::User,
         ),
+        (
+            "/Library/Managed Preferences/org.chromium.Chromium.plist",
+            Browser::Chromium,
+            Scope::Machine,
+        ),
+        (
+            "/Library/Managed Preferences/lawyer/org.chromium.Chromium.plist",
+            Browser::Chromium,
+            Scope::User,
+        ),
     ] {
         let off = plist(Some(false.into()));
         let tree = FakeTree::default().with(path, Ok(&off));
         let read = read_managed_prefs(&tree, user());
-        assert_eq!(read.found.len(), 4);
+        assert_eq!(read.found.len(), 6);
         assert_eq!(read.turned_off_by(), Some(place(browser, scope)), "{path}");
         let on = plist(Some(true.into()));
         let tree = FakeTree::default().with(path, Ok(&on));
@@ -209,9 +228,16 @@ fn missing_or_unreadable_managed_preferences_do_not_turn_it_off() {
         );
     let read = read_managed_prefs(&tree, Ok(Some("lawyer".to_owned())));
     assert_eq!(read.turned_off_by(), None);
-    assert_eq!(read.found[0].1, Found::Absent);
-    assert!(matches!(read.found[1].1, Found::Unreadable(_)));
-    assert!(matches!(read.found[2].1, Found::Unreadable(_)));
+    assert_eq!(at(&read, Browser::Chrome, Scope::Machine), Found::Absent);
+    assert!(matches!(
+        at(&read, Browser::Edge, Scope::Machine),
+        Found::Unreadable(_)
+    ));
+    assert!(matches!(
+        at(&read, Browser::Chrome, Scope::User),
+        Found::Unreadable(_)
+    ));
+    assert_eq!(at(&read, Browser::Chromium, Scope::Machine), Found::Absent);
     // No login user: the user's files are unreadable, the computer's still count.
     let off = plist(Some(false.into()));
     let tree = FakeTree::default().with(
@@ -223,21 +249,41 @@ fn missing_or_unreadable_managed_preferences_do_not_turn_it_off() {
         read.turned_off_by(),
         Some(place(Browser::Edge, Scope::Machine))
     );
-    assert!(matches!(read.found[2].1, Found::Unreadable(_)));
+    assert!(matches!(
+        at(&read, Browser::Chrome, Scope::User),
+        Found::Unreadable(_)
+    ));
+    assert!(matches!(
+        at(&read, Browser::Chromium, Scope::User),
+        Found::Unreadable(_)
+    ));
     let read = read_managed_prefs(&FakeTree::default(), Ok(Some("..".to_owned())));
-    assert!(matches!(read.found[3].1, Found::Unreadable(_)));
+    assert!(matches!(
+        at(&read, Browser::Edge, Scope::User),
+        Found::Unreadable(_)
+    ));
 }
 
 #[test]
 fn each_linux_managed_folder_turns_it_off_when_a_file_says_false() {
+    // Edge's Linux policy folder is `/etc/opt/edge`, not its install folder's `microsoft/msedge`.
+    assert_eq!(
+        super::LINUX_DIRS,
+        [
+            (Browser::Chrome, "/etc/opt/chrome/policies/managed"),
+            (Browser::Edge, "/etc/opt/edge/policies/managed"),
+            (Browser::Chromium, "/etc/chromium/policies/managed"),
+        ]
+    );
     for (path, browser) in [
         (
             "/etc/opt/chrome/policies/managed/firm.json",
             Browser::Chrome,
         ),
+        ("/etc/opt/edge/policies/managed/firm.json", Browser::Edge),
         (
-            "/etc/opt/microsoft/msedge/policies/managed/firm.json",
-            Browser::Edge,
+            "/etc/chromium/policies/managed/firm.json",
+            Browser::Chromium,
         ),
     ] {
         let tree = FakeTree::default()
@@ -265,7 +311,7 @@ fn each_linux_managed_folder_turns_it_off_when_a_file_says_false() {
 fn missing_or_unreadable_linux_policy_does_not_turn_it_off() {
     let read = read_linux(&FakeTree::default());
     assert!(all_absent(&read));
-    assert_eq!(read.found.len(), 2);
+    assert_eq!(read.found.len(), 3);
     let mut tree = FakeTree::default()
         .with("/etc/opt/chrome/policies/managed/a.json", Ok(b"{ not json"))
         .with(
@@ -277,15 +323,65 @@ fn missing_or_unreadable_linux_policy_does_not_turn_it_off() {
             Ok(br#"{"RemoteDebuggingAllowed": 0}"#),
         );
     tree.broken_dirs
-        .push(PathBuf::from("/etc/opt/microsoft/msedge/policies/managed"));
+        .push(PathBuf::from("/etc/opt/edge/policies/managed"));
+    tree.broken_dirs
+        .push(PathBuf::from("/etc/chromium/policies/managed"));
     let read = read_linux(&tree);
     assert_eq!(read.turned_off_by(), None);
-    assert_eq!(read.found.len(), 4);
+    assert_eq!(read.found.len(), 5);
     assert!(
         read.found
             .iter()
             .all(|(_, found)| matches!(found, Found::Unreadable(_)))
     );
+}
+
+// Chromium-branded builds read `/etc/chromium/policies`: the same rule as Chrome's folder.
+#[test]
+fn chromiums_managed_folder_blocks_only_on_false() {
+    let chromium = |name: &str| format!("/etc/chromium/policies/managed/{name}");
+    let one = |bytes: Result<&[u8], io::ErrorKind>| {
+        read_linux(&FakeTree::default().with(&chromium("firm.json"), bytes))
+    };
+    let off = place(Browser::Chromium, Scope::Machine);
+    assert_eq!(
+        one(Ok(br#"{"RemoteDebuggingAllowed": false}"#)).turned_off_by(),
+        Some(off)
+    );
+    let said = |read: RemoteDebugging| {
+        assert_eq!(read.turned_off_by(), None);
+        read.found
+            .into_iter()
+            .find(|(place, _)| place.browser == Browser::Chromium)
+            .map(|(_, found)| found)
+    };
+    assert_eq!(
+        said(one(Ok(br#"{"RemoteDebuggingAllowed": true}"#))),
+        Some(Found::Allowed)
+    );
+    assert_eq!(said(one(Ok(b"{}"))), Some(Found::Absent));
+    assert_eq!(said(read_linux(&FakeTree::default())), Some(Found::Absent));
+    for bytes in [
+        Ok(&br#"{"RemoteDebuggingAllowed": "false"}"#[..]),
+        Ok(&b"{ not json"[..]),
+        Err(io::ErrorKind::PermissionDenied),
+    ] {
+        assert!(matches!(said(one(bytes)), Some(Found::Unreadable(_))));
+    }
+    let mut broken = FakeTree::default();
+    broken
+        .broken_dirs
+        .push(PathBuf::from("/etc/chromium/policies/managed"));
+    assert!(matches!(
+        said(read_linux(&broken)),
+        Some(Found::Unreadable(_))
+    ));
+    // Its recommended folder is not read.
+    let tree = FakeTree::default().with(
+        "/etc/chromium/policies/recommended/firm.json",
+        Ok(br#"{"RemoteDebuggingAllowed": false}"#),
+    );
+    assert_eq!(read_linux(&tree).turned_off_by(), None);
 }
 
 #[test]

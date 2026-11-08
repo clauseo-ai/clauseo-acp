@@ -10,11 +10,12 @@
 //! - Windows: `RemoteDebuggingAllowed` under `SOFTWARE\Policies\Google\Chrome` and
 //!   `SOFTWARE\Policies\Microsoft\Edge`, in `HKLM` and in `HKCU` (a `REG_DWORD`, 0 is false);
 //!   [`read_registry`] over a [`Registry`].
-//! - macOS: the managed preferences files of `com.google.Chrome` and `com.microsoft.Edge`, the
-//!   computer's and the login user's (a boolean); [`read_managed_prefs`].
-//! - Linux: every `*.json` in Chrome's and Edge's `managed` policy folders (Chrome takes this
-//!   policy only as mandatory, never as recommended: its definition does not set
-//!   `can_be_recommended`); [`read_linux`].
+//! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge` and
+//!   `org.chromium.Chromium`, the computer's and the login user's (a boolean);
+//!   [`read_managed_prefs`].
+//! - Linux: every `*.json` in Chrome's, Edge's and Chromium's `managed` policy folders
+//!   (Chrome takes this policy only as mandatory, never as recommended: its definition does not
+//!   set `can_be_recommended`); [`read_linux`].
 //!
 //! Every store comes in through a trait ([`Registry`], [`PolicyTree`]), so the tests use fakes,
 //! and every reader's logic is compiled and tested on every OS. A value that is missing, or a
@@ -40,6 +41,8 @@ pub enum Browser {
     Chrome,
     /// Microsoft Edge.
     Edge,
+    /// Chromium-branded builds (Linux and macOS; a forced browser path can point at one).
+    Chromium,
 }
 
 /// Whose policy: the computer's or the user's.
@@ -129,15 +132,17 @@ pub const REGISTRY_KEYS: [(Browser, &str); 2] = [
 ];
 
 /// The managed preferences domains, by browser.
-pub const MAC_DOMAINS: [(Browser, &str); 2] = [
+pub const MAC_DOMAINS: [(Browser, &str); 3] = [
     (Browser::Chrome, "com.google.Chrome"),
     (Browser::Edge, "com.microsoft.Edge"),
+    (Browser::Chromium, "org.chromium.Chromium"),
 ];
 
 /// The Linux folders of mandatory policy, by browser.
-pub const LINUX_DIRS: [(Browser, &str); 2] = [
+pub const LINUX_DIRS: [(Browser, &str); 3] = [
     (Browser::Chrome, "/etc/opt/chrome/policies/managed"),
-    (Browser::Edge, "/etc/opt/microsoft/msedge/policies/managed"),
+    (Browser::Edge, "/etc/opt/edge/policies/managed"),
+    (Browser::Chromium, "/etc/chromium/policies/managed"),
 ];
 
 impl RemoteDebugging {
@@ -155,6 +160,7 @@ impl fmt::Display for Place {
         let browser = match self.browser {
             Browser::Chrome => "Chrome",
             Browser::Edge => "Edge",
+            Browser::Chromium => "Chromium",
         };
         let scope = match self.scope {
             Scope::Machine => "computer",
@@ -225,7 +231,8 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
     RemoteDebugging { found }
 }
 
-/// The four macOS places: the computer's file then the user's, Chrome then Edge in each.
+/// The six macOS places: the computer's file then the user's, Chrome, Edge, then Chromium in
+/// each.
 /// `looked_up` is the login user ([`managed_prefs::login_user`]); without one, the user's
 /// places are unreadable.
 pub fn read_managed_prefs(
@@ -286,8 +293,8 @@ pub fn plist_says(bytes: &[u8]) -> Found {
     }
 }
 
-/// The Linux places: each `*.json` in Chrome's then Edge's `managed` folder, one entry per
-/// file; a folder with no file says [`Found::Absent`] once.
+/// The Linux places: each `*.json` in Chrome's, Edge's, then Chromium's `managed` folder,
+/// one entry per file; a folder with no file says [`Found::Absent`] once.
 pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
     let mut found = Vec::new();
     for (browser, dir) in LINUX_DIRS {
