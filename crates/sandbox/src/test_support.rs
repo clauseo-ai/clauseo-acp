@@ -107,8 +107,7 @@ pub(crate) fn set_readonly(path: &Path, readonly: bool) {
     std::fs::set_permissions(path, permissions).unwrap();
 }
 
-/// Moves the file at `from` to `to`.
-#[cfg(windows)]
+/// Moves the file or folder at `from` to `to`.
 pub(crate) fn rename(from: &Path, to: &Path) {
     std::fs::rename(from, to).unwrap();
 }
@@ -136,6 +135,16 @@ pub(crate) fn symlink_file_at(link: &Path, target: &Path) {
 /// Removes the file at `path`.
 pub(crate) fn remove(path: &Path) {
     std::fs::remove_file(path).unwrap();
+}
+
+/// Writes `bytes` over the file at `path`.
+pub(crate) fn overwrite(path: &Path, bytes: &[u8]) {
+    std::fs::write(path, bytes).unwrap();
+}
+
+/// Removes the folder at `path` and everything in it.
+pub(crate) fn remove_tree(path: &Path) {
+    std::fs::remove_dir_all(path).unwrap();
 }
 
 /// Removes the empty folder at `path`.

@@ -53,13 +53,9 @@ fn allows_in_other(w: &World, acl: &FakeAcl) -> Vec<Key> {
 }
 
 /// `docs` moved on disk and in the fake to `to`, relative to the temp folder.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the other matter's agent or the lawyer moves the folder, not the sandbox"
-)]
 fn move_docs(w: &World, acl: &mut FakeAcl, to: &str) -> PathBuf {
     let docs = w.canonical("other/m2/docs");
-    std::fs::rename(&docs, w.at(to)).unwrap();
+    crate::test_support::rename(&docs, &w.at(to));
     let to = w.canonical(to);
     acl.move_item(&docs, &to);
     to
@@ -108,17 +104,13 @@ fn a_granted_folder_moved_during_the_run_loses_the_read_where_it_went() {
 }
 
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the other matter's agent or the lawyer deletes the folder, not the sandbox"
-)]
 fn a_granted_folder_deleted_during_the_run_counts_as_taken_back() {
     let w = World::new("files-deleted");
     w.other_tree();
     let (mut ledger, mut acl) = (ledger(&w), volume(&w));
     launch(&w, &mut ledger, &mut acl, &[("other/m2/docs", false)]);
     let docs = w.canonical("other/m2/docs");
-    std::fs::remove_dir_all(&docs).unwrap();
+    crate::test_support::remove_tree(&docs);
     acl.delete_item(&docs);
     acl.walks.clear();
 
@@ -187,10 +179,6 @@ fn a_relaunch_takes_back_a_read_whose_item_moved_and_writes_it_on_the_item_there
 }
 
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "writes the ledger as an older version left it"
-)]
 fn an_older_ledgers_read_with_no_file_loads_and_is_written_again_with_one() {
     let w = World::new("files-older");
     w.other_tree();
@@ -205,7 +193,8 @@ fn an_older_ledgers_read_with_no_file_loads_and_is_written_again_with_one() {
             entry.as_object_mut().unwrap().remove("file");
         }
     }
-    std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+    // The ledger as an older version left it.
+    crate::test_support::overwrite(&path, &serde_json::to_vec_pretty(&json).unwrap());
     let mut ledger = super::ledger(&w);
     let reads = read_entries(&ledger);
     assert_ne!(reads, Vec::<Entry>::new());
