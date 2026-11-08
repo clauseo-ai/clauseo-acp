@@ -38,30 +38,30 @@ fn the_end_sweeper_kills_only_what_was_created_before_it() {
 fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
     struct NoClock(Fake);
     impl Processes for NoClock {
-        type Process = u32;
+        type Process = Handle;
         fn list(&mut self) -> io::Result<Vec<Seen>> {
             self.0.list()
         }
         fn named(&mut self) -> io::Result<Vec<Seen>> {
             self.0.named()
         }
-        fn open(&mut self, pid: u32) -> io::Result<Option<u32>> {
+        fn open(&mut self, pid: u32) -> io::Result<Option<Handle>> {
             self.0.open(pid)
         }
         fn job_pids(&mut self) -> io::Result<Vec<u32>> {
             self.0.job_pids()
         }
-        fn started(&mut self, process: &u32) -> io::Result<u64> {
+        fn started(&mut self, process: &Handle) -> io::Result<u64> {
             self.0.started(process)
         }
         fn own_start(&mut self) -> io::Result<u64> {
             Err(io::Error::from_raw_os_error(6))
         }
-        fn kill(&mut self, process: &u32) -> io::Result<()> {
+        fn kill(&mut self, process: &Handle) -> io::Result<()> {
             self.0.kill(process)
         }
-        fn exited(&mut self, process: &u32) -> bool {
-            self.0.exited(process)
+        fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+            self.0.exited(process, wait)
         }
         fn pause(&mut self, pause: Duration) {
             self.0.pause(pause);

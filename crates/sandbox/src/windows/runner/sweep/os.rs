@@ -17,8 +17,10 @@
 //! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
 //! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
 //! this user those rights, and opened again; when that fails too, the first error stands. Its
-//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`. Whether
-//! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
+//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`, whose
+//! success is never taken for its end: whether it has exited is `WaitForSingleObject` on the
+//! same handle (`SYNCHRONIZE`), `WAIT_OBJECT_0` and nothing else, for as long as the sweep says
+//! (`KILL_WAIT` after a kill, no wait for one whose kill was refused).
 //!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
@@ -55,8 +57,6 @@ use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, sid_text};
 
-/// How long an ended process has to be gone.
-const KILL_WAIT: Duration = Duration::from_secs(5);
 /// `ERROR_INVALID_PARAMETER`: `OpenProcess` of a pid no process has.
 const NO_SUCH_PID: i32 = 87;
 /// `ERROR_NO_MORE_FILES`: the snapshot's end.
@@ -199,24 +199,11 @@ impl Processes for OsProcesses<'_> {
 
     fn kill(&mut self, process: &Handle) -> io::Result<()> {
         // SAFETY: the handle is live with PROCESS_TERMINATE.
-        let ended = unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e));
-        if let Err(error) = ended {
-            // One already exiting refuses the call; it is gone all the same.
-            return if exited(process.0, Duration::ZERO) {
-                Ok(())
-            } else {
-                Err(error)
-            };
-        }
-        if exited(process.0, KILL_WAIT) {
-            Ok(())
-        } else {
-            Err(io::Error::from(io::ErrorKind::TimedOut))
-        }
+        unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e))
     }
 
-    fn exited(&mut self, process: &Handle) -> bool {
-        exited(process.0, Duration::ZERO)
+    fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+        exited(process.0, wait)
     }
 
     fn pause(&mut self, pause: Duration) {

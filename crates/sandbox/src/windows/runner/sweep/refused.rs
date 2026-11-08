@@ -53,7 +53,7 @@ pub(super) fn wait_out<'a, P: Processes>(
     loop {
         let (gone, still): (Vec<_>, Vec<_>) = left
             .into_iter()
-            .partition(|refused| calls.exited(&refused.process));
+            .partition(|refused| calls.exited(&refused.process, Duration::ZERO));
         ended.extend(gone);
         left = still;
         if left.is_empty() || waited >= EXIT_WAIT {
