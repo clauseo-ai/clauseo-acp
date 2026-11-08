@@ -43,8 +43,9 @@
 //! - **The IT off switch:** [`POLICY_VALUE`] a `DWORD` 0 in `HKLM\`[`POLICY_KEY`] means the
 //!   task is never started: [`Down::TurnedOff`], logged once.
 //! - **The breaker:** the watcher's `paused` line (heavy disk activity) reaches every registered
-//!   launch once as [`Denial::ReporterPaused`](crate::Denial::ReporterPaused); `resumed`, or a
-//!   new connection, clears it.
+//!   launch once as [`Denial::ReporterPaused`](crate::Denial::ReporterPaused), and a launch
+//!   registered during the pause hears it as it registers; `resumed`, or a new connection,
+//!   clears it.
 //! - **Fallback:** a task not registered, a watcher that exits 68 (the provider's sessions are
 //!   taken) or anything else, no name within [`PIPE_WAIT`], or a key or server that fails the
 //!   check marks the reporter [`Status::Down`] and is logged once per reason. Launches go
@@ -65,7 +66,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use super::sids::Sid;
-use crate::{Access, CappedSink, Clock, DenialSink, Policy};
+use crate::{Access, CappedSink, Clock, Denial, DenialSink, Policy};
 
 #[cfg(windows)]
 mod os;
@@ -228,8 +229,9 @@ struct State {
     logged: Option<Down>,
     /// The registration the last refusal went to, for a `dropped` line.
     last_routed: Option<u64>,
-    /// The watcher's breaker is open: its pause was told, and isn't told again until it resumes.
-    paused: bool,
+    /// The watcher's breaker is open for this many seconds: its pause was told, and isn't told
+    /// again until it resumes, but to a launch registered meanwhile.
+    paused: Option<u64>,
 }
 
 /// The client: its effects and its state.
@@ -302,7 +304,8 @@ impl<W: Watch> Hub<W> {
         policy: Arc<Policy>,
         sink: Arc<dyn Capped>,
     ) -> Registration {
-        let (id, first) = {
+        let told = Arc::clone(&sink);
+        let (id, first, paused) = {
             let mut state = self.shared.lock();
             let id = state.next_id;
             state.next_id += 1;
@@ -318,8 +321,12 @@ impl<W: Watch> Hub<W> {
                 state.status = Status::Starting;
                 state.generation
             });
-            (id, first)
+            (id, first, state.paused)
         };
+        // Registered during a pause: told now, as the launches before it were.
+        if let Some(secs) = paused {
+            told.denied(Denial::ReporterPaused { secs });
+        }
         if let Some(generation) = first {
             self.start(generation);
         }
@@ -375,7 +382,7 @@ impl<W: Watch> Shared<W> {
             if state.generation == generation && !state.launches.is_empty() {
                 state.status = Status::Live;
             }
-            state.paused = false;
+            state.paused = None;
             state.logged.take().is_some()
         };
         let line = if was_down {

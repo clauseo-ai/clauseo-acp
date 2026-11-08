@@ -527,5 +527,29 @@ fn a_pause_is_told_to_every_launch_once_until_it_resumes() {
     assert_eq!(a.keep.got().len(), 3);
 }
 
+#[test]
+fn a_launch_registered_during_a_pause_hears_it_as_it_registers() {
+    let fake = Fake::default();
+    let pipe = fake.pipe();
+    let hub = Hub::new(fake);
+    let dir = TempDir::new("watch-client-pause-late");
+    let policy = policy(&dir);
+    let a = launch();
+    let _a = hub.register(sid(POOL_A), Arc::clone(&policy), Arc::clone(&a.sink));
+    pipe.send(b"{\"v\":1,\"paused\":{\"secs\":30,\"reason\":\"rate\"}}\n".to_vec())
+        .unwrap();
+    eventually("a heard the pause", || a.keep.got().len() == 1);
+    let b = launch();
+    let _b = hub.register(sid(POOL_B), Arc::clone(&policy), Arc::clone(&b.sink));
+    assert_eq!(b.keep.got(), [Denial::ReporterPaused { secs: 30 }]);
+    // After it resumes, a new launch hears nothing.
+    pipe.send(b"{\"v\":1,\"resumed\":true}\n".to_vec()).unwrap();
+    pipe.send(denied(POOL_A, r"C:\a", "read")).unwrap();
+    eventually("the resume was read", || a.keep.got().len() == 2);
+    let c = launch();
+    let _c = hub.register(sid(POOL_B), Arc::clone(&policy), Arc::clone(&c.sink));
+    assert_eq!(c.keep.got(), []);
+}
+
 mod fallback;
 mod local;

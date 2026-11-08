@@ -8,6 +8,7 @@
 use std::io;
 use std::path::Path;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
@@ -113,9 +114,22 @@ impl Watch for OsWatch {
     }
 
     fn turned_off(&self) -> bool {
+        /// A value that isn't a `DWORD` (a `REG_SZ "0"`, say) was logged as ignored.
+        static IGNORED: AtomicBool = AtomicBool::new(false);
         let key = HSTRING::from(POLICY_KEY);
         let value = HSTRING::from(POLICY_VALUE);
-        read_dword(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr())).is_ok_and(|read| read == Some(0))
+        match read_dword(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr())) {
+            Ok(read) => read == Some(0),
+            Err(error) => {
+                if !IGNORED.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        %error,
+                        "the denial reporter's policy DenialReporter isn't a readable DWORD: ignored"
+                    );
+                }
+                false
+            }
+        }
     }
 
     fn last_exit(&self) -> Option<u32> {

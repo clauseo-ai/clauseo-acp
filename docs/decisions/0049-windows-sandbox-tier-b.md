@@ -2122,7 +2122,10 @@ and exits by itself after its 3 s grace.
 1. reads IT's off switch, `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\DenialReporter` (64-bit
    view). A `DWORD` 0 means the task is never started: the reporter is `Down(TurnedOff)` ("turned
    off by policy"), logged once, and the host-side source reports alone. It is read again at
-   each retry, so a change applies within a minute;
+   each retry, so a change applies within a minute. A value of another type (a `REG_SZ "0"`,
+   say) is ignored and logged once as ignored. Only the client reads the switch; the watcher
+   doesn't. So a run started by hand (Task Scheduler, `schtasks /run`) still runs, and a
+   connection already open when IT sets the switch stays open until it ends;
 2. starts `\Clauseo\SandboxWatch` (`refresh::request_watch`);
 3. polls `HKLM\SOFTWARE\Clauseo\SandboxWatch` every 100 ms, for up to 5 s, and opens only a
    `PipeName` that `protocol::is_pipe_name` accepts. It reads the name on a key handle whose
@@ -2169,7 +2172,8 @@ order before the launch (M1) is kept free of anything else. Row C2 measures what
   activity. Every registered launch gets `Denial::ReporterPaused { secs }` once (appended to
   `Denial`), which says file refusals aren't reported for that long and the host-side source
   still works. It passes `CappedSink` uncapped, and the host's counting sink counts it as no
-  refusal. A second `paused` changes nothing; `resumed`, or a new connection, clears the state.
+  refusal. A launch registered during the pause gets it as it registers. A second `paused`
+  changes nothing; `resumed`, or a new connection, clears the state.
 - `{"dropped":n}` carries no SID. It goes to the launch of the last refusal routed, or to every
   launch when none has been routed yet. The sinks are ticked once a second.
 
@@ -2177,7 +2181,9 @@ order before the launch (M1) is kept free of anything else. Row C2 measures what
 unelevated:
 - It refuses (`None`), before opening anything, any path that isn't `X:\...` with no `.` or
   `..` part, and any drive `GetDriveTypeW` calls remote or unknown. UNC, `\\?\`, `\\.\` and
-  device paths never reach the network or a device.
+  device paths never reach the network or a device. A letter `subst`-ed to a UNC path may make
+  `GetDriveTypeW` open that root, but the letter is the lawyer's own mapping, never one the
+  agent chose.
 - It opens the path one part at a time (`watch_client::open_no_reparse`): the drive's root by
   name, then each part relative to the handle of the folder before it (`object::open_at`:
   `NtCreateFile` with `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT` and backup intent). No

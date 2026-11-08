@@ -24,17 +24,17 @@ pub(super) fn deliver<W: Watch>(shared: &Shared<W>, text: &str) {
         }
         Some(Line::Dropped { dropped: count, .. }) => dropped(shared, count),
         Some(Line::Paused { paused, .. }) => pause(shared, paused.secs),
-        Some(Line::Resumed { .. }) => shared.lock().paused = false,
+        Some(Line::Resumed { .. }) => shared.lock().paused = None,
         None => {}
     }
 }
 
 /// The watcher's breaker opened for `secs`: every registered launch hears it once, until a
-/// `resumed` line (or a new connection) clears it. The host-side source still reports.
+/// `resumed` line (or a new connection) clears it; a launch registered meanwhile hears it then. The host-side source still reports.
 fn pause<W: Watch>(shared: &Shared<W>, secs: u64) {
     let sinks: Vec<Arc<dyn Capped>> = {
         let mut state = shared.lock();
-        if std::mem::replace(&mut state.paused, true) {
+        if state.paused.replace(secs).is_some() {
             return;
         }
         state
