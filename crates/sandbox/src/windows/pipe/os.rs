@@ -1,6 +1,7 @@
 //! The runner pipes on Windows: the outer runner's server ends, made with the explicit DACL
 //! and overlapped so a wait can also watch the inner runner's process, and the inner runner's
-//! client ends, opened plainly (synchronous) so the agent can use them as its stdio.
+//! client ends, opened plainly (synchronous) so the agent can use them as its stdio; and a
+//! client's identity, its process opened by pid with its creation time ([`open_process`]).
 #![expect(unsafe_code, reason = "FFI to the named pipe and overlapped I/O calls")]
 
 use std::io;
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{
     ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_CONNECTED,
-    ERROR_PIPE_NOT_CONNECTED, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_PIPE_NOT_CONNECTED, FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Storage::FileSystem::{
@@ -21,7 +22,10 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
-use windows::Win32::System::Threading::{CreateEventW, WaitForMultipleObjects};
+use windows::Win32::System::Threading::{
+    CreateEventW, GetProcessTimes, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, WaitForMultipleObjects,
+};
 use windows::core::HSTRING;
 
 use super::Role;
@@ -58,7 +62,7 @@ impl ServerPipe {
         let access = match role {
             Role::Ctl => PIPE_ACCESS_DUPLEX,
             Role::In => PIPE_ACCESS_OUTBOUND,
-            Role::Out | Role::Err => PIPE_ACCESS_INBOUND,
+            Role::Out | Role::Err | Role::Denials => PIPE_ACCESS_INBOUND,
         };
         // SAFETY: the name is a live HSTRING; `attributes` and the descriptor it points at
         // outlive the call; the handle returned is owned by `Handle`.
@@ -118,6 +122,46 @@ impl ServerPipe {
                 "the inner runner exited before connecting",
             )
         })
+    }
+
+    /// Reads into `buf`, waiting for bytes or for `watch` (a process) to be signalled, which
+    /// wins when both have come: `None` then, the read cancelled and what it got dropped.
+    /// `Some(0)` once the client has gone.
+    pub(in crate::windows) fn read_until(
+        &self,
+        buf: &mut [u8],
+        watch: HANDLE,
+    ) -> io::Result<Option<usize>> {
+        let mut io = Overlapped::new()?;
+        let len = buf.len().min(BUFFER as usize);
+        // SAFETY: `buf` and `io` outlive the operation, which is completed by `result` or
+        // cancelled by `cancel` (which waits) before either drops.
+        let started = unsafe {
+            ReadFile(
+                self.handle.0,
+                buf.get_mut(..len),
+                None,
+                Some(io.as_mut_ptr()),
+            )
+        };
+        match started {
+            Ok(()) => {}
+            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+            Err(error) if ended(&error) => return Ok(Some(0)),
+            Err(error) => return Err(os_error(&error)),
+        }
+        // The watch first: when both are signalled, the lower index wins.
+        // SAFETY: both handles are live for the wait.
+        let woke = unsafe { WaitForMultipleObjects(&[watch, io.event.0], false, INFINITE) };
+        if woke == WAIT_OBJECT_0 {
+            io.cancel(&self.handle);
+            return Ok(None);
+        }
+        match io.result(&self.handle) {
+            Ok(read) => Ok(Some(read)),
+            Err(error) if error.raw_os_error().is_some_and(ended_code) => Ok(Some(0)),
+            Err(error) => Err(error),
+        }
     }
 
     /// The pid of the client connected now.
@@ -261,7 +305,7 @@ pub(in crate::windows) fn open_client(name: &str, role: Role, inherit: bool) -> 
     let access = match role {
         Role::Ctl => super::PIPE_RIGHTS,
         Role::In => READ_END,
-        Role::Out | Role::Err => WRITE_END,
+        Role::Out | Role::Err | Role::Denials => WRITE_END,
     };
     // SAFETY: the name is a live HSTRING and `attributes` outlives the call; the handle
     // returned is owned by `Handle`.
@@ -278,4 +322,52 @@ pub(in crate::windows) fn open_client(name: &str, role: Role, inherit: bool) -> 
     }
     .map_err(|error| os_error(&error))?;
     Ok(Handle(handle))
+}
+
+/// A process opened to wait on (a pipe's `connect` can watch it), with its creation time in
+/// `FILETIME` ticks, which tells it from a later process with the same id.
+pub(in crate::windows) struct Opened {
+    handle: Handle,
+    /// Its creation time.
+    pub(in crate::windows) started: u64,
+}
+
+// SAFETY: the handle is a kernel handle any thread may use; nothing else is shared.
+unsafe impl Send for Opened {}
+
+impl Opened {
+    /// Its handle, live while this is.
+    pub(in crate::windows) fn handle(&self) -> HANDLE {
+        self.handle.0
+    }
+}
+
+/// Opens process `pid` (synchronize, query) and reads its creation time.
+pub(in crate::windows) fn open_process(pid: u32) -> io::Result<Opened> {
+    // SAFETY: a plain open by pid; the handle is owned by `Handle`.
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            pid,
+        )
+    }
+    .map(Handle)
+    .map_err(|error| os_error(&error))?;
+    let mut times = [FILETIME::default(); 4];
+    let [created, exited, kernel, user] = &mut times;
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; four live, distinct
+    // out-pointers.
+    unsafe {
+        GetProcessTimes(
+            handle.0,
+            &raw mut *created,
+            &raw mut *exited,
+            &raw mut *kernel,
+            &raw mut *user,
+        )
+    }
+    .map_err(|error| os_error(&error))?;
+    let started = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    Ok(Opened { handle, started })
 }

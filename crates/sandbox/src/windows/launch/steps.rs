@@ -5,11 +5,13 @@
 //!
 //! [`Launchers`]: super::Launchers
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
 
+use super::feed::DenialPipe;
 use super::prepare::Walk;
 use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
@@ -104,6 +106,8 @@ pub trait LaunchSteps: Send + Sync + 'static {
     type Repaired;
     /// What `set_aside::after_session` returned (`Checked`).
     type Passed;
+    /// A launch's denial pipe (`feed.rs`; `OsDenialPipe` on Windows).
+    type Pipe: DenialPipe;
 
     /// The sandbox's data folder, which [`Launchers::with_steps`](super::Launchers::with_steps)
     /// locks (`tier-b-launchers.lock`) for as long as the launchers live: one set of launchers
@@ -178,24 +182,40 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// progress).
     fn apply(&self, plan: &Self::Plan, check: &Self::Check, walk: &Walk<'_>) -> Result<(), Error>;
 
+    /// Makes a launch's denial pipe (`OsDenialPipe::create`): it, and its name for the launch
+    /// file.
+    fn create_pipe(&self) -> Result<(Self::Pipe, String), Error>;
     /// Writes the protected launch file for `spec` (`LaunchMessage::from_policy`,
-    /// `write_launch`): its path.
+    /// `write_launch`), naming `denial_pipe`, the pipe the outer writes its records to: its path.
+    ///
+    /// TODO(#789): the launch message's new field (`denial_pipe`) carries the name.
     fn write_launch(
         &self,
         policy: &Policy,
         pool: &PoolUser,
         spec: &LaunchSpec,
+        denial_pipe: &str,
     ) -> Result<PathBuf, Error>;
-    /// Starts the outer runner on the launch file (`spawn_in_tree` on `RUNNER_EXE`).
+    /// Removes a launch file whose outer didn't start: it holds the agent's environment.
+    fn remove_launch(&self, launch: &Path);
+    /// The outer runner: `<install>\clauseo-sandbox-run.exe` (`RUNNER_EXE`).
+    fn runner(&self) -> PathBuf;
+    /// The host's own variable `name`, for the outer's minimal environment.
+    fn host_var(&self, name: &str) -> Option<OsString>;
+    /// Starts the outer runner as `spec` says, in the host's tree (`spawn_in_tree`).
     fn spawn_outer(
         &self,
-        launch: &Path,
+        spec: &LaunchSpec,
         opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error>;
     /// Ends the outer a launcher may have started for `pool`'s run, after a panic in the
     /// launcher: kills its job and waits until the job is truly empty (#697), or fails. Nothing
     /// to end is fine. TODO(C4/C5): the real one, by the job the spawn made.
     fn end_outer(&self, pool: &PoolUser) -> Result<(), Error>;
+    /// Waits up to `within` for every process running as the pool user to have truly exited:
+    /// found by its token's user and each handle waited on, not by the job's count, which reads
+    /// empty while processes still tear down (stage D, #697). The pids still running then.
+    fn wait_exited(&self, pool: &PoolUser, within: Duration) -> Result<Vec<u32>, Error>;
 
     /// The journal's cursor, before the repair (`session_cursor`).
     fn session_cursor(&self, end: &Ending<'_>) -> Option<Self::Cursor>;

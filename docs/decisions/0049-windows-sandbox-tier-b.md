@@ -2446,6 +2446,31 @@ The orchestrator's rulings change the interface above in these ways:
   (`ClauseoRun-<hex>`, which `EndRun` deletes), not the pool user. Otherwise a grant survives a
   failed check and the pool user keeps it outside any run.
 
+#### As built (PR6 C4)
+
+- **The outer:** `TierBLauncher` makes the denial pipe, writes the launch file, which names
+  the pipe, then starts `clauseo-sandbox-run.exe --launch <file>` from the runner's folder. It
+  runs with `clear_env` and only `SystemRoot`, `SystemDrive`, `windir`, `TEMP` and `TMP`. Its
+  stdin grace is 5 s unless the host set one. A launch file whose outer didn't start is
+  removed.
+- **Denials come on the denial pipe, never from stderr.** The outer's stderr carries the
+  agent's, so the agent could forge any line there. The pipe has a random name
+  (`clauseo-run-<32 hex>-denials`), the desktop user alone in its DACL, the Medium label, one
+  instance made first, and local clients only. Once the outer has started, a thread reads it
+  only if its client is the outer, by pid and creation time. Each set-aside record goes to the
+  launch's sink in order. Each read also waits on the outer's process handle: once the outer
+  has exited the feed stops, drops what is unread (a handle it left behind could still write)
+  and closes the pipe. The record format is a stand-in until #789's.
+- **The exit:** `RunEnd::from_exit(code)` gives the host one of `Exited`, `HostEnded`,
+  `LeftSafeWorkspace`, `Redetect(cause)` or `Failed(error)`.
+- **The end runs once per session**, whoever asks first: the host's `after_session`, or the
+  launcher dropped without one, on a thread `Launchers::wait_ends` waits for. Until its outer
+  starts the launcher holds the reservation's claim, and a failed start or an unused drop
+  undoes the session instead; the end's guard is armed only once the outer has started. The
+  end waits first for the pool user's processes to have truly exited
+  (`LaunchSteps::wait_exited`, by token and handle, not the job's count). Any left after 10 s
+  get the stop task and a second wait. Only then is the matter free for `reserve`.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

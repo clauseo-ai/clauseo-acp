@@ -1,8 +1,11 @@
 //! The fake steps: a world that outlives one set of launchers (the "disk": slot claims, open
 //! sessions, the data folder), a log of every call, a step that fails, panics, waits or takes
-//! time on demand, and a clock the retries and slow steps move.
+//! time on demand, and a clock the retries and slow steps move. The pool user's processes are a
+//! count: leftovers, or the outer's tree, which [`FakeSteps::spawn_outer`] starts as a real
+//! process that exits at once (`spawn_fails` makes it fail instead).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -12,6 +15,7 @@ use std::time::Duration;
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
 
 use super::super::{Ending, LaunchSteps, RunRefusal, Slot, Stopped, Walk};
+use super::pipe::{FakePipe, PIPE};
 use crate::test_support::TempDir;
 use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
@@ -77,6 +81,26 @@ pub(super) struct World {
     progressing: Mutex<Option<(&'static str, Duration)>>,
     end_run_fails: Mutex<u32>,
     dir: OnceLock<TempDir>,
+    lingering: Mutex<u32>,
+    spawned: Mutex<Option<Spawned>>,
+    denial_pipe: Mutex<Option<String>>,
+    spawn_starts: Mutex<bool>,
+}
+
+/// What `spawn_outer` was given.
+#[derive(Debug, Clone)]
+pub(super) struct Spawned {
+    pub(super) program: PathBuf,
+    pub(super) args: Vec<OsString>,
+    pub(super) env: BTreeMap<OsString, OsString>,
+    pub(super) cwd: PathBuf,
+    pub(super) grace: Option<Duration>,
+    pub(super) clears_env: bool,
+}
+
+/// The fake's install folder: one that exists, as a spec's working folder must.
+pub(super) fn install() -> PathBuf {
+    std::env::temp_dir()
 }
 
 impl World {
@@ -172,6 +196,27 @@ impl World {
     /// The end sweeper an outer started runs as the pool user, or has finished.
     pub(super) fn sweeper(&self, running: bool) {
         *self.sweeper.lock().unwrap() = running;
+    }
+
+    /// The pool user's processes outlive `waits` waits for their exit (they tear down).
+    pub(super) fn linger(&self, waits: u32) {
+        *self.lingering.lock().unwrap() = waits;
+    }
+
+    /// `spawn_outer` starts a real process (this test binary, running no test), so the launch
+    /// succeeds: the outer's two processes then run as the pool user until a wait for them.
+    pub(super) fn spawn_starts(&self) {
+        *self.spawn_starts.lock().unwrap() = true;
+    }
+
+    /// The denial pipe the last launch file named.
+    pub(super) fn denial_pipe(&self) -> Option<String> {
+        self.denial_pipe.lock().unwrap().clone()
+    }
+
+    /// What the last `spawn_outer` was given.
+    pub(super) fn spawned(&self) -> Option<Spawned> {
+        self.spawned.lock().unwrap().clone()
     }
 
     pub(super) fn claimed_slots(&self) -> BTreeSet<u8> {
@@ -286,6 +331,7 @@ impl LaunchSteps for FakeSteps {
     type Cursor = ();
     type Repaired = ();
     type Passed = Vec<SetAside>;
+    type Pipe = FakePipe;
 
     fn data_dir(&self) -> &Path {
         &self.dir
@@ -443,23 +489,82 @@ impl LaunchSteps for FakeSteps {
         Ok(())
     }
 
+    fn create_pipe(&self) -> Result<(FakePipe, String), Error> {
+        self.world.step("create_pipe")?;
+        Ok((FakePipe::default(), PIPE.to_owned()))
+    }
+
     fn write_launch(
         &self,
         _policy: &Policy,
         _pool: &PoolUser,
         _spec: &LaunchSpec,
+        denial_pipe: &str,
     ) -> Result<PathBuf, Error> {
         self.world.step("write_launch")?;
+        *self.world.denial_pipe.lock().unwrap() = Some(denial_pipe.to_owned());
         Ok(PathBuf::from("run/0123456789abcdef.json"))
     }
 
+    fn remove_launch(&self, _launch: &Path) {
+        self.world.log("remove_launch");
+    }
+
+    fn runner(&self) -> PathBuf {
+        install().join("clauseo-sandbox-run.exe")
+    }
+
+    fn host_var(&self, name: &str) -> Option<OsString> {
+        match name {
+            "SystemRoot" | "windir" => Some(r"C:\Windows".into()),
+            "TEMP" => Some(r"C:\Users\lawyer\AppData\Local\Temp".into()),
+            "PATH" | "USERPROFILE" => Some("not for the outer".into()),
+            _ => None,
+        }
+    }
+
+    /// Records what it was given, then fails, or with [`World::spawn_starts`] starts a real
+    /// process that exits at once and "starts" the outer's two processes.
     fn spawn_outer(
         &self,
-        _launch: &Path,
-        _opts: &SpawnOptions,
+        spec: &LaunchSpec,
+        opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error> {
         self.world.log("spawn_outer");
-        Err(clauseo_process::Error::Closing)
+        *self.world.spawned.lock().unwrap() = Some(Spawned {
+            program: spec.program().to_path_buf(),
+            args: spec.args().to_vec(),
+            env: spec.env().clone(),
+            cwd: spec.cwd().to_path_buf(),
+            grace: opts.stdin_grace_set(),
+            clears_env: opts.clears_env(),
+        });
+        if !*self.world.spawn_starts.lock().unwrap() {
+            return Err(clauseo_process::Error::Closing);
+        }
+        *self.world.leftovers.lock().unwrap() = 2;
+        let exe = std::env::current_exe().unwrap();
+        let args = vec!["--exact".into(), "clauseo-no-such-test".into()];
+        let quick = LaunchSpec::new(exe, args, BTreeMap::new(), install()).unwrap();
+        clauseo_process::spawn_in_tree(&quick, &SpawnOptions::new())
+    }
+
+    /// Logs the processes running when it starts: they exit within the wait, unless they
+    /// linger, which costs the whole wait.
+    fn wait_exited(&self, _pool: &PoolUser, within: Duration) -> Result<Vec<u32>, Error> {
+        let mut leftovers = self.world.leftovers.lock().unwrap();
+        self.world.log(format!("wait_exited {}", *leftovers));
+        if *self.world.fail_at.lock().unwrap() == Some("wait_exited") {
+            return Err(Error::Policy("fake wait_exited failed".to_owned()));
+        }
+        let mut lingering = self.world.lingering.lock().unwrap();
+        if *lingering > 0 && *leftovers > 0 {
+            *lingering -= 1;
+            *self.world.clock.lock().unwrap() += within;
+            return Ok((1..=*leftovers).collect());
+        }
+        *leftovers = 0;
+        Ok(Vec::new())
     }
 
     fn end_outer(&self, _pool: &PoolUser) -> Result<(), Error> {

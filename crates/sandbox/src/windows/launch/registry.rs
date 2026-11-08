@@ -108,6 +108,8 @@ pub(super) struct Entry<S: LaunchSteps> {
     /// When it entered its state, on the steps' clock: the limit of a reserve, an undo, a
     /// release or a session's end counts from here.
     pub(super) since: Duration,
+    /// The outer started: the end waits for the pool user's processes to truly exit.
+    pub(super) spawned: bool,
 }
 
 /// What an undo takes from an entry: the run's group, the slot, the session's mark.
@@ -146,6 +148,7 @@ pub(super) struct Ended<S: LaunchSteps> {
     pub(super) run: Option<S::RunGroup>,
     /// The end's progress, for its work steps' [`Walk`](super::Walk).
     pub(super) walk: Arc<Shared>,
+    pub(super) spawned: bool,
 }
 
 /// The sessions of one set of launchers, by matter.
@@ -161,6 +164,9 @@ pub(super) struct Registry<S: LaunchSteps> {
     /// The sandbox folder's lock, held while anything (a reservation, a walk, a release thread)
     /// can still use the registry. `None` only once a test let go of it as a crash would.
     data_lock: Mutex<Option<File>>,
+    /// How many ends a dropped launcher started on a thread of their own are still running.
+    ending: Mutex<usize>,
+    ended: Condvar,
 }
 
 impl<S: LaunchSteps> Registry<S> {
@@ -173,6 +179,8 @@ impl<S: LaunchSteps> Registry<S> {
             owed: Mutex::new(Vec::new()),
             freed: Condvar::new(),
             data_lock: Mutex::new(Some(data_lock)),
+            ending: Mutex::new(0),
+            ended: Condvar::new(),
         }
     }
 
@@ -258,6 +266,7 @@ impl<S: LaunchSteps> Registry<S> {
                 walk: None,
                 stuck_from: None,
                 since: now,
+                spawned: false,
             },
         );
         Ok(id)
@@ -425,14 +434,17 @@ impl<S: LaunchSteps> Registry<S> {
         Ok((pool, std::mem::take(&mut entry.moved)))
     }
 
-    /// Starts `session`'s end: launched, it becomes ending, with its progress (the walk's stall
-    /// rule and cap, not a wall bound). `None` for a session not launched.
-    pub(super) fn end(&self, matter: &str, session: &str) -> Option<Ended<S>> {
+    /// Starts `session`'s end (of claim `id`, when given): launched, it becomes ending, with
+    /// its progress (the walk's stall rule and cap, not a wall bound). `None` for a session not
+    /// launched, or whose end (or undo) has started: each session ends once.
+    pub(super) fn end(&self, matter: &str, session: &str, id: Option<u64>) -> Option<Ended<S>> {
         let now = self.steps.now();
         let mut matters = self.lock();
-        let entry = matters
-            .get_mut(matter)
-            .filter(|entry| entry.session == session && entry.state == State::Launched)?;
+        let entry = matters.get_mut(matter).filter(|entry| {
+            entry.session == session
+                && entry.state == State::Launched
+                && id.is_none_or(|id| entry.id == id)
+        })?;
         let walk = Shared::new(now);
         entry.state = State::Ending;
         entry.since = now;
@@ -443,7 +455,42 @@ impl<S: LaunchSteps> Registry<S> {
             slot: entry.slot.clone(),
             run: entry.run.take(),
             walk,
+            spawned: entry.spawned,
         })
+    }
+
+    /// Whether claim `id` of `matter` is launched and its end not started.
+    pub(super) fn launched(&self, matter: &str, id: u64) -> bool {
+        self.lock()
+            .get(matter)
+            .is_some_and(|entry| entry.id == id && entry.state == State::Launched)
+    }
+
+    /// Counts an end started on a thread of its own, until [`Registry::end_done`].
+    pub(super) fn end_started(&self) {
+        *self.count() += 1;
+    }
+
+    /// Counts that end done.
+    pub(super) fn end_done(&self) {
+        let mut ending = self.count();
+        *ending = ending.saturating_sub(1);
+        drop(ending);
+        self.ended.notify_all();
+    }
+
+    /// Waits up to `timeout` for the ends running on threads of their own: whether none is left.
+    pub(super) fn wait_ends(&self, timeout: Duration) -> bool {
+        let ending = self.count();
+        let (ending, _) = self
+            .ended
+            .wait_timeout_while(ending, timeout, |ending| *ending > 0)
+            .unwrap_or_else(PoisonError::into_inner);
+        *ending == 0
+    }
+
+    fn count(&self) -> MutexGuard<'_, usize> {
+        self.ending.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Runs `undo`'s steps, then frees claim `id`'s matter, even if a step panics. Blocks:

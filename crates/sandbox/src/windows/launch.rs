@@ -16,9 +16,14 @@
 //!    launcher holds the reservation's claim until its agent starts: if writing the launch file
 //!    or starting the outer fails, or it is dropped unused, it undoes the session and frees the
 //!    matter itself.
-//! 4. [`Launchers::after_session`], once the agent's process tree is gone: the repair, the
-//!    set-aside's pass, the clean-close record, `EndRun`. Only then is the matter free, even if
-//!    a step panics (drop guards end the run and free it).
+//! 4. Once the outer has exited, [`RunEnd::from_exit`] on its exit code: what the host does
+//!    (the agent's own exit, the "left the Safe workspace" stop, a new tier detection, or a
+//!    failed launch with its cause).
+//! 5. [`Launchers::after_session`], once the agent's process tree is gone: the wait for the
+//!    pool user's processes to truly exit, the repair, the set-aside's pass, the clean-close
+//!    record, `EndRun`. Only then is the matter free, even if a step panics (drop guards end
+//!    the run and free it). It runs once per session whose agent started: a launcher dropped
+//!    before it runs it itself (`end.rs`), and [`Launchers::wait_ends`] waits for those.
 //!
 //! The host keeps one owner of the reservation from `reserve` through `launch`. Dropped before
 //! its launch, it undoes what was done for the session, newest first (the run's group, the
@@ -44,21 +49,29 @@ use std::time::Duration;
 
 use clauseo_process::SpawnOptions;
 
+mod end;
+mod feed;
 mod prepare;
+mod records;
 mod registry;
 mod steps;
 mod tier_b;
 mod walk;
 
+pub use end::{EXIT_WAIT, RunEnd};
+#[cfg(windows)]
+pub use feed::os::OsDenialPipe;
+pub use feed::{CONNECT_WAIT, DenialPipe, Peer};
 pub use prepare::{
     PREPARE_BOUND, PREPARE_STALL, Preparing, Progress, RETRY_PAUSE, STUCK_GRACE, Stage,
     WORK_CEILING, Walk,
 };
 pub use steps::{Ending, LaunchSteps, RunRefusal, Slot, Stopped};
-pub use tier_b::TierBLauncher;
+pub use tier_b::{OUTER_ENV, OUTER_STDIN_GRACE, TierBLauncher};
 
 use prepare::Reserved;
-use registry::{Begun, FinishEnd, Registry, State};
+use registry::{Begun, Registry, State};
+use tier_b::Handover;
 
 use crate::reservation::{Claim, Release};
 use crate::windows::pool::assign::Assign;
@@ -208,11 +221,16 @@ impl<S: LaunchSteps> Launchers<S> {
     /// **[`Error::LeftoverProcess`] here is final:** the preparation stopped, swept and looked
     /// again within its bound, so a process of the pool user's now started in the gap. The host
     /// doesn't retry; it is a plain launch failure. The seam's `running` went to `reserve`.
-    /// `denials` is unused until C4 feeds it the outer's denial lines.
+    ///
+    /// The launcher starts the outer with `opts`, `clear_env` and a 5 s stdin grace unless `opts`
+    /// set one (`tier_b.rs`). The outer's set-aside records come to `denials` on the denial pipe
+    /// the launcher makes, from the outer alone (`feed.rs`); nothing read from its stderr does.
     ///
     /// The launcher holds the reservation's claim until its agent starts ([`TierBLauncher`]):
     /// a failed start, or a launcher dropped unused, undoes the session and frees the matter,
-    /// so the host's `after_session` then finds nothing to do.
+    /// so the host's `after_session` then finds nothing to do. Once its agent started, it holds
+    /// the session's end: dropped before [`after_session`](Launchers::after_session) ran, it
+    /// runs it.
     pub fn launch(
         &self,
         reservation: Reservation,
@@ -238,9 +256,15 @@ impl<S: LaunchSteps> Launchers<S> {
             self.registry.release_now(id);
             return Err(Error::WrongReservation);
         };
-        // TODO(C4): the outer's stderr lines go to `denials` through `denial_from_line`.
-        drop(denials);
-        let launcher = TierBLauncher::new(Arc::clone(&self.registry), claim, policy, pool, opts);
+        let session = Handover {
+            matter: matter.to_owned(),
+            session: session.to_owned(),
+            claim,
+            policy,
+            pool,
+        };
+        let opts = tier_b::outer_options(opts);
+        let launcher = TierBLauncher::new(Arc::clone(&self.registry), session, opts, denials);
         Ok((Arc::new(launcher), moved))
     }
 
@@ -270,11 +294,12 @@ impl<S: LaunchSteps> Launchers<S> {
         self.registry.launch(matter, session, id, policy.matter())
     }
 
-    /// Once per launched agent, after its process tree is gone: in order the journal's cursor,
-    /// the repair, the end of R18's reads, the set-aside's pass, the clean-close record and
-    /// `EndRun`; then the slot goes back and the matter is free. What the pass moved. A session
-    /// these launchers didn't launch is left alone (the next launch's set-aside pass checks
-    /// it), and so is one whose launcher already undid it (its agent never started).
+    /// Once per launched agent, after its process tree is gone (`end.rs`): in order the wait for
+    /// the pool user's processes to truly exit, the journal's cursor, the repair, the end of
+    /// R18's reads, the set-aside's pass, the clean-close record and `EndRun`; then the slot
+    /// goes back and the matter is free. What the pass moved. A session these launchers didn't
+    /// launch is left alone (the next launch's set-aside pass checks it), and so is one whose
+    /// launcher already undid it (its agent never started) or whose end has run or is running.
     ///
     /// `EndRun`, the slot and the matter's release always run: drop guards do them, so a panic
     /// in a step still ends the run's group and frees the matter before it goes on up.
@@ -285,65 +310,16 @@ impl<S: LaunchSteps> Launchers<S> {
     /// the end goes on, the clean-close record noting it failed. A step that doesn't return
     /// makes the matter `MatterStuck` meanwhile; once it does return, the matter is freed.
     pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside> {
-        let registry = &self.registry;
-        let steps = &*registry.steps;
-        let Some(ended) = registry.end(matter, session) else {
-            tracing::warn!("tier B's after-session pass for a session it didn't launch");
-            return Vec::new();
-        };
-        // Dropped in reverse: the run's group and the slot first, then the matter freed.
-        let _finish = FinishEnd {
-            registry,
-            matter,
-            id: ended.id,
-        };
-        let _end_run = EndRun {
-            registry,
-            pool: ended.pool.clone(),
-            run: ended.run,
-            slot: ended.slot,
-        };
-        let mut moved = Vec::new();
-        if let Some(pool) = &ended.pool {
-            let now = || steps.now();
-            let walk = Walk {
-                shared: &ended.walk,
-                now: &now,
-            };
-            // Each step's end is progress: a stalled step stops, and the next gets its own time.
-            let stepped = || ended.walk.tick(steps.now());
-            let end = Ending {
-                walk: &walk,
-                matter,
-                session,
-                policy,
-                pool,
-            };
-            let cursor = steps.session_cursor(&end);
-            stepped();
-            let repaired = steps.repair(&end);
-            stepped();
-            if let Err(error) = &repaired {
-                tracing::warn!(
-                    kind = error.kind(),
-                    "tier B's repair after the session failed"
-                );
-            }
-            steps.end_reads(&end);
-            stepped();
-            let passed = steps.set_aside_after(&end);
-            match &passed {
-                Ok(passed) => moved = steps.moved(passed),
-                Err(error) => {
-                    tracing::warn!(
-                        kind = error.kind(),
-                        "tier B's set-aside after the session failed"
-                    );
-                }
-            }
-            steps.write_clean_close(&end, cursor.as_ref(), &repaired, &passed);
-        }
-        moved
+        end::end_session(&self.registry, (matter, session, None), policy).unwrap_or_else(|| {
+            tracing::info!("tier B's after-session pass for a session not running here");
+            Vec::new()
+        })
+    }
+
+    /// Waits up to `timeout` for the after-session passes dropped launchers started: whether
+    /// none is left. Desktop calls it at quit, so a pass isn't cut short.
+    pub fn wait_ends(&self, timeout: Duration) -> bool {
+        self.registry.wait_ends(timeout)
     }
 
     /// The id of `reservation` in these launchers' registry, if they handed it out.
@@ -358,23 +334,6 @@ impl<S: LaunchSteps> Launchers<S> {
 impl<S: LaunchSteps> std::fmt::Debug for Launchers<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Launchers").finish_non_exhaustive()
-    }
-}
-
-/// Ends the run's group, then gives the slot back (unless `EndRun` failed: then both stay held),
-/// when dropped: at the end of `after_session`, or on a panic in one of its steps.
-struct EndRun<'a, S: LaunchSteps> {
-    registry: &'a Registry<S>,
-    pool: Option<PoolUser>,
-    run: Option<S::RunGroup>,
-    slot: Option<Slot>,
-}
-
-impl<S: LaunchSteps> Drop for EndRun<'_, S> {
-    fn drop(&mut self) {
-        let (run, slot) = (self.run.take(), self.slot.take());
-        self.registry
-            .end_run_and_free_slot(self.pool.as_ref(), run, slot);
     }
 }
 
