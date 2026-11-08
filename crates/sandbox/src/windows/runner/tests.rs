@@ -1,6 +1,6 @@
 //! The launch message, its checks, the environment, the paths, the frames and the exit codes.
 
-use super::env::{CA_VARS, GIT_OPENSSL, firm_ca_files, profile_folders};
+use super::env::{CA_VARS, GIT_OPENSSL, GitEnv, firm_ca_files, profile_folders};
 use super::frame::{InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::*;
@@ -110,7 +110,13 @@ fn the_parse_refuses_what_breaks_a_rule() {
     let mut drive = message();
     drive.env.push(("=C:".to_owned(), r"C:\x".to_owned()));
     drive.check().unwrap();
-    assert!(get(&agent_env(&drive, &profile()).unwrap(), "=C:").is_none());
+    assert!(
+        get(
+            &agent_env(&drive, &profile(), &GitEnv::default()).unwrap(),
+            "=C:"
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -174,7 +180,7 @@ fn debug_never_prints_environment_values() {
 
 #[test]
 fn the_profile_variables_lie_under_the_state_folder() {
-    let env = agent_env(&message(), &profile()).unwrap();
+    let env = agent_env(&message(), &profile(), &GitEnv::default()).unwrap();
     assert_eq!(get(&env, "USERPROFILE"), Some(STATE));
     assert_eq!(get(&env, "HOME"), Some(STATE));
     assert_eq!(get(&env, "HOMEDRIVE"), Some("C:"));
@@ -203,7 +209,7 @@ fn the_profile_variables_lie_under_the_state_folder() {
 fn the_session_temp_folder_wins_when_set() {
     let mut with_tmp = message();
     with_tmp.tmpdir = Some(format!(r"{DATA}\run\s1\tmp"));
-    let env = agent_env(&with_tmp, &profile()).unwrap();
+    let env = agent_env(&with_tmp, &profile(), &GitEnv::default()).unwrap();
     assert_eq!(
         get(&env, "TEMP"),
         Some(format!(r"{DATA}\run\s1\tmp").as_str())
@@ -220,7 +226,7 @@ fn the_session_temp_folder_wins_when_set() {
 fn verbatim_paths_come_out_plain() {
     let mut verbatim = message();
     verbatim.state = format!(r"\\?\{STATE}");
-    let env = agent_env(&verbatim, &profile()).unwrap();
+    let env = agent_env(&verbatim, &profile(), &GitEnv::default()).unwrap();
     assert_eq!(get(&env, "USERPROFILE"), Some(STATE));
 }
 
@@ -233,7 +239,7 @@ fn git_uses_openssl_and_codex_the_bundle() {
         ("git_config_value_1".to_owned(), "evil".to_owned()),
         ("SSL_CERT_FILE".to_owned(), r"C:\elsewhere.pem".to_owned()),
     ]);
-    let env = agent_env(&spec, &profile()).unwrap();
+    let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     for (name, value) in GIT_OPENSSL {
         assert_eq!(get(&env, name), Some(value));
     }
@@ -247,7 +253,7 @@ fn git_uses_openssl_and_codex_the_bundle() {
     }
     // With no bundle, the spec's own values pass.
     spec.ca_bundle = None;
-    let env = agent_env(&spec, &profile()).unwrap();
+    let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     assert_eq!(get(&env, "SSL_CERT_FILE"), Some(r"C:\elsewhere.pem"));
     assert!(get(&env, "CODEX_CA_CERTIFICATE").is_none());
 }
@@ -275,7 +281,7 @@ fn nothing_points_back_at_the_lawyers_profile() {
             r"C:\Users\Lawyer\Documents\PowerShell\Modules;C:\Program Files\PowerShell\Modules".to_owned(),
         ),
     ]);
-    let env = agent_env(&spec, &profile()).unwrap();
+    let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     for gone in [
         "OneDrive",
         "NPM_CONFIG_CACHE",
@@ -316,7 +322,7 @@ fn the_environment_is_sorted_with_one_entry_per_name() {
     let mut spec = message();
     spec.env.push(("path".to_owned(), r"C:\a".to_owned()));
     spec.env.push(("PATH".to_owned(), r"C:\b".to_owned()));
-    let env = agent_env(&spec, &profile()).unwrap();
+    let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     let names: Vec<String> = env.iter().map(|(n, _)| n.to_uppercase()).collect();
     let mut sorted = names.clone();
     sorted.sort();

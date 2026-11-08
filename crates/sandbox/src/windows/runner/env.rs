@@ -10,6 +10,11 @@
 //! - **git over OpenSSL** (§3: Schannel fails under any restricting-SID token,
 //!   `s15-spikes-traverse.md` (b)): `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.sslBackend`,
 //!   `GIT_CONFIG_VALUE_0=openssl`; any other `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.
+//! - **Git Bash** (0049, "The Git tree"; [`GitEnv`], made by `git_bash.rs`): with the run's
+//!   checked tree, `CLAUDE_CODE_GIT_BASH_PATH` at `<tree>\bin\bash.exe` and `<tree>\cmd` first
+//!   in `PATH`, so the agent's `git` is the tree's and finds the tree's `sh.exe`. Either way
+//!   the spec's `CLAUDE_CODE_GIT_BASH_PATH` goes, and so does each `PATH` entry in the lawyer's
+//!   Git: with no tree the agent gets no Git, never the lawyer's.
 //! - **CA bundle** (`s15-spikes-traverse.md` (d): codex's rustls finds no roots under the token):
 //!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at the bundle, when the launch names one.
 //!   `SSL_CERT_FILE` makes every OpenSSL tool trust exactly the machine's roots, as intended.
@@ -36,6 +41,8 @@ pub const GIT_OPENSSL: [(&str, &str); 3] = [
 /// The variables codex (`CODEX_CA_CERTIFICATE`, read first) and OpenSSL tools read the CA
 /// bundle from.
 pub const CA_VARS: [&str; 2] = ["CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"];
+/// Where Claude Code finds Git Bash.
+pub const GIT_BASH_VAR: &str = "CLAUDE_CODE_GIT_BASH_PATH";
 /// The variables whose entries are filtered one by one rather than kept or dropped whole.
 const LISTS: [&str; 2] = ["PATH", "PSModulePath"];
 
@@ -75,10 +82,21 @@ pub fn profile_folders(message: &LaunchMessage) -> Result<Vec<String>, LaunchErr
     Ok(folders)
 }
 
-/// The agent's environment from `message`, for a lawyer whose profile folder is `profile`.
+/// What the agent's environment says of Git.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitEnv {
+    /// The run's checked Git tree; `None` when Git Bash is off for the run.
+    pub tree: Option<WinPath>,
+    /// The lawyer's per-machine Git installs, which no `PATH` entry of the agent's may lie in.
+    pub lawyer_git: Vec<WinPath>,
+}
+
+/// The agent's environment from `message`, for a lawyer whose profile folder is `profile`,
+/// with `git`'s Git Bash.
 pub fn agent_env(
     message: &LaunchMessage,
     profile: &WinPath,
+    git: &GitEnv,
 ) -> Result<Vec<(String, String)>, LaunchError> {
     let places = Places::of(message)?;
     let runtime: Vec<WinPath> = message
@@ -104,7 +122,10 @@ pub fn agent_env(
         {
             continue;
         }
-        let kept = if LISTS.iter().any(|list| list.eq_ignore_ascii_case(name)) {
+        let kept = if name.eq_ignore_ascii_case("PATH") {
+            filter_list(value, profile, &runtime)
+                .and_then(|value| without_roots(&value, &git.lawyer_git))
+        } else if LISTS.iter().any(|list| list.eq_ignore_ascii_case(name)) {
             filter_list(value, profile, &runtime)
         } else if lies_outside(value, profile, &granted) {
             None
@@ -117,6 +138,21 @@ pub fn agent_env(
     }
     for (name, value) in set {
         out.insert(name.to_uppercase(), (name, value));
+    }
+    if let Some(tree) = &git.tree {
+        out.insert(
+            GIT_BASH_VAR.to_owned(),
+            (
+                GIT_BASH_VAR.to_owned(),
+                tree.join("bin").join("bash.exe").display(),
+            ),
+        );
+        let cmd = tree.join("cmd").display();
+        let path = match out.remove("PATH") {
+            Some((name, value)) => (name, format!("{cmd};{value}")),
+            None => ("PATH".to_owned(), cmd),
+        };
+        out.insert("PATH".to_owned(), path);
     }
     Ok(out.into_values().collect())
 }
@@ -196,6 +232,7 @@ fn overridden(name: &str, message: &LaunchMessage) -> bool {
     ];
     let upper = name.to_ascii_uppercase();
     SET.contains(&upper.as_str())
+        || upper == GIT_BASH_VAR
         || upper == "GIT_CONFIG_COUNT"
         || upper
             .strip_prefix("GIT_CONFIG_KEY_")
@@ -215,6 +252,16 @@ fn lies_outside(value: &str, profile: &WinPath, granted: &[WinPath]) -> bool {
     value
         .split(';')
         .any(|part| text_within(part, profile) && !granted.iter().any(|g| text_within(part, g)))
+}
+
+/// `value` (a `;` list) without its entries that lie in any of `roots`; `None` when nothing
+/// is left.
+fn without_roots(value: &str, roots: &[WinPath]) -> Option<String> {
+    let kept: Vec<&str> = value
+        .split(';')
+        .filter(|entry| !roots.iter().any(|root| text_within(entry, root)))
+        .collect();
+    (!kept.is_empty()).then(|| kept.join(";"))
 }
 
 /// `value` (a `;` list) without its entries that lie in `profile` and in none of `runtime`;

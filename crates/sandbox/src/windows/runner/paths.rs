@@ -80,6 +80,11 @@ impl WinPath {
         }
     }
 
+    /// The parts below the drive (or the server and share's, for a UNC path).
+    pub fn parts(&self) -> &[String] {
+        &self.parts
+    }
+
     /// `self` with `name` appended (a single part, no separator).
     pub fn join(&self, name: &str) -> WinPath {
         let mut joined = self.clone();

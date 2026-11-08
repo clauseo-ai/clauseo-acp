@@ -78,6 +78,8 @@ mod desktop;
 mod end;
 pub mod env;
 pub mod frame;
+#[cfg(any(windows, test))]
+mod git_bash;
 #[cfg(windows)]
 mod inner;
 #[cfg(any(windows, test))]

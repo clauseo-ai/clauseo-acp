@@ -41,6 +41,8 @@ mod put;
 mod stub;
 mod walk;
 
+pub(crate) use level::checked_chain;
+
 /// The record key under `HKLM`, as `setup/record_write.rs` names it.
 const RECORD_KEY: &str = r"SOFTWARE\Clauseo\Sandbox";
 /// `HKLM\...\ProfileList`, which names the profiles folder.

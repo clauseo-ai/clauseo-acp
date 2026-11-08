@@ -80,6 +80,47 @@ pub(super) fn level(path: &Path, sddl: &str) -> Result<(), Refused> {
     secure(&folder, sddl).map_err(|why| fail(&why))
 }
 
+/// Opens the folder `admin`, then each of `levels`' names below it relative to the one above
+/// (`NtCreateFile`, `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`) for its security and
+/// attributes alone, and refuses unless each is a folder and no reparse point whose owner and
+/// DACL read back as its SDDL (`refresh::sddl_matches`, so a DACL that isn't protected fails).
+/// The outer runner's check of a tree, as the unelevated desktop user: each level's
+/// `READ_SECURITY` ACE lets it read them. The words name a level, never a path.
+pub(crate) fn checked_chain(admin: &Path, levels: &[(String, String)]) -> Result<(), String> {
+    let mut above = Object::open_folder(admin)
+        .map_err(|error| format!("opening the admin folder failed ({})", kind(&error)))?;
+    if above.reparse() || !above.folder {
+        return Err("the admin folder is a link or no folder".to_owned());
+    }
+    for (name, sddl) in levels {
+        let wide: Vec<u16> = name.encode_utf16().collect();
+        let level = match above.open_child_for(&wide, READ_CONTROL.0) {
+            Ok(level) => level,
+            Err(error) if reparse_refused(&error) => return Err(format!("{name} is a link")),
+            Err(error) => return Err(format!("opening {name} failed ({})", kind(&error))),
+        };
+        if level.reparse() || !level.folder {
+            return Err(format!("{name} is a link or no folder"));
+        }
+        let back = kernel_security(level.handle(), READ_BACK.0)
+            .map_err(|error| format!("reading {name}'s security failed ({})", kind(&error)))?;
+        let mut back = words(&back);
+        let found = to_sddl(PSECURITY_DESCRIPTOR(back.as_mut_ptr().cast()))?;
+        if !sddl_matches(&found, &Descriptor::from_sddl(sddl)?.to_sddl()?) {
+            return Err(format!("{name}'s owner or DACL isn't set-up's"));
+        }
+        above = level;
+    }
+    Ok(())
+}
+
+/// `error`'s code, else its kind.
+fn kind(error: &io::Error) -> String {
+    error
+        .raw_os_error()
+        .map_or_else(|| error.kind().to_string(), |code| code.to_string())
+}
+
 /// Sets `sddl`'s owner and protected DACL on what `folder` is open on, then reads them back
 /// and refuses unless they are that (`refresh::sddl_matches`).
 fn secure(folder: &Handle, sddl: &str) -> Result<(), String> {

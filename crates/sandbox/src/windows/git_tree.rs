@@ -71,6 +71,8 @@ mod tests_stub;
 
 pub use build::{ensure, ensure_with};
 #[cfg(windows)]
+pub(crate) use os::checked_chain;
+#[cfg(windows)]
 pub use os::{
     WindowsTrees, check_adopted_here, ensure_for, ensure_from_record, remove_all,
     remove_folder_here, runner_for_stub,

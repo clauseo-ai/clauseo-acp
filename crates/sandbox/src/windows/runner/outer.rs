@@ -142,7 +142,9 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     let (data_dir, desktop) = (&sweeper.data_dir, sweeper.desktop.clone());
     let profile = own_profile().map_err(|e| Failure::new(RunExit::BadLaunch, os("profile", &e)))?;
     refuse_codex_reuse(message, &profile)?;
-    let env = agent_env(message, &profile)
+    // Held until this process exits: msys's folders for the tree go with their last handle.
+    let git_bash = super::git_bash::os::for_run(message, &desktop, say);
+    let env = agent_env(message, &profile, &git_bash.env)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
     let env = super::ca::with_firm_ca(message, &desktop, env, say);
     let folders = super::env::profile_folders(message)
