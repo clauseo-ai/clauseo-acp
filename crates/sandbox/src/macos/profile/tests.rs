@@ -204,6 +204,32 @@ fn with_an_allowed_folder() {
 }
 
 #[test]
+fn with_reads_of_another_matter() {
+    let w = World::new("profile-other-matter");
+    w.dir.dir("m2/docs");
+    w.dir.dir("m2/.clauseo");
+    w.dir.file("m2/notes.txt", "notes");
+    let policy = w
+        .builder()
+        .hidden_matter(&w.at("m2"), "m2-id")
+        .other_matter_read(&w.at("m2/docs"), false)
+        .other_matter_read(&w.at("m2/notes.txt"), true)
+        .build()
+        .unwrap();
+    insta::assert_snapshot!(w.render(&policy));
+}
+
+#[test]
+fn the_refused_names_pattern_matches_whole_names_in_any_case() {
+    let regex = other_matter::refused_regex();
+    assert!(
+        regex.starts_with("/\\.([gG][iI][tT]|[cC][lL][aA][uU][sS][eE][oO]|"),
+        "{regex}"
+    );
+    assert!(regex.ends_with("[aA][gG][eE][nN][tT][sS])(/|$)"), "{regex}");
+}
+
+#[test]
 fn with_read_only_paths_in_the_matter() {
     let w = World::new("profile-read-only");
     w.dir.file("matter/.git/config", "[core]\n");
