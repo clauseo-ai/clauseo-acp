@@ -116,6 +116,8 @@ mod reclaim_run;
 #[cfg(test)]
 #[cfg(windows)]
 mod reclaim_tests;
+#[cfg(any(windows, test))]
+mod record_key;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;

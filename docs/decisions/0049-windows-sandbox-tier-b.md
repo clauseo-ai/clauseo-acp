@@ -578,11 +578,13 @@ started elevated, by the app or by the uninstall hook.
   only for the install that placed the copy (a per-machine removal for `machine`, the lawyer's
   own for theirs), the four values, the refresh and stop tasks (`unregister_task`), staging
   (`remove_staging`, taken back if need be), everything in the folder, then the folder; the key
-  goes once empty. The running copy is renamed in place to a name nothing starts and scheduled
-  for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the folder after it. A reinstall
-  before the restart keeps its new copy. If the rename fails, the copy stays and the step fails
-  (exit 10): the canonical `clauseo-sandbox-setup.exe` is never scheduled, since a reinstall
-  before the restart would lose its new copy at boot.
+  goes once empty, and `HKLM\SOFTWARE\Clauseo` after it once that has no value and no subkey
+  left (`record_key.rs`; a per-machine install's `SOFTWARE\Clauseo\Clauseo` keeps it, and
+  `SOFTWARE\Policies\Clauseo` is never touched). The running copy is renamed in place to a name
+  nothing starts and scheduled for deletion at restart (`MOVEFILE_DELAY_UNTIL_REBOOT`), with the
+  folder after it. A reinstall before the restart keeps its new copy. If the rename fails, the
+  copy stays and the step fails (exit 10): the canonical `clauseo-sandbox-setup.exe` is never
+  scheduled, since a reinstall before the restart would lose its new copy at boot.
   A step that fails writes an Event Log line naming it and its error code and exits 10
   (`AdminCopyLeft`); the protection itself is gone, so the hook counts 10 as removed, as 0.
 - **The copy beside the app stays.** A per-user install still ships
@@ -697,7 +699,8 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
   `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
-  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record. The
+  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record (its
+  key, and an empty `SOFTWARE\Clauseo` above it, once nothing is left in them). The
   first failure stops the run: exit 4, the record kept with `Removing` and every pool SID (so a
   later run still trusts the ledger), the ledger kept. A re-run skips what is gone.
 - **The ledger, as the owner** (the parent is the owner): `DataDir`, which the owner can
