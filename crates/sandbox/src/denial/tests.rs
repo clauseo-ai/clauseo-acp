@@ -259,12 +259,12 @@ fn every_invisible_or_control_range_is_escaped() {
         // Private use.
         (0xE000, 0xF8FF),
         (0xF0000, 0xF0010),
-        (0xFFFF0, 0x10FFFD),
+        (0xFFFF0, 0x0010_FFFD),
         // Noncharacters.
         (0xFDD0, 0xFDEF),
         (0xFFFE, 0xFFFF),
         (0x1FFFE, 0x1FFFF),
-        (0x10FFFE, 0x10FFFF),
+        (0x0010_FFFE, 0x0010_FFFF),
     ]);
 }
 
