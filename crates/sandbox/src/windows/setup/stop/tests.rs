@@ -216,10 +216,6 @@ impl Stopper for Fake {
         OWN_PID
     }
 
-    fn system_folders(&mut self) -> Vec<String> {
-        users::folders()
-    }
-
     fn suspend(&mut self, pid: u32) -> Result<(), Failed> {
         self.done.push(format!("suspend {pid}"));
         Ok(())

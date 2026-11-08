@@ -174,116 +174,141 @@ fn unopened(session: u32, image: Image) -> Process {
     }
 }
 
-/// The fake's Windows and Program Files folders, as `pick` takes them.
-pub(super) fn folders() -> Vec<String> {
-    [
-        r"C:\WINDOWS",
-        r"C:\Program Files",
-        r"C:\Program Files (x86)",
-    ]
-    .map(str::to_owned)
-    .to_vec()
-}
-
-/// `TrustedInstaller`, which owns the files Windows installs.
-const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
-
-/// An image at `path` whose file `owner` owns (`None`: its owner couldn't be read).
-fn owned(path: &str, owner: Option<&str>) -> Image {
-    Image::Path(
-        path.to_owned(),
-        owner.map(|owner| Sid::parse(owner).unwrap()),
-    )
-}
-
-/// An image at `path` owned by `TrustedInstaller`, as Windows's own files are.
-fn installed(path: &str) -> Image {
-    owned(path, Some(TRUSTED_INSTALLER))
+/// An image at `path`.
+fn path(path: &str) -> Image {
+    Image::Path(path.to_owned())
 }
 
 #[test]
-fn only_a_session_0_system_process_and_the_kernels_are_exempt_from_unknown() {
-    let protected = unopened(0, installed(r"C:\Windows\System32\csrss.exe"));
+fn only_a_session_0_minimal_process_and_the_kernels_are_exempt_from_unknown() {
+    let minimal = unopened(0, Image::Missing);
     let unknown_kernel = [0, 4, OWN_PID].map(|pid| process(pid, None, None, None));
-    let mut seen = vec![protected];
+    let mut seen = vec![minimal];
     seen.extend(unknown_kernel);
     let pool = [sid(1010)];
-    assert_eq!(pick(&seen, &pool, OWN_PID, &folders()), Picked::default());
+    assert_eq!(pick(&seen, &pool, OWN_PID), Picked::default());
     let (exit, fake) = run(seen);
     assert_eq!(exit, StopExit::Done);
     assert!(fake.logged[0].1.contains("0 unknown"), "{:?}", fake.logged);
+    assert!(
+        !fake.logged[0].1.contains("unknown images"),
+        "{:?}",
+        fake.logged
+    );
 }
 
 #[test]
 fn an_unopenable_process_in_an_interactive_session_is_unknown_and_marks_every_pool_user() {
     // A pool user's process started protected: it runs in the lawyer's session, and neither
-    // the list, the token nor the owner names it. Its image doesn't matter.
-    let protected = unopened(1, installed(r"C:\Windows\System32\csrss.exe"));
-    let (exit, fake) = run(vec![protected]);
-    assert_eq!(exit, StopExit::NotStopped);
-    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
-    assert!(fake.logged[0].1.contains("1 unknown"), "{:?}", fake.logged);
-    assert_eq!(fake.completed(), None);
+    // the list, the token nor the owner names it. Its image doesn't matter: even none.
+    for image in [path(r"C:\Windows\System32\csrss.exe"), Image::Missing] {
+        let (exit, fake) = run(vec![unopened(1, image.clone())]);
+        assert_eq!(exit, StopExit::NotStopped, "{image:?}");
+        assert_eq!(fake.resets, [sid(1010), sid(1011)], "{image:?}");
+        assert!(fake.logged[0].1.contains("1 unknown"), "{:?}", fake.logged);
+        assert_eq!(fake.completed(), None);
+    }
 }
 
 #[test]
-fn a_session_0_unopenable_process_is_exempt_only_with_a_system_image() {
-    let path = installed;
-    let exempt = [
-        path(r"C:\Windows\System32\lsass.exe"),
-        owned(r"C:\Windows\System32\svchost.exe", Some("S-1-5-18")),
-        owned(r"C:\Windows\System32\a.exe", Some("S-1-5-32-544")),
-        path(r"c:\program files\Windows Defender\MsMpEng.exe"),
-        path(r"\\?\C:\Program Files (x86)\a\b.exe"),
-        Image::Missing,
-    ];
-    for image in exempt {
-        let (exit, fake) = run(vec![unopened(0, image.clone())]);
-        assert_eq!(exit, StopExit::Done, "{image:?}");
-        assert!(fake.resets.is_empty(), "{image:?}");
-    }
-    // A signed binary copied where a user writes and started protected, by a pool user's
-    // scheduled task (S4U) in session 0; a folder whose name only starts like a system one; a
-    // path out of the folder; one that couldn't be read, or wasn't; a file in a folder of
-    // Windows's that users write, owned by the pool user who put it there, or by anyone else
-    // but SYSTEM, `TrustedInstaller` or Administrators; an owner that couldn't be read (or a
-    // reparse point); or no session listed.
+fn a_session_0_unopenable_process_is_exempt_only_with_no_image_file() {
+    let (exit, fake) = run(vec![unopened(0, Image::Missing)]);
+    assert_eq!(exit, StopExit::Done);
+    assert_eq!(fake.resets, Vec::<Sid>::new());
+    // A Windows-signed System32 binary (its file `TrustedInstaller`'s) a pool user's scheduled
+    // task (S4U) started as a PPL in session 0, or any other path; one whose path couldn't be
+    // read, or wasn't; a WSL 1 (pico) process, which has no image file either.
     let unknown = [
-        owned(r"C:\Windows\Temp\a.exe", Some("S-1-5-21-1-2-3-1010")),
-        owned(r"C:\Windows\Tasks\a.exe", Some(OWNER)),
-        owned(r"C:\Windows\System32\a.exe", Some("S-1-5-32-545")),
-        owned(r"C:\Windows\System32\lsass.exe", None),
-        path(r"C:\Users\x\AppData\Local\a.exe"),
-        path(r"C:\Windows2\a.exe"),
-        path(r"C:\Windows \a.exe"),
-        path(r"C:\Windows\..\Users\x\a.exe"),
-        path(r"\\server\share\Windows\a.exe"),
-        path(r"C:\Windows"),
+        path(r"C:\Windows\System32\csrss.exe"),
+        path(r"C:\Program Files\Windows Defender\MsMpEng.exe"),
         Image::Failed,
         Image::Unread,
+        Image::Subsystem,
     ];
     for image in unknown {
+        assert!(!kernel_made(&image), "{image:?}");
         let (exit, fake) = run(vec![unopened(0, image.clone())]);
         assert_eq!(exit, StopExit::NotStopped, "{image:?}");
         assert_eq!(fake.resets, [sid(1010), sid(1011)], "{image:?}");
+        assert_eq!(fake.completed(), None, "{image:?}");
     }
+    // Opened to be terminated, with no list entry, or with the list failed: no exemption.
+    let opened = Process {
+        can_stop: true,
+        ..unopened(0, Image::Missing)
+    };
     let unlisted = Process {
         session: None,
         ..unopened(0, Image::Missing)
     };
-    let (exit, _) = run(vec![unlisted]);
-    assert_eq!(exit, StopExit::NotStopped);
+    let failed = Process {
+        list_failed: true,
+        ..unopened(0, Image::Missing)
+    };
+    for process in [opened, unlisted, failed] {
+        let (exit, _) = run(vec![process.clone()]);
+        assert_eq!(exit, StopExit::NotStopped, "{process:?}");
+    }
 }
 
 #[test]
-fn system_image_matches_whole_components_of_the_folders_given() {
-    let image = installed(r"C:\Windows\a.exe");
-    assert!(system_image(&image, &[r"C:\Windows\".to_owned()]));
-    assert!(system_image(&image, &[r"c:/windows".to_owned()]));
-    assert!(!system_image(&image, &[r"C:\Win".to_owned()]));
-    assert!(!system_image(&image, &[r"D:\Windows".to_owned()]));
-    assert!(!system_image(&image, &[String::new()]));
-    assert!(!system_image(&image, &[]));
+fn the_log_line_names_the_unknown_images_by_file_name_only() {
+    let (exit, fake) = run(vec![unopened(0, path(r"C:\Windows\System32\foo.exe"))]);
+    assert_eq!(exit, StopExit::NotStopped);
+    let line = &fake.logged[0].1;
+    assert!(line.contains("; unknown images: foo.exe;"), "{line}");
+    assert!(!line.contains('\\') && !line.contains("S-1-"), "{line}");
+    // Once each, in the order seen; a fixed word without a path; five, then the rest counted.
+    let images = [
+        path(r"C:\a\one.exe"),
+        path("C:/b/two.exe"),
+        path(r"C:\c\one.exe"),
+        Image::Unread,
+        Image::Failed,
+        Image::Subsystem,
+        path(r"\\?\C:\d\three.exe"),
+        path(r"C:\e\four.exe"),
+        path(r"C:\f\"),
+    ];
+    let seen: Vec<Process> = images
+        .into_iter()
+        .zip(100..)
+        .map(|(image, pid)| Process {
+            pid,
+            ..unopened(0, image)
+        })
+        .collect();
+    let picked = pick(&seen, &[sid(1010)], OWN_PID);
+    assert_eq!(picked.unknown, 9);
+    assert_eq!(
+        image_names(&picked.unknown_images),
+        "one.exe, two.exe, unread, subsystem, three.exe, and 1 more"
+    );
+    assert_eq!(image_names(&["no image".to_owned()]), "no image");
+    assert_eq!(image_names(&[]), "");
+}
+
+#[test]
+fn a_named_pool_process_that_cant_be_terminated_ends_48_with_its_user_marked() {
+    // A pool user's PPL that the list names but SYSTEM can't terminate, in every snapshot: the
+    // passes run out (stop.rs: `passes.left > 0`), never 0, and its user is marked.
+    let mut fake = Fake::new(&[1010, 1011]);
+    let protected = Process {
+        can_stop: false,
+        ..process(60, Some(sid(1011)), None, None)
+    };
+    fake.refuse = vec![60];
+    fake.snapshots = vec![Ok(vec![protected])];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(StopExit::NotStopped.as_code(), 48);
+    assert_eq!(fake.stopped(), Vec::<u32>::new());
+    assert_eq!(fake.resets, [sid(1011)]);
+    assert_eq!(fake.completed(), None);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("1 left") && line.contains("time ran out"),
+        "{line}"
+    );
 }
 
 #[test]
@@ -298,7 +323,7 @@ fn pick_takes_each_pid_once_compares_sids_exactly_and_never_takes_this_process()
         process(OWN_PID, Some(sid(1010)), None, None),
         process(4, Some(sid(1010)), None, None),
     ];
-    let picked = pick(&seen, &pool, OWN_PID, &folders());
+    let picked = pick(&seen, &pool, OWN_PID);
     assert_eq!(picked.stop, [(40, sid(1010))]);
     assert_eq!(picked.unknown, 0);
 }

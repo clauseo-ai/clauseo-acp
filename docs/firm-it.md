@@ -358,6 +358,15 @@ commands under "Intune (Win32 app)" above, and give back a folder a sandbox user
 `sandbox` folder in their data folder stays as it is; keep its `set-aside` folder, which holds
 files the sandbox set aside from a matter.
 
+### If the SandboxStop task ends with 48
+
+The SYSTEM task `\Clauseo\SandboxStop` stops the sandbox users' processes. Exit 48 means it found
+a process it couldn't identify, or one it couldn't stop. Nothing is lost: every sandbox user is
+reset before it is used again. Its Application Event Log line names each such process's image
+file (`unknown images: ...`), by file name only. A security product that hides its processes'
+tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
+gives.
+
 ### If Defender quarantines a Clauseo file
 
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
