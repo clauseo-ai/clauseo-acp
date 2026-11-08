@@ -124,10 +124,18 @@ mod fast;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod files;
 #[cfg(any(windows, test))]
+mod live;
+#[cfg(test)]
+pub(in crate::windows) use live::Moved;
+#[cfg(any(windows, test))]
+pub(in crate::windows) use live::{Failed, Live};
+#[cfg(any(windows, test))]
 mod moves;
 mod names;
 #[cfg(windows)]
 mod ntfs;
+#[cfg(any(windows, test))]
+mod repo_names;
 #[cfg(windows)]
 pub(in crate::windows) use ntfs::make_folders;
 #[cfg(any(windows, test))]
@@ -224,7 +232,16 @@ pub enum SetAsideFailure {
     /// A file-system call failed, of this kind.
     #[error("a file-system call failed ({0})")]
     Io(io::ErrorKind),
+    /// A restore of a `.git`, or of an item inside one, is refused: put back, it would be the
+    /// lawyer's, and git trusts a lawyer's `.git`, so its hooks or `core.fsmonitor` would run
+    /// as the lawyer.
+    #[error("{}", GIT_REFUSAL)]
+    GitFolder,
 }
+
+/// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.
+const GIT_REFUSAL: &str = "Clauseo won't put back a .git folder an agent made: your own git \
+                           tools would run code from it as you";
 
 /// The launch-time call, before `apply`. Scans the matter; when any session of the matter is
 /// open (running, or ended with no [`after_session`]), sets aside each protected name and link
@@ -327,10 +344,41 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 /// then handed to the desktop user when a pool user the machine's record names owns it, as
 /// forget hands back a pool user's item, so a restored agent's `CLAUDE.md` comes back the
 /// lawyer's (S15 `PR4a2`); a hand-back that fails, or a record unreadable or empty, is logged,
-/// and the next launch hands it back before its deny.
+/// and the next launch hands it back before its deny. A `.git`, or an item inside one, is never
+/// put back ([`SetAsideFailure::GitFolder`]): handed back it would be the lawyer's, and git
+/// trusts a lawyer's `.git`.
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)
+}
+
+/// The outer runner's live watch over one matter's root (`runner/git_watch.rs`): each git
+/// repository or outbound link made during the session moved aside at once, by the
+/// after-session pass's own move (`live.rs`).
+#[cfg(windows)]
+pub(in crate::windows) struct GitGuard(live::Watched);
+
+#[cfg(windows)]
+impl GitGuard {
+    /// The watch over `matter`'s folder `root`, knowing the `.git`s its record holds.
+    pub(in crate::windows) fn new(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
+        GitGuard(live::Watched::new(&ntfs::Ntfs, root, data_dir, matter))
+    }
+
+    /// Checks the paths the watch reported, relative to the root.
+    pub(in crate::windows) fn changed(&self, paths: &[PathBuf], now: SystemTime) -> Live {
+        self.0.changed(&ntfs::Ntfs, paths, now)
+    }
+
+    /// Scans the whole matter for a `.git` its record doesn't know.
+    pub(in crate::windows) fn rescan(&self, now: SystemTime) -> Live {
+        self.0.rescan(&ntfs::Ntfs, now)
+    }
+
+    /// Tries again what a check couldn't move.
+    pub(in crate::windows) fn retry(&self, failed: &[Failed], now: SystemTime) -> Live {
+        self.0.retry(&ntfs::Ntfs, failed, now)
+    }
 }
 
 #[cfg(test)]

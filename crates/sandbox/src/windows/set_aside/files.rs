@@ -48,6 +48,12 @@ const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 const MANIFEST_FILE: &str = SET_ASIDE_BOOKKEEPING[2];
 /// The matter's lock file: every read and write of the record or the manifest holds it.
 pub(super) const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
+/// The key, in [`Record::names`], that says the record holds the `HEAD` files
+/// ([`Kept::Head`](super::scan::Kept::Head)): a record an older version wrote lacks it, and
+/// its `HEAD`s are then recorded, never set aside, so none is taken for new. No file can have
+/// the name: `:` separates a stream on NTFS. Older versions ignore the key.
+#[cfg(any(windows, test))]
+pub(super) const HEADS_RECORDED: &str = ":heads";
 /// The version both files are written in and the only one read.
 const VERSION: u32 = 1;
 
@@ -83,6 +89,14 @@ pub(super) struct Record {
     pub(super) links: Links,
 }
 
+/// Whether `names` holds [`HEADS_RECORDED`].
+#[cfg(any(windows, test))]
+pub(super) fn heads_recorded(names: &Names) -> bool {
+    names
+        .keys()
+        .any(|key| key.len() == 1 && key.first().is_some_and(|k| k == HEADS_RECORDED))
+}
+
 /// What a pass records of the matter: [`Record::names`] and [`Record::links`].
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -92,6 +106,12 @@ pub(super) struct Snapshot {
 }
 
 impl Record {
+    /// Whether the record holds the `HEAD` files ([`HEADS_RECORDED`]).
+    #[cfg(any(windows, test))]
+    pub(super) fn holds_heads(&self) -> bool {
+        heads_recorded(&self.names)
+    }
+
     /// Whether `bytes` read as a record of [`VERSION`] with no open session; anything the typed
     /// read refuses is `false`.
     pub(super) fn closed(bytes: &[u8]) -> bool {

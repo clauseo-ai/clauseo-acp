@@ -573,6 +573,12 @@ crates/sandbox/src/windows/pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
+# The git watch: ReadDirectoryChangesW and its overlapped wait (src/windows/runner/git_watch/os.rs);
+# the time its moves are named for, and the bounded pause between tries once the session ended
+# (src/windows/runner/outer/watch.rs; the tests pass both).
+crates/sandbox/src/windows/runner/git_watch/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer/watch.rs now clippy::disallowed_methods
+crates/sandbox/src/windows/runner/outer/watch.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code

@@ -17,6 +17,8 @@ fn message() -> LaunchMessage {
         pool_user: Sid::parse(POOL).unwrap(),
         pool_name: "ClauseoSb05".to_owned(),
         matter_sid: None,
+        matter: crate::windows::test_world::matter_one(),
+        matter_root: r"D:\Matters\Smith".to_owned(),
         program: format!(r"{RUNTIME}\node.exe"),
         args: vec!["codex-acp.js".to_owned(), "--flag value".to_owned()],
         cwd: r"D:\Matters\Smith".to_owned(),
@@ -72,6 +74,14 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.program = r"C:\x\..\y.exe".to_owned()),
         ),
         ("cwd", Box::new(|m| m.cwd = r"C:relative".to_owned())),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\..\Smith".to_owned()),
+        ),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\Jones".to_owned()),
+        ),
         (
             "state",
             Box::new(|m| m.state = r"\\server\share\state".to_owned()),

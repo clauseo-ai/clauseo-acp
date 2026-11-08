@@ -204,6 +204,53 @@ build 26100):
     (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free. An item on
     another volume than the data folder can't be moved there by a rename: the pass is refused naming
     the item (`OtherVolume`), the item stays, and no copy is made.
+  - **Repository shapes at exit.** A git folder needs no `.git` name: a folder holding `HEAD`
+    (a file or a link) with `objects` and `refs` folders, or with a `commondir` file, is one,
+    and git trusts it in a lawyer's folder (`safe.bareRepository` defaults to `all`). The scan
+    takes each `HEAD` outside every `.git` from the listings it reads anyway (no extra open
+    unless one is there) and records it by file ID; a new or changed one is set aside, the
+    `HEAD` alone, which ends git's discovery and leaves the lawyer's folder where it is (the
+    record can't tell a new folder from the lawyer's). A `HEAD` in a launch `.git` the lawyer
+    renamed is that `.git`'s and stays. A record an older version wrote holds no `HEAD` (its
+    `:heads` key is missing), so that pass records them and moves none. Names are compared with
+    the HFS+ ignorables stripped first (`strip_hfs_ignorables`, shared with the macOS jail),
+    then folded, since a matter may sync to a Mac: the scan also takes from the listings a name
+    that only stripping makes `.git` (`.g<U+200C>it`), which its NTFS probe doesn't open.
+  - **The live watch (the `.git` rename hole).** Between launch and the after-session pass, the
+    agent could rename a lawyer's folder or file to `.git`; it stays the lawyer's, so the
+    lawyer's VS Code git polling, or the lawyer's own git, would run its `core.fsmonitor` or
+    hooks as the lawyer. The outer runner runs as the lawyer for the whole session, so it
+    watches the matter's folder itself (`runner/git_watch.rs`, `runner/outer/watch.rs`): not
+    SandboxWatch or ETW, which IT can switch off, but `ReadDirectoryChangesW` on the run's one
+    writable matter folder (never a read-only grant), recursive, for names made and renamed,
+    armed before the inner runner starts and stopped once the job has ended. Each name reported
+    goes to the set-aside's live check (`set_aside/live.rs`), which moves at once, through the
+    after-session pass's own move, manifest and lock: a `.git` (folder, file or link) the record
+    doesn't hold at that key with that file ID; a `HEAD` made or renamed in outside every `.git`;
+    below a folder made, cloned or moved in (the watch names only the folder, so a folder moved in
+    from the agent's temp folder with a `.git` inside it is scanned), each `.git`, each git
+    folder whole and each `HEAD`; and a junction or symbolic link that leads outside the matter,
+    by its words alone, never followed, or whose target can't be read. A link within the matter is
+    left to the after-session pass, which moves every new link. An overflow
+    (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole matter and reads on;
+    a watch that breaks or can't be armed rescans every 2 s and tries again, saying so once. Fail
+    closed: an item that can't be moved (the agent holding a handle) ends the session first, by
+    the outer's own end path (the job ended and emptied), then is tried again; one still stuck is
+    said, and the after-session pass, the backstop, tries again. Each item moved gets one plain
+    line on the run's stderr, its path below the matter and why ("Clauseo set aside `<path>`: an
+    agent can't create a git repository inside a matter. Clone or init in your scratch folder
+    instead."), which the Windows launcher reads back (`runner::denial_from_line`) as a
+    `Denial::SetAside` for the session's denial sink, the agent's refusal. The cost is plain:
+    **agents can't clone or init a repository into a matter**, since it is set aside at once; they
+    work in their own scratch or state folder. A lawyer's own `.git` whose folder the agent
+    renamed is moved too, as the after-session pass moves it, and so is a `HEAD` the lawyer's
+    git rewrites in a bare repository of their own in the matter.
+  - **Restore never puts back a `.git`.** `restore_set_aside` hands an item back as the
+    lawyer's, which would make a set-aside `.git` trusted. It refuses any entry whose own name, a
+    folder it was in below the matter, or any part of the path it goes back to opens as `.git`
+    (`SetAsideFailure::GitFolder`: "Clauseo won't put back a .git folder an agent made: your own
+    git tools would run code from it as you"); the folder it goes back into is opened by that path
+    and must have it as its final path, so no short name or link lands it inside one.
   - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
     run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
     `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
@@ -404,6 +451,13 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **A deny on an item the lawyer renamed away from a protected name** stays after forget: the
   explicit entry goes with the file, and forget removes entries by path. This predates S15
   PR4a2, for the root names and nested `.git` (accepted).
+- **The live watch** reads a link's target by its words: a junction within the matter that
+  leads to another that leads out is moved only when that one is new. A folder the agent made
+  that shuts the lawyer out can't be scanned when it is moved in; the after-session pass names it
+  as unscanned and keeps the session open. A bare repository the lawyer had in the matter at
+  launch isn't write-denied by the launch walk, so an agent could change its hooks (follow-up).
+  Matters on another volume than the data folder can't be moved into the set-aside, so there the
+  watch ends the session on the first git part it finds (accepted, fail closed).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for

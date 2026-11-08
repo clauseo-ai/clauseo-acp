@@ -68,6 +68,52 @@ pub enum Denial {
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
     },
+    /// Something the agent made in the matter that Clauseo set aside at once, while the agent
+    /// ran (Windows tier B's watch, `windows/runner/git_watch.rs`). Its words
+    /// ([`SetAsideWhat::words`]) tell the agent why, so it can work elsewhere.
+    SetAside {
+        /// Where it was, below the matter's folder.
+        path: PathBuf,
+        /// What it was.
+        what: SetAsideWhat,
+    },
+}
+
+/// What the watch set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetAsideWhat {
+    /// A git repository, or the part that makes one: a `.git`, a bare repository's folder, or
+    /// its `HEAD` file. Git trusts one in a lawyer's folder and would run its hooks as the
+    /// lawyer.
+    GitRepository,
+    /// A link (a junction or symbolic link) that leads outside the matter, or nowhere Clauseo
+    /// can tell.
+    LinkOut,
+}
+
+impl SetAsideWhat {
+    /// Every kind, for reading a line back.
+    pub const ALL: [SetAsideWhat; 2] = [SetAsideWhat::GitRepository, SetAsideWhat::LinkOut];
+
+    /// The plain refusal for the item at `path`, below the matter's folder.
+    pub fn words(self, path: &std::path::Path) -> String {
+        format!("Clauseo set aside {}: {}", path.display(), self.why())
+    }
+
+    /// Why, after the path.
+    pub fn why(self) -> &'static str {
+        match self {
+            SetAsideWhat::GitRepository => {
+                "an agent can't create a git repository inside a matter. Clone or init in your \
+                 scratch folder instead."
+            }
+            SetAsideWhat::LinkOut => {
+                "an agent can't make a link inside a matter that leads outside it. Work on those \
+                 files where they are, or copy them into your scratch folder."
+            }
+        }
+    }
 }
 
 /// The kind of file access refused.

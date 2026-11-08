@@ -9,6 +9,7 @@ use super::*;
 use crate::Policy;
 use crate::windows::pool::PoolUser;
 use crate::windows::test_acl::Place;
+use crate::windows::test_world::matter_one;
 use crate::windows::write::make_agent_folder;
 
 const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1005";
@@ -46,8 +47,14 @@ fn a_written_launch_file_is_one_the_outer_runner_reads() {
         .home(place.at("home"))
         .build()
         .unwrap();
-    let message =
-        LaunchMessage::from_policy(&policy, &pool(), &spec(&place.at("matter")), None).unwrap();
+    let message = LaunchMessage::from_policy(
+        &policy,
+        matter_one(),
+        &pool(),
+        &spec(&place.at("matter")),
+        None,
+    )
+    .unwrap();
     let path = write_launch(&place.at("data"), &message).unwrap();
     let name = path.file_name().unwrap().to_str().unwrap();
     assert!(is_launch_name(name), "{name}");
@@ -74,9 +81,14 @@ fn the_message_carries_the_spec_and_the_policy() {
         .build()
         .unwrap();
     let bundle = place.at("roots.pem");
-    let message =
-        LaunchMessage::from_policy(&policy, &pool(), &spec(&place.at("matter")), Some(&bundle))
-            .unwrap();
+    let message = LaunchMessage::from_policy(
+        &policy,
+        matter_one(),
+        &pool(),
+        &spec(&place.at("matter")),
+        Some(&bundle),
+    )
+    .unwrap();
     assert_eq!(message.pool_name, "ClauseoSb01");
     assert_eq!(message.program, r"C:\Windows\System32\whoami.exe");
     assert_eq!(message.args, ["/all"]);

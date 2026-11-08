@@ -45,6 +45,8 @@
 //!   outer leaves it running. A request that fails is logged and changes no exit code; the outer,
 //!   if it lives, waits up to 20 s for the run's result. No process of the pool user's is
 //!   started at the end.
+//! - The outer watches the matter's folder for a new `.git` while the agent runs, and sets one
+//!   aside at once, ending the session first when it can't (`git_watch.rs`, `outer/watch.rs`).
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
@@ -67,6 +69,7 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
 use super::pool::pool_number;
@@ -80,6 +83,8 @@ mod desktop;
 mod end;
 pub mod env;
 pub mod frame;
+#[cfg(any(windows, test))]
+pub(crate) mod git_watch;
 #[cfg(windows)]
 mod inner;
 #[cfg(any(windows, test))]
@@ -102,6 +107,8 @@ mod sweep;
 pub mod unclean;
 
 pub use env::agent_env;
+#[cfg(any(windows, test))]
+pub use git_watch::denial_from_line;
 #[cfg(windows)]
 pub use inner::run_inner;
 #[cfg(any(windows, test))]
@@ -167,6 +174,11 @@ pub struct LaunchMessage {
     /// The matter's SID, added as a restricting SID when set (0049: off by default).
     #[serde(default)]
     pub matter_sid: Option<Sid>,
+    /// The matter's ID: the set-aside the outer's git watch moves a new `.git` into.
+    pub matter: MatterId,
+    /// The matter's folder, the run's one writable matter root, which the outer watches for a
+    /// new `.git` (`git_watch.rs`); a granted path, never a read-only one.
+    pub matter_root: String,
     /// The agent's program, absolute; never a batch file.
     pub program: String,
     /// Its arguments.
@@ -210,6 +222,8 @@ impl std::fmt::Debug for LaunchMessage {
             .field("pool_user", &self.pool_user)
             .field("pool_name", &self.pool_name)
             .field("matter_sid", &self.matter_sid)
+            .field("matter", &self.matter)
+            .field("matter_root", &self.matter_root)
             .field("program", &self.program)
             .field("args", &self.args.len())
             .field("cwd", &self.cwd)
@@ -222,17 +236,19 @@ impl std::fmt::Debug for LaunchMessage {
 }
 
 impl LaunchMessage {
-    /// The message for `spec` run as `pool` under `policy`, with the CA bundle `ca_bundle`:
-    /// the spec's program, arguments, folder and whole environment; the policy's state folder,
-    /// session temp folder, runtime paths, the paths it grants and its credential link. Refused
-    /// when a path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
+    /// The message for `spec` run as `pool` under `policy` for `matter`, with the CA bundle
+    /// `ca_bundle`: the spec's program, arguments, folder and whole environment; the policy's
+    /// matter folder, state folder, session temp folder, runtime paths, the paths it grants and
+    /// its credential link. Refused when a path or variable isn't UTF-8 or breaks
+    /// [`LaunchMessage::check`]'s rules.
     pub fn from_policy(
         policy: &crate::Policy,
+        matter: MatterId,
         pool: &super::pool::PoolUser,
         spec: &clauseo_process::LaunchSpec,
         ca_bundle: Option<&Path>,
     ) -> Result<LaunchMessage, LaunchError> {
-        policy::message_from_policy(policy, pool, spec, ca_bundle)
+        policy::message_from_policy(policy, matter, pool, spec, ca_bundle)
     }
 
     /// Reads and checks a launch message: [`LaunchMessage::check`]'s rules.
@@ -277,6 +293,10 @@ impl LaunchMessage {
             return Err(field("program", "is a batch file"));
         }
         local("cwd", &self.cwd)?;
+        local("matter_root", &self.matter_root)?;
+        if !self.granted.contains(&self.matter_root) {
+            return Err(field("matter_root", "is not a granted path"));
+        }
         local("state", &self.state)?;
         if WinPath::parse(&self.state).is_none_or(|state| state.drive().is_none()) {
             return Err(field("state", "is not on a drive letter"));

@@ -45,7 +45,7 @@ fn a_matter_whose_items_were_all_restored_goes_whole_for_remove_and_the_uninstal
         before(&root, &data, launch()).unwrap();
         // One item at the root, one nested (a `within` folder in its pass folder).
         w.dir.file("matter/CLAUDE.md", "# the agent's\n");
-        w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
+        w.dir.file("matter/sub/CLAUDE.md", "# the agent's too\n");
         let entries = after(&root, &data, exit()).unwrap();
         assert_eq!(entries.len(), 2, "{entries:?}");
         let folder = matter_folder(&data);
@@ -71,7 +71,7 @@ fn a_matter_whose_items_were_all_restored_goes_whole_for_remove_and_the_uninstal
             std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
             "# the agent's\n"
         );
-        assert!(root.join("sub").join(".git").join("HEAD").exists());
+        assert!(root.join("sub").join("CLAUDE.md").exists());
     }
 }
 
@@ -96,10 +96,10 @@ fn a_restore_leaves_a_pass_folder_still_holding_another_item() {
 #[test]
 fn an_empty_folder_item_on_a_siblings_way_survives_the_siblings_restore() {
     // A move reuses a folder already there, so an item that is an empty folder can sit at the
-    // path of a sibling's `within` folder: `<pass>\sub` an item, `<pass>\sub\.git` another.
+    // path of a sibling's `within` folder: `<pass>\sub` an item, `<pass>\sub\AGENTS.md` another.
     let (w, root, data) = world("aside-restored-folder-item");
     before(&root, &data, launch()).unwrap();
-    w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
+    w.dir.file("matter/sub/AGENTS.md", "# the agent's\n");
     let git = after(&root, &data, exit()).unwrap().remove(0);
     assert_eq!(git.within, [std::ffi::OsString::from("sub")]);
     let place = Place::new(&data, &matter_one());
