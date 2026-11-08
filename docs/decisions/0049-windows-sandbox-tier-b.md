@@ -2235,7 +2235,9 @@ keys would fail and roll back for the lawyer.
 
 **Removal.** `--remove` takes the deny off before the group goes (`RemoveStep::Wsl`, after
 `DeviceSync`'s deny), elevated, as admin: for each recorded target, and each target found now,
-only the entries `(D;…;;;G)` come off, and the result is checked, written and read back. A value
+only the entries `(D;…;;;G)` come off (every deny naming the group, whatever its flags and
+mask: `ClauseoSandboxUsers` is Clauseo's own group, so no one else's deny names it), and the
+result is checked, written and read back. A value
 we made is deleted instead once what is left is the default it was made from. No saved value is
 ever written back: it may be older than a WSL update since. A value that can't be parsed is left
 as it is and logged. A read or write that fails stops the removal there (`RemovedPartly`), with
