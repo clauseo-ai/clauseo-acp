@@ -44,13 +44,9 @@ use std::time::Duration;
 
 use super::marker::MarkerState;
 use super::sweep::SWEPT;
-use super::{RunExit, agent_code};
+use super::{HOST_ENDED, RunExit, agent_code};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 
-/// The exit code the host's own job end gives the outer, `TERMINATED` in
-/// `crates/process/src/os/windows.rs:54` (private there): what a cancel whose agent didn't exit
-/// within the host's `stdin_grace` gives without the outer's own job end.
-pub(crate) const HOST_ENDED: u32 = 0xC1A0;
 /// How long the agent has, once the host's stdin ended and the agent's was closed, to finish
 /// before the outer ends the job. The host gives the outer 5 s once it closed the outer's stdin
 /// (`SpawnOptions::stdin_grace` on tier B), before it ends the outer's job; the outer's end, this

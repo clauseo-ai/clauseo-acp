@@ -5,7 +5,12 @@ use std::io;
 use clauseo_protocol::ErrorCode;
 
 /// Why a policy was refused, a look at the machine failed, or a jailed agent did not start.
+///
+/// `#[non_exhaustive]`: variants are appended (never inserted or renumbered), so a match
+/// outside this crate keeps a wildcard arm. Inside it, [`Error::cause`], [`Error::code`] and
+/// [`Error::kind`] name every variant, so a new one doesn't build until it has its code.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The policy breaks one of [`PolicyBuilder::build`](crate::PolicyBuilder::build)'s rules,
     /// or [`Policy::check_allowed_folder`](crate::Policy::check_allowed_folder) refused a folder.
@@ -119,6 +124,49 @@ pub enum Error {
     /// planned or written; a later launch checks again. Its message names no path.
     #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
     UncleanSession(String),
+    /// Windows tier B has no free account for this matter (`windows::pool::assign`'s
+    /// `Assign::PoolFull`): every pool user is held back. Counts only, never an account: the
+    /// host shows `NotProtectedCause::PoolFull` from them, and the matter has no sandbox until
+    /// one is free (PR6).
+    #[error("the sandbox has no free account: {cause}")]
+    PoolFull {
+        /// How many of the pool's users are held back, and why.
+        cause: crate::windows::pool::PoolFullCause,
+    },
+    /// Windows tier B was asked to launch on a reservation that `prepare` hasn't finished for
+    /// (`windows::launch`): the trees are never walked inline. Retryable: the host reserves and
+    /// prepares again.
+    #[error("the sandbox hasn't prepared this matter yet")]
+    NotPrepared,
+    /// Windows tier B's preparation of the matter was cancelled (`Preparing::cancel`, on matter
+    /// close or app quit). What it had done for the session was undone; the permission entries
+    /// already written stay in the ledger, so the next `prepare` continues from them.
+    #[error("the sandbox's preparation of this matter was cancelled")]
+    Cancelled,
+    /// Windows tier B runs one live agent per matter (`windows::launch`): another session of
+    /// the matter holds its account, from its reservation until its after-session pass has
+    /// finished, or `assign` found another session open. A refusal, not a cause for another
+    /// tier: the host stops the other agent or waits.
+    #[error("Another agent is still working in this matter. Try again once it has finished.")]
+    MatterBusy,
+    /// Windows tier B's `launch` or `prepare` was given a reservation for another matter or
+    /// session, or one these launchers didn't hand out or no longer hold (used, released, or
+    /// cleared at start-up). A bug in the caller: nothing was run or granted.
+    #[error("the sandbox's reservation is for another matter or session, or no longer held")]
+    WrongReservation,
+    /// Windows tier B found processes of the matter's pool user running outside any run of
+    /// this launch (`windows::launch`, at `prepare` and again at `launch`): a leftover of an
+    /// earlier run, which could bind a port the new run's browser is given later. Nothing more
+    /// is done for the launch until they have ended (the outer's sweeps and the stop task end
+    /// them). Retryable.
+    #[error(
+        "A program from an earlier agent run is still running in the Safe workspace. Try again \
+         once it has stopped."
+    )]
+    LeftoverProcess {
+        /// How many there were.
+        count: usize,
+    },
 }
 
 impl Error {
@@ -140,7 +188,41 @@ impl Error {
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
             | Error::ProtectedLink { .. }
-            | Error::UncleanSession(_) => None,
+            | Error::UncleanSession(_)
+            | Error::PoolFull { .. }
+            | Error::NotPrepared
+            | Error::Cancelled
+            | Error::MatterBusy
+            | Error::WrongReservation
+            | Error::LeftoverProcess { .. } => None,
+        }
+    }
+
+    /// What kind of failure it is, in words for the lawyer's message and the log: never a path,
+    /// an account or a matter's name. Names every variant, so the host can use it in place of a
+    /// match of its own, which `#[non_exhaustive]` would make end in a wildcard.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Error::Policy(_) => "its rules for this matter were refused",
+            Error::Probe(_) => "a look at the matter failed",
+            Error::Launch(_) => "the jailed program did not start",
+            Error::ProxyConfig(_) | Error::ProxyStart(_) => "the network filter did not start",
+            Error::FolderUnsupported { .. } | Error::NeighbourUnfenceable { .. } => {
+                "a folder can't be protected"
+            }
+            Error::AclApply { .. } => "the folder permissions couldn't be set",
+            Error::SetAside { .. } => "a changed protected item couldn't be set aside",
+            Error::CleanClose(_) => "the record of the matter's last session couldn't be removed",
+            Error::ProtectedLink { .. } => "a protected item in the matter is a shortcut",
+            Error::NetworkUnfiltered { .. } => "the agent's network couldn't be filtered",
+            Error::Blocked(_) => "a setting on this computer stops the Safe workspace",
+            Error::UncleanSession(_) => "the clean-up after an earlier session isn't finished",
+            Error::PoolFull { .. } => "all of the Safe workspace's accounts are in use",
+            Error::NotPrepared => "the matter isn't prepared yet",
+            Error::Cancelled => "preparing the matter was cancelled",
+            Error::MatterBusy => "another agent is still working in this matter",
+            Error::WrongReservation => "the launch's reservation didn't match",
+            Error::LeftoverProcess { .. } => "a program from an earlier agent run is still running",
         }
     }
 
@@ -152,6 +234,11 @@ impl Error {
     /// A block only an administrator can lift is `SandboxBlocked`, not retryable. An earlier
     /// session's clean-up not yet finished is `SandboxCleaningUp`, retryable: a later launch
     /// checks again.
+    ///
+    /// Tier B's launcher (PR6): a full pool, a matter not prepared yet, a cancelled preparation,
+    /// a busy matter and a leftover process are failed launches (retryable; the host decides
+    /// what follows from the variant, not the code); a reservation that doesn't match is a bug,
+    /// `Internal`. Every one refuses the launch.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -165,11 +252,16 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
-            | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::NetworkUnfiltered { .. }
+            | Error::PoolFull { .. }
+            | Error::NotPrepared
+            | Error::Cancelled
+            | Error::MatterBusy
+            | Error::LeftoverProcess { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
-            Error::Probe(_) => ErrorCode::Internal,
+            Error::Probe(_) | Error::WrongReservation => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }
     }
@@ -194,6 +286,7 @@ mod tests {
                 "admin_copy_unsafe",
                 "other_account",
                 "tool_missing",
+                "loose_task",
             ]
         );
         for blocked in crate::Blocked::ALL {
@@ -243,5 +336,76 @@ mod tests {
         assert_eq!(unclean.code().as_str(), "sandbox.cleaning_up");
         assert!(unclean.code().is_retryable(), "a later launch checks again");
         assert_eq!(unclean.cause(), None);
+    }
+
+    /// Tier B's launcher errors (PR6): each refuses the launch, with no cause for the protocol's
+    /// `Blocked`, a kind of its own, and words with no path or account.
+    #[test]
+    fn launcher_errors_refuse_with_their_codes() {
+        let full = Error::PoolFull {
+            cause: crate::windows::pool::PoolFullCause {
+                size: 8,
+                open: 3,
+                held: 2,
+                owed: 2,
+                set_aside: 1,
+                needs_reset: 0,
+            },
+        };
+        let cases = [
+            (
+                full,
+                ErrorCode::AgentLaunchFailed,
+                "all of the Safe workspace's accounts",
+            ),
+            (
+                Error::NotPrepared,
+                ErrorCode::AgentLaunchFailed,
+                "isn't prepared",
+            ),
+            (Error::Cancelled, ErrorCode::AgentLaunchFailed, "cancelled"),
+            (
+                Error::MatterBusy,
+                ErrorCode::AgentLaunchFailed,
+                "another agent",
+            ),
+            (Error::WrongReservation, ErrorCode::Internal, "reservation"),
+            (
+                Error::LeftoverProcess { count: 2 },
+                ErrorCode::AgentLaunchFailed,
+                "earlier agent run",
+            ),
+        ];
+        let mut kinds = Vec::new();
+        for (error, code, kind) in cases {
+            assert_eq!(error.code(), code, "{error:?}");
+            assert_eq!(error.cause(), None, "{error:?}");
+            assert!(error.kind().contains(kind), "{error:?}: {}", error.kind());
+            assert!(!error.to_string().contains('\\'), "no path: {error}");
+            kinds.push(error.kind());
+        }
+        kinds.dedup();
+        assert_eq!(kinds.len(), 6, "each has a kind of its own");
+        assert!(
+            Error::NotPrepared.code().is_retryable(),
+            "the host prepares again"
+        );
+        assert_eq!(
+            Error::MatterBusy.to_string(),
+            "Another agent is still working in this matter. Try again once it has finished."
+        );
+    }
+
+    /// The loose-task block (0049's `loose_task`) is a block like the others: `SandboxBlocked`,
+    /// with its serde name as the cause.
+    #[test]
+    fn loose_task_is_a_block() {
+        let loose = Error::Blocked(crate::Blocked::LooseTask);
+        assert_eq!(loose.code(), ErrorCode::SandboxBlocked);
+        assert_eq!(loose.cause(), Some("loose_task"));
+        assert_eq!(
+            loose.kind(),
+            "a setting on this computer stops the Safe workspace"
+        );
     }
 }
