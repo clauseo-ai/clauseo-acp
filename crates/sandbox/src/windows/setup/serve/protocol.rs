@@ -216,6 +216,42 @@ pub enum SetUpError {
     /// The pipe failed: what failed.
     #[error("the set-up pipe failed: {0}")]
     Pipe(String),
+    /// Another process held the pipe's name, still after the pool's processes were stopped
+    /// ([`retry_squatted`]); nothing was sent.
+    #[error(
+        "another process holds the set-up pipe's name (a squatted pipe), so nothing was sent; \
+         restarting Windows frees it: {0}"
+    )]
+    Squatted(String),
+}
+
+/// What `request_set_up` makes of a first answer from a pipe someone else serves: a pool user's
+/// process can make the pipe's name before the task does, and keeps it while it lives. The
+/// pool's processes are stopped (`stop_pool`, the stop task: whether it started), `settle`
+/// waits for that, and `ask` runs once more; a pipe still someone else's, or a stop that
+/// didn't start, is [`SetUpError::Squatted`]. Any other answer is the first one's.
+pub fn retry_squatted(
+    mut ask: impl FnMut() -> Result<Reply, SetUpError>,
+    stop_pool: impl FnOnce() -> bool,
+    settle: impl FnOnce(),
+) -> Result<Reply, SetUpError> {
+    let why = match ask() {
+        Err(SetUpError::NotTheServer(why)) => why,
+        other => return other,
+    };
+    tracing::warn!(%why, "the set-up pipe is someone else's; stopping the sandbox users' processes");
+    if !stop_pool() {
+        return Err(SetUpError::Squatted(format!(
+            "{why}; the sandbox users' processes couldn't be stopped"
+        )));
+    }
+    settle();
+    match ask() {
+        Err(SetUpError::NotTheServer(why)) => Err(SetUpError::Squatted(format!(
+            "{why}, after the sandbox users' processes were stopped"
+        ))),
+        other => other,
+    }
 }
 
 /// What `UserSetup::run` (and its extend) return for `asked`, the set-up task's answer: its reply

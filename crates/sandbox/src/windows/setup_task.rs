@@ -26,7 +26,11 @@
 //!    ending as this connected, and is taken as gone;
 //! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
 //!    the one-line reply; a server that went away before replying (one that was ending as this
-//!    connected) is asked again, once, after the task is started again.
+//!    connected) is asked again, once, after the task is started again;
+//! 5. a pipe someone else serves is most likely a pool user's process holding the name: the
+//!    pool's processes are stopped (`request_pool_stop`), and once the stop task is done, steps
+//!    1 to 4 run once more. A pipe still someone else's is [`SetUpError::Squatted`]
+//!    (`serve::retry_squatted`).
 #![expect(unsafe_code, reason = "FFI to the named pipe and process list calls")]
 
 use std::path::Path;
@@ -51,10 +55,11 @@ use windows::core::{HSTRING, PWSTR};
 use super::acl::object::{Handle, os_error};
 use super::admin_copy::{self, os};
 use super::pipe::PIPE_RIGHTS;
-use super::refresh::task::run_task;
-use super::refresh::{SystemTask, TaskError};
+use super::refresh::task::{run_task, task_busy};
+use super::refresh::{SystemTask, TaskError, request_pool_stop};
 use super::setup::serve::{
     CONNECT_WAIT, Op, PIPE_NAME, REPLY_CAP, RERUN_AFTER, ServerFacts, check_owner, check_server,
+    retry_squatted,
 };
 use super::setup::stop::windows_stopper::listed_users;
 use super::sids::Sid;
@@ -64,6 +69,12 @@ pub use super::setup::serve::{Reply as SetUpReply, SetUpError};
 
 /// The pause between two tries while the pipe isn't there, in milliseconds.
 const PAUSE_MS: u32 = 250;
+/// The pause between two looks at the stop task, in milliseconds.
+const SETTLE_PAUSE_MS: u32 = 500;
+/// How many looks at the stop task, at most: 60 s, past which the request is made anyway.
+const SETTLE_STEPS: u32 = 120;
+/// How long the stop task is waited for when its state can't be read, in milliseconds.
+const SETTLE_UNREAD_MS: u32 = 10_000;
 /// How long one wait for a busy pipe lasts, in milliseconds.
 const BUSY_WAIT_MS: u32 = 1_000;
 /// `SystemProcessIdInformation`: a process's image name by its id, with no handle to it.
@@ -94,7 +105,32 @@ pub fn request_set_up(add: Option<u8>) -> Result<SetUpReply, SetUpError> {
     }
     let program_files = os::program_files().map_err(|error| SetUpError::Pipe(error.to_string()))?;
     let admin_exe = admin_copy::admin_exe(&program_files);
-    ask(PIPE_NAME, &request, &admin_exe, start)
+    retry_squatted(
+        || ask(PIPE_NAME, &request, &admin_exe, start),
+        request_pool_stop,
+        settle,
+    )
+}
+
+/// Waits for the stop task `request_pool_stop` started: a moment for it to begin, then while it
+/// is queued or running, up to [`SETTLE_STEPS`] pauses; a state that can't be read is waited
+/// out for the longest pause instead.
+fn settle() {
+    for step in 0..SETTLE_STEPS {
+        // SAFETY: plain value; it only waits.
+        unsafe { Sleep(SETTLE_PAUSE_MS) };
+        match task_busy(SystemTask::Stop) {
+            // The first look may come before the run began.
+            Ok(busy) if busy || step == 0 => {}
+            Ok(_done) => return,
+            Err(error) => {
+                tracing::warn!(%error, "the stop task's state can't be read");
+                // SAFETY: plain value; it only waits.
+                unsafe { Sleep(SETTLE_UNREAD_MS) };
+                return;
+            }
+        }
+    }
 }
 
 /// Steps 1 to 4 on the pipe `name` for `request`, the task started by `start`, the server

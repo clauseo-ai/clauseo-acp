@@ -37,7 +37,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::TaskScheduler::{
     IExecAction, ILogonTrigger, IRegisteredTask, ITaskService, TASK_ACTION_EXEC,
     TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE,
-    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_STATE_QUEUED, TASK_STATE_RUNNING,
+    TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, Interface};
@@ -357,6 +358,16 @@ pub(crate) fn run_task(task: SystemTask) -> Result<(), TaskError> {
         // SAFETY: a live task and an empty VARIANT: no parameters.
         unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
         Ok(())
+    })
+}
+
+/// Whether `task` is queued or running now (`IRegisteredTask::State`), read as whoever calls it;
+/// the app waits on the stop task through it before asking the set-up task again.
+pub(crate) fn task_busy(task: SystemTask) -> Result<bool, TaskError> {
+    with_task(task, |task| {
+        // SAFETY: a live task; it reads a value.
+        let state = unsafe { task.State() }.map_err(com("IRegisteredTask::State"))?;
+        Ok([TASK_STATE_QUEUED, TASK_STATE_RUNNING].contains(&state))
     })
 }
 
