@@ -18,7 +18,7 @@ use super::super::sweep::SWEPT;
 use super::say;
 use crate::windows::acl::object::Handle;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
-use crate::windows::setup::read_record_value;
+use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
 /// What the session and its end need of the outer's own.
@@ -95,7 +95,11 @@ impl EndSteps for OsEnd {
     }
 
     fn settle(&self, state: &MarkerState) -> Result<(), String> {
-        write_marker_at(&self.marker, Some(&self.pool_user), *state).map_err(|error| {
+        // The install's id, read again: no removal or reinstall runs while a session is open. One
+        // that can't be read leaves the marker open, which never passes for clean.
+        let install = read_record_install_id().map_err(|error| error.to_string())?;
+        let at = install.as_deref();
+        write_marker_at(&self.marker, Some(&self.pool_user), at, *state).map_err(|error| {
             error
                 .raw_os_error()
                 .map_or_else(|| error.kind().to_string(), |code| code.to_string())

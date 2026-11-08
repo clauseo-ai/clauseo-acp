@@ -24,7 +24,9 @@
 //! open (`write::make_sandbox_dir`): the pool user can neither write nor remove it, and gets no
 //! say in whether a session counts as clean. It is written as the launch file is (atomically,
 //! then given the folder's three entries as its own protected DACL and the desktop user as its
-//! owner) and holds the pool user's SID, nothing else.
+//! owner) and holds the pool user's SID and the install id it was written under (the record's
+//! `InstallId`, none for an install from before it): a marker of another install is stale, its
+//! numbers another install's counters (`unclean.rs`).
 //!
 //! The names, the paths and the listing hold no Windows call, so their tests run on every OS.
 
@@ -53,6 +55,9 @@ struct Marker {
     /// What it waits for; absent in a marker written before the states, which reads as open.
     #[serde(default)]
     state: MarkerState,
+    /// The record's `InstallId` when it was written; absent under an install without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    install: Option<String>,
 }
 
 /// What a marker waits for before it is clean.
@@ -163,6 +168,8 @@ pub struct UncleanSession {
     pub pool_user: Option<Sid>,
     /// What it waits for; `None` when it can't be read.
     pub state: Option<MarkerState>,
+    /// The install id it was written under; `None` when it has none or can't be read.
+    pub install: Option<String>,
 }
 
 /// The marker's path for the launch `id`: `<data_dir>\sandbox\run\<id>.session`.
@@ -187,17 +194,27 @@ pub fn launch_id(path: &Path) -> Option<&str> {
         .filter(|hex| is_id(hex))
 }
 
-/// Writes the open marker for the launch `id` and its pool user, in the run folder (which must
-/// exist: the launch file came from it); its path.
-pub fn write_marker(data_dir: &Path, id: &str, pool_user: &Sid) -> io::Result<PathBuf> {
+/// Writes the open marker for the launch `id`, its pool user and the install id `install`, in
+/// the run folder (which must exist: the launch file came from it); its path.
+pub fn write_marker(
+    data_dir: &Path,
+    id: &str,
+    pool_user: &Sid,
+    install: Option<&str>,
+) -> io::Result<PathBuf> {
     let path = marker_path(data_dir, id);
-    write_marker_at(&path, Some(pool_user), MarkerState::Open)?;
+    write_marker_at(&path, Some(pool_user), install, MarkerState::Open)?;
     Ok(path)
 }
 
 /// Writes the marker at `path` (`<16 hex>.session` in the run folder) as `state`, for
-/// `pool_user`, in place of what it held.
-pub fn write_marker_at(path: &Path, pool_user: Option<&Sid>, state: MarkerState) -> io::Result<()> {
+/// `pool_user` under the install id `install`, in place of what it held.
+pub fn write_marker_at(
+    path: &Path,
+    pool_user: Option<&Sid>,
+    install: Option<&str>,
+    state: MarkerState,
+) -> io::Result<()> {
     let named = path.file_name().and_then(|name| name.to_str());
     if named.and_then(marker_id).is_none() {
         return Err(io::Error::new(
@@ -208,6 +225,7 @@ pub fn write_marker_at(path: &Path, pool_user: Option<&Sid>, state: MarkerState)
     let marker = Marker {
         pool_user: pool_user.cloned(),
         state,
+        install: install.map(str::to_owned),
     };
     let bytes = serde_json::to_vec(&marker).map_err(io::Error::other)?;
     write::write_atomic(path, &bytes)?;
@@ -220,14 +238,16 @@ pub fn write_marker_at(path: &Path, pool_user: Option<&Sid>, state: MarkerState)
 }
 
 /// The outer's order once it read the launch `launch_file`: writes the session's marker for
-/// `pool_user` in `data_dir`, then runs `session` (everything that runs as the pool user) with
-/// its path. A marker that can't be written, or a launch file whose name gives no id, refuses the
+/// `pool_user`, under the install id `install`, in `data_dir`, then runs `session` (everything
+/// that runs as the pool user) with its path. A marker that can't be written, or a launch file
+/// whose name gives no id, refuses the
 /// launch: `session` never runs, and the error comes back. No session runs unmarked, so none can
 /// leave a process of the pool user that no marker names.
 pub(crate) fn marked<T>(
     data_dir: &Path,
     launch_file: &Path,
     pool_user: &Sid,
+    install: Option<&str>,
     session: impl FnOnce(PathBuf) -> T,
 ) -> io::Result<T> {
     let id = launch_id(launch_file).ok_or_else(|| {
@@ -236,7 +256,7 @@ pub(crate) fn marked<T>(
             "the launch file's name gives no id",
         )
     })?;
-    let marker = write_marker(data_dir, id, pool_user)?;
+    let marker = write_marker(data_dir, id, pool_user, install)?;
     Ok(session(marker))
 }
 
@@ -269,6 +289,7 @@ pub fn unclean_sessions(data_dir: &Path) -> io::Result<Vec<UncleanSession>> {
         sessions.push(UncleanSession {
             id: id.to_owned(),
             pool_user: marker.as_ref().and_then(|marker| marker.pool_user.clone()),
+            install: marker.as_ref().and_then(|marker| marker.install.clone()),
             state: marker.map(|marker| marker.state),
         });
     }

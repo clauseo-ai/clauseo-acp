@@ -21,6 +21,7 @@ use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
+use crate::windows::setup::read_record_install_id;
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
 use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
@@ -82,10 +83,20 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         .map_err(|why| Failure::new(RunExit::AwaitingStop, why))?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
     // `relay` removes it. One that can't be written refuses the launch with its own code
-    // (`RunExit::MarkerUnwritable`): no logon follows.
-    marked(&data_dir, launch_file, &message.pool_user, |marker| {
-        marked_outer(&message, data_dir.clone(), marker, exe)
-    })
+    // (`RunExit::MarkerUnwritable`): no logon follows. It records the install it belongs to; an
+    // id that can't be read refuses the same way, since a marker without it could pass for an
+    // older install's and be removed as stale.
+    let install = read_record_install_id().map_err(|e| {
+        let why = format!("the session marker failed (the install id: {e})");
+        Failure::new(RunExit::MarkerUnwritable, why)
+    })?;
+    marked(
+        &data_dir,
+        launch_file,
+        &message.pool_user,
+        install.as_deref(),
+        |marker| marked_outer(&message, data_dir.clone(), marker, exe),
+    )
     .map_err(|e| Failure::new(RunExit::MarkerUnwritable, os("the session marker", &e)))?
 }
 
