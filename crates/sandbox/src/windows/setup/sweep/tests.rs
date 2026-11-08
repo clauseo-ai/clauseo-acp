@@ -340,7 +340,7 @@ fn an_unreadable_principal_is_55_and_the_pools_other_tasks_still_go() {
     fake.unread("\\", "unread-too");
     fake.task("\\", "last", group("S-1-5-21-1-2-3-1010"));
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    assert_eq!(SweepExit::TasksLeft.as_code(), 55);
+    assert_eq!(SweepExit::TasksLeft.as_code(), 56);
     assert_eq!(fake.deleted(), ["\\first", "\\last"]);
     // The BITS step still ran.
     assert_eq!(fake.done.last().map(String::as_str), Some("jobs"));
@@ -471,8 +471,8 @@ fn only_the_pools_bits_jobs_are_cancelled_and_a_job_left_is_56() {
         assert!(fake.logged[0].0);
         assert_eq!(fake.deleted(), Vec::<&str>::new());
     }
-    assert_eq!(SweepExit::JobsLeft.as_code(), 56);
-    // A task left and a job left: 55 wins, and the job of the pool's is still cancelled.
+    assert_eq!(SweepExit::JobsLeft.as_code(), 57);
+    // A task left and a job left: 56 wins, and the job of the pool's is still cancelled.
     let mut fake = Fake::new(&[1010]);
     fake.unread("\\", "unread");
     fake.jobs = Ok(vec![None, Some(sid(1010))]);
@@ -562,7 +562,7 @@ fn the_exit_codes_follow_the_stop_codes_and_are_never_shared() {
         SweepExit::NotRecorded,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 52, 53, 54, 55, 56, 57, 58]);
+    assert_eq!(codes, [0, 53, 54, 55, 56, 57, 58, 59]);
     let stop = StopExit::NotReserved.as_code();
     assert_eq!(stop, 50, "the stop's last code");
     let mut by_code = BTreeMap::new();
@@ -570,6 +570,7 @@ fn the_exit_codes_follow_the_stop_codes_and_are_never_shared() {
         assert!(by_code.insert(exit.as_code(), exit).is_none());
     }
     assert!(codes[1..].iter().all(|code| *code > stop));
-    // 51 is the WSL deny task's (`WslDenyExit::NotAllowed`).
-    assert!(!codes.contains(&51));
+    // 51 and 52 are the WSL deny task's (`WslDenyExit`: not allowed, and the upgrade failed with
+    // the deny applied).
+    assert!(!codes.contains(&51) && !codes.contains(&52));
 }
