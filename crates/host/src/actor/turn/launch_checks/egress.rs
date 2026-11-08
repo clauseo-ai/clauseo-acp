@@ -21,14 +21,19 @@
 //! (`clauseo_sandbox::builtin_allowlist`), plus the browser's seed sites
 //! (`browser::seed_sites`). There is no `network.allowed_domains` setting yet, so no firm list
 //! is added. Chrome's background hosts (`browser::deny_hosts`) are refused silently. The
-//! upstream is the OS's (`Upstream::System`; R17 PR-D adds `network.upstream_proxy`). Refusals
-//! go to [`CountDenials`], which only counts them on the proxy's thread; the guard logs the
-//! session's total when the proxy closes, never a host (decision record 0047). R18 replaces it.
+//! upstream is the OS's (`Upstream::System`; R17 PR-D adds `network.upstream_proxy`). The
+//! block list (0053) is the shared `Current` of the host's `BlockListSeams`, the one its
+//! updater swaps; the proxy reads it per request, so a swap reaches the next connection. With no
+//! seams the list is empty. Refusals go to [`CountDenials`], which counts them on the proxy's
+//! thread and posts each `Denial::Blocked` to the actor (`actor/blocked.rs`, the app's notice);
+//! the guard logs the session's total when the proxy closes, never a host (decision record 0047).
+//! R18 replaces it.
 
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use clauseo_blocklist::Current;
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_sandbox::ports::ListenerFor;
 use clauseo_sandbox::{
@@ -36,10 +41,12 @@ use clauseo_sandbox::{
 };
 
 use super::super::super::Actor;
+use super::super::super::input::Input;
 use super::browser::BrowserPrep;
 use crate::browser::deny_hosts::DENY_HOSTS;
 use crate::browser::seed_sites::SEED_SITES;
 use crate::config::{EgressProxy, SessionKey};
+use crate::handle::BlockedSite;
 
 /// A session's open proxy. Dropping it closes the proxy (`EgressProxy::close`, which may block
 /// while the proxy's thread is joined) and logs the session's refusals. It sits last on
@@ -84,6 +91,10 @@ pub(super) struct EgressPrep {
     proxy: Option<Arc<dyn EgressProxy>>,
     /// The agent, for its built-in hosts.
     agent: AgentId,
+    /// The block list in use (`BlockListSeams::current`), when the host has one.
+    block: Option<Arc<Current>>,
+    /// The actor's input channel, for the sink's blocked-site reports.
+    post: async_channel::Sender<Input>,
 }
 
 /// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
@@ -92,6 +103,12 @@ pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep)
     EgressPrep {
         proxy: actor.wiring.proxy.clone().filter(|_| browser.wanted()),
         agent: agent.clone(),
+        block: actor
+            .wiring
+            .blocklist
+            .as_ref()
+            .map(|seams| Arc::clone(seams.current())),
+        post: actor.post.clone(),
     }
 }
 
@@ -103,10 +120,10 @@ impl EgressPrep {
     /// and binds loopback listeners: off the actor.
     pub(super) fn open(self, key: SessionKey, browser: bool) -> Option<Arc<EgressGuard>> {
         let proxy = self.proxy.filter(|_| browser)?;
-        let denials = Arc::new(CountDenials::default());
+        let denials = Arc::new(CountDenials::reporting(key, self.post));
         match proxy.open(
             key,
-            proxy_config(&self.agent, Arc::clone(&denials), browser),
+            proxy_config(&self.agent, Arc::clone(&denials), self.block, browser),
         ) {
             Ok(()) => Some(Arc::new(EgressGuard {
                 proxy,
@@ -132,10 +149,12 @@ impl EgressPrep {
 }
 
 /// The proxy config for `agent`'s session, its refusals counted in `denials` (see the module
-/// header), with the browser listener when the launch offers the browser (`browser`).
+/// header), refusing the hosts on `block` (an empty list when `None`), with the browser
+/// listener when the launch offers the browser (`browser`).
 pub(crate) fn proxy_config(
     agent: &AgentId,
     denials: Arc<CountDenials>,
+    block: Option<Arc<Current>>,
     browser: bool,
 ) -> ProxyConfig {
     // The plan sign-in's hosts hold the API-key sign-in's: the session's real sign-in is read
@@ -148,9 +167,9 @@ pub(crate) fn proxy_config(
     ProxyConfig {
         allow: builtin.union(hosts(SEED_SITES.iter().copied())),
         silent: hosts(DENY_HOSTS.iter().map(|deny| deny.host)),
-        // Unloaded, and none allowed: the block list (0053) and the lawyer's allowed sites reach
-        // the session's proxy in R17 PR-D's wiring.
-        block: Arc::default(),
+        // The shared list the updater swaps (0053), read per request; none loaded without seams.
+        block: block.unwrap_or_default(),
+        // None allowed yet: the lawyer's allowed sites reach the session's proxy in R17 PR-D.
         allowed: Arc::default(),
         upstream: Upstream::System,
         denials,
@@ -177,13 +196,25 @@ fn hosts<'a>(names: impl Iterator<Item = &'a str>) -> Allowlist {
 }
 
 /// The session's denial sink until R18's. It runs on the proxy's thread, so it only adds to an
-/// atomic counter: no log, no lock, nothing that blocks. [`EgressGuard`] logs the total.
+/// atomic counter and posts each block-list refusal on the actor's unbounded channel
+/// (`try_send`, which never waits): no log, no lock, nothing that blocks. [`EgressGuard`] logs
+/// the total.
 #[derive(Debug, Default)]
 pub(crate) struct CountDenials {
     count: AtomicU64,
+    /// Where a `Denial::Blocked` goes: the session and the actor's channel.
+    blocked: Option<(SessionKey, async_channel::Sender<Input>)>,
 }
 
 impl CountDenials {
+    /// A sink that also reports each `Denial::Blocked` for `session` to the actor.
+    pub(crate) fn reporting(session: SessionKey, post: async_channel::Sender<Input>) -> Self {
+        Self {
+            count: AtomicU64::new(0),
+            blocked: Some((session, post)),
+        }
+    }
+
     /// The refusals so far.
     pub(crate) fn count(&self) -> u64 {
         self.count.load(Ordering::Relaxed)
@@ -199,6 +230,27 @@ impl DenialSink for CountDenials {
             1
         };
         self.count.fetch_add(refused, Ordering::Relaxed);
+        if let (
+            Denial::Blocked {
+                host,
+                tag,
+                generated,
+                ..
+            },
+            Some((session, post)),
+        ) = (d, &self.blocked)
+        {
+            // The host only (never a path); a closed channel means the host has stopped.
+            let site = BlockedSite {
+                host,
+                tag,
+                generated,
+            };
+            let _gone = post.try_send(Input::SiteBlocked {
+                session: *session,
+                site,
+            });
+        }
     }
 }
 

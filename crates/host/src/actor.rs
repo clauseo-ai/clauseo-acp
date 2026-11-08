@@ -271,7 +271,7 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    (first, mut config): (protection::Observed, HostConfig),
+    (first, config): (protection::Observed, HostConfig),
     requests: async_channel::Receiver<Request>,
     (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
@@ -280,7 +280,7 @@ fn run(
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let allowed_sites = blocklist::allowed_sites(&config);
-    let blocklist = blocklist::take(&mut config);
+    let blocklist = blocklist::prepare(&config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
             Ok(actor) => actor,
@@ -511,6 +511,7 @@ impl Actor {
             Input::Connector(input) => connectors::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
+            Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

@@ -268,6 +268,12 @@ pub(crate) enum Input {
     Connector(Box<super::connectors::ConnectorInput>),
     /// A sandbox set-up, removal or check ended, from its thread (`protection/work.rs`).
     Protection(Box<super::protection::work::Done>),
+    /// A session proxy's sink reports a site the block list made it refuse (`blocked.rs`), as
+    /// `HostHandle::site_blocked` does (`launch_checks/egress.rs`).
+    SiteBlocked {
+        session: crate::config::SessionKey,
+        site: crate::handle::BlockedSite,
+    },
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -308,6 +314,7 @@ impl std::fmt::Debug for Input {
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",
             Self::Protection(_) => "Protection",
+            Self::SiteBlocked { .. } => "SiteBlocked",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
             Self::Allowed(_) => "Allowed",
