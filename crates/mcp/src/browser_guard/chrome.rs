@@ -155,7 +155,20 @@ pub(crate) fn launch(
     spec: &Spec<'_>,
     #[cfg(windows)] job: &super::job::Job,
 ) -> Result<Chrome, StartError> {
-    let host = sandbox::Host::now();
+    launch_on(
+        spec,
+        sandbox::Host::now(),
+        #[cfg(windows)]
+        job,
+    )
+}
+
+/// [`launch`] on `host`.
+fn launch_on(
+    spec: &Spec<'_>,
+    host: sandbox::Host,
+    #[cfg(windows)] job: &super::job::Job,
+) -> Result<Chrome, StartError> {
     if sandbox::refused_up_front(host) {
         return Err(StartError::Sandbox(None));
     }
