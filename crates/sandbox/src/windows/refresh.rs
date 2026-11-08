@@ -198,8 +198,27 @@ pub enum RefreshExit {
 }
 
 impl RefreshExit {
+    /// Every variant, in code order. Appended with each new one: a compile-time check below fails
+    /// the build unless this lists every code from 32 up, in order.
+    pub const ALL: [RefreshExit; 14] = [
+        RefreshExit::Done,
+        RefreshExit::NotAllowed,
+        RefreshExit::NoRecord,
+        RefreshExit::SourceRefused,
+        RefreshExit::SignatureRefused,
+        RefreshExit::PlaceholderKey,
+        RefreshExit::StagingFailed,
+        RefreshExit::ReplaceFailed,
+        RefreshExit::RecordNotWritten,
+        RefreshExit::Downgrade,
+        RefreshExit::OutsideProfile,
+        RefreshExit::WrongMachine,
+        RefreshExit::FolderBusy,
+        RefreshExit::LockHeld,
+    ];
+
     /// The process exit code.
-    pub fn as_code(self) -> u8 {
+    pub const fn as_code(self) -> u8 {
         match self {
             RefreshExit::Done => 0,
             RefreshExit::NotAllowed => 32,
@@ -218,6 +237,18 @@ impl RefreshExit {
         }
     }
 }
+
+// `RefreshExit::ALL` tied to the enum at compile time: `as_code`'s match is exhaustive, so a new
+// variant doesn't build until it has a code (the next one; append it to `ALL` too), and the build
+// fails unless `ALL` holds 0, then 32 up, in order with no gap or repeat.
+const _: () = {
+    let (mut rest, mut code): (&[RefreshExit], u8) = (&RefreshExit::ALL, 0);
+    while let [exit, tail @ ..] = rest {
+        assert!(exit.as_code() == code, "RefreshExit::ALL is out of order");
+        code = if code == 0 { 32 } else { code + 1 };
+        rest = tail;
+    }
+};
 
 /// The values of the record the refresh reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
