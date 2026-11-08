@@ -100,9 +100,9 @@ fn the_per_user_copy_and_the_attempt_flag_are_gone() {
 fn a_declined_or_failed_elevation_or_97_says_nothing_of_removal() {
     let code = admin_code();
     let ask = macro_body(&code, ASK);
-    // 1223 is outcome 4 (declined), 97 outcome 6, any other failure (no elevated instance, 99,
-    // NSIS's 1 or 2) outcome 1 through -1 and ${CaseElse}. Only outcome 8 says it, and only 95
-    // makes outcome 8.
+    // 1223 is outcome 4 (declined), 1260 and 5 outcome 9 (blocked), 97 outcome 6, any other
+    // failure (no elevated instance, 99, NSIS's 1 or 2) outcome 1 through -1 and ${CaseElse}.
+    // Only outcome 8 says it, and only 95 makes outcome 8.
     assert_run(ask, &["${ElseIf} $R9 = 1223", "StrCpy $R6 4"]);
     assert_run(
         ask,

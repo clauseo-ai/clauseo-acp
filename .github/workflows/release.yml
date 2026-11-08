@@ -826,17 +826,33 @@ jobs:
           [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
           node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
             "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
+          # makensis's warnings (an unused LangString, a macro left out, a jump to nowhere) don't fail its
+          # compile, and the bundler hides makensis's output unless --verbose. So both bundles run verbose
+          # into one log (pipefail keeps tauri's own exit code), which must hold makensis's output, so the
+          # check can't pass on an empty log, and no "N warning(s):" summary.
+          log=$RUNNER_TEMP/makensis.log
+          : > "$log"
           bundle() {
             rm -rf "$nsis"
-            pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+            pnpm -C ui tauri bundle --ci --verbose --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
               --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
               --config release/windows.conf.json "$@" \
-              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
+              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json 2>&1 | tee -a "$log"
           }
           bundle
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
           bundle --config release/machine.conf.json
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
+          if ! grep -Eq 'Processing script file|Output: ".*\.exe"' "$log"; then
+            echo "::error::no makensis output in the bundle log, so its warnings can't be checked"
+            exit 1
+          fi
+          # Not anchored: the bundler may prefix each line of makensis's output with its own log tag.
+          if grep -Eq '(^|[^0-9])[0-9]+ warnings?:' "$log"; then
+            echo "::error::makensis warned while building the installers"
+            grep -E -A40 '(^|[^0-9])[0-9]+ warnings?:' "$log"
+            exit 1
+          fi
           asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
           cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
           cp "crates/desktop/$sig" "$OUT/$asset.sig"
