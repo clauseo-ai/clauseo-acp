@@ -59,7 +59,7 @@ use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
 use super::ledger::{EntryId, EntryState, Ledger, RecordedFile, is_our_label};
-use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
+use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use crate::Error;
 
 mod back;
@@ -75,7 +75,7 @@ pub use back::{forget_matter, reconcile};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use fence::{FencedEach, fence_each, fence_registered};
 pub use reads::{Narrowed, end_reads, narrow_reads};
-pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
+pub(crate) use walk::{OWN_KINDS, excused_reads, strict_for, strict_of};
 use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, strict_at, walks};
 
 /// What [`apply`] did.
@@ -350,7 +350,10 @@ fn write_all(
         .filter(|e| e.state == EntryState::Pending && plan.entries().contains(&e.id))
         .map(|e| e.id)
         .collect();
-    let strict = strict_for(plan);
+    let strict = Strict {
+        excused: excused_reads(ledger),
+        ..strict_for(plan)
+    };
     let own = own_roots(plan);
     let mut by_path: BTreeMap<(usize, &Path), Vec<usize>> = BTreeMap::new();
     for (i, grant) in grants.iter().enumerate() {
@@ -487,7 +490,10 @@ pub fn repair_after_session(
     around: &mut dyn Surroundings,
 ) -> Result<Walked, Error> {
     let entries = ledger.matter_entries(matter);
-    let strict = strict_of(&entries);
+    let strict = Strict {
+        excused: excused_reads(ledger),
+        ..strict_of(&entries)
+    };
     let roots: BTreeSet<(PathBuf, PathKind)> = entries
         .iter()
         .filter(|e| OWN_KINDS.contains(&e.kind) && e.rights == Rights::Modify)

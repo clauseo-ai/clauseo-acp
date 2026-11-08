@@ -3,6 +3,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use super::fake::Broad;
 use super::*;
 use crate::windows::ledger::Entry;
 
@@ -15,11 +16,13 @@ fn pool() -> Vec<Sid> {
     vec![sid(USER_SID)]
 }
 
-/// A fake with the volume's default entry (`Users` may read and write everything) at the top.
+/// A fake with the volume's default entry (`Users` may read and write everything) at the top,
+/// whose strict walks refuse an allow beating a fence, as `NtfsAcl`'s do.
 fn volume(w: &World) -> FakeAcl {
     let mut acl = FakeAcl::default();
     let top = dunce::canonicalize(w.dir.path()).unwrap();
     acl.aces.insert(volume_default(&top));
+    acl.broad = Broad::Refused;
     acl
 }
 
@@ -342,4 +345,46 @@ fn forgetting_the_matter_takes_its_reads_back() {
     forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     assert_eq!(read_entries(&w, &ledger), Vec::<String>::new());
     assert!(!reads(&w, &acl, "other/m2/docs/b.txt"));
+}
+
+#[test]
+fn a_strict_walk_of_the_other_matter_passes_its_listed_reads_and_refuses_any_other_allow() {
+    // Matter two's fence is new in this launch, so its tree is walked strictly with the reads
+    // already written: they are listed, so excused.
+    let w = World::new("reads-strict");
+    w.other_tree();
+    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+    launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
+    let m2 = w.canonical("other/m2");
+    assert!(acl.walks.iter().any(|(r, _, strict)| *r == m2 && *strict));
+
+    // An allow for the same pool user the ledger doesn't list (one matter two's agent wrote)
+    // refuses the strict walk, as it always did.
+    let w = World::new("reads-strict-planted");
+    w.other_tree();
+    let (mut ledger, mut acl) = (super::ledger(&w), volume(&w));
+    let planted = w.canonical("other/m2/docs/b.txt");
+    let key = (
+        planted,
+        USER_SID.to_owned(),
+        Rights::ReadAndExecute,
+        Inherit::ThisOnly,
+    );
+    acl.aces.insert(key);
+    let policy = w.reading(&[("other/m2/docs", false)]);
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let (data, others) = (w.at("data"), w.neighbour_m2());
+    let admitted = admit_with(&policy, &data, &others, ok, &FakeFolders::default()).unwrap();
+    let mut plan = plan(&admitted, &sids(), matter_one()).unwrap();
+    let error = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::AclApply {
+                failure: ApplyFailure::BroadAllowChild,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
 }

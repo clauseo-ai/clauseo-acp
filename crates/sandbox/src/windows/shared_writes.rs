@@ -224,6 +224,7 @@ fn strict_for(grants: &[Grant], pool_users: &[Sid]) -> Strict {
         watched,
         pool,
         assigned: Vec::new(),
+        excused: Vec::new(),
     }
 }
 

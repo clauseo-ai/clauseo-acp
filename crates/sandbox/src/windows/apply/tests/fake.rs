@@ -85,6 +85,19 @@ pub(super) struct FakeAcl {
     pub(super) keeps_owner: BTreeSet<PathBuf>,
     /// The next this many adds of an allow on this path fail (S15 `PR4h`).
     pub(super) fail_allow: Option<(PathBuf, u32)>,
+    /// Whether a strict walk refuses an explicit allow below its root for a watched SID.
+    pub(super) broad: Broad,
+}
+
+/// What the fake's strict walk does with an explicit allow below its root for a watched SID.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Broad {
+    /// Nothing: the older tests' plans.
+    #[default]
+    Ignored,
+    /// Refuses it as `BroadAllowChild`, as `NtfsAcl` does on the lawyer's child, unless
+    /// `Strict::excused` lists it (R18).
+    Refused,
 }
 
 /// The owner the fake's hand-back gives: the desktop user.
@@ -141,6 +154,28 @@ impl FakeAcl {
     }
 
     /// A shut child below `root`, taken off the list, as the walk reports it.
+    /// The first path below `root` holding an explicit allow for one of `strict`'s watched SIDs
+    /// that isn't a read of another matter it excuses there.
+    fn broad_below(&self, root: &Path, strict: &Strict) -> Option<PathBuf> {
+        let watched = |sid: &str| strict.watched.iter().any(|w| w.as_str() == sid);
+        let excused = |p: &Path, sid: &str, rights: Rights| {
+            rights == Rights::ReadAndExecute
+                && strict
+                    .excused
+                    .iter()
+                    .any(|(e, s)| e == p && s.as_str() == sid)
+        };
+        let mut aces = self.aces.iter();
+        aces.find(|(p, sid, rights, _)| {
+            p != root
+                && p.starts_with(root)
+                && rights.is_allow()
+                && watched(sid)
+                && !excused(p, sid, *rights)
+        })
+        .map(|(p, ..)| p.clone())
+    }
+
     fn shut_below(&mut self, root: &Path) -> Option<PathBuf> {
         let at = self
             .shut
@@ -263,6 +298,15 @@ impl AclWriter for FakeAcl {
             }
             self.refused = Some(root.join("child"));
             return Err(failure);
+        }
+        // `NtfsAcl`'s strict rule, when asked for: an explicit allow below the root for a SID the
+        // walk watches beats the inherited deny, unless it is a read of another matter the ledger
+        // lists there (R18); the fake's children are the lawyer's, so it refuses.
+        if let Some(strict) = strict.filter(|_| self.broad == Broad::Refused)
+            && let Some(child) = self.broad_below(root, strict)
+        {
+            self.refused = Some(child);
+            return Err(ApplyFailure::BroadAllowChild);
         }
         if strict.is_some()
             && let Some(child) = self.shut_below(root)

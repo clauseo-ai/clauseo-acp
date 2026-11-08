@@ -166,9 +166,17 @@ impl AclWriter for NtfsAcl {
         } else {
             sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?)
         };
+        // R18: each read of another matter the ledger lists, its path as final paths are written.
+        let reads = strict
+            .excused
+            .iter()
+            .map(|(path, sid)| Ok((final_form(path)?, sid_bytes(sid))))
+            .collect::<io::Result<Vec<(PathBuf, Vec<u8>)>>>()
+            .map_err(|e| ApplyFailure::Io(e.kind()))?;
         let mode = Mode::Strict {
             watched: &watched,
             pool: &pool,
+            reads: &reads,
             foreign: (!assigned.is_empty()).then_some(Foreign {
                 assigned: &assigned,
                 me: &me,
@@ -508,6 +516,26 @@ fn same_path(target: &Object, planned: &Path) -> io::Result<bool> {
     wide.pop();
     let planned = PathBuf::from(OsString::from_wide(&wide));
     Ok(in_folder(&final_path, &planned) && in_folder(&planned, &final_path))
+}
+
+/// `planned` in the `\\?\` form a final path is read in, as [`same_path`] puts it.
+fn final_form(planned: &Path) -> io::Result<PathBuf> {
+    let mut wide = verbatim_wide(planned)?;
+    wide.pop();
+    Ok(PathBuf::from(OsString::from_wide(&wide)))
+}
+
+/// The SIDs `reads` (final-form paths, SIDs as bytes) lists a read of another matter for on
+/// `target`: the strict walk excuses exactly those allows there (R18).
+fn reads_on<'r>(target: &Object, reads: &'r [(PathBuf, Vec<u8>)]) -> io::Result<Vec<&'r [u8]>> {
+    if reads.is_empty() {
+        return Ok(Vec::new());
+    }
+    let at = PathBuf::from(OsString::from_wide(&target.normalized()?));
+    let here = reads
+        .iter()
+        .filter(|(p, _)| in_folder(&at, p) && in_folder(p, &at));
+    Ok(here.map(|(_, sid)| sid.as_slice()).collect())
 }
 
 /// The DACL control bits a write on a target keeps: its protection, and the auto-inherited mark
