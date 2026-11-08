@@ -1277,11 +1277,12 @@ leaves that profile, both naming the part.
       `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
       and the logon is refused. One whose stop completed is re-marked; one that couldn't be
       (`SweepNext` unreadable, the write failed) refuses the logon, as it refuses a launch,
-      without requesting a stop, which has completed. A marker of this pool
+      without requesting a stop, which has completed (`RunExit::AwaitingSweep`, `0xE0C15013`,
+      appended). A marker of this pool
       user's awaiting a sweep, re-marked now or earlier, is then waited for as a launch waits
       (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
       to 15 s): until that sweep ran, a task the escapee registered is live. One still short
-      refuses the logon (`RunExit::AwaitingStop`) without requesting a stop, which would end
+      refuses the logon (`RunExit::AwaitingSweep`) without requesting a stop, which would end
       every session. A marker naming no pool user (an unreadable one, replaced) awaits a
       stop for every pool user: while every stop ends 48 (a process it can't kill or can't
       place, a BITS job it can't cancel, a cut list), `StopSequence` never moves and every pool
@@ -2175,6 +2176,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   the host's "left the Safe workspace" stop (R17 PR-E). The outer asks the stop task itself.
   `RunExit::AwaitingStop` is F4's refusal: an earlier session of the pool user awaits a stop;
   the outer asked for it, and a later launch goes ahead once it completed.
+  `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
+  user's awaits a sweep that didn't complete within 15 s, or its completed stop couldn't be
+  re-marked; a later launch checks again.
 - **The desktop's start:** once, before any launch and off the UI thread,
   `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
   stop and sweep tasks for what they still await. It never waits.

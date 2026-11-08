@@ -444,10 +444,15 @@ pub enum RunExit {
     /// (`unclean::logon_check`). The outer requested `\Clauseo\SandboxStop` and refuses the
     /// launch before its own marker or any logon; a launch once the stop completed goes ahead.
     AwaitingStop,
+    /// F4: a marker of this pool user's awaits a sweep that didn't complete within 15 s of the
+    /// outer's wait, or its stop completed but it couldn't be re-marked to await a sweep
+    /// (`unclean::logon_check`). No stop is awaited, so none was requested; the outer refuses
+    /// the launch before its own marker or any logon, and a later launch checks again.
+    AwaitingSweep,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 19] = [
+    const ALL: [RunExit; 20] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -467,6 +472,7 @@ impl RunExit {
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
+        RunExit::AwaitingSweep,
     ];
 
     /// The exit code.
@@ -509,7 +515,8 @@ impl RunExit {
             | RunExit::Escapee
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable
-            | RunExit::AwaitingStop => None,
+            | RunExit::AwaitingStop
+            | RunExit::AwaitingSweep => None,
         }
     }
 }

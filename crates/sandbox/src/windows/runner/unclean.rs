@@ -42,6 +42,7 @@
 use std::io;
 use std::time::Duration;
 
+use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
@@ -58,6 +59,33 @@ pub const SWEEP_POLL: Duration = Duration::from_millis(100);
 
 /// Why a marker whose stop completed but couldn't be re-marked refuses a launch and a logon.
 const STUCK: &str = "an earlier session's marker couldn't be moved on from its completed stop";
+
+/// Why F4 refused a logon, with the outer's exit for it: [`RunExit::AwaitingStop`] when it
+/// requested the stop, [`RunExit::AwaitingSweep`] when no stop is awaited (a sweep that didn't
+/// complete, or a marker whose completed stop couldn't be re-marked).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused {
+    /// The outer's exit.
+    pub exit: RunExit,
+    /// What it says on stderr.
+    pub why: String,
+}
+
+impl Refused {
+    fn stop(why: String) -> Self {
+        Refused {
+            exit: RunExit::AwaitingStop,
+            why,
+        }
+    }
+
+    fn sweep(why: String) -> Self {
+        Refused {
+            exit: RunExit::AwaitingSweep,
+            why,
+        }
+    }
+}
 
 /// The markers' effects, as the lawyer.
 pub trait Markers {
@@ -176,9 +204,9 @@ fn remark(
 /// marker awaits a stop; a marker awaiting a sweep (a re-mark's, or any other) is waited for
 /// instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every session. One
 /// whose stop completed but couldn't be re-marked refuses the logon with no stop requested.
-pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String> {
-    let (sessions, known) =
-        current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
+pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused> {
+    let (sessions, known) = current(fs)
+        .map_err(|e| Refused::stop(format!("the session markers can't be read ({e})")))?;
     let ours: Vec<UncleanSession> = sessions
         .into_iter()
         .filter(|session| {
@@ -239,7 +267,7 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
         }
     }
     if !standing && stuck {
-        return Err(STUCK.to_owned());
+        return Err(Refused::sweep(STUCK.to_owned()));
     }
     if !standing {
         // A task the escapee registered is live until its sweep ran: wait for it here.
@@ -250,19 +278,20 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
     } else {
         "the stop couldn't be requested"
     };
-    Err(format!(
+    Err(Refused::stop(format!(
         "an earlier session of this sandbox user awaits the sandbox's stop ({asked})"
-    ))
+    )))
 }
 
 /// F4's wait for this pool user's markers awaiting a sweep: those `SweepSequence` meets go;
 /// otherwise a sweep is requested (unless `requested` already) and `SweepSequence` read every
-/// [`SWEEP_POLL`] for up to [`SWEEP_WAIT`]. `Err` when it is still short, or can't be read.
+/// [`SWEEP_POLL`] for up to [`SWEEP_WAIT`]. `Err` when it is still short, or can't be read:
+/// [`RunExit::AwaitingSweep`], since no stop is awaited.
 fn wait_for_sweeps(
     fs: &mut impl Markers,
     sessions: Vec<UncleanSession>,
     requested: bool,
-) -> Result<(), String> {
+) -> Result<(), Refused> {
     let sessions: Vec<UncleanSession> = sessions
         .into_iter()
         .filter(|session| session.state.and_then(MarkerState::sweep).is_some())
@@ -270,7 +299,8 @@ fn wait_for_sweeps(
     if sessions.is_empty() {
         return Ok(());
     }
-    let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
+    let unread =
+        |e: String| Refused::sweep(format!("the sandbox's sweep sequence can't be read ({e})"));
     let mut done = fs.sequences().map_err(unread)?;
     let left = sweep_clean(fs, sessions, done);
     let wanted = left
@@ -292,11 +322,11 @@ fn wait_for_sweeps(
             return Ok(());
         }
     }
-    Err(format!(
+    Err(Refused::sweep(format!(
         "an earlier session of this sandbox user awaits the sandbox's sweep, which didn't \
          finish within {} s",
         SWEEP_WAIT.as_secs()
-    ))
+    )))
 }
 
 /// A dead outer's marker: `StopNext` read now; `None` when it can't be.

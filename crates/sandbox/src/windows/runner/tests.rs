@@ -446,7 +446,9 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
     assert_eq!(RunExit::AwaitingStop.code(), 0xE0C1_5012);
     assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 19), None);
+    assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
+    assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 20), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
