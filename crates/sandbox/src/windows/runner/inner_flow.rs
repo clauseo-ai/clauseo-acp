@@ -8,9 +8,10 @@
 //!    [`RunExit::Escapee`] when a process couldn't be opened or ended (reported on `ctl` too,
 //!    held until it opens), else [`RunExit::Sweep`];
 //! 2. it removes what the pool user could have left to start at a logon or to run in a runner
-//!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes, `Run` values and Startup
-//!    entries, the end sweeper's removal but for the two kinds reached over COM, which this runner
-//!    never starts. The backstop for an end sweeper that never ran. Its failure is logged;
+//!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes (`HKCU\Software\Classes`), its
+//!    `Run` and `RunOnce` values and its Startup entries. Nothing else removes them, and no code
+//!    of the launch's runs before this (the agent starts in 4); the pool user's scheduled tasks
+//!    and BITS jobs are the `SYSTEM` sweep task's (`end.rs`). Its failure is logged;
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping its own job's processes, which it
