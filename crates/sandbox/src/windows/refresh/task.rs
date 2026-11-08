@@ -21,8 +21,8 @@
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   [`request_pool_stop`], and [`request_pool_sweep`], which the outer runner calls as the
 //!   lawyer at every session's end: each asks the Task Scheduler to run its task
-//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows. The
-//!   outer then looks at its sweep's run until it ended ([`pool_sweep_result`]).
+//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows. Nothing
+//!   waits for a run here: the record's `StopSequence` and `SweepSequence` say what completed.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -374,15 +374,17 @@ pub fn request_admin_refresh() -> Result<(), TaskError> {
     run_task(SystemTask::Refresh)
 }
 
-/// Asks the Task Scheduler to run `\Clauseo\SandboxStop` now, as whoever calls it (the app,
-/// as the lawyer, unelevated): whether the run was queued. A failure is logged with its cause;
-/// `false` with nothing else to do, as the task is the only way to stop a pool user's process
-/// that refuses the runner. The run stops every process of the pool's users and marks them for
-/// a profile reset (`setup::stop`); its outcome is its exit code (`StopExit`) and its Event Log
-/// line. Blocks on COM calls: call it off the UI thread.
+/// Asks the Task Scheduler to run `\Clauseo\SandboxStop` now, as whoever calls it (the outer
+/// runner or the app, as the lawyer, unelevated): whether the run was queued. A failure is
+/// logged with its cause; `false` with nothing else to do, as the task is the only way to stop a
+/// pool user's process that refuses the runner. The run stops every process of the pool's users
+/// and marks them for a profile reset (`setup::stop`); its outcome is its exit code (`StopExit`),
+/// its Event Log line and, when it completed, the record's `StopSequence`. Blocks on COM calls:
+/// call it off the UI thread.
 ///
-/// Who calls it (a follow-up, with the runner's sweeps of #649): the runner, when a pool user's
-/// process survived its sweep, and the desktop once at start-up after an unclean session.
+/// Who calls it: the outer runner, when a sweep of its session found an escapee
+/// (`runner::end`), or a logon it refuses for a marker awaiting a stop (`runner::unclean`); and
+/// the desktop once at start-up for an unclean marker (`runner::start_up_requests`).
 pub fn request_pool_stop() -> bool {
     match run_task(SystemTask::Stop) {
         Ok(()) => true,
@@ -393,69 +395,14 @@ pub fn request_pool_stop() -> bool {
     }
 }
 
-/// A run of `\Clauseo\SandboxSweep` [`request_pool_sweep`] asked for: its instance's GUID, and
-/// the task's last run time (`IRegisteredTask::LastRunTime`, an OLE date) just before the ask.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SweepRun {
-    instance: String,
-    before: f64,
-}
-
 /// Asks the Task Scheduler to run `\Clauseo\SandboxSweep` now, as whoever calls it: the outer
-/// runner, as the lawyer, at every session's end. The task deletes the pool users' scheduled
-/// tasks and cancels their BITS jobs, and kills nothing (`setup::sweep`). A run asked for while
-/// one runs is queued after it, so the run asked for begins after the ask. It returns once the
-/// run is queued; [`pool_sweep_result`] says when it ended and how. Blocks on COM calls.
-pub fn request_pool_sweep() -> Result<SweepRun, TaskError> {
-    with_task(SystemTask::Sweep, |task| {
-        // SAFETY: a live task; reads a value into memory the call owns.
-        let before = unsafe { task.LastRunTime() }.map_err(com("IRegisteredTask::LastRunTime"))?;
-        // SAFETY: a live task and an empty VARIANT: no parameters.
-        let running =
-            unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
-        // SAFETY: a live running task.
-        let instance =
-            unsafe { running.InstanceGuid() }.map_err(com("IRunningTask::InstanceGuid"))?;
-        Ok(SweepRun {
-            instance: instance.to_string(),
-            before,
-        })
-    })
-}
-
-/// How `run` ended, read as whoever asked for it: `None` while its instance is still listed
-/// (queued or running), or while the task's last run began no later than the ask (the run
-/// hasn't started); else the task's last result (`LastTaskResult`), the sweep's exit code
-/// (`SweepExit`). A run that ended and was followed by another, still running, reads as that
-/// one's `SCHED_S_TASK_RUNNING`, never 0. Blocks on COM calls.
-pub fn pool_sweep_result(run: &SweepRun) -> Result<Option<u32>, TaskError> {
-    with_task(SystemTask::Sweep, |task| {
-        // SAFETY: a live task; flags 0.
-        let instances =
-            unsafe { task.GetInstances(0) }.map_err(com("IRegisteredTask::GetInstances"))?;
-        // SAFETY: a live collection.
-        let count = unsafe { instances.Count() }.map_err(com("IRunningTaskCollection::Count"))?;
-        for at in 1..=count {
-            // SAFETY: a live collection and a 1-based index variant.
-            let instance = unsafe { instances.get_Item(&VARIANT::from(at)) }
-                .map_err(com("IRunningTaskCollection::Item"))?;
-            // SAFETY: a live running task.
-            let guid =
-                unsafe { instance.InstanceGuid() }.map_err(com("IRunningTask::InstanceGuid"))?;
-            if guid == run.instance {
-                return Ok(None);
-            }
-        }
-        // SAFETY: a live task; both read a value into memory the call owns.
-        let at = unsafe { task.LastRunTime() }.map_err(com("IRegisteredTask::LastRunTime"))?;
-        if at <= run.before {
-            return Ok(None);
-        }
-        // SAFETY: as above.
-        let code =
-            unsafe { task.LastTaskResult() }.map_err(com("IRegisteredTask::LastTaskResult"))?;
-        Ok(Some(code.cast_unsigned()))
-    })
+/// runner, as the lawyer, at every session's end, and a launch or the desktop's start for a marker
+/// still waiting for a sweep. The task deletes the pool users' scheduled tasks and cancels their
+/// BITS jobs, and kills nothing (`setup::sweep`). A run asked for while one runs is queued after
+/// it, so the run asked for begins after the ask. Whether it ended clean is read from the record's
+/// `SweepSequence`, never from the task's result (`runner::marker`). Blocks on COM calls.
+pub fn request_pool_sweep() -> Result<(), TaskError> {
+    run_task(SystemTask::Sweep)
 }
 
 /// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,

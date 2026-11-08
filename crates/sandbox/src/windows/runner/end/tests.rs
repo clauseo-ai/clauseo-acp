@@ -1,7 +1,8 @@
-//! The session's end through a recording fake: the job emptied first, then the sweep task
-//! requested once a session on every end path, even after a job that didn't empty; a failed
-//! request logged with the exit code unchanged; the wait for the task's result, clean only at 0;
-//! the host's stdin end set apart from the agent's; and the exit code on a cancel.
+//! The session's end through a recording fake: the job emptied first, then `SweepNext` read and
+//! the sweep task requested once a session on every end path, even after a job that didn't
+//! empty; a failed request logged with the exit code unchanged; the marker settled with no wait
+//! for any run (awaiting a sweep, or a stop too after an escapee); the host's stdin end set apart
+//! from the agent's; and the exit code on a cancel.
 
 use std::collections::VecDeque;
 use std::io;
@@ -20,16 +21,15 @@ struct Record {
     fail: Option<&'static str>,
     /// Told when the request begins, which then takes a while.
     slow: Mutex<Option<mpsc::Sender<()>>>,
-    /// The sweep task's results, read in turn; 0 once they run out.
-    results: Mutex<VecDeque<Result<Option<u32>, String>>>,
-    /// The task never ends: every read says it is still running.
-    running: bool,
-    /// How many result reads and pauses were made.
-    reads: Mutex<usize>,
-    pauses: Mutex<Vec<Duration>>,
+    /// The markers written, in order.
+    settled: Mutex<Vec<MarkerState>>,
     /// The clock's readings, in turn; 0 once they run out.
     readings: Mutex<VecDeque<Duration>>,
 }
+
+/// The fake's `SweepNext` and `StopNext`.
+const SWEEP_AT: u64 = 12;
+const STOP_AT: u64 = 4;
 
 impl Record {
     fn step(&self, name: &str) -> Result<(), String> {
@@ -44,47 +44,39 @@ impl Record {
         self.done.lock().unwrap().clone()
     }
 
-    /// A fake whose sweep task gives `results` in turn.
-    fn answering(results: &[Result<Option<u32>, &str>]) -> Record {
-        let results = results
-            .iter()
-            .map(|result| (*result).map_err(str::to_owned))
-            .collect();
-        Record {
-            results: Mutex::new(results),
-            ..Record::default()
-        }
+    fn settled(&self) -> Vec<MarkerState> {
+        self.settled.lock().unwrap().clone()
     }
 }
 
 impl EndSteps for Record {
-    type Run = u32;
     fn empty_job(&self) -> Result<(), String> {
         self.step("empty job")
     }
-    fn request_sweep(&self) -> Result<u32, String> {
+    fn next_number(&self, name: &'static str) -> Result<u64, String> {
+        self.step(&format!("read {name}"))?;
+        Ok(if name == SWEEP_NEXT {
+            SWEEP_AT
+        } else {
+            STOP_AT
+        })
+    }
+    fn request_sweep(&self) -> Result<(), String> {
         if let Some(begun) = self.slow.lock().unwrap().take() {
             begun.send(()).unwrap();
             // A request that takes 100 ms: nothing is ever sent on `idle`.
             let (_kept, idle) = mpsc::channel::<()>();
             assert!(idle.recv_timeout(Duration::from_millis(100)).is_err());
         }
-        self.step("request sweep").map(|()| 9)
+        self.step("request sweep")
     }
-    fn sweep_result(&self, run: &u32) -> Result<Option<u32>, String> {
-        assert_eq!(*run, 9);
-        *self.reads.lock().unwrap() += 1;
-        if self.running {
-            return Ok(None);
-        }
-        self.results
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or(Ok(Some(0)))
+    fn request_stop(&self) -> bool {
+        self.step("request stop").is_ok()
     }
-    fn pause(&self, pause: Duration) {
-        self.pauses.lock().unwrap().push(pause);
+    fn settle(&self, state: &MarkerState) -> Result<(), String> {
+        self.step("settle")?;
+        self.settled.lock().unwrap().push(*state);
+        Ok(())
     }
     fn log(&self, line: &str) {
         self.done.lock().unwrap().push(format!("log {line}"));
@@ -98,15 +90,17 @@ impl EndSteps for Record {
     }
 }
 
-const ENDED: [&str; 2] = ["empty job", "request sweep"];
-const NOT_EMPTY: [&str; 3] = [
+const ENDED: [&str; 3] = ["empty job", "read SweepNext", "request sweep"];
+const NOT_EMPTY: [&str; 4] = [
     "empty job",
     "log clauseo-sandbox-run: warning: the job didn't empty (empty job failed (5)); the sandbox \
      sweep task is requested all the same",
+    "read SweepNext",
     "request sweep",
 ];
-const NOT_REQUESTED: [&str; 3] = [
+const NOT_REQUESTED: [&str; 4] = [
     "empty job",
+    "read SweepNext",
     "request sweep",
     "log clauseo-sandbox-run: warning: the sandbox sweep task couldn't be requested (request \
      sweep failed (5))",
@@ -123,7 +117,7 @@ fn lines(want: &[&str]) -> Vec<String> {
 #[test]
 fn the_job_is_emptied_then_the_sweep_task_is_requested() {
     let record = Record::default();
-    assert_eq!(end_session(&record), (true, Some(9)));
+    assert_eq!(end_session(&record), (true, Some(SWEEP_AT)));
     // The job is empty before the request; no process of the pool user's is started.
     assert_eq!(record.done(), ENDED);
 }
@@ -135,7 +129,7 @@ fn a_job_that_doesnt_empty_still_requests_the_sweep_on_every_path() {
         ..Record::default()
     };
     let record = not_empty();
-    assert_eq!(end_session(&record), (false, Some(9)));
+    assert_eq!(end_session(&record), (false, Some(SWEEP_AT)));
     assert_eq!(record.done(), NOT_EMPTY);
     for path in [EndSignal::InnerExited, EndSignal::Failed] {
         let end = SessionEnd::new(not_empty());
@@ -145,9 +139,10 @@ fn a_job_that_doesnt_empty_still_requests_the_sweep_on_every_path() {
         // A later path doesn't end it again.
         assert!(!end.trigger(EndSignal::Stdin));
         assert_eq!(end.steps().done(), NOT_EMPTY, "{path:?}");
-        // The sweep ran clean, but the job didn't empty: no clean end.
-        assert_eq!(end.wait(), Swept::Clean);
-        assert!(!end.clean(Swept::Clean, true), "{path:?}");
+        // The next inner's first act kills what is left: the marker awaits a sweep alone.
+        end.finish();
+        let awaiting = MarkerState::AwaitingSweep { sweep: SWEEP_AT };
+        assert_eq!(end.steps().settled(), [awaiting], "{path:?}");
     }
     // The host's stdin end: the agent's stdin closes, its grace runs out, the request all the same.
     let end = SessionEnd::new(not_empty());
@@ -169,14 +164,11 @@ fn a_failed_request_is_logged_and_changes_no_exit_code() {
     let end = SessionEnd::new(failing());
     assert_eq!(inner_exited(&end, Some(7), Some(7), || {}), 7);
     assert_eq!(end.steps().done(), NOT_REQUESTED);
-    // Nothing to wait for: unclean, said once, and the outcome is the agent's.
-    assert_eq!(end.wait(), Swept::Unclean);
-    assert_eq!(end.wait(), Swept::Unclean);
-    let mut want = lines(&NOT_REQUESTED);
-    want.push("log clauseo-sandbox-run: warning: no sandbox sweep task was requested".to_owned());
-    assert_eq!(end.steps().done(), want);
-    assert_eq!(*end.steps().reads.lock().unwrap(), 0);
-    assert!(!end.clean(end.wait(), true));
+    // The marker still awaits a sweep: a later one, which the next launch asks for, clears it.
+    end.finish();
+    end.finish();
+    let awaiting = MarkerState::AwaitingSweep { sweep: SWEEP_AT };
+    assert_eq!(end.steps().settled(), [awaiting], "settled once");
     assert_eq!(end.outcome(7), 7);
     // On a cancel and a failure the code is unchanged too.
     let end = SessionEnd::new(failing());
@@ -310,9 +302,8 @@ fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output(
     want.extend(lines(&ENDED));
     want.push("log drain".to_owned());
     assert_eq!(end.steps().done(), want);
-    // Its end began at the inner's exit: no cancel, and a clean end once the sweep ended 0.
+    // Its end began at the inner's exit: no cancel.
     assert_eq!(end.began(), Some(EndSignal::InnerExited));
-    assert!(end.clean(end.wait(), true));
 }
 
 #[test]
@@ -326,28 +317,32 @@ fn stdin_ending_with_the_agent_not_finishing_ends_the_job_then_requests_the_swee
     want.extend(lines(&ENDED));
     assert_eq!(end.steps().done(), want);
     assert_eq!(end.began(), Some(EndSignal::Stdin));
-    // The job's end ended the inner: the host's job-end code, no second request, no clean end.
+    // The job's end ended the inner: the host's job-end code, no second request. A cancel past
+    // the grace awaits a sweep too: the next inner's first act kills what is left.
     let code = inner_exited(&end, Some(SWEPT), None, || end.steps().log("drain"));
     assert_eq!(code, HOST_ENDED);
     want.extend(lines(&["log drain", "log drain"]));
     assert_eq!(end.steps().done(), want);
-    assert!(!end.clean(end.wait(), false));
+    end.finish();
+    let awaiting = MarkerState::AwaitingSweep { sweep: SWEEP_AT };
+    assert_eq!(end.steps().settled(), [awaiting]);
 }
 
 #[test]
-fn the_grace_and_the_jobs_end_leave_the_request_half_a_second_of_the_hosts_two() {
+fn a_cancels_end_fits_in_3_s_well_inside_the_hosts_5() {
     // What the host gives the outer after it closed its stdin, before it ends the outer's job:
-    // `STDIN_GRACE` in `crates/process/src/handle.rs`.
-    const HOST_BUDGET: Duration = Duration::from_secs(2);
+    // `SpawnOptions::stdin_grace` on tier B.
+    const HOST_GRACE: Duration = Duration::from_secs(5);
     assert_eq!(GRACE, Duration::from_secs(1));
     assert_eq!(EMPTY_WAIT, Duration::from_millis(400));
-    // A full grace, a full wait for the job to empty, and 500 ms for the request's COM calls
-    // and the last poll: all inside the 2 s.
-    let request = Duration::from_millis(500);
-    assert!(GRACE + EMPTY_WAIT + request <= HOST_BUDGET);
-    // The outer's own wait for the result, past the host's budget, is for a run with no cancel.
-    assert_eq!(SWEEP_WAIT, Duration::from_secs(20));
-    assert_eq!(SWEEP_POLL, Duration::from_millis(100));
+    assert_eq!(OUTER_END, Duration::from_secs(3));
+    // A full grace, a full wait for the job to empty, the escapee snapshot (230 ms at most,
+    // measured), and a second for the two record reads, the requests' COM calls and the marker's
+    // write: inside the 3 s the cancel tests pin, which leaves the host's 5 s room.
+    let snapshot = Duration::from_millis(230);
+    let calls = Duration::from_secs(1);
+    assert!(GRACE + EMPTY_WAIT + snapshot + calls <= OUTER_END);
+    assert!(OUTER_END < HOST_GRACE);
 }
 
 #[test]
@@ -471,97 +466,99 @@ fn an_escapee_makes_the_run_exit_escapee_whatever_the_agents_code_or_the_sweep()
     for code in [0, 3, HOST_ENDED, SWEPT] {
         assert_eq!(end.outcome(code), escapee, "{code:#x}");
     }
-    // A sweep task that ended 0 changes nothing: still the escapee, and no clean end.
+    // The end changes nothing: still the escapee.
     assert!(end.trigger(EndSignal::InnerExited));
-    assert_eq!(end.wait(), Swept::Clean);
-    assert!(!end.clean(Swept::Clean, true));
+    end.finish();
     assert_eq!(end.outcome(0), escapee);
 }
 
 #[test]
-fn the_wait_reads_the_result_every_100_ms_for_up_to_20_s_and_only_0_is_clean() {
-    let (none, zero) = (Ok(None), Ok(Some(0)));
-    // Queued, running, then 0: two pauses of 100 ms, no line.
-    let record = Record::answering(&[none, none, zero]);
-    assert_eq!(wait_swept(&record, Some(&9)), Swept::Clean);
-    assert_eq!(*record.pauses.lock().unwrap(), [SWEEP_POLL; 2]);
-    assert_eq!(record.done(), Vec::<String>::new());
-    // Any other result, in hex: a task it couldn't read or delete, and the reserved PoolStop.
-    for code in [1, 0x8007_0005, RunExit::PoolStop.code()] {
-        let record = Record::answering(&[none, Ok(Some(code))]);
-        assert_eq!(wait_swept(&record, Some(&9)), Swept::Unclean, "{code:#x}");
-        let line =
-            format!("log clauseo-sandbox-run: warning: the sandbox sweep task ended {code:#010X}");
-        assert_eq!(record.done(), [line.replace("0X", "0x")], "{code:#x}");
+fn every_end_without_an_escapee_awaits_the_sweep_next_it_read_and_never_waits() {
+    for first in [EndSignal::InnerExited, EndSignal::Stdin, EndSignal::Failed] {
+        let end = SessionEnd::new(Record::default());
+        end.trigger(first);
+        end.finish();
+        let mut want = lines(&ENDED);
+        want.push("settle".to_owned());
+        // Read once the job ended, before the request; no stop is read or asked for.
+        assert_eq!(end.steps().done(), want, "{first:?}");
+        let awaiting = MarkerState::AwaitingSweep { sweep: SWEEP_AT };
+        assert_eq!(end.steps().settled(), [awaiting], "{first:?}");
     }
-    // Still running at the deadline: 200 pauses, 201 reads, and no more.
-    let record = Record {
-        running: true,
-        ..Record::default()
-    };
-    assert_eq!(wait_swept(&record, Some(&9)), Swept::Unclean);
-    assert_eq!(record.pauses.lock().unwrap().len(), 200);
-    assert_eq!(*record.reads.lock().unwrap(), 201);
-    assert_eq!(
-        record.done(),
-        ["log clauseo-sandbox-run: warning: the sandbox sweep task was still running after 20 s"]
-    );
-    // A read that failed.
-    let record = Record::answering(&[Err("IRegisteredTask::GetInstances failed (0x80070005)")]);
-    assert_eq!(wait_swept(&record, Some(&9)), Swept::Unclean);
-    assert_eq!(
-        record.done(),
-        [
-            "log clauseo-sandbox-run: warning: the sandbox sweep task's result can't be read \
-             (IRegisteredTask::GetInstances failed (0x80070005))"
-        ]
-    );
 }
 
 #[test]
-fn only_a_clean_end_removes_the_unclean_session_marker() {
-    let ended = |first: Option<EndSignal>, record: Record| {
-        let end = SessionEnd::new(record);
-        if let Some(first) = first {
-            end.trigger(first);
-        }
-        let swept = end.wait();
-        (end, swept)
-    };
-    let inner = Some(EndSignal::InnerExited);
-    // The inner exited, reported the agent's exit, the job emptied, and the sweep ended 0: clean.
-    let (end, swept) = ended(inner, Record::default());
-    assert_eq!(swept, Swept::Clean);
-    assert!(end.clean(swept, true));
-    // ... but not when the inner never reported, or a sweep found an escapee.
-    assert!(!end.clean(swept, false));
+fn an_escapee_reads_stop_next_then_requests_the_stop_and_awaits_both() {
+    let end = SessionEnd::new(Record::default());
     end.mark_escapee();
-    assert!(!end.clean(swept, true));
-    // A cancel, a failure, or no end signal at all (the outer never got that far): left.
-    for first in [Some(EndSignal::Stdin), Some(EndSignal::Failed), None] {
-        let (end, swept) = ended(first, Record::default());
-        assert!(!end.clean(swept, true), "{first:?}");
+    end.trigger(EndSignal::InnerExited);
+    end.finish();
+    let mut want = lines(&ENDED);
+    want.extend(lines(&["read StopNext", "request stop", "settle"]));
+    assert_eq!(end.steps().done(), want);
+    let awaiting = MarkerState::AwaitingStop {
+        stop: STOP_AT,
+        sweep: SWEEP_AT,
+    };
+    assert_eq!(end.steps().settled(), [awaiting]);
+    // A stop that couldn't be requested is said; the marker still awaits one.
+    let end = SessionEnd::new(Record {
+        fail: Some("request stop"),
+        ..Record::default()
+    });
+    end.mark_escapee();
+    end.trigger(EndSignal::Failed);
+    end.finish();
+    assert!(end.steps().done().contains(
+        &"log clauseo-sandbox-run: warning: the sandbox stop task couldn't be requested".to_owned()
+    ));
+    assert_eq!(end.steps().settled(), [awaiting]);
+}
+
+#[test]
+fn a_number_that_cant_be_read_or_no_end_leaves_the_marker_open() {
+    for (fail, escaped) in [
+        ("read SweepNext", false),
+        ("read SweepNext", true),
+        ("read StopNext", true),
+    ] {
+        let end = SessionEnd::new(Record {
+            fail: Some(fail),
+            ..Record::default()
+        });
+        if escaped {
+            end.mark_escapee();
+        }
+        end.trigger(EndSignal::InnerExited);
+        end.finish();
+        assert_eq!(end.steps().settled(), [], "{fail}");
+        let said = format!("{} can't be read", fail.trim_start_matches("read "));
+        assert!(
+            end.steps().done().iter().any(|line| line.contains(&said)),
+            "{fail}"
+        );
+        // The stop is still requested after an escapee, the sweep always.
+        assert!(end.steps().done().contains(&"request sweep".to_owned()));
+        assert_eq!(
+            end.steps().done().contains(&"request stop".to_owned()),
+            escaped,
+            "{fail}"
+        );
     }
-    // A sweep task that ended non-zero, ran past the wait, or whose result couldn't be read; a
-    // request that failed; a job that didn't empty: left.
-    let unclean = [
-        Record::answering(&[Ok(Some(1))]),
-        Record {
-            running: true,
-            ..Record::default()
-        },
-        Record::answering(&[Err("read failed")]),
-        Record {
-            fail: Some("request sweep"),
-            ..Record::default()
-        },
-        Record {
-            fail: Some("empty job"),
-            ..Record::default()
-        },
-    ];
-    for (at, record) in unclean.into_iter().enumerate() {
-        let (end, swept) = ended(inner, record);
-        assert!(!end.clean(swept, true), "case {at}");
-    }
+    // No end began: nothing read, nothing written.
+    let end = SessionEnd::new(Record::default());
+    end.finish();
+    assert_eq!(end.steps().done(), Vec::<String>::new());
+    // A marker that can't be written is said, and stays open.
+    let end = SessionEnd::new(Record {
+        fail: Some("settle"),
+        ..Record::default()
+    });
+    end.trigger(EndSignal::InnerExited);
+    end.finish();
+    let last = end.steps().done().pop().unwrap();
+    assert!(
+        last.contains("the session marker couldn't be written"),
+        "{last}"
+    );
 }
