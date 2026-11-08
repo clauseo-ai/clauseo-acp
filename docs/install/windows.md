@@ -127,10 +127,10 @@ The Clauseo installer opens. Click through its pages.
 On a work computer, your firm's IT team may have switched it off. Send them this page and
 [Clauseo for firm IT](../firm-it.md).
 
-## If Smart App Control blocks Clauseo
+## Smart App Control
 
-Some Windows 11 computers have Smart App Control on, often a new computer set up from scratch. It
-blocks any app that isn't signed and that Microsoft doesn't already know. Clauseo is both, so
+If Smart App Control blocks Clauseo, this section is for you. Some Windows 11 computers have it on,
+often a new computer set up from scratch. It blocks any app that isn't signed and that Microsoft doesn't already know. Clauseo is both, so
 Smart App Control blocks it outright.
 
 You can tell it apart from "Windows protected your PC": its message names Smart App Control, and
@@ -138,13 +138,31 @@ there is no **More info** and no **Run anyway**. It can't let one app through.
 
 Check on the laptop pass: the exact wording of Smart App Control's message.
 
-Clauseo can't be installed or run while Smart App Control is on. The setting is in Windows
-Security, under App & browser control, then Smart App Control settings. Turning it off lowers
-protection for every app on the computer, not only Clauseo. An up-to-date Windows 11 can usually
-turn it back on later in the same place, while older versions, or a computer with Windows'
-optional diagnostic data off, need a reset or reinstall of Windows to turn it back on.
+Clauseo can't be installed or run while Smart App Control is on. You can turn it off yourself:
 
-Ask your IT team, or wait for a signed version.
+1. Open the Start menu, type **Windows Security** and open it.
+2. Click **App & browser control**, then **Smart App Control settings**.
+3. Choose **Off**.
+
+Turning it off lowers protection for every app on the computer, not only Clauseo. If you want it
+back later, on an up-to-date Windows 11, with updates from March 2026 or later, you turn it back
+on in the same place. On older versions of Windows 11, or with Windows' optional diagnostic data
+off, turning it back on needs a reset or reinstall of Windows.
+
+Check on the laptop pass: the settings' wording, and that **Off** asks you to confirm.
+
+On a work computer your firm's IT team manages, the setting may be locked. Send them this page and
+[Clauseo for firm IT](../firm-it.md).
+
+## If Windows says it only runs Microsoft-verified apps
+
+Your computer is in S mode, a setting some new laptops come with that runs only apps from the
+Microsoft Store. Its message says Windows "only runs Microsoft-verified apps". It doesn't name
+[Smart App Control](#smart-app-control), and it isn't the blue "Windows protected your PC" box, so
+there is no **Run anyway**.
+
+You can switch S mode off yourself in Settings. It's free and takes a few minutes, but it can't be
+undone. [Switching out of S mode](windows-s-mode.md) has the clicks.
 
 ## After install
 
