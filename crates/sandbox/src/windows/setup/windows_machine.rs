@@ -412,6 +412,11 @@ impl Machine for WindowsMachine {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Refresh, owner)
+            .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
         refresh::register_task(SystemTask::Stop, owner)
             .map_err(|error| MachineError::Other(error.to_string()))

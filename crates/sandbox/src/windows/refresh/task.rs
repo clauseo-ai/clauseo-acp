@@ -2,9 +2,10 @@
 //! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
 //! API (`ITaskService`), never `schtasks` text:
 //!
-//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
-//!   user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`): the task
-//!   runs as LOCAL SYSTEM, starts
+//! - [`register_task`], which plain `--adopt` calls elevated for each of [`TASKS`](super::TASKS)
+//!   per user, and every set-up with an admin copy for the owner it records
+//!   (`late_steps::tasks`): both per user, the stop task alone per machine. The task runs as
+//!   LOCAL SYSTEM, starts
 //!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
 //!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
 //!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice

@@ -214,9 +214,12 @@ pub enum Step {
     ResetProfile,
     /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
     Network,
-    /// 5: on a per-machine install, registering the SYSTEM task `\Clauseo\SandboxStop` for the
-    /// owner just recorded (`late_steps::stop_task`).
+    /// 5: with an admin copy, registering the SYSTEM task `\Clauseo\SandboxStop` for the
+    /// owner just recorded, or reading the record's `AdminCopyOwner` (`late_steps::tasks`).
     StopTask,
+    /// 5: with an admin copy, registering the SYSTEM task `\Clauseo\SandboxRefresh` for the
+    /// owner just recorded (`late_steps::tasks`).
+    RefreshTask,
 }
 
 impl fmt::Display for Step {
@@ -246,6 +249,7 @@ impl fmt::Display for Step {
             Step::ResetProfile => "resetting a sandbox user's profile",
             Step::Network => "setting up the network filters",
             Step::StopTask => "registering the sandbox's stop task",
+            Step::RefreshTask => "registering the admin copy's refresh task",
         })
     }
 }

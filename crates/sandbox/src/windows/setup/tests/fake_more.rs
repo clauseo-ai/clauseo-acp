@@ -166,6 +166,8 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
+    /// The owner the task `\Clauseo\SandboxRefresh`'s descriptor names, while registered.
+    pub(super) refresh_task: Option<Sid>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -194,6 +196,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             secrets: BTreeMap::new(),
             copy_owner: None,
             stop_task: None,
+            refresh_task: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),

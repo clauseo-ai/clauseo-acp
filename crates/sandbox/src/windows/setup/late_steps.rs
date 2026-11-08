@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop task once the owner is recorded.
+//! 8's fence of them against the grown pool, step 9's change journals, and the SYSTEM tasks
+//! once the owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use clauseo_protocol::MatterId;
 
 use super::create::Failed;
 use super::journal_plan::{JournalAction, journal_plan};
-use super::machine::{Machine, owned};
+use super::machine::{Machine, MachineError, owned};
 use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
@@ -27,25 +27,50 @@ const SYSTEM: &str = "S-1-5-18";
 /// `BUILTIN\Administrators`.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 
-/// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
-/// record's `AdminCopyOwner` is `machine`), the SYSTEM task `\Clauseo\SandboxStop` is
-/// registered for `owner`, or replaced when it is there, by the same registration `--adopt`
-/// makes per user (`refresh::register_task`). Its descriptor then names `owner` alone, so a
-/// previous owner's start right goes with the replaced one. A per-user install's task is
-/// `--adopt`'s, and an install with no admin copy has no task, so neither is touched here. A
-/// record that can't be read or a registration that fails is [`Step::StopTask`], rolled back.
-pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
-    let failed = |why: String| (Step::StopTask, format!("the task SandboxStop: {why}"));
-    match machine.copy_owner() {
-        Ok(Some(CopyOwner::Machine)) => machine
-            .register_stop_task(owner)
-            .map_err(|error| failed(cause_of(&error))),
-        Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
-        Err(error) => Err(failed(format!(
-            "the record's AdminCopyOwner can't be read ({})",
-            cause_of(&error)
-        ))),
+/// After step 5, once the record names `owner` as `OwnerSid`, the SYSTEM tasks are registered
+/// for `owner`, or replaced when there, by `refresh::register_task`: per user (the record's
+/// `AdminCopyOwner` is `owner`), `\Clauseo\SandboxRefresh` then `\Clauseo\SandboxStop`
+/// (`refresh::TASKS`' order), as plain `--adopt` registers them; per machine (it is `machine`),
+/// the stop task alone, since IT updates a per-machine install (0049). Each descriptor then names
+/// `owner` alone, so a previous owner's start right goes with the replaced task, and a re-run
+/// registers them again.
+///
+/// Per user this is what makes the tasks once `--adopt --place-only` has placed the copy: the
+/// app's first run runs this set-up from the admin copy, outside the installer's process tree
+/// (0049, "Admin copy"). A copy another user placed keeps that user's tasks: nothing is
+/// registered for `owner` then. An install with no admin copy has no task, so nothing is
+/// registered either. A record that can't be read fails at [`Step::StopTask`]; a registration
+/// that fails at [`Step::RefreshTask`] or [`Step::StopTask`]; each rolled back.
+pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
+    let refresh = match machine.copy_owner() {
+        Ok(Some(CopyOwner::Machine)) => false,
+        Ok(Some(CopyOwner::User(placed))) if placed == *owner => true,
+        Ok(Some(CopyOwner::User(_))) => {
+            tracing::warn!("another user's install placed the admin copy; its tasks stay");
+            return Ok(());
+        }
+        Ok(None) => return Ok(()),
+        Err(error) => {
+            return Err((
+                Step::StopTask,
+                format!(
+                    "the tasks: the record's AdminCopyOwner can't be read ({})",
+                    cause_of(&error)
+                ),
+            ));
+        }
+    };
+    let failed = |step: Step, name: &str, error: &MachineError| {
+        (step, format!("the task {name}: {}", cause_of(error)))
+    };
+    if refresh {
+        machine
+            .register_refresh_task(owner)
+            .map_err(|error| failed(Step::RefreshTask, "SandboxRefresh", &error))?;
     }
+    machine
+        .register_stop_task(owner)
+        .map_err(|error| failed(Step::StopTask, "SandboxStop", &error))
 }
 
 /// Before step 7: the folders whose denies protect what is below them, which an owner could

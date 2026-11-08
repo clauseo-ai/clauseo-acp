@@ -455,6 +455,13 @@ impl Machine for FakeMachine {
         Ok(self.state.copy_owner.clone())
     }
 
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        self.call(format!("register_refresh_task {}", rid(owner)))?;
+        self.state.refresh_task = Some(owner.clone());
+        Ok(())
+    }
+
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
         assert!(!self.acting.get(), "the task is registered as admin");
         self.call(format!("register_stop_task {}", rid(owner)))?;

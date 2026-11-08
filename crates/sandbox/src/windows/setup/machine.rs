@@ -203,8 +203,10 @@ pub trait Machine {
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxStop` for the pool owner
-    /// `owner` (`refresh::register_task`, as `--adopt` does per user), as this process.
+    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxRefresh` for the pool owner
+    /// `owner` (`refresh::register_task`, as plain `--adopt` does per user), as this process.
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// The same for `\Clauseo\SandboxStop`.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
