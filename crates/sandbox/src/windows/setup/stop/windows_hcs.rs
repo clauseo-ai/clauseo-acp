@@ -1,11 +1,13 @@
 //! The stop's WSL step on the machine ([`VmStopper`] for [`WindowsStopper`]): HCS's compute
 //! systems through `computecore.dll`, the profiles through `ProfileList`, the lawyer's
-//! `Local AppData` redirect through its loaded hive (`HKU\<OwnerSid>`), and the services' keys. `computecore.dll` is loaded at run time from System32
-//! (`LoadLibraryExW`, `LOAD_LIBRARY_SEARCH_SYSTEM32`) and its exports found by name, never
-//! imported: a machine without it (no Hyper-V platform) must still start the exe, and has no VM
-//! to end. Every HCS call is asynchronous: each gets an operation (`HcsCreateOperation`), waited
-//! for with a bounded timeout (`HcsWaitForOperationResult`), and every operation and system
-//! handle is closed on drop. Errors name the call and its code, never a path, an id or a SID.
+//! `Local AppData` redirect through its loaded hive (`HKU\<OwnerSid>`), and the services' keys.
+//! `computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`,
+//! `LOAD_LIBRARY_SEARCH_SYSTEM32`) and its exports found by name, never imported: a machine without
+//! it (no Hyper-V platform) must still start the exe, and has no VM to end. Every HCS call is
+//! asynchronous: each gets an operation (`HcsCreateOperation`), waited for with a bounded timeout
+//! (`HcsWaitForOperationResult`), one whose wait times out is cancelled (`HcsCancelOperation`,
+//! where the DLL has it), and every operation and system handle is closed on drop. Errors name the
+//! call and its code, never a path, an id or a SID.
 #![expect(
     unsafe_code,
     reason = "FFI to computecore.dll, loaded at run time, and RegGetValueW on HKEY_USERS"
@@ -17,9 +19,9 @@ use std::ptr;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_MOD_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, FreeLibrary,
-    GENERIC_ALL, HCS_E_SYSTEM_ALREADY_STOPPED, HCS_E_SYSTEM_NOT_FOUND, HLOCAL, HMODULE, LocalFree,
-    WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_MOD_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_TIMEOUT,
+    FreeLibrary, GENERIC_ALL, HCS_E_OPERATION_TIMEOUT, HCS_E_SYSTEM_ALREADY_STOPPED,
+    HCS_E_SYSTEM_NOT_FOUND, HLOCAL, HMODULE, LocalFree, WIN32_ERROR,
 };
 use windows::Win32::System::LibraryLoader::{
     GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
@@ -48,6 +50,8 @@ type Enumerate = unsafe extern "system" fn(PCWSTR, Raw) -> HRESULT;
 type CreateOperation = unsafe extern "system" fn(*const c_void, *const c_void) -> Raw;
 /// `HcsWaitForOperationResult(operation, timeoutMs, resultDocument)`.
 type WaitForResult = unsafe extern "system" fn(Raw, u32, *mut PWSTR) -> HRESULT;
+/// `HcsCancelOperation(operation)`.
+type Cancel = unsafe extern "system" fn(Raw) -> HRESULT;
 /// `HcsCloseOperation(operation)` and `HcsCloseComputeSystem(computeSystem)`.
 type Close = unsafe extern "system" fn(Raw);
 /// `HcsOpenComputeSystem(id, requestedAccess, computeSystem)`.
@@ -63,6 +67,11 @@ fn service_installed(name: &str) -> bool {
 /// `call` failed with `code`, as a line for the log.
 fn failed(call: &str, code: HRESULT) -> Failed {
     format!("{call} failed ({:#010x})", code.0)
+}
+
+/// Whether `code` says a wait for an operation ran out of time.
+fn timed_out(code: HRESULT) -> bool {
+    code == ERROR_TIMEOUT.to_hresult() || code == HCS_E_OPERATION_TIMEOUT
 }
 
 /// Whether `code` says the system is already gone.
@@ -235,6 +244,9 @@ struct Hcs {
     create_operation: CreateOperation,
     wait_for_result: WaitForResult,
     close_operation: Close,
+    /// `HcsCancelOperation`: `None` where the DLL lacks it, and a timed-out operation is only
+    /// closed.
+    cancel: Option<Cancel>,
     open: Open,
     terminate: Terminate,
     close_system: Close,
@@ -256,6 +268,16 @@ unsafe fn export<T: Copy>(module: HMODULE, name: PCSTR) -> Result<T, Failed> {
     Ok(unsafe { std::mem::transmute_copy::<unsafe extern "system" fn() -> isize, T>(&found) })
 }
 
+/// The export `name` of `module` as `T`, or `None` when the module lacks it.
+///
+/// # Safety
+///
+/// As [`export`].
+unsafe fn optional_export<T: Copy>(module: HMODULE, name: PCSTR) -> Option<T> {
+    // SAFETY: as the caller's contract says.
+    unsafe { export(module, name) }.ok()
+}
+
 impl Hcs {
     /// `computecore.dll` from System32 with its exports; `None` when it isn't there.
     fn load() -> Result<Option<Hcs>, Failed> {
@@ -275,6 +297,7 @@ impl Hcs {
                 create_operation: export(module, s!("HcsCreateOperation"))?,
                 wait_for_result: export(module, s!("HcsWaitForOperationResult"))?,
                 close_operation: export(module, s!("HcsCloseOperation"))?,
+                cancel: optional_export(module, s!("HcsCancelOperation")),
                 open: export(module, s!("HcsOpenComputeSystem"))?,
                 terminate: export(module, s!("HcsTerminateComputeSystem"))?,
                 close_system: export(module, s!("HcsCloseComputeSystem"))?,
@@ -295,11 +318,21 @@ impl Hcs {
     }
 
     /// Waits up to `wait` for `operation`: its result, and its result document if it gave one.
+    /// One that runs out of time is cancelled, where the DLL can, before it is closed on drop.
     fn wait(&self, operation: &Operation<'_>, wait: Duration) -> (HRESULT, Option<String>) {
         let wait_ms = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
         let mut document = PWSTR::null();
         // SAFETY: a live operation, a bounded wait, and a live out-pointer.
         let code = unsafe { (self.wait_for_result)(operation.1, wait_ms, &raw mut document) };
+        if timed_out(code)
+            && let Some(cancel) = self.cancel
+        {
+            // SAFETY: a live operation, not yet closed.
+            let cancelled = unsafe { cancel(operation.1) };
+            if cancelled.is_err() {
+                tracing::debug!(code = cancelled.0, "HcsCancelOperation failed");
+            }
+        }
         if document.is_null() {
             return (code, None);
         }
