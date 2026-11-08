@@ -135,7 +135,7 @@ fn the_expected_names_are_the_ones_the_release_signs() {
     let release = std::fs::read_to_string(workflow).unwrap();
     for needle in [
         "{ target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, arch: x64 }",
-        "{ target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, arch: arm64 }",
+        "{ target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, arch: arm64 }",
         r#"tauri signer sign --app-version "$VERSION" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe""#,
         r#"cp "$bundle/macos/Clauseo.app.tar.gz" "$bundle/macos/Clauseo.app.tar.gz.sig" "$OUT/""#,
     ] {
