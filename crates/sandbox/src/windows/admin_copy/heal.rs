@@ -22,11 +22,10 @@
 //! Anything but the exact old form, or the deny on one and drift on the other, stays
 //! `AdminCopyUnsafe`, for the installer's repair.
 
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use super::{AdminCopyFs, admin_dir, admin_exe, check_chain, checked, locked};
+use super::{AdminCopyFs, admin_dir, admin_exe, checked, locked};
 use crate::windows::sids::Sid;
 
 /// How long the lawyer's side waits between looks at a copy being healed.
@@ -147,8 +146,9 @@ fn millis(at: Duration) -> u64 {
 
 /// The check's chain rule for every level from the volume root to the copy under
 /// `program_files`: what the refresh's heal requires before it opens anything (`heal_os.rs`).
-pub(crate) fn chain_safe(fs: &dyn AdminCopyFs, program_files: &Path) -> bool {
-    check_chain(fs, program_files, &admin_exe(program_files)).is_ok()
+#[cfg(windows)]
+pub(crate) fn chain_safe(fs: &dyn AdminCopyFs, program_files: &std::path::Path) -> bool {
+    super::check_chain(fs, program_files, &admin_exe(program_files)).is_ok()
 }
 
 /// [`owed`] for the machine's folder and copy and its recorded group; `None` with no group or
