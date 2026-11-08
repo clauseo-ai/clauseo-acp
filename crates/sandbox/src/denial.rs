@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+mod shown;
+pub(crate) use shown::shown_name;
+
 /// Something the jail or the egress proxy refused. One definition for every OS and for the
 /// proxy; `host` turns each into a denial event and, where it applies, a card (R18).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -122,9 +125,10 @@ impl SetAsideWhat {
     /// pool user owned (`by_agent`, read from the handle the move renamed) is the AI tool's, and
     /// is never to be put back; anyone else's may be the lawyer's own, made while an agent
     /// worked, so the notice blames no one and, since a restore refuses a git folder, gives the
-    /// step to put it back.
+    /// step to put it back. The agent chose `name`, so both paths are shown through
+    /// [`shown_name`]: a control or bidi character escaped, at most 512 characters each.
     pub fn notice_by(self, name: &std::path::Path, to: &std::path::Path, by_agent: bool) -> String {
-        let (name, to) = (name.display(), to.display());
+        let (name, to) = (shown_name(name), shown_name(to));
         match self {
             SetAsideWhat::GitRepository if by_agent => format!(
                 "The AI tool tried to put a code repository in the matter. Clauseo stopped it \

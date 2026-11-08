@@ -35,6 +35,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::pipe::{PIPE_ROOT, PipeSet};
+use crate::denial::shown_name;
 use crate::{Denial, SetAsideWhat};
 
 #[cfg(windows)]
@@ -92,11 +93,13 @@ pub enum Record {
 }
 
 impl Record {
-    /// The record of `what` moved from `path` to `to`; a part that isn't Unicode is replaced.
+    /// The record of `what` moved from `path` to `to`, each as the lawyer is shown it
+    /// ([`shown_name`]): a part that isn't Unicode replaced, a control or bidi character the
+    /// agent put in the name escaped, at most 512 characters.
     pub fn set_aside(path: &Path, to: &Path, what: SetAsideWhat) -> Record {
         Record::SetAside {
-            path: path.to_string_lossy().into_owned(),
-            to: to.to_string_lossy().into_owned(),
+            path: shown_name(path),
+            to: shown_name(to),
             what,
         }
     }

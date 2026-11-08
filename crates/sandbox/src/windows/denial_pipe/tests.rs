@@ -51,6 +51,24 @@ fn a_record_round_trips_as_one_kind_tagged_json_line() {
     assert_eq!(Record::notice("x").denial(), None);
 }
 
+/// A set-aside record holds both paths as the lawyer is shown them: a control or bidi character
+/// the agent put in a name escaped, and each capped at 512 characters.
+#[test]
+fn a_set_aside_record_escapes_and_caps_the_agents_names() {
+    let record = Record::set_aside(
+        Path::new("a\u{2066}b\r\nc"),
+        &Path::new("aside").join("q".repeat(900)),
+        SetAsideWhat::LinkOut,
+    );
+    let Record::SetAside { path, to, .. } = &record else {
+        panic!("not a set-aside");
+    };
+    assert_eq!(path, "a\\u{2066}b\\u{D}\\u{A}c");
+    assert_eq!(to.chars().count(), 512);
+    assert!(to.ends_with('…'));
+    assert_eq!(decode(&encode(&record).unwrap()).unwrap(), record);
+}
+
 /// The launcher's stand-in reader (PR6 C4, `launch/records.rs`) writes the same set-aside line.
 #[test]
 fn the_launchers_set_aside_line_reads_back() {
