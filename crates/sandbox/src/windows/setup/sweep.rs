@@ -88,8 +88,8 @@
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
 //! 7. logs one line of counts, naming only the paths of at most five tasks that keep it at 56,
-//!    SIDs redacted and hidden characters replaced ([`log_path`]): the Application log is
-//!    readable by every local user, so no other path, and no SID.
+//!    SIDs redacted, non-ASCII characters replaced and each path quoted ([`log_path`]): the
+//!    Application log is readable by every local user, so no other path, and no SID.
 //!
 //! It marks no profile for a reset, unlike `--stop`.
 

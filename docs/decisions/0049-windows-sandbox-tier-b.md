@@ -2165,8 +2165,11 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
      it 56. Why the file decides: the Task Scheduler writes it, and a standard user can't
      register a task for another principal without that principal's credentials, so a trusted
      file naming someone else isn't a pool user's task; a vendor's task whose odd `SD` hides it
-     from SYSTEM then doesn't block every launch. A key alone (no file) has no such evidence,
-     hence its stricter rule below;
+     from SYSTEM then doesn't block every launch. The odd-`SD` branch rests on the elevated
+     owner tests (`elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators`:
+     an ownerless descriptor at registration, and `SetSecurityDescriptor` to `O:SY` or `O:BA`,
+     must both be refused); if either succeeds on Windows, an odd `SD` must give 56 instead.
+     A key alone (no file) has no such evidence, hence its stricter rule below;
    - **in a task file alone** (no cache key, so the Task Scheduler holds no such task): the
      file's own NTFS owner decides, read through a handle opened as the fallback opens (by
      handle below `Tasks`, never through a link, refused if a reparse point or a folder) for
@@ -2225,10 +2228,12 @@ and not). Since every local user can read the Application log, it names no task 
 that keep the run at 56 (a hidden task, a pool task not deleted, an unreadable or unresolved
 one or one naming no one, a folder or key there again, a pool task new to the second walk),
 so an administrator can find what blocks launches: at most 5 a run, then `(+k more)`, each
-path cleaned by `sweep::log_path` (every `S-1-<digits>(-<digits>)+` run is `<sid>`, as
-vendors' task names embed a user's SID, as OneDrive's do; every C0, C1 and DEL control
-character and every bidi or invisible formatting character, U+200B to U+200F, U+202A to
-U+202E, U+2066 to U+2069, U+061C and U+FEFF, is `?`; cut at 260 characters, then `…`). It
+path cleaned by `sweep::log_path`: every character outside printable ASCII (U+0020 to U+007E)
+is `?`, so fullwidth digits, look-alike hyphens and bidi or invisible controls can't hide a
+SID; every SID-shaped run is `<sid>`, decimal (`S-1-<digits>(-<digits>)+`) or hex-authority
+(`S-1-0x<hex>(-<digits>)+`), either case, as vendors' task names embed a user's SID, as
+OneDrive's do; each path is in double quotes, with a `"` in it `?`, so a name holding `, \`
+can't read as two paths; cut at 260 characters, then `…` before the closing quote). It
 names no SID and no account. A refusal
 that comes from a value that isn't a SID (a record value, a `REG_MULTI_SZ` of SIDs) says so in
 fixed words (`sids::NOT_A_SID`, "the list holds a string that isn't a SID", "the list holds

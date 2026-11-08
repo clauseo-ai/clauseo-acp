@@ -79,8 +79,7 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     let line = &fake.logged[0].1;
     // Only the tasks that keep it at 56 are named, by path; never a task deleted or skipped,
     // a SID or an account's name.
-    let named =
-        r"; tasks that keep the sweep at 56: \Secret\Stuck, \Secret\Unread, \Secret\Unresolved";
+    let named = r#"; tasks that keep the sweep at 56: "\Secret\Stuck", "\Secret\Unread", "\Secret\Unresolved""#;
     assert!(line.ends_with(named), "{line}");
     for secret in [
         "S-1-",
