@@ -9,6 +9,7 @@ import type { Lang } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
 import { fl } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
+import { CopyForIt } from "../copy-for-it.tsx";
 import type { WorkingState } from "../working-line.tsx";
 import { InstallBar as Bar } from "./parts.tsx";
 
@@ -36,11 +37,11 @@ export type InstallView =
 export type InstallActs = {
   retry: () => void;
   proxy: () => void;
-  /** Copies the text: the message for IT, or the log. */
+  /** Copies the log ("Copy details for IT" copies its message itself, copy-for-it.tsx). */
   copy: (text: string) => void;
-  /** What was copied for the failure on screen now: the line reads it back. */
-  copied: "message" | "log" | null;
-  setCopied: (what: "message" | "log") => void;
+  /** Whether the log was copied for the failure on screen now: the line reads it back. */
+  copied: "log" | null;
+  setCopied: (what: "log") => void;
   /** Where no gate stands beside the line (the first screen, Settings' Plans): the room gate's Sign in, offered while
    * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
    * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
@@ -167,18 +168,12 @@ export function installLine(
         actions: wrap(
           <>
             {proxyButton("tone")}
-            <Button
-              kind="quiet"
-              size="small"
+            <CopyForIt
+              lang={lang}
+              text={message}
               className="working-act"
-              data-testid={ids.askIt}
-              onClick={() => {
-                acts.copy(message);
-                acts.setCopied("message");
-              }}
-            >
-              {acts.copied === "message" ? w("Message copied") : w("Copy details for IT")}
-            </Button>
+              {...(ids.askIt === undefined ? {} : { testId: ids.askIt })}
+            />
           </>,
         ),
       };

@@ -64,6 +64,7 @@ import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
+import { IT_ENTRIES } from "./registry-it.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -585,4 +586,5 @@ export const REGISTRY: readonly Entry[] = [
   ...TN,
   ...UBL,
   ...R23,
+  ...IT_ENTRIES,
 ];

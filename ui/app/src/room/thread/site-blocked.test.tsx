@@ -23,6 +23,7 @@ import {
 import type { ErrorCode, HostCommand } from "../../transport/protocol.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
 import { stubFonts } from "./testing.ts";
+import { APP_VERSION } from "../../settings/version.ts";
 
 stubFonts();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -271,4 +272,49 @@ test("a saved allow has no until-Clauseo-closes line", async () => {
   await h!.settle();
   expect(notices()[0]?.dataset["state"]).toBe("allowed-matter");
   expect(h!.one("site-blocked-unsaved")).toBeNull();
+});
+
+/** The note "Copy details for IT" copies for the notice's site: never the matter, its thread or a page's path. */
+const IT_NOTE =
+  "Clauseo blocked a site on its unsafe-site list, and the firm's policy has turned off allowing it.\n" +
+  `Code: blocklist.override_off\nSite: invoice-paypa1.example\nClauseo version: ${APP_VERSION}` +
+  "\nClauseo for firm IT: https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/firm-it.md#unsafe-site-override";
+
+test.each([
+  ["no-override", false],
+  ["override-off", true],
+] as const)(
+  "%s offers Copy details for IT; a press copies the code, the site and the version",
+  async (state, refused) => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await mount(refused ? "blocklist.override_off" : undefined);
+    await play(site({ override_allowed: refused }));
+    if (refused) {
+      expect(h!.one("site-blocked-it")).toBeNull();
+      await openConfirm("site-allow-matter");
+      await h!.click(inBody("site-allow-ok"));
+      await h!.settle();
+    }
+    expect(notices()[0]?.dataset["state"]).toBe(state);
+    expect(h!.one("site-blocked-it")?.textContent).toBe("Copy details for IT");
+    await h!.click(h!.one("site-blocked-it"));
+    await h!.settle();
+    expect(writeText).toHaveBeenCalledWith(IT_NOTE);
+    expect(writeText.mock.calls[0]![0]).not.toContain(MATTER);
+    expect(writeText.mock.calls[0]![0]).not.toContain(THREAD);
+    expect(h!.one("site-blocked-it")?.textContent).toBe("Message copied");
+    Reflect.deleteProperty(navigator, "clipboard");
+  },
+);
+
+test("where the firm allows the override, or the notice expired, nothing offers Copy details for IT", async () => {
+  await mount("blocklist.notice_expired");
+  await play(site());
+  expect(h!.one("site-blocked-it")).toBeNull();
+  await openConfirm("site-allow-matter");
+  await h!.click(inBody("site-allow-ok"));
+  await h!.settle();
+  expect(notices()[0]?.dataset["state"]).toBe("expired");
+  expect(h!.one("site-blocked-it")).toBeNull();
 });

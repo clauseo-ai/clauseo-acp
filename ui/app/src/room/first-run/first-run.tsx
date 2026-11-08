@@ -172,7 +172,7 @@ const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copi
   proxy: () => store.command({ retry_agent_install: { agent, use_system_proxy: true } }),
   copy: copyText,
   copied,
-  setCopied: (what: "message" | "log") => store.set({ copied: what }),
+  setCopied: (what: "log") => store.set({ copied: what }),
 });
 
 const noSubscribe = () => () => {};

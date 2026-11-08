@@ -70,7 +70,7 @@ export type SetupState = {
   /** The gate's own: the key panel open, the paste field open, what was copied for the failure on screen. */
   keyOpen: boolean;
   pasting: boolean;
-  copied: "message" | "log" | null;
+  copied: "log" | null;
   counts: CountsState;
 };
 
