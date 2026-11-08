@@ -266,6 +266,12 @@ impl SetupAgents for FakeInstall {
     fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         self.real.sign_in(agent, method)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        self.real.sign_in_switching(agent, method)
+    }
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        self.real.replaces_own_login(agent)
+    }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.real.cancel_sign_in(agent)
     }
@@ -286,6 +292,9 @@ impl SetupAgents for FakeInstall {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.real.use_different_account(agent)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.real.use_different_account_switching(agent)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.real.signin_state(agent)
