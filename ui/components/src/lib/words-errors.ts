@@ -163,7 +163,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.install_failed": "Setting up didn't finish. Try again.",
   // provisional (install resume PR): copy review and Hindi review are the app's
   "agent.install_setup_failed":
-    "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+    "Claude was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
   "signin.cancelled": "Sign-in was cancelled.",
   "signin.link_expired": "The sign-in link expired. Try again.",
   "signin.no_plan": "This account has no plan that works with Clauseo.",
@@ -254,11 +254,11 @@ const PLANNED: Partial<
   // provisional (install resume PR), as ERROR_WORDS' sentence
   "agent.install_setup_failed": {
     chatgpt:
-      "Codex was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "Codex was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
     named:
-      "{name} was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "{name} was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
     nameless:
-      "The AI was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+      "The AI was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
   },
   "agent.guard_missing": {
     chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",

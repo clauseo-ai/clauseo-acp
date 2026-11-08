@@ -3,6 +3,7 @@
 // live words hear the state alone, so the download's words, which change every 250 ms, are never
 // what the region says.
 import { isValidElement, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { loadHindi } from "../../lib/words-core.ts";
 import { installLine, type InstallActs, type InstallView } from "./install.tsx";
@@ -96,15 +97,36 @@ test("install lines: a failed set-up says the download worked and has its own co
   const setup = installLine("en", { kind: "failed", log, setup: true }, "Claude", ACTS);
   if (setup === null || setup.kind !== "wait") throw new Error("no wait line");
   expect(setup.words).toBe(
-    "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+    "Claude was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
   );
   expect(setup.code).toBe("agent.install_setup_failed");
   expect(linesOf("hi", { kind: "failed", log, setup: true }).words).toContain("डाउनलोड हो गया");
   const codex = installLine("en", { kind: "failed", log, setup: true }, "Codex", ACTS);
   if (codex === null || codex.kind !== "wait") throw new Error("no wait line");
-  expect(codex.words).toMatch(/^Codex was downloaded but couldn't be set up/);
+  expect(codex.words).toMatch(/^Codex was downloaded, but setting it up didn't finish/);
   const download = installLine("en", { kind: "failed", log }, "Claude", ACTS);
   if (download === null || download.kind !== "wait") throw new Error("no wait line");
   expect(download.words).toBe("Claude couldn't be downloaded.");
   expect(download.code).toBe("agent.install_failed");
+});
+
+test("install lines: a failed set-up offers Try again and Details, not the system proxy; a failed download keeps it", () => {
+  const actions = (setup: boolean) => {
+    const line = installLine("en", { kind: "failed", log: ["x"], setup }, "Claude", ACTS);
+    if (line === null || line.kind !== "wait") throw new Error("no wait line");
+    return renderToStaticMarkup(<>{line.actions}</>);
+  };
+  const setup = actions(true);
+  expect(setup).toContain("Try again");
+  expect(setup).toContain("Details");
+  expect(setup).not.toContain("Use the system proxy");
+  // the proxy button alone goes: the card's other buttons stay (it had no Ask-IT button), and the
+  // words keep the ask-your-IT path for a failure that keeps happening
+  expect(setup.match(/<button/g)?.length).toBe(2);
+  const words = installLine("en", { kind: "failed", log: ["x"], setup: true }, "Claude", ACTS);
+  if (words === null || words.kind !== "wait") throw new Error("no wait line");
+  expect(words.words).toContain("ask your IT team to check your security software");
+  const download = actions(false);
+  expect(download).toContain("Use the system proxy");
+  expect(download.match(/<button/g)?.length).toBe(3);
 });

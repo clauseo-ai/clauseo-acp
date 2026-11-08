@@ -95,7 +95,13 @@ impl Shared {
         let ready = matches!(state, InstallState::Ready { .. });
         if ready || state == InstallState::Installing {
             let word = if ready { "ready" } else { "installing" };
-            tracing::info!(agent = %ticket.agent, state = word, "agent install: state sent");
+            // The lifecycle target: host.log keeps INFO only from `clauseo_*::lifecycle`.
+            tracing::info!(
+                target: "clauseo_agents::lifecycle",
+                agent = %ticket.agent,
+                state = word,
+                "agent install: state sent"
+            );
         }
         Inner::set(&mut inner, &self.events, &ticket.agent, state, installed);
         drop(inner);

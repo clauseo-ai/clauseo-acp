@@ -218,6 +218,10 @@ pub(crate) struct SharedTimer {
     armed: Arc<Mutex<Vec<Duration>>>,
 }
 
+/// The install's poll for npm's process tree to end: ends at once here, so a tree the OS has
+/// not reaped yet costs the test no manual firing (the poll's count is bounded).
+pub(crate) const TREE_POLL: Duration = Duration::from_millis(50);
+
 impl Timer for SharedTimer {
     fn after(&self, duration: Duration) -> impl Future<Output = ()> + Send {
         trace(format_args!("timer: a {duration:?} wait armed"));
@@ -225,7 +229,12 @@ impl Timer for SharedTimer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(duration);
-        self.manual.after(duration)
+        let manual = (duration != TREE_POLL).then(|| self.manual.after(duration));
+        async move {
+            if let Some(wait) = manual {
+                wait.await;
+            }
+        }
     }
 }
 

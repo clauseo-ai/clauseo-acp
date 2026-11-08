@@ -20,7 +20,7 @@ use clauseo_agents::testing::trace;
 use clauseo_agents::{Agents, FailureKind, InstallState};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, kill};
 
-use crate::support::{A_PACKAGES, Events, Fixture, agent_a};
+use crate::support::{A_PACKAGES, Events, Fixture, TREE_POLL, agent_a};
 
 /// The fake npm that is interrupted: writes two 64 KiB entries into the npm cache its first
 /// argument names (as npm's `_cacache` does, under names no other run uses), then its pid as
@@ -40,19 +40,33 @@ fs.renameSync(file + '.tmp', file);
 setInterval(() => {}, 1000);
 ";
 
+/// The fake npm whose tree outlives it a moment: a child in its group, then its pid as
+/// `<n>.pid` in the folder its first argument names, then sleeps. The child, killed with the
+/// group, is reaped by init, so the tree is seldom gone at the instant npm's handle drops.
+const HANGING_TREE_NPM: &str = "\
+const fs = require('fs'), path = require('path');
+const [dir, n] = process.argv.slice(1);
+require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+const file = path.join(dir, n + '.pid');
+fs.writeFileSync(file + '.tmp', String(process.pid));
+fs.renameSync(file + '.tmp', file);
+setInterval(() => {}, 1000);
+";
+
 /// The fake npm that meets a held file: npm's own error-code line, then exit 1.
 const BUSY_NPM: &str = "process.stderr.write('npm error code EBUSY\\n'); process.exit(1);";
 
 /// How long the fake npm's pid may take to appear.
-const DEADLINE: Duration = Duration::from_secs(30);
+pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 /// The in-place retry's first wait, and the job's first back-off.
 const IN_PLACE_FIRST: Duration = Duration::from_millis(250);
-const BACKOFF_FIRST: Duration = Duration::from_secs(2);
+pub(crate) const BACKOFF_FIRST: Duration = Duration::from_secs(2);
 
 /// What one `npm ci` launch runs.
 #[derive(Clone, Copy, Debug)]
-enum Fake {
+pub(crate) enum Fake {
     Hang,
+    HangTree,
     Busy,
 }
 
@@ -93,6 +107,11 @@ impl Launcher for Planned {
                 self.pids.as_os_str().to_owned(),
                 n.to_string().into(),
             ]),
+            Fake::HangTree => argv.extend([
+                HANGING_TREE_NPM.into(),
+                self.pids.as_os_str().to_owned(),
+                n.to_string().into(),
+            ]),
             Fake::Busy => argv.push(BUSY_NPM.into()),
         }
         let env = spec.env().clone();
@@ -103,7 +122,7 @@ impl Launcher for Planned {
 
 /// Starts `Agents` on `fx` with `plan` (its count of `npm ci` runs kept in `ci_runs` across
 /// restarts) and reads the first states.
-fn start(fx: &Fixture, plan: &[Fake], ci_runs: &Arc<AtomicUsize>) -> (Agents, Events) {
+pub(crate) fn start(fx: &Fixture, plan: &[Fake], ci_runs: &Arc<AtomicUsize>) -> (Agents, Events) {
     let launcher: Arc<dyn Launcher> = Arc::new(Planned {
         inner: PassthroughLauncher::new(SpawnOptions::new()),
         plan: plan.to_vec(),
@@ -281,7 +300,7 @@ fn an_npm_ci_that_meets_ebusy_runs_again_in_place_with_one_download() {
 
 /// A rename fault answering `error()` for the first `times` renames (every one with `None`),
 /// counting every rename.
-fn rename_fault(
+pub(crate) fn rename_fault(
     times: Option<usize>,
     error: fn() -> std::io::Error,
 ) -> (Arc<clauseo_agents::RenameFault>, Arc<AtomicUsize>) {
@@ -407,4 +426,56 @@ fn installing_goes_out_before_node_s_unpack_and_its_failure_is_a_setup_failure()
         .filter(|request| request.path == path)
         .count();
     assert_eq!(fetched, 1, "the archive downloaded once");
+}
+
+/// The polls for npm's tree armed so far.
+fn tree_polls(fx: &Fixture) -> usize {
+    fx.timer
+        .armed()
+        .into_iter()
+        .filter(|wait| *wait == TREE_POLL)
+        .count()
+}
+
+/// A pause while `npm ci` runs waits for npm's whole tree (polled, up to 10 s) before the temp
+/// folder is removed, rather than ending the wait at once as the pause does elsewhere.
+#[test]
+fn a_pause_mid_npm_ci_waits_for_npm_s_tree() {
+    let fx = Fixture::new("resume-pause-tree");
+    let ci_runs = Arc::new(AtomicUsize::new(0));
+    let (agents, events) = start(&fx, &[Fake::HangTree], &ci_runs);
+    agents.install(&agent_a());
+    fake_pid(&fx, 0);
+    let before = tree_polls(&fx);
+    agents.pause(&agent_a());
+    events.until(&agent_a(), |state| *state == InstallState::Paused);
+    assert!(agents.shutdown(Duration::from_secs(10)), "the job ended");
+    assert!(
+        tree_polls(&fx) > before,
+        "the pause waited for npm's tree: {:?}",
+        fx.timer.armed()
+    );
+}
+
+/// `npm ci` running out of its 10 minutes waits for npm's tree too, before the job's retry.
+#[test]
+fn an_npm_ci_past_its_limit_waits_for_npm_s_tree() {
+    let fx = Fixture::new("resume-limit-tree");
+    let ci_runs = Arc::new(AtomicUsize::new(0));
+    let (agents, _events) = start(&fx, &[Fake::HangTree], &ci_runs);
+    agents.install(&agent_a());
+    fake_pid(&fx, 0);
+    let before = tree_polls(&fx);
+    fx.timer.fire_next(Duration::from_mins(10));
+    let start = Instant::now();
+    while !fx.timer.install_waits().contains(&BACKOFF_FIRST) {
+        assert!(start.elapsed() < DEADLINE, "no back-off after the limit");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        tree_polls(&fx) > before,
+        "the limit waited for npm's tree: {:?}",
+        fx.timer.armed()
+    );
+    assert!(agents.shutdown(Duration::from_secs(10)));
 }

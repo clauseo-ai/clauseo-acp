@@ -53,7 +53,7 @@ use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
-use self::entry::published_word;
+use self::entry::log_published;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
@@ -209,13 +209,7 @@ impl AgentsBackend {
                     open_url_unconfirmed(&*self.opener, &url)?;
                 }
             }
-            SetupCommand::SignOut { .. } => {
-                self.refuse_reused(&agent)?;
-                agents
-                    .sign_out(&agent)
-                    .map_err(|error| signin_error(&error))?;
-                self.replaced(&agent);
-            }
+            SetupCommand::SignOut { .. } => pending::sign_out(self, &agent)?,
             SetupCommand::UseFoundLogin { .. } => {
                 let hold = leave::hold_reads(self, &agent).await;
                 self.use_found(&agent, hold)?;
@@ -549,11 +543,7 @@ impl AgentsBackend {
                 agent: agent.clone(),
                 state: progress,
             });
-            // Every state but the download's ticks: with the agents' own line as each is sent,
-            // the log shows any lag between the job and the windows.
-            if let Some(word) = published_word(state) {
-                tracing::info!(%agent, state = word, "install state published to the windows");
-            }
+            log_published(agent, state);
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;

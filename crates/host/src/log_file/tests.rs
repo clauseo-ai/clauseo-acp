@@ -270,6 +270,9 @@ fn the_file_keeps_clauseo_warn_error_and_lifecycle_info_only() {
         (Level::INFO, "agent_client_protocol::lifecycle", false),
         (Level::INFO, "clauseo_host::lifecycle", true),
         (Level::INFO, "clauseo_sandbox::lifecycle", true),
+        // The install's timing lines (agents' state sent, desktop's state published).
+        (Level::INFO, "clauseo_agents::lifecycle", true),
+        (Level::INFO, "clauseo_desktop::lifecycle", true),
         (Level::INFO, "clauseo_host::actor::turn", false),
         (Level::INFO, "other::lifecycle", false),
         (Level::DEBUG, "clauseo_host::lifecycle", false),

@@ -239,7 +239,8 @@ export function installLine(
         actions: wrap(
           <>
             {retry}
-            {proxyButton("quiet")}
+            {/* a set-up failure is not the network's: no proxy offered */}
+            {view.setup ? null : proxyButton("quiet")}
             <Button
               kind="quiet"
               size="small"
