@@ -40,8 +40,8 @@ use clauseo_matters::{HeldOpen, held_open_at};
 use clauseo_protocol::MatterPath;
 use resolve::{Disk, Found};
 
-use crate::network_paths::resolve::{Entry, Fs, RealFs, Resolved};
-use crate::network_paths::{self, FOLD_CASE, NetEnv, fold_name, under_share_matter};
+use crate::network_paths::resolve::Entry;
+use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, may_touch};
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 
@@ -365,27 +365,22 @@ pub(crate) fn check_paths(
     fence: Option<&FenceCheck>,
 ) -> PathsChecked {
     let net = NetEnv::current();
-    if fence.is_some_and(|fence| fence.touches_data_on(FOLD_CASE, &Disk::real(&net))) {
+    let disk = Disk::real(&net);
+    if fence.is_some_and(|fence| fence.touches_data_on(FOLD_CASE, &disk)) {
         return PathsChecked::DataFolder;
     }
     PathsChecked::Held(
         paths
             .into_iter()
-            .filter(|path| may_look(folder, path, &net, &RealFs))
+            .filter(|path| may_look(folder, path, &Disk::vouch(&net)))
             .find_map(|path| held_open_at(folder, &path)),
     )
 }
 
 /// Whether the held-open check may look at `path` (absolute, or taken from the matter
-/// `folder`) on the disk: not when it lies by its text in `folder` kept on a share, nor when it
-/// is or leads to a network location (walked by [`network_paths::resolve::resolve`], which
-/// stops before one).
-fn may_look(folder: &Path, path: &Path, net: &NetEnv, fs: &dyn Fs) -> bool {
-    let joined = folder.join(path);
-    [path, joined.as_path()].iter().all(|path| {
-        !under_share_matter(path, folder, net)
-            && (!net.is_network(path) || network_paths::is_url(&path.to_string_lossy()))
-    }) && network_paths::resolve::resolve(&joined, fs, net) != Resolved::Network
+/// `folder`) on the disk: only when the network-safe walk vouches for it ([`may_touch`]).
+fn may_look(folder: &Path, path: &Path, disk: &Disk<'_>) -> bool {
+    may_touch(path, folder, disk)
 }
 
 /// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny

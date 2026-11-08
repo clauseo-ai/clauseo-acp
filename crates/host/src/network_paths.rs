@@ -20,6 +20,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use unicode_normalization::UnicodeNormalization as _;
+
 pub(crate) use share::{may_touch, under_share_matter};
 
 #[cfg(target_os = "macos")]
@@ -31,9 +33,10 @@ pub(crate) mod tests;
 #[cfg(windows)]
 mod windows;
 
-/// The Linux file system types that live on another machine.
+/// The Linux file system types that live on another machine, or mount one on first touch
+/// (`autofs`), FUSE network file systems included.
 #[cfg(any(target_os = "linux", test))]
-pub(crate) const LINUX_REMOTE_TYPES: [&str; 12] = [
+pub(crate) const LINUX_REMOTE_TYPES: [&str; 21] = [
     "nfs",
     "nfs4",
     "cifs",
@@ -46,6 +49,15 @@ pub(crate) const LINUX_REMOTE_TYPES: [&str; 12] = [
     "glusterfs",
     "fuse.glusterfs",
     "davfs",
+    "autofs",
+    "fuse.rclone",
+    "fuse.gvfsd-fuse",
+    "fuse.s3fs",
+    "fuse.ceph",
+    "fuse.davfs2",
+    "lustre",
+    "ncpfs",
+    "coda",
 ];
 
 /// What [`is_network_path`] compares a path against.
@@ -142,30 +154,30 @@ pub(crate) fn is_network_path(path: &Path, net: &NetEnv) -> bool {
         return true;
     }
     if let Some(rest) = text.strip_prefix('/') {
-        let first = rest.split('/').next().unwrap_or_default();
-        let named =
-            |want: &str| first == want || (net.fold_case && first.eq_ignore_ascii_case(want));
-        if named("net") || named("Network") {
+        let first = name_key(rest.split('/').next().unwrap_or_default());
+        if first == "net" || first == "network" {
             return true;
         }
     }
-    net.remote_mounts
-        .iter()
-        .any(|mount| under(path, mount, net.fold_case))
+    net.remote_mounts.iter().any(|mount| under(path, mount))
 }
 
-/// Whether `path` is `prefix` or inside it, by whole components; without case when
-/// `fold_case`.
-pub(crate) fn under(path: &Path, prefix: &Path, fold_case: bool) -> bool {
-    if !fold_case {
-        return path.starts_with(prefix);
-    }
+/// A name as a network check compares it: normalised to NFD (as APFS stores names), then
+/// folded by [`fold_name`] (ASCII, the long s, the Kelvin sign, every cased letter), then NFD
+/// again. On every system: a network check refuses, and over-matching is its safe side.
+fn name_key(name: &str) -> String {
+    let folded = fold_name(&name.nfd().collect::<String>());
+    folded.nfd().collect()
+}
+
+/// Whether `path` is `prefix` (a remote mount point) or inside it, by whole components each
+/// compared by [`name_key`], so a spelling the file system takes as the same name matches.
+fn under(path: &Path, prefix: &Path) -> bool {
     let mut names = path.components();
     prefix.components().all(|want| {
         names.next().is_some_and(|got| {
             let (got, want) = (got.as_os_str(), want.as_os_str());
-            got == want
-                || got.to_string_lossy().to_lowercase() == want.to_string_lossy().to_lowercase()
+            got == want || name_key(&got.to_string_lossy()) == name_key(&want.to_string_lossy())
         })
     })
 }
@@ -207,60 +219,92 @@ pub(crate) fn is_url(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
-/// The mount points of the remote file systems in a Linux mount table (`/proc/self/mounts`):
-/// `device mountpoint type options 0 0`, the mount point's space, tab, newline and `\` written
-/// as octal escapes.
+/// The mount points of the remote file systems in a Linux mount table (`/proc/self/mounts`),
+/// read as bytes: `device mountpoint type options 0 0`, the mount point's space, tab, newline
+/// and `\` written as octal escapes, its other bytes as they are (not always UTF-8). `None`
+/// when a line does not parse: the table is then unknown, and the caller counts every path as
+/// remote.
 #[cfg(any(target_os = "linux", test))]
-pub(crate) fn linux_remote_mounts(table: &str) -> Vec<PathBuf> {
-    table
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_ascii_whitespace();
-            let (_, mount, kind) = (fields.next()?, fields.next()?, fields.next()?);
-            LINUX_REMOTE_TYPES
-                .contains(&kind)
-                .then(|| PathBuf::from(unescape_octal(mount)))
-        })
-        .collect()
-}
-
-/// `\040`-style escapes made the characters they stand for.
-#[cfg(any(target_os = "linux", test))]
-fn unescape_octal(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find('\\') {
-        out.push_str(rest.get(..at).unwrap_or_default());
-        let digits = rest.get(at.saturating_add(1)..at.saturating_add(4));
-        let code = digits
-            .filter(|d| d.bytes().all(|b| (b'0'..=b'7').contains(&b)))
-            .and_then(|d| u8::from_str_radix(d, 8).ok());
-        if let Some(code) = code {
-            out.push(char::from(code));
-            rest = rest.get(at.saturating_add(4)..).unwrap_or_default();
-        } else {
-            out.push('\\');
-            rest = rest.get(at.saturating_add(1)..).unwrap_or_default();
+pub(crate) fn linux_remote_mounts(table: &[u8]) -> Option<Vec<PathBuf>> {
+    let mut mounts = Vec::new();
+    for line in table.split(|&b| b == b'\n') {
+        let mut fields = line
+            .split(u8::is_ascii_whitespace)
+            .filter(|field| !field.is_empty());
+        let Some(device) = fields.next() else {
+            continue;
+        };
+        let (_, Some(mount), Some(kind)) = (device, fields.next(), fields.next()) else {
+            return None;
+        };
+        if LINUX_REMOTE_TYPES.iter().any(|t| t.as_bytes() == kind) {
+            mounts.push(path_of_bytes(unescape_octal(mount)));
         }
     }
-    out.push_str(rest);
+    Some(mounts)
+}
+
+/// A path from its bytes: as they are on Unix, read as UTF-8 (lossily) elsewhere.
+#[cfg(any(target_os = "linux", test))]
+fn path_of_bytes(bytes: Vec<u8>) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt as _;
+        PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(
+            String::from_utf8(bytes)
+                .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()),
+        )
+    }
+}
+
+/// `\040`-style escapes made the bytes they stand for.
+#[cfg(any(target_os = "linux", test))]
+fn unescape_octal(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(&byte) = text.get(at) {
+        let digits = text.get(at.saturating_add(1)..at.saturating_add(4));
+        let code = digits
+            .filter(|_| byte == b'\\')
+            .filter(|d| d.iter().all(|b| (b'0'..=b'7').contains(b)))
+            .and_then(|d| std::str::from_utf8(d).ok())
+            .and_then(|d| u8::from_str_radix(d, 8).ok());
+        if let Some(code) = code {
+            out.push(code);
+            at = at.saturating_add(4);
+        } else {
+            out.push(byte);
+            at = at.saturating_add(1);
+        }
+    }
     out
 }
 
+/// What every path counts as under when the mount list can't be read: the root, so every path
+/// is remote and refused (fail-closed).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const UNKNOWN_MOUNTS: &str = "/";
+
 #[cfg(target_os = "linux")]
 fn remote_mounts() -> Vec<PathBuf> {
-    match std::fs::read_to_string("/proc/self/mounts") {
-        Ok(table) => linux_remote_mounts(&table),
-        Err(error) => {
-            tracing::warn!(%error, "the mount table could not be read; no mount counts as remote");
-            Vec::new()
-        }
-    }
+    let table = std::fs::read("/proc/self/mounts");
+    table
+        .as_deref()
+        .ok()
+        .and_then(linux_remote_mounts)
+        .unwrap_or_else(|| {
+            tracing::warn!("the mount table could not be read; every path counts as remote");
+            vec![PathBuf::from(UNKNOWN_MOUNTS)]
+        })
 }
 
 #[cfg(target_os = "macos")]
 fn remote_mounts() -> Vec<PathBuf> {
-    mac::remote_mounts()
+    mac::remote_mounts().unwrap_or_else(|| vec![PathBuf::from(UNKNOWN_MOUNTS)])
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

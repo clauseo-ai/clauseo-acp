@@ -24,24 +24,26 @@ use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 use crate::log_file::Cause;
-use crate::network_paths::resolve::RealFs;
+use crate::network_paths::resolve::Disk;
 use crate::network_paths::{self, NetEnv};
 use crate::sent::TurnPaths;
 
 /// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
 /// session folder by text, and each `outside` path that [`matter_path_in`] resolves into
 /// `folder` on the disk (a spelling through a symlink, or in another case where the file system
-/// ignores case). The rest lie outside the matter, and so does a path that is or leads to a
-/// network location, which is never resolved ([`network_paths::may_touch`]).
+/// ignores case). The rest lie outside the matter, and so does a path the network-safe walk
+/// does not vouch for, or one in a matter kept on a share, which is never resolved
+/// ([`network_paths::may_touch`]).
 pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath> {
     let TurnPaths {
         mut inside,
         outside,
     } = paths;
     let net = NetEnv::current();
+    let disk = Disk::vouch(&net);
     for path in outside {
         let path = Path::new(&path);
-        if !network_paths::may_touch(path, folder, &net, &RealFs) {
+        if !network_paths::may_touch(path, folder, &disk) {
             continue;
         }
         if let Some(found) = matter_path_in(folder, path) {
