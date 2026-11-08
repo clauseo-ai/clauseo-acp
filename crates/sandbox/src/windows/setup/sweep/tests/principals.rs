@@ -1,6 +1,6 @@
 //! How the sweep matches a principal: a SID's text directly, a name through the local lookup,
 //! and a name that resolves to no SID only by a pool user's name, with no prefix or this
-//! computer's; anything else such is skipped, not 54. A principal that can't be read still is.
+//! computer's; anything else such is skipped, not 55. A principal that can't be read still is.
 
 use super::*;
 
@@ -59,7 +59,7 @@ fn an_unresolved_pool_name_is_the_pools_with_no_prefix_or_this_computers() {
 }
 
 #[test]
-fn any_other_unresolved_name_is_skipped_logged_and_not_54() {
+fn any_other_unresolved_name_is_skipped_logged_and_not_55() {
     let mut fake = named();
     // A domain account with no domain controller reachable, a pool name under another domain,
     // a near name, an empty prefix or account, and a deleted account.
@@ -92,7 +92,7 @@ fn any_other_unresolved_name_is_skipped_logged_and_not_54() {
 }
 
 #[test]
-fn a_principal_that_cant_be_read_is_still_54() {
+fn a_principal_that_cant_be_read_is_still_55() {
     let mut fake = named();
     fake.unread("\\", "unread");
     fake.task("\\", "skipped", user(r"CORP\alice"));

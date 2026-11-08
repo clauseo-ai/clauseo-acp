@@ -40,7 +40,7 @@
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So do
 //! `--stop` (`stop.rs`, `StopExit`, from 45) and `--sweep-tasks` (`sweep.rs`, `SweepExit`,
-//! from 51), the other SYSTEM tasks'.
+//! from 52, after the WSL deny task's 51), the other SYSTEM tasks'.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 //! The sweep's task step on a real machine (`windows_sweeper.rs`): a test user's scheduled task,
 //! made as that user, is deleted when the pool is that user's SID, and the task this process's
 //! user (the lawyer, here an elevated administrator) made beside it is left. And this machine's
-//! own tasks all have a principal that reads and resolves, so a real run doesn't end 54 on a
+//! own tasks all have a principal that reads and resolves, so a real run doesn't end 55 on a
 //! clean machine.
 //!
 //! The gate is skipped (it needs LOCAL SYSTEM and a `ClauseoSbNN` pool), as the stop's BITS test
@@ -155,7 +155,7 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
         return;
     }
     // With an empty pool nothing is deleted, but every principal is still read and resolved:
-    // one that isn't would end every real run at 54. Each failure is listed by its kind (the
+    // one that isn't would end every real run at 55. Each failure is listed by its kind (the
     // call that failed), never by a task's or an account's name.
     let mut sweeper = WindowsSweeper::new();
     let swept = sweep_tasks(&mut sweeper, &[]);
