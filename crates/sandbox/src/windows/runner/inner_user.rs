@@ -75,9 +75,6 @@ fn compare(pool_user: &Sid, user: &Sid, how: &str) -> Result<(), (RunExit, Strin
     }
 }
 
-/// `ProcessTelemetryIdInformation`, the `PROCESSINFOCLASS` value.
-pub(super) const PROCESS_TELEMETRY_ID_INFORMATION: i32 = 64;
-
 // `PROCESS_TELEMETRY_ID_INFORMATION`'s fields read here, as phnt declares the struct
 // (`phnt/include/ntpsapi.h`, also System Informer's): `ULONG HeaderSize` at 0, `ULONG ProcessId`
 // at 4, then six `ULONGLONG`s (8 to 55), `ULONG SessionId`, `BootId`, `ImageChecksum`,

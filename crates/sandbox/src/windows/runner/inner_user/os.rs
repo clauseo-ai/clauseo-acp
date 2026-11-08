@@ -12,9 +12,11 @@ use windows::Win32::Foundation::{
 use windows::Win32::Security::{IsValidSid, PSID};
 
 use super::super::spawn::Process;
-use super::{PROCESS_TELEMETRY_ID_INFORMATION, telemetry_sid};
+use super::telemetry_sid;
 use crate::windows::sids::Sid;
 
+/// `ProcessTelemetryIdInformation`, the `PROCESSINFOCLASS` value.
+const PROCESS_TELEMETRY_ID_INFORMATION: i32 = 64;
 /// The telemetry buffer's first size (the VM's was 456 bytes); it grows to what the call asks,
 /// up to [`TELEMETRY_MAX`].
 const TELEMETRY_FIRST: usize = 4096;
