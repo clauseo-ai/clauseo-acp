@@ -24,7 +24,6 @@ use windows::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-use super::windows_bits::{self, Com};
 use super::windows_stopper::{WindowsStopper, look_at, processes};
 use super::{Image, Passes, Stopper as _, cancel_jobs, pick};
 use crate::test_support::TempDir;
@@ -32,6 +31,7 @@ use crate::windows::acl::object::{Handle, words};
 use crate::windows::acl_bytes::{build_descriptor, empty_acl};
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
+use crate::windows::setup::pool_steps::windows_bits::{self, Com};
 use crate::windows::setup::processes::{DebugPrivilege, owner_of};
 use crate::windows::setup::strays::TASK_TEST_PREFIX;
 use crate::windows::sids::Sid;
