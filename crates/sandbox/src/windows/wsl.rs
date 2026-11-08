@@ -21,10 +21,11 @@
 //!   and DACL are never touched), then read back and checked again. The targets are recorded
 //!   first ([`WslRecord`], `WslDenyAppIds` and `WslDenyAbsent` in the machine record).
 //! - **The launch check** ([`check`], unelevated, as the lawyer): with WSL present, a target
-//!   whose deny is missing or misplaced refuses the launch with `Blocked::WslDenyMissing`; with
-//!   `WSLService` present, one that can't be read or parsed, a class with no `AppID`, or a
-//!   packaged-COM registration of WSL's class (which would bypass the `AppID`) refuses with
-//!   `Blocked::WslDenyUnverifiable`. With no WSL at all nothing is refused.
+//!   whose deny is missing or misplaced refuses the launch with `Blocked::WslDenyMissing`; one
+//!   that can't be read or parsed, a class with no `AppID`, or a packaged-COM registration of
+//!   WSL's class (which would bypass the `AppID`) refuses with `Blocked::WslDenyUnverifiable`,
+//!   the inbox WSL's too: from Windows 10 2004 on it runs WSL2's VMs as well. With no WSL at all
+//!   nothing is refused.
 //! - **Removal** ([`remove`], `--remove`): only our denies come off each recorded target, and a
 //!   value we made goes once what is left is the default it was made from. No old value is ever
 //!   written back: it may be older than a WSL update since.

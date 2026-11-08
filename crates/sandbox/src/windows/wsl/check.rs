@@ -51,9 +51,6 @@ pub enum Found {
     NoWsl,
     /// WSL is here and every target's deny comes first; how many targets.
     Denied(usize),
-    /// Only the inbox WSL (no `WSLService`, so no WSL2 VM), and a target couldn't be read or
-    /// parsed: not refused, and logged.
-    Unverified,
 }
 
 /// The launch check, as the lawyer, before a tier B launch. WSL is present when either service
@@ -61,9 +58,10 @@ pub enum Found {
 ///
 /// - a target whose value is missing (or whose key is), or whose deny for the record's group
 ///   is missing or comes after an allow, is [`Blocked::WslDenyMissing`];
-/// - else, with `WSLService` present, a target that can't be read or parsed, a class of
-///   [`CLASSES`] with no `AppID`, targets that can't be listed, or a packaged registration of
-///   `LxssUserSession` is [`Blocked::WslDenyUnverifiable`].
+/// - else a target that can't be read or parsed, a class of [`CLASSES`] with no `AppID`,
+///   targets that can't be listed, or a packaged registration of `LxssUserSession` is
+///   [`Blocked::WslDenyUnverifiable`], whichever WSL is here: the inbox one (`LxssManager`)
+///   runs WSL2's VMs too, from Windows 10 2004 on.
 ///
 /// With no WSL nothing is refused. A record with no group names no deny, so every target is
 /// missing one.
@@ -111,13 +109,8 @@ pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
     if missing {
         return Err(Blocked::WslDenyMissing);
     }
-    if unverifiable && lifted {
+    if unverifiable {
         return Err(Blocked::WslDenyUnverifiable);
     }
-    Ok(if unverifiable {
-        tracing::warn!("the inbox WSL's launch permission couldn't be checked");
-        Found::Unverified
-    } else {
-        Found::Denied(targets)
-    })
+    Ok(Found::Denied(targets))
 }
