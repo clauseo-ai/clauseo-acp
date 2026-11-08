@@ -133,6 +133,13 @@ pub(crate) fn with_ground<R: Runtime, M: Manager<R>>(
     builder
 }
 
+/// Whether Windows' app theme is dark (`windows_theme.rs`): the native mark's colours
+/// (`native_mark.rs`).
+#[cfg(windows)]
+pub(crate) fn apps_dark() -> bool {
+    windows_theme::apps_dark()
+}
+
 /// Paints the window's background in the ground of the OS theme, so the first frame is not
 /// white. The day ground when the theme cannot be read.
 pub(crate) fn paint_first_frame<R: Runtime>(window: &WebviewWindow<R>) {

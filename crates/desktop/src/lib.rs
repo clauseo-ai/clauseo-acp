@@ -123,6 +123,7 @@ mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
+mod native_mark;
 mod navigation;
 mod open;
 mod picked;
@@ -555,16 +556,20 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
-    // The page's load, for the start-up's marks (startup.rs).
-    let builder = builder.on_page_load(|_window, payload| match payload.event() {
+    // The page's load, for the start-up's marks (startup.rs); the native mark goes with the first.
+    let builder = builder.on_page_load(|window, payload| match payload.event() {
         PageLoadEvent::Started => startup::mark("main window page load started"),
-        PageLoadEvent::Finished => startup::mark("main window page load finished"),
+        PageLoadEvent::Finished => {
+            startup::mark("main window page load finished");
+            native_mark::remove(&window);
+        }
     });
     let built = settings_window::number_build(app);
     // On Windows the build waits for WebView2's environment and controller (wry's
-    // `wait_with_pump`): the two marks around it time that.
+    // `wait_with_pump`): the two marks around it time that. The window shows the quiet mark
+    // through it on Windows (native_mark.rs).
     startup::mark("main window build started");
-    let window = builder.build()?;
+    let window = native_mark::through_build(|| builder.build())?;
     startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
