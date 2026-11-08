@@ -30,7 +30,8 @@ pub(super) fn deliver<W: Watch>(shared: &Shared<W>, text: &str) {
 }
 
 /// The watcher's breaker opened for `secs`: every registered launch hears it once, until a
-/// `resumed` line (or a new connection) clears it; a launch registered meanwhile hears it then. The host-side source still reports.
+/// `resumed` line (or a new connection) clears it; a launch registered meanwhile hears it as it
+/// registers. The host-side source still reports.
 fn pause<W: Watch>(shared: &Shared<W>, secs: u64) {
     let sinks: Vec<Arc<dyn Capped>> = {
         let mut state = shared.lock();
