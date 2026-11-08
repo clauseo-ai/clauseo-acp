@@ -2468,8 +2468,7 @@ values the upgrade step reads first. The
 event trigger is on this task alone because anyone who can log on can fire it: INTERACTIVE may
 write to the Application log, so the lawyer or a pool user can forge an `MsiInstaller` event, and
 on the refresh that started the admin copy's steps as SYSTEM. Here a forged event gains no more
-than a re-applied deny and WSL's own pending upgrade installed, which any user may start through
-`WslInstaller` anyway, and a forged burst gives one run at a time, each holding the set-up lock
+than a re-applied deny and WSL's own pending upgrade installed, and a forged burst gives one run at a time, each holding the set-up lock
 for a moment (a set-up that meets it then fails at once and can be run again). The task ignores
 a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is quick and idempotent, so an
 installer's burst of events gives one run, and an event after it ends gives another. It shares
