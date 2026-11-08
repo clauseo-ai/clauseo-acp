@@ -8,11 +8,12 @@
 //! plain drive path `--data-dir` is held to (`args::data_dir_of`), then resolved one component
 //! at a time with no junction or link (`private_dir::resolve_folder`), and only its final path
 //! is used. Either way the folder and its `sandbox` folder must be owned as the rest of the
-//! sandbox accepts (`private_dir::owner_allowed`): by the record's owner, Administrators or
+//! sandbox accepts (`sids::owner_allowed`): by the record's owner, Administrators or
 //! SYSTEM, since an elevated process makes Administrators the owner of what it creates (the
 //! built-in Administrator, or UAC off). For an administrator acting for an absent owner, the
-//! ledger is only read. Causes name the kind of a failure, never
-//! the path.
+//! ledger is only read, and a matter folder is held to the same rule (`admin_target`): all the
+//! removal does there is take our own pool and group entries, and our Low label, off. Causes
+//! name the kind of a failure, never the path.
 //!
 //! The owner is acted as only with a standard user's token (`remove::acting_token`): the
 //! parent's own, or a copy lowered to Administrators deny-only and Medium integrity when the
@@ -45,10 +46,10 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
-use crate::windows::private_dir::{owner_allowed, resolve_folder};
+use crate::windows::private_dir::resolve_folder;
 use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
-use crate::windows::sids::{Reserved, Sid};
+use crate::windows::sids::{Reserved, Sid, owner_allowed};
 use crate::windows::wfp;
 use crate::windows::{FolderSupport, folder_support};
 
@@ -385,7 +386,9 @@ impl Removal for WindowsRemoval {
                 "a matter's folder isn't where the ledger says".to_owned(),
             ));
         }
-        if folder_owner != *owner {
+        // The owner, Administrators or SYSTEM, as for the data folder: all that is done on a
+        // folder that passes is taking our own pool and group entries, and our Low label, off.
+        if !owner_allowed(&folder_owner, owner) {
             return Err(MachineError::Other(
                 "a matter's folder isn't its owner's own".to_owned(),
             ));

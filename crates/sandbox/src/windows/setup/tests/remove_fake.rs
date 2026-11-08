@@ -20,7 +20,7 @@ use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
-use crate::windows::sids::Reserved;
+use crate::windows::sids::{Reserved, owner_allowed};
 use crate::windows::writer::{
     AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
 };
@@ -81,8 +81,9 @@ pub(super) struct Remover {
     pub(super) lock_held: bool,
     /// The record's data folder fails its check.
     pub(super) data_dir_bad: bool,
-    /// The folders an administrator's path check passes: the owner's, with no link.
-    pub(super) admin_owned: Vec<PathBuf>,
+    /// The folders with no link on the way, and each one's owner, which an administrator's
+    /// path check holds to `owner_allowed`, as the real one does.
+    pub(super) admin_owned: Vec<(PathBuf, Sid)>,
     /// Whether anything ran acting as the owner.
     pub(super) acted: bool,
     /// The parent's token, as `remove::acting_token` left it.
@@ -349,7 +350,9 @@ impl Removal for Remover {
         assert!(!self.m.acting.get(), "an administrator acts as itself");
         assert_eq!(owner.as_str(), OWNER);
         self.call(format!("admin_target {}", rel(&self.base, path)))?;
-        if self.admin_owned.iter().any(|owned| owned == path) {
+        let allowed =
+            |(folder, found): &(PathBuf, Sid)| folder == path && owner_allowed(found, owner);
+        if self.admin_owned.iter().any(allowed) {
             Ok(())
         } else {
             Err(MachineError::Other(

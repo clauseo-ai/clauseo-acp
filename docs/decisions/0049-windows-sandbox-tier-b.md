@@ -715,7 +715,7 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   folder's handle, and never written. The only change is removing one access entry, for an entry
   that names a recorded pool SID or the group, is no label, records no file by ID, lies in a
   matter folder the ledger records (not a drive's root), and whose folder, checked right before,
-  has no junction or link on the way, is the owner's, and passes the gate's folder check; and
+  has no junction or link on the way, is owned as below, and passes the gate's folder check; and
   taking the recorded Low label off each such matter folder's root (removing a label only
   tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
   change themselves (K1). No walk, label written, hand-back, add or delete.
@@ -730,10 +730,15 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
 - **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
 - **The data folder's owner.** On both paths `DataDir` and its `sandbox\` must be owned by the
   record's owner, Administrators or SYSTEM: the rule `sandbox\` is made and repaired by
-  (`private_dir::owner_allowed`). An elevated process makes Administrators the owner of what it
+  (`sids::owner_allowed`). An elevated process makes Administrators the owner of what it
   creates (the built-in Administrator, or any admin with UAC off), and requiring the owner alone
   failed those removals with exit 4, the record, the group and the folder left (GitHub run
-  42464948955). Any other owner (a pool user, another account, Everyone) still refuses.
+  42464948955). Any other owner (a pool user, another account, Everyone) still refuses. The
+  administrator's path holds each matter folder to the same rule, since such a lawyer's matter
+  folders are Administrators' too. On one that passes, it only takes off what we wrote: the
+  ledger's allows and denies for a recorded pool SID or the group, and the Low label the ledger
+  records on the matter's root. Removing that label only tightens. Nothing is added and no other
+  entry is touched.
 - **VM rows.** With UAC off, and as the built-in Administrator: set-up, a launch, then the
   uninstall exits 0 and leaves no record, no `ClauseoSandboxUsers` group, no pool account and no
   `sandbox\` when the box is ticked.
