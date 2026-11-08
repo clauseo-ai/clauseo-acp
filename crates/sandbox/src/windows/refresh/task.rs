@@ -36,7 +36,7 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
-use super::rules::{MSI_EVENT_DELAY, Trigger, msi_event_query};
+use super::rules::{Trigger, msi_event_query};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
@@ -303,7 +303,8 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
                         .map_err(com("ILogonTrigger::SetUserId"))?;
                 }
                 // The subscription alone: no value queries, so nothing from the event reaches
-                // the action, whose argument stays the fixed one.
+                // the action, whose argument stays the fixed one; and no delay, so the run
+                // starts as soon as the installer's first event is logged.
                 Trigger::MsiEvents => {
                     let trigger = triggers
                         .Create(TASK_TRIGGER_EVENT)
@@ -312,9 +313,6 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
                     event
                         .SetSubscription(&BSTR::from(msi_event_query()))
                         .map_err(com("IEventTrigger::SetSubscription"))?;
-                    event
-                        .SetDelay(&BSTR::from(MSI_EVENT_DELAY))
-                        .map_err(com("IEventTrigger::SetDelay"))?;
                 }
             }
         }

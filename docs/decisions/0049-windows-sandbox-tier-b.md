@@ -2058,9 +2058,10 @@ says a removal is under way, nor with no `GroupSid`. A `GroupSid` that isn't a l
 written, and logged without the SID (`wsl::local_group`): Everyone, Authenticated Users,
 INTERACTIVE or a `BUILTIN` group there would deny the lawyer too. The task also starts on an event trigger:
 the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and
-11728 (`rules::msi_event_query`), 15 s after the event (`PT15S`, `rules::MSI_EVENT_DELAY`). The
+11728 (`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. The
 task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`), so an installer's burst of
-events gives one run, not a queue of them, and that run's last phase comes after the burst. The
+events gives one run, not a queue of them, and the run's first WSL phase re-applies at once while
+its last comes after the admin copy's steps, covering what the installer wrote meanwhile. The
 trigger has no value queries, so nothing from the event reaches the run, whose argument stays the
 fixed `--refresh`. Anyone who can log on can fire it: INTERACTIVE may write to the Application
 log, so the lawyer or a pool user can forge an `MsiInstaller` event. That gains nothing: the run
@@ -2101,8 +2102,8 @@ grants launch to Authenticated Users (WSL `AppxManifest.in:74-78`), and its `Ins
 through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
 is empty or older than the package's own version, compared as (major, minor, revision)
 (`WslInstaller.cpp:114-133`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
-package is newer than the MSI, and the MSI's rewrite drops the deny until the refresh's run 15 s
-after the installer's events. The check mirrors that test: the package's version comes from its
+package is newer than the MSI, and the MSI's rewrite drops the deny until the refresh's run,
+which the installer's first event starts. The check mirrors that test: the package's version comes from its
 packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
 `MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...` (the newest
 listed), which `Users` can read; the MSI's from `Version`, as WSL reads it. A package listed is WSL present, even before
@@ -2173,11 +2174,10 @@ VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name 
 that a termination from outside the service leaves it consistent (the elevated test checks only
 the calls, where HCS is).
 
-**No mid-session watcher.** A WSL update during a tier B session can drop the deny until the
-event trigger's run, seconds after the installer's last event; the next launch checks it again.
-A watcher on the AppID keys (`RegNotifyChangeKeyValue`) that stopped the session was weighed
-and left out: the window is the installer's own run plus a few seconds, and closing it would
-end the lawyer's session for an update the lawyer may have started.
+**No mid-session watcher yet.** A WSL update during a tier B session can drop the deny until the
+event trigger's run re-applies it, which the installer's first event starts; the next launch
+checks it again, and `WslUpgradePending` only blocks new launches. A watcher on the AppID keys
+(`RegNotifyChangeKeyValue`) that acts on a session while the deny is off follows in the next PR.
 
 **Drift.** A WSL update (Store, WinGet, `wsl --update`, its own updater), an MSI repair or a
 reinstall may rewrite `LaunchPermission` and drop the deny; a reinstall may bring a new AppID,

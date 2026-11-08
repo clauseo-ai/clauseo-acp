@@ -3,9 +3,10 @@
 //! group (`wsl::apply`), since a WSL update or repair rewrites its launch permissions. It runs
 //! twice in a run that is allowed (LOCAL SYSTEM, from the admin copy): first, before the admin
 //! copy's steps, so the deny comes back without waiting for them; and last, whatever they gave,
-//! so a run that began before an installer had finished re-applies after it too. The task
-//! ignores a start while it runs, and its event trigger waits 15 s, so a burst of installer
-//! events gives one run, which the second phase covers. Both are idempotent and cheap.
+//! so a run that began before an installer had finished re-applies after it too. The event
+//! trigger starts it at once (no delay, so the deny is off no longer than the run takes), and
+//! the task ignores a start while it runs, so a burst of installer events gives one run, whose
+//! second phase covers what came after its first. Both are idempotent and cheap.
 //!
 //! Each waits up to [`WSL_LOCK_WAIT`] for the set-up lock, so a run that meets another
 //! holder briefly (`--adopt`, another refresh's admin-copy steps) still re-applies; one still
