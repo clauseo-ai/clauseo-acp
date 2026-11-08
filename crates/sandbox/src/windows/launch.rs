@@ -27,6 +27,11 @@
 //! `MatterSids::release` gives it back on forget). Every OS effect is a [`LaunchSteps`] call,
 //! so the order is tested on every OS with fakes (`launch/tests`); the real steps are C5's.
 //!
+//! **The host's 180 s bound is the overall one** and covers `reserve` through `launch`
+//! (D3b-win): its `MatterBusy` retries, the walk's waits and the launch. The walk's own limits
+//! (`walk.rs`: the waits' 180 s budget, the work's 60 s stall timer) only bound the walk inside
+//! it; a large matter's first walk keeps going while its progress moves, and the host shows it.
+//!
 //! One set of launchers per sandbox folder, across processes: [`Launchers::with_steps`] takes
 //! the folder's lock ([`LAUNCHERS_LOCK`]) before it clears what a crash left, and a second set
 //! (another Clauseo) is refused at once with [`Error::LaunchersHeld`].
@@ -42,8 +47,11 @@ mod prepare;
 mod registry;
 mod steps;
 mod tier_b;
+mod walk;
 
-pub use prepare::{PREPARE_BOUND, Preparing, Progress, RETRY_PAUSE, Stage, Walk};
+pub use prepare::{
+    PREPARE_BOUND, PREPARE_STALL, Preparing, Progress, RETRY_PAUSE, STUCK_GRACE, Stage, Walk,
+};
 pub use steps::{Ending, LaunchSteps, RunRefusal, Slot, Stopped};
 pub use tier_b::TierBLauncher;
 
@@ -94,7 +102,9 @@ impl<S: LaunchSteps> Launchers<S> {
     /// reservation's undo is still running, or the previous session's detached end sweeper is
     /// still running as the pool user ([`LaunchSteps::end_sweeper_running`]). The host retries
     /// within its 180 s bound, showing that it is preparing. `reserve` never returns
-    /// [`Error::LeftoverProcess`].
+    /// [`Error::LeftoverProcess`]. **[`Error::MatterStuck`] is final** until Clauseo restarts: a
+    /// step for the matter never returned ([`STUCK_GRACE`]). While the pool user's last
+    /// `EndRun` keeps failing, it is [`Error::PoolFull`] with the account needing a reset.
     pub fn reserve(
         &self,
         matter: &str,
@@ -137,10 +147,13 @@ impl<S: LaunchSteps> Launchers<S> {
         registry.update(matter, id, |entry| entry.opened = true);
         let pool = steps.assign(matter, session).map_err(assign_refused)?;
         registry.update(matter, id, |entry| entry.pool = Some(pool.clone()));
+        // A failed `EndRun` of the pool user's last run is tried again; while it fails, the
+        // account needs a reset and no run reuses it.
+        registry.retry_owed(&pool)?;
         if steps.end_sweeper_running(&pool) {
             return Err(Error::MatterBusy);
         }
-        let slot = steps.claim_slot(matter, &pool)?;
+        let slot = steps.claim_slot(matter, &pool, id)?;
         registry.update(matter, id, |entry| {
             entry.slot = Some(slot.clone());
             entry.state = State::Reserved;
@@ -172,6 +185,7 @@ impl<S: LaunchSteps> Launchers<S> {
                     slot: Slot {
                         index,
                         ports: reservation.ports().to_vec(),
+                        claim: id,
                     },
                 };
                 Preparing::start(&self.registry, reserved, policy.clone(), shared)
@@ -276,7 +290,8 @@ impl<S: LaunchSteps> Launchers<S> {
             id: ended.id,
         };
         let _end_run = EndRun {
-            steps,
+            registry,
+            pool: ended.pool.clone(),
             run: ended.run,
             slot: ended.slot,
         };
@@ -327,30 +342,35 @@ impl<S: LaunchSteps> std::fmt::Debug for Launchers<S> {
     }
 }
 
-/// Ends the run's group, then gives the slot back, when dropped: at the end of
-/// `after_session`, or on a panic in one of its steps.
+/// Ends the run's group, then gives the slot back (unless `EndRun` failed: then both stay held),
+/// when dropped: at the end of `after_session`, or on a panic in one of its steps.
 struct EndRun<'a, S: LaunchSteps> {
-    steps: &'a S,
+    registry: &'a Registry<S>,
+    pool: Option<PoolUser>,
     run: Option<S::RunGroup>,
     slot: Option<Slot>,
 }
 
 impl<S: LaunchSteps> Drop for EndRun<'_, S> {
     fn drop(&mut self) {
-        if let Some(run) = self.run.take() {
-            self.steps.end_run(run);
-        }
-        if let Some(slot) = self.slot.take() {
-            self.steps.release_slot(&slot);
-        }
+        let (run, slot) = (self.run.take(), self.slot.take());
+        self.registry
+            .end_run_and_free_slot(self.pool.as_ref(), run, slot);
     }
 }
 
-/// Takes the sandbox folder `dir`'s launchers lock, without waiting: [`Error::LaunchersHeld`]
-/// while another holder has it, [`Error::Probe`] when the file can't be opened.
+/// Takes the sandbox folder `dir`'s launchers lock, without waiting and without following a
+/// link (checked as the matters lock is, then opened no-follow): [`Error::LaunchersHeld`] while
+/// another holder has it, [`Error::Probe`] when the file can't be opened or isn't a plain file.
 fn lock_data(dir: &Path) -> Result<File, Error> {
-    match write::lock_exclusive_for(&dir.join(LAUNCHERS_LOCK), Duration::ZERO) {
-        Ok(file) => Ok(file),
+    let path = dir.join(LAUNCHERS_LOCK);
+    write::check_owned_file(&path).map_err(Error::Probe)?;
+    match write::lock_no_follow_for(&path, Duration::ZERO) {
+        Ok(file) => {
+            // A lock file the open above just made gets the folder's entries too.
+            write::check_owned_file(&path).map_err(Error::Probe)?;
+            Ok(file)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
             tracing::warn!("tier B's launchers are held by another Clauseo");
             Err(Error::LaunchersHeld)

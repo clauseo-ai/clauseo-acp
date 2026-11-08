@@ -15,13 +15,16 @@ use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
 use crate::{Error, Policy, SetAside};
 
-/// A network slot: its number and the host ports (`H_s`) it holds.
+/// A network slot: its number, the host ports (`H_s`) it holds and the claim its record names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
     /// The slot's number.
     pub index: u8,
     /// Its host ports.
     pub ports: Vec<u16>,
+    /// The reservation's claim (unique in the process) that the slot's record names, so a late
+    /// release of an old claim never frees a newer claim's record of the same slot.
+    pub claim: u64,
 }
 
 /// Why the SYSTEM side's `PrepareRun` didn't make the run's group.
@@ -68,11 +71,14 @@ pub struct Ending<'a> {
 /// passed; so do the stop and the sweep of a leftover's pool user
 /// ([`stop_pool_user`](Self::stop_pool_user), [`sweep_pool_user`](Self::sweep_pool_user)).
 ///
-/// **No step waits unbounded.** The walk looks at its cancel and its 180 s bound between steps
-/// (`prepare.rs`), but can't interrupt a step blocked in an OS call: every wait a real step
-/// makes (a scheduled task, the set-up server's pipe, a process handle, a file lock) is a timed
-/// one, no longer than the bound, and `apply` stops at the next folder once
-/// [`Walk::cancelled`] says so.
+/// **No step waits unbounded.** The walk looks at its cancel, its waits' 180 s budget and its
+/// work's 60 s stall timer between steps (`walk.rs`), but can't interrupt a step blocked in an
+/// OS call: every wait a real step makes (a scheduled task, the set-up server's pipe, a process
+/// handle, a file lock) is a timed one, no longer than the budget; the work steps
+/// ([`plan`](Self::plan), [`check_launch`](Self::check_launch),
+/// [`before_launch`](Self::before_launch), [`apply`](Self::apply)) tick [`Walk::tick`] every
+/// few seconds and stop once [`Walk::cancelled`] says so. A step that never returns makes its
+/// matter `MatterStuck` until Clauseo restarts.
 ///
 /// **The launching session** is its session id together with its reservation's claim, never
 /// its name or a pid alone. C3's own checks (the registry's) use both. TODO(C5): where the real
@@ -119,18 +125,20 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// never handed out alongside it. TODO(C5): identified exactly, by the process handle and
     /// creation time recorded when it was started, never by name.
     fn end_sweeper_running(&self, pool: &PoolUser) -> bool;
-    /// A free network slot for the pool user (`wfp::check_slot`): a claim record only. It adds
-    /// no firewall permit and changes no filter: the set-up's static permit per pool user (0049)
-    /// stays the only one, and the slot only names the ports the host's proxy binds.
-    fn claim_slot(&self, matter: &str, pool: &PoolUser) -> Result<Slot, Error>;
-    /// Gives the slot back.
+    /// A free network slot for the pool user (`wfp::check_slot`), its record naming `claim`: a
+    /// record only. It adds no firewall permit and changes no filter (there is no static permit
+    /// since #791; PR6's connect permits come only after `check_launch`, behind the job gate);
+    /// the slot names the ports the host's proxy binds.
+    fn claim_slot(&self, matter: &str, pool: &PoolUser, claim: u64) -> Result<Slot, Error>;
+    /// Gives the slot back: removes its record only while the record still names `slot.claim`.
     fn release_slot(&self, slot: &Slot);
 
     /// The folder gate and the plan (`admit`, `plan`): reads only.
-    fn plan(&self, policy: &Policy, pool: &PoolUser) -> Result<Self::Plan, Error>;
+    /// A work step: ticks `walk`, stops once it is cancelled.
+    fn plan(&self, policy: &Policy, pool: &PoolUser, walk: &Walk<'_>) -> Result<Self::Plan, Error>;
     /// The launch check (`clean_close::check_launch`: the admin copy, the clean-close record,
-    /// the journal).
-    fn check_launch(&self, plan: &Self::Plan) -> Result<Self::Check, Error>;
+    /// the journal). A work step, as `plan` is.
+    fn check_launch(&self, plan: &Self::Plan, walk: &Walk<'_>) -> Result<Self::Check, Error>;
     /// The network check (`wfp::check_launch`).
     fn check_network(&self, policy: &Policy, pool: &PoolUser) -> Result<(), Error>;
     /// The processes running as the pool user (their pids), outside any job of this launch's:
@@ -144,21 +152,24 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// The pool user's own sweep (the runner's `--sweep`, `runner::sweep`), run to its end:
     /// what it may start at a logon goes too.
     fn sweep_pool_user(&self, pool: &PoolUser) -> Result<(), Error>;
-    /// The set-aside's launch pass (`before_launch_checked`): what it moved.
+    /// The set-aside's launch pass (`before_launch_checked`): what it moved. A work step.
     fn before_launch(
         &self,
         plan: &Self::Plan,
         check: &Self::Check,
         session: &str,
         running: &[&str],
+        walk: &Walk<'_>,
     ) -> Result<Vec<SetAside>, Error>;
     /// The SYSTEM side's `PrepareRun{slot}` (C7): hardens the loose tasks, makes the run's
     /// group and adds the pool user.
     fn prepare_run(&self, slot: &Slot, pool: &PoolUser) -> Result<Self::RunGroup, RunRefusal>;
-    /// The SYSTEM side's `EndRun{group}`: deletes the group.
-    fn end_run(&self, group: Self::RunGroup);
+    /// The SYSTEM side's `EndRun{group}`: deletes the group. A failure keeps the pool user and
+    /// its slot held back until a later `EndRun` of the group succeeds.
+    fn end_run(&self, group: &Self::RunGroup) -> Result<(), Error>;
     /// Applies the plan (`apply_checked`): the walk, which stops at the next folder once
-    /// `walk` is cancelled ([`Error::Cancelled`]) and counts the folders it walked.
+    /// `walk` is cancelled ([`Error::Cancelled`]) and counts the folders it walked (its
+    /// progress).
     fn apply(&self, plan: &Self::Plan, check: &Self::Check, walk: &Walk<'_>) -> Result<(), Error>;
 
     /// Writes the protected launch file for `spec` (`LaunchMessage::from_policy`,
@@ -175,6 +186,10 @@ pub trait LaunchSteps: Send + Sync + 'static {
         launch: &Path,
         opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error>;
+    /// Ends the outer a launcher may have started for `pool`'s run, after a panic in the
+    /// launcher: kills its job and waits until the job is truly empty (#697), or fails. Nothing
+    /// to end is fine. TODO(C4/C5): the real one, by the job the spawn made.
+    fn end_outer(&self, pool: &PoolUser) -> Result<(), Error>;
 
     /// The journal's cursor, before the repair (`session_cursor`).
     fn session_cursor(&self, end: &Ending<'_>) -> Option<Self::Cursor>;

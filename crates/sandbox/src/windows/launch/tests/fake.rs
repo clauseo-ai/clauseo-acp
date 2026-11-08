@@ -57,7 +57,8 @@ impl Held {
 #[derive(Default)]
 pub(super) struct World {
     log: Mutex<Vec<String>>,
-    slots: Mutex<BTreeSet<u8>>,
+    /// The slot records: each slot's number and the claim it names.
+    slots: Mutex<BTreeMap<u8, u64>>,
     open: Mutex<BTreeMap<String, BTreeSet<String>>>,
     fail_at: Mutex<Option<&'static str>>,
     assign_refuses: Mutex<Option<Assign>>,
@@ -73,6 +74,8 @@ pub(super) struct World {
     panic_at: Mutex<Option<&'static str>>,
     slow: Mutex<Option<(&'static str, Duration)>>,
     apply_ignores_cancel: Mutex<bool>,
+    progressing: Mutex<Option<(&'static str, Duration)>>,
+    end_run_fails: Mutex<u32>,
     dir: OnceLock<TempDir>,
 }
 
@@ -99,6 +102,26 @@ impl World {
     /// Makes `step` take `time` on the clock.
     pub(super) fn slow(&self, step: &'static str, time: Duration) {
         *self.slow.lock().unwrap() = Some((step, time));
+    }
+
+    /// Makes the work step `step` take `time` on the clock, ticking its progress every 10 s.
+    pub(super) fn progressing(&self, step: &'static str, time: Duration) {
+        *self.progressing.lock().unwrap() = Some((step, time));
+    }
+
+    /// Moves the clock on by `time`, as a step that hangs would let it.
+    pub(super) fn advance(&self, time: Duration) {
+        *self.clock.lock().unwrap() += time;
+    }
+
+    /// Makes the next `count` `EndRun`s fail.
+    pub(super) fn end_run_fails(&self, count: u32) {
+        *self.end_run_fails.lock().unwrap() = count;
+    }
+
+    /// The claim slot `index`'s record names, if it is claimed.
+    pub(super) fn slot_claim(&self, index: u8) -> Option<u64> {
+        self.slots.lock().unwrap().get(&index).copied()
     }
 
     /// `apply` finishes its walk even once cancelled, as one past its last folder would.
@@ -152,7 +175,7 @@ impl World {
     }
 
     pub(super) fn claimed_slots(&self) -> BTreeSet<u8> {
-        self.slots.lock().unwrap().clone()
+        self.slots.lock().unwrap().keys().copied().collect()
     }
 
     pub(super) fn open_sessions(&self, matter: &str) -> BTreeSet<String> {
@@ -174,6 +197,21 @@ impl World {
 
     fn log(&self, call: impl Into<String>) {
         self.log.lock().unwrap().push(call.into());
+    }
+
+    /// A work step: [`World::step`], then the time it takes, its progress ticked.
+    fn work(&self, step: &'static str, walk: &Walk<'_>) -> Result<(), Error> {
+        self.step(step)?;
+        let progressing = *self.progressing.lock().unwrap();
+        if let Some((_, time)) = progressing.filter(|(each, _)| *each == step) {
+            let mut done = Duration::ZERO;
+            while done < time {
+                *self.clock.lock().unwrap() += Duration::from_secs(10);
+                done += Duration::from_secs(10);
+                walk.tick();
+            }
+        }
+        Ok(())
     }
 
     /// Logs `step`, waits at its gate, takes its time, panics or fails it if asked to.
@@ -300,33 +338,37 @@ impl LaunchSteps for FakeSteps {
         *self.world.sweeper.lock().unwrap()
     }
 
-    fn claim_slot(&self, _matter: &str, _pool: &PoolUser) -> Result<Slot, Error> {
+    fn claim_slot(&self, _matter: &str, _pool: &PoolUser, claim: u64) -> Result<Slot, Error> {
         self.world.step("claim_slot")?;
         let mut slots = self.world.slots.lock().unwrap();
-        let Some(index) = (0..SLOTS).find(|index| !slots.contains(index)) else {
+        let Some(index) = (0..SLOTS).find(|index| !slots.contains_key(index)) else {
             return Err(Error::PoolFull {
                 cause: crate::windows::pool::PoolFullCause::default(),
             });
         };
-        slots.insert(index);
+        slots.insert(index, claim);
         let base = 46100 + u16::from(index) * 2;
         Ok(Slot {
             index,
             ports: vec![base, base + 1],
+            claim,
         })
     }
 
     fn release_slot(&self, slot: &Slot) {
         self.world.log("release_slot");
-        self.world.slots.lock().unwrap().remove(&slot.index);
+        let mut slots = self.world.slots.lock().unwrap();
+        if slots.get(&slot.index) == Some(&slot.claim) {
+            slots.remove(&slot.index);
+        }
     }
 
-    fn plan(&self, _policy: &Policy, _pool: &PoolUser) -> Result<(), Error> {
-        self.world.step("plan")
+    fn plan(&self, _policy: &Policy, _pool: &PoolUser, walk: &Walk<'_>) -> Result<(), Error> {
+        self.world.work("plan", walk)
     }
 
-    fn check_launch(&self, (): &()) -> Result<(), Error> {
-        self.world.step("check_launch")
+    fn check_launch(&self, (): &(), walk: &Walk<'_>) -> Result<(), Error> {
+        self.world.work("check_launch", walk)
     }
 
     fn check_network(&self, _policy: &Policy, _pool: &PoolUser) -> Result<(), Error> {
@@ -361,8 +403,9 @@ impl LaunchSteps for FakeSteps {
         (): &(),
         _session: &str,
         _running: &[&str],
+        walk: &Walk<'_>,
     ) -> Result<Vec<SetAside>, Error> {
-        self.world.step("before_launch")?;
+        self.world.work("before_launch", walk)?;
         Ok(vec![moved("CLAUDE.md")])
     }
 
@@ -381,12 +424,18 @@ impl LaunchSteps for FakeSteps {
         Ok(*groups)
     }
 
-    fn end_run(&self, group: u32) {
+    fn end_run(&self, group: &u32) -> Result<(), Error> {
         self.world.log(format!("end_run {group}"));
+        let mut fails = self.world.end_run_fails.lock().unwrap();
+        if *fails > 0 {
+            *fails -= 1;
+            return Err(Error::Policy("fake end_run failed".to_owned()));
+        }
+        Ok(())
     }
 
     fn apply(&self, (): &(), (): &(), walk: &Walk<'_>) -> Result<(), Error> {
-        self.world.step("apply")?;
+        self.world.work("apply", walk)?;
         if walk.cancelled() && !*self.world.apply_ignores_cancel.lock().unwrap() {
             return Err(Error::Cancelled);
         }
@@ -411,6 +460,10 @@ impl LaunchSteps for FakeSteps {
     ) -> Result<Launched, clauseo_process::Error> {
         self.world.log("spawn_outer");
         Err(clauseo_process::Error::Closing)
+    }
+
+    fn end_outer(&self, _pool: &PoolUser) -> Result<(), Error> {
+        self.world.step("end_outer")
     }
 
     fn session_cursor(&self, _end: &Ending<'_>) -> Option<()> {

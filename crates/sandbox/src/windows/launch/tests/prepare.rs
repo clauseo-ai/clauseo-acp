@@ -5,7 +5,7 @@ use super::fake::{FakeSteps, Held, MATTER, OTHER, World};
 use super::*;
 
 /// The walk's steps after the reserve, in order.
-const WALK: [&str; 7] = [
+pub(super) const WALK: [&str; 7] = [
     "plan",
     "check_launch",
     "check_network",
@@ -213,7 +213,7 @@ fn prepare_run_gives_up_at_the_bound() {
 }
 
 /// A preparation of `MATTER` held at `step`, with its handle and its reservation.
-fn held_at(
+pub(super) fn held_at(
     world: &Arc<World>,
     dir: &TempDir,
     step: &'static str,
@@ -228,7 +228,7 @@ fn held_at(
 }
 
 /// The calls of the walk up to `step`, then its undo.
-fn undone_at(step: &str) -> Vec<String> {
+pub(super) fn undone_at(step: &str) -> Vec<String> {
     let at = WALK.iter().position(|each| *each == step).unwrap();
     let mut want: Vec<String> = WALK[..=at].iter().map(|s| (*s).to_owned()).collect();
     if at >= 5 {
@@ -297,42 +297,59 @@ fn a_drop_at_each_step_keeps_the_matter_busy_until_the_walk_undid() {
     }
 }
 
-/// The bound covers the whole walk: a step that takes it all fails the preparation with a
-/// timeout right after, whichever step it is (`apply` sees it as a cancel at its next folder),
-/// and what was done is undone.
+/// A work step whose progress doesn't move for the stall timer fails the walk with
+/// `PrepareStalled` (`apply` sees it as a cancel at its next folder), and what was done is
+/// undone.
 #[test]
-fn the_bound_covers_every_step() {
-    for step in WALK {
+fn a_stalled_step_fails_the_walk_and_undoes() {
+    for step in ["plan", "check_launch", "before_launch", "apply"] {
         let world = World::new();
-        let dir = TempDir::new(&format!("launch-slow-{step}"));
-        world.slow(step, PREPARE_BOUND);
+        let dir = TempDir::new(&format!("launch-stall-{step}"));
+        world.slow(step, PREPARE_STALL);
         let (calls, result) = prepare_once(&world, &dir);
-        let error = result.unwrap_err();
         assert!(
-            matches!(&error, Error::Launch(clauseo_process::Error::Os { what, .. })
-                if what.contains("longer than its bound")),
-            "{step}: {error:?}"
+            matches!(result, Err(Error::PrepareStalled)),
+            "{step}: {result:?}"
         );
         assert_eq!(calls, undone_at(step), "{step}");
         assert!(world.claimed_slots().is_empty(), "{step}");
     }
-    for step in ["stop", "sweep"] {
+}
+
+/// The work steps have no wall-clock cap: a walk that keeps progressing well past 180 s (a
+/// large matter's first walk) is prepared.
+#[test]
+fn a_slow_walk_that_progresses_succeeds() {
+    for step in ["plan", "check_launch", "before_launch", "apply"] {
         let world = World::new();
-        let dir = TempDir::new(&format!("launch-slow-{step}"));
-        world.leftovers(1, false);
-        world.slow(step, PREPARE_BOUND);
+        let dir = TempDir::new(&format!("launch-progress-{step}"));
+        world.progressing(step, Duration::from_secs(600));
         let (calls, result) = prepare_once(&world, &dir);
-        assert!(
-            matches!(result, Err(Error::Launch(_))),
-            "{step}: {result:?}"
-        );
-        let stop: &[&str] = if step == "stop" {
-            &["stop"]
-        } else {
-            &["stop", "sweep"]
-        };
-        assert_eq!(calls, [&WALK[..4], stop, &UNDO[..]].concat(), "{step}");
+        assert!(result.is_ok(), "{step}: {result:?}");
+        assert_eq!(calls, WALK, "{step}");
+        assert!(world.now() >= Duration::from_secs(600), "{step}");
     }
+}
+
+/// The waits share one 180 s budget: a sweep that took 100 s leaves 80 s for `PrepareRun`'s
+/// retries while a set-up runs, then the launch is refused with the set-up's words.
+#[test]
+fn the_waits_share_one_budget() {
+    let world = World::new();
+    let dir = TempDir::new("launch-budget");
+    world.leftovers(1, false);
+    world.slow("sweep", Duration::from_secs(100));
+    world.run_answers(std::iter::repeat_n(RunRefusal::SetUpRunning, 300));
+    let (calls, result) = prepare_once(&world, &dir);
+    let error = result.unwrap_err();
+    assert!(
+        matches!(&error, Error::Launch(clauseo_process::Error::Os { what, .. })
+            if what.contains("still running")),
+        "{error:?}"
+    );
+    assert_eq!(world.pauses(), 80);
+    assert!(!calls.contains(&"apply".to_owned()));
+    assert_eq!(calls[calls.len() - 2..], UNDO);
 }
 
 /// A cancel that comes while `apply` finishes its last folder is never prepared: the walk looks

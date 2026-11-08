@@ -11,6 +11,7 @@ use crate::windows::pool::assign::{HeldBack, Why};
 use crate::windows::sids::Sid;
 
 mod fake;
+mod held;
 mod prepare;
 mod session;
 
@@ -251,4 +252,18 @@ fn a_second_set_of_launchers_is_refused() {
     drop(launchers(&world));
     let next = Launchers::with_steps(FakeSteps::new(&world));
     assert!(next.is_ok(), "the lock went with the first");
+}
+
+/// The lock file is never followed through a link: a link at its name refuses the start-up.
+#[cfg(unix)]
+#[test]
+fn a_link_at_the_lock_is_refused() {
+    let world = World::new();
+    let folder = TempDir::new("launch-lock-link");
+    let target = folder.file("target", "kept\n");
+    folder.symlink(LAUNCHERS_LOCK, &target);
+    let started = Launchers::with_steps(FakeSteps::elsewhere(&world, folder.path()));
+    assert!(matches!(started, Err(Error::Probe(_))), "{started:?}");
+    assert_eq!(world.calls(), Vec::<String>::new(), "no clear_stale");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "kept\n");
 }

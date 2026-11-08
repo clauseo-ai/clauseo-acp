@@ -174,6 +174,20 @@ pub enum Error {
     /// Clauseo.
     #[error("Another Clauseo is already using the Safe workspace on this computer.")]
     LaunchersHeld,
+    /// Windows tier B's work for this matter (a walk, its undo, or a session's end) is still in
+    /// one step past the 180 s bound and its grace (`windows::launch`'s `STUCK_GRACE`). Nothing
+    /// is undone from another thread (the step could still grant once it returns), so the
+    /// matter refuses every launch until Clauseo restarts. **Not retryable.**
+    #[error(
+        "A step of the Safe workspace stopped answering for this matter. Restart Clauseo to \
+         continue with this matter."
+    )]
+    MatterStuck,
+    /// Windows tier B's preparation of the matter made no progress for 60 s
+    /// (`windows::launch`'s `PREPARE_STALL`): its work steps have no wall-clock cap, only this.
+    /// It was cancelled and what it had done for the session undone. A failed launch.
+    #[error("Preparing the matter stopped making progress.")]
+    PrepareStalled,
 }
 
 impl Error {
@@ -202,7 +216,9 @@ impl Error {
             | Error::MatterBusy
             | Error::WrongReservation
             | Error::LeftoverProcess { .. }
-            | Error::LaunchersHeld => None,
+            | Error::LaunchersHeld
+            | Error::MatterStuck
+            | Error::PrepareStalled => None,
         }
     }
 
@@ -232,6 +248,8 @@ impl Error {
             Error::WrongReservation => "the launch's reservation didn't match",
             Error::LeftoverProcess { .. } => "a program from an earlier agent run is still running",
             Error::LaunchersHeld => "another Clauseo is using the Safe workspace",
+            Error::MatterStuck => "a step of the Safe workspace stopped answering",
+            Error::PrepareStalled => "preparing the matter stopped making progress",
         }
     }
 
@@ -245,9 +263,11 @@ impl Error {
     /// checks again.
     ///
     /// Tier B's launcher (PR6): a full pool, a matter not prepared yet, a cancelled preparation,
-    /// a busy matter, a leftover process and launchers another Clauseo holds are failed launches
-    /// (retryable; the host decides what follows from the variant, not the code); a reservation
-    /// that doesn't match is a bug, `Internal`. Every one refuses the launch.
+    /// a busy matter, a leftover process, a stalled preparation and launchers another Clauseo
+    /// holds are failed launches (retryable; the host decides what follows from the variant, not
+    /// the code); a reservation that doesn't match is a bug, `Internal`, and so is a matter
+    /// whose step hung past its limit (`MatterStuck`, not retryable: Clauseo must restart).
+    /// Every one refuses the launch.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -267,11 +287,12 @@ impl Error {
             | Error::Cancelled
             | Error::MatterBusy
             | Error::LeftoverProcess { .. }
-            | Error::LaunchersHeld => ErrorCode::AgentLaunchFailed,
+            | Error::LaunchersHeld
+            | Error::PrepareStalled => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
-            Error::Probe(_) | Error::WrongReservation => ErrorCode::Internal,
+            Error::Probe(_) | Error::WrongReservation | Error::MatterStuck => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }
     }
@@ -390,6 +411,12 @@ mod tests {
                 ErrorCode::AgentLaunchFailed,
                 "another Clauseo",
             ),
+            (Error::MatterStuck, ErrorCode::Internal, "stopped answering"),
+            (
+                Error::PrepareStalled,
+                ErrorCode::AgentLaunchFailed,
+                "stopped making progress",
+            ),
         ];
         let mut kinds = Vec::new();
         for (error, code, kind) in cases {
@@ -400,7 +427,12 @@ mod tests {
             kinds.push(error.kind());
         }
         kinds.dedup();
-        assert_eq!(kinds.len(), 7, "each has a kind of its own");
+        assert_eq!(kinds.len(), 9, "each has a kind of its own");
+        assert!(
+            !Error::MatterStuck.code().is_retryable(),
+            "Clauseo must restart"
+        );
+        assert!(Error::MatterStuck.to_string().contains("Restart Clauseo"));
         assert!(
             Error::NotPrepared.code().is_retryable(),
             "the host prepares again"

@@ -11,7 +11,14 @@
 //! here before the error returns (the run's group, the slot, the session's mark) and the matter
 //! freed; if the launcher is dropped unused, the claim's drop does the same, off the dropping
 //! thread. C4 keeps this hand-over wherever it moves the start.
+//!
+//! Before it starts anything, the launcher checks its session is still launched in the
+//! registry (an `after_session` may have ended it): if not, `WrongReservation`. A panic in the
+//! start is caught: the outer it may have started is ended first (its job killed and seen truly
+//! empty, `LaunchSteps::end_outer`), and only then is the claim released. If the outer can't
+//! be ended, the matter is marked stuck, never released.
 
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -82,21 +89,53 @@ impl<S: LaunchSteps> Launcher for TierBLauncher<S> {
                 "a tier B launcher starts one agent".to_owned(),
             ));
         }
-        let started = self.start(spec);
         let claim = self
             .claim
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(claim) = claim {
+        let Some(claim) = claim.filter(|claim| self.registry.is_launched(claim.id)) else {
+            // Its end began (or it was released): nothing is started for a session gone.
+            return Err(clauseo_process::Error::Os {
+                what: "the sandbox's reservation is no longer held",
+                source: std::io::Error::other(Error::WrongReservation),
+            });
+        };
+        let Ok(started) = std::panic::catch_unwind(AssertUnwindSafe(|| self.start(spec))) else {
+            tracing::warn!("tier B's launcher panicked while starting the outer");
             let id = claim.id;
             claim.disarm();
-            if started.is_err() {
-                // No agent: the session is undone and the matter freed before the error returns.
-                self.registry.release_now(id);
+            match self.registry.steps.end_outer(&self.pool) {
+                Ok(()) => self.registry.release_now(id),
+                Err(error) => {
+                    tracing::warn!(kind = error.kind(), "tier B couldn't end the outer");
+                    self.registry.stick(id);
+                }
             }
-        }
+            return Err(clauseo_process::Error::Os {
+                what: "the sandbox's launcher failed",
+                source: std::io::Error::other("a step panicked"),
+            });
+        };
+        hand_over(&self.registry, Some(claim), started.is_ok());
         started
+    }
+}
+
+/// Hands `claim` over once the start is known: started, it is let go of (`after_session` ends
+/// the session from here); not started, the session is undone and the matter freed before the
+/// error returns.
+pub(super) fn hand_over<S: LaunchSteps>(
+    registry: &Registry<S>,
+    claim: Option<Claim>,
+    started: bool,
+) {
+    if let Some(claim) = claim {
+        let id = claim.id;
+        claim.disarm();
+        if !started {
+            registry.release_now(id);
+        }
     }
 }
 

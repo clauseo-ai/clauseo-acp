@@ -11,7 +11,7 @@ impl DenialSink for NoDenials {
 }
 
 /// Launches `reservation` for `session` of `matter` under a policy for `matter_dir`.
-fn launch(
+pub(super) fn launch(
     launchers: &Launchers<FakeSteps>,
     dir: &TempDir,
     reservation: Reservation,
@@ -238,6 +238,90 @@ fn a_failed_launch_file_undoes_the_session() {
         ["write_launch", "end_run 1", UNDO[0], UNDO[1]]
     );
     assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+}
+
+/// A launcher whose session already ended (`after_session`) starts nothing: refused, as a
+/// reservation no longer held.
+#[test]
+fn the_launcher_refuses_after_the_sessions_end() {
+    let world = World::new();
+    let dir = TempDir::new("launch-after-end");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let (launcher, _) = launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    world.calls();
+    let error = refused(launcher.launch(&spec(&dir)));
+    assert!(
+        matches!(&error, clauseo_process::Error::Os { what, .. }
+            if what.contains("no longer held")),
+        "{error:?}"
+    );
+    assert_eq!(
+        world.calls(),
+        Vec::<String>::new(),
+        "nothing written or started"
+    );
+}
+
+/// A panic while the launcher starts the outer is caught: the outer it may have started is
+/// ended first, then the session undone and the matter freed. If the outer can't be ended, the
+/// matter is stuck, never freed.
+#[test]
+fn a_panic_in_the_launcher_ends_the_outer_first() {
+    for end_fails in [false, true] {
+        let world = World::new();
+        let dir = TempDir::new(&format!("launch-panic-{end_fails}"));
+        let launchers = launchers(&world);
+        let reservation = prepared(&launchers, &world, &dir, "s1");
+        let (launcher, _) =
+            launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+        world.calls();
+        world.panic_at("write_launch");
+        if end_fails {
+            world.fail_at("end_outer");
+        }
+        let error = refused(launcher.launch(&spec(&dir)));
+        assert!(
+            matches!(&error, clauseo_process::Error::Os { what, .. } if what.contains("failed")),
+            "{error:?}"
+        );
+        let next = launchers.reserve(MATTER, "s2", &[]);
+        if end_fails {
+            assert_eq!(world.calls(), ["write_launch", "end_outer"]);
+            assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
+        } else {
+            let want = ["write_launch", "end_outer", "end_run 1", UNDO[0], UNDO[1]];
+            assert_eq!(world.calls()[..5], want);
+            assert!(next.is_ok(), "{next:?}");
+        }
+    }
+}
+
+/// The hand-over once the outer has started: the claim is let go of without an undo, the
+/// session stays the registry's, and `after_session` ends it and frees the matter.
+#[test]
+fn the_hand_over_lets_a_started_session_go() {
+    let world = World::new();
+    let dir = TempDir::new("launch-hand-over");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let (_, id) = reservation.claim_id().unwrap();
+    let folder = policy_at(&dir, "matter").matter().to_path_buf();
+    launchers
+        .registry
+        .launch(MATTER, "s1", id, &folder)
+        .unwrap();
+    let claim = reservation.take_claim();
+    tier_b::hand_over(&launchers.registry, claim, true);
+    assert_eq!(world.calls(), Vec::<String>::new(), "no undo");
+    assert!(launchers.registry.is_launched(id));
+    let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+    assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    let calls = world.calls();
+    assert_eq!(calls[calls.len() - 2..], ["end_run 1", "release_slot"]);
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
 }
 
 /// A launcher dropped unused undoes the session off the dropping thread; the matter is busy
