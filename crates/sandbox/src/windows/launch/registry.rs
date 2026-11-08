@@ -2,13 +2,20 @@
 //! after-session pass has finished. One live agent per matter on tier B (the orchestrator's
 //! ruling): a matter in the registry refuses another reservation with
 //! [`Error::MatterBusy`], so one walk runs per matter, and a matter's account is handed out
-//! again only once the last session's job is gone and its after-session pass is done.
+//! again only once the last session's job is gone and its after-session pass is done (and its
+//! end sweeper, which `reserve` asks the steps about).
+//!
+//! **Nothing here blocks under the lock.** The registry's mutex is held only to read or change
+//! the map: no step, file call or wait ever runs under it, and no walk holds it across one. So
+//! a reservation's drop ([`Release::release`]) takes it briefly and never waits: it cancels a
+//! walk (an atomic), forgets a failed claim, or hands the undo to a thread of its own.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
+use super::prepare::Shared;
 use super::steps::{LaunchSteps, Slot};
 use crate::reservation::Release;
 use crate::windows::pool::PoolUser;
@@ -25,10 +32,13 @@ pub(super) enum State {
     Reserving,
     /// Reserved: the host holds the reservation.
     Reserved,
-    /// The walk holds it (`prepare`).
+    /// Its walk runs (`prepare`).
     Preparing,
-    /// Prepared: the host holds it again, for `launch`.
+    /// Prepared, for `launch`.
     Prepared,
+    /// Its walk failed or was cancelled, and undid what was done: `launch` refuses it, and
+    /// the matter stays held until the host drops the reservation.
+    Failed,
     /// Launched: the agent may run, until `after_session`.
     Launched,
     /// `after_session` is running.
@@ -54,6 +64,29 @@ pub(super) struct Entry<S: LaunchSteps> {
     pub(super) moved: Vec<SetAside>,
     /// The matter folder the walk prepared, which `launch`'s policy must name.
     pub(super) prepared: Option<PathBuf>,
+    /// The running walk, which a drop of the reservation cancels and a second `prepare` joins.
+    pub(super) walk: Option<Arc<Shared>>,
+    /// The reservation was dropped while its walk ran: the walk undoes and frees the matter.
+    pub(super) dropped: bool,
+}
+
+/// What an undo takes from an entry: the run's group, the slot, the session's mark.
+pub(super) struct Undo<S: LaunchSteps> {
+    matter: String,
+    session: String,
+    run: Option<S::RunGroup>,
+    slot: Option<Slot>,
+    opened: bool,
+}
+
+/// What `prepare` found for a reservation.
+pub(super) enum Begun {
+    /// A walk to start, its state made.
+    Start(Arc<Shared>),
+    /// A walk running already, to join.
+    Join(Arc<Shared>),
+    /// Prepared already.
+    Done,
 }
 
 /// What `after_session` takes from a launched session's entry.
@@ -70,6 +103,8 @@ pub(super) struct Registry<S: LaunchSteps> {
     pub(super) steps: Arc<S>,
     next: AtomicU64,
     matters: Mutex<BTreeMap<String, Entry<S>>>,
+    /// Signalled whenever a matter is freed.
+    freed: Condvar,
 }
 
 impl<S: LaunchSteps> Registry<S> {
@@ -79,6 +114,7 @@ impl<S: LaunchSteps> Registry<S> {
             steps,
             next: AtomicU64::new(1),
             matters: Mutex::new(BTreeMap::new()),
+            freed: Condvar::new(),
         }
     }
 
@@ -111,6 +147,8 @@ impl<S: LaunchSteps> Registry<S> {
                 run: None,
                 moved: Vec::new(),
                 prepared: None,
+                walk: None,
+                dropped: false,
             },
         );
         Ok(id)
@@ -130,23 +168,73 @@ impl<S: LaunchSteps> Registry<S> {
             .map(change)
     }
 
-    /// Moves claim `id` of `matter` and `session` from `from` to `to`; whether it was there.
-    pub(super) fn step(
+    /// Starts or joins the walk of claim `id`, for `session` of `matter`: the claim and the
+    /// session together name the launching session. A failed walk's claim is
+    /// [`Error::NotPrepared`] (the host drops it and reserves again); anything else but reserved,
+    /// preparing or prepared is [`Error::WrongReservation`].
+    pub(super) fn begin_walk(&self, matter: &str, session: &str, id: u64) -> Result<Begun, Error> {
+        let mut matters = self.lock();
+        let entry = matters
+            .get_mut(matter)
+            .filter(|entry| entry.id == id && entry.session == session && !entry.dropped)
+            .ok_or(Error::WrongReservation)?;
+        match entry.state {
+            State::Reserved => {
+                let shared = Shared::new();
+                entry.state = State::Preparing;
+                entry.walk = Some(Arc::clone(&shared));
+                Ok(Begun::Start(shared))
+            }
+            State::Preparing => entry
+                .walk
+                .as_ref()
+                .map(|walk| Begun::Join(Arc::clone(walk)))
+                .ok_or(Error::WrongReservation),
+            State::Prepared => Ok(Begun::Done),
+            State::Failed => Err(Error::NotPrepared),
+            State::Reserving | State::Launched | State::Ending | State::Releasing => {
+                Err(Error::WrongReservation)
+            }
+        }
+    }
+
+    /// The walk of claim `id` ended with `walked`, on the matter folder `folder`. Prepared on
+    /// success; otherwise the undo runs here, on the walk's thread, and the claim is failed, or,
+    /// when the reservation was dropped meanwhile, the matter is freed ([`Error::Cancelled`]).
+    /// What the walk's handles are told.
+    pub(super) fn walk_done(
         &self,
         matter: &str,
-        session: &str,
         id: u64,
-        from: State,
-        to: State,
-    ) -> bool {
-        self.update(matter, id, |entry| {
-            let at = entry.session == session && entry.state == from;
-            if at {
-                entry.state = to;
+        walked: Result<(), Error>,
+        folder: PathBuf,
+    ) -> Result<(), Error> {
+        let (undo, dropped) = {
+            let mut matters = self.lock();
+            let Some(entry) = matters.get_mut(matter).filter(|entry| entry.id == id) else {
+                return Err(Error::WrongReservation);
+            };
+            entry.walk = None;
+            if entry.dropped {
+                entry.state = State::Releasing;
+                (Some(take_undo(matter, entry)), true)
+            } else if walked.is_ok() {
+                entry.state = State::Prepared;
+                entry.prepared = Some(folder);
+                (None, false)
+            } else {
+                entry.state = State::Failed;
+                (Some(take_undo(matter, entry)), false)
             }
-            at
-        })
-        .unwrap_or(false)
+        };
+        if let Some(undo) = undo {
+            self.undo(undo);
+        }
+        if dropped {
+            self.finish(matter, id);
+            return Err(Error::Cancelled);
+        }
+        walked
     }
 
     /// Claim `id`'s account, if `launch` would take it ([`Registry::launch`]'s checks), with
@@ -210,16 +298,91 @@ impl<S: LaunchSteps> Registry<S> {
         let mut matters = self.lock();
         if matters.get(matter).is_some_and(|entry| entry.id == id) {
             matters.remove(matter);
+            self.freed.notify_all();
         }
+    }
+
+    /// Runs `undo`'s steps, newest first: `EndRun`, the slot, the session's mark. Blocks:
+    /// never under the lock, and never from a drop.
+    fn undo(&self, undo: Undo<S>) {
+        if let Some(run) = undo.run {
+            self.steps.end_run(run);
+        }
+        if let Some(slot) = &undo.slot {
+            self.steps.release_slot(slot);
+        }
+        if undo.opened {
+            self.steps.close_session(&undo.matter, &undo.session);
+        }
+    }
+
+    /// Lets go of claim `id`, never blocking: a running walk is cancelled (it undoes and frees
+    /// the matter when it stops), a failed claim is forgotten, and anything else is marked
+    /// releasing, its undo handed back for the caller to run, then [`Registry::finish`].
+    fn detach(&self, id: u64) -> Option<(u64, Undo<S>)> {
+        let mut matters = self.lock();
+        let (matter, entry) = matters.iter_mut().find(|(_, entry)| entry.id == id)?;
+        match entry.state {
+            State::Preparing => {
+                entry.dropped = true;
+                if let Some(walk) = &entry.walk {
+                    walk.cancel();
+                }
+                None
+            }
+            State::Failed => {
+                let matter = matter.clone();
+                matters.remove(&matter);
+                self.freed.notify_all();
+                None
+            }
+            State::Reserving | State::Reserved | State::Prepared => {
+                entry.state = State::Releasing;
+                Some((id, take_undo(&matter.clone(), entry)))
+            }
+            State::Launched | State::Ending | State::Releasing => None,
+        }
+    }
+
+    /// Lets go of claim `id` and runs its undo here: `reserve`'s and `launch`'s refusals,
+    /// which may block.
+    pub(super) fn release_now(&self, id: u64) {
+        if let Some((id, undo)) = self.detach(id) {
+            let matter = undo.matter.clone();
+            self.undo(undo);
+            self.finish(&matter, id);
+        }
+    }
+
+    /// Waits up to `timeout` for `matter` to be free; whether it is.
+    #[cfg(test)]
+    pub(super) fn wait_free(&self, matter: &str, timeout: std::time::Duration) -> bool {
+        let matters = self.lock();
+        let (matters, _) = self
+            .freed
+            .wait_timeout_while(matters, timeout, |matters| matters.contains_key(matter))
+            .unwrap_or_else(PoisonError::into_inner);
+        !matters.contains_key(matter)
     }
 }
 
-/// Whether `entry` can be launched on the matter folder `folder`: prepared, for it. Reserved is
-/// [`Error::NotPrepared`], anything else [`Error::WrongReservation`].
+/// Takes what `entry`'s undo needs, so it runs once.
+fn take_undo<S: LaunchSteps>(matter: &str, entry: &mut Entry<S>) -> Undo<S> {
+    Undo {
+        matter: matter.to_owned(),
+        session: entry.session.clone(),
+        run: entry.run.take(),
+        slot: entry.slot.take(),
+        opened: std::mem::take(&mut entry.opened),
+    }
+}
+
+/// Whether `entry` can be launched on the matter folder `folder`: prepared, for it. Reserved, or
+/// a failed walk's, is [`Error::NotPrepared`]; anything else [`Error::WrongReservation`].
 fn launchable<S: LaunchSteps>(entry: &Entry<S>, folder: &Path) -> Result<(), Error> {
     match entry.state {
         State::Prepared if entry.prepared.as_deref() == Some(folder) => Ok(()),
-        State::Reserving | State::Reserved => Err(Error::NotPrepared),
+        State::Reserving | State::Reserved | State::Failed => Err(Error::NotPrepared),
         State::Prepared | State::Preparing | State::Launched | State::Ending | State::Releasing => {
             Err(Error::WrongReservation)
         }
@@ -227,36 +390,37 @@ fn launchable<S: LaunchSteps>(entry: &Entry<S>, folder: &Path) -> Result<(), Err
 }
 
 impl<S: LaunchSteps> Release for Registry<S> {
-    /// Undoes what was done for claim `id` that wasn't launched, newest first: the run's group,
-    /// the slot, the session's mark; then frees the matter. A launched one is `after_session`'s.
-    fn release(&self, id: u64) {
-        let taken = {
-            let mut matters = self.lock();
-            matters.iter_mut().find_map(|(matter, entry)| {
-                let undone = matches!(
-                    entry.state,
-                    State::Reserving | State::Reserved | State::Preparing | State::Prepared
-                );
-                (entry.id == id && undone).then(|| {
-                    // Busy until the undo is done, so no reservation of the matter overlaps it.
-                    entry.state = State::Releasing;
-                    let opened = entry.opened.then(|| entry.session.clone());
-                    (matter.clone(), entry.run.take(), entry.slot.take(), opened)
-                })
-            })
-        };
-        let Some((matter, run, slot, opened)) = taken else {
+    /// The reservation's drop: never blocks ([`Registry::detach`]). An undo with steps to run
+    /// goes to a thread of its own, which frees the matter when done; the matter stays busy
+    /// (`MatterBusy`) until then. Only if no thread can be started does it run here.
+    fn release(self: Arc<Self>, id: u64) {
+        let Some((id, undo)) = self.detach(id) else {
             return;
         };
-        if let Some(run) = run {
-            self.steps.end_run(run);
+        let registry = Arc::clone(&self);
+        let (sender, receiver) = std::sync::mpsc::channel::<Undo<S>>();
+        let started = std::thread::Builder::new()
+            .name("clauseo-tierb-release".to_owned())
+            .spawn(move || {
+                if let Ok(undo) = receiver.recv() {
+                    let matter = undo.matter.clone();
+                    registry.undo(undo);
+                    registry.finish(&matter, id);
+                }
+            });
+        if started.is_ok() {
+            if let Err(unsent) = sender.send(undo) {
+                // The thread is gone already: the undo runs here after all.
+                let undo = unsent.0;
+                let matter = undo.matter.clone();
+                self.undo(undo);
+                self.finish(&matter, id);
+            }
+        } else {
+            tracing::warn!("tier B's release ran on the dropping thread: no thread started");
+            let matter = undo.matter.clone();
+            self.undo(undo);
+            self.finish(&matter, id);
         }
-        if let Some(slot) = &slot {
-            self.steps.release_slot(slot);
-        }
-        if let Some(session) = opened {
-            self.steps.close_session(&matter, &session);
-        }
-        self.finish(&matter, id);
     }
 }

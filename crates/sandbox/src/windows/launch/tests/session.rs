@@ -78,6 +78,64 @@ fn the_launch_checks_its_reservation() {
     }
 }
 
+/// A reservation whose walk failed is refused (`NotPrepared`): the walk undid its work
+/// already, so the refusal has nothing left to undo, and it frees the matter.
+#[test]
+fn the_launch_refuses_a_failed_walk() {
+    let world = World::new();
+    let dir = TempDir::new("launch-failed-walk");
+    let launchers = launchers(&world);
+    world.fail_at("check_launch");
+    let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
+    let preparing = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    assert!(matches!(preparing.wait(WAIT), Some(Err(Error::Policy(_)))));
+    assert!(matches!(preparing.result(), Some(Err(Error::NotPrepared))));
+    let again = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    assert!(matches!(again.result(), Some(Err(Error::NotPrepared))));
+    let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+    assert!(
+        matches!(busy, Error::MatterBusy),
+        "held until dropped: {busy:?}"
+    );
+    world.calls();
+    let error = refused(launch(
+        &launchers,
+        &dir,
+        reservation,
+        (MATTER, "s1", "matter"),
+    ));
+    assert!(matches!(error, Error::NotPrepared), "{error:?}");
+    assert_eq!(world.calls(), Vec::<String>::new());
+    world.fail_at("none");
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+}
+
+/// A relaunch right after a session's end waits for the end sweeper the outer started: the
+/// matter is busy (`MatterBusy`, the host retries) while it runs, with nothing claimed or run,
+/// and launches once it is done, so the two never run together.
+#[test]
+fn a_relaunch_waits_for_the_end_sweeper() {
+    let world = World::new();
+    let dir = TempDir::new("launch-end-sweeper");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    launch(&launchers, &dir, reservation, (MATTER, "s1", "matter")).unwrap();
+    // The outer starts its end sweeper as the session ends, before the host's pass.
+    world.sweeper(true);
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    world.calls();
+    for _ in 0..3 {
+        let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+        assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+        let calls = world.calls();
+        assert_eq!(calls, [&RESERVE[..4], &["close_session"]].concat());
+        assert!(world.claimed_slots().is_empty());
+    }
+    world.sweeper(false);
+    let reservation = prepared(&launchers, &world, &dir, "s2");
+    launch(&launchers, &dir, reservation, (MATTER, "s2", "matter")).unwrap();
+}
+
 /// A process of the pool user's found at the launch is refused plainly, the reservation
 /// released: the preparation stops leftovers, and nothing should run as it since.
 #[test]
@@ -238,5 +296,6 @@ fn after_session_leaves_a_session_it_didnt_launch() {
     );
     assert_eq!(world.calls(), Vec::<String>::new());
     drop(reservation);
+    assert!(launchers.registry.wait_free(MATTER, WAIT));
     assert_eq!(world.calls(), ["end_run 1", UNDO[0], UNDO[1]]);
 }

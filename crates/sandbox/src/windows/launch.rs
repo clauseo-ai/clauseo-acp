@@ -8,15 +8,18 @@
 //! 1. [`Launchers::reserve`]: quick bookkeeping, within the launch bound. The session is marked
 //!    open, the matter's account assigned, a network slot claimed. Its [`Reservation`] gives the
 //!    slot's ports, which the host binds its proxy on before it builds the policy.
-//! 2. [`Launchers::prepare`] with the reservation and the full policy: the background walk
-//!    ([`Preparing`], `prepare.rs`), which hands the reservation back prepared. A later launch
+//!    [`Error::MatterBusy`] means retry within the bound.
+//! 2. [`Launchers::prepare`] with the reservation, borrowed, and the full policy: the background
+//!    walk ([`Preparing`], `prepare.rs`), keyed by the reservation's claim. A later launch
 //!    takes 20-70 ms here; a first one 17-30 s.
 //! 3. [`Launchers::launch`] with it, by value: the launcher that starts the outer runner.
 //! 4. [`Launchers::after_session`], once the agent's process tree is gone: the repair, the
 //!    set-aside's pass, the clean-close record, `EndRun`. Only then is the matter free.
 //!
-//! A reservation dropped before its launch undoes what was done for the session, newest first:
-//! the run's group, the slot, the session's mark. The matter keeps its account (no lease;
+//! The host keeps one owner of the reservation from `reserve` through `launch`. Dropped before
+//! its launch, it undoes what was done for the session, newest first (the run's group, the
+//! slot, the session's mark), and cancels a walk running for it; the drop itself never blocks
+//! (`registry.rs`). The matter keeps its account (no lease;
 //! `MatterSids::release` gives it back on forget). Every OS effect is a [`LaunchSteps`] call,
 //! so the order is tested on every OS with fakes (`launch/tests`); the real steps are C5's.
 
@@ -33,11 +36,12 @@ pub use prepare::{PREPARE_BOUND, Preparing, Progress, RETRY_PAUSE, Stage, Walk};
 pub use steps::{Ending, LaunchSteps, RunRefusal, Slot, Stopped};
 pub use tier_b::TierBLauncher;
 
-use registry::{Registry, State};
+use prepare::Reserved;
+use registry::{Begun, Registry, State};
 
 use crate::reservation::{Claim, Release};
-use crate::windows::pool::PoolFullCause;
 use crate::windows::pool::assign::Assign;
+use crate::windows::pool::{PoolFullCause, PoolUser};
 use crate::{DenialSink, Error, Policy, Reservation, SetAside, SetupError};
 
 /// Tier B's launchers over `S`'s steps, with the registry of their sessions.
@@ -60,8 +64,14 @@ impl<S: LaunchSteps> Launchers<S> {
     /// Reserves the matter's account and a network slot for `session`; `running` names the
     /// matter's other sessions the host still runs (none, on tier B; a session marked open and
     /// not named crashed). Bookkeeping only: nothing runs as the pool user and nothing is
-    /// granted to it. [`Error::MatterBusy`] while another session holds the matter, until its
-    /// [`after_session`](Launchers::after_session) has finished.
+    /// granted to it. A refusal undoes what was done before it returns.
+    ///
+    /// **[`Error::MatterBusy`] means retry** (one live agent per matter): another session holds
+    /// the matter, from its reservation until its `after_session` has finished, or a released
+    /// reservation's undo is still running, or the previous session's detached end sweeper is
+    /// still running as the pool user ([`LaunchSteps::end_sweeper_running`]). The host retries
+    /// within its 180 s bound, showing that it is preparing. `reserve` never returns
+    /// [`Error::LeftoverProcess`].
     pub fn reserve(
         &self,
         matter: &str,
@@ -69,55 +79,97 @@ impl<S: LaunchSteps> Launchers<S> {
         running: &[&str],
     ) -> Result<Reservation, Error> {
         let registry = &self.registry;
-        let steps = &*registry.steps;
         let id = registry.begin(matter, session, running)?;
         let release: Arc<dyn Release> = Arc::<Registry<S>>::clone(registry);
-        // Dropped on any failure below, which undoes what was done.
         let claim = Claim::new(registry.owner, id, release);
+        match self.reserve_steps(matter, session, running, id) {
+            Ok((pool, slot)) => Ok(Reservation::claimed(
+                matter,
+                session,
+                (slot.index, slot.ports),
+                pool,
+                claim,
+            )),
+            Err(error) => {
+                // Undone here, before the refusal returns.
+                claim.disarm();
+                registry.release_now(id);
+                Err(error)
+            }
+        }
+    }
+
+    /// `reserve`'s steps for claim `id`, each recorded for the undo.
+    fn reserve_steps(
+        &self,
+        matter: &str,
+        session: &str,
+        running: &[&str],
+        id: u64,
+    ) -> Result<(PoolUser, Slot), Error> {
+        let registry = &self.registry;
+        let steps = &*registry.steps;
         steps.setup_ready()?;
         steps.open_session(matter, session, running)?;
         registry.update(matter, id, |entry| entry.opened = true);
         let pool = steps.assign(matter, session).map_err(assign_refused)?;
         registry.update(matter, id, |entry| entry.pool = Some(pool.clone()));
+        if steps.end_sweeper_running(&pool) {
+            return Err(Error::MatterBusy);
+        }
         let slot = steps.claim_slot(matter, &pool)?;
         registry.update(matter, id, |entry| {
             entry.slot = Some(slot.clone());
             entry.state = State::Reserved;
         });
-        Ok(Reservation::claimed(
-            matter,
-            session,
-            (slot.index, slot.ports),
-            pool,
-            claim,
-        ))
+        Ok((pool, slot))
     }
 
-    /// Starts the matter's preparation on `reservation` (see `prepare.rs`), and returns at
-    /// once. A reservation these launchers don't hold as reserved fails it with
-    /// [`Error::WrongReservation`].
-    pub fn prepare(&self, reservation: Reservation, policy: &Policy) -> Preparing {
-        let Some(id) = self.own(&reservation) else {
-            return Preparing::failed(Some(reservation), Error::WrongReservation);
+    /// Starts the matter's preparation for `reservation` (see `prepare.rs`), and returns at
+    /// once; the host keeps the reservation. The walk is keyed by its claim and matter: a second
+    /// call while it runs joins it, and one once it is prepared finishes at once. A reservation
+    /// these launchers don't hold is [`Error::WrongReservation`]; one whose walk failed is
+    /// [`Error::NotPrepared`] (the host drops it and reserves again). Dropping the reservation
+    /// cancels its walk.
+    pub fn prepare(&self, reservation: &Reservation, policy: &Policy) -> Preparing {
+        let Some(id) = self.own(reservation) else {
+            return Preparing::finished(Err(Error::WrongReservation));
+        };
+        let (Some(pool), Some(index)) = (reservation.pool_user(), reservation.slot()) else {
+            return Preparing::finished(Err(Error::WrongReservation));
         };
         let (matter, session) = (reservation.matter(), reservation.session());
-        if !self
-            .registry
-            .step(matter, session, id, State::Reserved, State::Preparing)
-        {
-            return Preparing::failed(Some(reservation), Error::WrongReservation);
+        match self.registry.begin_walk(matter, session, id) {
+            Ok(Begun::Start(shared)) => {
+                let reserved = Reserved {
+                    id,
+                    matter: matter.to_owned(),
+                    session: session.to_owned(),
+                    pool: pool.clone(),
+                    slot: Slot {
+                        index,
+                        ports: reservation.ports().to_vec(),
+                    },
+                };
+                Preparing::start(&self.registry, reserved, policy.clone(), shared)
+            }
+            Ok(Begun::Join(shared)) => Preparing::joined(shared),
+            Ok(Begun::Done) => Preparing::finished(Ok(())),
+            Err(error) => Preparing::finished(Err(error)),
         }
-        Preparing::start(Arc::clone(&self.registry), id, reservation, policy.clone())
     }
 
     /// The launcher for `session` of `matter` on its prepared `reservation`: what the launch
     /// pass moved comes with it, for the lawyer's notice. Refused with
     /// [`Error::WrongReservation`] for a reservation of another matter or session, or of other
     /// launchers, or a policy for another matter folder than the one prepared; with
-    /// [`Error::NotPrepared`] for one not prepared (the host reserves and prepares again). A
-    /// refused reservation is released, and so is one whose pool user has a process running
-    /// ([`Error::LeftoverProcess`]). The seam's `running` went to `reserve`. `denials` is
-    /// unused until C4 feeds it the outer's denial lines.
+    /// [`Error::NotPrepared`] for one not prepared, or whose walk failed (the host reserves and
+    /// prepares again). A refused reservation is released before the refusal returns.
+    ///
+    /// **[`Error::LeftoverProcess`] here is final:** the preparation stopped, swept and looked
+    /// again within its bound, so a process of the pool user's now started in the gap. The host
+    /// doesn't retry; it is a plain launch failure. The seam's `running` went to `reserve`.
+    /// `denials` is unused until C4 feeds it the outer's denial lines.
     pub fn launch(
         &self,
         reservation: Reservation,
@@ -128,27 +180,47 @@ impl<S: LaunchSteps> Launchers<S> {
         denials: Arc<dyn DenialSink>,
     ) -> Result<(Arc<dyn clauseo_process::Launcher>, Vec<SetAside>), Error> {
         let id = self.own(&reservation).ok_or(Error::WrongReservation)?;
-        if reservation.matter() != matter || reservation.session() != session {
-            return Err(Error::WrongReservation);
-        }
-        let pool = self
-            .registry
-            .prepared(matter, session, id, policy.matter())?;
-        // Nothing runs as the pool user between the preparation and here; a process that does
-        // is refused plainly (the preparation stops leftovers, within its bound).
-        let leftovers = self.registry.steps.pool_user_processes(&pool)?;
-        if !leftovers.is_empty() {
-            return Err(Error::LeftoverProcess {
-                count: leftovers.len(),
-            });
-        }
-        let (pool, moved) = self.registry.launch(matter, session, id, policy.matter())?;
+        let launched = self.launch_checked(&reservation, &policy, matter, session, id);
+        let (pool, moved) = match launched {
+            Ok(launched) => launched,
+            Err(error) => {
+                reservation.disarm();
+                self.registry.release_now(id);
+                return Err(error);
+            }
+        };
         // The registry holds the session from here until `after_session`.
         reservation.disarm();
         // TODO(C4): the outer's stderr lines go to `denials` through `denial_from_line`.
         drop(denials);
         let launcher = TierBLauncher::new(Arc::clone(&self.registry.steps), policy, pool, opts);
         Ok((Arc::new(launcher), moved))
+    }
+
+    /// `launch`'s checks of claim `id`, then the registry's move to launched.
+    fn launch_checked(
+        &self,
+        reservation: &Reservation,
+        policy: &Policy,
+        matter: &str,
+        session: &str,
+        id: u64,
+    ) -> Result<(PoolUser, Vec<SetAside>), Error> {
+        if reservation.matter() != matter || reservation.session() != session {
+            return Err(Error::WrongReservation);
+        }
+        let pool = self
+            .registry
+            .prepared(matter, session, id, policy.matter())?;
+        // Nothing runs as the pool user between the preparation and here: a process that does
+        // started in the gap, and is refused plainly.
+        let leftovers = self.registry.steps.pool_user_processes(&pool)?;
+        if !leftovers.is_empty() {
+            return Err(Error::LeftoverProcess {
+                count: leftovers.len(),
+            });
+        }
+        self.registry.launch(matter, session, id, policy.matter())
     }
 
     /// Once per launched agent, after its process tree is gone: in order the journal's cursor,

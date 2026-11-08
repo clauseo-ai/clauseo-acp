@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use crate::windows::pool::PoolUser;
 
-/// The matter's account and slot, held for one session. Dropped before its launch, its claim
-/// releases them (and undoes what was done for the session); its launch takes it by value, so it is
-/// never used twice.
+/// The matter's account and slot, held for one session, from `reserve` through `launch`.
+/// Dropped before its launch, its claim releases them and undoes what was done for the
+/// session, at once and without blocking: a walk running for it is cancelled, and the undo runs
+/// on a thread of the launchers'. Its launch takes it by value, so it is never used twice.
 pub struct Reservation {
     matter: String,
     session: String,
@@ -118,7 +119,9 @@ impl std::fmt::Debug for Reservation {
 /// What releases a claim: the launchers' session registry.
 pub(crate) trait Release: Send + Sync {
     /// Releases claim `id` and undoes what was done for its session, unless it was launched.
-    fn release(&self, id: u64);
+    /// Called from a drop, so it never blocks: no file call, no wait, no lock held across
+    /// either; work that blocks goes elsewhere.
+    fn release(self: Arc<Self>, id: u64);
 }
 
 /// A set of launchers' hold on a reservation; released when dropped, unless disarmed.
@@ -138,6 +141,11 @@ impl Claim {
             id,
             release: Some(release),
         }
+    }
+
+    /// Lets go of it without releasing: the caller releases it itself.
+    pub(crate) fn disarm(mut self) {
+        self.release = None;
     }
 }
 
@@ -159,7 +167,7 @@ mod tests {
     struct Released(Mutex<Vec<u64>>);
 
     impl Release for Released {
-        fn release(&self, id: u64) {
+        fn release(self: Arc<Self>, id: u64) {
             self.0.lock().unwrap().push(id);
         }
     }

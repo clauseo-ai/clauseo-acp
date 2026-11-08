@@ -1,5 +1,5 @@
 //! The preparation: its order, the launch check before any grant, each failure and cancel
-//! undone, `PrepareRun`'s retries, one walk per matter.
+//! undone, `PrepareRun`'s retries, one walk per matter, and the reservation's drop.
 
 use super::fake::{FakeSteps, Held, MATTER, OTHER, World};
 use super::*;
@@ -25,11 +25,11 @@ const GRANTS: [&str; 6] = [
 ];
 
 /// The calls of a preparation of `MATTER` for `s1`, after its reserve, and its result.
-fn prepare_once(world: &Arc<World>, dir: &TempDir) -> (Vec<String>, Result<Reservation, Error>) {
+fn prepare_once(world: &Arc<World>, dir: &TempDir) -> (Vec<String>, Result<(), Error>) {
     let launchers = launchers(world);
     let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
     world.calls();
-    let preparing = launchers.prepare(reservation, &policy_at(dir, "matter"));
+    let preparing = launchers.prepare(&reservation, &policy_at(dir, "matter"));
     let result = preparing.wait(WAIT).unwrap();
     (world.calls(), result)
 }
@@ -40,8 +40,8 @@ fn the_walk_runs_in_order_and_grants_only_after_the_check() {
     let dir = TempDir::new("launch-walk-order");
     let launchers = launchers(&world);
     let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
-    let preparing = launchers.prepare(reservation, &policy_at(&dir, "matter"));
-    let reservation = preparing.wait(WAIT).unwrap().unwrap();
+    let preparing = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    preparing.wait(WAIT).unwrap().unwrap();
     let calls = world.calls();
     assert_eq!(calls, [&RESERVE[..], &WALK[..]].concat());
     let check = calls
@@ -67,11 +67,11 @@ fn the_walk_runs_in_order_and_grants_only_after_the_check() {
             done: true,
         }
     );
-    assert!(preparing.result().is_none(), "taken once");
+    assert!(matches!(preparing.result(), Some(Ok(()))), "every time");
 }
 
-/// A failed launch check drops the reservation: nothing granted, nothing run, the slot and the
-/// mark undone, the matter free.
+/// A failed launch check undoes the reservation's work: nothing granted, nothing run, the slot
+/// and the mark undone (`launch` then refuses it: `session.rs`).
 #[test]
 fn a_failed_check_drops_the_reservation() {
     let world = World::new();
@@ -135,8 +135,8 @@ fn a_leftover_is_stopped_and_the_walk_goes_on() {
     let launchers = launchers(&world);
     let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
     world.calls();
-    let preparing = launchers.prepare(reservation, &policy_at(&dir, "matter"));
-    let _prepared = preparing.wait(WAIT).unwrap().unwrap();
+    let preparing = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    preparing.wait(WAIT).unwrap().unwrap();
     assert_eq!(preparing.progress().stopped, 2);
     let calls = world.calls();
     let want = [&WALK[..4], &["stop", "sweep", "pool_processes"], &WALK[4..]].concat();
@@ -214,28 +214,39 @@ fn prepare_run_gives_up_at_the_bound() {
     assert_eq!(calls[calls.len() - 2..], UNDO);
 }
 
-/// A preparation of `MATTER` held at `step`, with its handle.
+/// A preparation of `MATTER` held at `step`, with its handle and its reservation.
 fn held_at(
     world: &Arc<World>,
     dir: &TempDir,
     step: &'static str,
-) -> (Launchers<FakeSteps>, Preparing, Held) {
+) -> (Launchers<FakeSteps>, Preparing, Held, Reservation) {
     let launchers = launchers(world);
     let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
     world.calls();
     let held = world.hold(step);
-    let preparing = launchers.prepare(reservation, &policy_at(dir, "matter"));
+    let preparing = launchers.prepare(&reservation, &policy_at(dir, "matter"));
     held.reached();
-    (launchers, preparing, held)
+    (launchers, preparing, held, reservation)
+}
+
+/// The calls of the walk up to `step`, then its undo.
+fn undone_at(step: &str) -> Vec<String> {
+    let at = WALK.iter().position(|each| *each == step).unwrap();
+    let mut want: Vec<String> = WALK[..=at].iter().map(|s| (*s).to_owned()).collect();
+    if at >= 5 {
+        want.push("end_run 1".to_owned());
+    }
+    want.extend(UNDO.map(str::to_owned));
+    want
 }
 
 /// A cancel at any step stops the walk there, with `Cancelled`, and undoes what was done.
 #[test]
 fn a_cancel_at_each_step_undoes_what_was_done() {
-    for (at, step) in WALK.iter().enumerate() {
+    for step in WALK {
         let world = World::new();
         let dir = TempDir::new(&format!("launch-cancel-{step}"));
-        let (_launchers, preparing, held) = held_at(&world, &dir, step);
+        let (_launchers, preparing, held, _reservation) = held_at(&world, &dir, step);
         preparing.cancel();
         held.go();
         let result = preparing.wait(WAIT).unwrap();
@@ -243,62 +254,98 @@ fn a_cancel_at_each_step_undoes_what_was_done() {
             matches!(result, Err(Error::Cancelled)),
             "{step}: {result:?}"
         );
-        let mut want: Vec<String> = WALK[..=at].iter().map(|s| (*s).to_owned()).collect();
-        if at >= 5 {
-            want.push("end_run 1".to_owned());
-        }
-        want.extend(UNDO.map(str::to_owned));
-        assert_eq!(world.calls(), want, "{step}");
+        assert_eq!(world.calls(), undone_at(step), "{step}");
         assert!(world.claimed_slots().is_empty(), "{step}");
         assert!(world.open_sessions(MATTER).is_empty(), "{step}");
     }
 }
 
-/// One walk per matter: while one runs, the matter refuses another reservation; another matter
-/// prepares meanwhile.
+/// Dropping the reservation while its walk is blocked mid-step returns at once (the walk holds
+/// nothing the drop waits for), cancels the walk, and the walk undoes and frees the matter when
+/// it stops.
+#[test]
+fn dropping_the_reservation_cancels_its_walk_at_once() {
+    for step in ["before_launch", "apply"] {
+        let world = World::new();
+        let dir = TempDir::new(&format!("launch-drop-{step}"));
+        let (launchers, preparing, held, reservation) = held_at(&world, &dir, step);
+        // Would hang here if the drop waited for the walk, which waits for `go`.
+        drop(reservation);
+        let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+        assert!(matches!(busy, Error::MatterBusy), "{step}: {busy:?}");
+        held.go();
+        let result = preparing.wait(WAIT).unwrap();
+        assert!(
+            matches!(result, Err(Error::Cancelled)),
+            "{step}: {result:?}"
+        );
+        assert!(launchers.registry.wait_free(MATTER, WAIT), "{step}");
+        assert_eq!(world.calls(), undone_at(step), "{step}");
+        assert!(world.claimed_slots().is_empty(), "{step}");
+    }
+}
+
+/// Dropping a prepared reservation returns while its undo is still blocked mid-step: the undo
+/// runs on a thread of its own, and the matter stays busy until it is done.
+#[test]
+fn a_drop_never_waits_for_its_undo() {
+    let world = World::new();
+    let dir = TempDir::new("launch-drop-undo");
+    let launchers = launchers(&world);
+    let reservation = prepared(&launchers, &world, &dir, "s1");
+    let held = world.hold("close_session");
+    drop(reservation);
+    let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
+    assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+    held.reached();
+    held.go();
+    assert!(launchers.registry.wait_free(MATTER, WAIT));
+    assert_eq!(world.calls(), ["end_run 1", UNDO[0], UNDO[1]]);
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+}
+
+/// One walk per matter: while one runs, the matter refuses another reservation, and a second
+/// `prepare` of the same reservation joins it; another matter prepares meanwhile.
 #[test]
 fn a_matter_walks_once_at_a_time() {
     let world = World::new();
     let dir = TempDir::new("launch-one-walk");
-    let (launchers, preparing, held) = held_at(&world, &dir, "apply");
+    let (launchers, preparing, held, reservation) = held_at(&world, &dir, "apply");
     assert_eq!(preparing.progress().stage, Stage::Walking);
     assert!(!preparing.progress().done);
     let busy = launchers.reserve(MATTER, "s2", &[]).unwrap_err();
     assert!(matches!(busy, Error::MatterBusy), "{busy:?}");
+    let joined = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
     let other = launchers.reserve(OTHER, "s3", &[]).unwrap();
     held.go();
-    assert!(preparing.wait(WAIT).unwrap().is_ok());
-    let theirs = launchers.prepare(other, &policy_at(&dir, "other"));
-    assert!(theirs.wait(WAIT).unwrap().is_ok());
+    assert!(matches!(preparing.wait(WAIT), Some(Ok(()))));
+    assert!(matches!(joined.wait(WAIT), Some(Ok(()))));
+    let walks = world.calls().iter().filter(|call| *call == "apply").count();
+    assert_eq!(walks, 1, "one walk");
+    let theirs = launchers.prepare(&other, &policy_at(&dir, "other"));
+    assert!(matches!(theirs.wait(WAIT), Some(Ok(()))));
 }
 
-/// A dropped handle doesn't stop the walk (the lawyer's Stop ends the wait only); its
-/// reservation is released when the walk ends.
+/// A dropped handle doesn't stop the walk (the lawyer's Stop ends the wait only): a later
+/// `prepare` of the reservation finds it prepared, with no walk again.
 #[test]
-fn a_dropped_handle_releases_when_the_walk_ends() {
+fn a_dropped_handle_doesnt_stop_the_walk() {
     let world = World::new();
     let dir = TempDir::new("launch-dropped-handle");
-    let (launchers, preparing, held) = held_at(&world, &dir, "apply");
+    let (launchers, preparing, held, reservation) = held_at(&world, &dir, "apply");
     drop(preparing);
-    let closing = world.hold("close_session");
     held.go();
-    // The release's last step; the matter is freed just after it.
-    closing.reached();
-    closing.go();
-    let freed = (0..10_000_000).any(|_| {
-        std::thread::yield_now();
-        launchers.reserve(MATTER, "s2", &[]).is_ok()
-    });
-    assert!(freed, "the matter stayed held");
-    let calls = world.calls();
-    assert!(calls.starts_with(&WALK.map(str::to_owned)), "{calls:?}");
-    assert_eq!(
-        calls[WALK.len()..WALK.len() + 3],
-        ["end_run 1", UNDO[0], UNDO[1]]
-    );
+    let again = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    assert!(matches!(again.wait(WAIT), Some(Ok(()))));
+    assert_eq!(world.calls(), WALK);
+    let done = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    assert!(done.progress().done);
+    assert!(matches!(done.result(), Some(Ok(()))));
+    assert_eq!(world.calls(), Vec::<String>::new(), "prepared already");
 }
 
-/// A reservation these launchers don't hold as reserved is refused at once, nothing called.
+/// A reservation these launchers don't hold is refused at once, nothing called; the end
+/// sweeper is never taken for a leftover.
 #[test]
 fn prepare_refuses_reservations_it_doesnt_hold() {
     let world = World::new();
@@ -308,23 +355,30 @@ fn prepare_refuses_reservations_it_doesnt_hold() {
     let theirs = others.reserve(OTHER, "s9", &[]).unwrap();
     world.calls();
     for reservation in [
-        Reservation::fixed(vec![46100], MATTER, "s1"),
-        Reservation::unpooled(MATTER, "s1"),
-        theirs,
+        &Reservation::fixed(vec![46100], MATTER, "s1"),
+        &Reservation::unpooled(MATTER, "s1"),
+        &theirs,
     ] {
         let preparing = launchers.prepare(reservation, &policy_at(&dir, "matter"));
         assert!(preparing.progress().done);
         let result = preparing.result().unwrap();
         assert!(matches!(result, Err(Error::WrongReservation)), "{result:?}");
     }
-    // Theirs was released by its own launchers when it was dropped.
-    assert_eq!(world.calls(), UNDO);
-    // A prepared reservation can't be prepared again.
-    let again = prepared(&launchers, &world, &dir, "s1");
-    let preparing = launchers.prepare(again, &policy_at(&dir, "matter"));
-    assert!(matches!(
-        preparing.result(),
-        Some(Err(Error::WrongReservation))
-    ));
-    assert_eq!(world.calls(), ["end_run 1", UNDO[0], UNDO[1]]);
+    assert_eq!(world.calls(), Vec::<String>::new());
+}
+
+/// The detached end sweeper runs as the pool user but is known exactly: it is never a leftover,
+/// so it triggers no stop and no refusal.
+#[test]
+fn the_end_sweeper_is_never_a_leftover() {
+    let world = World::new();
+    let dir = TempDir::new("launch-sweeper-not-leftover");
+    let launchers = launchers(&world);
+    let reservation = launchers.reserve(MATTER, "s1", &[]).unwrap();
+    world.calls();
+    world.sweeper(true);
+    let preparing = launchers.prepare(&reservation, &policy_at(&dir, "matter"));
+    assert!(matches!(preparing.wait(WAIT), Some(Ok(()))));
+    assert_eq!(world.calls(), WALK);
+    assert_eq!(preparing.progress().stopped, 0);
 }

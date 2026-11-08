@@ -64,6 +64,7 @@ pub(super) struct World {
     groups: Mutex<u32>,
     leftovers: Mutex<u32>,
     stubborn: Mutex<bool>,
+    sweeper: Mutex<bool>,
 }
 
 impl World {
@@ -109,6 +110,11 @@ impl World {
     pub(super) fn leftovers(&self, count: u32, stubborn: bool) {
         *self.leftovers.lock().unwrap() = count;
         *self.stubborn.lock().unwrap() = stubborn;
+    }
+
+    /// The end sweeper an outer started runs as the pool user, or has finished.
+    pub(super) fn sweeper(&self, running: bool) {
+        *self.sweeper.lock().unwrap() = running;
     }
 
     pub(super) fn claimed_slots(&self) -> BTreeSet<u8> {
@@ -226,6 +232,11 @@ impl LaunchSteps for FakeSteps {
         Ok(pool_user())
     }
 
+    fn end_sweeper_running(&self, _pool: &PoolUser) -> bool {
+        self.0.log("end_sweeper");
+        *self.0.sweeper.lock().unwrap()
+    }
+
     fn claim_slot(&self, _matter: &str, _pool: &PoolUser) -> Result<Slot, Error> {
         self.0.step("claim_slot")?;
         let mut slots = self.0.slots.lock().unwrap();
@@ -261,7 +272,10 @@ impl LaunchSteps for FakeSteps {
 
     fn pool_user_processes(&self, _pool: &PoolUser) -> Result<Vec<u32>, Error> {
         self.0.step("pool_processes")?;
-        Ok((1..=*self.0.leftovers.lock().unwrap()).collect())
+        // The end sweeper, pid 9000 here, is known exactly and never listed.
+        let sweeper = (*self.0.sweeper.lock().unwrap()).then_some(9000);
+        let found = (1..=*self.0.leftovers.lock().unwrap()).chain(sweeper);
+        Ok(found.filter(|&pid| Some(pid) != sweeper).collect())
     }
 
     fn stop_pool_user(&self, _pool: &PoolUser) -> Result<Stopped, Error> {

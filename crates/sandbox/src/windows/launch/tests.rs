@@ -39,13 +39,19 @@ fn prepared(
     session: &str,
 ) -> Reservation {
     let reservation = launchers.reserve(MATTER, session, &[]).unwrap();
-    let preparing = launchers.prepare(reservation, &policy_at(dir, "matter"));
-    let reservation = preparing.wait(WAIT).unwrap().unwrap();
+    let preparing = launchers.prepare(&reservation, &policy_at(dir, "matter"));
+    preparing.wait(WAIT).unwrap().unwrap();
     world.calls();
     reservation
 }
 
-const RESERVE: [&str; 4] = ["setup_ready", "open_session", "assign", "claim_slot"];
+const RESERVE: [&str; 5] = [
+    "setup_ready",
+    "open_session",
+    "assign",
+    "end_sweeper",
+    "claim_slot",
+];
 const UNDO: [&str; 2] = ["release_slot", "close_session"];
 
 #[test]
@@ -179,6 +185,8 @@ fn a_reservation_holds_the_matter_until_dropped() {
     assert_eq!(other.slot(), Some(1));
     world.calls();
     drop(first);
+    // The undo runs off the dropping thread; the matter is busy until it is done.
+    assert!(launchers.registry.wait_free(MATTER, WAIT));
     assert_eq!(world.calls(), UNDO);
     assert_eq!(world.claimed_slots().into_iter().collect::<Vec<_>>(), [1]);
     assert!(world.open_sessions(MATTER).is_empty());

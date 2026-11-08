@@ -1,5 +1,5 @@
-//! The matter's preparation, in the background: the walk `prepare` starts on a reservation, and
-//! the handle the host polls ([`Preparing`]). The order, after `reserve`'s bookkeeping:
+//! The matter's preparation, in the background: the walk `prepare` starts for a reservation,
+//! and the handle the host polls ([`Preparing`]). The order, after `reserve`'s bookkeeping:
 //!
 //! 1. the gate and the plan (reads only);
 //! 2. the launch check (the admin copy, the clean-close record, the journal);
@@ -15,18 +15,23 @@
 //! (which runs as the pool user), `PrepareRun` (which adds it to the run's group) and `apply`
 //! come after it. Steps 4 and 6 share one bound, [`PREPARE_BOUND`] from the walk's start.
 //!
-//! Any failure, and a cancel, drops the reservation, which undoes what was done for the session
-//! (the group, the slot, the session's mark); the permission entries `apply` wrote stay in the
-//! ledger, so the next preparation continues from them.
+//! The walk borrows nothing from the host: it is keyed by the reservation's claim and matter in
+//! the registry. A failure, and a cancel, undo what was done for the session on the walk's own
+//! thread (the group, the slot, the session's mark) before the result is posted; the
+//! reservation stays the host's, refused by `launch` ([`Error::NotPrepared`]) until it drops
+//! it. Dropping the reservation mid-walk cancels the walk, which undoes and frees the matter
+//! when it stops. The permission entries `apply` wrote stay in the ledger, so the next
+//! preparation continues from them.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::registry::{Registry, State};
+use super::registry::Registry;
 use super::steps::{LaunchSteps, RunRefusal, Slot, Stopped};
 use crate::windows::pool::PoolUser;
-use crate::{Blocked, Error, Policy, Reservation};
+use crate::{Blocked, Error, Policy};
 
 /// How long a preparation stops leftovers and retries `PrepareRun` while a set-up runs, from
 /// the walk's start: the host's launch bound on tier B (0049). Past it, the preparation fails.
@@ -65,13 +70,15 @@ pub struct Progress {
 }
 
 /// A matter's preparation, running in the background. Dropping it doesn't stop the walk (the
-/// lawyer's Stop ends the wait, not the walk); the reservation is released when the walk ends.
-/// [`Preparing::cancel`] stops it.
+/// lawyer's Stop ends the wait, not the walk); [`Preparing::cancel`] does, and so does dropping
+/// the reservation. Another `prepare` of the same reservation while it runs joins it.
 pub struct Preparing {
     shared: Arc<Shared>,
 }
 
-struct Shared {
+/// A walk's state, shared by its thread, its handles and the registry (which cancels it when
+/// the reservation is dropped). Its lock is held only to read or post the stage and result.
+pub(super) struct Shared {
     inner: Mutex<Inner>,
     finished: Condvar,
     cancelled: AtomicBool,
@@ -82,7 +89,7 @@ struct Shared {
 struct Inner {
     stage: Stage,
     done: bool,
-    result: Option<Result<Reservation, Error>>,
+    result: Option<Result<(), Error>>,
 }
 
 /// What [`LaunchSteps::apply`] is given: whether to stop, and where to count.
@@ -104,7 +111,7 @@ impl Walk<'_> {
 }
 
 impl Shared {
-    fn new() -> Arc<Shared> {
+    pub(super) fn new() -> Arc<Shared> {
         Arc::new(Shared {
             inner: Mutex::new(Inner {
                 stage: Stage::Checking,
@@ -116,6 +123,11 @@ impl Shared {
             walked: AtomicU64::new(0),
             stopped: AtomicU64::new(0),
         })
+    }
+
+    /// Stops the walk at its next check; never blocks.
+    pub(super) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -137,7 +149,7 @@ impl Shared {
         }
     }
 
-    fn finish(&self, result: Result<Reservation, Error>) {
+    fn finish(&self, result: Result<(), Error>) {
         let mut inner = self.lock();
         inner.stage = Stage::Finished;
         inner.done = true;
@@ -147,68 +159,57 @@ impl Shared {
     }
 }
 
+/// What a walk needs from the reservation, copied: it never holds the reservation itself.
+pub(super) struct Reserved {
+    pub(super) id: u64,
+    pub(super) matter: String,
+    pub(super) session: String,
+    pub(super) pool: PoolUser,
+    pub(super) slot: Slot,
+}
+
 impl Preparing {
-    /// One that failed before it started; `reservation`, if any, is dropped first.
-    pub(super) fn failed(reservation: Option<Reservation>, error: Error) -> Preparing {
-        drop(reservation);
+    /// One finished already, with `result`.
+    pub(super) fn finished(result: Result<(), Error>) -> Preparing {
         let shared = Shared::new();
-        shared.finish(Err(error));
+        shared.finish(result);
         Preparing { shared }
     }
 
-    /// Starts the walk for claim `id`, which the registry holds as preparing.
+    /// A handle on the walk `shared`, running.
+    pub(super) fn joined(shared: Arc<Shared>) -> Preparing {
+        Preparing { shared }
+    }
+
+    /// Starts the walk `shared` for `reserved`, which the registry holds as preparing.
     pub(super) fn start<S: LaunchSteps>(
-        registry: Arc<Registry<S>>,
-        id: u64,
-        reservation: Reservation,
+        registry: &Arc<Registry<S>>,
+        reserved: Reserved,
         policy: Policy,
+        shared: Arc<Shared>,
     ) -> Preparing {
-        let shared = Shared::new();
         let ours = Arc::clone(&shared);
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<Reservation>(1);
+        let (matter, id) = (reserved.matter.clone(), reserved.id);
+        let thread_registry = Arc::clone(registry);
         let started = std::thread::Builder::new()
             .name("clauseo-tierb-prepare".to_owned())
             .spawn(move || {
-                let Ok(reservation) = receiver.recv() else {
-                    return;
-                };
-                let walked = walk(&registry, id, &reservation, &policy, &ours);
-                let result = walked.and_then(|()| {
-                    let folder = policy.matter().to_path_buf();
-                    let matter = reservation.matter();
-                    let session = reservation.session();
-                    let moved =
-                        registry.step(matter, session, id, State::Preparing, State::Prepared);
-                    registry.update(matter, id, |entry| entry.prepared = Some(folder));
-                    if moved {
-                        Ok(())
-                    } else {
-                        Err(Error::WrongReservation)
-                    }
-                });
-                match result {
-                    Ok(()) => ours.finish(Ok(reservation)),
-                    Err(error) => {
-                        // Undone before the host hears of the failure.
-                        drop(reservation);
-                        ours.finish(Err(error));
-                    }
-                }
+                let walked = walk(&thread_registry, &reserved, &policy, &ours);
+                let folder: PathBuf = policy.matter().to_path_buf();
+                // The undo runs here, before the result is posted.
+                let result =
+                    thread_registry.walk_done(&reserved.matter, reserved.id, walked, folder);
+                ours.finish(result);
             });
-        match started {
-            Ok(_) => {
-                // The thread waits for it; it is dropped (released) if the thread has gone.
-                let _sent = sender.send(reservation);
-                Preparing { shared }
-            }
-            Err(error) => Preparing::failed(
-                Some(reservation),
-                Error::Launch(clauseo_process::Error::Os {
-                    what: "the sandbox's preparation didn't start",
-                    source: error,
-                }),
-            ),
+        if let Err(error) = started {
+            let error = Error::Launch(clauseo_process::Error::Os {
+                what: "the sandbox's preparation didn't start",
+                source: error,
+            });
+            let result = registry.walk_done(&matter, id, Err(error), PathBuf::new());
+            shared.finish(result);
         }
+        Preparing { shared }
     }
 
     /// How far it is.
@@ -222,27 +223,42 @@ impl Preparing {
         }
     }
 
-    /// Its result once finished, taken: the reservation, prepared, for `launch`, or why not
-    /// (the reservation released). `None` while it runs, and once taken.
-    pub fn result(&self) -> Option<Result<Reservation, Error>> {
-        self.shared.lock().result.take()
+    /// Its result once finished: `Ok(())`, the reservation prepared for `launch` (every time
+    /// it is asked), or why not, what was done for the session undone (the error once, then
+    /// [`Error::NotPrepared`], to every handle of the walk). `None` while it runs.
+    pub fn result(&self) -> Option<Result<(), Error>> {
+        Self::take(&mut self.shared.lock())
     }
 
     /// [`Preparing::result`], waiting up to `timeout` for it to finish.
-    pub fn wait(&self, timeout: Duration) -> Option<Result<Reservation, Error>> {
+    pub fn wait(&self, timeout: Duration) -> Option<Result<(), Error>> {
         let inner = self.shared.lock();
         let (mut inner, _) = self
             .shared
             .finished
             .wait_timeout_while(inner, timeout, |inner| !inner.done)
             .unwrap_or_else(PoisonError::into_inner);
-        inner.result.take()
+        Self::take(&mut inner)
+    }
+
+    fn take(inner: &mut Inner) -> Option<Result<(), Error>> {
+        if !inner.done {
+            return None;
+        }
+        match inner.result.take() {
+            Some(Ok(())) => {
+                inner.result = Some(Ok(()));
+                Some(Ok(()))
+            }
+            Some(Err(error)) => Some(Err(error)),
+            None => Some(Err(Error::NotPrepared)),
+        }
     }
 
     /// Stops it at the next step, or the walk's next folder: it finishes with
     /// [`Error::Cancelled`], what was done for the session undone. On matter close or app quit.
     pub fn cancel(&self) {
-        self.shared.cancelled.store(true, Ordering::Release);
+        self.shared.cancel();
     }
 }
 
@@ -257,25 +273,20 @@ impl std::fmt::Debug for Preparing {
 /// The walk's steps, in order; see the module's docs.
 fn walk<S: LaunchSteps>(
     registry: &Registry<S>,
-    id: u64,
-    reservation: &Reservation,
+    reserved: &Reserved,
     policy: &Policy,
     shared: &Shared,
 ) -> Result<(), Error> {
     let steps = &*registry.steps;
     let started = steps.now();
-    let matter = reservation.matter();
-    let session = reservation.session();
-    let (pool, slot) = match (reservation.pool_user(), reservation.slot()) {
-        (Some(pool), Some(index)) => (
-            pool,
-            Slot {
-                index,
-                ports: reservation.ports().to_vec(),
-            },
-        ),
-        _ => return Err(Error::WrongReservation),
-    };
+    let Reserved {
+        id,
+        matter,
+        session,
+        pool,
+        slot,
+    } = reserved;
+    let (id, matter) = (*id, matter.as_str());
     let running = registry
         .update(matter, id, |entry| entry.running.clone())
         .ok_or(Error::WrongReservation)?;
@@ -292,8 +303,8 @@ fn walk<S: LaunchSteps>(
     let moved = steps.before_launch(&plan, &check, session, &running)?;
     registry.update(matter, id, |entry| entry.moved = moved);
     shared.at(Stage::PreparingRun)?;
-    let group = prepare_run(steps, &slot, pool, started, shared)?;
-    // The entry holds the group, so a release ends it; with no entry, it is ended here.
+    let group = prepare_run(steps, slot, pool, started, shared)?;
+    // The entry holds the group, so the undo ends it; with no entry, it is ended here.
     let mut group = Some(group);
     registry.update(matter, id, |entry| entry.run = group.take());
     if let Some(group) = group {

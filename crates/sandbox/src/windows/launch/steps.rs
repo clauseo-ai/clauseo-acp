@@ -67,6 +67,12 @@ pub struct Ending<'a> {
 /// ([`spawn_outer`](Self::spawn_outer)) come only after [`check_launch`](Self::check_launch)
 /// passed; so do the stop and the sweep of a leftover's pool user
 /// ([`stop_pool_user`](Self::stop_pool_user), [`sweep_pool_user`](Self::sweep_pool_user)).
+///
+/// **The launching session** is its session id together with its reservation's claim, never
+/// its name or a pid alone. C3's own checks (the registry's) use both. TODO(C5): where the real
+/// steps must not count the launching session (`open_session`'s mark, then `check_launch` and
+/// `before_launch` reading the open sessions), they know it by both too: the session marked by
+/// this reservation's `open_session`, not any session of that name.
 pub trait LaunchSteps: Send + Sync + 'static {
     /// The admitted plan (`admit` and `acl_plan::plan`: `AdmittedPlan`).
     type Plan: Send;
@@ -95,6 +101,12 @@ pub trait LaunchSteps: Send + Sync + 'static {
     fn close_session(&self, matter: &str, session: &str);
     /// The matter's account (`MatterSids::assign`, over the ledger it loads).
     fn assign(&self, matter: &str, session: &str) -> Result<PoolUser, Assign>;
+    /// Whether the detached end sweeper an outer started at a session's end (`--sweep`, as
+    /// the pool user) is still running for `pool`, from any session, this app's or a crashed
+    /// one's: `reserve` refuses with `MatterBusy` until it has finished, so a pool user is
+    /// never handed out alongside it. TODO(C5): identified exactly, by the process handle and
+    /// creation time recorded when it was started, never by name.
+    fn end_sweeper_running(&self, pool: &PoolUser) -> bool;
     /// A free network slot for the pool user (`wfp::check_slot`).
     fn claim_slot(&self, matter: &str, pool: &PoolUser) -> Result<Slot, Error>;
     /// Gives the slot back.
@@ -108,7 +120,9 @@ pub trait LaunchSteps: Send + Sync + 'static {
     /// The network check (`wfp::check_launch`).
     fn check_network(&self, policy: &Policy, pool: &PoolUser) -> Result<(), Error>;
     /// The processes running as the pool user (their pids), outside any job of this launch's:
-    /// leftovers of an earlier run. Asked after the launch check, and again at `launch`.
+    /// leftovers of an earlier run. Asked after the launch check, and again at `launch`. The
+    /// end sweeper ([`end_sweeper_running`](Self::end_sweeper_running)), identified exactly,
+    /// is never one: it never triggers a refusal or a stop.
     fn pool_user_processes(&self, pool: &PoolUser) -> Result<Vec<u32>, Error>;
     /// The SYSTEM stop task for the pool user (`setup::stop`), which ends its processes; what
     /// it reported.
