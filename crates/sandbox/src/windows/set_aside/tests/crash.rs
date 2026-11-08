@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use super::{after, before, exit, exit_as, launch, list, none, record, volume, world};
 use crate::windows::set_aside::files::{FileId, Place};
-use crate::windows::set_aside::run::{self, Refused, Volume};
+use crate::windows::set_aside::run::{self, Need, Refused, Volume};
 use crate::windows::set_aside::scan::Listed;
 use crate::windows::set_aside::{Reason, SetAsideFailure, under_lock};
 use crate::windows::test_world::matter_one;
@@ -53,6 +53,10 @@ impl<V: Volume> Volume for Stopping<V> {
 
     fn probe(&self, folder: &V::Folder, name: &OsStr) -> io::Result<Option<FileId>> {
         self.inner.probe(folder, name)
+    }
+
+    fn read_small(&self, folder: &V::Folder, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
+        self.inner.read_small(folder, name, max)
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
@@ -102,15 +106,16 @@ impl<V: Volume> Volume for Stopping<V> {
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure> {
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure> {
         match self.stop {
             Stop::CrashBefore => panic!("the process dies before the move"),
             Stop::CrashAfter => {
-                self.inner.move_into(from, sandbox, parts, name)?;
+                self.inner.move_into(from, sandbox, parts, name, need)?;
                 panic!("the process dies after the move")
             }
             Stop::Fail(failure) => Err(failure),
-            Stop::CrashAtOwn => self.inner.move_into(from, sandbox, parts, name),
+            Stop::CrashAtOwn => self.inner.move_into(from, sandbox, parts, name, need),
         }
     }
 

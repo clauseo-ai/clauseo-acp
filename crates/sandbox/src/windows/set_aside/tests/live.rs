@@ -20,17 +20,19 @@ pub(super) fn watched(root: &Path, data: &Path) -> Watched {
     Watched::new(&volume(), root, data, &matter_one())
 }
 
-/// The watch's side of a check: each end it was asked for, and a clock that moves
-/// `step` at each reading.
+/// The watch's side of a check: each end it was asked for, a clock that moves `step` at each
+/// reading, and what each end says of the agent's job (`empty`).
 pub(super) struct Calm {
     pub(super) ends: std::cell::RefCell<Vec<Ending>>,
     pub(super) clock: std::cell::Cell<std::time::Duration>,
     step: std::time::Duration,
+    pub(super) empty: std::cell::Cell<bool>,
 }
 
 impl Hooks for Calm {
-    fn end(&self, why: Ending) {
+    fn end(&self, why: Ending) -> bool {
         self.ends.borrow_mut().push(why);
+        self.empty.get()
     }
 
     fn now(&self) -> std::time::Duration {
@@ -51,6 +53,7 @@ pub(super) fn ticking(step: std::time::Duration) -> Calm {
         ends: std::cell::RefCell::new(Vec::new()),
         clock: std::cell::Cell::new(std::time::Duration::ZERO),
         step,
+        empty: std::cell::Cell::new(true),
     }
 }
 

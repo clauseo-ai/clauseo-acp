@@ -36,16 +36,18 @@ fn the_session_ends_before_the_first_move_and_only_when_something_moves() {
     assert_eq!(*hooks.ends.borrow(), [Ending::Found]);
 }
 
-/// A reported `.git` already gone is listed, so the watch can count a path renamed back and
-/// forth.
+/// Review item 1: a reported `.git` already gone by its check ends the session all the same (an
+/// agent renaming short-lived `.git`s in and out can't stay ahead of the watch), and is listed,
+/// so the watch counts it.
 #[test]
-fn a_reported_git_already_gone_is_listed_gone() {
+fn a_reported_git_already_gone_ends_the_session_and_is_listed_gone() {
     let (_w, root, data) = world("live-gone");
     let watch = watched(&root, &data);
     let hooks = calm();
     let live = watch.changed(&volume(), &reported(&["sub/.git"]), exit(), &hooks);
     assert_eq!(live.gone, [PathBuf::from("sub/.git")]);
-    assert!(live.moved.is_empty() && hooks.ends.borrow().is_empty());
+    assert!(live.moved.is_empty());
+    assert_eq!(*hooks.ends.borrow(), [Ending::Found]);
 }
 
 /// H1: an empty folder the agent made, then turned into a junction (`mklink /J`'s two steps):

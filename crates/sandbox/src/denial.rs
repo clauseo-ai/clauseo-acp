@@ -111,14 +111,28 @@ impl SetAsideWhat {
         format!("Clauseo set aside {}: {}", path.display(), self.why())
     }
 
-    /// The lawyer's notice for the item `name` moved to `to`: where it went, and, since a
-    /// restore refuses a git folder, the step to put back one the lawyer made.
+    /// The lawyer's notice for the item `name` moved to `to` when whose it was isn't known: as
+    /// [`SetAsideWhat::notice_by`] for an item the agent didn't make, so the lawyer is told how
+    /// to put back one the lawyer made.
     pub fn notice(self, name: &std::path::Path, to: &std::path::Path) -> String {
+        self.notice_by(name, to, false)
+    }
+
+    /// The lawyer's notice for the item `name` moved to `to`: where it went. A git repository a
+    /// pool user owned (`by_agent`, read from the handle the move renamed) is the AI tool's, and
+    /// is never to be put back; anyone else's may be the lawyer's own, made while an agent
+    /// worked, so the notice blames no one and, since a restore refuses a git folder, gives the
+    /// step to put it back.
+    pub fn notice_by(self, name: &std::path::Path, to: &std::path::Path, by_agent: bool) -> String {
         let (name, to) = (name.display(), to.display());
         match self {
-            SetAsideWhat::GitRepository => format!(
+            SetAsideWhat::GitRepository if by_agent => format!(
                 "The AI tool tried to put a code repository in the matter. Clauseo stopped it \
-                 and moved {name} to {to}. If you made it yourself, move it back after the \
+                 and moved {name} to {to}."
+            ),
+            SetAsideWhat::GitRepository => format!(
+                "Clauseo moved {name} to {to} because a git repository appeared in the matter \
+                 while an agent was working. If you made it yourself, move it back after the \
                  session ends."
             ),
             SetAsideWhat::LinkOut => format!(

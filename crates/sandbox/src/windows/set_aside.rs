@@ -161,7 +161,7 @@ mod live;
 #[cfg(test)]
 pub(in crate::windows) use live::Moved;
 #[cfg(any(windows, test))]
-pub(in crate::windows) use live::{Ending, Failed, Hooks, Live};
+pub(in crate::windows) use live::{Ending, Failed, Hooks, Live, SCAN_BUDGET};
 #[cfg(any(windows, test))]
 mod moves;
 mod names;
@@ -295,6 +295,11 @@ pub enum SetAsideFailure {
          won't use it until its system task moves it aside"
     )]
     DriveFolderNotYours,
+    /// The live watch moves a folder whole unchecked only when a pool user (the agent) owns it,
+    /// read from the handle the move renames (`run::Need::Pool`); this one's owner is someone
+    /// else's, or can't be read, so it stays where it is for the check after the session.
+    #[error("the item isn't the agent's, so it stays where it is")]
+    NotTheAgents,
 }
 
 /// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.

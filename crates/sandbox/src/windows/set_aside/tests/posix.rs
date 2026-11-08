@@ -12,7 +12,7 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
 use super::super::files::FileId;
-use super::super::run::Volume;
+use super::super::run::{Need, Volume};
 use super::super::scan::{Kind, Listed};
 use super::super::{SetAsideFailure, drive_folder_name, not_yours};
 use crate::windows::write::{make_sandbox_dir, rename_new};
@@ -36,6 +36,14 @@ pub(super) struct Posix {
     /// The lawyer's SID, as the thread's user on NTFS: it names the drive folder
     /// ([`drive_folder_name`]). [`LAWYER`] unless a test says otherwise.
     pub(super) lawyer: RefCell<String>,
+    /// Each file [`Volume::read_small`] read, in order.
+    pub(super) reads: RefCell<Vec<PathBuf>>,
+    /// Files whose read finds an oplock's break under way, as NTFS's open with
+    /// `FILE_COMPLETE_IF_OPLOCKED` would: refused as unreadable.
+    pub(super) oplocked: RefCell<Vec<PathBuf>>,
+    /// Owners [`Volume::move_into`] reads on the item it renames instead of the true one, by
+    /// path: an item swapped between a read by path and the move.
+    pub(super) swapped: RefCell<BTreeMap<PathBuf, String>>,
 }
 
 /// The lawyer [`Posix::lawyer`] starts as.
@@ -53,6 +61,9 @@ impl Posix {
             pool: RefCell::new(Some(vec![POOL_USER.to_owned()])),
             other: RefCell::default(),
             lawyer: RefCell::new(LAWYER.to_owned()),
+            reads: RefCell::default(),
+            oplocked: RefCell::default(),
+            swapped: RefCell::default(),
         }
     }
 
@@ -154,6 +165,24 @@ impl Volume for Posix {
         self.file_id(&folder.join(name))
     }
 
+    fn read_small(&self, folder: &PathBuf, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
+        use std::io::Read as _;
+        let path = self.at(&folder.join(name));
+        self.reads.borrow_mut().push(path.clone());
+        if self.oplocked.borrow().contains(&path) {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() || meta.is_dir() {
+            return Err(io::Error::other("a link or a folder"));
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)?
+            .take(max)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
         match std::fs::symlink_metadata(self.at(path)) {
             Ok(meta) => Ok(Some(FileId {
@@ -236,7 +265,8 @@ impl Volume for Posix {
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure> {
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure> {
         let mut folder = sandbox.to_owned();
         for part in parts {
             folder.push(part);
@@ -245,7 +275,15 @@ impl Volume for Posix {
             }
             make_sandbox_dir(&folder).map_err(|e| SetAsideFailure::Io(e.kind()))?;
         }
-        moved(&self.at(from), &folder.join(name))
+        // The owner of the item about to be renamed, as NTFS reads it from that handle.
+        let at = self.at(from);
+        let swapped = self.swapped.borrow().get(&at).cloned();
+        let owner = swapped.or_else(|| self.owner(&at).ok());
+        if std::fs::symlink_metadata(&at).is_ok() && !need.allows(owner.as_deref()) {
+            return Err(SetAsideFailure::NotTheAgents);
+        }
+        moved(&at, &folder.join(name))?;
+        Ok(owner)
     }
 
     fn move_back(

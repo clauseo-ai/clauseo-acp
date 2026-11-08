@@ -28,7 +28,8 @@ fn past_its_budget_a_folder_the_agent_made_is_set_aside_whole_without_scanning_o
     let step = Duration::from_millis(500);
     let hooks = ticking(step);
     let live = watch.changed(&agents, &reported(&["big"]), exit(), &hooks);
-    assert_eq!(*hooks.ends.borrow(), [Ending::Slow, Ending::Found]);
+    // Ended once, at the budget, with the job empty: the move needs no second end.
+    assert_eq!(*hooks.ends.borrow(), [Ending::Slow]);
     let last = live.moved.last().expect("the folder moved");
     assert_eq!(
         (last.entry.from.clone(), last.what),

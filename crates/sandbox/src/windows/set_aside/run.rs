@@ -42,6 +42,12 @@ pub(super) trait Volume {
     /// On NTFS the open ignores case as NTFS does, so this is what git and Claude would open.
     fn probe(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<Option<FileId>>;
 
+    /// At most `max` bytes of the file `name` in `folder`, opened relative to it as itself (a
+    /// link there is an error), never waiting on another process: on NTFS with
+    /// `FILE_COMPLETE_IF_OPLOCKED`, and an open that finds an oplock's break under way is an
+    /// error, as unreadable. For a `commondir` an agent may have made and holds an oplock on.
+    fn read_small(&self, folder: &Self::Folder, name: &OsStr, max: u64) -> io::Result<Vec<u8>>;
+
     /// The file ID of `path` itself, never what a link at it names; `None` when nothing is
     /// there.
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>>;
@@ -67,14 +73,17 @@ pub(super) trait Volume {
     /// Moves the item at `from` (itself, not what a link names; its final path must be `from`)
     /// into the folder `parts` below `sandbox`, each part made or opened in turn without
     /// following a link, as `name`. Never replaces: a taken name is
-    /// [`SetAsideFailure::NameTaken`], a missing item [`SetAsideFailure::Gone`].
+    /// [`SetAsideFailure::NameTaken`], a missing item [`SetAsideFailure::Gone`]. The owner is
+    /// read from the very handle that is renamed, and returned (`None` when it can't be read);
+    /// one `need` refuses isn't moved ([`SetAsideFailure::NotTheAgents`]).
     fn move_into(
         &self,
         from: &Path,
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure>;
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure>;
 
     /// Every pool user's SID as text, from the machine's record (`sandbox_pool_sids` on
     /// Windows); empty when no pool is recorded.
@@ -110,6 +119,27 @@ pub(super) trait Volume {
         parts: &[OsString],
         kept: usize,
     ) -> Result<(), SetAsideFailure>;
+}
+
+/// Whose an item must be for [`Volume::move_into`] to move it, read from the item's own handle
+/// once it is opened as itself, before the rename.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Need<'a> {
+    /// Anyone's.
+    Anyone,
+    /// One of these SIDs' (the pool's, exactly): a folder the live watch sets aside whole
+    /// unchecked, which must be the agent's (`live.rs`). An owner that can't be read is refused.
+    Pool(&'a [String]),
+}
+
+impl Need<'_> {
+    /// Whether an item whose owner reads as `owner` may move.
+    pub(super) fn allows(self, owner: Option<&str>) -> bool {
+        match self {
+            Need::Anyone => true,
+            Need::Pool(pool) => owner.is_some_and(|owner| pool.iter().any(|sid| sid == owner)),
+        }
+    }
 }
 
 /// Why a pass failed, and the item it failed on, when it was one (N11).
@@ -261,7 +291,7 @@ pub(super) fn set_aside_path(
 ) -> Result<Entry, Refused> {
     let place = Place::new(data_dir, matter);
     let _held = place.lock().map_err(|failure| Refused::at(failure, path))?;
-    set_aside(volume, &place, path, &[], reason, now)
+    set_aside(volume, &place, path, &[], reason, now, Need::Anyone)
 }
 
 /// See [`super::list_set_aside`].
