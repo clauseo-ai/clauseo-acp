@@ -249,6 +249,10 @@ error_codes! {
     SandboxBlocked = "sandbox.blocked", retryable: false, meaning: "A Windows setting or \
         security tool blocks the sandbox (its set-up program is missing or was blocked, say), so \
         no agent was started; whoever looks after this computer can fix it.";
+    AgentInstallSetupFailed = "agent.install_setup_failed", retryable: true, meaning: "The \
+        agent's files all downloaded and checked, but setting them up on this computer failed \
+        after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
+        because security software held the fresh files. Trying again may work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

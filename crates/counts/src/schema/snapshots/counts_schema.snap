@@ -1512,7 +1512,8 @@ expression: counts_schema()
         "sandbox.setup_required",
         "sandbox.required",
         "matter.folder_not_a_matter",
-        "sandbox.blocked"
+        "sandbox.blocked",
+        "agent.install_setup_failed"
       ],
       "type": "string"
     },

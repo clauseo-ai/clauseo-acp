@@ -425,6 +425,7 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 crates/agents/src/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/quit.rs - clippy::disallowed_methods
+crates/agents/tests/install/resume.rs - clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
 crates/agents/src/write/extract.rs - clippy::disallowed_methods

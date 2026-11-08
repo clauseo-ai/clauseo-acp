@@ -949,6 +949,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
  "ureq",
  "windows",
  "zeroize",

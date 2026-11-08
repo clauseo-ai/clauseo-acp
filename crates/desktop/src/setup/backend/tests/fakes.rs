@@ -18,6 +18,7 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
+use super::install_busy::{LaunchGate, held_write};
 use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
@@ -276,6 +277,8 @@ pub(super) struct RecordingHost {
     pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     /// What `sign_in_holds` answers, once a test sets it.
     pub(super) holds: Mutex<Option<BoxStream<'static, AgentId>>>,
+    /// The next `set_agent_launch` tells the sender, then answers once the receiver opens.
+    pub(super) launch_gate: Mutex<Option<LaunchGate>>,
 }
 
 impl RecordingHost {
@@ -290,6 +293,7 @@ impl RecordingHost {
             changes: Mutex::new(None),
             restarted: Mutex::new(None),
             holds: Mutex::new(None),
+            launch_gate: Mutex::new(None),
         }
     }
 
@@ -317,7 +321,7 @@ impl SetupHost for RecordingHost {
         launch: AgentLaunch,
     ) -> BoxFuture<'_, Result<EntryWrite, HostError>> {
         self.push(HostCall::SetAgentLaunch(agent, launch));
-        Box::pin(std::future::ready(Ok(EntryWrite::Written)))
+        Box::pin(held_write(lock(&self.launch_gate).take()))
     }
     fn set_endpoint(
         &self,

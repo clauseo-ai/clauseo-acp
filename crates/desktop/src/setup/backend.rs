@@ -53,6 +53,7 @@ use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
+use self::entry::published_word;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
@@ -538,6 +539,11 @@ impl AgentsBackend {
                 agent: agent.clone(),
                 state: progress,
             });
+            // Every state but the download's ticks: with the agents' own line as each is sent,
+            // the log shows any lag between the job and the windows.
+            if let Some(word) = published_word(state) {
+                tracing::info!(%agent, state = word, "install state published to the windows");
+            }
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;

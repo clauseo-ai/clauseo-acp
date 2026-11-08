@@ -114,6 +114,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `sandbox.required` | The firm requires the sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a newer cause), so no agent was started. | no | host (`CreateThread` or a turn's launch under `sandbox.required`, any other cause, decision record 0051) |
 | `matter.folder_not_a_matter` | The matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, unreadable or belongs to another matter: locate the matter's folder. | no | matters (`Error::FolderMissing` with reason `NoMatterJson`, `Unreadable` or `OtherMatter`: open, locate, relink, every checkpoint), desktop (`open_file` and `reveal` for a folder without its marker) |
 | `sandbox.blocked` | A Windows setting or security tool blocks the sandbox (its set-up program is missing or was blocked, say), so no agent was started; whoever looks after this computer can fix it. | no | sandbox (`Error::Blocked`: tier B's launch check refused the set-up program's admin copy, `Blocked::AdminCopyMissing`, `AdminCopyChanged` or `AdminCopyUnsafe`; decision record 0049) |
+| `agent.install_setup_failed` | The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. | yes | agents (`FailureKind::SetupFailed` on `Failed`), desktop (0048) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -134,6 +135,14 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+`agent.install_setup_failed` was added on 2026-11-07, at the orchestrator's request (the install
+resume PR, after the Windows VM pass of #683 on #664): a Claude install with Defender on downloaded
+every file, then failed all three tries at the rename into place with `Access is denied`, and said
+the agent "couldn't be downloaded". A failure after every file is fetched and checked now has its own
+code, so the words can say the download worked. It is retryable, as `agent.install_failed` is: the
+antivirus that holds the fresh files lets go, and the next try's set-up may work. `agent.install_failed`
+keeps its meaning, now only for failures before the files are all fetched.
 
 ## Consequences
 

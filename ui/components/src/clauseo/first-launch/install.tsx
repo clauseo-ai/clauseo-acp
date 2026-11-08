@@ -6,7 +6,7 @@
 // each say what happened and give the one or two things to do, in concrete, never in red.
 import type { ReactNode } from "react";
 import type { Lang } from "../../lib/display.ts";
-import { errorWords } from "../../lib/words-errors.ts";
+import { type AgentName, errorWords } from "../../lib/words-errors.ts";
 import { fl } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
 import type { WorkingState } from "../working-line.tsx";
@@ -30,7 +30,8 @@ export type InstallView =
   | { kind: "offline" }
   | { kind: "blocked"; hosts: readonly string[] }
   | { kind: "disk"; need: number; free: number }
-  | { kind: "failed"; log: readonly string[] };
+  /** `setup`: every file downloaded, and setting them up failed (agent.install_setup_failed). */
+  | { kind: "failed"; log: readonly string[]; setup?: boolean };
 
 /** What the line's buttons do. */
 export type InstallActs = {
@@ -176,15 +177,17 @@ export function installLine(
     case "failed":
       return {
         kind: "wait",
-        words:
-          acts.copied === "log"
+        // the agent by its name: Claude's sentence for Claude, the named one (provisional) for another
+        words: view.setup
+          ? errorWords(lang, "agent.install_setup_failed", setupAgent(name))
+          : acts.copied === "log"
             ? w(
                 "{name} couldn't be downloaded. The log is copied, with nothing from your matters in it.",
                 { name },
               )
             : w("{name} couldn't be downloaded.", { name }),
         pill: null,
-        code: "agent.install_failed",
+        code: view.setup ? "agent.install_setup_failed" : "agent.install_failed",
         actions: wrap(
           <>
             {retry}
@@ -204,4 +207,9 @@ export function installLine(
         ),
       };
   }
+}
+
+/** The install line's agent for the set-up's sentence (plannedKey): Claude by its kind, any other by its name. */
+function setupAgent(name: string): AgentName {
+  return name === "Claude" ? { kind: "claude", name } : { kind: undefined, name };
 }

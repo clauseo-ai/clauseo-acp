@@ -9,6 +9,7 @@ mod auth_held;
 mod counts;
 mod endpoint;
 mod fakes;
+mod install_busy;
 mod key_marker;
 mod key_reads;
 mod key_state;

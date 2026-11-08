@@ -139,6 +139,14 @@ export const HI = {
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
   "Protection is blocked on this computer: a Windows setting or security tool stopped it, so Clauseo can't answer here. Ask whoever looks after this computer.":
     "इस कंप्यूटर पर संरक्षण अवरुद्ध है: Windows की किसी सेटिंग या सुरक्षा टूल ने इसे रोक दिया, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "Claude डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "Codex was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "Codex डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "{name} was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "{name} डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "The AI was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "AI डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

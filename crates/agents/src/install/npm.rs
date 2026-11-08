@@ -24,6 +24,16 @@
 //! other local users. Its stderr pump and its stdout are driven to their end while its exit is
 //! raced against a pause (the handle is dropped, which kills its tree) and 10 minutes. Nothing
 //! of its output reaches the log but npm's own `npm error code X` line, redacted.
+//!
+//! A sharing or lock error is retried in place ([`in_place`]): `npm ci` exiting with
+//! `EBUSY`, `EPERM` or `EACCES`, and on Windows the rename meeting
+//! `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION` or `ERROR_ACCESS_DENIED` (an antivirus
+//! scanning the files npm has just written holds them open for a moment). `npm ci` runs again
+//! after 250 ms, 500 ms, 1 s and 2 s, the rename after those and 4 s and 8 s more, keeping the
+//! temp folder and the checked tarballs; only then does the try fail and the job's own retry,
+//! which starts the folder over, take it. Before either runs again, and before the rename,
+//! npm's whole process tree (its job object on Windows, its group on Unix) has ended, so no
+//! process of ours holds a file in the folder.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -31,7 +41,8 @@ use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::time::Duration;
 
-use clauseo_process::{LaunchSpec, Launched, Timer};
+use clauseo_process::{LaunchSpec, Launched, Timer, TreeWatch};
+use clauseo_protocol::AgentId;
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join3, select};
 
@@ -39,6 +50,7 @@ use super::files::{Fetched, npm_cache};
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::node::{self, NodeSource, node_line};
+use crate::platform::Os;
 use crate::receipt::{Receipt, install_folder, install_root, script_path, write_receipt};
 use crate::state::{InstallState, Installed};
 use crate::write;
@@ -52,6 +64,33 @@ const NPM_LIMIT: Duration = Duration::from_mins(10);
 /// few thousand did that; with no background tasks there is nothing to wait for. npm does not
 /// need them: its run is short and mostly file work.
 const NODE_SINGLE_THREADED: &str = "--single-threaded";
+/// The waits before each in-place retry of `npm ci` after a sharing or lock error.
+const NPM_WAITS: [Duration; 4] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+];
+/// The waits before each in-place retry of the rename after a sharing or lock error: 15.75 s
+/// in all, since an antivirus may scan the thousands of fresh files for several seconds (the
+/// Windows VM with Defender on met `Access is denied` on three tries in a row).
+const RENAME_WAITS: [Duration; 6] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
+/// How often, and how many times, a finished npm's process tree is checked for its end
+/// before the folder it ran in is used again: 10 s in all.
+const TREE_POLL: Duration = Duration::from_millis(50);
+const TREE_POLLS: u32 = 200;
+/// npm's error codes for a file another process holds: retried in place.
+const NPM_BUSY: [&str; 3] = ["EBUSY", "EPERM", "EACCES"];
+/// Windows' raw errors for a file another process holds open or locked, or one being deleted
+/// or scanned: `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`.
+const WINDOWS_BUSY: [i32; 3] = [5, 32, 33];
 /// The flags `npm ci` runs with, besides the common ones.
 const CI_FLAGS: [&str; 6] = [
     "--offline",
@@ -78,6 +117,11 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     let entry = snapshot.agent(agent).ok_or_else(missing)?;
     let pins = snapshot.pins(agent).ok_or_else(missing)?;
     let hash = snapshot.install_hash(agent, platform).ok_or_else(missing)?;
+    // As soon as every file is fetched and checked, before Node's unpack (thousands of files,
+    // seconds under an antivirus): the set-up has started.
+    if !job.emit(InstallState::Installing, false) {
+        return Err(TryError::cancelled());
+    }
     let (program, cli, version) = match node_choice {
         NodeChoice::User(found) => (
             found.program.clone(),
@@ -105,9 +149,6 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         NodeChoice::Runtime { .. } => NodeSource::Pinned,
     };
     tracing::info!(%agent, "agent install: {}", node_line(source, &program, &version));
-    if !job.emit(InstallState::Installing, false) {
-        return Err(TryError::cancelled());
-    }
     let io = |what: &'static str| io_error(what, config);
     let cache = npm_cache(&config.data_dir);
     // Made through no link below the data folder, as `install/` is below, so the removals in
@@ -144,14 +185,26 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             .map_err(io("writing package-lock.json"))?;
         let mut args: Vec<OsString> = vec!["ci".into()];
         args.extend(CI_FLAGS.iter().map(OsString::from));
-        npm.run("ci", args, &tmp).await?;
+        // `npm ci` empties `node_modules` itself, so a rerun in the same folder starts clean.
+        in_place(
+            "npm ci",
+            agent,
+            &NPM_WAITS,
+            async |pause| job.wait(pause).await,
+            async || npm.run("ci", args.clone(), &tmp).await,
+            |failed: &NpmFailed| failed.busy().map(str::to_owned),
+        )
+        .await
+        .map_err(|failed| failed.err)?;
         if let Some(link) = first_link(&tmp) {
             let detail = format!("npm left a link in the install folder: {}", link.display());
             return Err(TryError::retry(&detail, config));
         }
         let folder = install_folder(&config.data_dir, agent, &hash);
         write::remove_dir_all(&folder).map_err(io("clearing the install folder"))?;
-        write::rename(&tmp, &folder).map_err(io("renaming the install folder"))?;
+        rename_held(job, &tmp, &folder)
+            .await
+            .map_err(io("renaming the install folder"))?;
         let receipt = Receipt::new(
             agent,
             pins.version(),
@@ -174,6 +227,107 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         drop(write::remove_dir_all(&tmp));
     }
     done
+}
+
+/// Runs `step`, and again after each of `waits` while it fails with an error `busy`
+/// names a sharing or lock cause for; any other error, the last retry's, or a pause during a
+/// wait (`wait` answering `false`) ends it with that error. Each retry is logged with fixed
+/// words, naming `what`, the cause and the wait.
+pub(super) async fn in_place<R, E>(
+    what: &str,
+    agent: &AgentId,
+    waits: &[Duration],
+    wait: impl AsyncFn(Duration) -> bool,
+    mut step: impl AsyncFnMut() -> Result<R, E>,
+    busy: impl Fn(&E) -> Option<String>,
+) -> Result<R, E> {
+    let mut waits = waits.iter();
+    loop {
+        let err = match step().await {
+            Ok(done) => return Ok(done),
+            Err(err) => err,
+        };
+        let Some(cause) = busy(&err) else {
+            return Err(err);
+        };
+        let Some(&pause) = waits.next() else {
+            return Err(err);
+        };
+        tracing::warn!(
+            %agent,
+            step = what,
+            cause,
+            wait_ms = u64::try_from(pause.as_millis()).unwrap_or(u64::MAX),
+            "agent install: a sharing or lock error; retrying the step in place"
+        );
+        if !wait(pause).await {
+            return Err(err);
+        }
+    }
+}
+
+/// Renames `tmp` to `folder`, retried in place after [`RENAME_WAITS`] while another process
+/// holds a file in it (Windows' 5, 32 or 33: a folder walker, an indexer, an antivirus).
+async fn rename_held<T: Timer + Send + Sync>(
+    job: &Job<T>,
+    tmp: &Path,
+    folder: &Path,
+) -> std::io::Result<()> {
+    let config = &job.config;
+    let os = rename_os(config);
+    in_place(
+        "the rename",
+        &job.ticket.agent,
+        &RENAME_WAITS,
+        async |pause| job.wait(pause).await,
+        async || rename_into_place(config, tmp, folder),
+        |err: &std::io::Error| windows_busy(err, os),
+    )
+    .await
+}
+
+/// Renames the finished temp folder to its `<hash>` folder; under `test-support`, a
+/// [`crate::config::InstallConfig::rename_fault`] error comes first when it gives one.
+fn rename_into_place(config: &AgentsConfig, tmp: &Path, folder: &Path) -> std::io::Result<()> {
+    match rename_fault(config) {
+        Some(err) => Err(err),
+        None => write::rename(tmp, folder),
+    }
+}
+
+/// A test's error for the next rename.
+#[cfg(feature = "test-support")]
+fn rename_fault(config: &AgentsConfig) -> Option<std::io::Error> {
+    config
+        .install
+        .rename_fault
+        .as_ref()
+        .and_then(|fault| fault())
+}
+
+/// No test, no fault.
+#[cfg(not(feature = "test-support"))]
+fn rename_fault(_config: &AgentsConfig) -> Option<std::io::Error> {
+    None
+}
+
+/// The OS whose rules judge a rename's error: the platform's, or Windows' under a test's
+/// [`crate::config::InstallConfig::rename_fault`].
+fn rename_os(config: &AgentsConfig) -> Os {
+    #[cfg(feature = "test-support")]
+    if config.install.rename_fault.is_some() {
+        return Os::Win32;
+    }
+    config.platform.os
+}
+
+/// The cause when `err` on `os` is Windows' sharing, lock or access error, which a scan holding
+/// the file causes: `None` on any other OS, where those raw numbers mean other things.
+pub(super) fn windows_busy(err: &std::io::Error, os: Os) -> Option<String> {
+    let code = err
+        .raw_os_error()
+        .filter(|code| WINDOWS_BUSY.contains(code))?;
+    (os == Os::Win32).then(|| format!("Windows error {code}"))
 }
 
 /// Maps a file error of `what` to a try's error.
@@ -244,8 +398,39 @@ impl<T> Npm<'_, T> {
 }
 
 impl<T: Timer + Send + Sync> Npm<'_, T> {
+    /// Waits, up to 10 s, until npm's whole tree has ended (its handle has sent the kill),
+    /// so nothing of ours still holds a file in the folder npm ran in. A pause ends the wait.
+    async fn tree_ended(&self, tree: &TreeWatch) {
+        if tree.gone() {
+            return;
+        }
+        let agent = &self.job.ticket.agent;
+        tracing::info!(%agent, "agent install: waiting for npm's processes to end");
+        for _ in 0..TREE_POLLS {
+            if !self.job.wait(TREE_POLL).await || tree.gone() {
+                return;
+            }
+        }
+        tracing::warn!(%agent, "agent install: npm's processes had not ended after 10 s");
+    }
+
     /// Runs `node <npm-cli.js> <args> <common flags>` in `cwd`.
-    async fn run(&self, what: &str, args: Vec<OsString>, cwd: &Path) -> Result<(), TryError> {
+    async fn run(&self, what: &str, args: Vec<OsString>, cwd: &Path) -> Result<(), NpmFailed> {
+        self.run_once(what, args, cwd)
+            .await
+            .map_err(|(err, code_line)| NpmFailed {
+                err,
+                code: code_line.and_then(|line| npm_code(&line).map(str::to_owned)),
+            })
+    }
+
+    /// [`Npm::run`], failing with npm's `npm error code X` line when it printed one.
+    async fn run_once(
+        &self,
+        what: &str,
+        args: Vec<OsString>,
+        cwd: &Path,
+    ) -> Result<(), (TryError, Option<String>)> {
         let config = &self.job.config;
         let mut argv = vec![
             OsString::from(NODE_SINGLE_THREADED),
@@ -264,14 +449,18 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
             BTreeMap::new(),
             cwd.to_owned(),
         )
-        .map_err(refused)?;
+        .map_err(|err| (refused(err), None))?;
         let Launched {
             stdin,
             mut stdout,
             stderr,
             mut handle,
             ..
-        } = self.job.launcher.launch(&spec).map_err(refused)?;
+        } = self
+            .job
+            .launcher
+            .launch(&spec)
+            .map_err(|err| (refused(err), None))?;
         drop(stdin);
         let mut code_line: Option<String> = None;
         let mut module_missing = false;
@@ -305,7 +494,11 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                 Either::Right((Either::Right(_), _)) => Err(Some(())),
             }
         };
+        let tree = handle.tree_watch();
         drop(handle);
+        if ran.is_ok() {
+            self.tree_ended(&tree).await;
+        }
         match ran {
             Ok(Some(0)) => Ok(()),
             Ok(code) => {
@@ -320,13 +513,35 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                     self.drop_runtime(&mut detail);
                 }
                 let enospc = code_line.as_deref().is_some_and(|l| l.ends_with("ENOSPC"));
-                Err(TryError::npm(&detail, enospc, config))
+                Err((TryError::npm(&detail, enospc, config), code_line))
             }
-            Err(None) => Err(TryError::cancelled()),
-            Err(Some(())) => Err(TryError::retry(
-                &format!("npm {what} did not finish in 10 minutes"),
-                config,
+            Err(None) => Err((TryError::cancelled(), None)),
+            Err(Some(())) => Err((
+                TryError::retry(&format!("npm {what} did not finish in 10 minutes"), config),
+                None,
             )),
         }
     }
 }
+
+/// An npm run that failed: the try's error, and npm's error code when it printed one.
+struct NpmFailed {
+    err: TryError,
+    code: Option<String>,
+}
+
+impl NpmFailed {
+    /// npm's code when it is one of a file another process holds ([`NPM_BUSY`]).
+    fn busy(&self) -> Option<&str> {
+        self.code.as_deref().filter(|code| NPM_BUSY.contains(code))
+    }
+}
+
+/// The code of npm's `npm error code X` line.
+pub(super) fn npm_code(line: &str) -> Option<&str> {
+    let code = line.strip_prefix("npm error code ")?.trim();
+    (!code.is_empty() && !code.contains(char::is_whitespace)).then_some(code)
+}
+
+#[cfg(test)]
+mod tests;
