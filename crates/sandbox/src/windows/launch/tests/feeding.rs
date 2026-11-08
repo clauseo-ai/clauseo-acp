@@ -46,7 +46,7 @@ fn from_outer(chunks: Vec<Vec<u8>>) -> FakePipe {
         read_fails: false,
         exits_after: None,
         adopts: false,
-        watched: None,
+        world: None,
     }
 }
 

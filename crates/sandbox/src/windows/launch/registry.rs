@@ -43,7 +43,7 @@ use crate::{Error, SetAside};
 mod ended;
 mod held;
 
-pub(super) use ended::Ended;
+pub(super) use ended::{Ended, OuterState, finish_race};
 pub(super) use held::{Finish, FinishEnd};
 use held::{Owed, stuck};
 
@@ -110,8 +110,8 @@ pub(super) struct Entry<S: LaunchSteps> {
     /// When it entered its state, on the steps' clock: the limit of a reserve, an undo, a
     /// release or a session's end counts from here.
     pub(super) since: Duration,
-    /// The outer started: the end waits for the pool user's processes to truly exit.
-    pub(super) spawned: bool,
+    /// Where the launcher's start of the outer is (`ended.rs`).
+    pub(super) outer: OuterState,
     /// The launch file, until the outer has read it: deleted by the feed then, else by the
     /// session's end or undo.
     pub(super) launch_file: Option<PathBuf>,
@@ -161,6 +161,8 @@ pub(super) struct Registry<S: LaunchSteps> {
     data_lock: Mutex<Option<File>>,
     /// The ends dropped launchers run on threads of their own (`end.rs`).
     pub(super) ends: super::end::Ends,
+    /// Launch files whose removal failed, tried again at each end and undo.
+    pub(super) files: super::end::LaunchFiles,
 }
 
 impl<S: LaunchSteps> Registry<S> {
@@ -174,6 +176,7 @@ impl<S: LaunchSteps> Registry<S> {
             freed: Condvar::new(),
             data_lock: Mutex::new(Some(data_lock)),
             ends: super::end::Ends::default(),
+            files: super::end::LaunchFiles::default(),
         }
     }
 
@@ -259,7 +262,7 @@ impl<S: LaunchSteps> Registry<S> {
                 walk: None,
                 stuck_from: None,
                 since: now,
-                spawned: false,
+                outer: OuterState::Unstarted,
                 launch_file: None,
             },
         );
@@ -449,8 +452,9 @@ impl<S: LaunchSteps> Registry<S> {
     /// never under the lock, and never from a drop.
     fn undo(&self, undo: Undo<S>) {
         if let Some(file) = &undo.launch_file {
-            self.steps.remove_launch(file);
+            self.files.remove(&*self.steps, file);
         }
+        self.files.retry(&*self.steps);
         self.end_run_and_free_slot(undo.pool.as_ref(), undo.run, undo.slot);
         if undo.opened {
             self.steps.close_session(&undo.matter, &undo.session);

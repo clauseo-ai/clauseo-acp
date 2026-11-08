@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use super::super::feed::Got;
 use super::super::{DenialPipe, Peer};
+use super::fake::World;
 
 /// The outer's side of the world.
 #[derive(Default)]
@@ -19,8 +20,8 @@ pub(super) struct Outer {
     pub(super) denial_pipe: Mutex<Option<String>>,
     pub(super) spawn_starts: Mutex<bool>,
     pub(super) pipe_connects: Mutex<bool>,
-    /// The pids the launchers' pipes opened as the outer, in order.
-    pub(super) watched: std::sync::Arc<Mutex<Vec<u32>>>,
+    /// The launch files on "disk": written, not yet removed.
+    pub(super) files: Mutex<std::collections::BTreeSet<PathBuf>>,
 }
 
 /// What `spawn_outer` was given.
@@ -80,14 +81,13 @@ impl Outer {
     pub(super) fn pipe(&self) -> FakePipe {
         FakePipe {
             adopts: *self.pipe_connects.lock().unwrap(),
-            watched: Some(std::sync::Arc::clone(&self.watched)),
             ..FakePipe::default()
         }
     }
 
-    /// The pids the launchers' pipes opened as the outer.
-    pub(super) fn watched(&self) -> Vec<u32> {
-        self.watched.lock().unwrap().clone()
+    /// The launch files still on "disk".
+    pub(super) fn files(&self) -> Vec<PathBuf> {
+        self.files.lock().unwrap().iter().cloned().collect()
     }
 
     /// The pool user's processes outlive `waits` waits for their exit (they tear down).
@@ -132,14 +132,14 @@ pub(super) struct FakePipe {
     pub(super) read_fails: bool,
     pub(super) exits_after: Option<usize>,
     pub(super) adopts: bool,
-    /// Where it notes each pid it is asked to open as the outer.
-    pub(super) watched: Option<std::sync::Arc<Mutex<Vec<u32>>>>,
+    /// The world whose log notes `watch_outer` when it opens the outer.
+    pub(super) world: Option<std::sync::Arc<World>>,
 }
 
 impl DenialPipe for FakePipe {
     fn watch(&mut self, pid: u32) -> std::io::Result<Peer> {
-        if let Some(watched) = &self.watched {
-            watched.lock().unwrap().push(pid);
+        if let Some(world) = &self.world {
+            world.log("watch_outer");
         }
         if self.adopts {
             let outer = Peer { pid, started: 1 };

@@ -82,7 +82,7 @@ fn the_outer_starts_minimal_with_its_pipe_and_a_5s_grace() {
         start(&*launcher, &world, &dir);
         assert_eq!(
             world.calls(),
-            ["create_pipe", "write_launch", "spawn_outer"]
+            ["create_pipe", "write_launch", "spawn_outer", "watch_outer"]
         );
         assert_eq!(world.outer.denial_pipe().as_deref(), Some(PIPE));
         let outer = world.outer.spawned().unwrap();
@@ -373,6 +373,7 @@ fn the_launch_file_goes_once_the_outer_connects() {
             "create_pipe",
             "write_launch",
             "spawn_outer",
+            "watch_outer",
             "remove_launch"
         ]
     );
@@ -399,42 +400,88 @@ fn an_end_before_the_start_fails_the_launch() {
         Vec::<String>::new(),
         "nothing written or started"
     );
+}
+
+/// An end that comes while the outer is starting: the pass runs, but the slot and the matter
+/// stay held; the launcher opens the outer (before its handle can drop), ends it, and frees
+/// them only once `end_outer` has seen its job empty. If it can't, the matter is stuck.
+#[test]
+fn an_end_during_the_spawn_holds_the_slot_until_the_outer_is_gone() {
+    for end_fails in [false, true] {
+        let world = World::new();
+        let dir = TempDir::new(&format!("launch-end-race-{end_fails}"));
+        let launchers = launchers(&world);
+        let policy = policy_at(&dir, "matter");
+        let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+        world.outer.spawn_starts();
+        if end_fails {
+            world.fail_at("end_outer");
+        }
+        let held = world.hold("spawn_outer");
+        std::thread::scope(|scope| {
+            let starting = scope.spawn(|| launcher.launch(&spec(&dir)).is_err());
+            held.reached();
+            launchers.after_session(MATTER, "s1", &policy);
+            let busy = launchers.reserve(MATTER, "s2", &[]);
+            assert!(matches!(busy, Err(Error::MatterBusy)), "held: {busy:?}");
+            assert!(!world.claimed_slots().is_empty(), "the slot stays claimed");
+            held.go();
+            assert!(starting.join().unwrap(), "the launch failed");
+        });
+        let calls = world.calls();
+        let at = |call: &str| calls.iter().position(|each| each == call).unwrap();
+        assert!(at("end_run 1") < at("watch_outer"), "{calls:?}");
+        // Opened first; the handle dropped (the outer ended) before the file and `end_outer`.
+        let tail: Vec<&str> = calls[at("watch_outer")..]
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let next = launchers.reserve(MATTER, "s2", &[]);
+        if end_fails {
+            assert_eq!(tail, ["watch_outer", "remove_launch", "end_outer"]);
+            assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
+        } else {
+            let want = ["watch_outer", "remove_launch", "end_outer", "release_slot"];
+            assert_eq!(tail, want);
+            assert!(next.is_ok(), "{next:?}");
+        }
+        drop(launcher);
+        assert!(launchers.wait_ends(WAIT));
+    }
+}
+
+/// A launch file whose removal fails is noted and tried again at the session's end; one that
+/// still won't go is removed by the next start's stale sweep.
+#[test]
+fn a_launch_file_that_wont_go_is_retried() {
     let world = World::new();
-    let launchers = super::launchers(&world);
+    let dir = TempDir::new("launch-file-retry");
+    let launchers = launchers(&world);
     let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
-    world.outer.spawn_starts();
-    let held = world.hold("spawn_outer");
-    std::thread::scope(|scope| {
-        let starting = scope.spawn(|| launcher.launch(&spec(&dir)).is_err());
-        held.reached();
-        launchers.after_session(MATTER, "s1", &policy);
-        held.go();
-        assert!(starting.join().unwrap(), "the launch failed");
-    });
-    let calls = world.calls();
-    let pass_at = calls
-        .iter()
-        .position(|call| call == "session_cursor")
-        .unwrap();
-    assert_eq!(
-        calls[..pass_at],
-        [
-            "create_pipe",
-            "write_launch",
-            "spawn_outer",
-            "remove_launch"
-        ]
-    );
-    assert_eq!(calls.last().map(String::as_str), Some("remove_launch"));
-    // The outer was opened by its pid before the failed launch dropped its handle.
-    assert_eq!(
-        world.outer.watched().len(),
-        1,
-        "opened first, on the error path too"
-    );
+    world.outer.pipe_connects();
+    world.fail_at("remove_launch");
+    start(&*launcher, &world, &dir);
+    world.wait_for("remove_launch");
+    assert_eq!(world.outer.files().len(), 1, "the feed's removal failed");
+    world.fail_at("none");
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    assert!(world.outer.files().is_empty(), "retried at the end");
     drop(launcher);
-    assert!(launchers.wait_ends(WAIT));
-    assert_eq!(world.calls(), Vec::<String>::new());
+    *world.outer.pipe_connects.lock().unwrap() = false;
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    world.fail_at("remove_launch");
+    start(&*launcher, &world, &dir);
+    launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
+    assert_eq!(world.outer.files().len(), 1, "the end's removal failed too");
+    world.fail_at("none");
+    // The next start (another data folder, so the first launchers' lock doesn't matter).
+    let other = TempDir::new("launch-file-retry-next");
+    let _next = Launchers::with_steps(FakeSteps::elsewhere(&world, other.path())).unwrap();
+    assert!(
+        world.outer.files().is_empty(),
+        "the next start's sweep removed it"
+    );
+    drop((launcher, launchers));
 }
 
 /// A pass that panics on the dropped launcher's thread still counts as done: `wait_ends`

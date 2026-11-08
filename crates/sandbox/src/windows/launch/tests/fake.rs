@@ -202,7 +202,7 @@ impl World {
         *self.clock.lock().unwrap()
     }
 
-    fn log(&self, call: impl Into<String>) {
+    pub(super) fn log(&self, call: impl Into<String>) {
         self.log.lock().unwrap().push(call.into());
         self.logged.notify_all();
     }
@@ -314,6 +314,7 @@ impl LaunchSteps for FakeSteps {
 
     fn clear_stale(&self) -> Result<(), Error> {
         self.world.step("clear_stale")?;
+        self.world.outer.files.lock().unwrap().clear();
         self.world.slots.lock().unwrap().clear();
         Ok(())
     }
@@ -466,7 +467,11 @@ impl LaunchSteps for FakeSteps {
 
     fn create_pipe(&self) -> Result<(FakePipe, String), Error> {
         self.world.step("create_pipe")?;
-        Ok((self.world.outer.pipe(), PIPE.to_owned()))
+        let pipe = FakePipe {
+            world: Some(Arc::clone(&self.world)),
+            ..self.world.outer.pipe()
+        };
+        Ok((pipe, PIPE.to_owned()))
     }
 
     fn write_launch(
@@ -478,11 +483,15 @@ impl LaunchSteps for FakeSteps {
     ) -> Result<PathBuf, Error> {
         self.world.step("write_launch")?;
         *self.world.outer.denial_pipe.lock().unwrap() = Some(denial_pipe.to_owned());
-        Ok(PathBuf::from("run/0123456789abcdef.json"))
+        let file = PathBuf::from("run/0123456789abcdef.json");
+        self.world.outer.files.lock().unwrap().insert(file.clone());
+        Ok(file)
     }
 
-    fn remove_launch(&self, _launch: &Path) {
-        self.world.log("remove_launch");
+    fn remove_launch(&self, launch: &Path) -> Result<(), Error> {
+        self.world.step("remove_launch")?;
+        self.world.outer.files.lock().unwrap().remove(launch);
+        Ok(())
     }
 
     fn runner(&self) -> PathBuf {

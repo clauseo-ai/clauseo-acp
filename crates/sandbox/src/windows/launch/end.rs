@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::prepare::Walk;
-use super::registry::{FinishEnd, Registry, State};
+use super::registry::{FinishEnd, OuterState, Registry, State, finish_race};
 use super::steps::{Ending, LaunchSteps, Slot};
 use crate::windows::pool::PoolUser;
 use crate::windows::runner::outcome::Meaning;
@@ -102,10 +102,17 @@ pub(super) fn end_session<S: LaunchSteps>(
     let steps = &*registry.steps;
     let ended = registry.end(matter, session, id)?;
     // Dropped in reverse: the run's group and the slot first, then the matter freed.
-    let _finish = FinishEnd {
-        registry,
-        matter,
-        id: ended.id,
+    // An end that raced the outer's start leaves the matter (and the slot) to the launcher,
+    // which frees them once the outer is ended and seen empty (`finish_race`).
+    // (Built only when it frees: `then_some` would build one and drop it, freeing at once.)
+    let _finish = if ended.handoff {
+        None
+    } else {
+        Some(FinishEnd {
+            registry,
+            matter,
+            id: ended.id,
+        })
     };
     let _end_run = EndRun {
         registry,
@@ -113,8 +120,9 @@ pub(super) fn end_session<S: LaunchSteps>(
         run: ended.run,
         slot: ended.slot,
     };
+    registry.files.retry(steps);
     if let Some(file) = &ended.launch_file {
-        steps.remove_launch(file);
+        registry.files.remove(steps, file);
     }
     let mut moved = Vec::new();
     if let Some(pool) = &ended.pool {
@@ -243,20 +251,45 @@ pub(super) struct SessionGuard<S: LaunchSteps> {
 }
 
 impl<S: LaunchSteps> SessionGuard<S> {
-    /// The outer has started: the session's end is the pass from now on, and it waits for the
-    /// pool user's processes. `false` when the session's end began first: the launch must fail
-    /// and the outer be ended.
-    pub(super) fn started(&self) -> bool {
-        let noted = self
-            .registry
+    /// The outer is about to be started: `false` when the session's end has begun (nothing is
+    /// started then). From here an end hands the slot and the matter over to the launcher.
+    pub(super) fn spawning(&self) -> bool {
+        self.registry
             .update(&self.matter, self.id, |entry| {
                 let launched = entry.state == State::Launched;
-                entry.spawned |= launched;
+                if launched {
+                    entry.outer = OuterState::Spawning;
+                }
                 launched
             })
-            .unwrap_or(false);
-        self.armed.store(noted, Ordering::Release);
-        noted
+            .unwrap_or(false)
+    }
+
+    /// The spawn has returned (`started`: an outer runs): what the launcher does next.
+    pub(super) fn spawned(&self, started: bool) -> AfterSpawn {
+        let next = self
+            .registry
+            .update(&self.matter, self.id, |entry| {
+                if entry.outer == OuterState::Raced {
+                    AfterSpawn::Raced
+                } else if started && entry.state == State::Launched {
+                    entry.outer = OuterState::Spawned;
+                    AfterSpawn::Run
+                } else {
+                    entry.outer = OuterState::Unstarted;
+                    AfterSpawn::Failed
+                }
+            })
+            .unwrap_or(AfterSpawn::Failed);
+        // From here the session's end is the pass, and it waits for the pool user's processes.
+        self.armed.store(next == AfterSpawn::Run, Ordering::Release);
+        next
+    }
+
+    /// The end raced the start: frees the slot and the matter once the outer is `ended` and seen
+    /// empty, or leaves the matter stuck.
+    pub(super) fn finish_race(&self, ended: bool) {
+        finish_race(&self.registry, &self.matter, self.id, ended);
     }
 
     /// Notes the session's launch file, which its end or undo deletes if nothing has.
@@ -283,6 +316,18 @@ impl<S: LaunchSteps> SessionGuard<S> {
                 .flatten()
         }
     }
+}
+
+/// What follows a spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AfterSpawn {
+    /// The outer runs as the session's agent.
+    Run,
+    /// The spawn failed: the launcher's claim undoes the session.
+    Failed,
+    /// The session's end began during the spawn: the outer (if any) is ended, then
+    /// [`SessionGuard::finish_race`].
+    Raced,
 }
 
 /// Counts an end on a thread of its own done when dropped, even if the pass panicked.
@@ -362,6 +407,38 @@ impl Ends {
 
     fn count(&self) -> std::sync::MutexGuard<'_, usize> {
         self.running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Launch files whose removal failed (`LaunchSteps::remove_launch`), tried again at each end and
+/// undo; the next start's stale sweep (`clear_stale`) removes any left. Logged with no content.
+#[derive(Default)]
+pub(super) struct LaunchFiles(std::sync::Mutex<Vec<PathBuf>>);
+
+impl LaunchFiles {
+    /// Removes `file`, or notes it to try again.
+    pub(super) fn remove<S: LaunchSteps>(&self, steps: &S, file: &Path) {
+        if let Err(error) = steps.remove_launch(file) {
+            tracing::warn!(
+                kind = error.kind(),
+                "tier B couldn't remove a launch file; noted"
+            );
+            self.noted().push(file.to_path_buf());
+        }
+    }
+
+    /// Tries the noted files again.
+    pub(super) fn retry<S: LaunchSteps>(&self, steps: &S) {
+        let noted = std::mem::take(&mut *self.noted());
+        for file in noted {
+            self.remove(steps, &file);
+        }
+    }
+
+    fn noted(&self) -> std::sync::MutexGuard<'_, Vec<PathBuf>> {
+        self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }

@@ -196,8 +196,10 @@ pub trait LaunchSteps: Send + Sync + 'static {
         spec: &LaunchSpec,
         denial_pipe: &str,
     ) -> Result<PathBuf, Error>;
-    /// Removes a launch file whose outer didn't start: it holds the agent's environment.
-    fn remove_launch(&self, launch: &Path);
+    /// Removes the launch file `launch`: it holds the agent's environment. One already gone is
+    /// `Ok`. A failure is noted and tried again at each end and undo, and the next start's
+    /// stale sweep ([`clear_stale`](Self::clear_stale)) removes any left.
+    fn remove_launch(&self, launch: &Path) -> Result<(), Error>;
     /// The outer runner: `<install>\clauseo-sandbox-run.exe` (`RUNNER_EXE`).
     fn runner(&self) -> PathBuf;
     /// The host's own variable `name`, for the outer's minimal environment.

@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions};
 
-use super::end::SessionGuard;
+use super::end::{AfterSpawn, SessionGuard};
 use super::feed::{self, DenialPipe, Peer};
 use super::registry::Registry;
 use super::steps::LaunchSteps;
@@ -143,8 +143,9 @@ impl<S: LaunchSteps> TierBLauncher<S> {
     /// Makes the pipe, writes the launch file and starts the outer; the feed starts with it.
     ///
     /// A session whose end began during the spawn (the host's `after_session` raced the start)
-    /// gets no agent: the outer is ended (its handle dropped, which ends its job) and the launch
-    /// fails. One whose end began before is refused by `launch`.
+    /// gets no agent: the outer is ended and seen empty (`LaunchSteps::end_outer`) before its
+    /// slot and matter are freed, or they stay held (stuck), and the launch fails. One whose end
+    /// began before the spawn starts nothing.
     fn start(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         let (mut pipe, pipe_name) = self.steps.create_pipe().map_err(launch_error)?;
         let file = self
@@ -153,41 +154,51 @@ impl<S: LaunchSteps> TierBLauncher<S> {
             .map_err(launch_error)?;
         // The session's end and undo delete it too, if nothing has by then.
         self.guard.launch_file(&file);
-        let outer = outer_spec(self.steps.runner(), &file, |name| self.steps.host_var(name));
-        let started = outer.and_then(|outer| self.steps.spawn_outer(&outer, &self.opts));
-        let launched = match started {
-            Ok(launched) => launched,
-            Err(error) => {
-                self.remove_launch(&file);
-                return Err(error);
-            }
-        };
-        // First, before anything that could drop `launched` (an early return, a `?`, a
-        // panic unwinding): open the outer by its pid while `launched` holds its process
-        // handle, so the pid is still its own. Nothing between the spawn and here can fail.
-        let outer = feed::watch(&mut pipe, launched.handle.pid());
-        if !self.guard.started() {
-            drop(launched);
+        if !self.guard.spawning() {
             self.remove_launch(&file);
-            tracing::warn!("tier B's session ended while its outer started: the outer is ended");
             return Err(ended_early());
         }
-        if let Some(outer) = outer {
-            let (steps, take_file) = (Arc::clone(&self.steps), self.guard.file_taker());
+        let outer = outer_spec(self.steps.runner(), &file, |name| self.steps.host_var(name));
+        let started = outer.and_then(|outer| self.steps.spawn_outer(&outer, &self.opts));
+        // First, before anything that could drop `launched` (an early return, a `?`, a panic
+        // unwinding): open the outer by its pid while `launched` holds its process handle, so
+        // the pid is still its own. Nothing between the spawn and here can fail or return.
+        let watched = started
+            .as_ref()
+            .ok()
+            .and_then(|launched| feed::watch(&mut pipe, launched.handle.pid()));
+        match self.guard.spawned(started.is_ok()) {
+            AfterSpawn::Run => {}
+            AfterSpawn::Failed => {
+                self.remove_launch(&file);
+                return started;
+            }
+            AfterSpawn::Raced => {
+                // Dropping `launched` ends its job; `end_outer` waits until it is truly empty.
+                drop(started);
+                self.remove_launch(&file);
+                tracing::warn!("tier B's session ended while its outer started: ending it");
+                let ended = self.steps.end_outer(&self.pool).is_ok();
+                self.guard.finish_race(ended);
+                return Err(ended_early());
+            }
+        }
+        if let Some(outer) = watched {
+            let (registry, take_file) = (Arc::clone(&self.guard.registry), self.guard.file_taker());
             let connected = move || {
                 if let Some(file) = take_file() {
-                    steps.remove_launch(&file);
+                    registry.files.remove(&*registry.steps, &file);
                 }
             };
             start_feed(pipe, outer, Arc::clone(&self.denials), connected);
         }
-        Ok(launched)
+        started
     }
 
     /// Deletes the launch file `file`, and forgets the session's note of it.
     fn remove_launch(&self, file: &Path) {
         let _noted = self.guard.take_launch_file();
-        self.steps.remove_launch(file);
+        self.guard.registry.files.remove(&*self.steps, file);
     }
 }
 
