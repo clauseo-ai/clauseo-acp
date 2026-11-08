@@ -1250,7 +1250,13 @@ leaves that profile, both naming the part.
       (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
       to 15 s): until that sweep ran, a task the escapee registered is live. One still short
       refuses the logon (`RunExit::AwaitingStop`) without requesting a stop, which would end
-      every session. An
+      every session. A marker naming no pool user (an unreadable one, replaced) awaits a
+      stop for every pool user: while every stop ends 48 (a process it can't kill or can't
+      place, a BITS job it can't cancel, a cut list), `StopSequence` never moves and every pool
+      user's logon is refused. That is the fail-closed answer, since the escapee may be any of
+      theirs. It clears once the 48's cause is gone and a stop completes (an administrator running
+      `\Clauseo\SandboxStop`, or the next F4 refusal or Clauseo's start, requests one), or with `--remove`.
+      No narrower scope is safe: such a marker no longer says whose session it was. An
       unreadable or corrupt marker, or an `Open` one naming no pool user, would otherwise
       refuse every logon for good: it is replaced by `AwaitingStop` with `StopNext` read then,
       naming no pool user (so it counts for all), the stop is requested and the logon refused,
