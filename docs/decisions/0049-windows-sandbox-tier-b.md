@@ -2316,8 +2316,10 @@ The orchestrator's rulings change the interface above in these ways:
 
 - **A reservation comes first.** `Launchers::reserve(matter, session, running)` assigns the
   matter's pool user and claims a network slot. It is bookkeeping only and fits the launch
-  bound. The slot's claim is a record: it adds no firewall permit, and the set-up's static
-  permit per pool user stays the only one. It returns a `clauseo_sandbox::Reservation`, a type
+  bound. The slot's claim is a record that names the reservation's claim: it adds no firewall
+  permit (there is no static permit since #791; PR6's connect permits come only after
+  `check_launch`, behind the job gate), and a late release of an old claim never frees a newer
+  claim's record of the same slot. It returns a `clauseo_sandbox::Reservation`, a type
   on every OS with `matter()`, `session()`, `ports()` (the slot's host ports, which the host
   binds before it builds the policy), `slot()` and `pool_user()`. macOS makes one with
   `Reservation::unpooled`, and the host's fakes with `Reservation::fixed` (`test-support`).
@@ -2328,7 +2330,9 @@ The orchestrator's rulings change the interface above in these ways:
   stays busy until it is done. Dropped mid-walk, the entry is marked releasing and the walk
   cancelled; the walk's own thread undoes and frees the matter when it stops. Until then
   `reserve` gives `MatterBusy`, so a new session never gets the pool user while the old walk
-  could still stop its processes, run `PrepareRun` or `apply`.
+  could still stop its processes, run `PrepareRun` or `apply`. A failed walk holds the matter
+  too (undoing) until its undo (`EndRun`, the slot, the session's mark) has ended; a drop
+  meanwhile marks it releasing, and the walk's thread frees the matter at the end.
 - **`prepare(&reservation, &policy)` is the walk.** It borrows the reservation and is keyed by
   its claim and matter. `Preparing::result()` and `wait()` give `Option<Result<(), Error>>`.
   A second `prepare` of the same reservation joins the running walk, or finishes at once once
@@ -2342,9 +2346,17 @@ The orchestrator's rulings change the interface above in these ways:
   walk takes 20-70 ms inside `prepare`. The launcher it returns holds the reservation's claim
   until the outer has started. If writing the launch file or starting the outer fails, the
   launcher undoes the session (the run's group, the slot, the mark) and frees the matter
-  before the error returns. Dropped unused, it does the same off the dropping thread.
+  before the error returns. Dropped unused, it does the same off the dropping thread. Before it
+  starts anything it checks the session is still launched in the registry (an `after_session`
+  may have ended it), or refuses with `WrongReservation`. A panic while it starts is caught:
+  the outer it may have started is ended first (its job killed and seen truly empty), then the
+  claim released; if the outer can't be ended, the matter is stuck.
 - **`after_session` always frees the matter.** `EndRun`, the slot and the matter's release
   run from drop guards, so a panic in a step still ends the run's group and frees the matter.
+- **A failed `EndRun` holds the account back.** `LaunchSteps::end_run` returns a result. On a
+  failure the slot stays claimed and the pool user needs a reset: the next `reserve` of it tries
+  `EndRun` again and, while it fails, refuses with `PoolFull` (`needs_reset` counted). C5's
+  `clear_stale` ends the groups a crash left the same way, from the records.
 - **The walk's order:** the gate and the plan, `check_launch`, `wfp::check_launch`, leftovers,
   the set-aside's launch pass, `PrepareRun{slot}`, then `apply`. Nothing runs as the pool user
   and nothing is granted to it before `check_launch` and `wfp::check_launch` pass. A failed
@@ -2352,18 +2364,28 @@ The orchestrator's rulings change the interface above in these ways:
   the stop task and the pool user's sweep, then looked for again. If one survives to the 180 s
   bound, the launch is refused with `Error::LeftoverProcess`. `PrepareRun` answering that a
   set-up is running is retried within the same bound.
-- **One 180 s bound covers the whole walk.** The walk looks at the clock and at its cancel
-  before and after every step, each stop, sweep and `PrepareRun` try included, and `apply`
-  sees both at each folder (`Walk::cancelled`). The cancel is looked at once more after
-  `apply`: a cancel that came during it undoes and is never prepared. A step blocked in one OS
-  call can't be interrupted, so **C5's real steps bound their own waits**: every wait (a
-  scheduled task, the set-up server's pipe, a process handle, a file lock) is timed, no longer
-  than the bound.
+- **The walk's two limits.** The host's 180 s bound is the overall one and covers `reserve`
+  through `launch` (D3b-win). Inside the walk, the **waits** (the leftover stop, sweep and
+  re-check, and the `PrepareRun` retries while a set-up runs) share one 180 s wall-clock budget;
+  running out refuses with `LeftoverProcess` or the set-up's words. The **work steps** (the
+  plan, `check_launch`'s scan, the set-aside's pass, `apply`) take as long as the matter's size
+  needs, with no wall-clock cap, but a stall timer: if their progress (`Walk::tick`,
+  `Walk::walked`) doesn't move for 60 s, the walk cancels, undoes and fails with
+  `Error::PrepareStalled`. The walk looks at its cancel and its progress before and after every
+  step, and `apply` sees both at each folder (`Walk::cancelled`). The cancel is looked at once
+  more after `apply`: a cancel that came during it undoes and is never prepared.
+- **A step that never returns makes the matter stuck.** It can't be interrupted, and nothing is
+  undone around it from another thread (it could still grant once it returns). A walk with no
+  progress for the stall timer plus 60 s of grace, or a reserve, an undo, a release or a
+  session's end running for 180 s plus the grace, makes `reserve` mark the matter stuck and
+  refuse it with `Error::MatterStuck` (`Internal`, not retryable: "Restart Clauseo to continue
+  with this matter") until Clauseo restarts.
 - **One set of launchers per sandbox folder.** `Launchers::with_steps` takes the folder's
   `tier-b-launchers.lock` without waiting, before it clears what a crash left, and holds it
   while anything of the launchers' can still run. A second set, in this Clauseo or another, is
   refused at once with `Error::LaunchersHeld` and clears nothing. That is stricter than a
-  bounded wait, which would only help a Clauseo that is quitting.
+  bounded wait, which would only help a Clauseo that is quitting. The lock file is checked as
+  the matters lock is and opened without following a link.
 - **One live agent per matter.** The matter stays held from its reservation until
   `after_session` has finished. Its pool user isn't handed out again while the detached end
   sweeper the outer started still runs as that user (`LaunchSteps::end_sweeper_running`). Until
@@ -2381,12 +2403,21 @@ The orchestrator's rulings change the interface above in these ways:
 - **Errors:** `Error` is `#[non_exhaustive]`, so callers outside the crate match with a
   wildcard. `Error::kind()` gives every variant a phrase with no path in it. The appended
   variants are `PoolFull { cause }` (counts for `NotProtectedCause::PoolFull`), `NotPrepared`,
-  `Cancelled`, `MatterBusy`, `WrongReservation`, `LeftoverProcess` and `LaunchersHeld`.
+  `Cancelled`, `MatterBusy`, `WrongReservation`, `LeftoverProcess`, `LaunchersHeld`,
+  `MatterStuck` and `PrepareStalled`.
   `Blocked` gets `LooseTask` (`loose_task`).
 - **The exit:** `RunOutcome::meaning()` tells the host what each exit means, and `HOST_ENDED`
   is public.
 - **What is left:** the steps are a `LaunchSteps` trait, so the order is tested on every OS.
   The real steps are C5's and `TierBLauncher` is C4's.
+- **C5's launch-blocking list.** The real steps must:
+  - stop and end runs to **truly empty** (#697): a job is empty only once its last process is
+    gone, never on a count read before it;
+  - identify the detached end sweeper by its **process handle and creation time**, recorded when
+    it started, never by name; `pool_user_processes` in `launch` stays as the backstop;
+  - tick the work steps' progress at least every few seconds, and make every wait a timed one;
+  - keep the pool users out of the sandbox data folder (no access at all), where
+    `tier-b-launchers.lock` and the records live.
 - **A gate for C5: `apply`'s grants name the run's group.** A failed or cancelled walk undoes
   the session's work, but not the permission entries `apply` wrote (by design: the next walk
   continues from them). C5 must confirm that those entries name the run's group
