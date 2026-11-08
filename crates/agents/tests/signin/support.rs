@@ -330,6 +330,13 @@ impl Fixture {
         if let Some(path) = std::env::var_os("PATH") {
             base.insert("PATH".into(), path);
         }
+        // Windows: the launcher clears the environment, and a child without `SystemRoot` cannot
+        // start Winsock, so the fake's login could not bind its callback port. The app's own
+        // base environment (`SigninConfig::base_env`, all of its variables) always has it.
+        #[cfg(windows)]
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            base.insert("SystemRoot".into(), root);
+        }
         config.signin.base_env = base;
         let online = Arc::new(AtomicBool::new(true));
         let lookups: Arc<Mutex<Vec<String>>> = Arc::default();
