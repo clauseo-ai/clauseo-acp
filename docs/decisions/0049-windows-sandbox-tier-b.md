@@ -2109,7 +2109,13 @@ whose rewrite would drop the deny under that user; it runs the phase and exits "
 exits (`WslUpgradeExit`): 0 (`Done`, installed or none owed, then the phase), 60 (`NotAllowed`),
 61 (`Deferred`) and 62 (`UpgradeFailed`, "upgrade failed, deny applied": owed and failed, or
 couldn't be tried, the MSI's checks refusing it included; WSL is as it was, and the phase ran
-after it). The phase's outcome never changes
+after it), and 67 (`StillInstalling`: msiexec still running at the end of its 240 s wait, left
+running rather than ended mid-write; 63 is `SetupExit`'s, so 67 is this task's), which the launch
+refuses as `WslUpgradePending`. The pool-process check is one snapshot, taken before msiexec
+starts: a pool process started after it isn't seen, and a process whose user can't be read (its
+token and the kernel's list both unreadable, as for some protected processes) isn't counted, as
+the stop's own pick leaves it out. The follow-up that closes both is the kernel process list PR
+(`SystemFullProcessInformation`, each process's user from the kernel's own list). The phase's outcome never changes
 an exit, the refresh's or this task's: a failure is one Event Log error line (AppIDs and Windows
 error codes, never a path or a SID), and a run that changed nothing writes no line. The launch
 check enforces the deny, so an exit code would tell no one more.
