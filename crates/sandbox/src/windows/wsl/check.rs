@@ -3,6 +3,7 @@
 use super::record::AppId;
 use super::sd::LaunchSd;
 use super::seam::{ClassEntry, Permission, WslError, WslRead};
+use super::upgrade::{Upgrade, upgrade};
 use super::{CLASSES, LXSS_MANAGER, SERVICES, WSL_SERVICE};
 use crate::Blocked;
 
@@ -54,14 +55,18 @@ pub enum Found {
 }
 
 /// The launch check, as the lawyer, before a tier B launch. WSL is present when either service
-/// is installed or any of [`CLASSES`] is registered (a read that fails counts as present). Then:
+/// is installed, any of [`CLASSES`] is registered, or the WSL package is (`upgrade.rs`); a read
+/// that fails counts as present. Then:
 ///
 /// - a target whose value is missing (or whose key is), or whose deny for the record's group
 ///   is missing or comes after an allow, is [`Blocked::WslDenyMissing`];
 /// - else a target that can't be read or parsed, a class of [`CLASSES`] with no `AppID`,
 ///   targets that can't be listed, or a packaged registration of any of [`CLASSES`] is
 ///   [`Blocked::WslDenyUnverifiable`], whichever WSL is here: the inbox one (`LxssManager`)
-///   runs WSL2's VMs too, from Windows 10 2004 on.
+///   runs WSL2's VMs too, from Windows 10 2004 on; so is a package or MSI version that can't
+///   be read or parsed ([`Upgrade::Unreadable`]);
+/// - else a pending upgrade ([`Upgrade::Pending`]: the MSI missing or older than the package)
+///   is [`Blocked::WslUpgradePending`].
 ///
 /// With no WSL nothing is refused. A record with no group names no deny, so every target is
 /// missing one.
@@ -71,7 +76,9 @@ pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
     let inbox = present(LXSS_MANAGER);
     let resolved = resolve(reg);
     let registered = !matches!(&resolved, Ok(found) if !found.registered);
-    if !(lifted || inbox || registered) {
+    let upgrade = upgrade(reg);
+    let packaged = upgrade != Upgrade::NoPackage;
+    if !(lifted || inbox || registered || packaged) {
         return Ok(Found::NoWsl);
     }
     let group = reg.group();
@@ -109,8 +116,11 @@ pub fn check(reg: &dyn WslRead) -> Result<Found, Blocked> {
     if missing {
         return Err(Blocked::WslDenyMissing);
     }
-    if unverifiable {
+    if unverifiable || upgrade == Upgrade::Unreadable {
         return Err(Blocked::WslDenyUnverifiable);
+    }
+    if upgrade == Upgrade::Pending {
+        return Err(Blocked::WslUpgradePending);
     }
     Ok(Found::Denied(targets))
 }

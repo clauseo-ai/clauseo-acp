@@ -906,6 +906,12 @@ Before each Safe workspace launch, Clauseo checks the deny, and refuses the laun
   is registered as packaged COM (under `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex`, such as
   `{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a WSL from before 2.0). Repairing or updating
   WSL (`wsl --update`) usually fixes it.
+- **`wsl_upgrade_pending`**: the WSL package from the Store
+  (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the WSL that is installed
+  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`), or that
+  one isn't installed yet: a WSL update is pending, and any user could start it, which would take the deny off until Clauseo puts it
+  back. Finish or let the WSL update complete (`wsl --update`, or open WSL once as an
+  administrator), then try again.
 
 With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)
 takes the deny off before it deletes the group. If you clear a leftover sandbox by hand

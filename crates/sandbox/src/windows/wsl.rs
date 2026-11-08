@@ -41,6 +41,7 @@ mod os;
 mod record;
 mod sd;
 mod seam;
+mod upgrade;
 
 pub use apply::{WslApplied, WslRemoved, apply, local_group, remove};
 pub use check::{Found, Resolved, check, resolve};
@@ -49,6 +50,7 @@ pub use os::WindowsWsl;
 pub use record::{AppId, RECORD_ABSENT, RECORD_APP_IDS, WslRecord};
 pub use sd::{DENY_MASK, LaunchSd, NEEDED_MASK, SdError};
 pub use seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
+pub use upgrade::{PACKAGE_NAME, Upgrade, upgrade, version};
 
 /// The lifted WSL's service (the MSI's `wslservice.exe`), which runs WSL2's VMs.
 pub const WSL_SERVICE: &str = "WSLService";

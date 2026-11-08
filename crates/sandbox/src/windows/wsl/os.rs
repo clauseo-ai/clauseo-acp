@@ -2,8 +2,9 @@
 //! `Users` can read every key the launch check reads (the VM's R5c read). The writes open the
 //! `AppID`'s key with `REG_OPTION_BACKUP_RESTORE` and `SeBackupPrivilege` and
 //! `SeRestorePrivilege` enabled (as wslservice writes its P9NP key), so a key `TrustedInstaller`
-//! owns is written without taking its ownership or touching its DACL; the open (`NtOpenKeyEx`)
-//! never makes a key that isn't there, and Windows checks each new value just before it is set. The record's two values go through the set-up's record writer.
+//! owns is written without taking its ownership or touching its DACL; the open
+//! (`NtOpenKeyEx`) never makes a key that isn't there, and Windows checks each new value just
+//! before it is set. The record's two values go through the set-up's record writer.
 //! Errors name the call and its code, never a path or a SID.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry calls")]
 
@@ -24,9 +25,9 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-use super::CLASSES;
 use super::record::{AppId, WslRecord};
 use super::seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
+use super::{CLASSES, PACKAGE_NAME};
 use crate::windows::acl::object::words;
 use crate::windows::acl::privilege::{BACKUP_RESTORE, Privileges};
 use crate::windows::record::{read_string, sandbox_group_sid};
@@ -38,6 +39,10 @@ const SERVICES_KEY: &str = r"SYSTEM\CurrentControlSet\Services";
 const CLSID_KEY: &str = r"SOFTWARE\Classes\CLSID";
 /// Where `AppID`s are.
 const APPID_KEY: &str = r"SOFTWARE\Classes\AppID";
+/// Where packaged-COM registrations are listed, by package full name.
+const PACKAGED_PACKAGES: &str = r"SOFTWARE\Classes\PackagedCom\Package";
+/// Where WSL records its MSI.
+const LXSS_MSI_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI";
 /// Where packaged-COM classes are indexed, by CLSID.
 const PACKAGED_INDEX: &str = r"SOFTWARE\Classes\PackagedCom\ClassIndex";
 /// COM's machine-wide settings, which hold `DefaultLaunchPermission`.
@@ -337,6 +342,22 @@ impl WslRead for WindowsWsl {
             }
         }
         Ok(false)
+    }
+
+    fn msi_version(&self) -> Result<Option<String>, WslError> {
+        text(LXSS_MSI_KEY, "Version")
+    }
+
+    fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        let Some(key) = open(PACKAGED_PACKAGES)? else {
+            return Ok(Vec::new());
+        };
+        let prefix = format!("{PACKAGE_NAME}_");
+        let names = subkeys(&key)?;
+        Ok(names
+            .into_iter()
+            .filter(|name| name.starts_with(&prefix))
+            .collect())
     }
 
     fn group(&self) -> Option<Sid> {
