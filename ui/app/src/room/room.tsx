@@ -83,6 +83,7 @@ import { tauriWindowControls, type WindowControls } from "../transport/window-co
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import { hasSetup } from "./first-run/hold.ts";
+import { FirstRun } from "./first-run/first-run.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
 
@@ -95,11 +96,6 @@ const RetriedLine = lazy(() =>
 const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
-
-/** UD1's first run: its screen with no matter yet, and its hold on the composer, where the host has the setup wire. */
-const FirstRun = lazy(() =>
-  late(import("./first-run/first-run.tsx")).then((m) => ({ default: m.FirstRun })),
-);
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
 function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
@@ -480,17 +476,17 @@ function RoomFrame({
       {shield.note}
       <LocateFolderContext value={locate}>
         <main className="room-centre" ref={nodes.slot("centre")}>
+          {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
+              300 ms reveal throttle (FALLBACK_THROTTLE_MS), however soon its chunk landed */}
           {setup && (
-            <Suspense fallback={null}>
-              <FirstRun
-                transport={transport}
-                matters={matters}
-                conversations={conversations}
-                talks={talks}
-                zone={view.zone}
-                welcome={welcome}
-              />
-            </Suspense>
+            <FirstRun
+              transport={transport}
+              matters={matters}
+              conversations={conversations}
+              talks={talks}
+              zone={view.zone}
+              welcome={welcome}
+            />
           )}
           {welcome ? null : open !== null && view.folderMissing ? (
             // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate

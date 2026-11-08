@@ -1,3 +1,5 @@
+// first: its body is the script's start mark (start-marks.ts)
+import { markRender } from "./start-marks.ts";
 import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -23,7 +25,8 @@ if (perf !== null) setTimedHook(() => {});
 const transport = pageTransport();
 connectRoom(transport);
 
-whenWordsReady(() =>
+whenWordsReady(() => {
+  markRender();
   createRoot(container).render(
     <StrictMode>
       <App
@@ -33,5 +36,5 @@ whenWordsReady(() =>
         }
       />
     </StrictMode>,
-  ),
-);
+  );
+});

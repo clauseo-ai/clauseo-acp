@@ -27,7 +27,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
-import { loadThread } from "./chunk.ts";
+import { loadThread, threadLoaded } from "./chunk.ts";
 import { promptContent } from "./paper-mentions.ts";
 
 /** The code of a refused command, and its setter, which makes no set to the code already held: React drops such a
@@ -134,9 +134,6 @@ export type ThreadSession = {
   actions: ThreadActions;
 };
 
-/** Whether the thread's chunk is in memory: its import is tagged fulfilled once it is (chunk.ts). */
-const chunkIn = (): boolean => (loadThread() as { status?: string }).status === "fulfilled";
-
 export function useThreadSession(
   transport: HostTransport,
   store: ViewStore,
@@ -147,7 +144,7 @@ export function useThreadSession(
 ): ThreadSession {
   // the thread opens only once the chunk is in, so its rows never render, settle or page before it (chunk.ts); once
   // it is, a conversation opens on its first render
-  const [loaded, setLoaded] = useState(chunkIn);
+  const [loaded, setLoaded] = useState(threadLoaded);
   const [made, setMade] = useState<ThreadId | null>(null);
   const [sentTurn, setSentTurn] = useState<TurnId | null>(null);
   const [refused, refuse] = useRefused();
@@ -166,8 +163,10 @@ export function useThreadSession(
     open.current = known;
   }, [known]);
 
+  // loaded once a matter opens: never at boot or under the welcome, which have no thread
+  const opened = matter !== null;
   useEffect(() => {
-    if (loaded) return;
+    if (loaded || !opened) return;
     let live = true;
     void loadThread().then(() => {
       if (live) setLoaded(true);
@@ -175,7 +174,7 @@ export function useThreadSession(
     return () => {
       live = false;
     };
-  }, [loaded]);
+  }, [loaded, opened]);
 
   const command = useCallback(
     (body: HostCommand) => transport.dispatch({ command_id: crypto.randomUUID(), command: body }),

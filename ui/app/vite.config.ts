@@ -157,9 +157,8 @@ function probeEntry(): Plugin {
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
  * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
- * popover only those and the line; UD1's first run only the first load (U2's form, which it shares with New matter, it
- * loads lazily itself, as Start a new matter is pressed); UD2's first read's start only the first load and the small
- * marks and words chunks it shares with the first run and the list (isLazyShared); U17's tool result block only those
+ * popover only those and the line; UD2's first read's start only the first load and the small
+ * chunks it shares with the list (isLazyShared); U17's tool result block only those
  * and the list. The Hindi words (ui/components' words-hi.ts, every words
  * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
  * The dialogs that share the dialog primitives are
@@ -179,7 +178,6 @@ export const BARE_CHUNKS = [
   "tool-line-room",
   "tool-popover",
   "result",
-  "first-run",
   "first-read-start",
   "words-hi",
 ];

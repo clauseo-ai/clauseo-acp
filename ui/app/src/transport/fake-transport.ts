@@ -57,6 +57,7 @@ import type {
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
+import type { SendMarks } from "../start-marks.ts";
 
 /** One host call the fake saw, in order. */
 export type FakeCall =
@@ -177,6 +178,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   /** UC: whether the protection wire is scripted (`host.protection`). */
   readonly protectionWire: boolean;
   readonly calls: FakeCall[] = [];
+  /** The start-up marks' send (start-marks.ts): none unless a test sets it. */
+  pageMarks: SendMarks | undefined = undefined;
   /** Problems the channel reader reported. */
   readonly problems: string[] = [];
   /** Bytes of every channel message delivered, as serialized text. */

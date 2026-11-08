@@ -9,7 +9,7 @@
 // call, a microtask after the flush; messages that carried nothing and no flush followed are acked on the next
 // animation frame with no positions.
 import { Channel, isTauri } from "@tauri-apps/api/core";
-import { commands, type Ack, type StreamMessage } from "./bindings.ts";
+import { commands, type Ack, type PageMarks, type StreamMessage } from "./bindings.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import {
@@ -445,6 +445,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
    * own HostError (Tauri's text, which can quote what it could not decode) becomes `internal` naming the kind only. */
   async setup(command: SetupCommand): Promise<void> {
     await sendSetup(command);
+  }
+  /** Sends the room's start-up marks (start-marks.ts) to host.log through `page_marks`, on the background lane, never
+   * a lawyer's action's; `read` gives them as the call leaves, so each mark's age is the age it is then. */
+  async pageMarks(read: () => PageMarks): Promise<void> {
+    await this.#inBackground(() => call(commands.pageMarks(read())));
   }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {

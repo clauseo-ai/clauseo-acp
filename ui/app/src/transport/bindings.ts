@@ -171,6 +171,12 @@ export const commands = {
 	 *  page opened (`ui/app/src/room/protection/installer.ts`).
 	 */
 	quitApp: () => typedError<null, HostError>(__TAURI_INVOKE("quit_app")),
+	/**
+	 *  The page's start-up marks (`ui/app/src/start-marks.ts`), sent once after the welcome's
+	 *  primary button mounts, logged on the desktop's clock (`startup::log_page`): the first call of
+	 *  a run only. Always answers ok; carries only milliseconds.
+	 */
+	pageMarks: (marks: PageMarks) => typedError<null, HostError>(__TAURI_INVOKE("page_marks", { marks })),
 };
 
 /* Constants */
@@ -3779,6 +3785,23 @@ export type PackView = {
 
 /**  How many entries one `PageEntries` asks for: 1 to [`MAX_PAGE_ENTRIES`]. */
 export type PageLimit = number;
+
+/**
+ *  The page's start-up marks, as `ui/app/src/start-marks.ts` takes them: each is its age, the ms
+ *  from it to the call leaving the page; `None` for a mark it did not take.
+ */
+export type PageMarks = {
+	/**  The page's time origin. */
+	navigation: number,
+	/**  The page's first module running. */
+	script: number | null,
+	/**  The root's render called. */
+	render: number | null,
+	/**  The welcome's first commit. */
+	welcome: number | null,
+	/**  The welcome's primary button mounted. */
+	button: number | null,
+};
 
 /**
  *  How a page was opened: the agent's web fetch, Codex's open-page tool, the browser, or the

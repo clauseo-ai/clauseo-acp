@@ -3,7 +3,7 @@
 // (U2's form, in place). The plan gets ready from the first second, on the working line at the foot where the composer
 // will stand, with the fine print under it; and the anonymous counts Clauseo sends by default, said plainly, with the
 // switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
-import { useId, type ReactNode } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
@@ -33,6 +33,7 @@ export function Welcome({
   opening,
   onWhatsSent,
   testIds = {},
+  openRef,
 }: {
   /** The plan's name, "Claude" or "ChatGPT". */
   name: string;
@@ -52,6 +53,8 @@ export function Welcome({
   /** What's sent, where the app can show the privacy settings. */
   onWhatsSent?: (() => void) | undefined;
   testIds?: { counts?: string; open?: string; newMatter?: string };
+  /** The primary button, Open the folder for a matter, as it mounts: the app's start-up mark. */
+  openRef?: Ref<HTMLButtonElement> | undefined;
 }) {
   const w = useFirstLaunchWords();
   const heading = useId();
@@ -84,6 +87,7 @@ export function Welcome({
                   className={cn(WRAP, "min-h-control-large max-w-full py-s2")}
                   onClick={onOpenFolder}
                   data-testid={testIds.open}
+                  ref={openRef}
                 >
                   <IconOpen size={16} />
                   {w("Open the folder for a matter")}

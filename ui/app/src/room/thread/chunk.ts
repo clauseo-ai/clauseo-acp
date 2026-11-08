@@ -1,6 +1,6 @@
 // The open thread in its own chunk: list.tsx, with Thread, the rows, the change note and the Markdown renderer it
 // imports, so the room's first chunk (room/entry.ts, loaded before the first render) carries none of them. Work starts
-// the import as it mounts (`loadThread`), and the session opens a thread only once it is in (session.ts), so a
+// the import once a matter opens (`loadThread`; never at boot or under the welcome), and the session opens a thread only once it is in (session.ts), so a
 // reopened thread's rows never render, settle or page before it.
 // `LazyThreadList` reads the one cached import promise with React's use(): once the chunk is in memory the promise is
 // tagged fulfilled, so use() returns it at once and the list's first render is its content, never a fallback commit
@@ -44,6 +44,9 @@ export function loadThread(): Promise<Loaded> {
   chunk = loading;
   return loading;
 }
+
+/** Whether the chunk is in memory, without starting its load. */
+export const threadLoaded = (): boolean => chunk?.status === "fulfilled";
 
 /** `<ThreadList>`, from its own chunk; suspends only while the chunk is still loading. */
 export function LazyThreadList(props: ThreadListProps) {
