@@ -10,6 +10,7 @@ mod build;
 mod links;
 mod names;
 mod other_matter;
+mod overlap;
 mod rule;
 mod store;
 
@@ -18,6 +19,7 @@ pub(crate) use names::opens_as;
 pub use names::{hfs_ignorable, strip_hfs_ignorables};
 use other_matter::HiddenMatter;
 pub use other_matter::{OtherMatterRead, REFUSED_IN_OTHER_MATTER};
+pub use overlap::HiddenOverlapAllowance;
 pub use rule::{Loopback, PathRule};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,

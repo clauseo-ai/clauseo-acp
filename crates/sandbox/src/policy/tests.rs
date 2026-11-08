@@ -5,6 +5,7 @@ mod allowed;
 mod links;
 mod nested;
 mod other_matter;
+mod overlap;
 mod reallowed;
 mod tmpdir;
 mod unicode;

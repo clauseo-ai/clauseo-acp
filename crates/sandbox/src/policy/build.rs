@@ -9,9 +9,9 @@ use std::path::{Component, Path, PathBuf};
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::other_matter::{all_reads, hidden_matters};
+use super::overlap::store_and_sockets;
 use super::{
-    ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
-    PolicyBuilder, same, under,
+    Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under,
 };
 use crate::Error;
 use crate::links::{LinkFinding, scan_matter};
@@ -52,11 +52,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             link.display()
         ));
     }
-    let claude_store = b
-        .claude_store
-        .as_deref()
-        .map(|dir| existing(dir, "Claude store folder").map(|dir| ClaudeStore { dir }))
-        .transpose()?;
+    let claude_store = store_and_sockets(&b, &hidden, &hidden_matters)?;
 
     let runtime = all_existing(&b.runtime, "runtime path")?;
     let read = all_existing(&b.read, "read path")?;

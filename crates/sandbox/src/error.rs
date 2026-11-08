@@ -119,6 +119,24 @@ pub enum Error {
     /// planned or written; a later launch checks again. Its message names no path.
     #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
     UncleanSession(String),
+    /// The policy puts a Claude store or the browser socket folder on, inside or above a hidden
+    /// path ([`PolicyBuilder::build`](crate::PolicyBuilder::build)): the profile allows their
+    /// writes after the hidden paths, so they would write there. A Claude store inside a hidden
+    /// path that is not another matter is allowed (Clauseo's login home is in the data dir).
+    #[error(
+        "sandbox policy refused: the {allowance} may not equal, hold or sit inside a hidden \
+         path: {} and {}",
+        path.display(),
+        hidden.display()
+    )]
+    HiddenOverlap {
+        /// Which allowance.
+        allowance: crate::HiddenOverlapAllowance,
+        /// Its folder, canonical.
+        path: std::path::PathBuf,
+        /// The hidden path it meets.
+        hidden: std::path::PathBuf,
+    },
 }
 
 impl Error {
@@ -140,7 +158,8 @@ impl Error {
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
             | Error::ProtectedLink { .. }
-            | Error::UncleanSession(_) => None,
+            | Error::UncleanSession(_)
+            | Error::HiddenOverlap { .. } => None,
         }
     }
 
@@ -165,7 +184,8 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
-            | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::NetworkUnfiltered { .. }
+            | Error::HiddenOverlap { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
