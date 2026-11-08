@@ -15,7 +15,7 @@ use crate::network_paths::resolve::tests::FakeFs;
 use crate::network_paths::tests::plain_net;
 
 /// A request from the matter `cwd` naming `paths`, the data folder at `/d`.
-fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
+pub(super) fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
     FenceCheck {
         data: PathBuf::from("/d"),
         allowed: Vec::new(),
@@ -28,7 +28,7 @@ fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
 }
 
 /// Whether the fence refuses `check` on `fs` under `net`.
-fn refused(check: &FenceCheck, net: &NetEnv, fs: &FakeFs) -> bool {
+pub(super) fn refused(check: &FenceCheck, net: &NetEnv, fs: &FakeFs) -> bool {
     let real = |_: &Path| None;
     let disk = Disk {
         fs,
@@ -52,7 +52,7 @@ fn network_touched(fs: &FakeFs) -> Vec<PathBuf> {
 }
 
 /// Whether the held-open check may look at `path` from the matter `folder`, on `fs`.
-fn look(folder: &Path, path: &Path, net: &NetEnv, fs: &FakeFs) -> bool {
+pub(super) fn look(folder: &Path, path: &Path, net: &NetEnv, fs: &FakeFs) -> bool {
     let real = |_: &Path| None;
     let disk = Disk {
         fs,
@@ -63,7 +63,7 @@ fn look(folder: &Path, path: &Path, net: &NetEnv, fs: &FakeFs) -> bool {
 }
 
 /// Windows' rules with drive `Z:` a mapped share.
-fn windows_net() -> NetEnv {
+pub(super) fn windows_net() -> NetEnv {
     NetEnv {
         remote_drive: Box::new(|letter| letter == 'Z'),
         ..plain_net(true)
@@ -363,4 +363,22 @@ fn a_name_the_walk_cannot_look_at_is_refused() {
         .filter(|p| p.starts_with("/m/locked/x") || p.starts_with("/m/bad/x"))
         .collect();
     assert!(past.is_empty(), "{past:?}");
+}
+
+/// A shell word Windows rejects as a name (`docs\*.docx`, `https://x/a`) is not refused: the
+/// walk keeps the rejected name as written.
+#[cfg(unix)]
+#[test]
+fn a_wildcard_or_url_word_is_not_refused() {
+    let fs = FakeFs::with(&[
+        ("/m/docs/*.docx", Fake::BadName),
+        ("/m/https:", Fake::BadName),
+    ]);
+    let net = plain_net(false);
+    assert!(!refused(
+        &fence("/m", &["docs/*.docx", "https://x/a"]),
+        &net,
+        &fs
+    ));
+    assert!(look(Path::new("/m"), Path::new("docs/*.docx"), &net, &fs));
 }

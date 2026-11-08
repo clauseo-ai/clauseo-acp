@@ -21,6 +21,8 @@ pub(crate) enum Fake {
     BadLink,
     /// A name the walk may not look at (permission denied).
     Denied,
+    /// A name the system rejects (`InvalidFilename`: Windows' answer for `*`, `?` or `:`).
+    BadName,
 }
 
 /// A disk in memory that records every path it is asked about, in order.
@@ -28,6 +30,8 @@ pub(crate) enum Fake {
 pub(crate) struct FakeFs {
     pub(crate) names: BTreeMap<PathBuf, Fake>,
     pub(crate) touched: RefCell<Vec<PathBuf>>,
+    /// The identities [`Fs::identity`] answers, by path.
+    pub(crate) ids: BTreeMap<PathBuf, (u64, u128)>,
 }
 
 impl FakeFs {
@@ -57,6 +61,7 @@ impl Fs for FakeFs {
             Some(Fake::File) => Ok(Entry::File),
             Some(Fake::Link(_) | Fake::BadLink) => Ok(Entry::Link),
             Some(Fake::Denied) => Err(io::ErrorKind::PermissionDenied.into()),
+            Some(Fake::BadName) => Err(io::ErrorKind::InvalidFilename.into()),
             None => Err(io::ErrorKind::NotFound.into()),
         }
     }
@@ -67,6 +72,11 @@ impl Fs for FakeFs {
             Some(Fake::Link(target)) => Ok(target.clone()),
             _ => Err(io::ErrorKind::InvalidInput.into()),
         }
+    }
+
+    fn identity(&self, path: &Path) -> Option<(u64, u128)> {
+        self.touched.borrow_mut().push(path.to_path_buf());
+        self.ids.get(path).copied()
     }
 }
 
@@ -231,4 +241,26 @@ fn the_real_disk_resolves_links_and_dot_dots() {
         crate::write::symlink(&deals, &root.join("link")).unwrap();
         assert_eq!(at(&root.join("link").join("spa.docx")), spa);
     }
+}
+
+/// A name the system rejects (a shell word's wildcard, a URL's `https:`) is kept as written and
+/// the walk goes on; a network name after it is still refused before it is touched.
+#[test]
+fn a_rejected_name_is_kept_and_later_names_still_checked() {
+    let net = NetEnv {
+        remote_mounts: vec!["/m/https:/share".into()],
+        ..plain_net(false)
+    };
+    let fs = FakeFs::with(&[
+        ("/m/docs/*.docx", Fake::BadName),
+        ("/m/https:", Fake::BadName),
+    ]);
+    assert_eq!(on("/m/docs/*.docx", &fs, &net), local("/m/docs/*.docx"));
+    assert_eq!(on("/m/https:/x/a", &fs, &net), local("/m/https:/x/a"));
+    assert_eq!(on("/m/https:/share/a", &fs, &net), Walked::Refused);
+    assert!(
+        !fs.touched()
+            .iter()
+            .any(|p| p.starts_with("/m/https:/share"))
+    );
 }

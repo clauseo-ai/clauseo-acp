@@ -10,55 +10,44 @@
 //!   `\Device\Mup\…`), `\GLOBAL??\…`, and every other device-namespace form (`\\.\…`,
 //!   `\\?\GLOBALROOT\…`, `\\?\Volume{…}\…`). Of the `\\?\` forms only `\\?\X:\…` is a local path.
 //!   With [`NetEnv::windows`], `/` separates too (`//server/share` is UNC) and a drive whose
-//!   root `GetDriveTypeW` calls `DRIVE_REMOTE` is network.
+//!   device `QueryDosDeviceW` names as anything but a local volume (`\Device\HarddiskVolume…`,
+//!   `\Device\CdRom…`) is network, as is one it can't name.
 //! - `/net/…` and `/Network/…` (macOS's and Linux's automounted hosts).
+//! - With [`NetEnv::macos`]: `/.nofollow/…`, `/.resolve/…` and `/.vol/…` (they reach a mount by
+//!   another text), `/home/…` (`auto_home`), and `/System/Volumes/Data/…` put in its firmlinked
+//!   form first (`/usr/share/firmlinks`; refused when that can't be read).
 //! - A URL (`smb://`, `afp://`, `nfs://`, `file://` and any other scheme).
 //! - A path at or under a remote mount point ([`NetEnv::remote_mounts`]): on macOS each mount
 //!   without `MNT_LOCAL`, or of type `smbfs`, `nfs`, `afpfs`, `webdav` or `autofs`; on Linux
-//!   each `/proc/self/mounts` entry of a network type (`LINUX_REMOTE_TYPES`).
+//!   each `/proc/self/mounts` entry whose type is not a known local one (`linux.rs`).
+//!
+//! Names a deny matches against an ASCII name (`/net`, `.nofollow`) fold as a case-insensitive
+//! volume does ([`name_folds_to`]); mount names, which are not ASCII, compare NFD-normalised and
+//! folded ([`fold_name`]).
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use unicode_normalization::UnicodeNormalization as _;
 
+pub(crate) use ascii_fold::name_folds_to;
 pub(crate) use share::{may_touch, under_share_matter};
+pub(crate) use windows_names::refused_windows_name;
 
+mod ascii_fold;
+#[cfg(any(target_os = "linux", test))]
+mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
+mod macos_rules;
 pub(crate) mod resolve;
 mod share;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(windows)]
 mod windows;
-
-/// The Linux file system types that live on another machine, or mount one on first touch
-/// (`autofs`), FUSE network file systems included.
-#[cfg(any(target_os = "linux", test))]
-pub(crate) const LINUX_REMOTE_TYPES: [&str; 21] = [
-    "nfs",
-    "nfs4",
-    "cifs",
-    "smb3",
-    "smbfs",
-    "fuse.sshfs",
-    "sshfs",
-    "afs",
-    "ceph",
-    "glusterfs",
-    "fuse.glusterfs",
-    "davfs",
-    "autofs",
-    "fuse.rclone",
-    "fuse.gvfsd-fuse",
-    "fuse.s3fs",
-    "fuse.ceph",
-    "fuse.davfs2",
-    "lustre",
-    "ncpfs",
-    "coda",
-];
+mod windows_names;
 
 /// What [`is_network_path`] compares a path against.
 pub(crate) struct NetEnv {
@@ -68,9 +57,14 @@ pub(crate) struct NetEnv {
     pub(crate) fold_case: bool,
     /// The mount points of remote file systems.
     pub(crate) remote_mounts: Vec<PathBuf>,
-    /// Whether drive `X:` is a network drive. Given the letter alone, so it can only ask about
-    /// the drive's root (`GetDriveTypeW` on `X:\`), never a path on it.
+    /// Whether drive `X:` is a network drive. Given the letter alone, so it can only ask what
+    /// device the letter names (`QueryDosDeviceW`), never open a path on it.
     pub(crate) remote_drive: Box<dyn Fn(char) -> bool + Send>,
+    /// macOS's rules too: `/.nofollow`, `/.resolve`, `/.vol`, `/home` and the firmlinks.
+    pub(crate) macos: bool,
+    /// The firmlinks (`/usr/share/firmlinks`: each root folder and its place on the data volume),
+    /// `None` when they couldn't be read, so every `/System/Volumes/Data` path is refused.
+    pub(crate) firmlinks: Option<Vec<(String, String)>>,
 }
 
 impl fmt::Debug for NetEnv {
@@ -91,7 +85,15 @@ impl NetEnv {
             windows: cfg!(windows),
             fold_case: FOLD_CASE,
             remote_mounts: remote_mounts(),
-            remote_drive: Box::new(remote_drive),
+            remote_drive: remote_drive(),
+            macos: cfg!(target_os = "macos"),
+            firmlinks: {
+                #[cfg(target_os = "macos")]
+                let firmlinks = firmlinks();
+                #[cfg(not(target_os = "macos"))]
+                let firmlinks = Some(Vec::new());
+                firmlinks
+            },
         }
     }
 
@@ -153,21 +155,34 @@ pub(crate) fn is_network_path(path: &Path, net: &NetEnv) -> bool {
     {
         return true;
     }
+    let rewritten;
+    let path = if net.macos {
+        match macos_rules::firmlinked(&text, net) {
+            macos_rules::Mac::Refused => return true,
+            macos_rules::Mac::Rewritten(form) => {
+                rewritten = PathBuf::from(form);
+                rewritten.as_path()
+            }
+            macos_rules::Mac::AsIs => path,
+        }
+    } else {
+        path
+    };
+    let text = path.to_string_lossy();
     if let Some(rest) = text.strip_prefix('/') {
-        let first = name_key(rest.split('/').next().unwrap_or_default());
-        if first == "net" || first == "network" {
+        let first = OsStr::new(rest.split('/').next().unwrap_or_default());
+        if name_folds_to(first, "net") || name_folds_to(first, "network") {
             return true;
         }
     }
     net.remote_mounts.iter().any(|mount| under(path, mount))
 }
 
-/// A name as a network check compares it: normalised to NFD (as APFS stores names), then
-/// folded by [`fold_name`] (ASCII, the long s, the Kelvin sign, every cased letter), then NFD
-/// again. On every system: a network check refuses, and over-matching is its safe side.
+/// A mount name as a network check compares it: [`fold_name`] (which normalises to NFD, as
+/// APFS stores names). On every system: a network check refuses, and over-matching is its safe
+/// side.
 fn name_key(name: &str) -> String {
-    let folded = fold_name(&name.nfd().collect::<String>());
-    folded.nfd().collect()
+    fold_name(name)
 }
 
 /// Whether `path` is `prefix` (a remote mount point) or inside it, by whole components each
@@ -182,19 +197,18 @@ fn under(path: &Path, prefix: &Path) -> bool {
     })
 }
 
-/// `name` folded for a match that refuses (a deny by name or prefix): at least as broadly as
-/// APFS and NTFS fold names, so a spelling the file system takes as the same name always
-/// matches. Each character lowercased (`char::to_lowercase`: ASCII, the Kelvin sign `K`
-/// U+212A to `k`, and every other cased letter), and the long s `ſ` (U+017F) made `s`.
-/// Over-matching is the safe side for a deny; never use it for a match that allows
-/// ([`under_share_matter`] compares strictly).
+/// `name` folded for a match that refuses against a name that is not ASCII (the data folder's
+/// path, a mount point): each code point stage C's table folds to an ASCII letter made that
+/// letter ([`name_folds_to`]'s table: ASCII case, `ſ`, the Kelvin sign, `ı`, `İ`), then
+/// normalised to NFD (as APFS stores names) and lowercased (`char::to_lowercase`, every other
+/// cased letter). Against an ASCII name use [`name_folds_to`]. Over-matching is the safe side
+/// for a deny; never use it for a match that allows ([`under_share_matter`] compares strictly).
 pub(crate) fn fold_name(name: &str) -> String {
-    name.chars()
-        .flat_map(|c| match c {
-            '\u{17F}' => 's'.to_lowercase(),
-            c => c.to_lowercase(),
-        })
-        .collect()
+    let mapped: String = name
+        .chars()
+        .map(|c| ascii_fold::ascii_letter(c).unwrap_or(c))
+        .collect();
+    mapped.nfd().flat_map(char::to_lowercase).collect()
 }
 
 /// Folds the case of names on the volumes that ignore it: macOS and Windows.
@@ -219,71 +233,6 @@ pub(crate) fn is_url(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
-/// The mount points of the remote file systems in a Linux mount table (`/proc/self/mounts`),
-/// read as bytes: `device mountpoint type options 0 0`, the mount point's space, tab, newline
-/// and `\` written as octal escapes, its other bytes as they are (not always UTF-8). `None`
-/// when a line does not parse: the table is then unknown, and the caller counts every path as
-/// remote.
-#[cfg(any(target_os = "linux", test))]
-pub(crate) fn linux_remote_mounts(table: &[u8]) -> Option<Vec<PathBuf>> {
-    let mut mounts = Vec::new();
-    for line in table.split(|&b| b == b'\n') {
-        let mut fields = line
-            .split(u8::is_ascii_whitespace)
-            .filter(|field| !field.is_empty());
-        let Some(device) = fields.next() else {
-            continue;
-        };
-        let (_, Some(mount), Some(kind)) = (device, fields.next(), fields.next()) else {
-            return None;
-        };
-        if LINUX_REMOTE_TYPES.iter().any(|t| t.as_bytes() == kind) {
-            mounts.push(path_of_bytes(unescape_octal(mount)));
-        }
-    }
-    Some(mounts)
-}
-
-/// A path from its bytes: as they are on Unix, read as UTF-8 (lossily) elsewhere.
-#[cfg(any(target_os = "linux", test))]
-fn path_of_bytes(bytes: Vec<u8>) -> PathBuf {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStringExt as _;
-        PathBuf::from(std::ffi::OsString::from_vec(bytes))
-    }
-    #[cfg(not(unix))]
-    {
-        PathBuf::from(
-            String::from_utf8(bytes)
-                .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()),
-        )
-    }
-}
-
-/// `\040`-style escapes made the bytes they stand for.
-#[cfg(any(target_os = "linux", test))]
-fn unescape_octal(text: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
-    let mut at = 0;
-    while let Some(&byte) = text.get(at) {
-        let digits = text.get(at.saturating_add(1)..at.saturating_add(4));
-        let code = digits
-            .filter(|_| byte == b'\\')
-            .filter(|d| d.iter().all(|b| (b'0'..=b'7').contains(b)))
-            .and_then(|d| std::str::from_utf8(d).ok())
-            .and_then(|d| u8::from_str_radix(d, 8).ok());
-        if let Some(code) = code {
-            out.push(code);
-            at = at.saturating_add(4);
-        } else {
-            out.push(byte);
-            at = at.saturating_add(1);
-        }
-    }
-    out
-}
-
 /// What every path counts as under when the mount list can't be read: the root, so every path
 /// is remote and refused (fail-closed).
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -295,7 +244,7 @@ fn remote_mounts() -> Vec<PathBuf> {
     table
         .as_deref()
         .ok()
-        .and_then(linux_remote_mounts)
+        .and_then(linux::remote_mounts)
         .unwrap_or_else(|| {
             tracing::warn!("the mount table could not be read; every path counts as remote");
             vec![PathBuf::from(UNKNOWN_MOUNTS)]
@@ -312,12 +261,42 @@ fn remote_mounts() -> Vec<PathBuf> {
     Vec::new()
 }
 
-#[cfg(windows)]
-fn remote_drive(letter: char) -> bool {
-    windows::remote_drive(letter)
+/// The firmlinks, read once and kept (macOS).
+#[cfg(target_os = "macos")]
+fn firmlinks() -> Option<Vec<(String, String)>> {
+    static FIRMLINKS: std::sync::OnceLock<Option<Vec<(String, String)>>> =
+        std::sync::OnceLock::new();
+    FIRMLINKS
+        .get_or_init(|| match std::fs::read_to_string("/usr/share/firmlinks") {
+            Ok(text) => Some(macos_rules::parse_firmlinks(&text)),
+            Err(error) => {
+                tracing::warn!(%error, "the firmlinks could not be read; the data volume's paths are refused");
+                None
+            }
+        })
+        .clone()
 }
 
-#[cfg(not(windows))]
-fn remote_drive(_letter: char) -> bool {
-    false
+/// This system's drive answer: on Windows each letter's device asked once (`QueryDosDeviceW`)
+/// and kept for this `NetEnv`; no drive is remote elsewhere.
+fn remote_drive() -> Box<dyn Fn(char) -> bool + Send> {
+    #[cfg(windows)]
+    {
+        let known = std::sync::Mutex::new([None::<bool>; 26]);
+        Box::new(move |letter: char| {
+            let index = usize::from(u8::try_from(letter).unwrap_or(b'A').saturating_sub(b'A'));
+            let Ok(mut known) = known.lock() else {
+                return true;
+            };
+            match known.get_mut(index) {
+                Some(Some(remote)) => *remote,
+                Some(slot) => *slot.insert(windows::remote_drive(letter)),
+                None => true,
+            }
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(|_| false)
+    }
 }

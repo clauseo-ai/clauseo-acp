@@ -5,7 +5,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::{NetEnv, fold_name, is_network_path, linux_remote_mounts};
+use super::linux::remote_mounts as linux_remote_mounts;
+use super::macos_rules::parse_firmlinks;
+use super::{NetEnv, fold_name, is_network_path};
 
 /// No mounts, no remote drive: only the text decides.
 pub(crate) fn plain_net(windows: bool) -> NetEnv {
@@ -14,6 +16,26 @@ pub(crate) fn plain_net(windows: bool) -> NetEnv {
         fold_case: windows,
         remote_mounts: Vec::new(),
         remote_drive: Box::new(|_| false),
+        macos: false,
+        firmlinks: Some(Vec::new()),
+    }
+}
+
+/// The remote mount points of a Linux mount table (`linux.rs`).
+pub(crate) fn linux_mounts(table: &[u8]) -> Vec<PathBuf> {
+    linux_remote_mounts(table).unwrap()
+}
+
+/// macOS's rules: folded names, the given remote mounts, and the usual firmlinks.
+pub(crate) fn mac_net(remote_mounts: &[&str]) -> NetEnv {
+    NetEnv {
+        fold_case: true,
+        remote_mounts: remote_mounts.iter().map(PathBuf::from).collect(),
+        macos: true,
+        firmlinks: Some(parse_firmlinks(
+            "/Users\tUsers\n/Volumes\tVolumes\n/Applications\tApplications\n/usr/local\tusr/local\n",
+        )),
+        ..plain_net(false)
     }
 }
 
@@ -24,11 +46,11 @@ fn windows_net() -> (NetEnv, Arc<Mutex<Vec<char>>>) {
     let net = NetEnv {
         windows: true,
         fold_case: true,
-        remote_mounts: Vec::new(),
         remote_drive: Box::new(move |letter| {
             seen.lock().unwrap().push(letter);
             letter == 'Z'
         }),
+        ..plain_net(true)
     };
     (net, asked)
 }
@@ -135,7 +157,7 @@ fn a_path_under_a_remote_mount_is_network() {
 }
 
 #[test]
-fn the_linux_mount_table_gives_its_network_mounts() {
+fn the_linux_mount_table_gives_every_mount_not_of_a_local_type() {
     let table = "\
 /dev/nvme0n1p2 / ext4 rw,relatime 0 0
 server:/export /mnt/nfs nfs4 rw,relatime 0 0
@@ -143,12 +165,20 @@ server:/export /mnt/nfs nfs4 rw,relatime 0 0
 user@host:/x /home/a/remote fuse.sshfs rw 0 0
 tmpfs /tmp tmpfs rw 0 0
 //server/s3 /mnt/s3 smb3 rw 0 0
+proc /proc proc rw 0 0
+drvfs /mnt/c 9p rw 0 0
 ";
     let mounts = linux_remote_mounts(table.as_bytes()).unwrap();
-    let want: Vec<PathBuf> = ["/mnt/nfs", "/mnt/my share", "/home/a/remote", "/mnt/s3"]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
+    let want: Vec<PathBuf> = [
+        "/mnt/nfs",
+        "/mnt/my share",
+        "/home/a/remote",
+        "/mnt/s3",
+        "/mnt/c",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
     assert_eq!(mounts, want);
 }
 
