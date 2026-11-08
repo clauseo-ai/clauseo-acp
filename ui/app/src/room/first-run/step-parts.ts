@@ -31,7 +31,7 @@ export const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
   ask: fl(lang, "Windows asks once for permission to set up the Safe workspace."),
   unknown: pw(
     lang,
-    "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
   ),
   setUp: pw(lang, "Set up the Safe workspace"),
   waiting: pw(lang, "Choose Yes in the window Windows shows."),

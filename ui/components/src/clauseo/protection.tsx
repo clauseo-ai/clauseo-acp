@@ -9,7 +9,9 @@
 // (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
 // set-up cause offers its retry beside it ("Set up the Safe workspace", "Try again"; a full pool's
 // "Add room" while it can grow), which leaves the note open: the waiting line stands in the
-// button's place, and a refusal's words under it. The open lock leads it, in concrete: nothing here
+// button's place, and a refusal's words under it. Where the firm requires the Safe workspace, the
+// caller's line for it takes the cause's first line's place: Clauseo doesn't answer there, so no
+// line says it works without the Safe workspace. The open lock leads it, in concrete: nothing here
 // is red.
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
@@ -44,6 +46,7 @@ export function NotProtectedNote({
   open,
   matter,
   why,
+  required = null,
   pool,
   named1385 = false,
   addRoom = false,
@@ -58,6 +61,9 @@ export function NotProtectedNote({
   /** The matter's name as filed. */
   matter: string;
   why: NoteWhy;
+  /** Optional: the firm requires the Safe workspace; its line for the cause, which takes the cause's
+   * first line's place (the caller's: the firm's notice says the same). */
+  required?: string | null;
   /** The pool's counts, for "pool". */
   pool?: NotePool | undefined;
   /** Optional: R17 PR-E names Windows error 1385 inside a failed set-up; its line takes the platform line's place. */
@@ -91,7 +97,7 @@ export function NotProtectedNote({
           [pool.set_aside, p("Still holding files set aside: {n}", { n: pool.set_aside })],
         ]
       : [];
-  const lines: string[] =
+  const causeLines: string[] =
     why === "off"
       ? [
           w.v(
@@ -150,6 +156,10 @@ export function NotProtectedNote({
                           ]
                         : []),
                   ];
+  // the firm's line in the cause's place; the reason lines after it (a platform's refusal, 1385) still stand
+  const lines = required === null ? causeLines : [required, ...causeLines.slice(1)];
+  // the firm's pool line already says to end a conversation in another matter
+  const freeOne = (pool?.open ?? 0) > 0 && required === null;
   // the line beside the installer's button: the button quits Clauseo once the page is open
   const close = onGetInstaller === undefined ? [] : [p(INSTALLER_CLOSE)];
   const retry =
@@ -171,6 +181,7 @@ export function NotProtectedNote({
         className="np-note"
         data-testid="np-note"
         data-cause={why === "setup" ? "set_up_refused" : why}
+        data-required={required !== null}
         title={
           <span className="np-note-title">
             <span className="card-icon np-note-icon">
@@ -200,11 +211,11 @@ export function NotProtectedNote({
             )}
             {/* the ways out: ending a conversation frees a space another open matter holds; under the largest pool,
                 Add room makes 4 more behind Windows' prompt */}
-            {why === "pool" && ((pool?.open ?? 0) > 0 || addRoom) && (
+            {why === "pool" && (freeOne || addRoom) && (
               <span data-testid="np-pool-out">
                 <Say>
                   {[
-                    ...((pool?.open ?? 0) > 0
+                    ...(freeOne
                       ? [p("To free one now, end a conversation in another matter.")]
                       : []),
                     ...(addRoom
