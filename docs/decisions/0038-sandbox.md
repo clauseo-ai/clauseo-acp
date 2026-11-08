@@ -116,13 +116,23 @@ launch stays while it keeps its file ID: the walk's `.git`s and outbound links, 
 repositories, `HEAD` folders (left alone while they stay unshaped) and folders of the watch's
 own walk (one more walk of the matter per launch, before the agent runs). How it watches:
 `FSEvents` on the matter (file events, no defer, 0.1 s latency, a minimal binding to
-CoreServices). Every event re-checks its parent folder's `HEAD`, so a folder of `HEAD` and
-`config` that gets `objects` and `refs` later is caught; a created, renamed-in or cloned folder
-is scanned whole; a dropped or must-scan event, a changed root or a path outside the matter
-rescans it; a stream that can't start falls back to a full scan every 2 s, logged. Scans never
-follow a link, never enter a `.git`, and skip any folder whose `statfs` lacks `MNT_LOCAL`: a
-matter on a network volume is never scanned, which is logged (to become the shared
-`network_paths` rules once #766 lands; whether to refuse such matters is the host's call).
+CoreServices). Each batch of events is first checked by name alone, listing no folder: a `.git`
+anywhere in an event's path, a `HEAD` at its end (unless in a launch folder that held one), or
+an `objects`, `refs` or `commondir` arriving beside a `HEAD` ends the session at once, whether
+or not the item is still there, so a repository renamed into the matter and out again before
+the check still ends it. Only a launch repository that keeps its file ID (the profile makes it
+read-only) and the volume set-aside folder are passed by. An item an event reported that is
+gone by check time is counted, per watch and for the whole host, and logged; a folder renamed in
+and out under a plain name leaves only that count. Past the names, every event re-checks its
+parent folder's `HEAD`, so a folder of `HEAD` and `config` that gets `objects` and `refs`
+later is caught; a created, renamed-in or cloned folder is scanned, within 20,000 listed
+entries for the whole batch: past that the scan stops and the session ends, so a huge folder
+can't hold up the watch while the agent runs (the final scan after the kill has no cap). Any
+find while the agent may run ends the session, gone or not. A dropped or must-scan event, a
+changed root or a path outside the matter rescans it; a stream that can't start falls back to
+a full scan every 2 s, logged. Scans never follow a link, never enter a `.git`, and skip any
+folder whose `statfs` lacks `MNT_LOCAL`. A matter on a volume the stream can't watch is
+handled at build time (below).
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
@@ -192,8 +202,11 @@ set-aside folder and its launch baseline, and the matter's path. The session's o
 it after its final scan, unless the kill's 10 s ran out with a process left. A session whose
 host is gone (or, in this host, whose watch is not running) never ran its final scan, or ran it
 with a process left: its surviving processes are killed by its probe (up to 3 s) and its scan
-runs from its baseline, every folder counted as old, so a repository-shaped folder loses only
-its `HEAD`. That happens at the **host's start**, for every matter (`git_watch_start_up`, which
+runs from its baseline, every folder counted as old. It moves repository shapes only, never a
+folder of the lawyer's around them: each `.git` not the launch's, the `HEAD` of each folder
+that was not a launch repository (a repository-shaped one keeps its `objects` and `refs`),
+each link out and each new `commondir` path. A repository the lawyer made after the crash loses
+its `.git` or `HEAD` the same way, and the notice says where it went. That happens at the **host's start**, for every matter (`git_watch_start_up`, which
 the host calls once on a thread of its own with its git set-aside folder), and at each launch of
 the matter, before the watch takes anything in it for the lawyer's. The record stays while a
 process of it is left, or while the matter can't be found (a disk not plugged in), for the next
@@ -215,13 +228,28 @@ these literals in any letter case on APFS, checked on this Mac). The watch flags
 those paths in the matter.
 
 Each set-aside reaches the launch's sink, uncapped, as `Denial::GitSetAside { path, what,
-outcome, session_ended }`. `notice()` is the lawyer's text: "The AI tool tried to put a code
-repository in the matter at Clients/Acme/.git. Clauseo stopped it and moved it to <path>. If you
-made it yourself, you can move it back: the session has ended." `refusal()` is a line for the
-agent's log. The policy cost, plainly: agents can't clone or init a repository into the matter,
-their temp folder or notes, and a find ends their session. A `.git` or bare repository the
-lawyer makes in the matter while a session runs ends that session too, and the notice says how
-to put it back.
+outcome, session_ended }`. `notice()` is the lawyer's text. The agent runs as the lawyer's
+own user, so no one can tell who made the item, and the notice blames no one: "A Git folder
+appeared in the matter at Clients/Acme/.git while an AI tool was running. Clauseo stopped the
+session and moved it to <path>, because Git folders can run programs when opened. If you put it
+there yourself, you can move it back from there." No other move back is offered. Every path a
+notice or refusal shows has its control characters and bidirectional controls (U+061C, U+200E,
+U+200F, U+202A to U+202E, U+2066 to U+2069) and line separators replaced by `[U+XXXX]`, so a
+crafted name can't break the line or reorder the text. `refusal()` is a line for the agent's
+log. The policy cost, plainly: agents can't clone or init a repository into the matter, their
+temp folder or notes, and a find ends their session. A `.git` or bare repository the lawyer
+makes in the matter while a session runs ends that session too and is moved the same way; so
+does a big folder the lawyer copies in (past the scan budget), though nothing in it moves
+unless it is a repository.
+
+**A matter on a volume the stream can't watch** (no `MNT_LOCAL`, `autofs`, mounted by the
+automounter, or under `/net` or `/Network`; `FSEvents` doesn't report other machines' changes).
+`build()` reads each volume from an open folder (`fstat` and `fstatfs` on one descriptor, the
+nearest existing folder for a path not made yet). It allows such a matter only when no other
+path the agent can write (the state folder, the session's temp folder, notes, the Claude store,
+the browser socket folder) is on the same volume: then nothing can be renamed in from
+elsewhere, and `Policy::matter_watch()` is `MatterWatch::AfterOnly`: the launch runs no live
+stream, only the scans before and after the session. Otherwise it refuses with a plain reason.
 
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than
@@ -443,11 +471,10 @@ given.
   opened handle, with no folding.
 
 Residual risks:
-- **A matter on a network volume is never watched.** The git watch skips every folder whose
-  `statfs` lacks `MNT_LOCAL` (`FSEvents` doesn't report other machines' changes, and a scan
-  over the network is slow), so an agent can leave a repository in such a matter and nothing
-  sets it aside; only the profile's name denies stop a new `.git` or `HEAD` there. Whether to
-  refuse such matters is the host's call.
+- **A matter on a network volume is watched only before and after a session.** While the agent
+  runs only the profile's name denies stop a new `.git` or `HEAD` there; nothing can be renamed
+  in, as `build()` refuses the matter when another path the agent writes shares its volume.
+  Another machine on the network can still change the matter during the session.
 - On FAT32 volumes two siblings can differ only in normalisation (U+0958 and U+0915 U+093C were
   made as two folders on a FAT32 image; on an exFAT image the second form of each of U+0958, ऩ
   and café reported "already exists", as on APFS). A Seatbelt rule that allows one then also
