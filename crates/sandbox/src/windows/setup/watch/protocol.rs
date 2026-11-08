@@ -10,7 +10,8 @@
 //!   checks that the server's pipe is owned by SYSTEM before it reads a byte, as `SetUp`'s
 //!   client does.
 //! - **Descriptor** ([`pipe_sddl`]): owned by SYSTEM, protected, SYSTEM full control and the
-//!   record's owner read only; nobody else, not a pool user. Outbound only. Every instance after
+//!   record's owner read only; nobody else, not a pool user. Duplex, as `PeekNamedPipe` needs read
+//!   access on the server end; the client can't write all the same. Every instance after
 //!   the first is made by this server while another is open (`instances.rs`), and its owner is
 //!   checked; `FILE_FLAG_FIRST_PIPE_INSTANCE` refuses a name someone made first, and
 //!   `PIPE_REJECT_REMOTE_CLIENTS` refuses the network.
@@ -19,7 +20,8 @@
 //!   such line, `{"v":1,"dropped":n}`. A refusal outside every known local volume (a share, a
 //!   web folder, a device with no letter) adds `"net":true` and its `path` is for display
 //!   only: the client must never open or check it, which would reach a server a pool user chose
-//!   with the lawyer's credentials. `net` is optional and false when absent, so `v` stays 1.
+//!   with the lawyer's credentials. `net` is always sent, and read as true when absent (fail
+//!   safe: a path of unknown kind is never opened), so `v` stays 1.
 //!   `dropped` counts the refusals the rate held back, those the consumer's channel had no room
 //!   for, Creates whose name was too long, and the events ETW itself lost. When the event-rate
 //!   breaker trips (`breaker.rs`), `{"v":1,"paused":{"secs":60,"reason":"rate"}}`: no refusal
@@ -114,7 +116,7 @@ pub enum Line {
         /// `read`, `write` or `unknown`.
         access: String,
         /// Not under a known local volume: `path` is for display only.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default = "net_when_absent")]
         net: bool,
     },
     /// Refusals dropped since the last such line.
@@ -138,6 +140,11 @@ pub enum Line {
         /// Always true.
         resumed: bool,
     },
+}
+
+/// `net` when a line leaves it out: true, so a client never opens a path of unknown kind.
+fn net_when_absent() -> bool {
+    true
 }
 
 /// A pause: how long, and why (`rate` today).

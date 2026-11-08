@@ -358,7 +358,7 @@ fn lines_are_one_json_object_each_and_parse_back() {
     assert_eq!(
         line,
         "{\"v\":1,\"sid\":\"S-1-5-21-1-2-3-1003\",\"pid\":1234,\
-         \"path\":\"C:\\\\Users\\\\a b\\\\c.txt\",\"access\":\"write\"}\n"
+         \"path\":\"C:\\\\Users\\\\a b\\\\c.txt\",\"access\":\"write\",\"net\":false}\n"
     );
     assert_eq!(
         Line::parse(line.trim_end()),

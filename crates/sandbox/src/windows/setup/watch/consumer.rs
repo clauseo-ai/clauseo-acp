@@ -15,7 +15,9 @@
 //! ([`Counts::unknown_version`]), which the watcher logs once, as a count.
 //!
 //! Each Create keeps its `EventHeader.TimeStamp`; an `OperationEnd` stamped before the waiting
-//! Create of its `Irp` belongs to an earlier use of the IRP and pairs with nothing. A pool
+//! Create of its `Irp` belongs to an earlier use of the IRP and pairs with nothing; a waiting
+//! Create more than [`STALE_AFTER_SECONDS`] older than the end is stale, dropped unpaired (an
+//! end that arrives before its own Create can't pair with an old entry). A pool
 //! Create whose `FileName` is over [`MAX_NAME_UNITS`] is dropped, not truncated, and counted in
 //! what the clients are told was dropped.
 //!
@@ -38,6 +40,10 @@ pub const CREATE_ID: u16 = 12;
 pub const END_ID: u16 = 24;
 /// `STATUS_ACCESS_DENIED`.
 pub const ACCESS_DENIED: u32 = 0xC000_0022;
+/// The oldest a waiting Create may be, against the end being paired, in seconds of its stamp.
+pub const STALE_AFTER_SECONDS: i64 = 2;
+/// The stamps' rate until the trace gives its own: QPC at 10 MHz, as Windows 10 and later run it.
+pub const DEFAULT_STAMP_RATE: i64 = 10_000_000;
 /// The most pool Creates waiting for their `OperationEnd`.
 pub const PENDING_CAP: usize = 4096;
 /// The longest `FileName` kept, in UTF-16 units.
@@ -282,6 +288,8 @@ pub struct Pairing {
     order: VecDeque<(u64, u64)>,
     next: u64,
     cap: usize,
+    /// [`STALE_AFTER_SECONDS`] in stamp ticks.
+    stale_ticks: i64,
 }
 
 impl Pairing {
@@ -292,6 +300,7 @@ impl Pairing {
             order: VecDeque::new(),
             next: 0,
             cap: cap.max(1),
+            stale_ticks: STALE_AFTER_SECONDS * DEFAULT_STAMP_RATE,
         }
     }
 
@@ -349,10 +358,14 @@ impl Pairing {
     /// refused. One stamped before the waiting Create ends an earlier use of the IRP: the
     /// Create keeps waiting.
     fn end(&mut self, end: End, stamp: i64) -> Option<Pending> {
-        if self.pending.get(&end.irp)?.stamp > stamp {
+        let waiting = self.pending.get(&end.irp)?.stamp;
+        if waiting > stamp {
             return None;
         }
         let pending = self.pending.remove(&end.irp)?;
+        if stamp.saturating_sub(waiting) > self.stale_ticks {
+            return None;
+        }
         (end.status == ACCESS_DENIED).then_some(pending)
     }
 }
@@ -410,6 +423,13 @@ impl Consumer {
     /// How many pool Creates wait.
     pub fn pending(&self) -> usize {
         self.pairing.len()
+    }
+
+    /// The stamps' ticks a second (the trace's `PerfFreq`); a rate of zero or less is ignored.
+    pub fn set_stamp_rate(&mut self, ticks_per_second: i64) {
+        if ticks_per_second > 0 {
+            self.pairing.stale_ticks = STALE_AFTER_SECONDS.saturating_mul(ticks_per_second);
+        }
     }
 
     /// Forgets every pending Create: the breaker paused the trace, so their ends won't come.

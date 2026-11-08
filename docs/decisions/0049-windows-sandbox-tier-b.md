@@ -1945,7 +1945,9 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
   Create pairs with the next OperationEnd of its `Irp`. The pending map holds at most 4,096,
   oldest evicted. `Status == 0xC0000022` makes a record. Each pending Create keeps its
   `EventHeader.TimeStamp`. An OperationEnd stamped before it ends an earlier use of the IRP
-  (real-time buffers are per CPU, so delivery can be out of order), and pairs with nothing.
+  (real-time buffers are per CPU, so delivery can be out of order), and pairs with nothing. A
+  waiting Create more than 2 s older (QPC, at the trace's `PerfFreq`) than the end is stale: it
+  is dropped unpaired, so an end that arrives before its own Create can't pair with an old one.
 - **Versions.** Only Create v1 and OperationEnd v0 are read, the versions the spike recorded on
   WS2025 26100 and the offsets were written for. Any other version is skipped and counted, and
   the count is logged once as the consumer ends (a count only).
@@ -1973,7 +1975,9 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
 - **Descriptor:** `O:SYD:P(A;;FA;;;SY)(A;;FR;;;<OwnerSid>)S:(ML;;NWNR;;;ME)`. Only the record's
   owner may open it, read only. The first instance uses `FILE_FLAG_FIRST_PIPE_INSTANCE`, every
   instance uses `PIPE_REJECT_REMOTE_CLIENTS`, and at most 8 instances exist. It is
-  `PIPE_ACCESS_OUTBOUND`: the server only writes.
+  `PIPE_ACCESS_DUPLEX`, because `PeekNamedPipe` (how the server sees a client leave) needs read
+  access on the server end. Clients still can't write: the DACL gives them `FR`. A
+  `PeekNamedPipe` refused for access exits 74 rather than drop every client unseen.
 - **The instances never reach zero** (`instances.rs`). A name lives while one instance is open.
   At zero, a pool user spinning on `CreateNamedPipeW` with the published name could make the next
   instance under their own descriptor and read every refusal. So an accepted listener leaves the
@@ -2002,14 +2006,16 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
 - **Lines.** UTF-8 JSON, one per `\n`. A refusal is `{"v":1,"sid":"S-1-5-21-…","pid":1234,
   "path":"C:\\…","access":"read"|"write"|"unknown"}`. What the rate dropped since the last
   such line is `{"v":1,"dropped":n}`. `read` is reserved: this side never sends it today. A
-  refusal flagged as network adds `"net":true`. The field is optional and false when absent, so
-  `v` stays 1. `protocol::Line::parse` reads both and refuses other versions. The client never
-  writes.
+  refusal carries `"net"`, always sent, and read as true when absent (fail safe: a path of
+  unknown kind is never opened), so `v` stays 1. `protocol::Line::parse` reads every line and
+  refuses other versions. The client never writes.
 - **Rate.** At most 200 refusals a second at the source. The rest, any the consumer's
   1,024-record channel had no room for, the long names it dropped, and what ETW itself lost go
   as one `dropped` line when the second ends. ETW's losses come from a `ControlTraceW`
   (`EVENT_TRACE_CONTROL_QUERY`) every 5 s: what `EventsLost` and `RealTimeBuffersLost` grew
-  by. A lost event may have been a refusal. The
+  by. A lost event may have been a refusal. `dropped` overstates: a lost buffer held many
+  events but counts as one more, and both ETW counters cover every account's events, not only
+  the pool's. The
   runner's own cap is 20 a second.
 
 **Lifetime** (`lifetime.rs`, the orchestrator's condition). The watcher runs only while a
@@ -2063,6 +2069,11 @@ on average), so it should trip on a long `npm ci` and never on editing. When
 second's rate, a number a line with no path, so W12 can set the final constant from the
 distribution. A pause that can't disable or re-enable the provider exits 73.
 
+**Accepted trade-off: a pool user can keep the breaker tripped.** An agent that makes files
+fast enough keeps the reports dark about 60 of every 70 seconds. Only the reports go dark, never
+the enforcement: the kernel refuses the same opens, and each pause is announced to the client
+(`paused`), which can say so.
+
 **Exit codes** (`WatchExit`; 68, then from 70; 69 is SetUp's):
 
 | Code | Meaning |
@@ -2080,7 +2091,7 @@ distribution. A pause that can't disable or re-enable the provider exits 73.
 
 | Row | Check | Result |
 |---|---|---|
-| W1 | Lifetime after a run ends: the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | open |
+| W1 | Lifetime after a run ends: a client stays connected past 3 polls and receives a probe line (the server end can `PeekNamedPipe`); then the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | open |
 | W2 | Lifetime after a crash: kill the watcher with `taskkill /f`; the session is left; the next `--watch` stops it first, and `--remove` stops it | open |
 | W3 | Defender (RTP on, no exclusions) and an EDR if available: no detection, no alert for the session or the task | open |
 | W4 | Windows 10 22H2 Home and Windows 11 Home: the task registers, the session starts, refusals arrive with the SID item, Create is v1 and OperationEnd v0, and no "unknown version" line is logged (the count is 0) | open |
