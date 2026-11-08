@@ -265,6 +265,10 @@ pub trait Sweeper: Gate + Bits + Record {
     /// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree`, read
     /// only, the 64-bit view), as its path; `Err` when a key can't be read, or past the cap.
     fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed>;
+    /// The owner of the task at `path` (`\A\name`), from the security descriptor its cache
+    /// key holds (`TaskCache\Tree\<path>`, its `SD` value, `REG_BINARY`, read only, the 64-bit
+    /// view); `Err` when the key or value is missing or can't be read, or names no owner.
+    fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
