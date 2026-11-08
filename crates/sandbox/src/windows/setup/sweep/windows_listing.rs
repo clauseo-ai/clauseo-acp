@@ -58,13 +58,11 @@ pub(super) fn task_files(system: &Path) -> Result<Vec<String>, Failed> {
     }
     let tasks = listable(&root, &wide("Tasks"))?;
     let mut stack = vec![(String::new(), tasks)];
-    let mut folders = 0_usize;
+    // Counted, and capped, before a folder's handle is opened: the stack holds one open handle
+    // per folder in it, so a wide folder can't open more than the cap.
+    let mut folders = 1_usize;
     let mut paths = Vec::new();
     while let Some((path, folder)) = stack.pop() {
-        folders += 1;
-        if folders > FOLDERS_CAP {
-            return Err(format!("more than {FOLDERS_CAP} folders below Tasks"));
-        }
         let children = folder
             .children()
             .map_err(|error| format!("a folder below Tasks couldn't be listed ({error})"))?;
@@ -76,6 +74,10 @@ pub(super) fn task_files(system: &Path) -> Result<Vec<String>, Failed> {
                 .map_err(|_not_text| "a name below Tasks isn't UTF-16 text".to_owned())?;
             let at = format!("{path}\\{name}");
             if child.folder {
+                folders += 1;
+                if folders > FOLDERS_CAP {
+                    return Err(format!("more than {FOLDERS_CAP} folders below Tasks"));
+                }
                 stack.push((at, listable(&folder, &child.name)?));
             } else {
                 paths.push(at);
