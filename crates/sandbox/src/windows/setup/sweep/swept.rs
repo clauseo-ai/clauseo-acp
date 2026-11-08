@@ -1,9 +1,11 @@
 //! What the task walk (step 4) did, counted ([`Swept`]), and the run's one log line
-//! ([`log_line`]): counts only, never a path, task name or SID.
+//! ([`log_line`]): counts, and the paths of at most five tasks that keep the run at 56,
+//! cleaned ([`log_path`]: SIDs redacted, control and formatting characters replaced, capped);
+//! never another task's path, nor a SID.
 
 use std::collections::BTreeMap;
 
-use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
+use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs, log_path};
 #[cfg(doc)]
 use super::{running, unlisted};
 
@@ -69,7 +71,8 @@ pub struct Swept {
     /// Folders below `Tasks` or cache keys gone while they were listed, left out of it, and
     /// still gone when checked once more.
     pub vanished: usize,
-    /// Each hidden task's path, where it was read: never logged, for the tests.
+    /// Each hidden task's path, where it was read, for the tests (logged through
+    /// [`Swept::left_paths`]).
     pub hidden_paths: Vec<String>,
     /// Tasks the second walk listed that the first didn't, held to the first walk's check.
     pub arrived: usize,
@@ -82,9 +85,18 @@ pub struct Swept {
     /// that isn't the pool's, skipped though the owner their cache key's `SD` names couldn't
     /// be read (unreadable, ownerless, over its cap).
     pub odd_sd_skipped: usize,
+    /// The path of each task that keeps the run at 56, where it was read: logged, cleaned and
+    /// capped ([`log_path`]).
+    pub left_paths: Vec<String>,
 }
 
 impl Swept {
+    /// How many tasks the walk found that keep the run at 56: unreadable, unresolved, naming no
+    /// one, or the pool's and not deleted.
+    pub(super) fn left_tasks(&self) -> usize {
+        self.unreadable + self.unresolved + self.no_principal + self.not_deleted
+    }
+
     /// Whether a task of the pool's may be left: step 4's 56.
     pub fn left(&self) -> bool {
         self.unreadable > 0
@@ -145,13 +157,14 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
     } else {
         String::new()
     };
+    let left = log_path::listed(&swept.left_paths);
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file, and {} with an odd descriptor), {} with no user or group, {} unresolved (no SID, \
          not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
          not listed (in a task file or the cache only), {} running instances stopped, {} not, \
-         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
+         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}{left}",
         swept.folders,
         swept.tasks,
         swept.deleted,

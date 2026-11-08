@@ -37,8 +37,9 @@
 //! A folder or key that vanishes while listed is left out of its listing, never failing it,
 //! and checked once more after the judged read: one there again is 56 ([`Swept::reappeared`]);
 //! only one still gone is skipped and counted. A listing that can't be read on the judged read
-//! is 56. The log line counts each kind, never a path or SID. Nothing is deleted through a file
-//! or the registry: a hidden task is left, and the run fails closed.
+//! is 56. The log line counts each kind, and names the paths of the tasks that keep it at 56,
+//! cleaned ([`super::log_path`]). Nothing is deleted through a file or the registry: a hidden
+//! task is left, and the run fails closed.
 //!
 //! [`Swept::reappeared`]: super::Swept::reappeared
 
@@ -143,7 +144,7 @@ fn listed_again<S: Sweeper>(
         for task in fs.tasks(&folder)? {
             let at_path = running::task_path(&path, &task.name);
             let known = first.contains(at_path.as_str()) || holds(fs, listed, &at_path) == Ok(true);
-            again.push(at_path);
+            again.push(at_path.clone());
             if known {
                 continue;
             }
@@ -158,6 +159,7 @@ fn listed_again<S: Sweeper>(
             sweep_task(fs, &folder, task, one);
             if at.swept.pool_paths.len() > pool_before {
                 at.swept.arrived_pool += 1;
+                at.swept.left_paths.push(at_path);
             }
         }
         for sub in fs.subfolders(&folder)? {
@@ -263,10 +265,12 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
             Ok(false) => swept.vanished += 1,
             Ok(true) => {
                 swept.reappeared += 1;
+                swept.left_paths.push(path);
                 swept.note(REAPPEARED.to_owned());
             }
             Err(why) => {
                 swept.reappeared += 1;
+                swept.left_paths.push(path);
                 swept.note(why);
             }
         }
@@ -319,6 +323,7 @@ fn judge<S: Sweeper>(fs: &mut S, views: Views, at: Walk<'_>) {
         };
         if let Err(why) = judged {
             swept.hidden += 1;
+            swept.left_paths.push(path.clone());
             swept.hidden_paths.push(path);
             swept.note(why);
         }

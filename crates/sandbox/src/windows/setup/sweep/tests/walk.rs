@@ -77,14 +77,15 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     fake.jobs = Ok(vec![Some(sid(1010)), None]);
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
     let line = &fake.logged[0].1;
+    // Only the tasks that keep it at 56 are named, by path; never a task deleted or skipped,
+    // a SID or an account's name.
+    let named =
+        r"; tasks that keep the sweep at 56: \Secret\Stuck, \Secret\Unread, \Secret\Unresolved";
+    assert!(line.ends_with(named), "{line}");
     for secret in [
         "S-1-",
-        "Secret",
         "MatterTask",
-        "Stuck",
-        "Unread",
         "Skipped",
-        "Unresolved",
         "ClauseoSb",
         "CORP",
         "unknown",
@@ -92,7 +93,7 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     ] {
         assert!(!line.contains(secret), "{secret}: {line}");
     }
-    // Counts only.
+    // And the counts.
     assert!(
         line.contains("1 of the pool's tasks deleted, 1 unreadable (0 more skipped"),
         "{line}"

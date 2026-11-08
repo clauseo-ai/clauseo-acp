@@ -11,6 +11,7 @@ use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
 mod file_owner;
+mod log_path;
 mod principals;
 mod record;
 mod running;

@@ -2093,8 +2093,9 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    56 too. The log line counts hidden tasks ("not listed (in a task file or the cache only)")
    and, when the listings were read again, each kind: tasks in both, task files alone and how
    many were ignored, cache keys alone and how many were ignored, folders or keys gone while
-   listed and still gone or there again, and tasks new to the second walk and how many were
-   the pool's, never a path or SID;
+   listed and still gone or there again, tasks new to the second walk and how many were the
+   pool's, and hidden tasks skipped by their file despite an odd descriptor. It names no
+   path but those of the tasks that keep the run at 56 (below), and no SID;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
@@ -2120,10 +2121,17 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
 
 It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
 process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
-Event Log line with counts only (pool users, folders and tasks read, the pool's tasks deleted,
+Event Log line of counts (pool users, folders and tasks read, the pool's tasks deleted,
 unreadable, skipped and not deleted, running instances stopped and not, BITS jobs cancelled
-and not), with
-no path, task name or SID, since every local user can read the Application log. A refusal
+and not). Since every local user can read the Application log, it names no task but those
+that keep the run at 56 (a hidden task, a pool task not deleted, an unreadable or unresolved
+one or one naming no one, a folder or key there again, a pool task new to the second walk),
+so an administrator can find what blocks launches: at most 5 a run, then `(+k more)`, each
+path cleaned by `sweep::log_path` (every `S-1-<digits>(-<digits>)+` run is `<sid>`, as
+vendors' task names embed a user's SID, as OneDrive's do; every C0, C1 and DEL control
+character and every bidi or invisible formatting character, U+200B to U+200F, U+202A to
+U+202E, U+2066 to U+2069, U+061C and U+FEFF, is `?`; cut at 260 characters, then `…`). It
+names no SID and no account. A refusal
 that comes from a value that isn't a SID (a record value, a `REG_MULTI_SZ` of SIDs) says so in
 fixed words (`sids::NOT_A_SID`, "the list holds a string that isn't a SID", "the list holds
 a SID twice"), never the value: the stop's and the gate's lines take those messages as they
@@ -2167,8 +2175,8 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   0: an administrator deletes the task (or the folders, or the stray file or junction), after
   which the next launch's sweep completes, or runs `--remove` (with no pool recorded there is
   nothing to sweep). The Application log's sweep line says which count is non-zero (unreadable,
-  not listed, folders not listed), never which task. A task the file shows isn't the pool's no
-  longer blocks.
+  not listed, folders not listed) and names up to five of the tasks that keep it at 56. A
+  task the file shows isn't the pool's no longer blocks.
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
