@@ -177,6 +177,22 @@ jobs:
             ForEach-Object { "PROC $($_.Id) $($_.ProcessName) $($_.UserName)" }
           Get-CimInstance Win32_UserProfile | Where-Object LocalPath -like '*ClauseoSb*' |
             ForEach-Object { "PROFILE $($_.LocalPath) loaded=$($_.Loaded) sid=$($_.SID)" }
+          # EXPERIMENT: who owns data\ and data\sandbox\ before --remove, and what the token is.
+          foreach ($d in @((Join-Path $env:EMU_ROOT 'data'), (Join-Path $env:EMU_ROOT 'data\sandbox'))) {
+            if (Test-Path $d) {
+              "OWNER $d = $((Get-Acl $d).Owner)"
+              icacls $d /q | ForEach-Object { "ACLQ $_" }
+            } else { "OWNER $d missing" }
+          }
+          $me = [Security.Principal.WindowsIdentity]::GetCurrent()
+          "TOKEN user=$($me.Name) sid=$($me.User.Value) builtin_admin=$($me.User.Value.EndsWith('-500'))"
+          "TOKEN owner_default=$($me.Owner.Translate([Security.Principal.NTAccount]).Value) ($($me.Owner.Value))"
+          "TOKEN elevated=$(([Security.Principal.WindowsPrincipal]$me).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          whoami /groups | Select-String 'Mandatory Label|BUILTIN.Administrators' | ForEach-Object { "TOKEN group $($_.Line.Trim())" }
+          $pol = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
+          foreach ($n in 'EnableLUA', 'FilterAdministratorToken', 'ConsentPromptBehaviorAdmin', 'LocalAccountTokenFilterPolicy') {
+            "UAC $n=$($pol.$n)"
+          }
           $exe = "target\$env:TARGET\debug\examples\s15_launch_vm.exe"
           if (Test-Path $exe) { & $exe cleanup --root $env:EMU_ROOT 2>&1 }
 
