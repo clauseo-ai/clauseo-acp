@@ -46,12 +46,16 @@ impl Reach {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    #[cfg(unix)]
+    use std::path::PathBuf;
 
     use super::Reach;
     use crate::network_paths::NetEnv;
     use crate::network_paths::resolve::Disk;
-    use crate::network_paths::resolve::tests::{Fake, FakeFs};
+    #[cfg(unix)]
+    use crate::network_paths::resolve::tests::Fake;
+    use crate::network_paths::resolve::tests::FakeFs;
     use crate::network_paths::tests::plain_net;
 
     fn reach(net: NetEnv, matter: &str) -> Reach {
@@ -73,6 +77,7 @@ mod tests {
 
     /// A network path, or a local link to one, is never looked at past the link; nor is a path
     /// in a matter kept on a share, nor another server's; a local path is walked as before.
+    #[cfg(unix)]
     #[test]
     fn the_guard_never_looks_at_a_network_path_an_agent_names() {
         let local = reach(plain_net(false), "/home/a/matter");
@@ -89,6 +94,12 @@ mod tests {
             .collect();
         assert!(past.is_empty(), "{past:?}");
         assert!(may(&local, "/home/a/matter/brief.docx", &fs));
+    }
+
+    /// In a matter kept on a share nothing is looked at: not a path in it, not a relative one,
+    /// not another server's (on every system: Windows' forms, no local path).
+    #[test]
+    fn the_guard_never_looks_at_a_path_in_a_share_matter() {
         let share = reach(plain_net(true), r"\\srv\share\matter");
         let none = FakeFs::default();
         for path in [
@@ -103,6 +114,7 @@ mod tests {
 
     /// The guard gets the walked path back, links followed and `..` taken, and uses it from
     /// then on: the agent's text is never resolved again.
+    #[cfg(unix)]
     #[test]
     fn the_guard_uses_the_walked_path() {
         let local = reach(plain_net(false), "/home/a/matter");

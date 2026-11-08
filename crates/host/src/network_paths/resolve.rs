@@ -260,7 +260,7 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
 /// rejects (`InvalidFilename`; on Windows `ERROR_INVALID_NAME` and `ERROR_BAD_PATHNAME`, which a
 /// shell word with `*` or `?` or a URL's `:` gets). Nothing past such a name is opened, so the
 /// walk keeps it as written and still checks every later name.
-fn no_such_name(error: &io::Error) -> bool {
+pub(crate) fn no_such_name(error: &io::Error) -> bool {
     /// `ERROR_INVALID_NAME` and `ERROR_BAD_PATHNAME` (`winerror.h`).
     const WINDOWS_BAD_NAME: [i32; 2] = [123, 161];
     matches!(

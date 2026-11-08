@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 use super::network_tests::{fence, look, refused, windows_net};
 use crate::network_paths::NetEnv;
-use crate::network_paths::resolve::tests::{Fake, FakeFs};
+#[cfg(unix)]
+use crate::network_paths::resolve::tests::Fake;
+use crate::network_paths::resolve::tests::FakeFs;
 use crate::network_paths::tests::{mac_net, plain_net};
 
 /// Linux's rules with the mounts of a table that has an autofs and a gvfs mount.
@@ -170,6 +172,7 @@ fn every_loopback_and_self_form_is_refused_as_unc() {
 /// An 8.3 short name is walked: on a local drive it is put in its long form by the walk's
 /// canonical step, and a name with `~` and a digit is an ordinary name; an alias of the data
 /// folder, or of a folder in it, is still caught (by the long form, or by identity).
+#[cfg(unix)]
 #[test]
 fn a_short_name_is_walked_and_an_alias_of_the_data_folder_still_caught() {
     let net = windows_net();
@@ -206,6 +209,7 @@ fn a_short_name_is_walked_and_an_alias_of_the_data_folder_still_caught() {
 
 /// The firmlinks put a data volume path in its root form; when they can't be read, every data
 /// volume path is refused.
+#[cfg(unix)]
 #[test]
 fn a_data_volume_path_takes_its_firmlinked_form() {
     let fs = FakeFs::default();
@@ -261,6 +265,7 @@ fn a_deny_folds_dotless_and_dotted_i_and_an_allow_does_not() {
 
 /// A local path is in the data folder when it or a folder above it is the data folder by
 /// identity, whatever its text.
+#[cfg(unix)]
 #[test]
 fn a_path_into_the_data_folder_by_another_spelling_is_refused_by_identity() {
     let mut fs = FakeFs::with(&[("/alias/x", Fake::File), ("/other/x", Fake::File)]);
