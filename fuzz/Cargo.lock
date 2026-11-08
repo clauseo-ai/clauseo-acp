@@ -380,6 +380,7 @@ dependencies = [
  "memchr",
  "nix",
  "thiserror",
+ "tracing",
  "windows",
 ]
 
