@@ -203,17 +203,35 @@ build 26100):
     and new paths, the reason, the owner, the time and the matter). The running page shows them
     (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free.
   - **A matter on another drive.** A rename can't cross volumes, so what is set aside out of a
-    matter on another drive than Clauseo's data folder goes to a private folder at that drive's
-    root, `<volume>\.clauseo-set-aside` (`set-aside\<matter>\<pass>\...` inside it). Each
-    launch makes that folder, and each move checks it again, the way the sandbox folder is made
-    and checked: a link is refused, and another owner is replaced or the folder is refused. Its
-    protected permissions give full access to the lawyer and SYSTEM only, and deny the pool group
-    `ClauseoSandboxUsers`. If the drive can't hold such a folder (read-only, FAT or exFAT with no
-    permissions, or it can't be secured), the launch is refused
-    (`SetAsideFailure::DriveFolder`: "Clauseo can't make a private folder on the matter's drive
-    for what it moves out of the matter"). Nothing else refuses a matter on another drive, and no
-    repository is left in place. The manifest, record and lock stay in the data folder; a restore
-    trusts an entry's folder only when it is the sandbox folder or its own drive's.
+    matter on another drive than Clauseo's data folder goes to the lawyer's private folder at
+    that drive's root, `<volume>\.clauseo-set-aside-<lawyer's SID>` (`set-aside\<matter>\<pass>\...`
+    inside it), so each Windows user of the machine has their own and never meets another's.
+    Each launch makes that folder, and each move checks it again, the way the sandbox folder is
+    made and checked: a link is refused. Its protected permissions give full access to the lawyer
+    and SYSTEM only, and deny the pool group `ClauseoSandboxUsers`. If the drive can't hold such
+    a folder (read-only, FAT or exFAT with no permissions, a link at its name), the launch is
+    refused (`SetAsideFailure::DriveFolder`: "Clauseo can't make a private folder on the matter's
+    drive for what it moves out of the matter"). Nothing else refuses a matter on another drive,
+    and no repository is left in place. The manifest, record and lock stay in the data folder; a
+    restore trusts an entry's folder only when it is the sandbox folder or this lawyer's folder
+    on the item's own drive, by its SID-named path.
+  - **A squatted drive folder.** Anyone who can make a folder at a drive's root (another user,
+    or a pool user before the launch) can make the lawyer's first. The launch never takes one
+    another account owns back (its owner could hold handles into it, or have filled it): it is
+    refused (`SetAsideFailure::DriveFolderNotYours`). The refresh task, as SYSTEM, heals it for
+    each lawyer the record names (`OwnerSid`, a per-user `AdminCopyOwner`) on each local fixed
+    or removable drive, with nothing the lawyer or a squatter writes choosing what it touches
+    (`set_aside/heal.rs`, `private_dir/drive/heal.rs`). It opens the folder itself
+    (`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`), refuses a reparse point or a
+    file read from that handle (`FileAttributeTagInfo`), makes SYSTEM its owner with a protected,
+    non-inheritable DACL of SYSTEM and Administrators written on the handle alone
+    (`SetKernelObjectSecurity`; `SetSecurityInfo` would push entries down into the contents),
+    renames it by the same handle in place to `<name>.squatted-<UTC second>`
+    (`NtSetInformationFile`, no root, a bare name), and makes the lawyer's folder afresh, owned
+    by the lawyer with the drive DACL. Nothing inside is opened, listed or moved; one Event Log
+    line names the drive, the SIDs and the new name. Follow-ups: the launch's Preparing state
+    asking for the run (`request_admin_refresh`) and retrying on `DriveFolderNotYours`, and a
+    volume mounted on a folder, with no letter, which the heal doesn't visit.
     `OtherVolume` stays for a rename that still crosses volumes (a volume mounted on a folder
     inside the matter).
   - **Repository shapes at exit.** A git folder needs no `.git` name: a folder holding `HEAD`
@@ -503,9 +521,8 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   launch isn't write-denied by the launch walk, so an agent could edit its hooks with no name
   made; PR #784 makes every folder holding a `HEAD` at launch whole-tree read-only in the
   Windows plan, which covers it once merged. A `commondir` naming a folder outside the matter
-  isn't watched. The drive folder `.clauseo-set-aside` holds no SID in its name, so a second
-  Windows user of the machine finds the first one's there and their launch on that drive is
-  refused; the uninstaller and forget know only the data folder's set-aside (follow-ups).
+  isn't watched. The uninstaller and forget know only the data folder's set-aside, not the
+  drive folders (a follow-up).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
