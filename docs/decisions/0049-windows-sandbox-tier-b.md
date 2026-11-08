@@ -2295,8 +2295,12 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   (`S-1-5-32-544`) or `TrustedInstaller`, **and** whose principal may be the lawyer. That
   means the record's `OwnerSid`, a group that may hold the lawyer, or a name that resolves to
   no SID. A group that may hold the lawyer is one outside `S-1-5-21` (Users, Everyone,
-  Administrators, …), or a local group whose members include the lawyer or such a group; a
-  failed lookup counts as yes. A task the lawyer or any other user owns is never touched, and
+  Administrators, …), or a local group whose members include the lawyer, such a group, or any
+  group or SID whose kind can't be read: a nested group (Domain Users in a custom local group,
+  say) may hold the lawyer, and its own members aren't read. A failed lookup counts as yes.
+  `harden_loose_tasks` counts a task whose principal can't be read (`principal_unreadable`,
+  in its log line) rather than passing over it silently; the sweep counts those as unreadable
+  already (56). A task the lawyer or any other user owns is never touched, and
   neither is one that runs as SYSTEM, a service account, a pool user or another user.
 - **The change:** from each allow in its DACL that gives a right to rewrite the task
   (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_WRITE_EA`, `FILE_WRITE_ATTRIBUTES`,
@@ -2311,10 +2315,16 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   which only an added DACL would close, is counted as not hardened. `WRITE_OWNER` counts as
   write because an owner holds `WRITE_DAC`; `DELETE` alone doesn't, since deleting the task
   runs nothing as the lawyer.
-- **The write:** through the task's own interface. `IRegisteredTask::GetSecurityDescriptor`
-  reads the owner, group, DACL and SACL, and `SetSecurityDescriptor` writes them back with
+- **The write:** through the task's own interface. Whether a task needs hardening is told from
+  `IRegisteredTask::GetSecurityDescriptor` without the SACL (owner, group and DACL, no
+  privilege needed). A task that needs nothing is never counted as a failure; one whose
+  descriptor can't be read even so is counted apart (`couldn't be read`). Only a task that
+  needs it is read whole, SACL included, with `SeSecurityPrivilege` enabled; if that read
+  fails, nothing is written and the task counts as not hardened. The whole descriptor read is
+  tightened again and written back by `SetSecurityDescriptor` with
   `TASK_DONT_ADD_PRINCIPAL_ACE` (without it the Task Scheduler adds an allow for the
-  principal), `SeSecurityPrivilege` enabled for the two calls alone. MS-TSCH's
+  principal), its owner, group and SACL exactly as read. It is then read back: an owner, group
+  or SACL that changed counts the task as not hardened, and the log says which. MS-TSCH's
   `SchRpcSetSecurity` doesn't say how a descriptor missing a part is applied, so all four
   parts are always written.
 - **When:** in every sweep, inside the walk (SYSTEM), and once at set-up, right after the stop
@@ -2324,16 +2334,32 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   Once the SYSTEM set-up task (`SandboxSetUp`, #733) lands, the set-up call can move there.
   The same walk is `pub(crate) fn harden_loose_tasks`, which the pre-logon SYSTEM check (a
   later PR) must call at every session's start (follow-up below).
-- **Log:** each task hardened, with the SIDs that lost which rights, and each that couldn't be,
-  with why, go to the admin-only log, its path cleaned as the 56 paths are. The world-readable
-  line gets the two counts only. Set-up's administrator can't make that log (it is created
-  `O:SY`), so set-up appends only to one already there that passes the same checks. Set-up has
-  no other admin-only log: its result file is the lawyer's and the Event Log is every user's.
-  So otherwise set-up logs the counts alone.
+- **Log:** each task hardened goes to the admin-only log, its path cleaned as the 56 paths are,
+  with the SIDs that lost which rights and its DACL before the change as SDDL (the `D:` part
+  `GetSecurityDescriptor` gave), so IT can undo it by hand. Each task that couldn't be
+  hardened or read goes there too, with why. The world-readable line gets the counts only.
+  Set-up's administrator can't make a file owned by SYSTEM, so when the log or its folders are
+  missing set-up makes them owned by Administrators with the same DACL
+  (`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)`, and `Sandbox` likewise). Both writers accept a log owned
+  by SYSTEM or Administrators whose protected DACL is exactly full control for SYSTEM and for
+  Administrators, nothing for Users (`log_path::admin_only`), and the SYSTEM sweep keeps
+  appending to one set-up made.
+- **Firm-IT notes:** "At each session end and at set-up, Clauseo (as SYSTEM) removes write,
+  delete and permission-change rights held by Users, Everyone, Authenticated Users,
+  INTERACTIVE and similar groups from scheduled tasks owned by SYSTEM, Administrators or
+  TrustedInstaller that run as the Clauseo user or a group containing them. Read and run rights
+  are kept, nothing is added, and each change is logged in `sweep-admin.log` with the original
+  permissions."
 - **Never 56:** hardening isn't a failure, and a failed one (`SetSecurityDescriptor` refused, a
-  descriptor that can't be read) is logged and counted, still not 56. Option 3, fingerprinting
-  such tasks and refusing launches when one changes, stays in reserve. Whether any task on a
+  descriptor that can't be read) is logged and counted, still not 56. Whether any task on a
   real machine needs hardening is not measured; the rule is there because modification isn't.
+- **What it doesn't undo:** hardening at a session's end closes a loose task for the *next*
+  session. It doesn't undo a change a pool user made to that task *during* the session: those
+  actions stay rewritten, and run as the lawyer at the task's next trigger. #757 alone leaves
+  that window open. It closes with the run-group PR: a SandboxSetUp `PrepareRun` pipe operation
+  runs `harden_loose_tasks` before every logon and refuses the launch with `loose_task` when
+  hardening fails, and a per-run fingerprint check of the tasks that run as the lawyer sets a
+  sticky `loose_task` block when one changed during a run.
 
 It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
 process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
@@ -2419,10 +2445,13 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
-- **Follow-up: the pre-logon SYSTEM check hardens too.** The check the kernel-process-list PR
-  adds (below) must call `sweep::harden::harden_loose_tasks` at every session's start, so a task
-  loosened since the last sweep is closed before the session can use it. Until then a task
-  loosened during a session stays open until that session's end-of-session sweep.
+- **Follow-up: pre-logon hardening and the run fingerprint (the run-group PR).** SandboxSetUp's
+  `PrepareRun` pipe operation must call `sweep::harden::harden_loose_tasks` before every
+  logon and refuse the launch with `loose_task` when hardening fails; a per-run fingerprint
+  check of the tasks that run as the lawyer sets a sticky `loose_task` block when one changed.
+  Until then, session-end hardening doesn't undo a change made during a session: a task a pool
+  user rewrote while its session ran keeps the rewrite, and runs it as the lawyer at its next
+  trigger. #757 alone leaves that window open.
 - **Known gap: a task that deletes itself.** A pool task can start a process (X) and then
   delete itself (or be deleted by X). The sweep's walk never sees it, and its instance stop only
   covers instances of the tasks it finds, so X can live on into the next logon gap: it runs as
@@ -2478,9 +2507,27 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   principal is the lawyer and whose descriptor gives Users write (`(A;;FA;;;BA)(A;;FA;;;SY)`
   `(A;;GRGW;;;BU)`, say), and save its full SDDL. Run an agent session and end it. Expect the
   run 0 and the task's SDDL unchanged but for Users' entry, now `GR` alone; the log line counts
-  1 task hardened, 0 not, and `sweep-admin.log` names it with `S-1-5-32-545 lost 0x40000000`.
+  1 task hardened, 0 not, and `sweep-admin.log` names it with `S-1-5-32-545 lost 0x40000000`
+  and its DACL before as SDDL.
   Users then has no write, and everything else (owner, group, other entries, any SACL) is as it
-  was. Run set-up again with the same task loosened anew: it is hardened at set-up.
+  was. Run set-up again with the same task loosened anew: it is hardened at set-up, and on a
+  machine with no `sweep-admin.log` yet set-up makes it owned by Administrators, and the next
+  sweep appends to it.
+- VM row (not run): an audit SACL survives hardening. As an administrator, give the loose task
+  above an audit entry (`S:(AU;FA;FA;;;WD)`, through `SetSecurityDescriptor` with
+  `SeSecurityPrivilege`), harden it by a sweep and by set-up, and read its SDDL with the SACL:
+  expect the `S:` part unchanged. Expect the same when `GetSecurityDescriptor` with the SACL
+  works for SYSTEM and for an elevated administrator; if it doesn't, the task is counted as not
+  hardened and left as it was.
+- VM row (not run): SYSTEM- and `TrustedInstaller`-owned tasks keep their owner. Make one loose
+  task owned by SYSTEM and one by `TrustedInstaller` (each with the lawyer as principal), run a
+  sweep, and read each back: expect `O:SY` and `O:S-1-5-80-956008885-…` unchanged and Users'
+  write gone. If the write changes or refuses either owner, the read-back counts it as not
+  hardened.
+- VM row (not run): what a clean Windows 11 image would harden. On a fresh image with Clauseo
+  set up and no other software, run set-up and a sweep, and list every task `sweep-admin.log`
+  names as hardened or not hardened, `\Microsoft\` included (there is no skip for it). Expect
+  none; record each one found, with its DACL before, in this ADR.
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.
