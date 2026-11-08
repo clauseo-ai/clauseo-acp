@@ -199,3 +199,15 @@ fn clear_env_gives_none_of_the_parents_variables() {
         }
     );
 }
+
+/// What a launcher that wraps the host's options reads back: unset by default, then what was
+/// set.
+#[test]
+fn the_options_read_back_what_was_set() {
+    let unset = SpawnOptions::new();
+    assert_eq!(unset.stdin_grace_set(), None);
+    assert!(!unset.clears_env());
+    let set = unset.stdin_grace(Duration::from_secs(5)).clear_env();
+    assert_eq!(set.stdin_grace_set(), Some(Duration::from_secs(5)));
+    assert!(set.clears_env());
+}

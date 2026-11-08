@@ -119,6 +119,17 @@ impl SpawnOptions {
         self.stdin_grace = Some(grace);
         self
     }
+
+    /// The stdin grace [`stdin_grace`](Self::stdin_grace) set; `None` when unset (2 s). A
+    /// launcher that wraps the host's options sets its own only where the host set none.
+    pub fn stdin_grace_set(&self) -> Option<Duration> {
+        self.stdin_grace
+    }
+
+    /// Whether [`clear_env`](Self::clear_env) was set.
+    pub fn clears_env(&self) -> bool {
+        self.clear_env
+    }
 }
 
 /// A started agent. Write ACP to `stdin`, read it from `stdout`, drive `stderr`, and keep `handle`
