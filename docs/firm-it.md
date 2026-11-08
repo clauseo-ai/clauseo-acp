@@ -1,5 +1,9 @@
 # Clauseo for firm IT
 
+<!-- The app links to the `<a id>` anchors in this file (sandbox-policy, sandbox-logon-right,
+sandbox-other-account, sandbox-setup, sandbox-required, unsafe-site-override, sandbox-tool-missing,
+sandbox-admin-copy, sandbox-leftover-task); keep their ids when you edit. -->
+
 How to deploy, lock down and support Clauseo on Windows, and on Macs under MDM. Each fact names its
 source: a file in this repo, a decision record, a test run or a vendor page. When a fact changes, the
 pull request that changes it changes this page too.
@@ -443,6 +447,57 @@ files the sandbox set aside from a matter.
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
 do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
 
+<a id="sandbox-setup"></a>
+### If the Safe workspace can't be set up
+
+On Windows, when something on the computer stops the Safe workspace's set-up, the app names the
+reason, and "Copy details for IT" links to the part of this page that fixes it:
+
+- a Windows policy blocks the set-up program: [section 3](#sandbox-policy);
+- Windows won't let the Safe workspace's hidden Windows accounts sign in:
+  [below](#sandbox-logon-right);
+- the Safe workspace is set up for another Windows account: [below](#sandbox-other-account);
+- the set-up program's admin copy is missing, changed or unsafe: [section 10](#sandbox-admin-copy);
+- Windows security blocked or removed the set-up program: [section 10](#sandbox-tool-missing);
+- a leftover Windows task blocks it: [below](#sandbox-leftover-task).
+
+For any other reason, the host log ([section 4](#4-webview2), "The host log") says what failed.
+
+<a id="sandbox-leftover-task"></a>
+If Clauseo reports that the Safe workspace is blocked by a leftover Windows task, open
+`%ProgramData%\Clauseo\Sandbox\sweep-admin.log` as an administrator (rotated once to
+`sweep-admin.log.1` at 256 KiB). It names up to five offending task paths per run. A listed task
+that isn't Clauseo's and hides itself from SYSTEM blocks the check: review it, and fix its
+permissions or delete it with `schtasks /delete /tn "<path>" /f`. The next launch checks again
+automatically. The Application event log carries counts only, never paths.
+
+<a id="sandbox-logon-right"></a>
+### If Windows won't let the Safe workspace's accounts sign in
+
+Set-up signs each of the Safe workspace's hidden Windows accounts on locally. Windows refuses with
+`ERROR_LOGON_TYPE_NOT_GRANTED` (1385) when "Allow log on locally" (`SeInteractiveLogonRight`)
+doesn't include them, or when "Deny log on locally" names them. Before it makes any account,
+set-up checks "Deny log on locally" for Everyone, LOCAL, INTERACTIVE, Authenticated Users, Local
+account, Users and the accounts' group, `ClauseoSandboxUsers`; any of these refuses them all.
+
+In Group Policy, under *Computer Configuration → Windows Settings → Security Settings → Local
+Policies → User Rights Assignment*, add `ClauseoSandboxUsers` (or Users, which holds them too) to
+"Allow log on locally", and take those groups out of "Deny log on locally".
+
+The app says that setting up the Safe workspace again usually fixes this, and offers the set-up
+again. If it fails again, the policy above is what to change.
+
+<a id="sandbox-other-account"></a>
+### If the Safe workspace belongs to another Windows account
+
+On Windows, the Safe workspace is set up for one Windows account per computer: the one whose SID
+is `OwnerSid` under `HKLM\SOFTWARE\Clauseo\Sandbox`. Clauseo for any other account on that
+computer gets this reason, and the installer says so too. To move it to another account, remove
+it first: `clauseo-sandbox-setup.exe --remove --per-machine` at an elevated prompt (see "Where
+Clauseo's Windows protection was set up" in [section 1](#1-which-installer)), or by hand as
+[Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand) says.
+Then set it up again from Clauseo, signed in as the other account.
+
 ## 2. Signing
 
 - **Windows: unsigned for the beta.** There is no code-signing certificate yet; one comes once
@@ -466,11 +521,16 @@ do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it
   by that workflow from this repository. `gh attestation verify <file> -R clauseo-ai/clauseo-acp`
   (decision 0035, "Consequences").
 
+<a id="sandbox-policy"></a>
 ## 3. AppLocker and WDAC
 
 - Allow `%PROGRAMFILES%\Clauseo\*` by **path**. Only administrators can write there, which is why
   firms with these rules need the per-machine installer: they usually block programs in
   user-writable folders such as `%LOCALAPPDATA%`.
+- That rule covers Clauseo's set-up program, the admin copy Clauseo starts elevated:
+  `%PROGRAMFILES%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`. If AppLocker or Software
+  Restriction Policies block it (`ERROR_ACCESS_DISABLED_BY_POLICY`, 1260), the Safe workspace
+  can't be set up: allow that file by path.
 - Do not use **hash** rules: every release changes every hash. **Publisher** rules cannot name
   Clauseo while it is unsigned (section 2).
 - Coming (stage D): Clauseo will download Node and the agents into each user's data folder,
@@ -769,12 +829,12 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 
 | Key | Task | Note |
 |---|---|---|
-| `sandbox.required` | R17 | **Ignored in this release** (the Safe workspace comes after launch); Clauseo logs once that it is set but ignored. Boolean, default false, `REG_DWORD` 0 or 1. 1: on a computer that can't give the sandbox, no agent starts (`sandbox.required`). **Security key**: false if a source is unreadable; `sandbox.allow_unprotected_auto` carries the fail-closed |
+| <a id="sandbox-required"></a>`sandbox.required` | R17 | **Ignored in this release** (the Safe workspace comes after launch); Clauseo logs once that it is set but ignored. Boolean, default false, `REG_DWORD` 0 or 1. 1: on a computer that can't give the sandbox, no agent starts (`sandbox.required`). **Security key**: false if a source is unreadable; `sandbox.allow_unprotected_auto` carries the fail-closed |
 | `sandbox.allow_unprotected_auto` | R17 | **Ignored in this release** (the Safe workspace comes after launch); Clauseo logs once that it is set but ignored. Boolean, default true, `REG_DWORD` 0 or 1. 0: outside the Safe workspace Clauseo doesn't use an automatic mode: Claude asks before each change, and ChatGPT asks before changing files outside the matter's folder. **Security key**: false if a source is unreadable or the value does not type |
 | `network.upstream_proxy` | R17 | `http` or `https` URL with a host; no user name, password, query or fragment (Clauseo stores no proxy password). Default none: the proxy the OS is set to. `REG_SZ`. **Security key**: unset if a source is unreadable |
 | `network.ca_certs` | R17 | Object: agent id to the absolute path of a CA file, trusted besides the system's. Default empty. `REG_SZ`, JSON: `{"claude-acp": "C:\\ProgramData\\Firm\\ca.pem"}`. Replaces the user's whole map; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
 | `network.allowed_domains` | R17 | List of host names (`*.firm.example` for every name under it), added to every matter's allowlist. Default empty. `REG_MULTI_SZ`. Policy only: a `settings.json` value is ignored with a warning; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
-| `network.allow_unsafe_site_override` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: the lawyer can't allow a site the block list names, and sites already allowed stop being honoured (they are kept) (decision 0053); the lawyer may also switch it off for themselves. A change in the policy file takes effect when Clauseo next starts. **Security key**: false if a source is unreadable or a policy value does not type |
+| <a id="unsafe-site-override"></a>`network.allow_unsafe_site_override` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: the lawyer can't allow a site the block list names, and sites already allowed stop being honoured (they are kept) (decision 0053); the lawyer may also switch it off for themselves. A change in the policy file takes effect when Clauseo next starts. **Security key**: false if a source is unreadable or a policy value does not type |
 | `network.unsafe_site_list_updates` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: Clauseo never fetches block list updates and keeps the stored or bundled list (decision 0053). A change in the policy file takes effect when Clauseo next starts. Policy only: a `settings.json` value is ignored with a warning. **Security key**, locked at true (its default) if a source is unreadable or a policy value does not type: an unreadable policy must not stop protection updates |
 
 ### Browser automation and RemoteDebuggingAllowed
@@ -960,6 +1020,7 @@ To clear the sandbox users and the rest of the protection from a computer whose
 `clauseo-sandbox-setup.exe` is gone, see
 [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
 
+<a id="sandbox-tool-missing"></a>
 ## 10. If Windows security removed Clauseo's set-up program
 
 Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, which sets up and removes Clauseo's
@@ -1256,6 +1317,15 @@ filters are missing, changed or unreadable, or the ports 46100 to 46199 are take
 dynamic port range, a reserved range such as Hyper-V's, or another program's listener). "Set up
 protection again" in Clauseo (one Windows prompt) rewrites the filters. Removing the protection (section 1)
 deletes the filters, the sublayer, the provider and the firewall rules.
+
+<a id="sandbox-admin-copy"></a>
+### If the set-up program's admin copy is missing, changed or unsafe
+
+Before it starts `C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe`, Clauseo checks it
+as the uninstaller does (above). It refuses a copy that is missing or has no recorded hash, one
+whose SHA-256 isn't `AdminCopySha256`, or one in a folder that an account other than SYSTEM,
+Administrators or TrustedInstaller owns or can change. Run the Clauseo installer again as an
+administrator to put the copy back; for unsafe owners, put the folders' permissions back first.
 
 ## Later
 
