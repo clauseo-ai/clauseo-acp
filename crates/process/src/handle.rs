@@ -81,6 +81,15 @@ impl Handle {
         TreeWatch(crate::os::watch(&self.tree))
     }
 
+    /// A [`TreeKill`] on the agent's tree, which outlives the handle (Unix).
+    #[cfg(unix)]
+    pub fn tree_kill(&self) -> TreeKill {
+        TreeKill {
+            group: crate::os::watch(&self.tree),
+            root: self.root.clone(),
+        }
+    }
+
     /// The agent's descendants, to list and end while it runs (see [`Descendants`]).
     pub fn descendants(&self) -> Descendants {
         Descendants::new(self.root.clone())
@@ -198,6 +207,33 @@ impl TreeWatch {
     /// Whether the tree is gone. A blocking-free OS query; poll it.
     pub fn gone(&self) -> bool {
         self.0.gone()
+    }
+}
+
+/// Ends an agent's tree from any thread, as the handle's kill does after a stop: it lists the
+/// agent's descendants, sends SIGKILL to the group, then to each listed process still running
+/// with its listed start (a command in a session of its own has left the group). For a watcher
+/// that must end a session at once without the handle: the macOS git watch (decision record
+/// 0038). The [`Handle`] still reports the exit. Unix only.
+#[cfg(unix)]
+#[derive(Debug, Clone)]
+pub struct TreeKill {
+    group: crate::os::Watch,
+    root: Root,
+}
+
+#[cfg(unix)]
+impl TreeKill {
+    /// Sends the kill; blocking for the listing (see [`Descendants::snapshot`]). A group
+    /// already empty gets no signal, and nothing is listed once the agent is gone. Returns
+    /// whether the group's kill went or the group was gone.
+    pub fn kill(&self) -> bool {
+        let listed = self.root.list();
+        let ended = self.group.gone() || self.group.kill();
+        if let Some(listed) = listed {
+            kill_all(&listed);
+        }
+        ended
     }
 }
 

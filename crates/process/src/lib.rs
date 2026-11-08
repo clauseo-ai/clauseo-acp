@@ -35,6 +35,8 @@
 //! - [`Handle::exited`] (the agent exited on its own; its tree is then killed),
 //!   [`Handle::shutdown`] (the ladder, with a [`Timer`]: [`AsyncIoTimer`], or with the
 //!   `test-support` feature `ManualTimer`), and `Drop` (kills the tree, no waits).
+//! - [`Handle::tree_kill`] (Unix): a `TreeKill` that outlives the handle and ends the tree from
+//!   any thread as the stop's kill does, for the macOS git watch's fail-closed end.
 //! - [`Handle::descendants`]: a [`Descendants`] that outlives the handle and keeps nothing alive.
 //!   [`Descendants::snapshot`] lists them now (a [`Snapshot`], blocking);
 //!   [`Descendants::end_new`] ends what is new since a snapshot and started before a [`Cutoff`]
@@ -108,6 +110,8 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
+#[cfg(unix)]
+pub use handle::TreeKill;
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,

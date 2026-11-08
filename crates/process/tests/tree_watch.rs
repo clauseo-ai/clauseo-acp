@@ -1,5 +1,6 @@
 //! `TreeWatch` (Unix): the agent's group reads as gone only once no process is left in it, a
-//! zombie included, and stays readable after the handle has dropped. The helpers carry
+//! zombie included, and stays readable after the handle has dropped. `TreeKill` ends it.
+//! The helpers carry
 //! `#[cfg(test)]` so clippy treats them as test code.
 
 #![cfg(unix)]
@@ -47,6 +48,22 @@ fn the_group_reads_gone_once_the_agent_and_its_helper_have_gone() {
     let watch = handle.tree_watch();
     assert!(!watch.gone(), "the agent runs");
     block_on(handle.exited());
+    drop(handle);
+    assert!(gone_within(&watch, 500));
+}
+
+/// `TreeKill` ends a running agent and its helper from another thread, the handle still held;
+/// the handle then reports the kill.
+#[test]
+fn a_tree_kill_ends_the_agent_and_its_helper() {
+    let Launched { mut handle, .. } = launch("sleep 30 & sleep 30");
+    let watch = handle.tree_watch();
+    let kill = handle.tree_kill();
+    std::thread::spawn(move || assert!(kill.kill()))
+        .join()
+        .unwrap();
+    let report = block_on(handle.exited());
+    assert_eq!(report.signal(), Some(9));
     drop(handle);
     assert!(gone_within(&watch, 500));
 }

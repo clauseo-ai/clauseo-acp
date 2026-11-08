@@ -91,6 +91,15 @@ impl Watch {
     pub(crate) fn gone(&self) -> bool {
         matches!(killpg(self.group, None), Err(Errno::ESRCH))
     }
+
+    /// Sends SIGKILL to the group, as [`Tree::kill`] does. Returns whether it went, an empty
+    /// group counting as gone.
+    pub(crate) fn kill(&self) -> bool {
+        matches!(
+            killpg(self.group, Signal::SIGKILL),
+            Ok(()) | Err(Errno::ESRCH)
+        )
+    }
 }
 
 /// Where a listing of the agent's descendants starts: the agent's pid and its start, read while
