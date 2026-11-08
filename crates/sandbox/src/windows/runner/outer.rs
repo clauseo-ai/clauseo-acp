@@ -78,9 +78,8 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
     // F4, before this session's marker: a marker of this pool user's that awaits a stop refuses
-    // the logon until the stop completes (`unclean.rs`).
-    check_logon(&data_dir, &message.pool_user)
-        .map_err(|why| Failure::new(RunExit::AwaitingStop, why))?;
+    // the logon until the stop completes, one that awaits a sweep until it ran (`unclean.rs`).
+    check_logon(&data_dir, &message.pool_user).map_err(|r| Failure::new(r.exit, r.why))?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
     // `relay` removes it. One that can't be written refuses the launch with its own code
     // (`RunExit::MarkerUnwritable`): no logon follows. It records the install it belongs to; an

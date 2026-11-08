@@ -10,7 +10,7 @@ use super::super::marker::{
     MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
     write_marker_at,
 };
-use super::{Markers, StartUp, await_sweeps, logon_check, start_up};
+use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
@@ -93,7 +93,7 @@ impl Markers for OsMarkers {
 }
 
 /// F4, for the outer before it writes its own marker (`unclean::logon_check`).
-pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), String> {
+pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), Refused> {
     logon_check(&mut OsMarkers::new(data_dir), pool_user)
 }
 
