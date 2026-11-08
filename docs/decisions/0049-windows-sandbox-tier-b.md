@@ -1864,7 +1864,7 @@ cancelled and not), and says so when a pass couldn't read the process list. Its 
 | 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
 | 46 | the record can't be read, or its `PoolSids`, `OwnerSid` or `StopNext` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
-| 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
+| 48 | a pool user's process, job or WSL VM was left, a user, owner or VM's user couldn't be read, or a list failed |
 | 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
 | 50 | `StopNext` couldn't be reserved (lock held, record gone or pool changed, write failed); nothing stopped |
 
@@ -2063,7 +2063,40 @@ like a lifted one. With no WSL nothing is refused. Both are
 `sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
 the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
 line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolResidue`
-(`wsl_pool_residue`) is reserved for the stop's WSL clean-up (part B), and nothing gives it yet.
+(`wsl_pool_residue`) stays reserved: a pool VM the stop can't end ends the stop at 48 (below), and
+a stop that ends 48 writes no `StopSequence`, so what waits for a completed stop (the
+unclean-session marker and its refusal, F4) clears only after a later one, as for any process a
+stop left. One cause, one exit: no second refusal says the same.
+
+**The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
+the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
+user's `wslhost.exe` and `wslrelay.exe` carry the pool user's token, and the passes stop them.
+WSL 2's VM (and a WSL container's) is a Hyper-V compute system that `wslservice.exe` runs as
+SYSTEM, which the passes don't see. HCS names a system by id only, and WSL's owner string is
+`"WSL"` for every user, so the user comes from the profile: the service makes
+`%LOCALAPPDATA%\temp\<VM id>` (upper case, no braces) as the user for each VM it starts and
+deletes it when the VM ends (WSL `WslCoreVm.cpp:135,148`). The step lists every compute system
+(`HcsEnumerateComputeSystems`, a 3 s wait), keeps the ids that are GUIDs, and for each looks in
+every pool user's profile (`ProfileList`) for `AppData\Local\temp\<id>`, reading the profile
+folder and each part below it without following a link: a pool user could make a junction that
+points the check at the lawyer's folders. A system one names is that user's: it is opened
+(`HcsOpenComputeSystem`), terminated (`HcsTerminateComputeSystem`, at most 5 s each and 10 s
+in all, through an operation waited for and closed), and its user marked for a reset, whose
+profile delete takes the user's distro registrations (in its hive) with it. Every other system is
+left alone: the lawyer's VMs, other users', other containers. A system already gone is ended.
+`computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`, `GetProcAddress`),
+never imported, so the exe starts where it is missing; with it missing, or no `vmcompute`
+service, there is nothing to do and the log line says nothing of VMs. The stop ends at 48 when a
+pool user's VM isn't ended (a failure, a wait that ran out, or none tried once the 10 s are spent),
+when a VM may be a pool user's because that user's folder couldn't be read (a link on the way, or
+a read that failed; the user is marked), or when the list fails while `WSLService` or
+`LxssManager` is installed (either runs WSL 2); a list that fails with neither is logged and
+passed over. The log line adds counts only: VMs ended, not, and unmapped, never an id, a path or
+a SID. Not done: restarting `WSLService` as a fallback (it would end the lawyer's sessions too).
+Not verified on a VM: that SYSTEM's list shows WSL's VMs and that a termination from outside the
+service leaves it consistent (the elevated test checks only the calls, where HCS is). A pool user
+who learned another VM's id could make that folder in its own profile and have the stop end that
+VM: a denial of service only, and the ids are random GUIDs a pool user has no way to read.
 
 **No mid-session watcher.** A WSL update during a tier B session can drop the deny until the
 event trigger's run, seconds after the installer's last event; the next launch checks it again.

@@ -12,6 +12,7 @@ mod completed;
 mod jobs;
 mod sequence;
 mod users;
+mod vms;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -85,6 +86,8 @@ struct Fake {
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
+    /// HCS's compute systems and the pool's VM folders (`tests/vms.rs`).
+    vms: vms::FakeVms,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -117,6 +120,7 @@ impl Fake {
             pool_from: None,
             read_fails: None,
             end_at: None,
+            vms: vms::FakeVms::default(),
             done: Vec::new(),
             logged: Vec::new(),
         }

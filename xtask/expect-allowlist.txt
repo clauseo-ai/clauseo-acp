@@ -505,10 +505,11 @@ crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # The stop task's process snapshot, the WTS process list, OpenProcess, NtSuspendProcess and
-# TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
-# it starts.
+# TerminateProcess; the BITS jobs it cancels; the WSL VMs it ends through computecore.dll; its
+# Windows test's token DACL and the benign process it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_bits.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_hcs.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,

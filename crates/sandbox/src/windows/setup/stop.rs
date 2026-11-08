@@ -52,11 +52,20 @@
 //!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
 //!    of [`JOBS_CAP`] jobs, the most read, as more may be past it (the pool's jobs within it are
 //!    cancelled first, and the log line says the list was longer);
-//! 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`, under the
-//!    set-up lock (a bounded wait), so the next set-up deletes and remakes its profile before the
-//!    user runs anything again (`resets.rs`): what the stopped process left in its profile goes
-//!    with it. Each user is added as soon as it is found, so a run the task's 2-minute limit
-//!    kills has marked every user it saw. A pass that finds a process of unknown user marks every
+//!    5b. ends each pool user's WSL 2 VM ([`vms`]): every HCS compute system whose folder,
+//!    `AppData\Local\temp\<id>`, is in a pool user's profile is terminated, with a bounded
+//!    wait, and its user marked; any other system (the lawyer's VMs) is left alone. With no
+//!    HCS (`computecore.dll` or the `vmcompute` service missing) there is nothing to do. A
+//!    pool user's VM that isn't ended, a VM that may be a pool user's whose folder couldn't be
+//!    read, or a list that fails while `WSLService` or `LxssManager` is installed, is 48. The
+//!    pool's WSL 1 instances need nothing more: their pico processes, `wslhost.exe` and
+//!    `wslrelay.exe` carry the pool user's token, and step 4 stops them;
+//! 6. adds each pool user it found running, owning a job or a VM, to the record's `ResetSids`,
+//!    under the set-up lock (a bounded wait), so the next set-up deletes and remakes its profile
+//!    before the user runs anything again (`resets.rs`): what the stopped process left in its
+//!    profile goes with it, WSL's distro registrations too (they are in the user's hive).
+//!    Each user is added as soon as it is found, so a run the task's 2-minute limit kills has
+//!    marked every user it saw. A pass that finds a process of unknown user marks every
 //!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
 //!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
 //!    at most;
@@ -100,13 +109,17 @@ use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
 pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
+pub use vms::{LIST_WAIT, VM_WAIT, VMS_BUDGET, VmId, VmStopper, ids_from_json};
 
 mod pick;
 mod sequence;
 #[cfg(test)]
 mod tests;
+mod vms;
 #[cfg(windows)]
 mod windows_bits;
+#[cfg(windows)]
+mod windows_hcs;
 #[cfg(windows)]
 pub(crate) mod windows_stopper;
 #[cfg(windows)]
@@ -132,8 +145,9 @@ pub enum StopExit {
     NotPool,
     /// 48: a pool user's process was still there when the passes ran out of time, a process's
     /// user couldn't be read, a pool user's BITS job wasn't cancelled (or a job's owner couldn't
-    /// be read), a process snapshot or the BITS list couldn't be taken, or the BITS list reached
-    /// [`JOBS_CAP`].
+    /// be read), a process snapshot or the BITS list couldn't be taken, the BITS list reached
+    /// [`JOBS_CAP`], or a pool user's WSL VM wasn't ended (or may be one, or HCS's list failed
+    /// with WSL installed).
     NotStopped,
     /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids`, or
     /// `StopCompleted` and `StopSequence` couldn't be written (the set-up lock stayed held, a
@@ -187,8 +201,9 @@ pub const LAST_WAITS: Duration = Duration::from_secs(15);
 pub(crate) const JOBS_CAP: usize = 10_000;
 
 /// Every effect of the stop. The real one reads the record and the admin copy's path itself, so
-/// no method takes a SID or a path the caller chose, but the pool the record gave.
-pub trait Stopper {
+/// no method takes a SID or a path the caller chose, but the pool the record gave. The WSL
+/// step's are [`VmStopper`]'s.
+pub trait Stopper: VmStopper {
     /// Whether this process's token user is LOCAL SYSTEM.
     fn is_system(&mut self) -> Result<bool, Failed>;
     /// This process's exe, its final path.
@@ -278,6 +293,8 @@ struct Passes {
     clean_at: Option<u64>,
     /// When the BITS step's enumeration began.
     jobs_at: Option<u64>,
+    /// What the WSL step did.
+    vms: vms::Vms,
 }
 
 /// Runs the stop as the module says.
@@ -310,6 +327,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     let mut passes = Passes::default();
     let ran = run_passes(fs, &pool.users, &mut passes);
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
+    let vms = vms::stop_vms(fs, &pool.users, &mut passes);
     // Without the list, a process no token names is unknown: the line says why.
     let list = if passes.list_failed {
         " (the process list couldn't be read)"
@@ -329,7 +347,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     };
     let counts = format!(
         "{} pool users, {} found running, {} processes stopped in {} passes, {} left, \
-         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}{images}",
+         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}{}{images}",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,
@@ -337,17 +355,21 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         passes.left,
         passes.unknown,
         passes.jobs_cancelled,
-        passes.jobs_failed
+        passes.jobs_failed,
+        passes.vms.counts()
     );
     mark_new(fs, &mut passes);
     let not_stopped = |why: &str| Err((StopExit::NotStopped, format!("{counts}; {why}")));
-    if let Err(why) = ran.and(cancelled) {
+    if let Err(why) = ran.and(cancelled).and(vms) {
         return not_stopped(&why);
     }
     if passes.jobs_failed > 0 || passes.jobs_capped {
         return not_stopped(
             "a BITS job wasn't cancelled, its owner couldn't be read, or the list was cut",
         );
+    }
+    if passes.vms.left > 0 || passes.vms.unmapped > 0 {
+        return not_stopped("a pool user's WSL VM wasn't ended, or a VM's user couldn't be read");
     }
     if passes.left > 0 {
         return not_stopped("a pool user's process was still there when the passes' time ran out");
