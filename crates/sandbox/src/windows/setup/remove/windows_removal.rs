@@ -367,6 +367,18 @@ impl Removal for WindowsRemoval {
             })
     }
 
+    fn clear_markers(&mut self) -> Result<usize, MachineError> {
+        if !self.acting.get() {
+            return Err(MachineError::Other(
+                "the unclean-session markers are removed only as their owner".to_owned(),
+            ));
+        }
+        let Some(folder) = &self.checked else {
+            return Ok(0);
+        };
+        clear_markers_in(folder)
+    }
+
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
@@ -405,4 +417,18 @@ impl Removal for WindowsRemoval {
             Err(error) => Err(kind_of("a matter's folder check", &error)),
         }
     }
+}
+
+/// Removes every unclean-session marker in `folder`'s run folder, as whoever this thread acts
+/// as; how many. A run folder that is missing holds none.
+fn clear_markers_in(folder: &Path) -> Result<usize, MachineError> {
+    use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
+    let other = |error: std::io::Error| {
+        MachineError::Other(format!("the unclean-session markers ({})", error.kind()))
+    };
+    let sessions = unclean_sessions(folder).map_err(other)?;
+    for session in &sessions {
+        remove_marker(&marker_path(folder, &session.id)).map_err(other)?;
+    }
+    Ok(sessions.len())
 }
