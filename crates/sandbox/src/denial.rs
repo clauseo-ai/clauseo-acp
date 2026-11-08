@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Something the jail or the egress proxy refused. One definition for every OS and for the
 /// proxy; `host` turns each into a denial event and, where it applies, a card (R18).
@@ -82,8 +82,8 @@ pub enum Denial {
     },
 }
 
-/// What the watch set aside.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// What the watch set aside. Read back from the denial pipe's records (`windows::denial_pipe`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetAsideWhat {
     /// A git repository, or the part that makes one: a `.git`, a bare repository's folder, or

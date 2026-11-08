@@ -9,9 +9,10 @@ use super::super::{Cause, Guard, Live, Next, Pulse, Session, watch};
 use super::{Log, added, guard, script};
 use crate::SetAsideWhat;
 use crate::windows::SetAsideFailure;
+use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::{Failed, Hooks};
 
-/// A session that keeps every line said, whole.
+/// A session that keeps every line said and every notice recorded, whole.
 #[derive(Default)]
 struct Heard(RefCell<Vec<String>>, Pulse);
 
@@ -22,6 +23,12 @@ impl Session for Heard {
 
     fn say(&self, line: &str) {
         self.0.borrow_mut().push(line.to_owned());
+    }
+
+    fn record(&self, record: &Record) {
+        if let Record::Notice { text } = record {
+            self.0.borrow_mut().push(text.clone());
+        }
     }
 
     fn pause(&self, _wait: Duration) -> bool {
@@ -52,9 +59,9 @@ impl Heard {
     }
 }
 
-/// The notice said for `cause`, as the outer says it.
+/// The notice recorded for `cause`, as the host gets it.
 fn line(cause: Cause) -> String {
-    format!("clauseo-sandbox-run: {}", cause.notice())
+    cause.notice().to_owned()
 }
 
 /// A guard whose moves fail without ending the session.

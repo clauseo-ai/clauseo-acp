@@ -70,6 +70,7 @@ pub(super) fn message_from_policy(
             .transpose()?,
         // R17 PR-E: the agent's `network.ca_certs` file goes here.
         firm_ca: Vec::new(),
+        denial_pipe: None,
     };
     message.check()?;
     Ok(message)

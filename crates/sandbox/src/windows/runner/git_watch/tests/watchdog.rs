@@ -11,6 +11,7 @@ use std::time::Duration;
 use super::super::watchdog::TICK;
 use super::super::{Changes, Dog, Guard, Live, Pulse, Session, watch, watchdog};
 use super::{added, script};
+use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::{Failed, Hooks, SCAN_BUDGET};
 
 /// A monotonic clock both threads read, in milliseconds.
@@ -62,6 +63,8 @@ impl Session for Watching {
     }
 
     fn say(&self, _line: &str) {}
+
+    fn record(&self, _record: &Record) {}
 
     fn pause(&self, _wait: Duration) -> bool {
         true
