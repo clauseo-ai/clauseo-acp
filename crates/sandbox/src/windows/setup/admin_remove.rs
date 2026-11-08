@@ -12,9 +12,10 @@
 //! and that name is scheduled for deletion at the next restart (`MoveFileExW` with
 //! `MOVEFILE_DELAY_UNTIL_REBOOT`), as are the `Sandbox` folder and `%ProgramFiles%\Clauseo`
 //! after it; Windows deletes a scheduled folder only if it is empty by then, so a reinstall
-//! before the restart keeps its new copy. If the rename fails, the copy itself is scheduled
-//! instead, under its own name. Run from anywhere else (a test, a VM harness), the copy and
-//! the folder are deleted at once.
+//! before the restart keeps its new copy. If the rename fails, the copy stays where it is and
+//! the step fails: the canonical name is never scheduled, since a reinstall before the restart
+//! would put its new copy there and lose it at boot. Run from anywhere else (a test, a VM
+//! harness), the copy and the folder are deleted at once.
 //!
 //! A step that fails stops the teardown and is named ([`CopyLeft`]): `exe::run_remove` logs
 //! it to the Event Log and exits `AdminCopyLeft`.
@@ -107,7 +108,8 @@ pub(super) struct Restart<'a> {
 /// Deletes everything in the admin folder `dir`, then `dir`. When the copy `exe` is the
 /// running exe (`running`), it is renamed in place to [`parked_name`] instead, and `schedule`
 /// is given that name, `dir` and `app` (`%ProgramFiles%\Clauseo`), in that order, to delete
-/// at restart; if the rename fails, `exe` itself is scheduled in its place. A link inside is
+/// at restart; if the rename fails, nothing is scheduled and the rename's error is returned,
+/// `exe` left in place (never scheduled under its own name). A link inside is
 /// deleted as itself, never followed; an entry that shuts Administrators out is taken back
 /// first (`admin_copy::take_back`).
 pub(super) fn clear(
@@ -128,14 +130,11 @@ pub(super) fn clear(
         return std::fs::remove_dir(dir);
     }
     let parked = parked_name(exe, std::process::id());
-    let doomed = match (fs.rename)(exe, &parked) {
-        Ok(()) => parked,
-        Err(error) => {
-            tracing::warn!(%error, "the running copy can't be renamed; it is deleted at restart");
-            exe.to_path_buf()
-        }
-    };
-    for path in [doomed.as_path(), dir, app] {
+    if let Err(error) = (fs.rename)(exe, &parked) {
+        tracing::warn!(%error, "the running copy can't be renamed; it is left in place");
+        return Err(error);
+    }
+    for path in [parked.as_path(), dir, app] {
         (fs.schedule)(path)?;
     }
     Ok(())
