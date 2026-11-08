@@ -314,9 +314,10 @@ pub enum SetAsideFailure {
     /// the check after the session.
     #[error("the item isn't the agent's, so it stays where it is")]
     NotTheAgents,
-    /// A restore of a link (a junction or a symbolic link) whose target, read by its words,
-    /// leads outside the folder it was set aside from, or can't be read, is refused: put back,
-    /// it would lead git, or the lawyer's own tools, outside the matter.
+    /// A restore of a link (a junction or a symbolic link), or of a folder holding one at any
+    /// depth, whose target, told by identity, leads outside the folder it was set aside from, or
+    /// can't be read, is refused: put back, it would lead git, or the lawyer's own tools,
+    /// outside the matter.
     #[error("{}", LINK_REFUSAL)]
     LinkOut,
 }

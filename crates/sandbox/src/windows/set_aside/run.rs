@@ -427,7 +427,7 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         tracing::info!("a set-aside git folder, or an item inside one, is never put back");
         return Err(SetAsideFailure::GitFolder.into());
     }
-    if refusals::leads_out(&found) {
+    if refusals::leads_out(volume, &found) {
         tracing::info!("a set-aside link leading out of the matter is never put back");
         return Err(SetAsideFailure::LinkOut.into());
     }

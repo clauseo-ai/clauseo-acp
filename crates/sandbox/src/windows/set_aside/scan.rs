@@ -20,7 +20,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
@@ -420,39 +420,6 @@ fn found(scan: &mut Scan, visit: &mut dyn FnMut(Found<'_>) -> Step, item: Item) 
 /// The matter's folder, from the path of a folder `parts` below it.
 fn scan_root<'a>(path: &'a Path, parts: &[OsString]) -> &'a Path {
     parts.iter().fold(path, |at, _| at.parent().unwrap_or(at))
-}
-
-/// `path` as text parts, its `..` and `.` worked out by their words, with a verbatim prefix
-/// (`\\?\C:\`, `\\?\UNC\`, `\??\`) read as the plain one, for comparing a link's or a
-/// `commondir`'s target with the matter's folder.
-pub(super) fn plain(path: &Path) -> Vec<String> {
-    let text = path.to_string_lossy();
-    let text = if let Some(rest) = text
-        .strip_prefix(r"\\?\UNC\")
-        .or_else(|| text.strip_prefix(r"\??\UNC\"))
-    {
-        format!(r"\\{rest}")
-    } else {
-        let rest = text
-            .strip_prefix(r"\\?\")
-            .or_else(|| text.strip_prefix(r"\??\"));
-        rest.unwrap_or(&text).to_owned()
-    };
-    let mut parts: Vec<String> = Vec::new();
-    for part in Path::new(&text).components() {
-        match part {
-            Component::ParentDir => {
-                if parts.len() > 1 {
-                    parts.pop();
-                }
-            }
-            Component::CurDir => {}
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                parts.push(part.as_os_str().to_string_lossy().into_owned());
-            }
-        }
-    }
-    parts
 }
 
 /// What is at `name` in `folder`, opened as itself.

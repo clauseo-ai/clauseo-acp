@@ -1,6 +1,6 @@
 //! What a restore refuses: a git folder or an item in one ([`holds_git`], [`holds_repo`]),
-//! an item that was git's in a folder a launch `commondir` names, and a link that leads out of
-//! the folder it goes back to. Put back, the first would be read by git as the lawyer's (its
+//! an item that was git's in a folder a launch `commondir` names, and a link, at any depth of
+//! the item, that leads out of the folder it goes back to. Put back, the first would be read by git as the lawyer's (its
 //! `config` and `hooks` run code as the lawyer); the second would lead git, or anything else,
 //! outside.
 
@@ -13,7 +13,7 @@ use super::super::Entry;
 use super::super::files::{Place, Record};
 use super::super::names::Key;
 use super::super::repo_names::{COMMON_NAMES, is_commondir, is_git, is_head, opens_as};
-use super::super::scan::{COMMON_KEY, Kind, plain, same_key};
+use super::super::scan::{COMMON_KEY, Kind, Last, locate, same_key};
 use super::Volume;
 
 /// What git reads from a `commondir`'s folder that runs code as the lawyer: refused by its name
@@ -71,25 +71,55 @@ pub(super) fn from_common(entry: &Entry, targets: &[Key]) -> bool {
     })
 }
 
-/// Whether `entry`'s item is a link whose target, read by its words and worked out from the
-/// folder it goes back to, leads outside the matter's (or notes) folder it came from, or can't
-/// be read: never opened, as the live watch's check does. Not a link is `false`.
-pub(super) fn leads_out(entry: &Entry) -> bool {
-    if !is_link(&entry.to) {
-        return false;
-    }
-    let Ok(target) = std::fs::read_link(&entry.to) else {
-        return true;
-    };
+/// Whether `entry`'s item is a link, or holds one at any depth, whose target leads outside the
+/// matter's (or notes) folder it came from, or can't be read. Each target is read from the
+/// link itself, never followed, worked out from its words relative to the folder the link goes
+/// back to, and told inside by identity, as the live watch tells it (`scan/locate.rs`): a
+/// target spelled in another case, or with `..`, still counts as inside when it is. A target
+/// inside the item itself isn't back yet, so it counts as outside. The item's folders are opened
+/// as the scan opens them, never through a link; one that can't be opened or listed counts as
+/// holding a link out. A file is `false`.
+pub(super) fn leads_out<V: Volume>(volume: &V, entry: &Entry) -> bool {
     let (Some(folder), Some(root)) = (entry.from.parent(), root_of(entry)) else {
         return true;
     };
-    let (full, root) = (plain(&folder.join(target)), plain(&root));
-    !(full.len() >= root.len()
-        && full
-            .iter()
-            .zip(&root)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b)))
+    let out = |at: &Path, target: &Path| locate(volume, &root, (at, target), Last::Must).is_none();
+    let Ok(meta) = std::fs::symlink_metadata(&entry.to) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() {
+        return std::fs::read_link(&entry.to).map_or(true, |target| out(folder, &target));
+    }
+    if !meta.is_dir() {
+        return false;
+    }
+    let Ok(top) = volume.open_root(&entry.to) else {
+        return true;
+    };
+    let mut stack: Vec<(V::Folder, PathBuf)> = vec![(top, entry.from.clone())];
+    while let Some((at, back)) = stack.pop() {
+        let Ok(listed) = volume.list(&at) else {
+            return true;
+        };
+        for child in listed {
+            match child.kind {
+                Kind::Link => {
+                    let Ok(target) = volume.link_target(&at, &child.name) else {
+                        return true;
+                    };
+                    if out(&back, &target) {
+                        return true;
+                    }
+                }
+                Kind::Folder => match volume.open_folder(&at, &child.name) {
+                    Ok(inner) => stack.push((inner, back.join(&child.name))),
+                    Err(_) => return true,
+                },
+                Kind::Other => {}
+            }
+        }
+    }
+    false
 }
 
 /// The folder `entry`'s item was set aside from: its `from` less its name and the folders
