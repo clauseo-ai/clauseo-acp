@@ -374,9 +374,10 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         });
         let (agents, source) = Agents::start_with_launchers(config, install, signin, AsyncIoTimer);
         let agents: Arc<dyn super::backend::SetupAgents> = Arc::new(agents);
-        // The e2e build's scripted sign-ins (`E2E_FAKE_SIGNIN`); no other build has them.
+        // The e2e build's scripted installs (`E2E_FAKE_INSTALL`) and sign-ins
+        // (`E2E_FAKE_SIGNIN`); no other build has them.
         #[cfg(feature = "e2e")]
-        let (agents, source) = super::fake_signin::wrap(agents, source, Arc::clone(&clock));
+        let (agents, source) = super::fake_install::scripted(agents, source, Arc::clone(&clock));
         parts.events.publish(SetupEvent::SetupInfo {
             keys_available: keys.available(),
         });

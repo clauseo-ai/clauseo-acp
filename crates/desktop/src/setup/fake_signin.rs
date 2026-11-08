@@ -17,7 +17,8 @@
 //!   when S18's does ([`wrap`]).
 //!
 //! Contract: built only with the `e2e` feature (`setup.rs` declares the module under it, and
-//! `start.rs` calls [`wrap`] under it), so no release reads the variables or holds a script.
+//! `start.rs` calls [`wrap`] under it, through `fake_install::scripted`), so no release reads
+//! the variables or holds a script.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

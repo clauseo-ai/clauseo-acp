@@ -40,8 +40,18 @@ test("scripted sign-ins reach the app as E2E_FAKE_SIGNIN, and none sets no varia
   await removeScratch(scratch);
 });
 
+test("scripted installs reach the app as E2E_FAKE_INSTALL", async () => {
+  const opts = { scenario: null, matterFiles: {}, firstRun: true, fakeInstall: ["claude-acp"] };
+  const scratch = makeScratch(opts, () => "", base);
+  expect(scratchEnv(scratch)["E2E_FAKE_INSTALL"]).toBe("claude-acp");
+  // nothing set up: the scripted install is what makes Claude ready
+  expect(scratchEnv(scratch)["E2E_AGENTS_MANAGED"]).toBe("");
+  await removeScratch(scratch);
+});
+
 test("no scripted sign-in sets no variable", async () => {
   const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => "", base);
+  expect(scratchEnv(scratch)).not.toHaveProperty("E2E_FAKE_INSTALL");
   expect(scratchEnv(scratch)).not.toHaveProperty("E2E_FAKE_SIGNIN");
   expect(scratchEnv(scratch)).not.toHaveProperty("E2E_FAKE_SIGNIN_HOLD_MS");
   await removeScratch(scratch);

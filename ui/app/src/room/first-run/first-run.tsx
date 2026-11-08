@@ -72,6 +72,7 @@ const IDS = {
     retry: "install-retry",
     proxy: "install-proxy",
     askIt: "install-ask-it",
+    signIn: "install-sign-in",
   },
   gate: {
     root: "signin",
@@ -472,7 +473,11 @@ export function FirstRun({
       plan={planOf(state.chosen)}
       setup={state.agents[state.chosen]}
       state={state}
-      acts={installActs(store, state.chosen, state.copied)}
+      acts={{
+        ...installActs(store, state.chosen, state.copied),
+        // no gate on the first screen: the line offers the gate's own Sign in press while the plan isn't here yet
+        signIn: () => void actsFor(store, transport, state.chosen, null)({ act: "sign-in" }),
+      }}
     />
   );
 }

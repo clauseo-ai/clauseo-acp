@@ -41,9 +41,19 @@ export type InstallActs = {
   /** What was copied for the failure on screen now: the line reads it back. */
   copied: "message" | "log" | null;
   setCopied: (what: "message" | "log") => void;
+  /** Where no gate stands beside the line (the first screen, Settings' Plans): the room gate's Sign in, offered while
+   * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
+   * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
+  signIn?: (() => void) | undefined;
 };
 
-export type InstallTestIds = { line?: string; retry?: string; proxy?: string; askIt?: string };
+export type InstallTestIds = {
+  line?: string;
+  retry?: string;
+  proxy?: string;
+  askIt?: string;
+  signIn?: string;
+};
 
 /** The working line for the install, in the language, or null when there is nothing to say (no install known, ready,
  * managed). A plain function, no hook: the first run builds it outside render too, as the setup store changes. */
@@ -94,7 +104,19 @@ export function installLine(
         kind: "wait",
         words: w("Needs a download of about {mb} MB", { mb: view.mb }),
         pill: null,
-        actions: wrap(null),
+        actions: wrap(
+          acts.signIn === undefined ? null : (
+            <Button
+              kind="tone"
+              size="small"
+              className="working-act"
+              onClick={acts.signIn}
+              data-testid={ids.signIn}
+            >
+              {w("Sign in")}
+            </Button>
+          ),
+        ),
       };
     case "downloading": {
       const words = w("Getting {name} ready… {done} MB of {total} MB", {

@@ -41,6 +41,8 @@ mod compose;
 mod confirm;
 mod events;
 #[cfg(feature = "e2e")]
+mod fake_install;
+#[cfg(feature = "e2e")]
 mod fake_signin;
 mod firm_policy;
 mod hook;

@@ -3,6 +3,7 @@
 // (a reused one), each asking first; with a key or the firm's account, the line alone, since the host bars a sign-in
 // then. Signed out: "Sign in again" and "Look for my … sign-in", or UD1's line for a login found but not reusable.
 // Signing in: UD1's gate, inline. ChatGPT not added: "Add ChatGPT", which installs it and then starts its sign-in.
+// Claude not here yet: the install line with the room gate's Sign in, which downloads it and then signs in.
 // Under it, the other ways in (a key; for Claude the firm's address). A plan the firm's policy locks shows its line
 // and "Managed by firm", and no control.
 import { useEffect, useState, type ReactNode } from "react";
@@ -262,13 +263,22 @@ export function PlanBlock({
         );
         break;
       case "install": {
-        const working = installLine(lang, installView(setup), name, {
-          retry: () => command({ retry_agent_install: { agent } }),
-          proxy: () => command({ retry_agent_install: { agent, use_system_proxy: true } }),
-          copy: copyText,
-          copied: null,
-          setCopied: () => {},
-        });
+        const working = installLine(
+          lang,
+          installView(setup),
+          name,
+          {
+            retry: () => command({ retry_agent_install: { agent } }),
+            proxy: () => command({ retry_agent_install: { agent, use_system_proxy: true } }),
+            copy: copyText,
+            copied: null,
+            setCopied: () => {},
+            // a plan not here yet gets the room gate's Sign in: desktop downloads it and signs in once it is ready
+            // (not while "Add ChatGPT" waits: its own sign-in starts at ready)
+            signIn: adding ? undefined : signIn,
+          },
+          { signIn: "plans-sign-in" },
+        );
         body = working !== null && working.kind === "wait" && (
           <div className="set-plan-install">
             {line(working.words)}

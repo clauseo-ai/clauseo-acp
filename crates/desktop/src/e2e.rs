@@ -17,6 +17,10 @@
 //! - Setup plays a scripted sign-in for the agents `E2E_FAKE_SIGNIN` names
 //!   (`claude-acp=ok,codex-acp=fail`; `setup/fake_signin.rs`), its `Waiting` held for
 //!   `E2E_FAKE_SIGNIN_HOLD_MS`: `Queued`, `Waiting`, then `SignedIn` or `Failed`.
+//! - Setup plays a scripted install for the agents `E2E_FAKE_INSTALL` names (`claude-acp`;
+//!   `setup/fake_install.rs`, wrapping the seam over S18 below the scripted sign-in): each starts
+//!   `Missing` (50 MB), and its install plays `Downloading`, `Installing`, then `Ready`, 1 s a
+//!   state, with no network and no entry written, so a sign-in pressed before it runs at `Ready`.
 //! - The speed scoreboard's measures (docs/decisions/0012-desktop-bridge.md):
 //!   - each channel event that fits one message wrapped goes as
 //!     `{"timed":{"received_ms":<f64>,"event":<event>}}`, the time the bridge received it from
