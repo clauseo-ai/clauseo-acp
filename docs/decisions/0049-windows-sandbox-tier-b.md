@@ -2004,6 +2004,17 @@ checks activation against a running server too). The owner's WSL kept working (T
 1040, 11728, 1035 and 1042; an upgrade is untested and is expected to rewrite the values.
 `\\wsl.localhost\` was inconclusive: in that form it fails for the owner too.
 
+**Per-user registrations don't reach it** (R5d, the same VM: Server 2025 26100.33650, WSL 3.0.3.0).
+COM merges `HKCU\Software\Classes` into a caller's view, and a pool user can write its own
+`HKCU`, so a per-user `AppID` or `CLSID` with no `LaunchPermission` might have bypassed the
+machine's deny. It doesn't for this `LocalService` class: with
+`HKCU\Software\Classes\AppID\{370121D2-AA7E-4608-A86D-0BBAB9DA1A60}` holding only
+`LocalService`, and again with `HKCU\Software\Classes\CLSID\{a9b7a1b9-…ce7e}` pointing at a fresh
+`AppID` with its own `LocalService`, the pool user's `wsl -l` and `CreateInstance(ce7e)` were
+still denied, and all 8 DCOM 10016 events named the machine's `AppID` `{370121D2-…}`, never the
+per-user one. So the deny isn't extended to the pool users' hives, and the check reads only
+`HKLM`.
+
 **The deny** (`windows::wsl`). The targets are found at each run, never hard-coded: every AppID
 whose `LocalService` is `WSLService` or `LxssManager` (listing `HKLM\SOFTWARE\Classes\AppID`
 finds every class on such an AppID, so a future WSL class is caught; a key there that can't be
