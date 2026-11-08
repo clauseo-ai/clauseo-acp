@@ -525,3 +525,22 @@ fn the_data_folder_suffix_is_the_apps_identifier() {
     assert!(dir.starts_with(profile));
     assert!(dir.ends_with("ai.clauseo.desktop"));
 }
+
+#[test]
+fn the_app_asks_the_task_only_for_the_folder_it_would_set_up() {
+    let profile = Path::new(r"C:\Users\lawyer");
+    let apps = profile.join(r"AppData\Local\ai.clauseo.desktop");
+    assert_eq!(task_serves(Some(profile), &apps), Ok(()));
+    let folded = PathBuf::from(r"c:\users\LAWYER\appdata\local\AI.CLAUSEO.DESKTOP");
+    assert_eq!(task_serves(Some(profile), &folded), Ok(()), "case folded");
+    // A moved AppData, a portable data folder, another user's, or no profile: the prompt.
+    for elsewhere in [
+        r"D:\Profiles\lawyer\AppData\Local\ai.clauseo.desktop",
+        r"C:\Users\lawyer\Documents\Clauseo",
+        r"C:\Users\other\AppData\Local\ai.clauseo.desktop",
+    ] {
+        let why = task_serves(Some(profile), Path::new(elsewhere));
+        assert!(why.is_err(), "{elsewhere}");
+    }
+    assert!(task_serves(None, &apps).is_err());
+}

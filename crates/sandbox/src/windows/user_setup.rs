@@ -1,8 +1,9 @@
 //! [`UserSetup`]: the app's side of the elevated set-up (S15 `PR4h`), as R17 holds it through
 //! [`SandboxSetup`]. It reads the set-up's state, asks the set-up task for a set-up or an extend
 //! with no prompt (`setup_task`), starts the setup exe's admin copy and waits for it where
-//! there is no set-up task (`run_elevated`, `extend_elevated`), the clean-up and the removal,
-//! and forgets a matter without admin.
+//! there is no set-up task, or the task would set up another folder than the app's
+//! (`run_elevated`, `extend_elevated`), the clean-up and the removal, and forgets a matter
+//! without admin.
 //!
 //! The one exe it starts is the admin copy in `%ProgramFiles%\Clauseo\Sandbox\`
 //! (`admin_copy`), never the copy beside `Clauseo.exe`, which a per-user install keeps in a
@@ -56,12 +57,13 @@ use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
 use super::reclaim::hand_back_after;
-use super::record::{sandbox_group_sid, sandbox_pool_sids};
+use super::record::{current_user_sid, sandbox_group_sid, sandbox_pool_sids};
 use super::setup::SetupExit;
+use super::setup::adopt::windows_adopter::own_profile;
 use super::setup::args::quote;
 use super::setup::around::Around;
 use super::setup::result_file::{self, SetupResult};
-use super::setup::serve::via_task;
+use super::setup::serve::{task_serves, via_task};
 use super::setup::taken_file;
 use super::setup::{launch_code, launch_error};
 use super::setup_task::request_set_up;
@@ -113,7 +115,9 @@ impl UserSetup {
     /// Asks the set-up task (`setup_task::request_set_up`) and reads its reply as the exe's
     /// result is read (`serve::via_task`); with no set-up task, `elevated`. The last result file
     /// is removed first, as before a prompted run, so a request the task refused before running
-    /// anything leaves no earlier result to be read as its own.
+    /// anything leaves no earlier result to be read as its own. The task sets up the folder it
+    /// derives from this user's profile: when that isn't `data_dir` (`serve::task_serves`), it
+    /// isn't asked, the reason is logged, and `elevated` runs.
     fn through_task(
         &self,
         add: Option<u8>,
@@ -124,6 +128,13 @@ impl UserSetup {
                 "the last set-up's result can't be cleared: {error}"
             ))
         })?;
+        if let Err(why) = task_serves(own_profile_folder().as_deref(), &self.data_dir) {
+            tracing::info!(
+                why,
+                "the set-up task sets up another folder; asking with the prompt"
+            );
+            return elevated();
+        }
         via_task(request_set_up(add), elevated)
     }
 
@@ -274,7 +285,8 @@ impl SandboxSetup for UserSetup {
     }
 
     /// The set-up through the set-up task, with no prompt (`setup_task::request_set_up`); on an
-    /// install with no set-up task, [`UserSetup::run_elevated`] and its prompt.
+    /// install with no set-up task, or a data folder the task wouldn't set up,
+    /// [`UserSetup::run_elevated`] and its prompt.
     fn run(&self) -> Result<(), SetupError> {
         self.through_task(None, || self.run_elevated())
     }
@@ -309,6 +321,13 @@ impl SandboxSetup for UserSetup {
         let code = launch("--remove")?;
         result_file::outcome(code, None)
     }
+}
+
+/// This user's own profile folder, as the set-up task reads it for them (`own_profile`);
+/// `None` when there is none or it can't be read.
+fn own_profile_folder() -> Option<PathBuf> {
+    let user = current_user_sid().ok()?;
+    own_profile(&user).ok().flatten()
 }
 
 /// The record's pool users, and the SIDs a ledger trusts: those and their group.

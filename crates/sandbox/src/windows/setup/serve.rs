@@ -365,6 +365,22 @@ fn locked<H: Host>(
     Reply::Ran(host.set_up(owner, data_dir, add.unwrap_or(0)))
 }
 
+/// Whether the set-up task would set up the app's `data_dir` for a user whose own profile folder
+/// is `profile` (`ProfileImagePath`, `None` for none): the folder it derives ([`data_dir_in`])
+/// is that one. When not (a moved `AppData\Local`, a portable data folder, no profile), a
+/// reply would say done while the app's folder stayed unset; `Err` says why, and the app asks
+/// with the prompt instead, whose `--set-up` takes the folder as it is.
+pub fn task_serves(profile: Option<&Path>, data_dir: &Path) -> Result<(), &'static str> {
+    let profile = profile.ok_or("this user has no profile folder of their own")?;
+    match data_dir_in(profile) {
+        Some(derived) if same_path(&derived, data_dir) => Ok(()),
+        Some(_) => {
+            Err("the app's data folder isn't AppData\\Local\\ai.clauseo.desktop in the profile")
+        }
+        None => Err("the profile's data folder can't be named inside it"),
+    }
+}
+
 /// The data folder in `profile`: [`DATA_SUFFIX`] below it, checked to lie inside it.
 pub fn data_dir_in(profile: &Path) -> Option<PathBuf> {
     let dir = DATA_SUFFIX
