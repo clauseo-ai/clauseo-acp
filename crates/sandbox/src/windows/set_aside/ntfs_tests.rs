@@ -278,3 +278,17 @@ fn a_profile_base_reached_through_a_junction_is_refused_and_nothing_is_made() {
         "nothing made through a junction"
     );
 }
+
+/// A matter on the data folder's volume keeps the sandbox folder as its set-aside root, whatever
+/// form its path takes; nothing is made at a volume's root.
+#[test]
+fn a_matter_on_the_data_folders_volume_sets_aside_into_the_sandbox_folder() {
+    use super::run::Volume as _;
+    let w = World::new("ntfs-items-root");
+    let sandbox = w.canonical("data").join("sandbox");
+    let matter = w.canonical("matter");
+    let ntfs = super::ntfs::Ntfs;
+    assert_eq!(ntfs.items_root(&sandbox, &matter).unwrap(), sandbox);
+    let verbatim = PathBuf::from(format!(r"\\?\{}", matter.display()));
+    assert_eq!(ntfs.items_root(&sandbox, &verbatim).unwrap(), sandbox);
+}
