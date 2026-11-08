@@ -100,3 +100,22 @@ fn machine_memory_sets_the_browser_slots() {
         .into();
     assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(32 * GB)));
 }
+
+/// No dialogs by default; `with_dialogs` hands its own to the wiring, which asks through it.
+#[test]
+fn the_dialogs_seam_reaches_the_wiring() {
+    use crate::dialogs::{Dialog, DialogAnswer, FakeDialogs, NativeDialogs};
+    let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let parts = ConfigParts::from(HostConfig::new(effective(), launcher()));
+    assert!(parts.wiring.dialogs.is_none());
+    let fake = Arc::new(FakeDialogs::new([DialogAnswer::AllowOnce]));
+    let parts: ConfigParts = HostConfig::new(effective(), launcher())
+        .with_dialogs(Arc::clone(&fake) as Arc<dyn NativeDialogs>)
+        .into();
+    let dialogs = parts.wiring.dialogs.expect("the dialogs set");
+    let off = Dialog::SwitchOff {
+        matter_name: "Smith".to_owned(),
+    };
+    assert_eq!(dialogs.ask(off.clone()), DialogAnswer::AllowOnce);
+    assert_eq!(fake.asked(), vec![off]);
+}

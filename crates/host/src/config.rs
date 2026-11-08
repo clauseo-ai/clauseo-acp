@@ -571,6 +571,13 @@ impl HostConfig {
         self
     }
 
+    /// The native dialogs (R18): the widening questions and the picker, drawn by the OS.
+    #[must_use]
+    pub fn with_dialogs(mut self, dialogs: Arc<dyn crate::dialogs::NativeDialogs>) -> Self {
+        self.wiring.dialogs = Some(dialogs);
+        self
+    }
+
     /// The seam set, for the first detection in `Host::start`.
     pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
         self.sandbox.as_ref()

@@ -40,12 +40,62 @@ pub(crate) enum Key {
     SwitchMessage,
     /// ND-15: its accepting button.
     SwitchOk,
+    // R18's widening questions and picker (`ask/words.rs`): provisional English, no review id
+    // yet, and English in the Hindi table until the app thread writes it ([`PENDING_HINDI`]).
+    /// R18, the widening questions' allowing button (macOS `NSAlert` and Windows).
+    AskAllow,
+    /// R18, their refusing button.
+    AskRefuse,
+    /// R18, their Remember checkbox (macOS `NSAlert` and Windows).
+    AskRemember,
+    /// R18, where there is no checkbox (Linux, and macOS until `NSAlert` lands): allow this time.
+    AskAllowOnce,
+    /// R18, there: allow and remember.
+    AskAllowAlways,
+    /// R18, a refused folder's title.
+    AskFolderTitle,
+    /// R18, a refused file's title.
+    AskFileTitle,
+    /// R18, their message; `{matter}` is the matter's name, `{path}` the folder or file.
+    AskOutsideMessage,
+    /// R18, the title for a folder of another matter.
+    AskOtherFolderTitle,
+    /// R18, the title for a file of another matter.
+    AskOtherFileTitle,
+    /// R18, the first line for a folder of another matter; `{other}` is that matter's name.
+    AskOtherFolderNote,
+    /// R18, the first line for a file of another matter.
+    AskOtherFileNote,
+    /// R18, the line after it.
+    AskOtherMessage,
+    /// R18, the last line for another matter's folder or file.
+    AskReadOnlyNote,
+    /// R18, a refused site's title.
+    AskSiteTitle,
+    /// R18, its message; `{host}` is the site.
+    AskSiteMessage,
+    /// R18, the line added for a site on a shared server.
+    AskSharedHostingNote,
+    /// R18, switching protection off: the title.
+    AskSwitchOffTitle,
+    /// R18, its message.
+    AskSwitchOffMessage,
+    /// R18, confirming a picked folder: the title.
+    AskPickFolderTitle,
+    /// R18, confirming a picked file: the title.
+    AskPickFileTitle,
+    /// R18, their message (after the other matter's line, when it is another's).
+    AskPickMessage,
+    /// R18, the folder picker's title.
+    PickFolderTitle,
+    /// R18, the file picker's title.
+    PickFileTitle,
 }
 
 impl Key {
     /// Every key, in review order (ND-01 first).
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 15] = [
+    pub(crate) const ALL: [Self; 39] = [
         Self::Cancel,
         Self::AlwaysTitle,
         Self::AlwaysMessage,
@@ -61,6 +111,30 @@ impl Key {
         Self::SwitchTitle,
         Self::SwitchMessage,
         Self::SwitchOk,
+        Self::AskAllow,
+        Self::AskRefuse,
+        Self::AskRemember,
+        Self::AskAllowOnce,
+        Self::AskAllowAlways,
+        Self::AskFolderTitle,
+        Self::AskFileTitle,
+        Self::AskOutsideMessage,
+        Self::AskOtherFolderTitle,
+        Self::AskOtherFileTitle,
+        Self::AskOtherFolderNote,
+        Self::AskOtherFileNote,
+        Self::AskOtherMessage,
+        Self::AskReadOnlyNote,
+        Self::AskSiteTitle,
+        Self::AskSiteMessage,
+        Self::AskSharedHostingNote,
+        Self::AskSwitchOffTitle,
+        Self::AskSwitchOffMessage,
+        Self::AskPickFolderTitle,
+        Self::AskPickFileTitle,
+        Self::AskPickMessage,
+        Self::PickFolderTitle,
+        Self::PickFileTitle,
     ];
 }
 
@@ -92,6 +166,41 @@ fn en(key: Key) -> &'static str {
              account you want."
         }
         Key::SwitchOk => "Sign out and continue",
+        Key::AskAllow => "Allow",
+        Key::AskRefuse => "Don't allow",
+        Key::AskRemember => "Remember for this matter",
+        Key::AskAllowOnce => "Allow once",
+        Key::AskAllowAlways => "Always allow for this matter",
+        Key::AskFolderTitle => "Let Clauseo read this folder?",
+        Key::AskFileTitle => "Let Clauseo read this file?",
+        Key::AskOutsideMessage => {
+            "While working on {matter}, Clauseo was stopped from reading {path}, which is outside \
+             the matter's folder."
+        }
+        Key::AskOtherFolderTitle => "Let Clauseo read a folder from another matter?",
+        Key::AskOtherFileTitle => "Let Clauseo read a file from another matter?",
+        Key::AskOtherFolderNote => "This folder belongs to another matter, {other}.",
+        Key::AskOtherFileNote => "This file belongs to another matter, {other}.",
+        Key::AskOtherMessage => {
+            "While working on {matter}, Clauseo was stopped from reading {path}."
+        }
+        Key::AskReadOnlyNote => "If you allow it, Clauseo can read it but not change it.",
+        Key::AskSiteTitle => "Let Clauseo open this site?",
+        Key::AskSiteMessage => "Clauseo was stopped from opening {host}.",
+        Key::AskSharedHostingNote => {
+            "{host} shares its server with other sites, so allowing it may let Clauseo open them \
+             too."
+        }
+        Key::AskSwitchOffTitle => "Switch protection off for {matter}?",
+        Key::AskSwitchOffMessage => {
+            "Without protection, Clauseo can read and change files anywhere on this computer and \
+             open any site while it works on {matter}."
+        }
+        Key::AskPickFolderTitle => "Let Clauseo read the folder you picked?",
+        Key::AskPickFileTitle => "Let Clauseo read the file you picked?",
+        Key::AskPickMessage => "While working on {matter}, Clauseo will be able to read {path}.",
+        Key::PickFolderTitle => "Choose a folder for {matter}",
+        Key::PickFileTitle => "Choose a file for {matter}",
     }
 }
 
@@ -116,8 +225,63 @@ fn hi(key: Key) -> &'static str {
              उससे साइन इन कर सकते हैं।"
         }
         Key::SwitchOk => "साइन आउट करके आगे बढ़ें",
+        // The app thread writes these (PENDING_HINDI); English until then.
+        Key::AskAllow
+        | Key::AskRefuse
+        | Key::AskRemember
+        | Key::AskAllowOnce
+        | Key::AskAllowAlways
+        | Key::AskFolderTitle
+        | Key::AskFileTitle
+        | Key::AskOutsideMessage
+        | Key::AskOtherFolderTitle
+        | Key::AskOtherFileTitle
+        | Key::AskOtherFolderNote
+        | Key::AskOtherFileNote
+        | Key::AskOtherMessage
+        | Key::AskReadOnlyNote
+        | Key::AskSiteTitle
+        | Key::AskSiteMessage
+        | Key::AskSharedHostingNote
+        | Key::AskSwitchOffTitle
+        | Key::AskSwitchOffMessage
+        | Key::AskPickFolderTitle
+        | Key::AskPickFileTitle
+        | Key::AskPickMessage
+        | Key::PickFolderTitle
+        | Key::PickFileTitle => en(key),
     }
 }
+
+/// The keys whose Hindi the app thread writes: English stands in the Hindi table until then,
+/// and the tests of the Hindi (and of the review page, where they have no id yet) skip them.
+#[cfg(test)]
+pub(crate) const PENDING_HINDI: &[Key] = &[
+    Key::AskAllow,
+    Key::AskRefuse,
+    Key::AskRemember,
+    Key::AskAllowOnce,
+    Key::AskAllowAlways,
+    Key::AskFolderTitle,
+    Key::AskFileTitle,
+    Key::AskOutsideMessage,
+    Key::AskOtherFolderTitle,
+    Key::AskOtherFileTitle,
+    Key::AskOtherFolderNote,
+    Key::AskOtherFileNote,
+    Key::AskOtherMessage,
+    Key::AskReadOnlyNote,
+    Key::AskSiteTitle,
+    Key::AskSiteMessage,
+    Key::AskSharedHostingNote,
+    Key::AskSwitchOffTitle,
+    Key::AskSwitchOffMessage,
+    Key::AskPickFolderTitle,
+    Key::AskPickFileTitle,
+    Key::AskPickMessage,
+    Key::PickFolderTitle,
+    Key::PickFileTitle,
+];
 
 /// `template` with each `{slot}` that `slots` names replaced by its value, in one pass, so a
 /// value that itself holds a `{slot}` stays as it is. A slot `slots` does not name stays too.
@@ -142,6 +306,28 @@ pub(crate) fn fill(template: &str, slots: &[(&str, &str)]) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// `value` bidi-isolated for a slot: wrapped in FIRST STRONG ISOLATE (U+2068) and POP
+/// DIRECTIONAL ISOLATE (U+2069), so a right-to-left name or path cannot reorder the words
+/// around it. Its own bidi controls and other control characters (a line break included) go
+/// first, so it cannot close the isolate early or fake a line of the dialog.
+pub(crate) fn isolate(value: &str) -> String {
+    let kept = value
+        .chars()
+        .filter(|c| !c.is_control() && !bidi_control(*c));
+    std::iter::once('\u{2068}')
+        .chain(kept)
+        .chain(std::iter::once('\u{2069}'))
+        .collect()
+}
+
+/// Whether `c` is a bidi mark, embedding, override or isolate.
+fn bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 /// One confirm's words, in one language, its slots filled.
