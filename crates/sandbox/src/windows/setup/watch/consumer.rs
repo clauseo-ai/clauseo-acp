@@ -42,8 +42,11 @@ pub const END_ID: u16 = 24;
 pub const ACCESS_DENIED: u32 = 0xC000_0022;
 /// The oldest a waiting Create may be, against the end being paired, in seconds of its stamp.
 pub const STALE_AFTER_SECONDS: i64 = 2;
-/// The stamps' rate until the trace gives its own: QPC at 10 MHz, as Windows 10 and later run it.
-pub const DEFAULT_STAMP_RATE: i64 = 10_000_000;
+/// The stamps' ticks a second. A real-time consumer opened without
+/// `PROCESS_TRACE_MODE_RAW_TIMESTAMP` in `EVENT_TRACE_LOGFILE.ProcessTraceMode` (this one) gets
+/// `EventHeader.TimeStamp` converted to system time, a `FILETIME` in 100 ns units, whatever
+/// the session's clock or the header's `PerfFreq`; so the rate is fixed, never `PerfFreq`.
+pub const STAMP_TICKS_PER_SECOND: i64 = 10_000_000;
 /// The most pool Creates waiting for their `OperationEnd`.
 pub const PENDING_CAP: usize = 4096;
 /// The longest `FileName` kept, in UTF-16 units.
@@ -300,7 +303,7 @@ impl Pairing {
             order: VecDeque::new(),
             next: 0,
             cap: cap.max(1),
-            stale_ticks: STALE_AFTER_SECONDS * DEFAULT_STAMP_RATE,
+            stale_ticks: STALE_AFTER_SECONDS * STAMP_TICKS_PER_SECOND,
         }
     }
 
@@ -423,13 +426,6 @@ impl Consumer {
     /// How many pool Creates wait.
     pub fn pending(&self) -> usize {
         self.pairing.len()
-    }
-
-    /// The stamps' ticks a second (the trace's `PerfFreq`); a rate of zero or less is ignored.
-    pub fn set_stamp_rate(&mut self, ticks_per_second: i64) {
-        if ticks_per_second > 0 {
-            self.pairing.stale_ticks = STALE_AFTER_SECONDS.saturating_mul(ticks_per_second);
-        }
     }
 
     /// Forgets every pending Create: the breaker paused the trace, so their ends won't come.

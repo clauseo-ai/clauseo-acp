@@ -1946,7 +1946,7 @@ runner starts it with `refresh::request_watch` (as the lawyer, through
   oldest evicted. `Status == 0xC0000022` makes a record. Each pending Create keeps its
   `EventHeader.TimeStamp`. An OperationEnd stamped before it ends an earlier use of the IRP
   (real-time buffers are per CPU, so delivery can be out of order), and pairs with nothing. A
-  waiting Create more than 2 s older (QPC, at the trace's `PerfFreq`) than the end is stale: it
+  waiting Create more than 2 s older (system time, 100 ns ticks) than the end is stale: it
   is dropped unpaired, so an end that arrives before its own Create can't pair with an old one.
 - **Versions.** Only Create v1 and OperationEnd v0 are read, the versions the spike recorded on
   WS2025 26100 and the offsets were written for. Any other version is skipped and counted, and
