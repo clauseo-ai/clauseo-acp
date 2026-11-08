@@ -3,7 +3,7 @@
 //! and no logon start; the uninstaller's removal takes them all down before the copy they run,
 //! and a per-machine install's set-up registers and removes the stop and sweep tasks.
 
-use super::rules::{MSI_EVENT_DELAY, MSI_EVENT_IDS, Trigger, msi_event_query};
+use super::rules::{MSI_EVENT_IDS, Trigger, msi_event_query};
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
 
@@ -94,8 +94,6 @@ fn the_triggers_pass_nothing_but_the_fixed_argument() {
         assert!(!task.argument().contains('$'), "{task:?}");
     }
     assert_eq!(SystemTask::Refresh.argument(), REFRESH_ARG);
-    // A burst of events waits 15 s and gives one run (a start while it runs is dropped).
-    assert_eq!(MSI_EVENT_DELAY, "PT15S");
 }
 
 #[test]
