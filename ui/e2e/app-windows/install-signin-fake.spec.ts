@@ -22,7 +22,13 @@ test.describe("a sign-in pressed before Claude is installed", () => {
     const foot = page.getByTestId("install-foot");
     // the starting state: the first screen, Claude missing, its download's size and Sign in
     await expect(foot).toHaveAttribute("data-state", "missing");
-    await expect(page.getByText("Needs a download of about", { exact: false })).toBeVisible();
+    // the line says it twice: once for screen readers (the sr-only status) and once on screen
+    await expect(page.getByTestId("install-said")).toHaveText(/^Needs a download of about \d+ MB$/);
+    await expect(
+      page
+        .getByText("Needs a download of about", { exact: false })
+        .and(page.locator(":not(.sr-only)")),
+    ).toBeVisible();
     const signIn = foot.getByRole("button", { name: "Sign in", exact: true });
     await expect(signIn).toHaveAttribute("data-testid", "install-sign-in");
     await expect(signIn).toBeEnabled();
