@@ -696,10 +696,10 @@ in Chrome's and Edge's policy locations:
   doesn't take this policy as a recommendation either.
 
 **The rule.** If any of these says false, Clauseo's browser doesn't start, and the app tells the
-lawyer that your firm has turned off browser automation on this computer. If a value is missing,
-or a source can't be read, that alone doesn't block: Clauseo writes one line to the host log
-naming which browser and scope it couldn't read (never a path). Clauseo reads Chrome's and Edge's
-policy again each time a session starts its browser, so a change there applies to the next
+lawyer that your firm doesn't allow apps to control a browser on this computer. If a value is
+missing, or a source can't be read, that alone doesn't block: Clauseo writes one line to the host
+log naming which browser and scope it couldn't read (never a path). Clauseo reads Chrome's and
+Edge's policy again each time a session starts its browser, so a change there applies to the next
 session; its own key below, like every Clauseo policy key, applies on the next start.
 
 **Allowing Clauseo specifically.** Set Clauseo's policy key

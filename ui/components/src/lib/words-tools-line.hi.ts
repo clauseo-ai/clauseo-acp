@@ -19,7 +19,7 @@ export const HI = {
   "Too many browsers open": "बहुत सारे ब्राउज़र खुले हैं",
   "Needs Chrome": "Chrome चाहिए",
   // the firm's Chrome or Edge policy turns off remote debugging, so no browser starts
-  // (provisional Hindi)
+  // (provisional Hindi, app track final)
   "Blocked by your firm": "आपकी फ़र्म ने रोका है",
 } as const;
 
