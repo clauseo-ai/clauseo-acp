@@ -31,8 +31,7 @@ use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
-    WRITE_OWNER,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
@@ -286,13 +285,16 @@ fn hash_file(file: &mut File) -> io::Result<String> {
 /// Gives `path` (a folder when `folder`, else the admin copy) [`LOCKED_FOLDER_SDDL`]'s or
 /// [`LOCKED_FILE_SDDL`]'s owner and protected DACL, then reads it back and refuses unless it is
 /// exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
-/// Administrators as owner. Opened as itself, then [`lock_handle`].
+/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down: the
+/// set-up's walks lock through handles of their own (`lock_tree_os`).
+#[cfg(test)]
 pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
+    use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
     let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;
     lock_handle(Handle::open(path, access)?.0, folder)
 }
 
-/// [`lock_down`] on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
+/// `lock_down` on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
 /// and `FILE_READ_ATTRIBUTES`). A file with more than one name (a hard link, whose other name
 /// may be anywhere on the volume and would get the same owner and DACL) is refused, never
 /// locked: the lock-down then fails, and a removal leaves the admin copy (exit 10).
