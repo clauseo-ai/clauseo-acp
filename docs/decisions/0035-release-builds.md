@@ -139,14 +139,20 @@ Developer ID.
 - **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
   installer is built from `crates/desktop/windows/nsis/installer.nsi`
   (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus
-  nine marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08).
-  `admin-section`, at the top of `.onInit`, runs the per-user installer's elevated instance
-  (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in the per-machine installer it first makes the run's own temporary folder
-  directly in `%ProgramFiles%\Clauseo`, locked to Administrators and SYSTEM, and points
+  ten marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08; and
+  `version-info`). `admin-section`, at the top of `.onInit`, runs the per-user installer's
+  elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in
+  the per-machine installer it first makes the run's own temporary folder directly in
+  `%ProgramFiles%\Clauseo`, locked to Administrators and SYSTEM, and points
   `$PLUGINSDIR` and `$TEMP` at it (`safe_temp.nsh`, decision 0049). The hooks alone couldn't do
   either: the template's `.onInit` calls plug-ins (`${RunningX64}` in `SetContext` on every run,
   `SemverCompare` under `/S`), which NSIS extracts into `$PLUGINSDIR` under `%TEMP%`, a folder
   the lawyer's processes can rename while the elevated instance is about to load from it.
+  `version-info` stands in for upstream's six version lines with the full set the sandbox's set-up
+  exe has (`CompanyName` from `bundle.publisher`, `FileDescription` "Clauseo Setup" or "Clauseo
+  Setup (all users)", `InternalName` and `OriginalFilename` "Clauseo Setup"), after Defender's
+  machine-learning check quarantined test-v0.0.1's per-user installer as
+  `Trojan:Win32/Bearfoos.A!ml`; NSIS refuses a key given twice, so the block replaces the lines.
   `no-solid` drops `/SOLID`, so the stub reads each file straight from the installer instead of
   unpacking all its data into a file in `%TEMP%` first, which the elevated instance would read
   the sandbox's set-up program from. `finish-show` and `finish-show-function` hide "Run Clauseo"
