@@ -1924,19 +1924,25 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
 1. walks every Task Scheduler folder from `\`, subfolders included, with no depth limit but at
    most 10 000 folders (`FOLDERS_CAP`), and reads every task, hidden ones included
    (`TASK_ENUM_HIDDEN`), with its definition's principal: `UserId`, else `GroupId`;
-2. resolves that name (`sweep::resolve`, once a run per name): a SID's text is that SID,
-   compared as it is; `LocalSystem`, `LocalService` and `NetworkService` (any case) are
-   S-1-5-18, -19 and -20; any other name is looked up (`LookupAccountNameW`, which finds a local
-   account on this machine). A pool principal is always a local account (`ClauseoSbNN`) or a
-   SID's text, and both resolve locally. So a name that resolves to no SID (a domain account
-   with no domain controller reachable, a deleted account) is the pool's only when its account
-   part is a pool user's name, without case, with no prefix or one of `.\`, this computer's
-   NetBIOS name or its DNS host name (`sweep::Names::is_pool_name`). Any other such name is
-   skipped: counted in the log line, never named, and not 56;
-3. deletes the task when that SID equals one of the pool's, never on a prefix or a domain, or
-   when step 2 found it a pool user's name. A task with neither a user nor a group isn't the
-   pool's. A task whose definition or principal can't be read is unreadable and never deleted.
-   No failure stops the walk. Deleting a task ends no running instance of it;
+2. resolves that name (`sweep::resolve`, once a run per name): a SID's text, in any form
+   `ConvertStringSidToSidW` takes (`s-`, a hex authority, leading zeros), is that SID
+   (`sweep::canonical_sid`); `LocalSystem`, `LocalService` and `NetworkService` (any case)
+   are S-1-5-18, -19 and -20; any other name is looked up (`LookupAccountNameW`, which finds a
+   local account on this machine). A pool principal is always a local account (`ClauseoSbNN`)
+   or a SID's text, and both resolve locally. So a name that resolves to no SID is the pool's
+   when its account part is a pool user's name, without case, with no prefix or one of `.\`,
+   this computer's NetBIOS name or its DNS host name (`sweep::Names::is_pool_name`). Such a
+   name under another domain's prefix (`sweep::Names::is_foreign`: one prefix that is neither
+   empty, `.` nor this computer's name; a domain account with no domain controller reachable)
+   is skipped: counted in the log line, never named, and not 56. Any other such name (a
+   deleted account, an empty prefix, a name with no prefix) is 56, and so is every prefix while
+   this computer's names can't be read: it may be the pool's;
+3. deletes the task when that SID equals one of the pool's, never on a prefix or a domain, when
+   step 2 found it a pool user's name, or when the owner its security descriptor names
+   (`IRegisteredTask::GetSecurityDescriptor`, `sweep::sddl_owner`) is a pool SID, whatever
+   its principal. A task with neither a user nor a group is 56 unless its owner is the pool's;
+   a task whose definition, principal or owner can't be read is unreadable, never deleted,
+   and 56. No failure stops the walk. Deleting a task ends no running instance of it;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found;
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
@@ -1974,10 +1980,11 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 `SweepSequence`, so the marker stays and the next launch asks for another run.
 
 **Risks.**
-- A task whose principal can't be read at all still ends every run at 56, and every launch
-  then waits 15 s and is refused, until the task goes. A name that can't be resolved no longer
-  does (step 2). `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks
-  CI's machine only.
+- A task whose principal or owner can't be read at all, or that names no one, or a name that
+  resolves to no SID and isn't another domain's, ends every run at 56, and every launch then
+  waits 15 s and is refused, until the task goes: the sweep fails closed rather than leave a
+  task that may be the pool's. Another domain's name that can't be resolved doesn't (step 2).
+  `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.
