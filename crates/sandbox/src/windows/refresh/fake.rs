@@ -46,6 +46,8 @@ pub(super) struct Fake {
     pub(super) crashed: bool,
     pub(super) calls: Vec<&'static str>,
     pub(super) logs: Vec<(bool, String)>,
+    /// What `reapply_wsl` gives.
+    pub(super) wsl: Result<Option<String>, Failed>,
     /// The staging folder's state.
     pub(super) staging: Staging,
 }
@@ -88,6 +90,7 @@ impl Fake {
             calls: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
+            wsl: Ok(None),
         }
     }
 
@@ -248,6 +251,10 @@ impl Refresher for Fake {
     }
     fn log(&mut self, error: bool, line: &str) {
         self.logs.push((error, line.to_owned()));
+    }
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
+        self.calls.push("reapply_wsl");
+        self.wsl.clone()
     }
 }
 

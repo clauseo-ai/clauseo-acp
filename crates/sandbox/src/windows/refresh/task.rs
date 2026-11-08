@@ -7,7 +7,8 @@
 //!   runs as LOCAL SYSTEM, starts
 //!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
 //!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
-//!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice
+//!   logon and on Windows Installer's events, `rules::Trigger`, with no value queries), needs no
+//!   network, stops after its limit (5 minutes, 2 minutes), and never runs twice
 //!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
@@ -26,14 +27,16 @@ use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
-    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    IEventTrigger, IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService,
+    TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW,
+    TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT,
+    TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
+use super::rules::{Trigger, msi_event_query};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
@@ -271,8 +274,13 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
+        let instances = if spec.queues() {
+            TASK_INSTANCES_QUEUE
+        } else {
+            TASK_INSTANCES_IGNORE_NEW
+        };
         settings
-            .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
+            .SetMultipleInstances(instances)
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)
@@ -286,15 +294,30 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetEnabled(yes)
             .map_err(com("ITaskSettings::SetEnabled"))?;
-        if spec.at_logon() {
-            let trigger = task.Triggers().map_err(com("Triggers"))?;
-            let trigger = trigger
-                .Create(TASK_TRIGGER_LOGON)
-                .map_err(com("ITriggerCollection::Create"))?;
-            let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
-            logon
-                .SetUserId(&BSTR::from(owner_sid.as_str()))
-                .map_err(com("ILogonTrigger::SetUserId"))?;
+        let triggers = task.Triggers().map_err(com("Triggers"))?;
+        for each in spec.triggers() {
+            match each {
+                Trigger::Logon => {
+                    let trigger = triggers
+                        .Create(TASK_TRIGGER_LOGON)
+                        .map_err(com("ITriggerCollection::Create"))?;
+                    let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
+                    logon
+                        .SetUserId(&BSTR::from(owner_sid.as_str()))
+                        .map_err(com("ILogonTrigger::SetUserId"))?;
+                }
+                // The subscription alone: no value queries, so nothing from the event reaches
+                // the action, whose argument stays the fixed one.
+                Trigger::MsiEvents => {
+                    let trigger = triggers
+                        .Create(TASK_TRIGGER_EVENT)
+                        .map_err(com("ITriggerCollection::Create"))?;
+                    let event: IEventTrigger = trigger.cast().map_err(com("IEventTrigger"))?;
+                    event
+                        .SetSubscription(&BSTR::from(msi_event_query()))
+                        .map_err(com("IEventTrigger::SetSubscription"))?;
+                }
+            }
         }
         let action = task.Actions().map_err(com("Actions"))?;
         let action = action

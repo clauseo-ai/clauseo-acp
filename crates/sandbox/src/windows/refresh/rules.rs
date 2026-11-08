@@ -17,6 +17,38 @@ pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 
+/// The Windows Installer events (`MsiInstaller` in the Application log) that start the refresh
+/// task, so WSL's deny comes back within seconds of a WSL update, repair or removal: product
+/// updated (1022), installed (1033), reconfigured (1035), a transaction begun and ended (1040,
+/// 1042), and an install, removal or configuration completed (11707, 11724, 11728). The VM saw
+/// 1040, 11728, 1035 and 1042 for a WSL repair (R5c, T3b).
+pub(super) const MSI_EVENT_IDS: [u32; 8] = [1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728];
+
+/// What starts a task besides a demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    /// The record owner's logon.
+    Logon,
+    /// A Windows Installer event ([`MSI_EVENT_IDS`]), matched by [`msi_event_query`]. It
+    /// passes the task nothing from the event: no value queries, and the action keeps its one
+    /// fixed argument.
+    MsiEvents,
+}
+
+/// The event trigger's subscription: the Application log's `MsiInstaller` events with one of
+/// [`MSI_EVENT_IDS`]. Fixed text, nothing from the record or the event.
+pub(super) fn msi_event_query() -> String {
+    let ids: Vec<String> = MSI_EVENT_IDS
+        .iter()
+        .map(|id| format!("EventID={id}"))
+        .collect();
+    format!(
+        "<QueryList><Query Id=\"0\" Path=\"Application\"><Select Path=\"Application\">\
+         *[System[Provider[@Name='MsiInstaller'] and ({})]]</Select></Query></QueryList>",
+        ids.join(" or ")
+    )
+}
+
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
 /// fixed argument. Both share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
 /// one instance at a time and the settings `task.rs` gives every task; they differ only in
@@ -59,6 +91,22 @@ impl SystemTask {
 
     /// Whether it also starts at the record owner's logon; otherwise only on demand.
     pub fn at_logon(self) -> bool {
+        self.triggers().contains(&Trigger::Logon)
+    }
+
+    /// What starts it besides a demand: the refresh at the owner's logon and on Windows
+    /// Installer's events (WSL's deny, `wsl_phase.rs`); the stop only on demand.
+    pub fn triggers(self) -> &'static [Trigger] {
+        match self {
+            SystemTask::Refresh => &[Trigger::Logon, Trigger::MsiEvents],
+            SystemTask::Stop => &[],
+        }
+    }
+
+    /// Whether a start while it runs waits its turn (`TASK_INSTANCES_QUEUE`) rather than being
+    /// dropped: the refresh's, so an installer event during a run still gets a run after it,
+    /// one at a time. The stop drops it (`TASK_INSTANCES_IGNORE_NEW`).
+    pub fn queues(self) -> bool {
         match self {
             SystemTask::Refresh => true,
             SystemTask::Stop => false,
