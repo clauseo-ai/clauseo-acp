@@ -122,6 +122,21 @@ Dir.mktmpdir do |dir|
     puts "FAIL: self-test: a job its if: keeps off pull requests is flagged"
     failures += 1
   end
+  # Function calls in an if: (workflow_expr.rb raised NameError on any call before ci-cache-plan-a).
+  { "startsWith(github.ref, 'refs/heads/main') && github.event_name == 'schedule'" => false,
+    "always() && contains(format('{0}-x', github.event_name), 'pull')" => true }.each_with_index do |(cond, bad), k|
+    fpath = File.join(dir, "job-if-call-#{k}.yml")
+    File.write(fpath, { "on" => %w[pull_request schedule],
+                        "jobs" => { "j" => { "if" => cond, "permissions" => { "actions" => "write" },
+                                             "steps" => [{ "uses" => checkout }] } } }.to_yaml)
+    caught = !violations([fpath], nil).empty?
+    if caught == bad
+      puts "ok: self-test: if: #{cond} #{bad ? "is caught" : "passes"}"
+    else
+      puts "FAIL: self-test: if: #{cond} #{bad ? "is not caught" : "is flagged"}"
+      failures += 1
+    end
+  end
 
   # The second rule: [steps, listed, bad].
   run_only = [{ "run" => "gh api -X POST repos/o/r/actions/runs/1/cancel" }]
