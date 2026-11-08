@@ -530,3 +530,5 @@ crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line 
 # named like the variants beside it, so no exit code is used twice.
 crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
 crates/sandbox/src/windows/reclaim/taken_tests.rs timed clippy::disallowed_methods
+# An OLE date's seconds, range-checked to 1900..10000 just above the cast (refresh task's last run, host.log).
+crates/sandbox/src/windows/refresh/last_run.rs ole_date_text clippy::cast_possible_truncation

@@ -68,6 +68,7 @@ pub mod installed;
 pub mod key;
 #[cfg(test)]
 mod key_tests;
+pub mod last_run;
 pub mod pe_version;
 #[cfg(test)]
 mod refusal_tests;
@@ -102,7 +103,7 @@ pub use rules::{
 };
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, register_task, remove_staging, request_admin_refresh,
+    TASK_FOLDER, TaskError, last_refresh_run, register_task, remove_staging, request_admin_refresh,
     request_pool_stop, unregister_task,
 };
 pub use version::version_not_older;
