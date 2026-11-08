@@ -96,10 +96,9 @@ fn a_failed_reserve_undoes_what_it_did() {
         assert!(world.open_sessions(MATTER).is_empty(), "{step}");
         assert!(world.claimed_slots().is_empty(), "{step}");
         world.fail_at("none");
-        assert!(
-            launchers.reserve(MATTER, "s2", &[]).is_ok(),
-            "{step}: freed"
-        );
+        // Held to the end: a dropped reservation's undo would log on its own thread.
+        let free = launchers.reserve(MATTER, "s2", &[]);
+        assert!(free.is_ok(), "{step}: freed");
     }
 }
 

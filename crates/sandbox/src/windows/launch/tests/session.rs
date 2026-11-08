@@ -108,7 +108,9 @@ fn the_launch_refuses_a_failed_walk() {
     assert!(matches!(error, Error::NotPrepared), "{error:?}");
     assert_eq!(world.calls(), Vec::<String>::new());
     world.fail_at("none");
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok());
 }
 
 /// A relaunch right after a session's end waits for the end sweeper the outer started: the
@@ -207,7 +209,9 @@ fn the_launch_hands_out_one_agents_launcher() {
         launchers.after_session(MATTER, "s1", &policy),
         Vec::<SetAside>::new()
     );
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok(), "free");
     world.calls();
     let again = refused(launcher.launch(&spec));
     assert!(
@@ -237,7 +241,9 @@ fn a_failed_launch_file_undoes_the_session() {
         world.calls(),
         ["write_launch", "end_run 1", UNDO[0], UNDO[1]]
     );
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok(), "free");
 }
 
 /// A launcher whose session already ended (`after_session`) starts nothing: refused, as a
@@ -321,7 +327,9 @@ fn the_hand_over_lets_a_started_session_go() {
     launchers.after_session(MATTER, "s1", &policy_at(&dir, "matter"));
     let calls = world.calls();
     assert_eq!(calls[calls.len() - 2..], ["end_run 1", "release_slot"]);
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok());
 }
 
 /// A launcher dropped unused undoes the session off the dropping thread; the matter is busy
@@ -372,7 +380,9 @@ fn after_session_frees_the_matter_on_a_panic() {
         ["session_cursor", "repair", "end_run 1", "release_slot"]
     );
     assert!(world.claimed_slots().is_empty());
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "free");
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok(), "free");
 }
 
 /// The session's end, in 0049's order; then the slot goes back and the matter is free.
@@ -402,7 +412,9 @@ fn after_session_runs_in_order_and_frees_the_matter() {
     assert!(world.open_sessions(MATTER).is_empty());
     // The end was `after_session`'s: the launcher's claim, dropped now, undoes nothing.
     drop(launched);
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok());
     assert_eq!(world.calls(), RESERVE);
 }
 
@@ -430,7 +442,9 @@ fn after_session_goes_on_past_failures() {
             ["end_run 1", "release_slot"],
             "{step}"
         );
-        assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "{step}");
+        // Held to the end: a dropped reservation's undo would log on its own thread.
+        let free = launchers.reserve(MATTER, "s2", &[]);
+        assert!(free.is_ok(), "{step}");
     }
 }
 
@@ -455,7 +469,9 @@ fn the_matter_is_busy_until_its_after_session_pass_finishes() {
         held.go();
         ending.join().unwrap();
     });
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok());
 }
 
 /// A session these launchers didn't launch is left alone, and so is its matter's holder.

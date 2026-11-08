@@ -293,7 +293,9 @@ fn a_drop_at_each_step_keeps_the_matter_busy_until_the_walk_undid() {
             "{step}: no step after the drop"
         );
         assert!(world.claimed_slots().is_empty(), "{step}");
-        assert!(launchers.reserve(MATTER, "s2", &[]).is_ok(), "{step}: free");
+        // Held to the end: a dropped reservation's undo would log on its own thread.
+        let free = launchers.reserve(MATTER, "s2", &[]);
+        assert!(free.is_ok(), "{step}: free");
     }
 }
 
@@ -386,7 +388,9 @@ fn a_drop_never_waits_for_its_undo() {
     held.go();
     assert!(launchers.registry.wait_free(MATTER, WAIT));
     assert_eq!(world.calls(), ["end_run 1", UNDO[0], UNDO[1]]);
-    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s2", &[]);
+    assert!(free.is_ok());
 }
 
 /// One walk per matter: while one runs, the matter refuses another reservation, and a second

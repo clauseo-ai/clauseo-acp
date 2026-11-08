@@ -31,10 +31,9 @@ fn a_walk_hung_in_a_step_makes_the_matter_stuck() {
     assert_eq!(world.calls(), undone_at("apply")[WALK.len()..]);
     let still = launchers.reserve(MATTER, "s3", &[]).unwrap_err();
     assert!(matches!(still, Error::MatterStuck), "{still:?}");
-    assert!(
-        launchers.reserve(OTHER, "s4", &[]).is_ok(),
-        "other matters go on"
-    );
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(OTHER, "s4", &[]);
+    assert!(free.is_ok(), "other matters go on");
 }
 
 /// A session's end whose step never returns makes the matter stuck past the bound plus the
@@ -131,5 +130,7 @@ fn an_old_undo_never_frees_a_newer_claims_slot() {
         Some(newer),
         "a late release frees nothing"
     );
-    assert!(launchers.reserve(MATTER, "s4", &[]).is_ok());
+    // Held to the end: a dropped reservation's undo would log on its own thread.
+    let free = launchers.reserve(MATTER, "s4", &[]);
+    assert!(free.is_ok());
 }
