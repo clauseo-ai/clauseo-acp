@@ -129,3 +129,11 @@ pub(super) fn plan(inputs: Inputs<'_>) -> Result<Plan, NotEligible> {
 pub(super) fn copy_missing(recorded: Result<bool, ()>, present: bool) -> bool {
     recorded != Ok(true) || !present
 }
+
+/// Whether a sealed attempt's folder holds its installer and nothing else: `names` as the folder
+/// lists them, `.` and `..` aside, must be exactly `installer` (the `.sig` stays in memory).
+/// Any other name, a stream's name (`file:stream`), a second entry or none refuses.
+pub(super) fn only_installer(names: &[String], installer: &str) -> bool {
+    let mut rest = names.iter().filter(|name| *name != "." && *name != "..");
+    rest.next().is_some_and(|name| name == installer) && rest.next().is_none()
+}

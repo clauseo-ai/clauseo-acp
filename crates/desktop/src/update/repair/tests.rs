@@ -337,3 +337,30 @@ fn the_installer_handles_the_repair_switch() {
          (installer-repair-switch) must land first"
     );
 }
+
+/// A sealed attempt's folder must list its installer alone (`.` and `..` aside): another file,
+/// a stream's name, a folder, a second entry or none refuses.
+#[test]
+fn the_sealed_folder_holds_its_installer_alone() {
+    use super::plan::only_installer;
+    let names = |list: &[&str]| {
+        list.iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let exe = "Clauseo_0.4.1_x64-setup.exe";
+    assert!(only_installer(&names(&[".", "..", exe]), exe));
+    assert!(only_installer(&names(&[exe]), exe));
+    for refused in [
+        names(&[".", "..", exe, "version.dll"]),
+        names(&["version.dll", exe]),
+        names(&[".", "..", "version.dll"]),
+        names(&[".", ".."]),
+        names(&[]),
+        names(&[exe, exe]),
+        names(&[&format!("{exe}:payload")]),
+        names(&[exe, "sub"]),
+    ] {
+        assert!(!only_installer(&refused, exe), "{refused:?}");
+    }
+}

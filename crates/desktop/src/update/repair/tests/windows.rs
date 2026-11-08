@@ -157,6 +157,26 @@ fn the_sealed_folder_is_read_and_run_only_and_the_sweep_still_removes_it() {
     assert!(!folder.exists());
 }
 
+/// A file planted beside the installer before the seal (the folder was the user's until then)
+/// makes the seal refuse; nothing launches, and discarded, the folder is gone.
+#[test]
+fn a_file_planted_before_the_seal_refuses_the_attempt() {
+    let scratch = Scratch::new("repair-planted", &[]);
+    let updates = scratch.path().join("updates");
+    let mut stage = Stage::create(&updates, "0.4.1", "Clauseo_0.4.1_x64-setup.exe").unwrap();
+    stage.write(b"the installer's bytes").unwrap();
+    std::fs::write(stage.folder().join("version.dll"), b"planted").unwrap();
+    assert!(stage.seal().is_err());
+    let folder = stage.folder().to_path_buf();
+    assert_eq!(
+        super::super::lockdown::entries(&folder).unwrap().len(),
+        4,
+        "., .., the installer and the planted file"
+    );
+    stage.discard();
+    assert!(!folder.exists());
+}
+
 /// An attempt is never made through a junction at `updates/<version>`.
 #[test]
 fn an_attempt_refuses_a_junction_in_the_updates_folder() {

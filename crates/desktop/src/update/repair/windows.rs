@@ -177,8 +177,24 @@ impl Staged for Stage {
         let held = reopen(&shared, FILE_SHARE_READ)?;
         drop(shared);
         self.held = Some(held);
-        // Written and sealed: nothing may be added beside it now (`lockdown.rs`).
-        super::lockdown::lock_down(&self.folder)
+        // Written and sealed: nothing may be added beside it now (`lockdown.rs`), and nothing
+        // added before may stay.
+        super::lockdown::lock_down(&self.folder)?;
+        let file = self
+            .exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if !super::plan::only_installer(&super::lockdown::entries(&self.folder)?, file) {
+            tracing::warn!(
+                target: super::super::install::LIFECYCLE,
+                "repair: the attempt's folder holds more than its installer; refused"
+            );
+            return Err(io::Error::other(
+                "the attempt's folder holds more than its installer",
+            ));
+        }
+        Ok(())
     }
 
     fn read_back(&mut self) -> io::Result<Vec<u8>> {

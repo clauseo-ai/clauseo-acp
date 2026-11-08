@@ -9,6 +9,10 @@
 //!   on both, so being the owner restores neither write nor `WRITE_DAC`; SYSTEM full control.
 //!   `SetNamedSecurityInfoW` carries the inherited entries to the file. The held handle is
 //!   untouched: share modes don't govern `WRITE_DAC`, and access is checked only at open.
+//! - **Nothing but the installer** ([`entries`]): until the seal the folder was the user's, so a
+//!   file dropped there during the download (a `version.dll`) would outlive the lock-down. After
+//!   it, the folder is listed through a directory handle opened then (never `read_dir` on the
+//!   path), and anything but the installer refuses the attempt (`plan::only_installer`).
 //! - **The admin copy** ([`admin_copy_missing`]): the record names no admin copy (or can't be
 //!   read, which the launch check treats as missing too), or no plain file is at
 //!   `<Program Files>\Clauseo\Sandbox\clauseo-sandbox-setup.exe`.
@@ -18,6 +22,7 @@
     reason = "FFI to SetNamedSecurityInfoW with a converted descriptor"
 )]
 
+use std::ffi::c_void;
 use std::io;
 use std::path::Path;
 
@@ -94,6 +99,86 @@ fn set_dacl(folder: &Path, descriptor: PSECURITY_DESCRIPTOR) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::from_raw_os_error(set.0.cast_signed()))
+    }
+}
+
+/// The names in `folder`, `.` and `..` included, listed through a directory handle opened now
+/// (`FILE_LIST_DIRECTORY`, sharing reads; `FILE_FLAG_BACKUP_SEMANTICS` opens a folder) with
+/// `GetFileInformationByHandleEx`'s `FileIdBothDirectoryInfo`.
+pub(super) fn entries(folder: &Path) -> io::Result<Vec<String>> {
+    use std::os::windows::io::FromRawHandle as _;
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_READ,
+        OPEN_EXISTING,
+    };
+    // SAFETY: a live HSTRING; no security attributes or template.
+    let handle = unsafe {
+        CreateFileW(
+            &HSTRING::from(folder.as_os_str()),
+            FILE_LIST_DIRECTORY.0,
+            FILE_SHARE_READ,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .map_err(io::Error::from)?;
+    // SAFETY: a fresh handle nothing else owns; closed when `owned` drops.
+    let owned = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle.0) };
+    list(&owned)
+}
+
+/// Every name the directory `handle` lists, from the start.
+fn list(handle: &std::os::windows::io::OwnedHandle) -> io::Result<Vec<String>> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows::Win32::Foundation::{ERROR_NO_MORE_FILES, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ID_BOTH_DIR_INFO, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+        GetFileInformationByHandleEx,
+    };
+    let raw = HANDLE(handle.as_raw_handle());
+    // u64s, so each record is aligned; 64 KiB per call.
+    let mut buffer = vec![0u64; 8 * 1024];
+    let size = u32::try_from(buffer.len() * size_of::<u64>()).unwrap_or(u32::MAX);
+    let mut names = Vec::new();
+    let mut class = FileIdBothDirectoryRestartInfo;
+    loop {
+        // SAFETY: `buffer` is live and writable for `size` bytes for the call.
+        let read = unsafe {
+            GetFileInformationByHandleEx(raw, class, buffer.as_mut_ptr().cast::<c_void>(), size)
+        };
+        match read {
+            Ok(()) => {}
+            Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => return Ok(names),
+            Err(error) => return Err(io::Error::from(error)),
+        }
+        class = FileIdBothDirectoryInfo;
+        let mut offset = 0usize;
+        loop {
+            // Records start 8-aligned (NextEntryOffset is a multiple of 8) and lie in the buffer.
+            let whole = offset.is_multiple_of(size_of::<u64>())
+                && offset + size_of::<FILE_ID_BOTH_DIR_INFO>() <= buffer.len() * size_of::<u64>();
+            if !whole {
+                return Err(io::Error::other("the folder's listing is malformed"));
+            }
+            // SAFETY: the call wrote a FILE_ID_BOTH_DIR_INFO at this 8-aligned offset, inside
+            // `buffer` (checked above), which outlives `record`.
+            let record = unsafe {
+                &*buffer
+                    .as_ptr()
+                    .add(offset / size_of::<u64>())
+                    .cast::<FILE_ID_BOTH_DIR_INFO>()
+            };
+            let units = usize::try_from(record.FileNameLength).unwrap_or(0) / 2;
+            // SAFETY: the record's name is `FileNameLength` bytes from `FileName`, in the buffer.
+            let name = unsafe { std::slice::from_raw_parts(record.FileName.as_ptr(), units) };
+            names.push(String::from_utf16_lossy(name));
+            if record.NextEntryOffset == 0 {
+                break;
+            }
+            offset += usize::try_from(record.NextEntryOffset).unwrap_or(usize::MAX);
+        }
     }
 }
 
