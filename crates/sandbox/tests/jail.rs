@@ -65,3 +65,8 @@ mod env;
 #[cfg(target_os = "macos")]
 #[path = "jail/unicode.rs"]
 mod unicode;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/native.rs"]
+mod native;
