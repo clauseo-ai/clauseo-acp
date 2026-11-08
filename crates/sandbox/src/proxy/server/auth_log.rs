@@ -1,7 +1,11 @@
-//! The cap on the egress log's 407 lines. Another run on the same computer can reach the agent
-//! listener and send requests with no token, each named after a host of its choosing; one
-//! bucket for the whole proxy, not one per connection or source port, keeps it from filling
-//! this run's log.
+//! The cap on the egress log's 407 lines: 5, then one per 10 s. Any program that can reach the
+//! agent listener without its token (another of the lawyer's programs, say; on Windows no
+//! other run's agent, which set-up's filters keep off every slot's ports) can send requests
+//! naming hosts of its choosing. One bucket for the whole proxy, not one per connection or
+//! source port (each connection gets a new one), keeps them from filling this run's log. The
+//! next 407 record written carries the count dropped before it (`Exchange::suppressed`), so
+//! the log says "N more 407s suppressed"; a flood's last drops, with no 407 after them, go
+//! uncounted in the log.
 
 use std::time::Duration;
 

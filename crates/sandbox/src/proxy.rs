@@ -189,6 +189,15 @@ pub struct Exchange {
     pub bytes_up: u64,
     /// Bytes from the origin to the client.
     pub bytes_down: u64,
+    /// On a 407's record: how many 407s before it the log cap dropped since the last 407
+    /// record ("N more 407s suppressed"); left out of the line when 0.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub suppressed: u64,
+}
+
+/// Whether `n` is its type's default (0), for [`Exchange::suppressed`].
+fn is_zero<T: Default + PartialEq>(n: &T) -> bool {
+    *n == T::default()
 }
 
 /// Timeouts and caps; tests shorten the timeouts.

@@ -189,13 +189,14 @@ async fn serve(
         why: None,
         bytes_up: 0,
         bytes_down: 0,
+        suppressed: 0,
     };
     let answered = handle(&ctx, &client, &mut exchange, pending).await;
     drop(client);
     drop(socket);
     if answered
         && let Some(record) = &ctx.record
-        && ctx.logs(&exchange)
+        && ctx.logs(&mut exchange)
     {
         record(&exchange);
     }
@@ -496,10 +497,10 @@ impl Ctx {
         }
     }
 
-    /// Whether the exchange's log line is written: a 407's only when the cap lets it through.
-    /// The count of the ones dropped before it goes to the tracing log, since the record has no
-    /// field for it.
-    fn logs(&self, exchange: &Exchange) -> bool {
+    /// Whether the exchange's log line is written: a 407's only when the cap lets it through,
+    /// carrying the count of the ones dropped before it ([`Exchange::suppressed`]) into the
+    /// proxy's log, and the tracing log too.
+    fn logs(&self, exchange: &mut Exchange) -> bool {
         if exchange.verdict != Verdict::AuthRequired {
             return true;
         }
@@ -507,6 +508,7 @@ impl Ctx {
             Admit::Log { suppressed: 0 } => true,
             Admit::Log { suppressed } => {
                 tracing::info!(suppressed, "egress: {suppressed} more 407s suppressed");
+                exchange.suppressed = suppressed;
                 true
             }
             Admit::Drop => false,

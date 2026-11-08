@@ -80,4 +80,18 @@ fn twenty_requests_without_a_token_log_five_lines_then_one_more_after_ten_second
     let records = rig.records(6);
     assert_eq!(records.len(), 6, "{records:?}");
     assert!(records.iter().all(|r| r.verdict == Verdict::AuthRequired));
+    // The sixth line, in the proxy's own log, says how many were dropped before it.
+    // A record is written after its client sees the connection close, so the twentieth may be
+    // counted only once the clock has moved: it is then the sixth line, after 14 drops.
+    let counts: Vec<u64> = records.iter().map(|r| r.suppressed).collect();
+    assert!(counts[..5].iter().all(|n| *n == 0), "{counts:?}");
+    assert!(matches!(counts[5], 14 | 15), "{counts:?}");
+    let line = serde_json::to_value(&records[5]).unwrap();
+    assert_eq!(line["suppressed"], counts[5]);
+    assert!(
+        serde_json::to_value(&records[0])
+            .unwrap()
+            .get("suppressed")
+            .is_none()
+    );
 }
