@@ -326,3 +326,39 @@ fn the_sweepers_com_token_dacl_adds_query_duplicate_and_impersonate_for_its_user
     // TOKEN_ADJUST_* (0x20, 0x40, 0x80, 0x100), READ_CONTROL or WRITE_DAC/WRITE_OWNER.
     assert_eq!(SWEEPER_COM_TOKEN_RIGHTS, 0x8 | 0x2 | 0x4);
 }
+
+#[test]
+fn a_refused_sid_is_named_by_its_authority_never_in_full() {
+    let entra = "S-1-12-1-3263492174-1177263218-2391161522-1513380577";
+    let cases = [
+        (
+            TokenSpec::for_pool(&sid(entra), &sid(LOGON), &sid(DESKTOP), None),
+            entra,
+            "S-1-12",
+        ),
+        (
+            TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid("S-1-5-18"), None),
+            "S-1-5-18",
+            "S-1-5",
+        ),
+        (
+            TokenSpec::for_pool(
+                &sid(POOL),
+                &sid(LOGON),
+                &sid(DESKTOP),
+                Some(&sid("S-1-1-0")),
+            ),
+            "S-1-1-0",
+            "S-1-1",
+        ),
+    ];
+    for (refused, full, authority) in cases {
+        let words = refused.unwrap_err().to_string();
+        assert!(!words.contains(full), "{words}");
+        assert!(
+            words.ends_with(&format!("the authority {authority})")),
+            "{words}"
+        );
+    }
+    assert_eq!(sid_authority(&sid(DESKTOP)), "S-1-5");
+}
