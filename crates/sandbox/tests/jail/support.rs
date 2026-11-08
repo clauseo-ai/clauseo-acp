@@ -175,9 +175,24 @@ pub(crate) fn listen_unix_at(path: PathBuf) -> PathBuf {
 }
 
 impl Drop for World {
+    /// Removes the folder. A launch's git watch writes its matter state file under `data/` once
+    /// the session is gone, a moment after the test's run returns, so a removal that races it
+    /// is tried again for up to 3 s.
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.root) {
-            eprintln!("removing {}: {error}", self.root.display());
+        let mut tries = 0;
+        loop {
+            match std::fs::remove_dir_all(&self.root) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) if tries >= 30 => {
+                    eprintln!("removing {}: {error}", self.root.display());
+                    return;
+                }
+                Err(_) => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
         }
     }
 }
