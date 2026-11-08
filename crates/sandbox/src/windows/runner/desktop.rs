@@ -16,6 +16,7 @@
 use std::ffi::c_void;
 use std::io::{self, Write as _};
 
+use windows::Wdk::Foundation::{NtQueryObject, OBJECT_INFORMATION_CLASS, OBJECT_NAME_INFORMATION};
 use windows::Win32::Foundation::{
     DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, GetLastError, HANDLE, SetLastError, WIN32_ERROR,
 };
@@ -30,14 +31,15 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW, DESKTOP_CONTROL_FLAGS,
-    GetProcessWindowStation, GetUserObjectInformationW, HDESK, HWINSTA, OpenWindowStationW,
-    SetProcessWindowStation, UOI_NAME,
+    GetProcessWindowStation, HDESK, HWINSTA, OpenWindowStationW, SetProcessWindowStation,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, OpenThreadToken};
 use windows::core::{HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
-use super::station::{Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station};
+use super::station::{
+    Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station, station_name_of_path,
+};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{LocalDescriptor, LocalSid, user};
@@ -45,6 +47,9 @@ use crate::windows::token::{DESKTOP_MAKE_RIGHTS, STATION_MAKE_RIGHTS, STATION_OP
 
 /// A failure: the call that failed and its error.
 type Failed = (&'static str, io::Error);
+
+/// `ObjectNameInformation`: a window station's object path (`NtQueryObject`).
+const OBJECT_NAME: OBJECT_INFORMATION_CLASS = OBJECT_INFORMATION_CLASS(1);
 
 /// The agent's window station and its desktop, closed on drop (the outer runner keeps them for
 /// its whole run), the desktop first.
@@ -234,34 +239,49 @@ impl StationSteps for OsStation<'_> {
         drop(logon);
     }
 
+    /// The station's name, from its object path (`NtQueryObject`): `UOI_NAME` needs
+    /// `WINSTA_READATTRIBUTES`, which the creation rights (`READ_CONTROL` alone) don't grant.
     fn name(&mut self, station: &Station) -> Result<String, Failed> {
-        let call = "GetUserObjectInformationW";
-        let mut buffer = [0u16; 256];
-        let len = u32::try_from(size_of_val(&buffer)).map_err(|e| (call, io::Error::other(e)))?;
-        // SAFETY: the station handle is live; `buffer` is writable for `len` bytes.
-        unsafe {
-            GetUserObjectInformationW(
-                HANDLE(station.0.0),
-                UOI_NAME,
+        let call = "NtQueryObject";
+        // Eight KiB: an object path is far shorter; `NtQueryObject` fails past the buffer.
+        let mut buffer = vec![0u64; 1024];
+        let len = u32::try_from(size_of_val(buffer.as_slice()))
+            .map_err(|e| (call, io::Error::other(e)))?;
+        // SAFETY: the station handle is live; `buffer` is live, writable for `len` bytes and
+        // aligned for an OBJECT_NAME_INFORMATION.
+        let status = unsafe {
+            NtQueryObject(
+                Some(HANDLE(station.0.0)),
+                OBJECT_NAME,
                 Some(buffer.as_mut_ptr().cast::<c_void>()),
                 len,
                 None,
             )
+        };
+        if status.0 < 0 {
+            return Err((
+                call,
+                io::Error::other(format!("NTSTATUS {:#010x}", status.0.cast_unsigned())),
+            ));
         }
-        .map_err(|e| (call, os_error(&e)))?;
-        let end = buffer
-            .iter()
-            .position(|unit| *unit == 0)
-            .unwrap_or(buffer.len());
-        let name = String::from_utf16(buffer.get(..end).unwrap_or_default())
-            .map_err(|e| (call, io::Error::other(e)))?;
-        if StationDesktop::of(&name).is_none() {
+        // SAFETY: the call wrote an OBJECT_NAME_INFORMATION at the start of `buffer`; its string
+        // points into `buffer` (or is empty).
+        let info = unsafe { &*buffer.as_ptr().cast::<OBJECT_NAME_INFORMATION>() };
+        let units = usize::from(info.Name.Length) / 2;
+        if units == 0 || info.Name.Buffer.is_null() {
+            return Err((call, io::Error::other("the station has no object name")));
+        }
+        // SAFETY: `Length` bytes of UTF-16 at `Buffer`, inside `buffer`, which is still live.
+        let wide = unsafe { std::slice::from_raw_parts(info.Name.Buffer.0, units) };
+        let path = String::from_utf16(wide).map_err(|e| (call, io::Error::other(e)))?;
+        let name = station_name_of_path(&path).map_err(|why| (call, io::Error::other(why)))?;
+        if StationDesktop::of(name).is_none() {
             return Err((
                 call,
                 io::Error::other("the station's name isn't an unnamed station's"),
             ));
         }
-        Ok(name)
+        Ok(name.to_owned())
     }
 
     fn open_station(&mut self, name: &str) -> Result<Station, Failed> {

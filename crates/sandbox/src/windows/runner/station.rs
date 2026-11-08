@@ -48,7 +48,7 @@ pub(crate) trait StationSteps {
     fn revert(&mut self);
     /// Closes the logon's token; the station outlives it.
     fn close_logon(&mut self, logon: Self::Logon);
-    /// The station's name.
+    /// The station's name (its object path's last component, [`station_name_of_path`]).
     fn name(&mut self, station: &Self::Station) -> Result<String, Self::Error>;
     /// Opens the station `name` as this process's own user.
     fn open_station(&mut self, name: &str) -> Result<Self::Station, Self::Error>;
@@ -101,6 +101,22 @@ impl StationDesktop {
     pub(crate) fn wide(&self) -> Vec<u16> {
         self.0.encode_utf16().chain([0]).collect()
     }
+}
+
+/// The station's name from its object path, as `NtQueryObject(ObjectNameInformation)` gives it:
+/// `\Sessions\<n>\Windows\WindowStations\<name>`, the last component. `Err` for a path without
+/// `\WindowStations\`, or with no name or a deeper one after it.
+pub(crate) fn station_name_of_path(path: &str) -> Result<&str, &'static str> {
+    let (_, name) = path
+        .rsplit_once(r"\WindowStations\")
+        .ok_or("the object's name has no \\WindowStations\\ part")?;
+    if name.is_empty() {
+        return Err("the station's object name is empty");
+    }
+    if name.contains('\\') {
+        return Err("the station's object name has more than one component after WindowStations");
+    }
+    Ok(name)
 }
 
 /// Who the descriptors name.
