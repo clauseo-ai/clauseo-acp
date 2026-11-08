@@ -24,6 +24,10 @@ pub(crate) const TAG_PREFIX: &str = "clauseo-";
 /// the last name, each letter in both cases (Seatbelt's regex has no case flag).
 const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
 
+/// Any path name `.git`, in any letter case, as the last name or a folder above it. A `.git`
+/// the agent made would be the lawyer's and run its hooks under the lawyer's own git.
+const GIT_NAME_REGEX: &str = "/\\.[gG][iI][tT](/|$)";
+
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
 
@@ -320,6 +324,15 @@ impl Writer {
             "file-write*",
             &[format!(
                 "(require-all (subpath (param \"MATTER\")) (regex #\"{INSTRUCTIONS_REGEX}\"))"
+            )],
+        );
+        self.note("; No new .git, folder or file, at any depth, in any letter case: not made, not");
+        self.note("; renamed onto (Seatbelt checks a rename's destination path).");
+        self.rule(
+            "deny",
+            "file-write*",
+            &[format!(
+                "(require-all (subpath (param \"MATTER\")) (regex #\"{GIT_NAME_REGEX}\"))"
             )],
         );
 
