@@ -83,12 +83,15 @@ writable (jail-tested), and a matter path holding them changes nothing. `strip_h
 beside the policy's name fold, removes them before the fold for the watches' name checks.
 The `CLAUDE.md` regex and the root's protected names do not take the ignorables.
 
-At launch the walk that finds every `.git` also lists each repository-shaped folder outside one:
-a `HEAD` file or link beside `objects` and `refs` folders, or beside a `commondir` file (a
-linked worktree's git dir). Names compare without the ignorables, then by the policy's name fold
-(one listing of the folder per `HEAD`). It is read-only with its whole tree, like a `.git`, on
-macOS and in the Windows ACL plan (a whole-tree DenyWrite). A matter whose root has that layout
-is read-only to the agent.
+At launch the walk that finds every `.git` also lists each folder outside one that holds a
+`HEAD` file or link, whole bare layout or lone `HEAD` (the agent could add `objects/` and
+`refs/`, or `commondir`), and the folder a `commondir` beside it names inside the matter (git
+reads `config` there; one outside the matter, or the matter itself, is left out, as for
+`gitdir:`). Names compare without the ignorables, then by the policy's caseless fold on every OS
+(NTFS opens `objectſ` as `objects`). Each is read-only with its whole tree, like a `.git`, on
+macOS and in the Windows ACL plan (a whole-tree DenyWrite). The cost: a folder with a lone file
+named `HEAD` (rare in a matter) is read-only to the agent, and a matter whose root holds one is
+read-only entirely.
 
 What the name rules cannot see, covered by the lawyer-side watch (a follow-up): a folder that
 already holds a `.git` or a bare layout, made in `TMPDIR`, the state or notes folder, and moved

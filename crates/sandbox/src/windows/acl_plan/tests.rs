@@ -287,9 +287,9 @@ fn read_only_names_get_deny_write_for_the_pool_user() {
     assert_eq!(mask & 0x1, 0);
 }
 
-/// A repository-shaped folder the launch walk finds (`HEAD` beside `objects/` and `refs/`, or
-/// beside `commondir`; no `.git` name) gets the same whole-tree deny of writes as an existing
-/// `.git`.
+/// A folder the launch walk finds holding a `HEAD` (a whole bare layout, one with `commondir`,
+/// or a lone `HEAD`), and the folder a `commondir` names, get the same whole-tree deny of
+/// writes as an existing `.git`.
 #[test]
 fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
     let w = World::new("plan-bare");
@@ -298,7 +298,9 @@ fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
     w.dir.dir("matter/precedents.git/objects");
     w.dir.dir("matter/precedents.git/refs");
     w.dir.file("matter/linked/HEAD", "ref: refs/heads/other\n");
-    w.dir.file("matter/linked/commondir", "../precedents.git\n");
+    w.dir.file("matter/linked/commondir", "../common\n");
+    w.dir.dir("matter/common");
+    w.dir.file("matter/lone/HEAD", "ref: refs/heads/main\n");
     let policy = w.full_policy();
     let grants = grants_for(&w, &policy, &sids());
     let deny = |name: &str| {
@@ -312,6 +314,8 @@ fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
     assert_eq!(deny(".git"), want);
     assert_eq!(deny("precedents.git"), want);
     assert_eq!(deny("linked"), want);
+    assert_eq!(deny("common"), want);
+    assert_eq!(deny("lone"), want);
 }
 
 #[test]

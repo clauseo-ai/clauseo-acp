@@ -81,16 +81,16 @@ impl MatterScan {
         &self.git
     }
 
-    /// The folders that `.git` files' `gitdir:` lines name inside the matter, and that `.git`
-    /// links lead to inside it, canonical, sorted. One outside the matter is left out: the jail
+    /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD` name
+    /// inside the matter, and that `.git` links lead to inside it, canonical, sorted. One outside the matter is left out: the jail
     /// denies it anyway.
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
     }
 
-    /// The repository-shaped folders outside any `.git`, sorted: each holds a `HEAD` file or link
-    /// and either `objects` and `refs` folders or a `commondir` file, which git's discovery
-    /// takes for a git dir (no `.git` name involved).
+    /// The folders outside any `.git` that hold a `HEAD` file or link, sorted: git's discovery
+    /// takes one with `objects` and `refs` folders, or a `commondir` file, for a git dir (no
+    /// `.git` name involved), and the agent could add those.
     pub fn bare_repos(&self) -> &[PathBuf] {
         &self.bare
     }
@@ -236,8 +236,8 @@ impl Walk {
         if nested && !kind.is_symlink() {
             self.scan.nested.push(path.clone());
         }
-        if (kind.is_file() || kind.is_symlink()) && opens_as(&name, "HEAD") {
-            self.bare_repo(&path);
+        if (kind.is_file() || kind.is_symlink()) && opens_as(&name, "head") {
+            self.bare_repo(matter, &path);
         }
         if kind.is_symlink() {
             match symlink_finding(matter, &path, kind) {
@@ -269,34 +269,27 @@ impl Walk {
         }
     }
 
-    /// Lists the folder holding the `HEAD` file or link at `head` if it is a repository to git:
-    /// `objects` and `refs` folders beside it, or a `commondir` file (a linked worktree's git
-    /// dir). Names compare by [`opens_as`], so one HFS+ opens under an ignorable spelling counts;
-    /// that takes one listing of the folder per `HEAD`.
-    fn bare_repo(&mut self, head: &Path) {
+    /// Lists the folder holding the `HEAD` file or link at `head`: with one, the agent could
+    /// complete it into a git dir (`objects/` and `refs/`, or `commondir`). Also lists the
+    /// folder each `commondir` file in it names inside the matter (where git reads `config`),
+    /// by the `gitdir:` rule. Names compare by [`opens_as`]: one listing of the folder per
+    /// `HEAD`.
+    fn bare_repo(&mut self, matter: &Path, head: &Path) {
         let Some(folder) = head.parent() else {
             return;
         };
+        self.scan.bare.push(folder.to_owned());
         let Ok(entries) = fs::read_dir(folder) else {
             return;
         };
-        let (mut objects, mut refs, mut commondir) = (false, false, false);
         for entry in entries.flatten() {
-            let name = entry.file_name();
-            let found = ["objects", "refs", "commondir"].map(|want| opens_as(&name, want));
-            if !found.contains(&true) {
-                continue;
+            if opens_as(&entry.file_name(), "commondir")
+                && let Some(dir) = read_small(&entry.path())
+                    .ok()
+                    .and_then(|text| dir_named(matter, folder, text.lines().next()?))
+            {
+                self.scan.git_dirs.push(dir);
             }
-            // Followed, as git follows them.
-            let Ok(meta) = fs::metadata(entry.path()) else {
-                continue;
-            };
-            objects |= found[0] && meta.is_dir();
-            refs |= found[1] && meta.is_dir();
-            commondir |= found[2] && meta.is_file();
-        }
-        if (objects && refs) || commondir {
-            self.scan.bare.push(folder.to_owned());
         }
     }
 
@@ -378,11 +371,17 @@ fn file_id(_entry: &fs::DirEntry) -> Option<((u64, u64), u64)> {
 fn git_dir_named(matter: &Path, git_file: &Path) -> Option<PathBuf> {
     let text = read_small(git_file).ok()?;
     let line = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+    dir_named(matter, git_file.parent()?, line)
+}
+
+/// The folder `line` names (absolute, or relative to `base`), canonical, if it exists inside
+/// `matter`: a `gitdir:` line or a `commondir` file's.
+fn dir_named(matter: &Path, base: &Path, line: &str) -> Option<PathBuf> {
     let named = Path::new(line.trim());
     let joined = if named.is_absolute() {
         named.to_owned()
     } else {
-        git_file.parent()?.join(named)
+        base.join(named)
     };
     let dir = dunce::canonicalize(joined).ok()?;
     // The matter itself is left out: naming it would make the whole matter read-only.
