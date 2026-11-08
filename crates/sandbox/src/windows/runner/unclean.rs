@@ -56,6 +56,9 @@ pub const SWEEP_WAIT: Duration = Duration::from_secs(15);
 /// How often it reads `SweepSequence` meanwhile.
 pub const SWEEP_POLL: Duration = Duration::from_millis(100);
 
+/// Why a marker whose stop completed but couldn't be re-marked refuses a launch and a logon.
+const STUCK: &str = "an earlier session's marker couldn't be moved on from its completed stop";
+
 /// The markers' effects, as the lawyer.
 pub trait Markers {
     /// Every marker in the run folder (`marker::unclean_sessions`).
@@ -171,7 +174,8 @@ fn remark(
 
 /// F4: whether `pool_user` may log on. `Err` says why not: the stop task was requested when a
 /// marker awaits a stop; a marker awaiting a sweep (a re-mark's, or any other) is waited for
-/// instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every session.
+/// instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every session. One
+/// whose stop completed but couldn't be re-marked refuses the logon with no stop requested.
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String> {
     let (sessions, known) =
         current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
@@ -211,6 +215,7 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
         }
     }
     let mut requested = None;
+    let mut stuck = false;
     if !awaiting.is_empty() {
         match fs.sequences() {
             // One whose stop completed is re-marked, and its sweep then waited for below.
@@ -223,10 +228,18 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
                         .and_then(MarkerState::stop)
                         .is_some_and(|stop| done.stop < stop)
                 });
+                // Its stop completed but it couldn't be re-marked: no sweep number to wait
+                // for, and no stop to ask for, so it refuses as a launch does.
+                stuck = left
+                    .iter()
+                    .any(|session| session.state.is_some_and(|state| state.stopped(done)));
                 sweeping.extend(left);
             }
             Err(_) => standing = true,
         }
+    }
+    if !standing && stuck {
+        return Err(STUCK.to_owned());
     }
     if !standing {
         // A task the escapee registered is live until its sweep ran: wait for it here.
@@ -304,9 +317,7 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
         .iter()
         .any(|session| session.state.is_some_and(|state| state.stopped(done)))
     {
-        return Err(
-            "an earlier session's marker couldn't be moved on from its completed stop".to_owned(),
-        );
+        return Err(STUCK.to_owned());
     }
     let left = sweep_clean(fs, sessions, done);
     let wanted = left
