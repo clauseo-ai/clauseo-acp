@@ -150,3 +150,13 @@ fn the_action_names_the_admin_copy_in_quotes() {
         r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#
     );
 }
+
+#[test]
+fn a_missing_task_or_folder_is_not_registered_whichever_code_windows_gives() {
+    // ERROR_FILE_NOT_FOUND and ERROR_PATH_NOT_FOUND as HRESULTs: either leaves the prompt.
+    assert!(not_registered(0x8007_0002));
+    assert!(not_registered(0x8007_0003));
+    // Access denied, and a bare Win32 code, are failures, not a missing task.
+    assert!(!not_registered(0x8007_0005));
+    assert!(!not_registered(2));
+}

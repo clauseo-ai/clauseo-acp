@@ -34,8 +34,8 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HSTRING, Interface, PCWSTR, PWSTR, w};
 use zeroize::Zeroizing;
 
-use super::task::{Apartment, service};
-use super::task_sddl;
+use super::task::{Apartment, TaskError, service, with_task_in};
+use super::{SystemTask, task_sddl};
 use crate::test_support::TempDir;
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
 use crate::windows::setup::strays::TASK_TEST_PREFIX;
@@ -57,6 +57,19 @@ fn gate(test: &str) -> bool {
     }
     eprintln!("skipped {test}: needs an elevated token and CLAUSEO_ELEVATED_TESTS=1");
     false
+}
+
+/// Unelevated, on every Windows CI run: a task in a folder that isn't there, and a task missing
+/// from a folder that is, are both `NotRegistered`, whichever of `ERROR_PATH_NOT_FOUND` and
+/// `ERROR_FILE_NOT_FOUND` Windows gives (`rules::not_registered`), so an install with no
+/// `\Clauseo` still meets the prompt.
+#[test]
+fn a_missing_folder_or_task_is_not_registered() {
+    let folder = format!("ClauseoTestMissing{}", std::process::id());
+    for folder in [folder.as_str(), "Microsoft"] {
+        let found = with_task_in(folder, SystemTask::SetUp, |_task| Ok(()));
+        assert_eq!(found, Err(TaskError::NotRegistered), "\\{folder}");
+    }
 }
 
 /// A quarter of a second, between two looks.

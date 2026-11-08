@@ -139,6 +139,18 @@ pub enum Teardown {
     AdminFolder,
 }
 
+/// `ERROR_FILE_NOT_FOUND` as an HRESULT.
+const HRESULT_FILE_NOT_FOUND: u32 = 0x8007_0002;
+/// `ERROR_PATH_NOT_FOUND` as an HRESULT.
+const HRESULT_PATH_NOT_FOUND: u32 = 0x8007_0003;
+
+/// Whether the Task Scheduler's `hresult` says the task, or its folder, isn't there: a missing
+/// task is `ERROR_FILE_NOT_FOUND`, and a missing folder may be that or `ERROR_PATH_NOT_FOUND`.
+/// Either is `TaskError::NotRegistered`, which leaves the app the prompted set-up.
+pub fn not_registered(hresult: u32) -> bool {
+    [HRESULT_FILE_NOT_FOUND, HRESULT_PATH_NOT_FOUND].contains(&hresult)
+}
+
 /// The removal's steps, in order: every task goes before the copy it runs, the set-up task
 /// first, so no set-up starts while the rest goes.
 pub const TEARDOWN: [Teardown; 6] = [

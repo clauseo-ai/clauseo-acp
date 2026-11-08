@@ -30,7 +30,7 @@
 
 use std::path::Path;
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
+use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, VARIANT_BOOL};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
@@ -40,7 +40,7 @@ use windows::Win32::System::TaskScheduler::{
     TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
-use windows::core::{BSTR, HRESULT, Interface};
+use windows::core::{BSTR, Interface};
 
 use super::last_run::{LastRun, last_run};
 use super::task_scheduler::folder;
@@ -93,9 +93,9 @@ fn com(call: &'static str) -> impl Fn(windows::core::Error) -> TaskError {
     }
 }
 
-/// Whether `error` says the folder or task isn't there.
+/// Whether `error` says the folder or task isn't there (`rules::not_registered`).
 pub(super) fn missing(error: &windows::core::Error) -> bool {
-    error.code() == HRESULT::from_win32(ERROR_FILE_NOT_FOUND.0)
+    super::not_registered(error.code().0.cast_unsigned())
 }
 
 /// COM on this thread for the guard's life: uninitialised on drop when this call initialised
@@ -384,7 +384,7 @@ pub(super) fn with_task<T>(
 }
 
 /// [`with_task`] in the folder `\<folder_name>`.
-fn with_task_in<T>(
+pub(super) fn with_task_in<T>(
     folder_name: &str,
     task: SystemTask,
     then: impl FnOnce(&IRegisteredTask) -> Result<T, TaskError>,
