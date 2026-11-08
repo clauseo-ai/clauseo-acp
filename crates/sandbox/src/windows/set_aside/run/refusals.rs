@@ -1,8 +1,8 @@
 //! What a restore refuses: a git folder or an item in one ([`holds_git`], [`holds_repo`]),
 //! an item that was git's in a folder a launch `commondir` names, and a link, at any depth of
-//! the item, that leads out of the folder it goes back to. Put back, the first would be read by git as the lawyer's (its
-//! `config` and `hooks` run code as the lawyer); the second would lead git, or anything else,
-//! outside.
+//! the item, that leads out of the folder it goes back to. Put back, the first would be read by
+//! git as the lawyer's (its `config` and `hooks` run code as the lawyer); the second would lead
+//! git, or anything else, outside.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
