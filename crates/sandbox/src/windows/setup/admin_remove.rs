@@ -11,8 +11,12 @@
 //! and that name is scheduled for deletion at the next restart (`MoveFileExW` with
 //! `MOVEFILE_DELAY_UNTIL_REBOOT`), as are the `Sandbox` folder and `%ProgramFiles%\Clauseo`
 //! after it; Windows deletes a scheduled folder only if it is empty by then, so a reinstall
-//! before the restart keeps its new copy. Run from anywhere else (a test, a VM harness), the
-//! copy and the folder are deleted at once.
+//! before the restart keeps its new copy. If the rename fails, the copy itself is scheduled
+//! instead, under its own name. Run from anywhere else (a test, a VM harness), the copy and
+//! the folder are deleted at once.
+//!
+//! A step that fails stops the teardown and is named ([`CopyLeft`]): `exe::run_remove` logs
+//! it to the Event Log and exits `AdminCopyLeft`.
 #![expect(unsafe_code, reason = "FFI to MoveFileExW")]
 #![expect(
     clippy::disallowed_methods,
@@ -28,23 +32,40 @@ use std::path::{Path, PathBuf};
 use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
 use windows::core::PCWSTR;
 
+use super::explain::{Cause, CopyLeft};
 use super::machine::MachineError;
 use super::record_write;
 use crate::windows::admin_copy::{self, Found, os, same_path};
 use crate::windows::refresh::{self, SystemTask, TEARDOWN, Teardown};
 
 /// Deletes the admin copy as the module says, step by step in [`TEARDOWN`]'s order. The
-/// record's values first: a failure there stops before any task or file is touched.
-pub(crate) fn remove_admin_copy(record_key: &str) -> Result<(), MachineError> {
+/// record's values first: a failure there stops before any task or file is touched. A step
+/// that fails is named, with why.
+pub(crate) fn remove_admin_copy(record_key: &str) -> Result<(), CopyLeft> {
     for step in TEARDOWN {
-        match step {
-            Teardown::AdminValues => record_write::delete_admin_values(record_key)?,
-            Teardown::Task(task) => unregister_task(task)?,
-            Teardown::Staging => remove_staging()?,
-            Teardown::AdminFolder => remove_admin_folder()?,
-        }
+        let done = match step {
+            Teardown::AdminValues => record_write::delete_admin_values(record_key),
+            Teardown::Task(task) => unregister_task(task),
+            Teardown::Staging => remove_staging(),
+            Teardown::AdminFolder => remove_admin_folder(),
+        };
+        done.map_err(|error| CopyLeft {
+            step: teardown_name(step),
+            cause: Cause::from(error),
+        })?;
     }
     Ok(())
+}
+
+/// A teardown step's name, for the Event Log.
+pub(super) fn teardown_name(step: Teardown) -> &'static str {
+    match step {
+        Teardown::AdminValues => "admin_values",
+        Teardown::Task(SystemTask::Refresh) => "refresh_task",
+        Teardown::Task(SystemTask::Stop) => "stop_task",
+        Teardown::Staging => "staging",
+        Teardown::AdminFolder => "admin_folder",
+    }
 }
 
 /// The last step: everything in the admin folder, then the folder ([`clear`]).
@@ -63,19 +84,34 @@ fn remove_admin_folder() -> Result<(), MachineError> {
     let exe = admin_copy::admin_exe(&program_files);
     let running = std::env::current_exe().is_ok_and(|running| same_path(&running, &exe));
     let app = program_files.join(admin_copy::ADMIN_DIR[0]);
-    clear(&dir, &exe, running, &app, &mut delete_at_restart).map_err(|e| other(&e))
+    let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+    let mut schedule = delete_at_restart;
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    clear(&dir, &exe, running, &app, &mut fs).map_err(|e| other(&e))
+}
+
+/// How [`clear`] parks the running copy: the rename, and the delete at restart.
+pub(super) struct Restart<'a> {
+    /// Renames the first path to the second (`std::fs::rename`).
+    pub rename: &'a mut dyn FnMut(&Path, &Path) -> io::Result<()>,
+    /// Schedules a path for deletion at restart (`MoveFileExW`).
+    pub schedule: &'a mut dyn FnMut(&Path) -> io::Result<()>,
 }
 
 /// Deletes everything in the admin folder `dir`, then `dir`. When the copy `exe` is the
 /// running exe (`running`), it is renamed in place to [`parked_name`] instead, and `schedule`
 /// is given that name, `dir` and `app` (`%ProgramFiles%\Clauseo`), in that order, to delete
-/// at restart. A link inside is deleted as itself, never followed.
+/// at restart; if the rename fails, `exe` itself is scheduled in its place. A link inside is
+/// deleted as itself, never followed.
 pub(super) fn clear(
     dir: &Path,
     exe: &Path,
     running: bool,
     app: &Path,
-    schedule: &mut dyn FnMut(&Path) -> io::Result<()>,
+    fs: &mut Restart<'_>,
 ) -> io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
@@ -95,9 +131,15 @@ pub(super) fn clear(
         return std::fs::remove_dir(dir);
     }
     let parked = parked_name(exe, std::process::id());
-    std::fs::rename(exe, &parked)?;
-    for path in [parked.as_path(), dir, app] {
-        schedule(path)?;
+    let doomed = match (fs.rename)(exe, &parked) {
+        Ok(()) => parked,
+        Err(error) => {
+            tracing::warn!(%error, "the running copy can't be renamed; it is deleted at restart");
+            exe.to_path_buf()
+        }
+    };
+    for path in [doomed.as_path(), dir, app] {
+        (fs.schedule)(path)?;
     }
     Ok(())
 }
@@ -137,8 +179,18 @@ fn delete_at_restart(path: &Path) -> io::Result<()> {
     .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))
 }
 
+/// An I/O error as a removal error, its Win32 code kept when it has one.
 fn other(error: &io::Error) -> MachineError {
-    MachineError::Other(error.to_string())
+    match error
+        .raw_os_error()
+        .and_then(|code| u32::try_from(code).ok())
+    {
+        Some(code) => MachineError::Os {
+            call: "deleting the admin folder",
+            code,
+        },
+        None => MachineError::Other(error.to_string()),
+    }
 }
 
 #[cfg(test)]

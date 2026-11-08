@@ -79,7 +79,11 @@ pub mod args;
 pub mod around;
 mod create;
 #[cfg(windows)]
+mod event_trace;
+#[cfg(windows)]
 pub mod exe;
+#[cfg(any(windows, test))]
+pub mod explain;
 #[cfg(windows)]
 mod ffi;
 #[cfg(test)]

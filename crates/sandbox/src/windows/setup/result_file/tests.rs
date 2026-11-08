@@ -19,6 +19,18 @@ fn failure(step: Step, exit: SetupExit, cause: &str) -> Result<SetupReport, Setu
     })
 }
 
+/// `read`'s result with its stamp checked (set, and no later than now) and taken off, to
+/// compare with what was written.
+fn unstamped(read: Result<Option<SetupResult>, String>) -> Result<Option<SetupResult>, String> {
+    read.map(|result| {
+        result.map(|result| {
+            let at = result.at.expect("write stamps the time");
+            assert!(at <= now_secs(), "{at}");
+            SetupResult { at: None, ..result }
+        })
+    })
+}
+
 fn failed_with(error: Result<(), SetupError>) -> String {
     match error {
         Err(SetupError::Failed(why)) => why,
@@ -33,7 +45,7 @@ fn the_file_round_trips_and_is_replaced_and_removed() {
     assert_eq!(read(&data), Ok(None));
     let first = SetupResult::of(&failure(Step::LogOn, SetupExit::Failed, "error 1326"));
     write(&data, &first).unwrap();
-    assert_eq!(read(&data), Ok(Some(first)));
+    assert_eq!(unstamped(read(&data)), Ok(Some(first)));
     let text = std::fs::read_to_string(path(&data)).unwrap();
     assert!(text.contains("\"exit\": 3"), "{text}");
     assert!(text.contains("logging a sandbox user on"), "{text}");
@@ -43,13 +55,15 @@ fn the_file_round_trips_and_is_replaced_and_removed() {
         cause: None,
         blocked: None,
         taken: None,
+        code: None,
+        kind: None,
+        at: None,
     };
     write(&data, &done).unwrap();
-    assert_eq!(read(&data), Ok(Some(done)));
-    assert_eq!(
-        std::fs::read_to_string(path(&data)).unwrap(),
-        "{\n  \"exit\": 0\n}\n"
-    );
+    assert_eq!(unstamped(read(&data)), Ok(Some(done)));
+    let text = std::fs::read_to_string(path(&data)).unwrap();
+    let at = read(&data).unwrap().unwrap().at.unwrap();
+    assert_eq!(text, format!("{{\n  \"exit\": 0,\n  \"at\": {at}\n}}\n"));
     remove(&data).unwrap();
     assert_eq!(read(&data), Ok(None));
     remove(&data).unwrap();
@@ -318,6 +332,9 @@ fn state_is_blocked_after_a_blocked_run_until_a_later_set_up_is_ready() {
         cause: None,
         blocked: None,
         taken: None,
+        code: None,
+        kind: None,
+        at: None,
     };
     write(&data, &done).unwrap();
     assert_eq!(
@@ -411,7 +428,7 @@ fn the_state_read_writes_nothing_and_ignores_a_file_not_the_users_alone() {
     let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o644, "nothing repaired");
     crate::test_support::set_mode(&file, 0o600);
-    assert_eq!(read_unchanged(&data), Ok(Some(blocked)));
+    assert_eq!(unstamped(read_unchanged(&data)), Ok(Some(blocked)));
     assert_eq!(read_unchanged(&dir.path().join("none")), Ok(None));
 }
 
@@ -423,5 +440,56 @@ fn the_state_read_takes_the_file_write_left() {
     let data = dir.path().join("data");
     let told = SetupResult::failed(SetupExit::Failed, "x", "y");
     write(&data, &told).unwrap();
-    assert_eq!(read_unchanged(&data), Ok(Some(told)));
+    assert_eq!(unstamped(read_unchanged(&data)), Ok(Some(told)));
+}
+
+#[test]
+fn a_result_an_earlier_run_left_isnt_this_runs() {
+    let stale = |exit: u8, at: Option<u64>| {
+        Ok(Some(SetupResult {
+            exit,
+            step: None,
+            cause: None,
+            blocked: None,
+            taken: None,
+            code: None,
+            kind: None,
+            at,
+        }))
+    };
+    // An earlier run's `{"exit":0}`, stamped before this run started, is no result.
+    assert_eq!(of_run(stale(0, Some(99)), 100), Ok(None));
+    // So the failure that left none is named by its code, never read as done.
+    let why = failed_with(outcome(3, Some(&of_run(stale(3, Some(99)), 100))));
+    assert!(why.contains("exit 3"), "{why}");
+    assert!(why.contains("it left no result"), "{why}");
+    // This run's is kept, and so is one an older exe wrote with no stamp.
+    assert_eq!(of_run(stale(3, Some(100)), 100), stale(3, Some(100)));
+    assert_eq!(of_run(stale(0, None), 100), stale(0, None));
+    // Nothing to read, or a file that can't be, stays so.
+    assert_eq!(of_run(Ok(None), 100), Ok(None));
+    assert_eq!(of_run(Err("bad".to_owned()), 100), Err("bad".to_owned()));
+}
+
+#[test]
+fn a_file_with_the_appended_fields_still_reads_and_one_without_them_too() {
+    let dir = TempDir::new("setup-result-appended");
+    let data = dir.path().join("data");
+    dir.file(
+        "data/sandbox/setup-result.json",
+        r#"{"exit":3,"step":"lock","cause":"x","code":5,"kind":"win32","at":7,"later":1}"#,
+    );
+    let read = read(&data).unwrap().unwrap();
+    assert_eq!(
+        (
+            read.exit,
+            read.step.as_deref(),
+            read.code,
+            read.kind.as_deref(),
+            read.at
+        ),
+        (3, Some("lock"), Some(5), Some("win32"), Some(7))
+    );
+    dir.file("data/sandbox/setup-result.json", r#"{"exit":0}"#);
+    assert_eq!(super::read(&data).unwrap().unwrap().at, None);
 }

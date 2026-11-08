@@ -30,7 +30,12 @@
 //! After a `--remove --uninstall` that leaves no pool owner on the machine, the admin copy is
 //! removed last (`admin_remove.rs`), by the removal of the install that placed it only (the
 //! app's plain `--remove` keeps it, with its record values); a failure there is
-//! logged and the exit stays the removal's, as what is left is only administrators' to change.
+//! written to the Event Log with its step and code, and exits `AdminCopyLeft` (10), which the
+//! uninstall hook counts as removed, as what is left is only administrators' to change.
+//!
+//! The exe has no log output of its own: `--adopt`'s failures go to the Event Log and the
+//! result file (`explain.rs`), and `tracing` lines at warn and above go to the Event Log as
+//! their message alone (`event_trace.rs`).
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
@@ -44,6 +49,7 @@ use super::adopt::Target;
 use super::adopt::windows_adopter::run_adopt;
 use super::args::{self, Mode};
 use super::around::Around;
+use super::explain::{AdoptFailure, AdoptStep, Cause, CopyLeft, removal_exit};
 use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
 use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
@@ -68,6 +74,11 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
         tracing::error!(%error, "the DLL search couldn't be kept to System32");
+        let failure = AdoptFailure {
+            step: AdoptStep::DllSearch,
+            cause: Cause::from(error),
+        };
+        refresh::event_log(true, &failure.line());
         return SetupExit::Failed.as_code();
     }
     let mode = match args::parse(args) {
@@ -83,6 +94,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     if mode == Mode::Stop {
         return stop::windows_stopper::run().as_code();
     }
+    super::event_trace::install();
     run_mode(mode).as_code()
 }
 
@@ -252,8 +264,13 @@ pub(crate) fn run_remove(
     match remove(&mut machine, &mut acl, per_machine) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
-            remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
-            SetupExit::Removed
+            let taken = remove_admin_copy_if_theirs(
+                &record_key,
+                uninstall,
+                per_machine,
+                invoker_sid.as_ref(),
+            );
+            removal_exit(taken, &mut |line| refresh::event_log(true, line))
         }
         Err(failure) => {
             tracing::error!(step = %failure.step, cause = %failure.cause, "the removal stopped");
@@ -266,13 +283,14 @@ pub(crate) fn run_remove(
 /// the uninstaller's removal (`uninstall`; the app's in-app one never takes it), the pool under
 /// `record_key` has no owner left, and this removal is the one of the install that placed the
 /// copy (`AdminCopyOwner`): a per-machine one for `machine`, the lawyer's own
-/// per-user one (`invoker`) for theirs.
+/// per-user one (`invoker`) for theirs. A copy that stays, or a record that can't be read to
+/// tell, is the step that failed and why.
 fn remove_admin_copy_if_theirs(
     record_key: &str,
     uninstall: bool,
     per_machine: bool,
     invoker: Option<&Sid>,
-) {
+) -> Result<(), CopyLeft> {
     let read = super::record_write::read(record_key)
         .and_then(|pool| Ok((pool, super::record_write::read_admin(record_key)?)));
     match read {
@@ -283,14 +301,22 @@ fn remove_admin_copy_if_theirs(
                 invoker,
             };
             if copy_removable(&removal, pool.is_some(), copy_owner.as_ref()) {
-                if let Err(error) = remove_admin_copy(record_key) {
+                remove_admin_copy(record_key).inspect_err(|left| {
+                    let error = &left.cause.text;
                     tracing::error!(%error, "the admin copy couldn't be removed in full");
-                }
+                })
             } else {
                 tracing::info!("the admin copy isn't this removal's to take; it stays");
+                Ok(())
             }
         }
-        Err(error) => tracing::error!(%error, "the record can't be read; the admin copy stays"),
+        Err(error) => {
+            tracing::error!(%error, "the record can't be read; the admin copy stays");
+            Err(CopyLeft {
+                step: "record",
+                cause: Cause::from(error),
+            })
+        }
     }
 }
 

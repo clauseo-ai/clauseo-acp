@@ -74,6 +74,10 @@ pub enum SetupExit {
     /// 9: `--adopt` found a newer admin copy recorded (`AdminCopyVersion`) than its own
     /// version, and left it as it was.
     Downgrade,
+    /// 10: `--remove --uninstall` removed the protection, but the admin copy, or part of it
+    /// (its values, a task, its folder), stays; the step and code are in the Event Log. The
+    /// uninstall hook counts it as removed, as only administrators can change what is left.
+    AdminCopyLeft,
 }
 
 impl SetupExit {
@@ -88,7 +92,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 10] = [
+    pub const ALL: [SetupExit; 11] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -99,6 +103,7 @@ impl SetupExit {
         SetupExit::NotElevated,
         SetupExit::NotAdminCopy,
         SetupExit::Downgrade,
+        SetupExit::AdminCopyLeft,
     ];
 
     /// The process exit code.
@@ -114,6 +119,7 @@ impl SetupExit {
             SetupExit::NotElevated => 7,
             SetupExit::NotAdminCopy => 8,
             SetupExit::Downgrade => 9,
+            SetupExit::AdminCopyLeft => 10,
         }
     }
 
