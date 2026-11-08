@@ -220,7 +220,7 @@ impl ChromiumRegistry for SystemRegistry {
                 Some(&raw mut len),
             )
         };
-        if read == ERROR_FILE_NOT_FOUND {
+        if crate::chromium_policy::registry_missing(read.0) {
             return Ok(None);
         }
         // Longer than any integer a string could hold: a bad value whatever its type.

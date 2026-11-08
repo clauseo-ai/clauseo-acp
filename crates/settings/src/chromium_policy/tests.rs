@@ -169,6 +169,17 @@ fn each_registry_place_says_nothing_false_true_bad_or_unreadable() {
     assert!(read.found.iter().all(|(_, found)| *found == Found::Absent));
 }
 
+// A missing key or value, or a missing path on the way to it, is nothing set; any other error
+// is a read error.
+#[test]
+fn registry_file_and_path_not_found_are_missing() {
+    assert!(super::registry_missing(2)); // ERROR_FILE_NOT_FOUND
+    assert!(super::registry_missing(3)); // ERROR_PATH_NOT_FOUND
+    for code in [0, 5, 1018] {
+        assert!(!super::registry_missing(code), "{code}");
+    }
+}
+
 #[test]
 fn the_registry_reasons_name_no_value_or_code_beyond_the_error() {
     assert_eq!(
