@@ -197,6 +197,8 @@ fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
     let states = [
         MarkerState::AwaitingSweep { sweep: 7 },
         MarkerState::AwaitingStop { stop: 3 },
+        MarkerState::AwaitingSweepBeforeStop { sweep: 8 },
+        MarkerState::AwaitingFinalStop { stop: 4 },
     ];
     for state in states {
         write_marker_at(&path, Some(&sid(POOL)), None, state).unwrap();
@@ -281,6 +283,27 @@ fn a_marker_is_clean_once_every_number_it_waits_for_is_met() {
         (MarkerState::Open.stop(), MarkerState::Open.sweep()),
         (None, None)
     );
+}
+
+#[test]
+fn a_marker_past_its_first_stop_is_clean_only_once_its_sweep_then_its_final_stop_completed() {
+    let done = |stop, sweep| Sequences { stop, sweep };
+    // Its sweep completing doesn't make it clean: it is due its re-mark to the final stop.
+    let swept = MarkerState::AwaitingSweepBeforeStop { sweep: 5 };
+    assert!(!swept.clean(done(u64::MAX, u64::MAX)));
+    assert!(!swept.swept(done(9, 4)));
+    assert!(swept.swept(done(0, 5)));
+    assert!(!swept.stopped(done(u64::MAX, u64::MAX)));
+    assert_eq!((swept.stop(), swept.sweep()), (None, Some(5)));
+    // The final stop: clean once StopSequence reaches it, never due another re-mark.
+    let last = MarkerState::AwaitingFinalStop { stop: 7 };
+    assert!(!last.clean(done(6, u64::MAX)));
+    assert!(last.clean(done(7, 0)));
+    assert!(!last.stopped(done(u64::MAX, 0)));
+    assert!(!last.swept(done(u64::MAX, u64::MAX)));
+    assert_eq!((last.stop(), last.sweep()), (Some(7), None));
+    // A plain sweep-awaiting marker is never due the final stop.
+    assert!(!MarkerState::AwaitingSweep { sweep: 5 }.swept(done(0, 9)));
 }
 
 #[test]

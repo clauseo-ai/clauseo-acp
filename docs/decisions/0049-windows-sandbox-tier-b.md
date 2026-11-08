@@ -1254,9 +1254,23 @@ leaves that profile, both naming the part.
       proves nothing, since the escapee can watch that sweep complete, register a task, and only
       then be killed by the stop. It is never clean itself. Once `StopSequence >= stop`, whoever
       reads it (F4, a launch, the desktop's start) re-marks it: reads `SweepNext` (`M`) only
-      then, requests the sweep, and writes `AwaitingSweep { sweep: M }`. A marker written
-      before this rule as `AwaitingStop { stop, sweep }` reads as `AwaitingStop { stop }`, its
-      `sweep` ignored.
+      then, requests the sweep, and writes `AwaitingSweepBeforeStop { sweep: M }`. A marker
+      written before this rule as `AwaitingStop { stop, sweep }` reads as
+      `AwaitingStop { stop }`, its `sweep` ignored.
+    - `AwaitingSweepBeforeStop { sweep: M }` (appended): never clean itself either. Once
+      `SweepSequence >= M`, F4 or the desktop's start re-marks it: reads `StopNext` (`s`) only
+      then, requests the stop, and writes `AwaitingFinalStop { stop: s }` (appended), clean once
+      `StopSequence >= s`. So a session with an escapee is clean only after stop, sweep, stop.
+      Why: from the first stop's snapshot until the sweep deletes a pool task (or cancels a BITS
+      job), the task's trigger (or the job's notify command) can start a new process of the pool
+      user's, and the sweep ends no process but a task's running instance, never its children.
+      The final stop reserved its number after the sweep completed, so its observation began
+      with no pool task or job left to start one. What it doesn't close: such a process may
+      register a new task before the final stop kills it, and that task stays until the next
+      session's end sweep; its trigger can start a process in the next logon gap, which the
+      first-act sweep kills (the known gap under "Sweeping the pool's tasks and BITS jobs", and
+      the same pre-logon check closes it). An older build reads either new state as unreadable,
+      which awaits a stop for every pool user: closed, not open.
     - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
       couldn't read a number.
 
@@ -1283,7 +1297,12 @@ leaves that profile, both naming the part.
       (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
       to 15 s): until that sweep ran, a task the escapee registered is live. One still short
       refuses the logon (`RunExit::AwaitingSweep`) without requesting a stop, which would end
-      every session. A marker naming no pool user (an unreadable one, replaced) awaits a
+      every session. One awaiting the sweep before its final stop whose sweep completed, now or
+      earlier, is re-marked to `AwaitingFinalStop`, the stop is requested and the logon refused
+      (`RunExit::AwaitingStop`); one that couldn't be re-marked (`StopNext` unreadable, the
+      write failed) refuses it with `RunExit::AwaitingSweep`, no stop requested. One awaiting a
+      final stop refuses the logon and requests the stop, as one awaiting its first stop does,
+      until `StopSequence` reaches its number; then it is clean. A marker naming no pool user (an unreadable one, replaced) awaits a
       stop for every pool user: while every stop ends 48 (a process it can't kill or can't
       place, a BITS job it can't cancel, a cut list), `StopSequence` never moves and every pool
       user's logon is refused. That is the fail-closed answer, since the escapee may be any of
@@ -1304,13 +1323,27 @@ leaves that profile, both naming the part.
       `sandbox.cleaning_up`, retryable). A marker whose stop completed is re-marked first, and
       the launch then waits for its sweep; one that couldn't be re-marked (`SweepNext`
       unreadable, the write failed) refuses the launch the same way. A marker still awaiting its
-      stop is F4's and doesn't hold the launch. `Open` markers are left there: they may be live
-      sessions'.
+      stop, first or final, is F4's and doesn't hold the launch, and so is one whose sweep before
+      its final stop completed: the launch doesn't re-mark it, since a stop it requested would
+      end the session it is launching. A final stop that completed makes a marker clean here
+      too. `Open` markers are left there: they may be live sessions'.
     - **The desktop's start** (`runner::start_up_requests(data_dir)`, once, before any launch,
       off the UI thread): every outer of the last run is gone, so each `Open` or unreadable
       marker becomes `AwaitingStop` with `StopNext` read then (an unreadable one naming no pool
-      user, so it counts for all); one whose stop completed is re-marked; the clean ones go; the
-      stop and sweep tasks are requested for what is still awaited. It never waits.
+      user, so it counts for all); one whose stop completed is re-marked, and one whose sweep
+      before its final stop completed too; the clean ones go; the stop and sweep tasks are
+      requested for what is still awaited. It never waits.
+    - **Not done: disabling the pool account between the stops.** Disabling a pool user
+      (`NetUserSetInfo`, `UF_ACCOUNTDISABLE`) from the first stop to the final one would stop
+      any task or BITS job from starting a process as it, and close the window above. It was
+      left out. The stop and the sweep take no argument and never read the markers (the record
+      is all they trust), so neither knows whether it is a first or a final stop, or whose
+      session it serves: the disable would need new state in the record saying who re-enables,
+      and when. The stop acts on every pool user, so every other matter's next logon would fail
+      (`ERROR_ACCOUNT_DISABLED`, 1331), a new failure for the launch to handle. A stop the
+      lawyer ended (execute access ends a task) or a final stop never requested would leave the
+      account disabled with nothing to notice, and a reset's `NetUserSetInfo` must then keep
+      the flag. The final stop covers the same window without any of this, for one more stop.
 
     A marker naming a pool SID the record no longer lists is stale and removed: a removal stopped
     every process of that SID before it deleted the account. **The install id.** The set-up
@@ -1841,7 +1874,8 @@ the admin copy.
    ends a run at 0. Once the passes stop, whatever they found, the run requests
    `\Clauseo\SandboxSweep` (`request_pool_sweep`): what a killed escapee left (a task, a BITS
    job) is the sweep's. The request is logged in the run's line and changes no exit code; a
-   marker that awaited this stop re-marks to a sweep whose number is read after it completed;
+   marker that awaited this stop re-marks to a sweep whose number is read after it completed,
+   and then to a final stop whose number is read after that sweep completed;
 5. cancels every BITS job a pool user owns (`EnumJobs(BG_JOB_ENUM_ALL_USERS)`, each job's
    `GetOwner`), at the impersonate level on the manager, the enumerator and each job
    (`pool_steps::cancel_pool_jobs`, which `--sweep-tasks` shares). A pool user's BITS job can't
@@ -1888,7 +1922,7 @@ the admin copy.
 mid-pass. An ended stop can't pass for a finished one. The rule: an unclean-session marker
 awaiting a stop records `StopNext` as it reads it (M), and only after its session's last launch
 path has closed (the session's job ended, or its outer is dead). The F4 refusal lifts, and the
-marker moves on to await a sweep read then, only when `StopSequence >= M`: a stop reserved its number after the marker read it and
+marker moves on to await a sweep read then (and, after that sweep, a final stop read then), only when `StopSequence >= M`: a stop reserved its number after the marker read it and
 then completed, so its observation began after the session could launch nothing more. The
 marker reads `StopNext` as the lawyer, **without the set-up lock**, which only an
 administrator's token can open (an earlier version of this rule asked for the lock). The read
@@ -2011,15 +2045,19 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    only `Task/Principals/Principal/UserId` and `GroupId`. When that principal resolves to a
    SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
    when it is the pool's, resolves to nothing else, or the file can't be read or is
-   malformed, the task stays unreadable and 56. No failure stops the walk. Deleting a task
-   ends no running instance of it, so before a pool task is deleted its instances are stopped
-   (`sweep::running`): the running instances are listed
-   (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`) and each whose path (`IRunningTask::Path`,
-   compared without case) is the task's is stopped (`IRunningTask::Stop`). A stop that fails,
-   an instance whose path can't be read (it may be the task's), a list that can't be read, or a
-   folder whose path can't be read is 56, and the task is deleted all the same;
+   malformed, the task stays unreadable and 56. No failure stops the walk. A pool task is
+   deleted as soon as it is found, so its trigger starts nothing more;
 4. cancels every BITS job a pool user owns with the stop's BITS step
-   (`pool_steps::cancel_pool_jobs`), whatever the walk found;
+   (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
+   left to trigger and no job left to notify, it stops the running instances of the pool's
+   tasks the walk found, deleted or not, since deleting a task ends none (`sweep::running`):
+   the running instances are listed once (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`)
+   and each whose path (`IRunningTask::Path`, compared without case) is one of theirs is
+   stopped (`IRunningTask::Stop`). Stopping them before the delete, as an earlier version did,
+   left an instance its trigger started in between. A stop that fails, an instance whose path
+   can't be read (it may be theirs), a list that can't be read, or a pool task whose folder's
+   path can't be read is 56. An instance's children may outlive it: the final stop a marker
+   past its first stop waits for ends them ("The unclean-session marker");
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
    and writes `SweepCompleted` (`REG_QWORD`, a `FILETIME`: when the walk began) and then
    `SweepSequence = n` (`REG_QWORD`, never lowered). A record gone or changed, a sequence
@@ -2164,11 +2202,12 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
 - **The exit:** the host decodes the child's exit status with `RunOutcome::from_exit` (`Agent`,
   `Runner(RunExit)`, `HostEnded`, `Unknown`) or `RunExit::from_code`. `RunExit::Escapee` becomes
   the host's "left the Safe workspace" stop (R17 PR-E). The outer asks the stop task itself.
-  `RunExit::AwaitingStop` is F4's refusal: an earlier session of the pool user awaits a stop;
-  the outer asked for it, and a later launch goes ahead once it completed.
+  `RunExit::AwaitingStop` is F4's refusal: an earlier session of the pool user awaits a stop,
+  its first or the final one after its sweep; the outer asked for it, and a later launch goes
+  ahead once it completed.
   `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
-  user's awaits a sweep that didn't complete within 15 s, or its completed stop couldn't be
-  re-marked; a later launch checks again.
+  user's awaits a sweep that didn't complete within 15 s, or its completed stop (or sweep)
+  couldn't be re-marked; a later launch checks again.
 - **The desktop's start:** once, before any launch and off the UI thread,
   `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
   stop and sweep tasks for what they still await. It never waits.
