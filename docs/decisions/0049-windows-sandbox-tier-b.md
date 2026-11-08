@@ -1996,21 +1996,32 @@ registration gave the folder that task's descriptor, so a per-machine set-up reg
 stop task for one owner would have shut every other interactive user out of the folder. An
 elevated CI test starts the set-up task as a standard user beside another owner's stop task.
 
-**The server's run** (`--serve-set-up`; exits `ServeExit`, from 63, after the other
+**The server's run** (`--serve-set-up`; exits `ServeExit`, 63 to 67, after the other
 `\Clauseo` tasks' codes: the stop's to 50, the WSL deny's 51-52, the sweep's 53-59, the WSL
 upgrade's 60-62):
 
 1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, as the stop task does
    (63);
 2. reads the record; no admin copy recorded is 65;
-3. makes `\\.\pipe\ClauseoSandboxSetUp`: the first instance or nothing
+3. makes `\\.\pipe\ClauseoSetUp-<token>`, the token 128 random bits drawn for this run
+   (32 lowercase hex digits, `serve::pipe_name`): the first instance or nothing
    (`FILE_FLAG_FIRST_PIPE_INSTANCE`), message mode, `PIPE_REJECT_REMOTE_CLIENTS`, owned by LOCAL
    SYSTEM (`O:SY`, which no one but SYSTEM or an administrator can make, and the app's proof), and
    a protected DACL built from the record: each pool group denied everything first, SYSTEM full
    control, then per user the owner and per machine `IU` with read and write less
    `FILE_CREATE_PIPE_INSTANCE` (`0x12019b`), and a Medium no-read-up, no-write-up label. A name
    someone made first is logged and served to no one (64); a pipe that can't be made is 66;
-4. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66; a
+4. publishes the token, once the pipe is made: the value `Pipe` (`REG_SZ`) in
+   `HKLM\SOFTWARE\Clauseo\Sandbox\SetUpPipe`. The record's key lets Administrators write
+   (`RECORD_SDDL`), so the name has a subkey of its own, made and given its descriptor again
+   before each write: `O:SYD:P(A;;KA;;;SY)(A;;SD;;;BA)(A;;KR;;;BU)` (`serve::PUBLISHED_SDDL`),
+   owned by LOCAL SYSTEM, the only writer, Users reading, Administrators allowed only to delete
+   it, and protected, so the record key's entries aren't inherited. A token that can't be drawn
+   or published is 67, with no one served. On every exit after that the server deletes the
+   subkey while it still holds its token. A run that was ended (`schtasks /end`, the two-hour
+   limit) leaves it, naming a pipe that is gone: a stale name, which `--remove --uninstall`
+   deletes with the admin values, so the record's key can go;
+5. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66; a
    name someone took while no instance was left is 64; a client that closed before the server
    reached it is let go and the wait goes on).
    A spare instance waits while one client is served, so the name is never free while the server
@@ -2078,12 +2089,17 @@ Holding it to once per start is the host's job (D3a's start-up checks), not the 
    plus `AppData\Local\ai.clauseo.desktop` (`serve::task_serves`). When they differ (a moved
    `AppData`, no profile of its own), a reply would say done while the app's folder stayed unset,
    so it logs why and runs the prompted `--set-up`, which takes the folder as it is;
-2. starts the task (`IRegisteredTask::Run`). `NotRegistered` (the task, or `\Clauseo`, missing:
-   `ERROR_FILE_NOT_FOUND` or `ERROR_PATH_NOT_FOUND`) means the install has no set-up task, and
-   `UserSetup` falls back to the prompted `--set-up` (`run_elevated`, `extend_elevated`);
-3. opens the pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and the client rights
-   alone, overlapped, retrying for 30 s and starting the task once more after 5 s; a busy pipe is
-   waited for. A pipe that refuses this user is someone else's;
+2. reads the published token, then starts the task (`IRegisteredTask::Run`). `NotRegistered`
+   (the task, or `\Clauseo`, missing: `ERROR_FILE_NOT_FOUND` or `ERROR_PATH_NOT_FOUND`) means the
+   install has no set-up task, and `UserSetup` falls back to the prompted `--set-up`
+   (`run_elevated`, `extend_elevated`). A token read before the start is a server already
+   running (the start was dropped) or a stale name; one that differs is this start's;
+3. reads the token again until it names a pipe (a value that isn't 32 lowercase hex digits is
+   read as none) and opens that pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and
+   the client rights alone, overlapped, retrying for 30 s and starting the task once more after
+   5 s; a busy pipe is waited for. No token in time, or only the stale one, is
+   `SetUpError::Unpublished`; a token whose pipe stays missing is `NoServer`. A pipe that
+   refuses this user is someone else's;
 4. on that handle, before writing, checks the server. The proof is the pipe's owner, read first
    (`GetSecurityInfo`, which the client rights' `READ_CONTROL` allows): LOCAL SYSTEM. A pool user
    can make the name first (its token holds `IU`), but not a pipe SYSTEM owns, and the owner stays
@@ -2099,9 +2115,14 @@ Holding it to once per start is the host's job (D3a's start-up checks), not the 
    result file does, except `refused`: the gate shouldn't refuse a lawyer, so for one it didn't
    foresee the app logs why and runs the prompted `--set-up` (`serve::via_task`), which needs an
    administrator's credentials and so grants no one anything;
-6. a pipe whose owner is one of the record's pool users or its group (`serve::pool_squat`) is a
-   pool user's process holding the name: the app starts the stop task (`request_pool_stop`),
-   waits while it is queued or running (up to 60 s), and runs steps 2 to 5 once more. Any other
+6. a token read before the start whose pipe fails step 4, or refuses this user, is stale: its
+   server ended, and anyone may make a pipe under a name once it was published, so it is passed
+   over and the token read again (the client's order is `serve::ask_with`, tested with fakes).
+   A token this start published can't have been made first, as no one knew it; its pipe failing
+   step 4 is a squat. One whose owner is one of the record's pool users or its group
+   (`serve::pool_squat`) is a pool user's process holding the name: the app starts the stop task
+   (`request_pool_stop`), waits while it is queued or running (up to 60 s), and runs steps 2 to 5
+   once more. Any other
    squat (another user's pipe, one that refuses this user, an owner that can't be read, a SYSTEM
    pipe whose image doesn't match, as through a `subst` drive) stops nothing: per machine a stop
    would end every lawyer's matters and free nothing. That, a pipe still someone else's, or a stop
@@ -2111,9 +2132,18 @@ Holding it to once per start is the host's job (D3a's start-up checks), not the 
 **Accepted.** A non-admin user can now make local accounts, WFP filters and the D5 claim on a
 per-machine install; IT opts in by deploying it. The set-up's change journal step grows journals
 on volumes the user's registered matters name, now with no admin consent, bounded at 256 MiB
-each. A pool user's process squatting the pipe's name is stopped and the request made again; any
-other squatter (another user's process) denies the set-up, the Event Log names the squat, and
-the app's failure names a squatted pipe.
+each.
+
+**Squatting the name.** A fixed name let any local account that isn't in the pool (another user,
+a service) make the pipe between two runs, which the server only runs on demand, and block every
+set-up until a restart: on a shared PC or Remote Desktop, one user could deny the others. Each
+run's name is now random and published where only LOCAL SYSTEM writes, so a squatter can only
+take a name after it was published and its server ended (a stale one), and the app passes such
+a name over. The app still trusts the pipe only by its owner (LOCAL SYSTEM) and the checks after
+it, never by the name or the registry: an administrator could write the value, and an
+administrator could make a SYSTEM-owned pipe anyway. A squat of this start's name (not expected)
+denies the set-up, the Event Log names it, and the app's failure names a squatted pipe; a pool
+user's process is stopped first and the request made again.
 
 **Not yet verified** (VM rows): `WTSQueryUserToken` and DPAPI under the session token as
 SYSTEM; Defender with the registration in `--place-only`; Remote Desktop and fast user

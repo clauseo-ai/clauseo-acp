@@ -5,26 +5,30 @@
 //! [`SetUpError::NotRegistered`] means this install has no set-up task, and the elevated
 //! `UserSetup` path, with its prompt, is the one left.
 //!
-//! In order:
+//! In order (`serve::ask_with`, whose order this module's calls fill in):
 //!
-//! 1. starts the task (`IRegisteredTask::Run`, through the read-and-execute entry its descriptor
-//!    gives this user);
-//! 2. opens the pipe `\\.\pipe\ClauseoSandboxSetUp` with identification-only quality of service
-//!    (`SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`), so whoever serves it can learn who
-//!    this is but never act as them, and the pipe's client rights alone (`pipe::PIPE_RIGHTS`,
-//!    never a new instance). A pipe not there yet is tried again for [`CONNECT_WAIT`], the task
-//!    started once more after [`RERUN_AFTER`] (a start made as the last server ended may have
-//!    been its own); a busy one is waited for (`WaitNamedPipeW`);
+//! 1. reads the pipe name the running server published (`HKLM\SOFTWARE\Clauseo\Sandbox\
+//!    SetUpPipe`, which only LOCAL SYSTEM may write, `serve::windows_published`), then starts the
+//!    task (`IRegisteredTask::Run`, through the read-and-execute entry its descriptor gives this
+//!    user). Each server run draws its own random name, so no one can make it first;
+//! 2. reads the published name until one names a pipe, and opens it with identification-only
+//!    quality of service (`SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`), so whoever serves
+//!    it can learn who this is but never act as them, and the pipe's client rights alone
+//!    (`pipe::PIPE_RIGHTS`, never a new instance). No name, or no pipe yet, is tried again for
+//!    `serve::CONNECT_WAIT`, the task started once more after `serve::RERUN_AFTER`; a busy pipe
+//!    is waited for (`WaitNamedPipeW`);
 //! 3. on that same handle, before writing anything, checks who serves it
 //!    (`setup::serve::check_server`). The proof is the pipe's owner, read first
-//!    (`GetSecurityInfo`): LOCAL SYSTEM, which a pool user can't make. Then its session
+//!    (`GetSecurityInfo`): LOCAL SYSTEM, which no standard user can make. Then its session
 //!    (`GetNamedPipeServerSessionId`) is 0, its process (`GetNamedPipeServerProcessId`) is LOCAL
 //!    SYSTEM's in the kernel's process list, and its image, as the kernel names it, is the admin
 //!    copy: one that differs refuses, one Windows won't give this user is logged and set aside.
-//!    A pool user can make the pipe's name first, and a pipe that refuses this user or fails the
-//!    check gets nothing: [`SetUpError::NotTheServer`] when its owner is one of the record's
-//!    pool users or its group (`serve::pool_squat`), otherwise [`SetUpError::Squatted`] at once.
-//!    A server process no longer listed was ending as this connected, and is taken as gone;
+//!    A name read before the start that fails the check, or refuses this user, is stale (its
+//!    server ended, and anyone may make a name once published) and the name is read again; a
+//!    name this start published that fails it gets nothing: [`SetUpError::NotTheServer`] when
+//!    its owner is one of the record's pool users or its group (`serve::pool_squat`), otherwise
+//!    [`SetUpError::Squatted`] at once. A server process no longer listed was ending as this
+//!    connected, and is taken as gone;
 //! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
 //!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server
 //!    that went away before replying (one that was ending as this connected) is asked again,
@@ -62,8 +66,9 @@ use super::pipe::os::Overlapped;
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::refresh::task::{run_task, task_busy};
 use super::refresh::{SystemTask, TaskError, request_pool_stop};
+use super::setup::serve::windows_published::read_published;
 use super::setup::serve::{
-    CONNECT_WAIT, Op, PIPE_NAME, REPLY_CAP, REPLY_WAIT, RERUN_AFTER, ServerFacts, check_owner,
+    Asker, Exchange, Op, Opened, REPLY_CAP, REPLY_WAIT, ServerFacts, ask_with, check_owner,
     check_server, pool_squat, retry_squatted,
 };
 use super::setup::stop::windows_stopper::listed_users;
@@ -113,7 +118,7 @@ pub fn request_set_up(add: Option<u8>) -> Result<SetUpReply, SetUpError> {
     let program_files = os::program_files().map_err(|error| SetUpError::Pipe(error.to_string()))?;
     let admin_exe = admin_copy::admin_exe(&program_files);
     retry_squatted(
-        || ask(PIPE_NAME, &request, &admin_exe, start),
+        || ask(read_published, &request, &admin_exe, start),
         request_pool_stop,
         settle,
     )
@@ -140,69 +145,71 @@ fn settle() {
     }
 }
 
-/// Steps 1 to 4 on the pipe `name` for `request`, the task started by `start`, the server
-/// checked against the admin copy `admin_exe`; the tests pass their own pipe, exe and start.
+/// Steps 1 to 4 for `request`, the published name read by `published`, the task started by
+/// `start`, the server checked against the admin copy `admin_exe`; the tests pass their own.
 pub(crate) fn ask(
-    name: &str,
+    published: impl FnMut() -> Result<Option<String>, String>,
     request: &[u8],
     admin_exe: &Path,
-    mut start: impl FnMut() -> Result<(), SetUpError>,
+    start: impl FnMut() -> Result<(), SetUpError>,
 ) -> Result<SetUpReply, SetUpError> {
-    start()?;
-    let mut began = now_ms();
-    let mut started_again = false;
-    let mut asked_again = false;
-    loop {
-        let elapsed = now_ms().saturating_sub(began);
+    ask_with(&mut WindowsAsker {
+        published,
+        start,
+        request,
+        admin_exe,
+    })
+}
+
+/// [`Asker`] on Windows: the published name, the task and the pipe's client end.
+struct WindowsAsker<'a, P, S> {
+    published: P,
+    start: S,
+    request: &'a [u8],
+    admin_exe: &'a Path,
+}
+
+impl<P, S> Asker for WindowsAsker<'_, P, S>
+where
+    P: FnMut() -> Result<Option<String>, String>,
+    S: FnMut() -> Result<(), SetUpError>,
+{
+    type Pipe = Handle;
+
+    fn start(&mut self) -> Result<(), SetUpError> {
+        (self.start)()
+    }
+
+    fn published(&mut self) -> Result<Option<String>, String> {
+        (self.published)()
+    }
+
+    fn now_ms(&mut self) -> u64 {
+        now_ms()
+    }
+
+    fn pause(&mut self) {
+        // SAFETY: plain value; it only waits.
+        unsafe { Sleep(PAUSE_MS) };
+    }
+
+    fn open(&mut self, name: &str) -> Opened<Handle> {
         match open(name) {
-            Ok(pipe) => match exchange(&pipe, request, admin_exe) {
-                Ok(reply) => return Ok(reply),
-                Err(Exchange::Gone) if !asked_again => {
-                    asked_again = true;
-                    start()?;
-                    began = now_ms();
-                    started_again = false;
-                }
-                Err(Exchange::Gone) => {
-                    return Err(SetUpError::Pipe("the server went away twice".to_owned()));
-                }
-                Err(Exchange::NotTheServer(why)) => return Err(SetUpError::NotTheServer(why)),
-                Err(Exchange::Squatted(why)) => return Err(SetUpError::Squatted(why)),
-                Err(Exchange::Failed(why)) => return Err(SetUpError::Pipe(why)),
-            },
-            Err(code)
-                if elapsed >= CONNECT_WAIT
-                    && [ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY].contains(&code) =>
-            {
-                return Err(SetUpError::NoServer);
-            }
-            Err(code) if code == ERROR_FILE_NOT_FOUND => {
-                if elapsed >= RERUN_AFTER && !started_again {
-                    started_again = true;
-                    start()?;
-                }
-                // SAFETY: plain value; it only waits.
-                unsafe { Sleep(PAUSE_MS) };
-            }
-            Err(code) if code == ERROR_PIPE_BUSY => {
-                // SAFETY: a live HSTRING; it only waits for an instance to be free.
-                let _free_or_timed_out =
-                    unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) };
-            }
-            Err(code) if code == ERROR_ACCESS_DENIED => {
-                // The set-up task's pipe lets this user in: one that doesn't is someone else's,
-                // whose owner can't be read, so nothing is stopped for it.
-                return Err(SetUpError::Squatted(
-                    "the pipe refuses this user, so another process made it".to_owned(),
-                ));
-            }
-            Err(code) => {
-                return Err(SetUpError::Pipe(format!(
-                    "opening it failed (error {})",
-                    code.0
-                )));
-            }
+            Ok(pipe) => Opened::Open(pipe),
+            Err(code) if code == ERROR_FILE_NOT_FOUND => Opened::Missing,
+            Err(code) if code == ERROR_PIPE_BUSY => Opened::Busy,
+            Err(code) if code == ERROR_ACCESS_DENIED => Opened::Denied,
+            Err(code) => Opened::Failed(code.0),
         }
+    }
+
+    fn wait_busy(&mut self, name: &str) {
+        // SAFETY: a live HSTRING; it only waits for an instance to be free.
+        let _free_or_timed_out = unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) };
+    }
+
+    fn exchange(&mut self, pipe: Handle) -> Result<SetUpReply, Exchange> {
+        exchange(&pipe, self.request, self.admin_exe)
     }
 }
 
@@ -244,19 +251,6 @@ pub(in crate::windows) fn open(
     opened.map(Handle).map_err(|error| {
         windows::Win32::Foundation::WIN32_ERROR::from_error(&error).unwrap_or_default()
     })
-}
-
-/// How an exchange on an open pipe failed.
-#[derive(Debug)]
-pub(in crate::windows) enum Exchange {
-    /// The server closed before any reply.
-    Gone,
-    /// The server isn't the set-up task's: a pool user's (`serve::pool_squat`).
-    NotTheServer(String),
-    /// Anything else.
-    Failed(String),
-    /// The server isn't the set-up task's, nor a pool user's.
-    Squatted(String),
 }
 
 /// Checks the server on `pipe` against `admin_exe` ([`check_pipe`]), then sends `request`

@@ -514,6 +514,7 @@ crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 crates/sandbox/src/windows/setup/serve/windows_pipe.rs - unsafe_code
+crates/sandbox/src/windows/setup/serve/windows_published.rs - unsafe_code
 crates/sandbox/src/windows/setup/serve/windows_tests/system.rs - unsafe_code
 crates/sandbox/src/windows/setup/serve/windows_tests/system.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/setup/serve/windows_tests/system.rs copy_of_this_binary clippy::disallowed_methods

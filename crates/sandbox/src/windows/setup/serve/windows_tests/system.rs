@@ -26,7 +26,7 @@ use windows::core::HSTRING;
 
 use super::super::tests::{FakeHost, SET_UP};
 use super::super::windows_pipe::WindowsPipe;
-use super::super::{ServerFacts, run};
+use super::super::{ServerFacts, TOKEN_BYTES, pipe_name, run};
 use super::gate;
 use crate::test_support::TempDir;
 use crate::windows::record::current_user_sid;
@@ -37,9 +37,9 @@ use crate::windows::setup::strays::TASK_TEST_PREFIX;
 use crate::windows::setup_task::{ask, open, read_facts};
 use crate::windows::test_dacl::protect_with;
 
-/// The server helper's variable: the pipe's short name.
+/// The server helper's variable: the run's token, which names the pipe (`pipe_name`).
 const SERVE_PIPE: &str = "CLAUSEO_SET_UP_TEST_SERVE";
-/// The client helper's variables: the pipe's short name, and the image it expects.
+/// The client helper's variables: the run's token, and the image it expects.
 const ASK_PIPE: &str = "CLAUSEO_SET_UP_TEST_ASK";
 const ASK_EXE: &str = "CLAUSEO_SET_UP_TEST_EXE";
 /// How many half-second looks the client takes for the pipe: SYSTEM's run starts this binary.
@@ -72,9 +72,9 @@ fn system_helper_serves() {
     };
     let me = current_user_sid().unwrap();
     assert_eq!(me.as_str(), "S-1-5-18", "only SYSTEM serves");
-    let name = format!(r"\\.\pipe\{short}");
+    let name = pipe_name(&short).unwrap();
     let mut host = FakeHost::new();
-    let exit = run(&mut host, |sddl| {
+    let exit = run(&mut host, |_name, sddl| {
         println!("descriptor: {sddl}");
         WindowsPipe::create(&name, sddl)
     });
@@ -89,7 +89,7 @@ fn user_helper_asks() {
     let (Ok(short), Ok(exe)) = (std::env::var(ASK_PIPE), std::env::var(ASK_EXE)) else {
         return;
     };
-    let name = format!(r"\\.\pipe\{short}");
+    let name = pipe_name(&short).unwrap();
     let wait = || {
         for _ in 0..PIPE_LOOKS {
             // SAFETY: a live HSTRING; it only waits, up to half a second.
@@ -120,7 +120,9 @@ fn user_helper_asks() {
         Err(code) => println!("facts: the pipe wouldn't open ({})", code.0),
     }
     assert!(wait(), "the pipe went");
-    let answer = ask(&name, SET_UP.as_bytes(), Path::new(&exe), || Ok(()));
+    // The name published before and after the start: a server already running.
+    let published = || Ok(Some(short.clone()));
+    let answer = ask(published, SET_UP.as_bytes(), Path::new(&exe), || Ok(()));
     println!("answer: {answer:?}");
 }
 
@@ -164,7 +166,8 @@ fn elevated_a_standard_user_takes_a_pipe_system_made_and_asks_on_it() {
     let (code, printed) = try_in_cmd(&user, dir.path(), "echo ready");
     assert_eq!(code, Some(0), "{printed}");
 
-    let short = format!("ClauseoTestServe{}", std::process::id());
+    // The run's token, as the server would draw and publish it.
+    let short = random_hex(TOKEN_BYTES);
     let served = dir.path().join("server.txt");
     let serve = format!(
         r#"/d /s /c "set {SERVE_PIPE}={short}&& "{}" {} --exact --ignored --nocapture > "{}" 2>&1""#,

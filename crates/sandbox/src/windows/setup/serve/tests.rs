@@ -10,8 +10,10 @@ use super::*;
 use crate::windows::setup::record_values::CopyOwner;
 
 mod app;
+mod client;
 mod flow;
 mod identify;
+mod publish;
 
 pub(crate) const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 pub(crate) const OTHER: &str = "S-1-5-21-1-2-3-1002";
@@ -126,6 +128,12 @@ pub(crate) struct FakeHost {
     pub(crate) clock: Duration,
     /// How far the clock moves at each look.
     pub(crate) tick: Duration,
+    /// What the random bytes for the pipe's name are.
+    pub(crate) random: Result<[u8; TOKEN_BYTES], String>,
+    /// The published token, as the subkey holds it.
+    pub(crate) published: Option<String>,
+    /// Publishing fails with this.
+    pub(crate) publish_fails: Option<String>,
 }
 
 impl FakeHost {
@@ -150,6 +158,9 @@ impl FakeHost {
             lines: Vec::new(),
             clock: Duration::ZERO,
             tick: Duration::ZERO,
+            random: Ok([0xa5; TOKEN_BYTES]),
+            published: None,
+            publish_fails: None,
         }
     }
 
@@ -257,6 +268,27 @@ impl Host for FakeHost {
         self.clock += self.tick;
         now
     }
+
+    fn random(&mut self) -> Result<[u8; TOKEN_BYTES], String> {
+        self.calls.push("random".to_owned());
+        self.random.clone()
+    }
+
+    fn publish(&mut self, token: &str) -> Result<(), String> {
+        self.calls.push(format!("publish {token}"));
+        if let Some(why) = &self.publish_fails {
+            return Err(why.clone());
+        }
+        self.published = Some(token.to_owned());
+        Ok(())
+    }
+
+    fn unpublish(&mut self, token: &str) {
+        self.calls.push(format!("unpublish {token}"));
+        if self.published.as_deref() == Some(token) {
+            self.published = None;
+        }
+    }
 }
 
 /// Serves `clients` and gives the replies, in order, with the exit.
@@ -278,7 +310,7 @@ fn run_on(host: &mut FakeHost, pipe: &mut FakePipe) -> (ServeExit, Option<String
     let taken = std::mem::take(pipe);
     let mut out = None;
     let mut sddl = None;
-    let exit = run(host, |made| {
+    let exit = run(host, |_name, made| {
         sddl = Some(made.to_owned());
         Ok(Recording(taken, &mut out))
     });

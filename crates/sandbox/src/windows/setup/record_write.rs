@@ -266,9 +266,11 @@ pub(super) fn delete(key: &str) -> Result<(), MachineError> {
     delete_values(key, &SETUP_VALUES)
 }
 
-/// Deletes `--adopt`'s values ([`ADMIN_VALUES`]) from `HKLM\<key>`, then the key once it is
-/// empty, as [`delete`] does for the set-up's.
+/// Deletes `--adopt`'s values ([`ADMIN_VALUES`]) from `HKLM\<key>`, and the set-up task's
+/// published pipe name (`serve::windows_published`) a run that was ended may have left, then
+/// the key once it is empty, as [`delete`] does for the set-up's.
 pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
+    super::serve::windows_published::delete(key)?;
     delete_values(key, &ADMIN_VALUES)
 }
 

@@ -258,7 +258,7 @@ fn a_failed_set_up_is_the_reply_and_an_error_line() {
 fn only_system_from_the_admin_copy_with_a_recorded_copy_makes_the_pipe() {
     let opened = |host: &mut FakeHost, open: Result<(), Unmade>| {
         let mut made = false;
-        let exit = run(host, |_| {
+        let exit = run(host, |_name, _sddl| {
             made = true;
             open.map(|()| FakePipe::default())
         });

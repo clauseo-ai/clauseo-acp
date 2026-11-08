@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::windows_pipe::{WindowsPipe, ticks};
-use super::{Gate, Host, PIPE_NAME, ServeExit};
+use super::{Gate, Host, ServeExit, TOKEN_BYTES, windows_published};
 use crate::SetupState;
 use crate::windows::admin_copy::{self, os};
 use crate::windows::marker::setup_state;
@@ -27,10 +27,10 @@ use crate::windows::sids::Sid;
 /// a set-up started with a prompt may hold it; well inside each client's 30 minutes.
 const LOCK_WAIT_MS: u32 = 300_000;
 
-/// `--serve-set-up`: [`super::run`] over a [`WindowsHost`] and the pipe [`PIPE_NAME`].
+/// `--serve-set-up`: [`super::run`] over a [`WindowsHost`] and the production pipe.
 pub(crate) fn run() -> ServeExit {
     let mut host = WindowsHost::new(Names::production());
-    super::run(&mut host, |sddl| WindowsPipe::create(PIPE_NAME, sddl))
+    super::run(&mut host, WindowsPipe::create)
 }
 
 /// Why the record (or the group it names) couldn't be read, for the log and the reply: the
@@ -150,6 +150,26 @@ impl Host for WindowsHost {
 
     fn elapsed(&mut self) -> Duration {
         ticks().saturating_sub(self.started)
+    }
+
+    fn random(&mut self) -> Result<[u8; TOKEN_BYTES], String> {
+        let mut bytes = [0u8; TOKEN_BYTES];
+        getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+        Ok(bytes)
+    }
+
+    fn publish(&mut self, token: &str) -> Result<(), String> {
+        windows_published::publish(&self.names.record_key, token).map_err(|error| unread(&error))
+    }
+
+    fn unpublish(&mut self, token: &str) {
+        if let Err(error) = windows_published::unpublish(&self.names.record_key, token) {
+            let line = format!(
+                "--serve-set-up: clearing the pipe's name: {}",
+                unread(&error)
+            );
+            event_log(true, &line);
+        }
     }
 }
 

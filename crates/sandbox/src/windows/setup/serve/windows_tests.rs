@@ -23,7 +23,9 @@ use std::time::Duration;
 
 use super::tests::{FakeHost, SET_UP};
 use super::windows_pipe::WindowsPipe;
-use super::{ClientFacts, Pipe, Refusal, Reply, ServeExit, SetUpError, Unmade, run};
+use super::{
+    ClientFacts, Pipe, Refusal, Reply, ServeExit, SetUpError, TOKEN_BYTES, Unmade, pipe_name, run,
+};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -146,7 +148,7 @@ fn elevated_the_pipe_server_refuses_a_user_who_isnt_the_sessions_user() {
     let (exit, as_refused, as_served) = std::thread::scope(|scope| {
         let first = scope.spawn(|| ask_as("refused", &refused, &refused_dir));
         let second = scope.spawn(|| ask_as("served", &served, &served_dir));
-        let exit = run(&mut host, |sddl| {
+        let exit = run(&mut host, |_name, sddl| {
             made = Some(sddl.to_owned());
             WindowsPipe::create(&name, sddl).map(|pipe| Seen(pipe, &mut seen))
         });
@@ -190,13 +192,16 @@ fn elevated_a_squatted_pipe_name_is_served_to_no_one_and_the_app_sends_it_nothin
     if !gate("elevated_a_squatted_pipe_name_is_served_to_no_one_and_the_app_sends_it_nothing") {
         return;
     }
-    let name = format!(r"\\.\pipe\ClauseoTestSquat{}", std::process::id());
+    // A published name someone else holds: a random name can't be made first, so the test
+    // makes its own pipe under the name it then publishes, as a squat would have to be.
+    let token = random_hex(TOKEN_BYTES);
+    let name = pipe_name(&token).unwrap();
     // The squatter, first, as a pool user's process would be: its own owner (this process's,
     // Administrators), everyone let in.
     let mut squatter = WindowsPipe::create(&name, "D:(A;;GA;;;WD)").unwrap();
     enable_restore().unwrap();
     let mut host = FakeHost::new();
-    let exit = run(&mut host, |sddl| WindowsPipe::create(&name, sddl));
+    let exit = run(&mut host, |_name, sddl| WindowsPipe::create(&name, sddl));
     eprintln!("the server's lines: {:?}", host.lines);
     assert_eq!(exit, ServeExit::Squatted);
     assert_eq!(exit.as_code(), 64);
@@ -204,7 +209,13 @@ fn elevated_a_squatted_pipe_name_is_served_to_no_one_and_the_app_sends_it_nothin
     // The app's own client, against the squatter: refused before a byte is written.
     let exe = Path::new(r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe");
     let (asked, sent) = std::thread::scope(|scope| {
-        let app = scope.spawn(|| ask(&name, SET_UP.as_bytes(), exe, || Ok(())));
+        // Nothing published before the start, then the squatter's name: one this start made.
+        let mut reads = 0;
+        let published = move || {
+            reads += 1;
+            Ok((reads > 1).then(|| token.clone()))
+        };
+        let app = scope.spawn(|| ask(published, SET_UP.as_bytes(), exe, || Ok(())));
         let mut client = squatter
             .next(Duration::from_secs(30))
             .unwrap()

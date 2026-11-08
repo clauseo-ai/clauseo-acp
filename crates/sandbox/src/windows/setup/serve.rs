@@ -1,8 +1,9 @@
 //! `clauseo-sandbox-setup.exe --serve-set-up`, run by the SYSTEM task `\Clauseo\SandboxSetUp`:
 //! the set-up a standard user asks for, with no prompt. The app starts the task
-//! (`windows::setup_task`), then asks over the pipe [`PIPE_NAME`]; this process learns who asked
-//! from the pipe and the Windows session, never from an argument, and sets that user up as
-//! `--set-up` would, writing every file in their data folder as them.
+//! (`windows::setup_task`), then asks over the pipe this run made and published
+//! (`published.rs`); this process learns who asked from the pipe and the Windows session, never
+//! from an argument, and sets that user up as `--set-up` would, writing every file in their data
+//! folder as them.
 //!
 //! [`run`] holds the order and the refusals, with no Windows call; every effect goes through
 //! [`Pipe`] and [`Host`], which `windows_pipe.rs` and `windows_host.rs` implement and the tests
@@ -12,12 +13,16 @@
 //!    task does ([`ServeExit::NotAllowed`]);
 //! 2. reads the record: with no admin copy recorded there is no one to serve
 //!    ([`ServeExit::NoRecord`]);
-//! 3. makes the pipe, its first instance or nothing (`FILE_FLAG_FIRST_PIPE_INSTANCE`), local
-//!    clients only, owned by LOCAL SYSTEM, with a protected DACL built now from the record
-//!    ([`pipe_sddl`]): per user the owner, per machine interactive users, the pool's group refused
-//!    first once it exists. A name someone else made first is logged and served to no one
-//!    ([`ServeExit::Squatted`]);
-//! 4. serves each client in turn ([`handle`]), waiting [`FIRST_WAIT`] for the first and
+//! 3. makes the pipe under a name drawn at random for this run ([`pipe_name`], 128 bits
+//!    from [`Host::random`]), its first instance or nothing
+//!    (`FILE_FLAG_FIRST_PIPE_INSTANCE`), local clients only, owned by LOCAL SYSTEM, with a
+//!    protected DACL built now from the record ([`pipe_sddl`]): per user the owner, per machine
+//!    interactive users, the pool's group refused first once it exists. A name someone else made
+//!    first is logged and served to no one ([`ServeExit::Squatted`]);
+//! 4. publishes the name where only LOCAL SYSTEM may write ([`Host::publish`]), and clears it
+//!    as it exits, whichever way ([`Host::unpublish`]); a name it can't publish is
+//!    [`ServeExit::Unpublished`], served to no one;
+//! 5. serves each client in turn ([`handle`]), waiting [`FIRST_WAIT`] for the first and
 //!    [`IDLE_WAIT`] for each after, then exits [`ServeExit::Done`]. It takes a client only while
 //!    [`CLIENT_LIMIT`] of the run's [`RUN_LIMIT`] is left after the wait, so each set-up taken
 //!    gets its full time; past that it exits [`ServeExit::Done`] too. While one is served the next
@@ -62,6 +67,7 @@ use super::result_file::SetupResult;
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
+pub use client::{Asker, Exchange, Opened, ask_with};
 pub use identify::{
     ClientFacts, Gate, Refusal, ServerFacts, check_owner, check_server, identify, pipe_sddl,
     pool_squat,
@@ -69,21 +75,26 @@ pub use identify::{
 pub use protocol::{
     Op, PROTOCOL, REPLY_CAP, REQUEST_CAP, Reply, SetUpError, retry_squatted, via_task,
 };
+pub use published::{
+    PIPE_PREFIX, PUBLISHED_SDDL, PUBLISHED_SUBKEY, PUBLISHED_VALUE, TOKEN_BYTES, pipe_name, token,
+};
 
+mod client;
 mod identify;
 mod protocol;
+mod published;
 #[cfg(test)]
 pub(crate) mod tests;
 #[cfg(windows)]
 pub(crate) mod windows_host;
 #[cfg(windows)]
 pub(crate) mod windows_pipe;
+#[cfg(windows)]
+pub(crate) mod windows_published;
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_tests;
 
-/// The pipe's name.
-pub const PIPE_NAME: &str = r"\\.\pipe\ClauseoSandboxSetUp";
 /// How long the server waits for its first client: a start with no client ends here.
 pub const FIRST_WAIT: Duration = Duration::from_secs(30);
 /// How long it waits for each client after one was served.
@@ -127,6 +138,8 @@ pub enum ServeExit {
     NoRecord,
     /// 66: the pipe couldn't be made, or waiting for a client failed.
     PipeFailed,
+    /// 67: the pipe's name couldn't be drawn or published; no one was served.
+    Unpublished,
 }
 
 impl ServeExit {
@@ -138,6 +151,7 @@ impl ServeExit {
             ServeExit::Squatted => 64,
             ServeExit::NoRecord => 65,
             ServeExit::PipeFailed => 66,
+            ServeExit::Unpublished => 67,
         }
     }
 }
@@ -204,12 +218,19 @@ pub trait Host {
     fn log(&mut self, error: bool, line: &str);
     /// How long this server has run.
     fn elapsed(&mut self) -> Duration;
+    /// [`TOKEN_BYTES`] random bytes, for the pipe's name.
+    fn random(&mut self) -> Result<[u8; TOKEN_BYTES], String>;
+    /// Publishes `token` (`published.rs`): the subkey made, or given its descriptor again,
+    /// before the value is written.
+    fn publish(&mut self, token: &str) -> Result<(), String>;
+    /// Clears the published value while it is still `token`, and the subkey once empty.
+    fn unpublish(&mut self, token: &str);
 }
 
-/// `--serve-set-up` as the module says, the pipe made by `open` with its descriptor.
+/// `--serve-set-up` as the module says, the pipe made by `open` with its name and descriptor.
 pub fn run<P: Pipe>(
     host: &mut impl Host,
-    open: impl FnOnce(&str) -> Result<P, Unmade>,
+    open: impl FnOnce(&str, &str) -> Result<P, Unmade>,
 ) -> ServeExit {
     match allowed(host) {
         Ok(true) => {}
@@ -236,7 +257,17 @@ pub fn run<P: Pipe>(
             return ServeExit::NoRecord;
         }
     };
-    let mut pipe = match open(&sddl) {
+    let token = match host.random() {
+        Ok(bytes) => token(&bytes),
+        Err(error) => {
+            host.log(true, &format!("--serve-set-up: the pipe's name: {error}"));
+            return ServeExit::Unpublished;
+        }
+    };
+    let Some(name) = pipe_name(&token) else {
+        return ServeExit::Unpublished;
+    };
+    let mut pipe = match open(&name, &sddl) {
         Ok(pipe) => pipe,
         Err(Unmade::Taken) => {
             host.log(
@@ -250,6 +281,21 @@ pub fn run<P: Pipe>(
             return ServeExit::PipeFailed;
         }
     };
+    if let Err(error) = host.publish(&token) {
+        host.log(
+            true,
+            &format!("--serve-set-up: publishing the pipe's name: {error}"),
+        );
+        host.unpublish(&token);
+        return ServeExit::Unpublished;
+    }
+    let exit = serve(&mut pipe, host);
+    host.unpublish(&token);
+    exit
+}
+
+/// Step 5: each client in turn, until none comes or the run's time is short.
+fn serve<P: Pipe>(pipe: &mut P, host: &mut impl Host) -> ServeExit {
     let mut wait = FIRST_WAIT;
     loop {
         if host.elapsed() + wait + CLIENT_LIMIT > RUN_LIMIT {
@@ -261,7 +307,7 @@ pub fn run<P: Pipe>(
         }
         match pipe.next(wait) {
             Ok(Some(mut client)) => {
-                let reply = handle(&mut pipe, host, &mut client);
+                let reply = handle(pipe, host, &mut client);
                 pipe.reply(client, &reply.to_line());
             }
             Ok(None) => return ServeExit::Done,
