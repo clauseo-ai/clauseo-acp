@@ -474,6 +474,8 @@ crates/agents/src/fileid.rs file_id unsafe_code
 crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
+# The case-law connector's env: GetWindowsDirectoryW, the fallback for SystemRoot and windir.
+crates/host/src/agent/loads/case_law.rs windows_directory unsafe_code
 crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
 # The record's owner in Administrators, by SID (NetUserGetLocalGroups), for the removal.
 crates/sandbox/src/windows/setup/admin_member.rs - unsafe_code
