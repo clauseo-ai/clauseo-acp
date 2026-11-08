@@ -42,8 +42,14 @@ pub enum Upgrade {
     LawyerOnly,
     /// The installed MSI is as new as the package, or newer.
     Current,
-    /// The MSI is missing or older than the package: an upgrade is pending.
+    /// The MSI is older than the package: an upgrade is pending.
     Pending,
+    /// The package is registered (machine-wide) and no MSI version is recorded (missing or
+    /// empty): WSL's installer would install the MSI, not upgrade it, and nothing says when, so
+    /// this isn't a pending upgrade but a state the check can't judge ([`check`]).
+    ///
+    /// [`check`]: super::check
+    NoMsi,
     /// The package is registered and a version can't be read or parsed.
     Unreadable,
 }
@@ -72,8 +78,7 @@ fn package_version(full_name: &str) -> Option<Version> {
 /// Whether a WSL upgrade is pending, as the module says. A read that fails (the lawyer's own
 /// registrations' too), a listed full name
 /// whose version doesn't parse, or an MSI version that doesn't parse, is
-/// [`Upgrade::Unreadable`]; a missing MSI version is [`Upgrade::Pending`], as WSL's installer
-/// takes it.
+/// [`Upgrade::Unreadable`]; a missing or empty MSI version is [`Upgrade::NoMsi`].
 pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
     let Ok(names) = reg.wsl_packages() else {
         return Upgrade::Unreadable;
@@ -97,8 +102,8 @@ pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
     };
     match reg.msi_version() {
         Err(_) => Upgrade::Unreadable,
-        Ok(None) => Upgrade::Pending,
-        Ok(Some(text)) if text.trim().is_empty() => Upgrade::Pending,
+        Ok(None) => Upgrade::NoMsi,
+        Ok(Some(text)) if text.trim().is_empty() => Upgrade::NoMsi,
         Ok(Some(text)) => match version(&text) {
             None => Upgrade::Unreadable,
             Some(installed) if installed < package => Upgrade::Pending,

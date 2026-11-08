@@ -911,12 +911,15 @@ Before each Safe workspace launch, Clauseo checks the deny, and refuses the laun
   permission can't be read or isn't a valid descriptor, a WSL class names no AppID, or a WSL class
   is registered as packaged COM (under `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex`, such as
   `{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a WSL from before 2.0). Repairing or updating
-  WSL (`wsl --update`) usually fixes it.
+  WSL (`wsl --update`) usually fixes it. So does the Store WSL package with no WSL MSI recorded
+  (no `Version` under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`) while
+  `WSLService` or `LxssManager` is installed: run `wsl --update` to finish installing it.
 - **`wsl_upgrade_pending`**: the WSL package from the Store
   (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the WSL that is installed
-  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`), or that
-  one isn't installed yet: a WSL update is pending, and any user could start it, which would take the deny off until Clauseo puts it
-  back. Finish or let the WSL update complete (`wsl --update`, or open WSL once as an
+  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`): a WSL
+  update is pending, and any user could start it, which would take the deny off until Clauseo
+  puts it back. A package registered for the signed-in user only isn't counted: other users
+  can't start its update. Finish or let the WSL update complete (`wsl --update`, or open WSL once as an
   administrator), then try again.
 
 With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)

@@ -421,12 +421,10 @@ fn a_pending_wsl_upgrade_refuses_the_launch_as_wsls_installer_judges_it() {
             "{msi}"
         );
     }
-    // Older, missing or empty: an upgrade is pending. The newest package listed counts.
+    // Older: an upgrade is pending. The newest package listed counts.
     for (packages, msi) in [
         (&["3.0.3.0"][..], Some("3.0.2")),
         (&["3.0.3.0"], Some("2.9.9.0")),
-        (&["3.0.3.0"], None),
-        (&["3.0.3.0"], Some(" ")),
         (&["2.0.0.0", "3.0.3.0"], Some("2.5.0")),
     ] {
         let fake = applied(packages, msi);
@@ -457,11 +455,29 @@ fn a_pending_wsl_upgrade_refuses_the_launch_as_wsls_installer_judges_it() {
     fake.fail.push("packages".to_owned());
     assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
     // A missing deny is still the cause shown first.
-    let mut fake = applied(&["3.0.3.0"], None);
+    let mut fake = applied(&["3.0.3.0"], Some("3.0.2"));
     fake.keys.get_mut(&app(WSLC_APP)).unwrap().value = Some(stock());
     assert_eq!(check(&fake), Err(Blocked::WslDenyMissing));
-    // The package alone, before its MSI is in (no service, no class): WSL is present, and the
-    // install is pending.
+}
+
+#[test]
+fn a_package_with_no_msi_is_unverifiable_where_wsl_2_can_run_and_refuses_nothing_where_not() {
+    // With the lifted WSL (or the inbox one) installed, no MSI version is a state WSL doesn't
+    // record: unverifiable, not an update with no end.
+    for msi in [None, Some(""), Some(" ")] {
+        let mut fake = FakeWsl::lifted();
+        apply(&mut fake, &group()).unwrap();
+        fake.packages = vec![package("3.0.3.0")];
+        fake.msi_version = msi.map(str::to_owned);
+        assert_eq!(upgrade(&fake), Upgrade::NoMsi, "{msi:?}");
+        assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable), "{msi:?}");
+    }
+    let mut fake = inbox();
+    apply(&mut fake, &group()).unwrap();
+    fake.packages = vec![package("3.0.3.0")];
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    // The package alone, before its MSI is in (no service, no class): WSL is present, but no VM
+    // can run until the MSI's install, whose events start the refresh; nothing is refused.
     let mut fake = FakeWsl {
         group: Some(group()),
         record: Some(WslRecord::default()),
@@ -469,7 +485,7 @@ fn a_pending_wsl_upgrade_refuses_the_launch_as_wsls_installer_judges_it() {
     };
     assert_eq!(check(&fake), Ok(Found::NoWsl));
     fake.packages = vec![package("3.0.3.0")];
-    assert_eq!(check(&fake), Err(Blocked::WslUpgradePending));
+    assert_eq!(check(&fake), Ok(Found::Denied(0)));
 }
 
 #[test]
