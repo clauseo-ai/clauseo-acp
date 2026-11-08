@@ -2130,13 +2130,19 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 `SweepSequence`, so the marker stays and the next launch asks for another run.
 
 **Risks.**
-- A pool user can keep every sweep at 56: a task of its own the sweep can't read (through the
-  Task Scheduler or its file, step 3), or a flood of Task Scheduler folders (more than 10 000,
-  or one whose descriptor shuts SYSTEM out). Every launch then waits 15 s and is refused with
-  `sandbox.cleaning_up`, until the task or folders go: an administrator's `--remove` (with no pool
-  recorded there is nothing to sweep) or deleting the task clears it. The
-  sweep fails closed rather than leave a task that may be the pool's; a task the file shows
-  isn't the pool's no longer blocks.
+- **Denial of service: a pool user can keep every sweep at 56.** It takes a task of its own the
+  sweep can't read or delete (through the Task Scheduler or its file, step 3, or one only the
+  task files or the cache show, the cross-check), a flood of tasks or Task Scheduler folders
+  (more than 10 000 folders, or 100 000 task files or cache keys, or one folder whose
+  descriptor shuts SYSTEM out), or a task file it keeps a write handle open on. No
+  `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
+  15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
+  F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
+  gives the pool user nothing beyond that. It clears once the cause is gone and a sweep ends
+  0: an administrator deletes the task (or the folders), after which the next launch's sweep
+  completes, or runs `--remove` (with no pool recorded there is nothing to sweep). The
+  Application log's sweep line says which count is non-zero (unreadable, not listed, folders
+  not listed), never which task. A task the file shows isn't the pool's no longer blocks.
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
