@@ -41,7 +41,7 @@
 ;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
 ;    removal and never stops the tool, which finishes later and leaves its records consistent at
 ;    every step. Only an ended wait (WAIT_OBJECT_0), an exit code read and that code 0 count as
-;    removed. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
+;    removed, or 10 (CLAUSEO_REMOVED_COPY_LEFT): removed, with the admin copy left. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
 ;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
 ;    With the tool missing (Windows security can quarantine it: Defender called it
 ;    Trojan:Win32/Bearfoos.A!ml, a false positive) nothing can be removed. When the machine's
@@ -118,6 +118,12 @@
 ; 22 to 26 are the installers' and the per-machine uninstaller's (admin_copy.nsh, safe_temp.nsh,
 ; uninstall_in_place.nsh).
 !define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27
+
+; The setup exe's --remove --uninstall exit 10 (SetupExit::AdminCopyLeft): the protection is
+; removed, but the admin copy, or part of it, stays; the tool wrote the step and its error code
+; to the Event Log. What is left is only administrators' to change, so the hook counts it as
+; removed, as it does 0.
+!define CLAUSEO_REMOVED_COPY_LEFT 10
 
 ; The rights admin_copy.rs's chain rule counts: CHANGE_RIGHTS on every level below the drive's
 ; root, ROOT_CHANGE_RIGHTS on the root (a test holds them equal); and TrustedInstaller's SID,
@@ -554,6 +560,7 @@
           ${EndIf}
           System::Call 'kernel32::CloseHandle(p R7)'
           ${If} $R8 = 0
+          ${OrIf} $R8 = ${CLAUSEO_REMOVED_COPY_LEFT}
             StrCpy $R5 1
           ${EndIf}
         ${EndIf}

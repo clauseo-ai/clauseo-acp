@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{clear, parked_name};
+use super::{Restart, clear, parked_name};
 use crate::test_support::TempDir;
 use crate::windows::admin_copy::{Found, os};
 
@@ -32,7 +32,12 @@ fn a_copy_not_running_goes_with_its_folder_and_a_link_is_not_followed() {
         Ok(())
     };
     let app = dir.path().join(r"pf\Clauseo");
-    clear(&sandbox, &exe, false, &app, &mut schedule).unwrap();
+    let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    clear(&sandbox, &exe, false, &app, &mut fs).unwrap();
     assert_eq!(os::found(&sandbox).unwrap(), Found::Missing);
     assert!(scheduled.is_empty(), "{scheduled:?}");
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
@@ -49,7 +54,12 @@ fn the_running_copy_is_parked_and_scheduled_with_the_folders_in_order() {
         Ok(())
     };
     let app = dir.path().join(r"pf\Clauseo");
-    clear(&sandbox, &exe, true, &app, &mut schedule).unwrap();
+    let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    clear(&sandbox, &exe, true, &app, &mut fs).unwrap();
     let parked = parked_name(&exe, std::process::id());
     assert_eq!(scheduled, [parked.clone(), sandbox.clone(), app]);
     assert_eq!(os::found(&exe).unwrap(), Found::Missing);
@@ -60,4 +70,29 @@ fn the_running_copy_is_parked_and_scheduled_with_the_folders_in_order() {
         .collect();
     assert_eq!(left, [parked], "only the parked copy stays");
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "the lawyer's");
+}
+
+#[test]
+fn a_running_copy_that_cant_be_renamed_is_scheduled_under_its_own_name() {
+    let dir = TempDir::new("admin-remove-unrenamed");
+    let (sandbox, exe, _outside) = sandbox(&dir);
+    let mut scheduled = Vec::new();
+    let mut schedule = |path: &Path| {
+        scheduled.push(path.to_path_buf());
+        Ok(())
+    };
+    let mut rename =
+        |_: &Path, _: &Path| -> std::io::Result<()> { Err(std::io::Error::from_raw_os_error(5)) };
+    let mut fs = Restart {
+        rename: &mut rename,
+        schedule: &mut schedule,
+    };
+    let app = dir.path().join(r"pf\Clauseo");
+    clear(&sandbox, &exe, true, &app, &mut fs).unwrap();
+    assert_eq!(scheduled, [exe.clone(), sandbox.clone(), app]);
+    assert_eq!(
+        os::found(&exe).unwrap(),
+        Found::File,
+        "left for the restart"
+    );
 }

@@ -173,11 +173,11 @@ fn the_installers_adopt_codes_are_setup_exits() {
     assert_eq!(defined, wanted);
     let codes: Vec<u8> = wanted.iter().map(|(_, code)| *code).collect();
     assert_eq!(codes, [0, 1, 2, 3, 5, 6, 7, 8, 9]);
-    // Every SetupExit but the removal's own RemovedPartly (4) is one --adopt may give, so a code
-    // added to SetupExit fails here until the installer names it.
+    // Every SetupExit but the removal's own RemovedPartly (4) and AdminCopyLeft (10) is one
+    // --adopt may give, so a code added to SetupExit fails here until the installer names it.
     let mut all: Vec<u8> = SetupExit::ALL
         .iter()
-        .filter(|exit| **exit != SetupExit::RemovedPartly)
+        .filter(|exit| !matches!(exit, SetupExit::RemovedPartly | SetupExit::AdminCopyLeft))
         .map(|exit| exit.as_code())
         .collect();
     all.sort_unstable();

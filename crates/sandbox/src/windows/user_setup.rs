@@ -195,6 +195,8 @@ impl UserSetup {
                 "the last set-up's result can't be cleared: {error}"
             ))
         })?;
+        // Before the launch: a result stamped earlier is an earlier run's (`of_run`).
+        let started = result_file::now_secs();
         let code = match launch(params) {
             Ok(code) => code,
             Err(SetupError::Blocked(blocked)) => {
@@ -215,7 +217,8 @@ impl UserSetup {
             }
             Err(error) => return Err(error),
         };
-        Ok((code, result_file::read(&self.data_dir)))
+        let read = result_file::of_run(result_file::read(&self.data_dir), started);
+        Ok((code, read))
     }
 }
 
