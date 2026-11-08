@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use clauseo_protocol::AgentId;
 
+use super::remove::{REMOVE_WAITS, remove_retried};
 use super::{
     Ended, RENAME_WAITS, in_place, missing_agent, missing_archive, npm_code, windows_busy,
 };
@@ -172,4 +173,62 @@ fn npm_s_code_is_the_word_after_its_prefix() {
     assert_eq!(npm_code("npm error code EPERM "), Some("EPERM"));
     assert_eq!(npm_code("npm error code "), None);
     assert_eq!(npm_code("npm error errno -4082"), None);
+}
+
+/// Runs `remove_retried` on Windows' rule over removals answering `results` in turn: the
+/// removals tried, the waits asked for, and the log.
+fn removal(results: Vec<io::Result<()>>) -> (usize, Vec<Duration>, String) {
+    let results = RefCell::new(results.into_iter());
+    let tries = RefCell::new(0);
+    let waits = RefCell::new(Vec::new());
+    let tmp = std::path::Path::new("install").join(".tmp-abc-1");
+    let text = logged(|| {
+        futures::executor::block_on(remove_retried(
+            &agent(),
+            Os::Win32,
+            &tmp,
+            async |pause| waits.borrow_mut().push(pause),
+            || {
+                *tries.borrow_mut() += 1;
+                results.borrow_mut().next().unwrap_or(Ok(()))
+            },
+        ));
+    });
+    (tries.into_inner(), waits.into_inner(), text)
+}
+
+/// A temp folder an antivirus holds a moment is removed on a retry, with no warning that it
+/// stays.
+#[test]
+fn a_held_temp_folder_is_removed_on_a_retry() {
+    let (tries, waits, text) = removal(vec![Err(sharing()), Err(sharing()), Ok(())]);
+    assert_eq!(tries, 3);
+    assert_eq!(waits, REMOVE_WAITS[..2]);
+    assert!(!text.contains("could not be removed"), "{text}");
+}
+
+/// A temp folder still held after the last retry (2 s) is logged with its error's code and its
+/// name, and left for the next start's clean-up; another error is logged at once.
+#[test]
+fn a_temp_folder_that_will_not_go_is_logged_after_the_retries() {
+    let (tries, waits, text) = removal((0..10).map(|_| Err(sharing())).collect());
+    assert_eq!(tries, REMOVE_WAITS.len() + 1);
+    assert_eq!(waits, REMOVE_WAITS);
+    assert_eq!(
+        REMOVE_WAITS.iter().sum::<Duration>(),
+        Duration::from_secs(2)
+    );
+    assert_eq!(
+        text.matches("agent install: the temp folder could not be removed")
+            .count(),
+        1,
+        "{text}"
+    );
+    assert!(
+        text.contains("folder=.tmp-abc-1") && text.contains("os error 32"),
+        "{text}"
+    );
+    let (tries, waits, text) = removal(vec![Err(io::Error::from_raw_os_error(2))]);
+    assert_eq!((tries, waits), (1, Vec::new()));
+    assert!(text.contains("could not be removed"), "{text}");
 }
