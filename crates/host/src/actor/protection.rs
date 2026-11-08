@@ -155,7 +155,8 @@ pub(crate) fn protection_of(detection: &Detection) -> Protection {
         Some(NoSandbox::NotBuilt) => NotProtectedCause::Unsupported {
             why: UnsupportedWhy::NotBuilt,
         },
-        Some(NoSandbox::NeedsSetUp) => NotProtectedCause::NeedsSetUp,
+        // An older Clauseo's set-up, run again: shown as a set-up still needed.
+        Some(NoSandbox::NeedsSetUp | NoSandbox::NeedsReSetUp) => NotProtectedCause::NeedsSetUp,
         Some(NoSandbox::SetUpRefused) => NotProtectedCause::SetUpRefused,
         Some(NoSandbox::ProbeFailed(_)) => failed("probe_failed"),
         Some(NoSandbox::SetUpFailed(_)) => failed("set_up_failed"),

@@ -2039,6 +2039,10 @@ upgrade's 60-62):
 
 A request that isn't such an object, or a known op with wrong fields, is `refused`.
 
+**Set up before.** An older Clauseo's set-up (an older `setup.json` version,
+`SetupState::Outdated`) is `NoSandbox::NeedsReSetUp`, a first set-up `NoSandbox::NeedsSetUp`;
+for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, once per app start.
+
 **The app** (`request_set_up`, which `UserSetup::run` and `UserSetup::extend` call):
 
 1. starts the task (`IRegisteredTask::Run`). `NotRegistered` means the install has no set-up

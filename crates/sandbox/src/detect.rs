@@ -33,7 +33,8 @@ pub enum NoSandbox {
     NotBuilt,
     /// The jail's probe failed; what it said.
     ProbeFailed(String),
-    /// Windows: the sandbox user is not set up for this user, or an older Clauseo set it up.
+    /// Windows: the sandbox user is not set up for this user (an older Clauseo's set-up is
+    /// [`NoSandbox::NeedsReSetUp`]).
     NeedsSetUp,
     /// Windows: the set-up's prompt was declined.
     SetUpRefused,
@@ -43,6 +44,11 @@ pub enum NoSandbox {
     /// Windows: a setting only whoever looks after the computer can change blocks the set-up
     /// (D-B4); which one.
     SetUpBlocked(crate::Blocked),
+    /// Windows: this user was set up before, by an older Clauseo (`SetupState::Outdated`: the
+    /// marker's version is older than this build's), so the set-up must run again. The host runs
+    /// it again through the set-up task with no prompt, once per app start; a first set-up is
+    /// [`NoSandbox::NeedsSetUp`].
+    NeedsReSetUp,
 }
 
 /// What [`detect`] found.
@@ -144,7 +150,8 @@ fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
             tier: Tier::B,
             reason: None,
         },
-        SetupState::Needed | SetupState::Outdated { .. } => Detection::none(NoSandbox::NeedsSetUp),
+        SetupState::Needed => Detection::none(NoSandbox::NeedsSetUp),
+        SetupState::Outdated { .. } => Detection::none(NoSandbox::NeedsReSetUp),
         SetupState::Refused => Detection::none(NoSandbox::SetUpRefused),
         SetupState::Failed(why) => Detection::none(NoSandbox::SetUpFailed(why)),
         SetupState::Blocked(cause) => Detection::none(NoSandbox::SetUpBlocked(cause)),
