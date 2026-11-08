@@ -75,7 +75,10 @@ impl Sid {
     /// well-known SID (`S-1-5-18`, `S-1-1-0`), builtin group (`S-1-5-32-…`), service
     /// (`S-1-5-80-…`), virtual account (`S-1-5-83-…`, `S-1-5-90-…`, `S-1-5-96-…`), logon SID,
     /// `AppContainer` and capability (`S-1-15-…`) is refused. [`Sid::parse`] already held the
-    /// text to canonical decimals, so the authority is compared exactly.
+    /// text to canonical decimals, so the authority is compared exactly. The RID is not checked:
+    /// RID 500 (the built-in Administrator, a real interactive user when UAC is off) is taken.
+    /// A group RID such as 512 under `S-1-5-21` is taken too, since no rule here can tell it from
+    /// a user; a group can't be a token's user, so no launch carries one.
     pub fn is_user_account(&self) -> bool {
         let parts: Vec<&str> = self.0.split('-').collect();
         parts.len() == 8 && matches!(parts.get(2..4), Some(["5", "21"] | ["12", "1"]))
@@ -258,6 +261,8 @@ mod tests {
             "S-1-5-5-0-123456",
             "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
             "S-1-5-83-1-1-2-3-4",
+            "S-1-5-82-3876422241-1344743576-1731187256-2652481255-2240555440",
+            "S-1-5-7",
             "S-1-5-90-0-1",
             "S-1-5-96-0-1",
             "S-1-15-2-1-2-3-4-5-6-7",
@@ -266,6 +271,7 @@ mod tests {
             "S-1-5-21-7-8-9",
             "S-1-5-21-7-8-9-1001-2",
             "S-1-12-1-1-2-3",
+            "S-1-12-1-1-2-3-4-5",
             "S-1-12-2-1-2-3-4",
             "S-1-16-12288",
         ] {

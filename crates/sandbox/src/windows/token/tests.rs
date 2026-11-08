@@ -114,6 +114,48 @@ fn well_known_sids_are_not_accounts() {
 }
 
 #[test]
+fn a_service_or_malformed_desktop_user_is_refused() {
+    // Well-known, service, virtual-account, logon and AppContainer SIDs, and an Entra SID with
+    // the wrong part count (`S-1-12-1-a-b-c-d` is the only Entra user form).
+    for not_user in [
+        "S-1-5-7",
+        "S-1-5-18",
+        "S-1-5-82-3876422241-1344743576-1731187256-2652481255-2240555440",
+        "S-1-5-83-1-1-2-3-4",
+        "S-1-15-2-1-2-3-4-5-6-7",
+        "S-1-15-3-1024-1-2-3-4-5-6-7",
+        "S-1-12-1-1-2-3",
+        "S-1-12-1-1-2-3-4-5",
+    ] {
+        let refused = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(not_user), None);
+        assert!(
+            matches!(
+                refused,
+                Err(TokenSpecError::NotAnAccount {
+                    role: "the desktop user",
+                    ..
+                })
+            ),
+            "{not_user}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn the_built_in_administrator_is_an_accepted_desktop_user() {
+    // RID 500 is the built-in Administrator, a real interactive user when UAC is off, so the
+    // allow-list takes it. There is no RID >= 1000 rule; group RIDs such as 512 are not refused
+    // here either (see `Sid::is_user_account`), since a group can't be a token's user.
+    let administrator = "S-1-5-21-1111111111-2222222222-3333333333-500";
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(administrator), None).unwrap();
+    assert!(
+        spec.default_dacl.contains(administrator),
+        "{}",
+        spec.default_dacl
+    );
+}
+
+#[test]
 fn an_entra_desktop_user_is_an_account_and_an_entra_pool_user_is_not() {
     let entra = "S-1-12-1-3263492174-1177263218-2391161522-1513380577";
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(entra), None).unwrap();
