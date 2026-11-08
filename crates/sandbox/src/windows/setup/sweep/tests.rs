@@ -10,6 +10,7 @@ use super::*;
 use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
+mod file_owner;
 mod principals;
 mod record;
 mod running;
@@ -66,6 +67,8 @@ struct Fake {
     /// The task files by their parts below `Tasks`, joined by `\`; `Err` where one can't be
     /// read, and one not here is missing.
     files: BTreeMap<String, Result<Vec<u8>, Failed>>,
+    /// The task files' owners and DACLs, by the same key; one not here is [`clean`].
+    securities: BTreeMap<String, FileSecurity>,
     /// The BITS jobs' owners; `Err` when the list can't be read.
     jobs: Listed,
     /// Indexes of the jobs whose cancel fails.
@@ -107,6 +110,7 @@ impl Fake {
             stop_refuse: Vec::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
+            securities: BTreeMap::new(),
             jobs: Ok(Vec::new()),
             jobs_refuse: Vec::new(),
             values: BTreeMap::new(),
@@ -163,6 +167,20 @@ impl Fake {
     fn lookups(&self) -> Vec<&str> {
         let names = self.done.iter().filter_map(|l| l.strip_prefix("lookup "));
         names.collect()
+    }
+}
+
+/// A task file's security as the Task Scheduler leaves it: owned by Administrators, all access
+/// for SYSTEM and Administrators, read and execute for Users.
+fn clean() -> FileSecurity {
+    let allow = |sid: &str, mask| (Some(Sid::parse(sid).unwrap()), mask);
+    FileSecurity {
+        owner: Sid::parse("S-1-5-32-544").unwrap(),
+        allows: Some(vec![
+            allow("S-1-5-18", 0x001F_01FF),
+            allow("S-1-5-32-544", 0x001F_01FF),
+            allow("S-1-5-32-545", 0x0012_00A9),
+        ]),
     }
 }
 
@@ -274,11 +292,13 @@ impl Sweeper for Fake {
         Ok(folder.clone())
     }
 
-    fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed> {
+    fn read_task_file(&mut self, parts: &[String]) -> Result<TaskFile, Failed> {
         let path = parts.join("\\");
         self.done.push(format!("file {path}"));
         let file = self.files.get(&path).cloned();
-        file.unwrap_or_else(|| Err("the task file is missing".to_owned()))
+        let bytes = file.unwrap_or_else(|| Err("the task file is missing".to_owned()))?;
+        let security = self.securities.get(&path).cloned().unwrap_or_else(clean);
+        Ok(TaskFile { bytes, security })
     }
 
     fn running_tasks(&mut self) -> Result<Vec<Result<String, Failed>>, Failed> {

@@ -7,7 +7,7 @@ use crate::windows::setup::sweep::task_file::{parts, principal_of};
 
 /// A task file as the Task Scheduler writes it: UTF-16LE after its byte order mark, its
 /// principal `inner`.
-fn file(inner: &str) -> Vec<u8> {
+pub(super) fn file(inner: &str) -> Vec<u8> {
     let xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<Task version=\"1.2\" \
          xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n  \
@@ -23,7 +23,7 @@ fn file(inner: &str) -> Vec<u8> {
 
 /// A fake of pool user 1010, with the task `name` in `\A\B` that the Task Scheduler won't give,
 /// and its file `bytes`.
-fn hidden(name: &str, bytes: Result<Vec<u8>, Failed>) -> Fake {
+pub(super) fn hidden(name: &str, bytes: Result<Vec<u8>, Failed>) -> Fake {
     let mut fake = Fake::new(&[1010]);
     fake.names.insert(sid(1010), "ClauseoSb01".to_owned());
     fake.unread("\\A\\B", name);

@@ -47,13 +47,21 @@
 //!    are stopped ([`running`]: `GetRunningTasks`, each instance whose path is the task's,
 //!    `IRunningTask::Stop`), since deleting a task ends nothing; one not stopped is 56, and the
 //!    task is deleted all the same. A task whose definition or principal the Task Scheduler
-//!    won't give (its descriptor shuts SYSTEM out, say) is read from its file instead,
-//!    `%SystemRoot%\System32\Tasks\<folder>\<name>` ([`task_file`]): each part a plain name,
-//!    opened by handle below `Tasks`, never through a link, with `SeBackupPrivilege` for the
-//!    opens alone, at most [`TASK_FILE_CAP`] bytes, its XML read narrowly. When the file's
+//!    won't give (its descriptor shuts SYSTEM out, say) is first held to its owner: a pool SID
+//!    is the pool's task, deleted as above; an owner that can't be read is 56. Otherwise it is
+//!    read from its file, `%SystemRoot%\System32\Tasks\<folder>\<name>` ([`task_file`]):
+//!    each part a plain name, opened by handle below `Tasks`, never through a link, with
+//!    `SeBackupPrivilege` for the opens alone and no right to write asked, at most
+//!    [`TASK_FILE_CAP`] bytes, its XML read narrowly, its owner and DACL read through the same
+//!    handle ([`file_trust`]). Its creator may hold write on it, so the file counts only when
+//!    its owner isn't a pool SID and no allow in its DACL gives a right to change it (write,
+//!    append, extended attributes, attributes, delete, `WRITE_DAC`, `WRITE_OWNER`, generic
+//!    write or all) to anyone a pool user's token may hold: every SID but SYSTEM,
+//!    Administrators, the service accounts, a service's SID, CREATOR OWNER, OWNER RIGHTS and
+//!    another domain's accounts and groups; a NULL DACL lets everyone in. When such a file's
 //!    principal resolves to a SID that isn't the pool's, or is another domain's name, the task
-//!    is skipped and counted; when it is the pool's, resolves to nothing else, or the file can't
-//!    be read, the task is unreadable (56) and left;
+//!    is skipped and counted; when it is the pool's or resolves to nothing else, or the file
+//!    can't be read or trusted, the task is unreadable (56) and left;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both;
@@ -76,6 +84,7 @@ use super::pool_steps::{
 };
 use crate::windows::sids::Sid;
 
+mod file_trust;
 mod resolve;
 mod running;
 pub mod task_file;
@@ -89,6 +98,10 @@ mod windows_task_file;
 #[cfg(test)]
 mod windows_tests;
 
+#[cfg(any(windows, test))]
+pub use file_trust::file_security;
+pub use file_trust::{FileSecurity, TaskFile, WRITE_RIGHTS, may_be_pool, trusted};
+use resolve::pool_owned;
 pub use resolve::{Names, Resolved, canonical_sid, resolve, sddl_owner};
 pub use task_file::TASK_FILE_CAP;
 
@@ -110,7 +123,8 @@ pub enum SweepExit {
     /// 55: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
     NotPool,
     /// 56: a task's principal or owner couldn't be read, or names no one, or a name that
-    /// resolves to no SID and isn't another domain's; a pool user's task couldn't be
+    /// resolves to no SID and isn't another domain's (a task file read instead whose owner or
+    /// DACL lets a pool user change it counts as unread); a pool user's task couldn't be
     /// deleted, or a running instance of one couldn't be stopped (or its path read), a folder's
     /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders.
     /// The BITS step still ran.
@@ -205,9 +219,10 @@ pub trait Sweeper: Gate + Bits + Record {
     /// `folder`'s path (`ITaskFolder::Path`): `\` for the root, `\A\B` below it.
     fn folder_path(&mut self, folder: &Self::Folder) -> Result<String, Failed>;
     /// The task file whose path below `%SystemRoot%\System32\Tasks` is `parts` (each a plain
-    /// name, [`task_file::parts`]), read as the module says, at most [`TASK_FILE_CAP`] bytes;
-    /// `Err` when it can't be, or is larger.
-    fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed>;
+    /// name, [`task_file::parts`]), read as the module says, at most [`TASK_FILE_CAP`] bytes,
+    /// with its owner and DACL read through the same handle; `Err` when either can't be read,
+    /// or the file is larger.
+    fn read_task_file(&mut self, parts: &[String]) -> Result<TaskFile, Failed>;
     /// Every running task instance, hidden ones included
     /// (`ITaskService::GetRunningTasks(TASK_ENUM_HIDDEN)`): each its task's path
     /// (`IRunningTask::Path`), `Err` where it can't be read; `Err` when the list can't be. It
@@ -249,8 +264,8 @@ pub struct Swept {
     pub capped: bool,
     /// Each failure's text, with how often it came: never logged, for the tests' diagnostics.
     pub why: BTreeMap<Failed, usize>,
-    /// Tasks the Task Scheduler wouldn't give whose task file names a principal that isn't the
-    /// pool's: skipped.
+    /// Tasks the Task Scheduler wouldn't give whose task file, its owner and DACL leaving no
+    /// pool user a way to change it, names a principal that isn't the pool's: skipped.
     pub file_skipped: usize,
     /// The pool's tasks' running instances stopped.
     pub instances_stopped: usize,
@@ -477,13 +492,18 @@ enum Found {
     Unresolved(Failed),
     /// No user or group: 56.
     NoPrincipal,
-    /// The owner couldn't be read: 56.
+    /// The owner couldn't be read, or the task file read instead couldn't be read or trusted,
+    /// or names the pool or no one known: 56.
     Unread(Failed),
+    /// The Task Scheduler wouldn't give it, and its trusted task file names a principal that
+    /// isn't the pool's: skipped.
+    FileSkipped,
 }
 
 /// One task of `folder`: deleted when its principal is the pool's (a pool SID, or a pool
 /// user's name that resolves to no SID) or its owner is a pool SID, counted in `swept` either
-/// way.
+/// way. A task the Task Scheduler won't give is held to its owner and its file
+/// ([`file_trust::by_file`]).
 fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
     let Walk {
         pool,
@@ -492,38 +512,28 @@ fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'
         swept,
     } = at;
     swept.tasks += 1;
-    let principal = match task.principal {
-        Ok(principal) => principal,
-        Err(why) => {
-            let file = from_file(fs, folder, &task.name);
-            match file.map(|name| by_name(fs, pool, names, resolved, &name)) {
-                Ok(Found::NotPool | Found::Skipped(_)) => swept.file_skipped += 1,
-                found => {
-                    swept.unreadable += 1;
-                    swept.note(why);
-                    match found {
-                        Err(why) => swept.note(why),
-                        Ok(_) => swept.note(FILE_NOT_SKIPPED.to_owned()),
-                    }
+    let found = match task.principal {
+        Ok(principal) => {
+            let found = match principal.name() {
+                Some(name) => by_name(fs, pool, names, resolved, name),
+                None => Found::NoPrincipal,
+            };
+            if matches!(found, Found::Pool) {
+                found
+            } else {
+                match pool_owned(fs, folder, &task.name, pool) {
+                    Ok(true) => Found::Pool,
+                    Ok(false) => found,
+                    Err(why) => Found::Unread(why),
                 }
             }
-            return;
         }
-    };
-    let found = match principal.name() {
-        Some(name) => by_name(fs, pool, names, resolved, name),
-        None => Found::NoPrincipal,
-    };
-    let found = if matches!(found, Found::Pool) {
-        found
-    } else {
-        match fs
-            .task_sddl(folder, &task.name)
-            .and_then(|sddl| sddl_owner(&sddl))
-        {
-            Ok(Some(owner)) if pool.contains(&owner) => Found::Pool,
-            Ok(_) => found,
-            Err(why) => Found::Unread(why),
+        Err(why) => {
+            let found = file_trust::by_file(fs, folder, &task.name, pool, names, resolved);
+            if matches!(found, Found::Unread(_)) {
+                swept.note(why);
+            }
+            found
         }
     };
     match found {
@@ -552,6 +562,7 @@ fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'
             swept.unreadable += 1;
             swept.note(why);
         }
+        Found::FileSkipped => swept.file_skipped += 1,
     }
 }
 
@@ -575,22 +586,4 @@ fn by_name(
         Resolved::Skipped(why) => Found::Skipped(why),
         Resolved::Unresolved(why) => Found::Unresolved(why),
     }
-}
-
-/// Why a task the file fallback read stays unreadable: its file's principal is the pool's, or
-/// may be.
-const FILE_NOT_SKIPPED: &str = "the task file names a pool user or a name that resolves to none";
-
-/// The principal's name the file of the task `name` in `folder` gives ([`task_file`]): its
-/// path's parts checked, the file read and its XML read. `Err` for anything that fails, or a
-/// file that names no user or group.
-fn from_file<S: Sweeper>(fs: &mut S, folder: &S::Folder, name: &str) -> Result<String, Failed> {
-    let path = fs.folder_path(folder)?;
-    let parts = task_file::parts(&path, name)?;
-    let bytes = fs.read_task_file(&parts)?;
-    let principal = task_file::principal_of(&bytes)?;
-    principal
-        .name()
-        .map(str::to_owned)
-        .ok_or_else(|| "the task file names no user or group".to_owned())
 }
