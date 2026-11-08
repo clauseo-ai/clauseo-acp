@@ -44,6 +44,7 @@ fn a_start_while_a_run_holds_the_lock_sets_the_flag_and_exits_at_once() {
         .skip_while(|call| *call != "run_lock")
         .collect();
     assert_eq!(after_allowed, ["run_lock", "ask_again", "run_lock"]);
+    assert_eq!(count(&machine, "check_copy"), 0, "the loser hashes nothing");
     assert_eq!(machine.watch.clock, Duration::ZERO);
     assert!(machine.logs.is_empty(), "{:?}", machine.logs);
 
@@ -53,6 +54,11 @@ fn a_start_while_a_run_holds_the_lock_sets_the_flag_and_exits_at_once() {
     assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
     assert_eq!(count(&machine, "reapply_wsl"), 5);
     assert!(!machine.run_lock.again && !machine.run_lock.held);
+    assert_eq!(
+        count(&machine, "check_copy"),
+        1,
+        "the holder checks the copy once"
+    );
 
     // The flag can't be set: one error line, and still no run beside the running one.
     let mut machine = fake();
@@ -77,6 +83,12 @@ fn the_running_one_sees_the_flag_clears_it_and_runs_once_more() {
     let again = [20, 25, 30, 35, 40].map(secs);
     assert_eq!(machine.watch.passes, [floor, again].concat());
     assert_eq!(count(&machine, "reapply_wsl"), 10);
+    // The full check once per run, each after the lock and before its passes.
+    assert_eq!(count(&machine, "check_copy"), 2);
+    let first = machine.calls.iter().position(|call| *call == "check_copy");
+    let lock = machine.calls.iter().position(|call| *call == "run_lock");
+    let pass = machine.calls.iter().position(|call| *call == "reapply_wsl");
+    assert!(lock < first && first < pass, "{:?}", machine.calls);
     // One lock, let go once, then a last look for a start that came just before.
     assert_eq!(count(&machine, "run_lock"), 1);
     let tail = &machine.calls[machine.calls.len() - 2..];
@@ -190,4 +202,18 @@ fn the_lock_file_is_kept_to_system_in_the_admin_folders_lock_folder() {
         true
     )));
     assert!(!system_only(&descriptor("S-1-5-18", None, true)));
+}
+
+#[test]
+fn a_holder_whose_admin_copy_fails_its_check_lets_the_lock_go_and_makes_no_pass() {
+    let mut machine = fake();
+    let why = "the admin copy failed its check (the admin copy's hash isn't the recorded one)";
+    machine.run_lock.copy_fails = Some(why.to_owned());
+    assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
+    assert_eq!(count(&machine, "check_copy"), 1);
+    assert_eq!(count(&machine, "reapply_wsl"), 0);
+    assert!(!machine.run_lock.held, "released");
+    assert_eq!(machine.logs.len(), 1, "{:?}", machine.logs);
+    let (error, line) = &machine.logs[0];
+    assert!(*error && line.ends_with(why), "{line}");
 }

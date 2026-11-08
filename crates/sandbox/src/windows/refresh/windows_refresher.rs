@@ -412,6 +412,10 @@ impl WslRunLock for WindowsRefresher {
     fn asked_again(&mut self) -> Result<bool, Failed> {
         windows_lock::asked_again(RECORD_KEY)
     }
+
+    fn check_copy(&mut self) -> Result<(), Failed> {
+        windows_lock::check_copy()
+    }
 }
 
 impl WslUpgrade for WindowsRefresher {

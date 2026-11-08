@@ -263,6 +263,7 @@ mod tests {
             "run_unlock",
             "take_again",
             "asked_again",
+            "check_copy",
         ];
         let rest: Vec<&str> = machine
             .calls

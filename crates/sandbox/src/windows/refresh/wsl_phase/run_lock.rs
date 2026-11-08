@@ -9,9 +9,12 @@
 //! - **The lock.** Each run opens [`LOCK_NAME`] in `%ProgramFiles%\Clauseo\Sandbox\locks\` with no
 //!   sharing, holding the handle for the run ([`WslRunLock::run_lock`]). Never a named mutex,
 //!   which a pool user could make first in `Global\`, and not `%ProgramData%`, where any user
-//!   may make `Clauseo` first and keep the lock refused. The admin folder passes the admin
-//!   copy's own check first (`admin_copy::check`: the chain from the volume root, nothing in it
-//!   but what is expected, the copy's hash). `locks\` sits there because that check, and
+//!   may make `Clauseo` first and keep the lock refused. Before the lock, only cheap checks:
+//!   the admin copy's folder chain from the volume root (`admin_copy::check`'s rule 2, no hash)
+//!   and the lock folder and file below. Only the holder then runs the full `admin_copy::check`
+//!   (the copy's hash too) once per run ([`WslRunLock::check_copy`]); one that fails is logged,
+//!   the lock let go, and no pass made. So a forged flood's losing starts hash nothing.
+//!   `locks\` sits there because that check, and
 //!   `--adopt`'s lock-down, refuse or delete any other entry, and the lock-down would give a file
 //!   beside the copy Users' read: `admin_copy::expected_entry` names it, and `--adopt` deletes it
 //!   when free, as it does staging (`take_back.rs`). This task makes it when missing, with
@@ -75,6 +78,8 @@ pub trait WslRunLock {
     fn take_again(&mut self) -> Result<bool, Failed>;
     /// Whether the flag is set, leaving it.
     fn asked_again(&mut self) -> Result<bool, Failed>;
+    /// The admin copy's full check, its hash included (`admin_copy::check`): the holder's alone.
+    fn check_copy(&mut self) -> Result<(), Failed>;
 }
 
 /// `--wsl-deny`'s runs, once allowed, as the module says.
@@ -87,6 +92,11 @@ pub(super) fn runs<F: WslWatch + WslRunLock>(fs: &mut F) {
     }
     let start = fs.now();
     loop {
+        // Only the holder hashes: a start that lost the lock never got here.
+        if let Err(why) = fs.check_copy() {
+            fs.run_unlock();
+            return refused(fs, &why);
+        }
         // What came before this run is covered by it.
         if let Err(why) = fs.take_again() {
             fs.log(

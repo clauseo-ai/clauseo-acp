@@ -201,6 +201,19 @@ fn identity(file: &File) -> io::Result<Identity> {
     ))
 }
 
+/// The admin folder once its chain passes [`check`](super::check)'s rule 2 (the copy's level
+/// included), with no hash and no listing: the WSL deny task's cheap check before its run lock
+/// (`refresh/wsl_phase/run_lock.rs`), so a start that loses the lock hashes nothing.
+pub(crate) fn admin_dir_checked() -> Result<PathBuf, crate::Blocked> {
+    let program_files = program_files().map_err(|error| {
+        tracing::warn!(%error, "Windows gave no Program Files folder");
+        crate::Blocked::AdminCopyMissing
+    })?;
+    let exe = super::admin_exe(&program_files);
+    super::check_chain(&WindowsAdminCopy, &program_files, &exe)?;
+    Ok(super::admin_dir(&program_files))
+}
+
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment,
 /// which whoever started this process could have set.
 pub(crate) fn program_files() -> io::Result<PathBuf> {

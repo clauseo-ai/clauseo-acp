@@ -2123,9 +2123,12 @@ could have built hours of 20 s+ runs in a queue that may be the machine's, so th
 or the heal request could be refused (Event 131). The lock is
 `%ProgramFiles%\Clauseo\Sandbox\locks\wsl-deny.lock`, held as an open handle with no sharing,
 never a named mutex, which a pool user could make first in `Global\`. Not `%ProgramData%`: any user
-may make `%ProgramData%\Clauseo` first, which would keep the lock refused for good. The admin folder
-must pass the admin copy's own check first (`admin_copy::check`: the chain from the volume root,
-nothing unexpected in it, the copy's hash). The lock has a folder of its own because that check and
+may make `%ProgramData%\Clauseo` first, which would keep the lock refused for good. Before the lock
+only cheap checks run: the admin copy's folder chain from the volume root (`admin_copy::check`'s
+rule 2, no hash) and the lock folder and file below. A start that loses the lock hashes nothing;
+only the holder runs the full `admin_copy::check` (the listing and the copy's hash), once per run,
+and one that fails is an error line, the lock let go and no pass made. The lock has a folder of its
+own because that check and
 `--adopt`'s lock-down refuse or delete any other entry in `Sandbox`, and the lock-down gives what
 it keeps Users' read; `locks\` is named as expected, and `--adopt` deletes it when free, as it does
 `staging\`, and always leaves `locks\` out of its lock-down and take-back, so one a run holds, or

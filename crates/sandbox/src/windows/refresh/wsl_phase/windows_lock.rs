@@ -1,8 +1,10 @@
 //! `--wsl-deny`'s run lock and "run again" flag on Windows (`run_lock.rs`).
 //!
-//! The lock is `%ProgramFiles%\Clauseo\Sandbox\locks\wsl-deny.lock`. The admin folder must pass
-//! the admin copy's check first (`admin_copy::check`, `%ProgramFiles%` from
-//! `FOLDERID_ProgramFiles`, never the environment). `locks\` is made with [`LOCKS_SDDL`] at once
+//! The lock is `%ProgramFiles%\Clauseo\Sandbox\locks\wsl-deny.lock`. The admin folder's chain
+//! must pass first (`admin_copy::os::admin_dir_checked`: `check`'s rule 2, no hash, so a start
+//! that loses the lock hashes nothing; `%ProgramFiles%` from `FOLDERID_ProgramFiles`, never the
+//! environment). Only the holder runs the full `admin_copy::check` ([`check_copy`]).
+//! `locks\` is made with [`LOCKS_SDDL`] at once
 //! when missing (`CreateDirectoryW`), then opened without following a reparse point (one, or a
 //! file, is refused) and its owner and DACL read through that handle (`admin_copy::level_safe`);
 //! the file is made with [`LOCK_SDDL`] at once, opened the same way, then refused unless a plain
@@ -65,13 +67,17 @@ pub(in crate::windows::refresh) fn take() -> (Locked, Option<File>) {
     }
 }
 
+/// The holder's full check of the admin copy (`admin_copy::check`, its hash included).
+pub(in crate::windows::refresh) fn check_copy() -> Result<(), Failed> {
+    admin_copy::check(&WindowsAdminCopy)
+        .map(drop)
+        .map_err(|blocked| format!("the admin copy failed its check ({blocked})"))
+}
+
 /// [`take`]: `None` when another run holds it.
 fn take_in() -> Result<Option<File>, Failed> {
-    let exe = admin_copy::check(&WindowsAdminCopy)
-        .map_err(|blocked| format!("the admin copy failed its check ({blocked})"))?;
-    let folder = exe
-        .parent()
-        .ok_or("the admin copy has no folder")?
+    let folder = admin_copy::os::admin_dir_checked()
+        .map_err(|blocked| format!("the admin copy's folders failed their check ({blocked})"))?
         .join(LOCKS);
     lock_folder(&folder, LOCKS_SDDL)?;
     let descriptor = Descriptor::from_sddl(LOCK_SDDL)?;

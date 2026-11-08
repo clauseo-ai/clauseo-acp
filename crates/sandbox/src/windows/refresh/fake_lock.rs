@@ -24,6 +24,8 @@ pub(super) struct FakeLock {
     pub(super) asks: Vec<Duration>,
     /// Setting the flag fails.
     pub(super) ask_fails: bool,
+    /// What `check_copy` gives, when it fails.
+    pub(super) copy_fails: Option<Failed>,
     /// When each `take_again` found the flag set.
     pub(super) taken: Vec<Duration>,
 }
@@ -77,6 +79,11 @@ impl WslRunLock for Fake {
             self.run_lock.taken.push(clock);
         }
         Ok(again)
+    }
+
+    fn check_copy(&mut self) -> Result<(), Failed> {
+        self.calls.push("check_copy");
+        self.run_lock.copy_fails.clone().map_or(Ok(()), Err)
     }
 
     fn asked_again(&mut self) -> Result<bool, Failed> {
