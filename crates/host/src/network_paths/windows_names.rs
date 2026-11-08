@@ -67,13 +67,52 @@ fn refused(name: &str) -> bool {
 
 /// Whether `QueryDosDeviceW`'s answer for a drive letter is a local volume: a hard disk volume
 /// or a CD drive. Anything else (`\Device\Mup`, `\??\UNC`, `\Device\LanmanRedirector`, any
-/// other redirector, a `subst` to another path) counts as remote.
+/// other redirector) counts as remote; a `subst` to a path is followed by [`drive_is_local`].
 #[cfg(any(windows, test))]
 pub(crate) fn drive_target_is_local(target: &str) -> bool {
     let lower = target.to_ascii_lowercase();
     ["\\device\\harddiskvolume", "\\device\\cdrom"]
         .iter()
         .any(|prefix| lower.starts_with(prefix))
+}
+
+/// The most `subst` drives one drive letter may lead through; past it, or in a loop, the drive
+/// counts as remote.
+#[cfg(any(windows, test))]
+const MAX_SUBST_HOPS: usize = 8;
+
+/// Whether drive `letter` is local, its device asked by `query` (`QueryDosDeviceW`'s first
+/// target; `None` when it can't be asked): a local volume ([`drive_target_is_local`]), or a
+/// `subst` (`\??\X:\folder`) to a drive that is, followed up to [`MAX_SUBST_HOPS`] times. A
+/// loop, too many hops, a `subst` to a UNC path (`\??\UNC\…`) and any other answer are remote.
+#[cfg(any(windows, test))]
+pub(crate) fn drive_is_local(letter: char, query: &dyn Fn(char) -> Option<String>) -> bool {
+    let mut seen: Vec<char> = Vec::new();
+    let mut letter = letter.to_ascii_uppercase();
+    while seen.len() <= MAX_SUBST_HOPS && !seen.contains(&letter) {
+        seen.push(letter);
+        let Some(target) = query(letter) else {
+            return false;
+        };
+        if drive_target_is_local(&target) {
+            return true;
+        }
+        let Some(next) = subst_drive(&target) else {
+            return false;
+        };
+        letter = next;
+    }
+    false
+}
+
+/// The drive a `subst` target `\??\X:\…` (or `\??\X:`) names, upper case.
+#[cfg(any(windows, test))]
+fn subst_drive(target: &str) -> Option<char> {
+    let rest = target.strip_prefix(r"\??\")?;
+    let mut chars = rest.chars();
+    let letter = chars.next().filter(char::is_ascii_alphabetic)?;
+    let after = chars.as_str().strip_prefix(':')?;
+    (after.is_empty() || after.starts_with('\\')).then(|| letter.to_ascii_uppercase())
 }
 
 /// Whether a reparse point's tag that is not a link (a symlink or a junction, which the walk
@@ -101,7 +140,7 @@ pub(crate) fn local_reparse_tag(tag: u32) -> bool {
 mod tests {
     use std::path::Path;
 
-    use super::{drive_target_is_local, local_reparse_tag, refused_windows_name};
+    use super::{drive_is_local, drive_target_is_local, local_reparse_tag, refused_windows_name};
     use crate::network_paths::tests::plain_net;
 
     #[test]
@@ -164,6 +203,39 @@ mod tests {
         }
         for tag in [0x8000_000A, 0x8000_001E, 0x1234] {
             assert!(!local_reparse_tag(tag), "{tag:#x}");
+        }
+    }
+
+    /// A `subst` to a local folder is followed to its drive (`\??\C:\folder`); one to a UNC
+    /// path, a loop, too many hops or a drive that can't be asked is remote.
+    #[test]
+    fn a_subst_drive_is_followed_to_the_drive_it_names() {
+        let query = |letter: char| -> Option<String> {
+            Some(
+                match letter {
+                    'C' => r"\Device\HarddiskVolume3",
+                    'S' => r"\??\C:\Users\a\Deals",
+                    'T' => r"\??\S:\sub",
+                    'U' => r"\??\UNC\server\share",
+                    'V' => r"\??\U:\x",
+                    'L' => r"\??\M:\x",
+                    'M' => r"\??\L:\x",
+                    'Z' => r"\Device\Mup\;Z:000\server\share",
+                    // A chain past the hop limit: D -> E -> ... -> N's neighbour.
+                    'D'..='K' => {
+                        let next = char::from(u8::try_from(letter).unwrap() + 1);
+                        return Some(format!(r"\??\{next}:\x"));
+                    }
+                    _ => return None,
+                }
+                .to_owned(),
+            )
+        };
+        for letter in ['C', 'c', 'S', 'T'] {
+            assert!(drive_is_local(letter, &query), "{letter}");
+        }
+        for letter in ['U', 'V', 'L', 'M', 'Z', 'N', 'D'] {
+            assert!(!drive_is_local(letter, &query), "{letter}");
         }
     }
 }

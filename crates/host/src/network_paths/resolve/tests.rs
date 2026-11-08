@@ -30,8 +30,10 @@ pub(crate) enum Fake {
 pub(crate) struct FakeFs {
     pub(crate) names: BTreeMap<PathBuf, Fake>,
     pub(crate) touched: RefCell<Vec<PathBuf>>,
-    /// The identities [`Fs::identity`] answers, by path.
+    /// The identities [`Fs::identity`] answers, by path; `NotFound` for any other.
     pub(crate) ids: BTreeMap<PathBuf, (u64, u128)>,
+    /// The paths whose identity can't be read (permission denied).
+    pub(crate) unreadable_ids: Vec<PathBuf>,
 }
 
 impl FakeFs {
@@ -74,9 +76,19 @@ impl Fs for FakeFs {
         }
     }
 
-    fn identity(&self, path: &Path) -> Option<(u64, u128)> {
+    fn identity(&self, path: &Path) -> io::Result<(u64, u128)> {
         self.touched.borrow_mut().push(path.to_path_buf());
-        self.ids.get(path).copied()
+        if self
+            .unreadable_ids
+            .iter()
+            .any(|unreadable| unreadable == path)
+        {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.ids
+            .get(path)
+            .copied()
+            .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
 }
 
