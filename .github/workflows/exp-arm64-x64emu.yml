@@ -1,0 +1,203 @@
+# EXPERIMENT (branch exp-arm64-x64emu, never for main): does an x64 Clauseo build on an ARM64
+# machine run x64 Node, x64 Codex and x64 Claude under Windows' x64 emulation when tier B's
+# runner starts them as a pool user, under the sandbox token?
+#
+# Two jobs, both on windows-11-arm (elevated, as ci.yml's nightly ARM64 job): `x64emu` builds
+# clauseo-sandbox-setup, clauseo-sandbox-run and the s15_launch_vm harness for
+# x86_64-pc-windows-msvc and runs x64 runtimes; `native` is the control, aarch64 bins and ARM64
+# runtimes. Each: prepare (runs the set-up), `s15_launch_vm emu` (the emu-* rows in
+# examples/s15_launch_vm/emu.rs, each program twice as matter A's pool user), cleanup (the
+# set-up's --remove), and the emulation cache (%SystemRoot%\XtaCache) and the event logs before
+# and after.
+#
+# Versions come from the repo, none written here: Node's version, URL and SHA-256 from
+# crates/agents/src/snapshot/embedded.rs (checked against SHASUMS256.txt), the Claude SDK's
+# platform package and Codex's platform package from crates/limits/tests/live/package-lock.json
+# (URL and sha512 integrity).
+#
+# Runs on a push to exp-arm64-x64emu, or `gh workflow run exp-arm64-x64emu.yml --ref exp-arm64-x64emu`.
+name: exp-arm64-x64emu
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [exp-arm64-x64emu]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp-arm64-x64emu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emu:
+    name: emu (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: x64emu, target: x86_64-pc-windows-msvc, arch: x64 }
+          - { name: native, target: aarch64-pc-windows-msvc, arch: arm64 }
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+    env:
+      TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.arch }}
+      EMU_ROOT: 'C:\ClauseoEmu'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: OS build, token, and the emulation cache before
+        run: |
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "$($cv.ProductName) | $($cv.DisplayVersion) | build $($cv.CurrentBuildNumber).$($cv.UBR)"
+          "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          whoami /groups | Select-String 'Mandatory Label'
+          Get-Service -Name XtaCache -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType -AutoSize | Out-String
+          $x = Join-Path $env:SystemRoot 'XtaCache'
+          if (Test-Path $x) {
+            $f = @(Get-ChildItem $x -Recurse -File -ErrorAction Continue)
+            "XtaCache before: $($f.Count) files, $([math]::Round(($f | Measure-Object Length -Sum).Sum / 1MB, 1)) MB"
+          } else { "no $x" }
+          Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
+            Where-Object { $_.LogName -match 'xta|prism|emulat|wow64' } |
+            ForEach-Object { "event log: $($_.LogName) ($($_.RecordCount) records)" }
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add $env:TARGET
+          rustc -vV
+
+      - name: Build the runner, the set-up and the harness for ${{ matrix.target }}
+        run: cargo build --locked -p clauseo-sandbox --bins --example s15_launch_vm --target $env:TARGET
+
+      - name: Fetch Node, Codex and the Claude SDK (${{ matrix.arch }}) at the repo's pins
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $t = $env:RUNNER_TEMP
+          $src = Get-Content crates/agents/src/snapshot/embedded.rs -Raw
+          $base = [regex]::Match($src, 'const NODE_BASE: &str = "([^"]+)"').Groups[1].Value
+          $m = [regex]::Match($src, '"(node-v[0-9.]+-win-' + $env:ARCH + '\.zip)",\s*[0-9_]+,\s*[0-9_]+,\s*"([0-9a-f]{64})"')
+          if (-not $m.Success -or -not $base) { throw "no Node pin for win-$env:ARCH in embedded.rs" }
+          $name = $m.Groups[1].Value; $pin = $m.Groups[2].Value
+          $zip = Join-Path $t $name
+          Invoke-WebRequest "$base$name" -OutFile $zip
+          $sums = [string](Invoke-WebRequest "${base}SHASUMS256.txt").Content
+          $line = ($sums -split "`n" | Where-Object { $_ -match ('\s' + [regex]::Escape($name) + '\s*$') } | Select-Object -First 1)
+          $listed = ($line -split '\s+')[0]
+          $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "node: $name sha256 $got; embedded.rs $pin; SHASUMS256 $listed"
+          if ($got -ne $pin -or $got -ne $listed) { throw "Node's SHA-256 differs" }
+          Expand-Archive $zip -DestinationPath (Join-Path $t 'node')
+          $node = Join-Path $t "node\$($name -replace '\.zip$','')\node.exe"
+          if (-not (Test-Path $node)) { throw "no $node" }
+
+          $lock = Get-Content crates/limits/tests/live/package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          function Fetch([string]$pattern, [string]$dir) {
+            $entry = $lock.packages.Values | Where-Object { $_.resolved -match $pattern } | Select-Object -First 1
+            if (-not $entry) { throw "no package-lock entry matches $pattern" }
+            $file = Join-Path $t ([IO.Path]::GetFileName($entry.resolved))
+            Invoke-WebRequest $entry.resolved -OutFile $file
+            $hex = (Get-FileHash $file -Algorithm SHA512).Hash
+            $b64 = 'sha512-' + [Convert]::ToBase64String([Convert]::FromHexString($hex))
+            "$($entry.resolved): $b64 (lock $($entry.integrity))"
+            if ($b64 -ne $entry.integrity) { throw "integrity differs for $($entry.resolved)" }
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            tar -xzf $file -C $dir
+            if ($LASTEXITCODE -ne 0) { throw "tar failed on $file" }
+          }
+          Fetch "/codex-[0-9.]+-win32-$env:ARCH\.tgz$" (Join-Path $t 'codex')
+          Fetch "/claude-agent-sdk-win32-$env:ARCH-[0-9.]+\.tgz$" (Join-Path $t 'claude')
+          $claude = Join-Path $t 'claude\package\claude.exe'
+          if (-not (Test-Path $claude)) { throw "no $claude" }
+          "EMU_NODE=$node" >> $env:GITHUB_ENV
+          "EMU_CODEX=$(Join-Path $t 'codex\package')" >> $env:GITHUB_ENV
+          "EMU_CLAUDE=$claude" >> $env:GITHUB_ENV
+
+      - name: The machine type of every program
+        run: |
+          function Machine([string]$p) {
+            $s = [IO.File]::OpenRead($p)
+            try {
+              $b = New-Object byte[] 4096; [void]$s.Read($b, 0, 4096)
+              $pe = [BitConverter]::ToInt32($b, 0x3C)
+              $mt = [BitConverter]::ToUInt16($b, $pe + 4)
+              switch ($mt) { 0x8664 { 'x64' } 0xAA64 { 'arm64' } 0x14C { 'x86' } default { '0x{0:X4}' -f $mt } }
+            } finally { $s.Close() }
+          }
+          $codex = Get-ChildItem $env:EMU_CODEX -Recurse -Filter codex.exe | Select-Object -First 1
+          foreach ($p in @("target\$env:TARGET\debug\clauseo-sandbox-run.exe",
+                           "target\$env:TARGET\debug\clauseo-sandbox-setup.exe",
+                           "target\$env:TARGET\debug\examples\s15_launch_vm.exe",
+                           $env:EMU_NODE, $codex.FullName, $env:EMU_CLAUDE)) {
+            "MACHINE $(Machine $p) $p"
+          }
+
+      - name: Prepare (the set-up), the emu rows, as matter A's pool user
+        id: emu
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'emu-out'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $log = Join-Path $out "emu-${{ matrix.name }}.txt"
+          "EMU_SINCE=$((Get-Date).ToUniversalTime().ToString('o'))" >> $env:GITHUB_ENV
+          $exe = "target\$env:TARGET\debug\examples\s15_launch_vm.exe"
+          & $exe prepare --root $env:EMU_ROOT --node $env:EMU_NODE --codex $env:EMU_CODEX `
+            --claude $env:EMU_CLAUDE --row-timeout 600 2>&1 | Tee-Object -FilePath $log
+          $prep = $LASTEXITCODE
+          "prepare exited $prep"
+          $code = 1
+          if ($prep -eq 0) {
+            & $exe emu --root $env:EMU_ROOT --row-timeout 600 2>&1 | Tee-Object -Append -FilePath $log
+            $code = $LASTEXITCODE
+            "emu exited $code"
+          }
+          "## emu (${{ matrix.name }}, $env:TARGET)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          Get-Content $log | Select-String '(EMU row=|^(PASS|FAIL|SKIP|INFO) |result:)' |
+            ForEach-Object { "- $($_.Line.Trim())" } |
+            Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          exit $code
+
+      - name: Cleanup (the set-up's --remove)
+        if: always()
+        run: |
+          $exe = "target\$env:TARGET\debug\examples\s15_launch_vm.exe"
+          if (Test-Path $exe) { & $exe cleanup --root $env:EMU_ROOT 2>&1 }
+
+      - name: The emulation cache and the event logs after
+        if: always()
+        run: |
+          $since = if ($env:EMU_SINCE) { [datetime]::Parse($env:EMU_SINCE).ToLocalTime() } else { (Get-Date).AddHours(-2) }
+          "since $since"
+          Get-Service -Name XtaCache -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType -AutoSize | Out-String
+          $x = Join-Path $env:SystemRoot 'XtaCache'
+          if (Test-Path $x) {
+            $f = @(Get-ChildItem $x -Recurse -File -ErrorAction Continue)
+            "XtaCache after: $($f.Count) files, $([math]::Round(($f | Measure-Object Length -Sum).Sum / 1MB, 1)) MB"
+            $f | Where-Object LastWriteTime -gt $since | Sort-Object LastWriteTime | Select-Object -Last 80 |
+              ForEach-Object { "XTA $($_.LastWriteTime.ToString('o')) $($_.Length) $($_.Name)" }
+          } else { "no $x" }
+          Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
+            Where-Object { $_.LogName -match 'xta|prism|emulat|wow64' -and $_.RecordCount -gt 0 } |
+            ForEach-Object {
+              $ln = $_.LogName
+              Get-WinEvent -LogName $ln -MaxEvents 40 -ErrorAction SilentlyContinue |
+                Where-Object TimeCreated -gt $since |
+                ForEach-Object { "EVT $ln $($_.TimeCreated.ToString('o')) [$($_.LevelDisplayName)] $($_.Id): $(($_.Message -split "`n")[0])" }
+            }
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System'; Level = 1, 2, 3; StartTime = $since } -ErrorAction SilentlyContinue |
+            Select-Object -First 80 |
+            ForEach-Object { "EVT $($_.LogName) $($_.TimeCreated.ToString('o')) [$($_.LevelDisplayName)] $($_.ProviderName) $($_.Id): $(($_.Message -split "`n")[0])" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: emu-${{ matrix.name }}
+          path: ${{ runner.temp }}/emu-out
+          if-no-files-found: warn

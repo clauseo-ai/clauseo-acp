@@ -189,6 +189,7 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
         "end-cleanup" => super::checks_cleanup::end_cleanup(ctx),
         "cancel" => super::checks_cancel::cancel(ctx),
         "stdin-unread-cancel" => super::checks_cancel::stdin_unread_cancel(ctx),
+        name if name.starts_with("emu-") => return super::emu::row(ctx),
         other => Err(format!("no row {other:?}; rows: {}", ROWS.join(", "))),
     };
     ctx.outcome(result)

@@ -70,6 +70,9 @@ mod cli;
 #[path = "s15_launch_vm/codex.rs"]
 mod codex;
 #[cfg(windows)]
+#[path = "s15_launch_vm/emu.rs"]
+mod emu;
+#[cfg(windows)]
 #[path = "s15_launch_vm/gate.rs"]
 mod gate;
 #[cfg(windows)]
@@ -174,6 +177,7 @@ mod harness {
             },
             Step::Row(name) => with_manifest(&opts, |m| verdict(&rows(&opts, m, &[name.as_str()]))),
             Step::Rows => with_manifest(&opts, |m| verdict(&rows(&opts, m, &ROWS))),
+            Step::Emu => with_manifest(&opts, |m| verdict(&rows(&opts, m, &super::emu::EMU_ROWS))),
             Step::Cleanup => prepare::cleanup(&opts.root),
             Step::Unattended => unattended(&opts),
         };

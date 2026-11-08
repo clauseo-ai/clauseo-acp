@@ -176,6 +176,18 @@ fn copy_programs(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
     if let Some(codex) = &opts.codex {
         super::codex::copy_codex(codex, m)?;
     }
+    if let Some(claude) = &opts.claude {
+        let dir = m.bin().join("claude");
+        make_dir(&dir).map_err(|e| format!("making {}: {e}", dir.display()))?;
+        let to = dir.join("claude.exe");
+        copy_file(claude, &to).map_err(|e| format!("copying {}: {e}", claude.display()))?;
+        say(&format!(
+            "prepare: copied {} to {}",
+            claude.display(),
+            to.display()
+        ));
+        m.claude = Some(to);
+    }
     Ok(())
 }
 

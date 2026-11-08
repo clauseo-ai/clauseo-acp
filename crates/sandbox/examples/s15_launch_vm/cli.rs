@@ -25,6 +25,8 @@ pub(crate) enum Step {
     Row(String),
     /// Every row.
     Rows,
+    /// The emulation experiment's rows (`emu.rs`).
+    Emu,
     /// Delete what the manifest lists.
     Cleanup,
     /// Prepare, every row, cleanup.
@@ -44,6 +46,8 @@ pub(crate) struct Opts {
     pub(crate) node: Option<PathBuf>,
     /// `--codex`.
     pub(crate) codex: Option<PathBuf>,
+    /// `--claude`: the Claude SDK's `claude.exe` (the emulation experiment).
+    pub(crate) claude: Option<PathBuf>,
     /// `--runner`.
     pub(crate) runner: Option<PathBuf>,
     /// `--setup`.
@@ -61,7 +65,7 @@ const DEFAULT_ROW_TIMEOUT: u64 = 120;
 
 /// The usage line.
 pub(crate) const USAGE: &str = "usage: s15_launch_vm prepare|rows|cleanup|row <name> | \
-     --unattended [--root D] [--data-dir D] [--node P] [--codex P] [--runner P] [--setup P] \
+     --unattended [--root D] [--data-dir D] [--node P] [--codex P] [--claude P] [--runner P] [--setup P] \
      [--row-timeout S] [--interactive-desktop] | probe <what> ...";
 
 /// Parses the arguments after the program's name (not `probe`).
@@ -73,6 +77,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
         data_dir: None,
         node: None,
         codex: None,
+        claude: None,
         runner: None,
         setup: None,
         row_timeout: Duration::from_secs(DEFAULT_ROW_TIMEOUT),
@@ -92,6 +97,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
             "--data-dir" => opts.data_dir = Some(PathBuf::from(value(arg)?)),
             "--node" => opts.node = Some(PathBuf::from(value(arg)?)),
             "--codex" => opts.codex = Some(PathBuf::from(value(arg)?)),
+            "--claude" => opts.claude = Some(PathBuf::from(value(arg)?)),
             "--runner" => opts.runner = Some(PathBuf::from(value(arg)?)),
             "--setup" => opts.setup = Some(PathBuf::from(value(arg)?)),
             "--row-timeout" => {
@@ -103,6 +109,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
             }
             "prepare" => set(&mut step, Step::Prepare)?,
             "rows" => set(&mut step, Step::Rows)?,
+            "emu" => set(&mut step, Step::Emu)?,
             "cleanup" => set(&mut step, Step::Cleanup)?,
             "row" => set(&mut step, Step::Row(value(arg)?))?,
             other => return Err(format!("unknown argument {other:?}")),
