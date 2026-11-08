@@ -390,9 +390,11 @@ session isn't finished". The task's Application Event Log line gives counts only
 A task whose "run as" account is a domain account that can't be found (no domain controller is
 reachable) doesn't cause 56: it is skipped and counted as "skipped" in that line. A "run as"
 account that can't be found and isn't another domain's (a deleted local account, say) does, and is
-counted as "unresolved"; so does a task with no "run as" account ("with no user or group"). The
-usual cause of 56 on every run is a task whose definition the SYSTEM account can't read, or one
-of those. Look in Task Scheduler for tasks that won't open or whose account is gone, and fix or
+counted as "unresolved"; so does a task with no "run as" account ("with no user or group"). A task
+whose definition the SYSTEM account can't read is read from its file under
+`C:\Windows\System32\Tasks`; it is skipped when that file names someone other than a sandbox
+user, and counted as "skipped, not the pool's by their task file". The usual cause of 56 on every
+run is a task that can't be read either way, or one of those. Look in Task Scheduler for tasks that won't open or whose account is gone, and fix or
 delete them; the next run then ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
 set-up held its lock; the next launch asks again.
 

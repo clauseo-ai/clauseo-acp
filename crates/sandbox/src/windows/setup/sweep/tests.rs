@@ -13,6 +13,7 @@ mod exits;
 mod principals;
 mod record;
 mod sequence;
+mod task_file;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -56,6 +57,9 @@ struct Fake {
     /// Each task's security descriptor by its name, `Err` where it can't be read; one not
     /// here is the Administrators'.
     owners: BTreeMap<String, Result<String, Failed>>,
+    /// The task files by their parts below `Tasks`, joined by `\`; `Err` where one can't be
+    /// read, and one not here is missing.
+    files: BTreeMap<String, Result<Vec<u8>, Failed>>,
     /// The BITS jobs' owners; `Err` when the list can't be read.
     jobs: Listed,
     /// Indexes of the jobs whose cancel fails.
@@ -92,6 +96,7 @@ impl Fake {
             computer: vec!["PC-7".to_owned(), "pc-7.firm.example".to_owned()],
             delete_refuse: Vec::new(),
             owners: BTreeMap::new(),
+            files: BTreeMap::new(),
             jobs: Ok(Vec::new()),
             jobs_refuse: Vec::new(),
             values: BTreeMap::new(),
@@ -255,6 +260,17 @@ impl Sweeper for Fake {
         self.computer.clone()
     }
 
+    fn folder_path(&mut self, folder: &String) -> Result<String, Failed> {
+        Ok(folder.clone())
+    }
+
+    fn read_task_file(&mut self, parts: &[String]) -> Result<Vec<u8>, Failed> {
+        let path = parts.join("\\");
+        self.done.push(format!("file {path}"));
+        let file = self.files.get(&path).cloned();
+        file.unwrap_or_else(|| Err("the task file is missing".to_owned()))
+    }
+
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
         if self.delete_refuse.iter().any(|refused| refused == name) {
             return Err("ITaskFolder::DeleteTask failed (0x80070005)".to_owned());
@@ -314,9 +330,9 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
     assert_eq!(
         line,
         "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
-         tasks deleted, 0 unreadable, 0 with no user or group, 0 unresolved (no SID, not another \
-         domain's), 0 skipped (another domain's, no SID), 0 not deleted, 0 BITS jobs cancelled, \
-         0 not"
+         tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
+         no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
+         domain's, no SID), 0 not deleted, 0 BITS jobs cancelled, 0 not"
     );
 }
 
@@ -477,7 +493,7 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     }
     // Counts only.
     assert!(
-        line.contains("1 of the pool's tasks deleted, 1 unreadable, 0 with no user or group"),
+        line.contains("1 of the pool's tasks deleted, 1 unreadable (0 more skipped"),
         "{line}"
     );
     assert!(line.contains(", 1 unresolved (no SID"), "{line}");
