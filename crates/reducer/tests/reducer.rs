@@ -15,6 +15,8 @@ pub mod helpers;
 
 #[path = "reducer/asks_status.rs"]
 mod asks_status;
+#[path = "reducer/denial_expiry.rs"]
+mod denial_expiry;
 #[path = "reducer/denials.rs"]
 mod denials;
 #[path = "reducer/field_updates.rs"]

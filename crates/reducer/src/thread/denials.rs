@@ -90,11 +90,19 @@ pub(super) fn paused(
     insert_new(state, seq, entry, out);
 }
 
-/// The agent left for good (any detach but a restart): every card still pending expires,
-/// since the launch it would widen is gone. A restart keeps them: the turn goes on.
+/// Every card still pending (offered, unanswered) expires. A pending card survives the end of
+/// its own turn, since an agent often ends the turn right after a refusal and the lawyer must
+/// still be able to answer. It expires when the next turn starts in the thread, when the agent
+/// session ends (an idle stop or any detach but a restart: the launch it would widen is gone),
+/// when a restart fails or is cut short (a `TurnFailed` or `TurnEnded` while
+/// `restarting_since` is set), and when the thread is archived. A restart itself keeps them.
 pub(super) fn expire_pending(state: &mut ThreadState, out: &mut Applied) {
-    for entry in state.entries.values_mut() {
-        if let ViewEntry::Denial(denial) = entry
+    // The denial index, not every entry; sorted so the upserts come in the view's order.
+    let mut orders: Vec<Seq> = state.index.denials.values().copied().collect();
+    orders.sort_unstable();
+    for order in orders {
+        if let Some(entry) = state.entries.get_mut(&order)
+            && let ViewEntry::Denial(denial) = entry
             && denial.state == DenialState::Pending
         {
             denial.state = DenialState::Expired;
@@ -102,6 +110,22 @@ pub(super) fn expire_pending(state: &mut ThreadState, out: &mut Applied) {
                 .push(ViewChange::Upsert(Box::new(entry.clone())));
         }
     }
+}
+
+/// A `TurnFailed` or `TurnEnded` while the header shows a restart: the relaunch failed (a
+/// sign-in refusal, `sandbox.required`, `agent.launch_failed`) or the host quit mid-restart.
+/// The restart is over and its pending cards expire; without this the header would show the
+/// restart for good. Nothing happens when no restart is shown.
+pub(super) fn end_restart(state: &mut ThreadState, event: &'static str, out: &mut Applied) {
+    if state
+        .header
+        .as_ref()
+        .is_none_or(|h| h.restarting_since.is_none())
+    {
+        return;
+    }
+    expire_pending(state, out);
+    super::update_header(state, event, out, |h| set(&mut h.restarting_since, None));
 }
 
 /// Changes the denial's entry with `change`, which says whether it changed anything, and emits

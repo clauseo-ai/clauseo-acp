@@ -44,8 +44,10 @@
 //! - No I/O, no clock, no randomness: time comes in as the envelope's `ts`.
 //! - The fold is total and never panics: an event that names something the state does not hold
 //!   changes nothing and adds an [`Anomaly`]; an unknown kind advances `seq` and changes nothing.
-//!   The restart detach reason is not folded yet: it advances `seq` and adds
-//!   [`Anomaly::NotYetFolded`].
+//! - A pending denial card survives the end of its own turn and expires when the next turn
+//!   starts, when the agent session ends (any detach but a restart), when a restart fails or is
+//!   cut short (a `TurnFailed` or `TurnEnded` while `restarting_since` is set, which clears it)
+//!   and when the thread is archived.
 //! - `queue_held` and `queue_held_reason` are the host's: no event sets them,
 //!   [`set_queue_held`] does, and a snapshot writes them `false` and `None`.
 //! - No change for an unchanged entry: each field is compared as it is set, and an `Upsert` is

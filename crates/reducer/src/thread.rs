@@ -52,6 +52,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
             });
         }
         DomainEvent::ThreadArchived(_) => {
+            denials::expire_pending(state, out);
             set_status(state, "thread_archived", out, ThreadStatus::Archived);
         }
         DomainEvent::ThreadSnoozed(event) => triage::snoozed(state, event, out),

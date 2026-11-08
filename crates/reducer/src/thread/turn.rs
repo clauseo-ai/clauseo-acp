@@ -37,8 +37,8 @@ pub(super) fn settled_status(state: &ThreadState) -> ThreadStatus {
 /// The agent's session detached at `ts`. A thread idle-stopped while its next prompt waited
 /// for the agent (the prompt came during the stop, so the thread is `Starting`) stays
 /// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`. A restart
-/// sets `restarting_since` and changes nothing else; any other detach expires pending denial
-/// cards and ends a restart.
+/// sets `restarting_since` and changes nothing else; any other detach ends the agent session,
+/// so it expires pending denial cards and ends a restart.
 pub(super) fn detached(
     state: &mut ThreadState,
     reason: &DetachReason,
@@ -166,7 +166,9 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
     }
 }
 
+/// A turn starts: the cards still pending from earlier turns expire (`denials::expire_pending`).
 pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    super::denials::expire_pending(state, out);
     settle_prompt(state, turn, UserMessageStatus::Sent, out);
     state.running = Some(turn);
     state.turn = Some(turn);
@@ -191,7 +193,9 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
 }
 
 /// Keeps the failure's code for the turn's step, or updates the step when the turn has ended.
+/// A failure while a restart is shown also ends the restart (`denials::end_restart`).
 pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut Applied) {
+    super::denials::end_restart(state, "turn_failed", out);
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
             set(&mut step.failure, Some(event.code)) | set(&mut step.failure_at, event.at.clone())
@@ -246,7 +250,9 @@ pub(super) fn stopped_at_limit(
 /// removed or cancelled before its turn) makes no step and marks its user message `Removed`; it
 /// leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from its wait
 /// for another thread's writer, while no turn runs, which settles (to `Idle` unless the lawyer
-/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
+/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`]. Pending
+/// denial cards survive it, but a `TurnEnded` while a restart is shown ends the restart and
+/// expires them (`denials::end_restart`).
 pub(super) fn turn_ended(
     state: &mut ThreadState,
     seq: Seq,
@@ -261,6 +267,7 @@ pub(super) fn turn_ended(
         });
         return;
     }
+    super::denials::end_restart(state, "turn_ended", out);
     let running = state.running == Some(event.turn);
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);
