@@ -43,8 +43,10 @@ struct Fake {
     unreadable: bool,
     /// `SweepNext` can't be read.
     sweep_next_fails: bool,
-    /// The last sweep's exit and number (`SweepLastExit`, `SweepLastSequence`).
+    /// The last sweep's exit and number (`SweepLastExit`, `SweepLastSequence`), and what each
+    /// pause moves it to, in turn.
     last: Option<(u32, u64)>,
+    lasts: Vec<(u32, u64)>,
     /// Which of the marker writes and removals fail.
     fails: Fails,
     log: Vec<String>,
@@ -63,6 +65,7 @@ impl Fake {
             unreadable: false,
             sweep_next_fails: false,
             last: None,
+            lasts: Vec::new(),
             fails: Fails::default(),
             log: Vec::new(),
         }
@@ -168,6 +171,9 @@ impl Markers for Fake {
         self.log.push("pause".to_owned());
         if !self.sweeps.is_empty() {
             self.done.sweep = self.sweeps.remove(0);
+        }
+        if !self.lasts.is_empty() {
+            self.last = Some(self.lasts.remove(0));
         }
     }
     fn note(&mut self, line: &str) {

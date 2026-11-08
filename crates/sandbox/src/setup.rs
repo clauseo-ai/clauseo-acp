@@ -105,10 +105,10 @@ pub enum Blocked {
     /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
     ToolMissing,
     /// A launch whose unclean-session marker awaits a sweep that already ran and ended 56
-    /// (`SweepLastExit`, at a `SweepLastSequence` at or past the marker's number): a scheduled
-    /// task the sweep can't read or delete is left, so no wait would help
-    /// (`windows::runner::unclean`). A fresh sweep is still requested, so the next launch goes
-    /// once an administrator deleted the task.
+    /// (`SweepLastExit`, at a `SweepLastSequence` at or past the marker's number), and whose
+    /// fresh sweep ended 56 too, or didn't end within 15 s with that 56 still standing: a
+    /// scheduled task the sweep can't read or delete is left (`windows::runner::unclean`). Once
+    /// an administrator deletes it, the next launch's fresh sweep ends 0 and the launch goes.
     LeftoverTask,
 }
 
@@ -208,8 +208,8 @@ impl std::fmt::Display for Blocked {
             }
             Blocked::LeftoverTask => {
                 "a scheduled task one of Clauseo's sandbox users left behind can't be removed by \
-                 Clauseo; whoever looks after this computer can delete it, and the next launch \
-                 then goes ahead"
+                 Clauseo; whoever looks after this computer can delete it, and Clauseo checks \
+                 again at the next launch"
             }
         })
     }
