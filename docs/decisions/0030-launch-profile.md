@@ -555,7 +555,10 @@ ask, could close even those: a later option, not this change.
   `description`, `plan`, `pattern`, `glob`), the words of `rawInput.command` (a string, or each string of an array) that start with `~` or
   `$HOME`, hold a separator, or are `..`, the targets of an `ln` in it taken from the link's
   own folder (and as written), and any path that starts, inside a command word, where the data
-  folder's text does (its configured and canonical paths and their `~/` form, so
+  folder's text does (its configured and canonical paths, their `~/`, `~\`, `$HOME` and
+  `%USERPROFILE%` forms, on Windows its 8.3 short name and its `%APPDATA%`, `$env:APPDATA`,
+  `${env:APPDATA}` and `$APPDATA` forms (or `LOCALAPPDATA`'s), matched folded and with a run
+  of separators read as one, so
   `python3 -c "open('<data>/…')"`, `grep -f<data>/…` and `curl file://<data>/…` are read).
   It also reads the folders a request may search the whole of: a Glob's or Grep's `path` (the
   matter folder without one), each folder a Glob's `pattern` or a Grep's `glob` may start in
@@ -598,6 +601,16 @@ ask, could close even those: a later option, not this change.
   Claude sessions, so another matter's plan notes stay reachable through it. The comparison
   ignores case on Windows and macOS. The agent's
   `agent ended` log line carries `denied_data_folder=<n>`, with no path.
+- **Network locations (PR #766).** The auto-deny never touches a network location an agent
+  names: a path that is one, or leads to one through a link, is walked name by name
+  (`network_paths::resolve::walk`, `..` taken by its text on Windows as Win32 does) and counts as
+  inside `<data>`, so it is refused untouched; a local path is also matched to `<data>` by
+  identity. A data folder that is itself on the network (app data redirected to a share) is
+  never touched for its identity: a path that resolves locally can't lie in it, and every
+  network path, a link to one included, is refused anyway, so the fence neither captures its
+  identity nor blocks every request. Callers that go on to touch a path (the held-open check,
+  the after-turn tool paths, the pre-write guard) use the walked path, never the agent's text
+  again.
 - **The reason the agent sees.** ACP's answer to `session/request_permission` carries an
   outcome and no message, and the adapters tell the model only that the user refused. For the
   subtrees the deny rules name, Claude Code refuses first with its own message naming the rule.

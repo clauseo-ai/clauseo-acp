@@ -98,11 +98,23 @@ fn every_network_form_is_refused_with_nothing_looked_at() {
     }
 }
 
-/// A link whose target is any network form is read, never followed.
+/// A link whose target is any network form is read, never followed: under each form's own
+/// rules, and under Windows' (a junction needs no privilege there, and its target is joined and
+/// its `..` dropped by text).
 #[cfg(unix)]
 #[test]
 fn a_link_to_any_network_form_stops_at_the_link() {
-    for (net, target) in forms() {
+    let windows = forms().into_iter().map(|(net, target)| {
+        (
+            NetEnv {
+                windows: true,
+                fold_case: true,
+                ..net
+            },
+            target,
+        )
+    });
+    for (net, target) in forms().into_iter().chain(windows) {
         let fs = FakeFs::with(&[("/m/link", Fake::Link(target.into()))]);
         assert!(
             refused(&fence("/m", &["/m/link/doc.docx"]), &net, &fs),

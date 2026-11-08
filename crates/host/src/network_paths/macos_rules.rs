@@ -74,6 +74,29 @@ pub(super) fn firmlinked(text: &str, net: &NetEnv) -> Mac {
     Mac::AsIs
 }
 
+/// A remote mount point recorded under the data volume's spelling (`/System/Volumes/Data/Users/a/
+/// share`) in the form [`firmlinked`] gives an agent's path (`/Users/a/share`), so the two
+/// compare. When the firmlinks are unknown, or none covers it, the names after the data volume
+/// from the root (`/Users/a/share`): every firmlink keeps its name, and over-matching is a deny's
+/// safe side. `None` for a mount not on the data volume.
+pub(super) fn mount_form(mount: &str, net: &NetEnv) -> Option<String> {
+    let rest = mount.strip_prefix('/')?;
+    let names: Vec<&str> = rest.split('/').filter(|name| !name.is_empty()).collect();
+    let on_data = DATA.iter().enumerate().all(|(at, want)| {
+        names
+            .get(at)
+            .is_some_and(|name| name_folds_to(OsStr::new(name), want))
+    });
+    if !on_data {
+        return None;
+    }
+    if let Mac::Rewritten(form) = firmlinked(mount, net) {
+        return Some(form);
+    }
+    let inside = names.get(DATA.len()..).unwrap_or_default();
+    Some(format!("/{}", inside.join("/")))
+}
+
 /// `/usr/share/firmlinks`' lines: each a root folder, a tab, and its place on the data volume.
 #[cfg(any(target_os = "macos", test))]
 pub(super) fn parse_firmlinks(text: &str) -> Vec<(String, String)> {

@@ -171,7 +171,7 @@ use codex::{has_codex_part, in_codex_folder, patch_targets};
 // (`agent/data_fence/command.rs`).
 use reach::Reach;
 pub(crate) use shell::script as shell_script;
-use shell::{resolutions, shell_targets};
+use shell::{shell_targets, walked_resolutions};
 pub(crate) use words::Escape;
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
@@ -376,9 +376,8 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
     let held_at = |paths: &[PathBuf]| {
         paths
             .iter()
-            .flat_map(|path| resolutions(&base.join(path), &reach))
-            .filter(|path| reach.may_touch(path))
-            .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
+            .flat_map(|path| walked_resolutions(&base.join(path), &reach))
+            .find_map(|path| clauseo_matters::held_open_resolved(&folder, &path))
             .map(|(path, _)| path)
     };
     match &targets {
@@ -469,45 +468,13 @@ fn targets(
 /// normalised by its text, so a huge word costs time in proportion to its length.
 const MAX_RESOLVED: usize = 4096;
 
-/// `path` with its deepest existing folder canonicalised and the rest added lexically: the
-/// whole path canonicalised, else its parent with the name added, else the deepest existing
-/// prefix found by halving (a prefix of an existing one exists), canonicalised once, so a long
-/// path costs a few `stat`s, not one per part. A path over [`MAX_RESOLVED`] bytes, or one whose
-/// folder does not canonicalise, is only normalised by its text ([`lexical`]), and so is one
-/// that is or leads to a network location ([`Reach::may_touch`]), never touched.
+/// Where `path` leads: the network-safe walk's resolved path ([`Reach::walked`]: every link
+/// followed, `..` taken as the OS takes it, missing names kept as written), used as it is and
+/// never canonicalised again. A path over [`MAX_RESOLVED`] bytes, or one the walk does not vouch
+/// for (a network location, or one it can't look at), is only normalised by its text
+/// ([`lexical`]), never touched.
 fn existing_resolved(path: &Path, reach: &Reach) -> PathBuf {
-    if path.as_os_str().len() > MAX_RESOLVED || !reach.may_touch(path) {
-        return lexical(path);
-    }
-    if let Ok(found) = dunce::canonicalize(path) {
-        return found;
-    }
-    if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
-        && let Ok(found) = dunce::canonicalize(parent)
-    {
-        return lexical(&found.join(name));
-    }
-    let parts: Vec<Component<'_>> = path.components().collect();
-    let prefix = |count: usize| parts.iter().take(count).collect::<PathBuf>();
-    // The longest existing prefix has between `low` (exists, or is empty) and `high` parts.
-    let (mut low, mut high) = (0, parts.len().saturating_sub(1));
-    while low < high {
-        let middle = low + (high - low).div_ceil(2);
-        if prefix(middle).metadata().is_ok() {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-    match dunce::canonicalize(prefix(low)) {
-        Ok(found) => lexical(
-            &parts
-                .iter()
-                .skip(low)
-                .fold(found, |acc, part| acc.join(part)),
-        ),
-        Err(_) => lexical(path),
-    }
+    reach.walked(path).unwrap_or_else(|| lexical(path))
 }
 
 /// `path` with `.` parts dropped and each `..` taking the part before it off.

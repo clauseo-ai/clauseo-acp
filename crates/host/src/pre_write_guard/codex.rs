@@ -4,18 +4,16 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use super::{Reach, existing_resolved, lexical};
+use super::{Reach, lexical};
 use crate::network_paths::name_folds_to;
 
 /// Whether `path`, taken from `base`, is `<folder>/.codex` or lies under it, resolved
-/// canonically (never when it is or leads to a network location, [`Reach::may_touch`]) or
-/// lexically.
+/// by the network-safe walk (never when it is or leads to a network location, [`Reach::walked`],
+/// its walked path used as it is) or lexically.
 pub(super) fn in_codex_folder(folder: &Path, base: &Path, path: &Path, reach: &Reach) -> bool {
     let absolute = base.join(path);
-    let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-    if reach.may_touch(&absolute)
-        && let Some(inside) =
-            clauseo_matters::matter_path_in(&root, &existing_resolved(&absolute, reach))
+    if let Some(walked) = reach.walked(&absolute)
+        && let Some(inside) = clauseo_matters::matter_path_of_resolved(folder, &walked)
         && inside.as_str().split('/').next().is_some_and(is_codex)
     {
         return true;
