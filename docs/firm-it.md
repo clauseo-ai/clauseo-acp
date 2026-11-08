@@ -312,9 +312,13 @@ once the key is gone.
 Then check that each item is gone. The check below changes nothing and defines everything it
 uses, so it works in any elevated PowerShell, before or after the clean-up. Every number is 0 and
 both other values are `False`. `Profiles` finds profiles by folder name, and by the SIDs in the
-key's `PoolSids` while the key is there. `DeviceSync` counts deny entries naming the group, or an
-account that no longer exists (shown as a bare `S-1-5-21-…` SID): one of those is most likely the
-deleted group's, but check it before you remove it. `Folders` counts the folders left in
+key's `PoolSids` while the key is there. `DeviceSync` counts deny entries naming the group (by
+name, or by the SID the key records while it is there), or a deleted local account or group, shown
+as a bare `S-1-5-21-…` SID whose last number is 1000 or more: one of those is most likely the
+deleted group's, but check it before you remove it. Windows keeps a deny of its own there for the
+built-in Guest account, which on a computer set up from an image can show as a bare SID ending in
+`-501`. The check skips SIDs ending below 1000; leave those entries alone. `Folders` counts the
+folders left in
 `C:\Users` under a pool user's exact name, with or without the `.<COMPUTER>` or `.000` Windows may
 add, since a profile whose folder was held open can lose its entry and keep its folder:
 
@@ -325,7 +329,11 @@ $key = 'HKLM:\SOFTWARE\Clauseo\Sandbox'
 $hide = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
 $deviceSync = Join-Path $env:ProgramData 'Microsoft\DeviceSync'
 $poolSids = @((Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).PoolSids | Where-Object { $_ })
-$denies = @((Get-Acl -Path $deviceSync -ErrorAction SilentlyContinue).Access | Where-Object { $_.AccessControlType -eq 'Deny' -and $_.IdentityReference.Value -match '(^|\\)ClauseoSandboxUsers$|^S-1-5-21-' })
+$groupSid = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).GroupSid
+$denies = @((Get-Acl -Path $deviceSync -ErrorAction SilentlyContinue).Access | Where-Object {
+    $id = $_.IdentityReference.Value
+    $_.AccessControlType -eq 'Deny' -and ($id -match '(^|\\)ClauseoSandboxUsers$' -or ($groupSid -and $id -eq $groupSid) -or
+        ($id -match '^S-1-5-21-\d+-\d+-\d+-(\d+)$' -and [int64]$Matches[1] -ge 1000)) })
 [pscustomobject]@{
     Users      = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count
     Profiles   = @(Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -match '\\ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' -or $poolSids -contains $_.SID }).Count
