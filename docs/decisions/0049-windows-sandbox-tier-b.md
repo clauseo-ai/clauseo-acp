@@ -2199,7 +2199,8 @@ F6 confirms the target resolution: the `AppID` `{E9B79997-57E3-4201-AECC-6A464E5
 deny. F2 confirms that a pool token holds INTERACTIVE, which may write the Application log: the
 reason the `MsiInstaller` trigger is on the WSL deny task alone (above).
 
-**Self-healing** (`clean_close/wsl_heal.rs`, `wsl/msi.rs`). The product rule, from the project
+**Self-healing** (`clean_close/wsl_heal.rs`, its outcome types in `wsl_healed.rs`, `wsl/msi.rs`).
+The product rule, from the project
 owner: a lawyer is never refused the Safe workspace for a state Clauseo can realistically repair;
 a launch is refused only when the repair really failed, and the log says why. So the launch
 check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
