@@ -121,7 +121,9 @@ read-only paths in the state folder; the network. Every deny carries the tag. Ne
 `localhost:<port>` for each proxy port and nothing else (no DNS: the proxy resolves names), Unix
 sockets in the browser socket folder only, when the host gives one (outbound, and bind for
 agent-browser's daemon; amended 2026-11-03, below), and by
-`Loopback` bind, inbound and outbound on the listed ports or `localhost:*`.
+`Loopback` bind, inbound and outbound on the listed ports or `localhost:*`. With
+`Policy::native_code_deny` on (amended 2026-11-09, below), one rule last of all: deny
+`file-map-executable` on every subpath and literal that a write allow of the profile names.
 
 The base is adapted from Codex's `seatbelt_base_policy.sbpl` and platform defaults (commit 1a604d58,
 Apache-2.0, notice kept) but lists system reads instead of Codex's full read access: `/`, `/System`,
@@ -291,6 +293,23 @@ Residual risks:
   U+A7D2-D5, and Beria Erfe U+16EA0-16EDx, all new in Unicode 17), and none the other way. For a
   name in those letters the Rust side can label a denial wrongly or accept an overlap the kernel
   still refuses, since Seatbelt applies the rule. Revisit when `caseless` moves to Unicode 17.
+- **Native code (amended 2026-11-09, macOS 27.2, build 26B123).** The base's `file-map-executable`
+  allow-list (`/System`, `/usr/lib`, `/Library/Apple`, `/Library/Developer`) never narrowed
+  mapping: `(deny default)` does not refuse `file-map-executable` of a file the profile lets the
+  process read, so a dylib or Python extension in the matter loaded (a matter venv's `import
+  lxml` worked). Only an explicit deny refuses it. With `Policy::native_code_deny` on, the
+  profile ends with `(deny file-map-executable ...)` over every subpath and literal any write
+  allow names (matter, state, session temp folder, notes, the Claude store's names and lock
+  folders, the credential link, the browser socket folder), collected as the rules are written
+  so a new write allow is covered without a list to keep. The base's device write allows
+  (`/dev/null`, ptys) are left out. `process-exec` is unchanged: a child inherits the jail and
+  `node_modules/.bin` scripts need it, and a Mach-O built in the matter still runs (measured).
+  Off, the profile's rules are as before. The jail tests (`native.rs`)
+  load a `cc -shared` dylib from the matter (off: it loads; on: dyld reports "file system sandbox
+  blocked mmap()" and the kernel logs `deny(1) file-map-executable` with the launch tag, while
+  `/usr/bin/python3 -c 'import json'` and the loader run); a Chromium copied into the matter fails
+  to load its framework (ignored by default, needing a Chrome for Testing build on the Mac).
+  These denials are not reported to the sink: the watcher reports reads and writes only.
 
 ## Status
 

@@ -2040,6 +2040,13 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
+- `Policy::native_code_deny` is one switch for both OSes. Its macOS half is an explicit deny of
+  `file-map-executable` on every place the profile lets the agent write (0038, amended
+  2026-11-09): on macOS 27.2 the profile's `(deny default)` did not cover mapping a readable
+  file as code, so the base's map allow-list never narrowed it, and a matter's native
+  extensions loaded. The halves differ in one place: Windows denies execute, so an exe the agent
+  writes doesn't start either, while on macOS a Mach-O the agent builds still runs (exec stays
+  allowed); on both, a library it writes doesn't load.
 
 ## Status
 

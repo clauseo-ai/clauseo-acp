@@ -425,3 +425,102 @@ fn many_findings_stay_within_the_link_rule_budget() {
     let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
     assert!(bytes < 64 * 1024, "{bytes} bytes");
 }
+
+/// The policy with every kind of write allow: matter, state, notes, session temp folder,
+/// credential link, the Claude store's names and lock folders, and the browser socket folder.
+fn every_write_allow(w: &World) -> PolicyBuilder {
+    w.dir.dir("data/run/s1");
+    w.dir.dir("home/.claude");
+    let root = dunce::canonicalize(w.dir.path()).unwrap();
+    w.builder()
+        .tmpdir(w.at("data/run/s1/tmp"))
+        .notes(w.at("data/agent-state/m1/notes"))
+        .credential_link(w.at("data/agent-state/m1/codex/auth.json"))
+        .claude_store(w.at("home/.claude"))
+        .proxy_port(41_234)
+        .browser_socket_path(root.join("tmp/clauseo-ab-aaaaaaaaaaaaaaaa"))
+}
+
+#[test]
+fn with_native_code_deny() {
+    let w = World::new("profile-native-code-deny");
+    let policy = every_write_allow(&w)
+        .native_code_deny(true)
+        .build()
+        .unwrap();
+    insta::assert_snapshot!(w.render(&policy));
+}
+
+/// The rules as written, each a single string: a comment, a blank line or a whole rule.
+fn rules(text: &str) -> Vec<String> {
+    let mut rules: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('(') || line.starts_with(';') || line.is_empty() {
+            rules.push(line.to_owned());
+        } else if let Some(rule) = rules.last_mut() {
+            rule.push('\n');
+            rule.push_str(line);
+        }
+    }
+    rules
+}
+
+/// The switch only appends: off, the text is today's (the other snapshots); on, it is the same
+/// text and then one rule, last, denying `file-map-executable` on every subpath or literal any
+/// write allow of the policy names, process-exec untouched.
+#[test]
+fn native_code_deny_appends_a_map_deny_on_every_write_allow() {
+    let w = World::new("profile-native-code-deny-roots");
+    let off = w.render(&every_write_allow(&w).build().unwrap());
+    let on = w.render(
+        &every_write_allow(&w)
+            .native_code_deny(true)
+            .build()
+            .unwrap(),
+    );
+    let (off_text, off_params) = off.split_once("\n;; parameters\n").unwrap();
+    let (on_text, on_params) = on.split_once("\n;; parameters\n").unwrap();
+    assert_eq!(off_params, on_params);
+    let added = on_text.strip_prefix(off_text).expect(on_text);
+    assert!(!added.contains("process-exec"), "{added}");
+    let last = rules(on_text).pop().unwrap();
+    assert!(last.starts_with("(deny file-map-executable\n"), "{last}");
+    assert!(
+        last.ends_with(&format!("(with message \"{TAG}\"))")),
+        "{last}"
+    );
+    assert!(added.ends_with(&format!("{last}\n")), "{added}");
+    let mut roots = 0;
+    for rule in rules(off_text) {
+        let ops = rule.lines().next().unwrap_or_default();
+        if !(ops.starts_with("(allow ") && ops.contains("file-write")) {
+            continue;
+        }
+        for filter in rule.lines().skip(1).map(|l| l.trim().trim_end_matches(')')) {
+            // The base's own write allows are devices (`/dev/null`, ptys), never code.
+            let kind = filter.starts_with("(subpath ") || filter.starts_with("(literal ");
+            if kind && filter.contains("(param ") {
+                let filter = format!("{filter}))");
+                assert!(
+                    last.contains(&format!("\n  {filter}\n")),
+                    "{filter} in {last}"
+                );
+                roots += 1;
+            }
+        }
+    }
+    for name in [
+        "MATTER",
+        "STATE",
+        "NOTES",
+        "TMPDIR",
+        "CREDENTIAL_LINK",
+        BROWSER_SOCKETS,
+    ] {
+        assert!(
+            last.contains(&format!("(param \"{name}\")")),
+            "{name}: {last}"
+        );
+    }
+    assert!(roots >= 8, "{roots}: {off_text}");
+}
