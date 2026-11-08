@@ -63,11 +63,13 @@
 //!    can't be read or trusted, the task is unreadable (56) and left. `GetTasks` may list only
 //!    the tasks the caller may read, so the walk is then held against every task file below
 //!    `Tasks` and every task in the Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`),
-//!    read only ([`unlisted`]). When they disagree, all three are read again once and only that
-//!    read is judged: a task both hold that the walk didn't list is 56, unless its trusted task
-//!    file names a principal that isn't the pool's; a task file alone is 56 when its own owner
-//!    is a pool SID or can't be read, else ignored; a cache key alone is 56 when its `SD`
-//!    names a pool owner, else ignored. Nothing is deleted through a file or the registry. A
+//!    read only ([`unlisted`]). When they disagree, all three are read again once, a task new
+//!    to the second walk held to this step's check (the pool's is 56), and only that read is
+//!    judged: a task both hold that the walk didn't list is 56, unless its trusted task file
+//!    names a principal that isn't the pool's; a task file alone is 56 when its own owner is a
+//!    pool SID or can't be read, else ignored; a cache key alone whose task can run is 56
+//!    unless its `SD` reads and names an owner that isn't a pool SID; a folder or key gone
+//!    while listed and there again is 56. Nothing is deleted through a file or the registry. A
 //!    listing that can't be read is 56 too;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
@@ -275,6 +277,15 @@ pub trait Sweeper: Gate + Bits + Record {
     /// descriptor, read through a handle opened as [`Sweeper::read_task_file`] opens (never
     /// through a link) for `READ_CONTROL` alone; `Err` when it can't be opened or read.
     fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed>;
+    /// Whether the task at `path` can run: its `Tree` key's `Id` (a GUID) names a
+    /// `TaskCache\Tasks\{Id}` key. `Ok(false)` when either key is gone; `Err` when unread.
+    fn task_cache_runnable(&mut self, path: &str) -> Result<bool, Failed>;
+    /// Whether the folder `path` (`\A\B`) below `Tasks` is there, opened as
+    /// [`Sweeper::task_file_paths`] walks; `Err` when that can't be told.
+    fn task_folder_present(&mut self, path: &str) -> Result<bool, Failed>;
+    /// Whether the key `path` (`\A\name`) below `TaskCache\Tree` is there; `Err` when that
+    /// can't be told.
+    fn task_cache_key_present(&mut self, path: &str) -> Result<bool, Failed>;
     /// The owner of the task at `path` (`\A\name`), from the security descriptor its cache
     /// key holds (`TaskCache\Tree\<path>`, its `SD` value, `REG_BINARY`, read only, the 64-bit
     /// view); `Err` when the key or value is missing or can't be read, or names no owner.

@@ -63,13 +63,21 @@ pub struct Swept {
     pub unlisted_keys: usize,
     /// Of the task files alone, those ignored: the file's own owner isn't a pool SID.
     pub stray_files: usize,
-    /// Of the cache keys alone, those ignored: the owner their `SD` names isn't a pool SID, or
-    /// can't be read.
+    /// Of the cache keys alone, those ignored: their task can't run (no `TaskCache\Tasks` key for
+    /// their `Id`), or their `SD` is readable and names an owner that isn't a pool SID.
     pub stale_keys: usize,
-    /// Folders below `Tasks` or cache keys gone while they were listed, left out of it.
+    /// Folders below `Tasks` or cache keys gone while they were listed, left out of it, and
+    /// still gone when checked once more.
     pub vanished: usize,
     /// Each hidden task's path, where it was read: never logged, for the tests.
     pub hidden_paths: Vec<String>,
+    /// Tasks the second walk listed that the first didn't, held to the first walk's check.
+    pub arrived: usize,
+    /// Of those, the pool's: 56, deleted or not.
+    pub arrived_pool: usize,
+    /// Folders or keys gone while listed that were there again when checked once more, or
+    /// couldn't be checked: 56.
+    pub reappeared: usize,
 }
 
 impl Swept {
@@ -81,6 +89,8 @@ impl Swept {
             || self.not_deleted > 0
             || self.instances_not_stopped > 0
             || self.hidden > 0
+            || self.arrived_pool > 0
+            || self.reappeared > 0
             || self.unlisted > 0
             || self.capped
     }
@@ -115,14 +125,18 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         format!(
             "; the listings disagreed and were read again: {} tasks in a task file and the cache \
              only, {} task files with no cache key ({} ignored, not a pool user's), {} cache keys \
-             with no task file ({} ignored, not a pool user's), {} folders or keys gone while \
-             listed",
+             with no task file ({} ignored, not a pool user's or can't run), {} folders or keys \
+             gone while listed and still gone, {} there again, {} tasks new to the second walk \
+             ({} the pool's)",
             swept.unlisted_in_both,
             swept.unlisted_files,
             swept.stray_files,
             swept.unlisted_keys,
             swept.stale_keys,
-            swept.vanished
+            swept.vanished,
+            swept.reappeared,
+            swept.arrived,
+            swept.arrived_pool
         )
     } else {
         String::new()
