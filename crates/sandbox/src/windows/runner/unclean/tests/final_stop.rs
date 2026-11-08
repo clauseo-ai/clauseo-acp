@@ -86,6 +86,9 @@ impl Markers for World {
     fn pause(&mut self, pause: Duration) {
         self.fake.pause(pause);
     }
+    fn note(&mut self, line: &str) {
+        self.fake.note(line);
+    }
 }
 
 #[test]
