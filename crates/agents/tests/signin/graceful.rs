@@ -5,7 +5,6 @@
 //! removed before a status reads it; the quit's kill and a second stop end the check after a
 //! Cancel without a logout. No test fires the lawyer's 2 s grace: every run ends by itself.
 
-use std::net::{Ipv4Addr, TcpStream};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,18 +21,15 @@ fn login_file(fx: &Fixture) -> PathBuf {
     home(fx).join(concat!("auth", ".json"))
 }
 
-/// Whether something accepts connections on `port`. A connection the fake login reads as an
-/// empty request, answers 404, and serves on.
-fn listening(port: u16) -> bool {
-    TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_ok()
-}
-
 /// Starts Codex's browser login on the fake (`script`) with its callback on a port of the
-/// test's own, and waits until it listens there.
-fn login_listening(fx: &Fixture, port: u16) -> (clauseo_agents::Agents, crate::support::Events) {
+/// test's own (`Fixture::listen_for_cancel`), and waits until it listens there: the fake's
+/// `fake-login-listening` file, written once it is bound. No connection probes the port: one
+/// that comes before the login binds it is refused only after about 2 s on Windows.
+fn login_listening(fx: &Fixture) -> (clauseo_agents::Agents, crate::support::Events) {
     let (agents, events) = start(fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
-    eventually("the login listens", || listening(port));
+    let listening = home(fx).join("fake-login-listening");
+    eventually("the login listens", || listening.is_file());
     (agents, events)
 }
 
@@ -43,8 +39,8 @@ fn login_listening(fx: &Fixture, port: u16) -> (clauseo_agents::Agents, crate::s
 #[test]
 fn cancel_sends_cancel_and_the_login_ends_writing_nothing() {
     let mut fx = Fixture::new("graceful-cancel", "never");
-    let port = fx.listen_for_cancel();
-    let (agents, events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, events) = login_listening(&fx);
     let login = fx.codex_runs(&["login"]).remove(0);
     agents.cancel_sign_in(&codex()).unwrap();
     let (seen, last) = events.until_end();
@@ -75,8 +71,8 @@ fn cancel_sends_cancel_and_the_login_ends_writing_nothing() {
 #[test]
 fn quit_sends_cancel_and_ends_inside_its_bound() {
     let mut fx = Fixture::new("graceful-quit", "never");
-    let port = fx.listen_for_cancel();
-    let (agents, _events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx);
     let login = fx.codex_runs(&["login"]).remove(0);
     assert!(agents.shutdown(QUIT_WAIT), "a job still runs");
     assert!(
@@ -98,8 +94,8 @@ fn quit_sends_cancel_and_ends_inside_its_bound() {
 #[test]
 fn a_quit_in_the_middle_of_a_save_lets_it_finish_and_leaves_no_unmarked_file() {
     let mut fx = Fixture::new("graceful-mid-write", "slow-save:1000");
-    let port = fx.listen_for_cancel();
-    let (agents, _events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx);
     eventually("the save started", || login_file(&fx).exists());
     assert!(agents.shutdown(QUIT_WAIT), "a job still runs");
     assert!(
@@ -116,8 +112,8 @@ fn a_quit_in_the_middle_of_a_save_lets_it_finish_and_leaves_no_unmarked_file() {
 #[test]
 fn a_slow_cancel_does_not_delay_the_kill_at_the_bound() {
     let mut fx = Fixture::new("graceful-slow-cancel", "slow-save:3000");
-    let port = fx.listen_for_cancel();
-    let (agents, _events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx);
     eventually("the save started", || login_file(&fx).exists());
     let login = fx.codex_runs(&["login"]).remove(0);
     assert!(
@@ -248,8 +244,8 @@ fn a_confirmation_cut_by_the_kill_leaves_no_file_and_starts_no_logout() {
 fn cancel_then_quit_records_a_confirmation_that_lands() {
     let mut fx = Fixture::new("graceful-cancel-quit-confirm", "slow-save:1000");
     fx.set_env("FAKE_APP_SERVER_PAUSE_MS", "1000");
-    let port = fx.listen_for_cancel();
-    let (agents, _events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx);
     eventually("the save started", || login_file(&fx).exists());
     agents.cancel_sign_in(&codex()).unwrap();
     eventually("the check's account read runs", || {
@@ -267,8 +263,8 @@ fn cancel_then_quit_records_a_confirmation_that_lands() {
 fn a_second_cancel_stops_the_check_after_the_first() {
     let mut fx = Fixture::new("graceful-cancel-twice", "never");
     fx.set_env("FAKE_STATUS_PAUSE_MS", "800");
-    let port = fx.listen_for_cancel();
-    let (agents, events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, events) = login_listening(&fx);
     agents.cancel_sign_in(&codex()).unwrap();
     eventually("the check's status runs", || {
         !fx.codex_runs(&["login", "status"]).is_empty()
@@ -290,8 +286,8 @@ fn a_second_cancel_stops_the_check_after_the_first() {
 fn the_quit_after_a_cancel_stops_the_check() {
     let mut fx = Fixture::new("graceful-cancel-then-quit", "never");
     fx.set_env("FAKE_STATUS_PAUSE_MS", "800");
-    let port = fx.listen_for_cancel();
-    let (agents, _events) = login_listening(&fx, port);
+    fx.listen_for_cancel();
+    let (agents, _events) = login_listening(&fx);
     agents.cancel_sign_in(&codex()).unwrap();
     eventually("the check's status runs", || {
         !fx.codex_runs(&["login", "status"]).is_empty()
