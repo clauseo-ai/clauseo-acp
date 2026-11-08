@@ -19,6 +19,7 @@ use crate::network_paths::NetEnv;
 use crate::network_paths::resolve::tests::FakeFs;
 use crate::network_paths::tests::plain_net;
 
+mod cost;
 mod holders;
 
 /// Identities in memory: each path's, aliases sharing one; every path asked is kept. Any other

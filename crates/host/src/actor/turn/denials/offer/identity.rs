@@ -18,15 +18,17 @@
 //! one the walk refuses (a matter root that is a link to a share) is kept as written, judged by
 //! its text, and never opened.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{OfferRules, fold_name, under};
 use crate::actor::turn::denials::resolve::{self, Disk, Resolved};
 use crate::network_paths::ascii_fold::REFUSED_IN_OTHER_MATTER;
 use crate::network_paths::resolve::{Fs as _, RealFs};
 
+mod memo;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -77,16 +79,29 @@ const SYSTEM_CREDENTIAL_PLACES: [&str; 1] = ["/Library/Keychains"];
 /// (`/System/Volumes/Data/Users/a`): every folder above that spelling holds the place too.
 const MAC_DATA_VOLUME: &str = "/System/Volumes/Data";
 
+/// The missing places [`Places::stale`] asks about at every check: the first ones captured, which
+/// are home's credential places and the data folder's (the capture lists them first).
+const STALE_ALWAYS: usize = 16;
+
+/// How many of the other missing places (another matter's `.claude`, `.codex`, ...)
+/// [`Places::stale`] asks about at each check, in turn: one made after the capture is seen
+/// within `ceil(others / STALE_IN_TURN)` checks.
+const STALE_IN_TURN: usize = 8;
+
 /// The known places by identity, each with the spelling the rules use.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Places {
-    known: Vec<(FileId, PathBuf)>,
+    /// Each identity with the first spelling captured for it.
+    known: HashMap<FileId, PathBuf>,
     /// Every protected place and every folder holding one, whatever its spelling: never offered
     /// whole.
     holders: HashSet<FileId>,
     /// Places the walk proved local that were missing at capture, in a folder that was there (a
-    /// `.ssh` not made yet): one that appears makes the capture stale ([`Places::stale`]).
+    /// `.ssh` not made yet), in capture order: one that appears makes the capture stale
+    /// ([`Places::stale`]).
     missing: Vec<PathBuf>,
+    /// Where [`Places::stale`]'s turn through the missing places past [`STALE_ALWAYS`] goes on.
+    turn: AtomicUsize,
 }
 
 impl Places {
@@ -94,14 +109,19 @@ impl Places {
     /// `ids` once each is walked on `disk` (only its walked path is asked). A place the walk
     /// refuses (a network location, a link to one, anything unresolved) is never asked, nor is
     /// anything under it: its text alone judges it. On macOS the folders above each place's
-    /// data volume spelling are holders too.
+    /// data volume spelling are holders too. Each place and folder is walked and asked once; on
+    /// a disk that remembers its answers (`Captured::new`'s, `memo.rs`) each name is looked at
+    /// once too, however many places share it.
     pub(crate) fn capture(rules: &OfferRules, disk: &Disk<'_>, ids: &dyn Identity) -> Self {
         let mut wanted: Vec<PathBuf> = Vec::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         let mut want = |place: PathBuf| {
             for above in place.ancestors() {
-                if !above.as_os_str().is_empty() && !wanted.iter().any(|w| w == above) {
-                    wanted.push(above.to_path_buf());
+                if above.as_os_str().is_empty() || !seen.insert(above.to_path_buf()) {
+                    // An empty path, or one listed already (and so is every folder above it).
+                    break;
                 }
+                wanted.push(above.to_path_buf());
             }
         };
         if let Some(home) = &rules.home {
@@ -125,36 +145,47 @@ impl Places {
             want(refused.clone());
         }
         let mut places = Self::default();
-        let mut found: Vec<PathBuf> = Vec::new();
+        let mut found: HashSet<PathBuf> = HashSet::new();
         let mut absent: Vec<PathBuf> = Vec::new();
+        let mut unreadable = 0_usize;
         for place in &wanted {
             let Resolved::Local { path: walked, .. } = resolve::resolve(place, disk) else {
                 continue;
             };
             match ids.id(&walked) {
                 Ok(id) => {
-                    places.known.push((id, place.clone()));
+                    places.known.entry(id).or_insert_with(|| place.clone());
                     places.holders.insert(id);
-                    found.push(walked);
+                    found.insert(walked);
                 }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => absent.push(walked),
-                Err(_) => {}
+                Err(error) => {
+                    unreadable = unreadable.saturating_add(1);
+                    // The kind alone: a path never goes in the log.
+                    tracing::warn!(
+                        kind = %error.kind(),
+                        "a protected place's identity could not be read; it is judged by its text"
+                    );
+                }
             }
+        }
+        if unreadable > 1 {
+            tracing::warn!(unreadable, "protected places judged by their text alone");
         }
         places.missing = absent
             .into_iter()
-            .filter(|walked| {
-                walked
-                    .parent()
-                    .is_some_and(|up| found.iter().any(|f| f == up))
-            })
+            .filter(|walked| walked.parent().is_some_and(|up| found.contains(up)))
             .collect();
         if disk.net.macos {
+            let mut asked: HashSet<PathBuf> = HashSet::new();
             for place in &wanted {
                 let Ok(inside) = place.strip_prefix("/") else {
                     continue;
                 };
                 for above in Path::new(MAC_DATA_VOLUME).join(inside).ancestors() {
+                    if !asked.insert(above.to_path_buf()) {
+                        break;
+                    }
                     if let Resolved::Local { path, .. } = resolve::resolve(above, disk)
                         && let Ok(id) = ids.id(&path)
                     {
@@ -168,9 +199,26 @@ impl Places {
 
     /// Whether a place missing at capture is there now: the capture is stale, taken again. Each
     /// is asked by its walked path, whose folder the walk proved local; a link made there since
-    /// is asked about itself, never followed.
+    /// is asked about itself, never followed. Capped: at most [`STALE_ALWAYS`] places asked at
+    /// every call (the first captured: home's credential places, the data folder), plus
+    /// [`STALE_IN_TURN`] of the rest in turn, so a call reads at most 24 identities however many
+    /// matters there are.
     pub(crate) fn stale(&self, ids: &dyn Identity) -> bool {
-        self.missing.iter().any(|walked| ids.id(walked).is_ok())
+        let there = |walked: &PathBuf| ids.id(walked).is_ok();
+        let always = self.missing.len().min(STALE_ALWAYS);
+        let (first, rest) = self.missing.split_at(always);
+        if first.iter().any(there) {
+            return true;
+        }
+        if rest.is_empty() {
+            return false;
+        }
+        let start = self.turn.fetch_add(STALE_IN_TURN, Ordering::Relaxed) % rest.len();
+        rest.iter()
+            .cycle()
+            .skip(start)
+            .take(STALE_IN_TURN.min(rest.len()))
+            .any(there)
     }
 
     /// Whether `folder` (resolved and local) may never be offered whole, by identity: it is a
@@ -209,7 +257,7 @@ impl Places {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            if let Some((_, place)) = self.known.iter().find(|(known, _)| *known == id) {
+            if let Some(place) = self.known.get(&id) {
                 let rest = path.strip_prefix(prefix).unwrap_or_else(|_| Path::new(""));
                 return Ok(if rest.as_os_str().is_empty() {
                     place.clone()
@@ -288,8 +336,16 @@ pub(crate) struct Captured {
 }
 
 impl Captured {
-    /// `raw`'s paths walked on `disk` ([`walked`]), then their identities asked of `ids`.
+    /// `raw`'s paths walked on `disk` ([`walked`]), then their identities asked of `ids`; each
+    /// name on `disk` looked at once for both (`memo.rs`).
     pub(crate) fn new(raw: OfferRules, disk: &Disk<'_>, ids: &dyn Identity) -> Self {
+        let memo = memo::Memo::new(disk.fs);
+        let real = |path: &Path| memo.real(path, disk.real);
+        let disk = &Disk {
+            fs: &memo,
+            real: &real,
+            net: disk.net,
+        };
         let rules = walked(raw, disk);
         let places = Places::capture(&rules, disk, ids);
         Self { rules, places }
