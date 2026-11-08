@@ -60,6 +60,17 @@ only "holds the matter" stands for the brief's `Documents/Clauseo`.
 `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at the matter root, existing or not; each existing
 `.git` at any depth and the folder a `gitdir:` file names inside the matter; over-cap files.
 
+The agent can't create a `.git` (dir or file) anywhere in the matter: one it made would be
+lawyer-owned and run as the lawyer under the lawyer's git. One deny, like the `CLAUDE.md` rule
+below, requires `(subpath (param "MATTER"))` and the path-free regex `/\.[gG][iI][tT](/|$)`
+(a name `.git` in any letter case, last or above), on `file-write*`: it refuses `git init`,
+`mkdir`, a `gitdir:` file, links and renames onto the name (Seatbelt checks a rename's
+destination). Names that only contain it (`.gitignore`, `.github/`, `a.git`) stay writable.
+The same gap as `CLAUDE.md`'s: a folder that already holds a `.git`, made in `TMPDIR`, the
+state or notes folder, can be moved into the matter (checked on this Mac, and kept as the jail
+test `a_folder_holding_a_git_moved_in_is_not_stopped_by_the_name_rule`); a lawyer-side scan is
+the follow-up.
+
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than
 the brief ("at the matter root"); approved by the orchestrator on 2026-11-02, in line with QC.11

@@ -425,3 +425,64 @@ fn many_findings_stay_within_the_link_rule_budget() {
     let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
     assert!(bytes < 64 * 1024, "{bytes} bytes");
 }
+
+/// [`GIT_NAME_REGEX`] as Seatbelt reads it: `sandbox-exec` with only that deny, so each probe
+/// shows what the pattern matches. Whether `sh -c "$cmd $1"` is refused in the matter.
+#[cfg(target_os = "macos")]
+fn git_name_refuses(matter: &Path, cmd: &str, rel: &str) -> bool {
+    let profile = format!(
+        "(version 1)(allow default)(deny file-write* (require-all (subpath (param \"M\")) \
+         (regex #\"{GIT_NAME_REGEX}\")))"
+    );
+    let script = format!("{cmd} \"$1\"");
+    let out = async_io::block_on(
+        async_process::Command::new("/usr/bin/sandbox-exec")
+            .arg("-D")
+            .arg(format!("M={}", matter.display()))
+            .args(["-p", &profile, "/bin/sh", "-c", &script, "sh"])
+            .arg(matter.join(rel))
+            .output(),
+    )
+    .unwrap();
+    let refused = !out.status.success();
+    if refused {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("Operation not permitted"), "{stderr}");
+    }
+    refused
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_git_name_regex_matches_only_a_name_git() {
+    let w = World::new("profile-git-name");
+    w.dir.dir("matter/sub");
+    w.dir.dir("matter/deep/.git");
+    let matter = dunce::canonicalize(w.at("matter")).unwrap();
+    for (cmd, rel) in [
+        ("mkdir", ".git"),
+        ("mkdir", ".GIT"),
+        ("touch", ".Git"),
+        ("mkdir", "sub/.git"),
+        ("touch", "deep/.git/x"),
+        ("touch", ".git"),
+    ] {
+        assert!(
+            git_name_refuses(&matter, cmd, rel),
+            "{cmd} {rel} was allowed"
+        );
+    }
+    w.dir.dir("matter/.github");
+    for (cmd, rel) in [
+        ("touch", ".gitignore"),
+        ("touch", ".github/x"),
+        ("touch", "a.git"),
+        ("mkdir", "sub/.gitattributes-dir"),
+        ("touch", "sub/x.git"),
+    ] {
+        assert!(
+            !git_name_refuses(&matter, cmd, rel),
+            "{cmd} {rel} was refused"
+        );
+    }
+}
