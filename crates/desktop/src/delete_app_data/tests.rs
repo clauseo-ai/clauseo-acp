@@ -13,6 +13,7 @@ mod installer_version_info;
 mod make;
 mod nsis_names;
 mod nsis_run;
+mod repair;
 mod safe_temp;
 mod sandbox_link;
 mod set_aside;

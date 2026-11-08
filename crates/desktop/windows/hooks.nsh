@@ -89,6 +89,25 @@
 ; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
 ; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
 ; the installer's own. The template deletes it with the data (installer.nsi:884, and step 2).
+;
+; Repair (/CLAUSEO_REPAIR, the per-user installer only; the per-machine one ignores it): the
+; desktop app's "Download and run the installer again" button (repair_install, #777) runs this
+; version's per-user installer interactively with exactly that switch, then closes its windows and
+; exits within about 6 s. NSIS_HOOK_PREINSTALL, which the template inserts right before its own
+; CheckIfAppIsRunning (installer.nsi:691-695), waits first up to 10 s, every 250 ms, until both
+; Clauseo.exe in $INSTDIR (the template's own test: Restart Manager's list for the file) and any
+; Clauseo main window (CLAUSEO_MAIN_WINDOW_CLASS) are gone; still there at 10 s, it carries on and
+; the usual checks apply (the template's box, admin_copy.nsh's adminCopyAppRunning and exit 24,
+; which comes later still, in NSIS_HOOK_POSTINSTALL). NSIS_HOOK_POSTINSTALL ends, after the admin
+; step whatever its outcome, by starting Clauseo once as the user, as the finish page's "Run
+; Clauseo" does (RunAsUser), and by taking the template's passive path from there: $PassiveMode 1,
+; so the template's SkipIfPassive skips the finish page (no second start from its box) and
+; SetAutoClose closes the installer. Only an install that ran to the end of Section Install gets
+; there: a cancelled "Clauseo is running" box, a failed file, any Abort or a closed installer
+; never reaches it, so nothing starts. A wait for the elevated instance that timed out
+; ($ClauseoAdminTimedOut) keeps the usual finish page, its "Run Clauseo" hidden, and starts
+; nothing, as without the switch. .onInstSuccess runs RunAsUser too under $PassiveMode, but only
+; with /R, which the app never passes.
 
 ; NSIS's warning 6000 is "unknown variable/constant detected, ignoring" (Source/build.h,
 ; DW_VAR_IGNORED_UNKNOWN): an unknown name stays as literal text and the hook does the wrong thing
@@ -101,6 +120,13 @@
 ; here: the elevated instance's branch, which the template's .onInit block inserts
 ; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
 !include "${__FILEDIR__}\admin_copy.nsh"
+
+; Repair mode (the paragraph "Repair" above): the switch, how long the installer waits for
+; Clauseo to go and how often it looks, and 1 when the per-user installer was given the switch.
+!define CLAUSEO_REPAIR_SWITCH "/CLAUSEO_REPAIR"
+!define CLAUSEO_REPAIR_WAIT_MS 10000
+!define CLAUSEO_REPAIR_POLL_MS 250
+Var ClauseoRepair
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).
@@ -714,6 +740,97 @@
   Pop $R0
 !macroend
 
+; Repair mode's switch and wait (the paragraph "Repair" above), first in Section Install: the
+; template inserts this right before its own CheckIfAppIsRunning. The per-machine installer
+; ignores the switch: $ClauseoRepair stays 0 there.
+!macro NSIS_HOOK_PREINSTALL
+  StrCpy $ClauseoRepair 0
+  !if "${INSTALLMODE}" == "currentUser"
+    Push $R0
+    ${GetOptions} $CMDLINE "${CLAUSEO_REPAIR_SWITCH}" $R0
+    ${IfNot} ${Errors}
+      StrCpy $ClauseoRepair 1
+    ${EndIf}
+    Pop $R0
+    ${If} $ClauseoRepair = 1
+      !insertmacro CLAUSEO_REPAIR_WAIT
+    ${EndIf}
+  !endif
+!macroend
+
+; Waits until Clauseo is gone, at most CLAUSEO_REPAIR_WAIT_MS, looking every
+; CLAUSEO_REPAIR_POLL_MS: gone is both no process using $INSTDIR\Clauseo.exe, found as the
+; template's CheckIfAppIsRunning finds it (a Restart Manager session with the file registered,
+; RmGetList's ERROR_MORE_DATA meaning some process has it), and no top-level window of class
+; CLAUSEO_MAIN_WINDOW_CLASS (FindWindow, hidden ones included), which admin_copy.nsh's check
+; looks for. A session or a registration that fails leaves only the window to wait for, as the
+; template's own check then finds nothing. Past the wait it carries on: what follows decides.
+; Keeps every register.
+!macro CLAUSEO_REPAIR_WAIT
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R3 0
+  !insertmacro RestartManager_StartSession $R0
+  ${If} $R0 != ""
+    !insertmacro RestartManager_RegisterFile $R0 "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} $0 = 0
+      StrCpy $R3 1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $R1 0
+  ${Do}
+    StrCpy $R2 0
+    ${If} $R3 = 1
+      System::Call 'RSTRTMGR::RmGetList(p R0, *i .r1, *i .r2, p 0, *i .r3) i .r0'
+      ${If} $0 = ${ERROR_MORE_DATA}
+        StrCpy $R2 1
+      ${EndIf}
+    ${EndIf}
+    FindWindow $1 "${CLAUSEO_MAIN_WINDOW_CLASS}"
+    ${If} $1 <> 0
+      StrCpy $R2 1
+    ${EndIf}
+    ${If} $R2 = 0
+    ${OrIf} $R1 >= ${CLAUSEO_REPAIR_WAIT_MS}
+      ${ExitDo}
+    ${EndIf}
+    Sleep ${CLAUSEO_REPAIR_POLL_MS}
+    IntOp $R1 $R1 + ${CLAUSEO_REPAIR_POLL_MS}
+  ${Loop}
+  ${If} $R0 != ""
+    !insertmacro RestartManager_EndSession $R0
+  ${EndIf}
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; Repair mode's end, last in the per-user NSIS_HOOK_POSTINSTALL, after the admin step whatever its
+; outcome: Clauseo started once, unelevated as the user, as the template's RunMainBinary does;
+; then the template's passive path, so its SkipIfPassive skips the finish page and its "Run
+; Clauseo" box, and the installer closes by itself. Not after a wait for the elevated instance that
+; timed out: the usual finish page then, which hides "Run Clauseo" (CLAUSEO_FINISH_SHOW). Outside
+; any Push and Pop, as RunAsUser may leave a result on the stack.
+!macro CLAUSEO_REPAIR_RELAUNCH
+  ${If} $ClauseoRepair = 1
+  ${AndIf} $ClauseoAdminTimedOut <> 1
+    nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+    StrCpy $PassiveMode 1
+    SetAutoClose true
+  ${EndIf}
+!macroend
+
 ; The firm-policy folder and the admin copy, per-machine installs; the per-user installer asks for
 ; the admin section. The test is inside the macro: the template (installer.nsi) includes this file
 ; at line 36, before `!define INSTALLMODE` at line 46, so a test at file scope would see none.
@@ -800,6 +917,7 @@
     Pop $R5
   !else
     !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
+    !insertmacro CLAUSEO_REPAIR_RELAUNCH
   !endif
 !macroend
 
