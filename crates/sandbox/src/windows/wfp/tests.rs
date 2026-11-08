@@ -3,18 +3,20 @@
 //! descriptors, and the ports a launch names. The launch's check against a fake WFP is in
 //! `tests/check.rs`.
 
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
 use super::check::{ERROR_INVALID_OWNER, NetworkGap, OWNER_CHECK, WfpError, owner_allowed};
 use super::spec::{
-    ACTRL_ENUM, ACTRL_READ, Action, BLOCK_WEIGHT, Condition, Direction, FIREWALL_UNDER_POLICY,
-    FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object, PERMIT_BASE,
-    PERMIT_WEIGHT, PROTOCOL_ICMP, PROTOCOL_ICMPV6, PROTOCOL_TCP, RuleProtocol, SpecError,
-    allowed_users, checked_ports, denied_users, not_pool_sddl, permit_ports, revocations,
-    rule_names, user_sddl,
+    ACTRL_ENUM, ACTRL_READ, Action, BLOCK_COUNT, BLOCK_WEIGHT, Condition, Direction,
+    FIREWALL_UNDER_POLICY, FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object,
+    PERMIT_BASE, PERMIT_SLOTS, PERMIT_WEIGHT, PROTOCOL_ICMP, PROTOCOL_ICMPV6, PROTOCOL_TCP,
+    REMOVAL_KEYS, RuleProtocol, SpecError, allowed_users, checked_ports, denied_users,
+    not_pool_sddl, permit_ports, permit_slot, revocations, rule_names, user_sddl,
 };
 use crate::ports::TIER_B_PORTS;
 use crate::test_support::TempDir;
+use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
 use crate::{Error, Loopback, Policy};
 use clauseo_protocol::ErrorCode;
@@ -253,7 +255,7 @@ fn the_firewall_rules_except_only_the_range() {
                 "clauseo_sandbox_block_loopback_tcp",
                 Direction::Out,
                 RuleProtocol::Tcp,
-                Some("1-46099,46200-65535")
+                Some("1-46099,46400-65535")
             ),
         ]
     );
@@ -280,6 +282,57 @@ fn removal_covers_everything_set_up_writes() {
         rule_names(&real)
             .iter()
             .all(|n| !rule_names(&test).contains(n))
+    );
+}
+
+#[test]
+fn every_pool_index_has_its_own_key_clear_of_the_blocks_and_the_probe() {
+    // In every namespace the permit keys of all 256 indices are distinct, apart from the block
+    // keys, and each maps back to its index; the pool cap fits under the slots.
+    assert!(usize::from(POOL_CAP) <= usize::from(PERMIT_SLOTS));
+    assert_eq!(PERMIT_BASE + (PERMIT_SLOTS - 1), 0x1FF);
+    for ns in [
+        Namespace::production(),
+        Namespace::test(),
+        Namespace::numbered_test(7),
+    ] {
+        let blocks: BTreeSet<u128> = (0..REMOVAL_KEYS).map(|n| ns.filter_key(n)).collect();
+        let permits: Vec<u128> = (0..PERMIT_SLOTS)
+            .map(|i| ns.filter_key(PERMIT_BASE + i))
+            .collect();
+        let distinct: BTreeSet<u128> = permits.iter().copied().collect();
+        assert_eq!(distinct.len(), usize::from(PERMIT_SLOTS));
+        assert!(distinct.is_disjoint(&blocks));
+        for (i, key) in (0..PERMIT_SLOTS).zip(&permits) {
+            assert_eq!(permit_slot(&ns, *key), Some(i));
+        }
+        for key in &blocks {
+            assert_eq!(permit_slot(&ns, *key), None);
+        }
+    }
+}
+
+#[test]
+fn a_full_pool_of_256_users_gets_a_key_each_and_one_more_is_refused() {
+    let ns = Namespace::production();
+    let full: Vec<u32> = (2001..2257).collect();
+    let filters = setup(&full).filters(&ns);
+    assert_eq!(filters.len(), BLOCK_COUNT + usize::from(PERMIT_SLOTS));
+    let keys: BTreeSet<u128> = filters.iter().map(|f| f.key).collect();
+    assert_eq!(keys.len(), filters.len());
+    let last = filters.last().unwrap();
+    assert_eq!(last.key, ns.filter_key(PERMIT_BASE + 255));
+    assert_eq!(last.conditions[0], Condition::Users(vec![sid(2256)]));
+    let removal = ns.removal_keys();
+    assert_eq!(
+        removal.len(),
+        usize::from(REMOVAL_KEYS) + usize::from(PERMIT_SLOTS)
+    );
+    assert!(keys.iter().all(|key| removal.contains(key)));
+    let over: Vec<Sid> = (2001..2258).map(sid).collect();
+    assert_eq!(
+        NetworkSetup::new(&owner(), &group(), &over),
+        Err(SpecError::TooManyUsers(257))
     );
 }
 
@@ -374,18 +427,16 @@ fn a_launch_names_only_ports_in_the_range_and_never_any() {
     assert_eq!(any, Err(NetworkGap::LoopbackAny));
     let outside = permit_ports(&policy(&dir, &[46190], Loopback::Ports(vec![9222])));
     assert_eq!(outside, Err(NetworkGap::PortOutsideRange(9222)));
-    assert_eq!(checked_ports(&[46199, 46100]), Ok(vec![46100, 46199]));
-    for outside in [46099, 46200, 61080] {
+    assert_eq!(checked_ports(&[46399, 46100]), Ok(vec![46100, 46399]));
+    for outside in [46099, 46400, 61080] {
         assert_eq!(
             checked_ports(&[outside]),
             Err(NetworkGap::PortOutsideRange(outside))
         );
     }
-    assert!(
-        NetworkGap::PortOutsideRange(1)
-            .to_string()
-            .contains("46100-46199")
-    );
+    let range = format!("{}-{}", TIER_B_PORTS.start(), TIER_B_PORTS.end());
+    assert!(NetworkGap::PortOutsideRange(1).to_string().contains(&range));
+    assert_eq!(range, "46100-46399");
     assert_eq!(checked_ports(&[]), Ok(vec![]));
 }
 

@@ -1,5 +1,5 @@
 //! The rows (S15 PR7, orchestrator ruling 2026-11-07): set-up's blocks catch every pool token,
-//! derived ones included, everywhere outside 127.0.0.1:46100-46199; inside the range a static
+//! derived ones included, everywhere outside 127.0.0.1:46100-46399; inside the range a static
 //! permit lets every pool user reach every listener, and the listeners' per-launch secrets keep
 //! matters apart (those rows are `measured`); the owner may read set-up's filters and change
 //! none; a launch refuses a filter set-up didn't write and a listener in the range that isn't
@@ -77,7 +77,7 @@ pub(crate) fn status() -> Result<(), Box<dyn Error>> {
 }
 
 /// `foreign check`, as the desktop user: a launch's check must refuse, while another Windows
-/// user runs `listen <port in 46100-46199>` (a listener that isn't this app's) or after
+/// user runs `listen <port in 46100-46399>` (a listener that isn't this app's) or after
 /// `foreign add` (a filter set-up didn't write; does the owner's enumeration see it?).
 /// `foreign add` and `foreign remove`, elevated: that filter, persistent, in our sublayer.
 pub(crate) fn foreign(rest: &[String]) -> Result<(), Box<dyn Error>> {
@@ -241,7 +241,7 @@ fn matter_a_rows(p: &Ports, cred_a: &str, cred_b: &str, options: &Options) -> Ve
     rows
 }
 
-/// A's rows outside 127.0.0.1:46100-46199, where set-up's blocks must hold.
+/// A's rows outside 127.0.0.1:46100-46399, where set-up's blocks must hold.
 fn outside_rows(p: &Ports) -> Vec<Row> {
     use Expect::{Filtered, Measured, NotReached};
     let s = |text: &str| text.to_owned();

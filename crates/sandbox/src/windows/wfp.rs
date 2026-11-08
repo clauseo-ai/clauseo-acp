@@ -1,4 +1,4 @@
-//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 46100-46199
+//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 46100-46399
 //! (`ports::TIER_B_PORTS`), where its launch's egress proxy and listed ports are, and nothing
 //! else. Set-up and each launch check the machine's dynamic and excluded port ranges against
 //! it, and each launch the listeners in it ([`check_ports`]).

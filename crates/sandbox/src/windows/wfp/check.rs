@@ -8,8 +8,9 @@
 
 use super::spec::{
     Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, SUBLAYER_WEIGHT,
-    allowed_users, block_filters, denied_users, is_account, is_permit_key, permit_filter,
+    allowed_users, block_filters, denied_users, is_account, permit_filter, permit_slot,
 };
+use crate::ports::TIER_B_PORTS;
 use crate::windows::sids::Sid;
 
 /// Why a tier-B launch can't get its network filtered, so it is refused. The host maps each
@@ -38,9 +39,13 @@ pub enum NetworkGap {
     /// off on tier B).
     #[error("the sandbox can't give an agent every loopback port on this computer")]
     LoopbackAny,
-    /// The policy names a loopback port outside 46100-46199 (`TIER_B_PORTS`), which the
-    /// firewall blocks.
-    #[error("the sandbox can't permit loopback port {0}, outside 46100-46199")]
+    /// The policy names a loopback port outside `TIER_B_PORTS`, which the firewall blocks.
+    #[error(
+        "the sandbox can't permit loopback port {port}, outside {first}-{last}",
+        port = .0,
+        first = TIER_B_PORTS.start(),
+        last = TIER_B_PORTS.end(),
+    )]
     PortOutsideRange(u16),
     /// WFP couldn't be opened to check (the Base Filtering Engine isn't running, say).
     #[error("the sandbox couldn't check its network filters ({call} failed, error {code:#x})")]
@@ -57,9 +62,11 @@ pub enum NetworkGap {
     /// Windows' TCP dynamic port range (first and last port) overlaps `ports::TIER_B_PORTS`, so
     /// the OS can hand those ports to any program.
     #[error(
-        "Windows' dynamic port range ({first}-{last}) overlaps the sandbox's ports 46100-46199: \
-         IT can move it back to its default with \
-         `netsh int ipv4 set dynamicport tcp start=49152 num=16384`"
+        "Windows' dynamic port range ({first}-{last}) overlaps the sandbox's ports \
+         {range_first}-{range_last}: IT can move it back to its default with \
+         `netsh int ipv4 set dynamicport tcp start=49152 num=16384`",
+        range_first = TIER_B_PORTS.start(),
+        range_last = TIER_B_PORTS.end(),
     )]
     DynamicPortsOverlap {
         /// Its first port.
@@ -69,15 +76,20 @@ pub enum NetworkGap {
     },
     /// A port of `ports::TIER_B_PORTS` that Windows refuses to bind: an excluded port range.
     #[error(
-        "port {0} of the sandbox's ports 46100-46199 is reserved on this computer (Hyper-V, WSL \
-         and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
-         protocol=tcp`)"
+        "port {port} of the sandbox's ports {first}-{last} is reserved on this computer (Hyper-V, \
+         WSL and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
+         protocol=tcp`)",
+        port = .0,
+        first = TIER_B_PORTS.start(),
+        last = TIER_B_PORTS.end(),
     )]
     PortsReserved(u16),
     /// A TCP listener in `ports::TIER_B_PORTS` that isn't this app's: its port and its program.
     #[error(
         "another program ({program}) listens on port {port}, inside the sandbox's ports \
-         46100-46199, where a sandboxed agent could reach it"
+         {first}-{last}, where a sandboxed agent could reach it",
+        first = TIER_B_PORTS.start(),
+        last = TIER_B_PORTS.end(),
     )]
     ForeignListener {
         /// Its port.
@@ -310,14 +322,8 @@ pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
             _ => Kind::Foreign,
         };
     }
-    if !is_permit_key(ns, found.key) {
-        return Kind::Foreign;
-    }
-    let permit = (0u16..)
+    let users = permit_slot(ns, found.key)
         .map(|i| permit_filter(ns, i, &placeholder))
-        .take(usize::from(crate::windows::pool::POOL_CAP))
-        .find(|spec| spec.key == found.key);
-    let users = permit
         .as_ref()
         .and_then(|spec| shaped_like(found, spec, Match::Equal))
         .and_then(allowed_users);

@@ -1377,12 +1377,16 @@ leaves that profile, both naming the part.
 
 ### The network (PR7)
 
-`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46199,
+`crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46399,
 where its launch's egress proxy and listed ports are, and nothing else. Rulings: the
 orchestrator's of 2026-11-07 on the security review (no control grants, static permits, residuals,
-the range moved).
+the range moved). The range was widened to 300 ports (46100-46399) on 2026-11-08, for about 60
+tier-B sessions at once, each binding about two, and a pool of up to 256 users: each user's
+static permit keeps its key (`filters + 0x100 + index`, indices `0..256`), and the permit's remote
+ports change, so an install set up before this one is refused as `sandbox.setup_required` until
+set-up runs again, which empties the sublayer and rewrites the filters and the block rule in place.
 
-**The range** (`ports::TIER_B_PORTS`, 46100-46199) holds a tier-B launch's listeners and nothing
+**The range** (`ports::TIER_B_PORTS`, 46100-46399) holds a tier-B launch's listeners and nothing
 else: its proxy's agent listener and R24 relay (`ports::bind_loopback(ListenerFor::TierB)`,
 `ProxyConfig::listener`), and what a tier-B launch claims (`claim_port`, `claim_port_at`). A
 tier-C launch's listeners, and the proxy's browser listener on any tier (it takes no token), bind
@@ -1430,7 +1434,7 @@ item 1. The allows keep every other token out of the block: `Everyone`, `RESTRIC
 restricted token's second pass, and the two application package groups for `AppContainer` and LPAC
 apps. A non-pool restricted token whose restricting set holds neither `Everyone` nor `RESTRICTED`
 fails the second pass and is blocked too; the spike measures this collateral. Each static permit, at
-a weight above the blocks, is `127.0.0.1`, TCP, remote ports 46100-46199, with an `ALE_USER_ID`
+a weight above the blocks, is `127.0.0.1`, TCP, remote ports 46100-46399, with an `ALE_USER_ID`
 `EQUAL` allow for that one user: a derived token that escapes the allow loses the permit and falls
 to the block. Then come the owner's grants, **read-only, no control**: `READ|ENUM` on the filter
 container, and `READ` on our provider, sublayer and filters. There is no ADD, ADD_LINK, WRITE or
@@ -1441,7 +1445,7 @@ policy "System objects: Default owner for objects created by members of the Admi
 set to the creator would make the lawyer the owner). The disclosure is small: the lawyer's processes
 can enumerate the machine's WFP filters, which shows other products' filter metadata but gives no
 control. Last come four Windows Firewall rules naming the pool: block everything that isn't
-loopback, both ways; block loopback UDP; block loopback TCP outside 46100-46199. A re-run or an
+loopback, both ways; block loopback UDP; block loopback TCP outside 46100-46399. A re-run or an
 extend rewrites it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
 
 **Measured** (spike run 42351029777, branch `exp-wfp-denyonly` at `7d66a922b`, GitHub's
@@ -1489,13 +1493,13 @@ nothing:
 A foreign filter, a change, a missing object or a refused read refuses the launch with
 `Error::NetworkUnfiltered` (`sandbox.setup_required`; set-up deletes foreign filters). So do, with
 `agent.launch_failed`: `Loopback::Any` (D10: the browser is off on tier B), a port outside
-46100-46199, WFP not answering, or the range overlapped, reserved or held by a foreign listener. The
+46100-46399, WFP not answering, or the range overlapped, reserved or held by a foreign listener. The
 ports `Policy::proxy_ports` and `Loopback::Ports` name narrow nothing at the WFP layer, but are
 still checked to be inside the range, so a launch never counts on a port the firewall blocks. No
 agent runs unfiltered.
 
 **Inside the range, the listeners' secrets are the check.** Every pool user reaches every
-listener on `127.0.0.1:46100-46199`, other matters' included. S16's proxy demands its per-launch
+listener on `127.0.0.1:46100-46399`, other matters' included. S16's proxy demands its per-launch
 token, and R24's relay its token file. **Accepted risk:** a listener an agent makes in the range
 (or one it puts on another matter's listed port before that port is bound, review item 7; S16's
 `SO_EXCLUSIVEADDRUSE` is out of PR7's scope) is reachable from another matter's agent: a
@@ -1918,7 +1922,7 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   variables, travels in the launch file, never on the runner's command line. `Handle::pid()` is
   the outer runner's.
 - **What the host passes in the `Policy`:**
-  - the network as `Loopback::Ports` inside 46100-46199, from a `ListenerFor::TierB` proxy,
+  - the network as `Loopback::Ports` inside 46100-46399, from a `ListenerFor::TierB` proxy,
     never `Any`;
   - the agent's credentials file, through `Policy::credentials(path)`.
 

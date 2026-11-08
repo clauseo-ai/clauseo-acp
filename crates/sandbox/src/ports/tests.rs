@@ -19,7 +19,7 @@ fn a_full_range_names_itself_and_the_windows_reservations() {
     let error = range_exhausted(&last);
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     let text = error.to_string();
-    assert!(text.contains("46100..=46199"), "{text}");
+    assert!(text.contains("46100..=46399"), "{text}");
     assert!(text.contains("another program"), "{text}");
     assert!(
         text.contains("netsh int ipv4 show excludedportrange protocol=tcp"),
@@ -168,7 +168,7 @@ fn dropping_a_claim_frees_its_port() {
 #[cfg(windows)]
 #[test]
 fn claim_at_refuses_a_port_outside_the_tier_b_range() {
-    for port in [46_099, 46_200, 61_080, 80] {
+    for port in [46_099, 46_400, 61_080, 80] {
         let error = claim_port_at(port).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{port}: {error}");
     }
@@ -198,7 +198,7 @@ fn a_second_bind_with_reuseaddr_fails() {
 
 #[test]
 fn the_tier_b_range_is_below_the_dynamic_range_and_clear_of_known_listeners() {
-    assert_eq!(TIER_B_PORTS.len(), 100);
+    assert_eq!(TIER_B_PORTS.len(), 300);
     assert!(
         *TIER_B_PORTS.end() < 49_152,
         "Windows' default dynamic range starts at 49152"

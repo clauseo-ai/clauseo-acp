@@ -111,6 +111,17 @@ fn a_whole_set_up_passes_for_each_covered_user_only() {
 }
 
 #[test]
+fn a_full_pool_of_256_users_passes_for_the_last_one_too() {
+    let ns = Namespace::production();
+    let full: Vec<u32> = (2001..2257).collect();
+    let mut wfp = FakeWfp::installed(&ns, &full);
+    assert_eq!(check_setup(&ns, &sid(2001), &mut wfp), Ok(()));
+    assert_eq!(check_setup(&ns, &sid(2256), &mut wfp), Ok(()));
+    let last = wfp.filters[&ns.filter_key(PERMIT_BASE + 255)].clone();
+    assert_eq!(classify(&ns, &last), Kind::Permit(sid(2256)));
+}
+
+#[test]
 fn another_namespace_s_filters_are_foreign() {
     let mut wfp = FakeWfp::installed(&Namespace::production(), &[2001]);
     let refused = check_setup(&Namespace::test(), &sid(2001), &mut wfp);

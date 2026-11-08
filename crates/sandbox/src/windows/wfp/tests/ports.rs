@@ -59,10 +59,18 @@ fn an_overlapping_dynamic_range_refuses() {
         assert!(!refused.unwrap_err().needs_setup());
     }
     let next_to_it = PortsSeen {
-        dynamic: vec![dynamic_span(46_200, 3_000).unwrap(), (40_000, 46_099)],
+        dynamic: vec![dynamic_span(46_400, 3_000).unwrap(), (40_000, 46_099)],
         ..PortsSeen::default()
     };
     assert_eq!(ports_usable(&next_to_it, ours), Ok(()));
+    let inside = PortsSeen {
+        dynamic: vec![dynamic_span(46_390, 5).unwrap()],
+        ..PortsSeen::default()
+    };
+    assert!(matches!(
+        ports_usable(&inside, ours),
+        Err(NetworkGap::DynamicPortsOverlap { first: 46_390, .. })
+    ));
 }
 
 #[test]
@@ -78,10 +86,18 @@ fn an_excluded_port_in_the_range_refuses() {
         "{refused}"
     );
     let outside = PortsSeen {
-        reserved: vec![50_000, 46_099],
+        reserved: vec![50_000, 46_099, 46_400],
         ..default_range()
     };
     assert_eq!(ports_usable(&outside, ours), Ok(()));
+    let last = PortsSeen {
+        reserved: vec![46_399],
+        ..default_range()
+    };
+    assert_eq!(
+        ports_usable(&last, ours),
+        Err(NetworkGap::PortsReserved(46_399))
+    );
 }
 
 #[test]
@@ -91,6 +107,7 @@ fn a_listener_in_the_range_must_be_this_process_s() {
         listeners: vec![
             listener(46_100, 100, None),
             listener(46_101, 100, Some(app)),
+            listener(46_400, 300, Some(r"C:\Chrome\chrome.exe")),
             listener(9_222, 300, Some(r"C:\Chrome\chrome.exe")),
         ],
         ..default_range()

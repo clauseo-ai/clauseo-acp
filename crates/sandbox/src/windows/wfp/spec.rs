@@ -12,9 +12,9 @@
 //! action right. So:
 //! - set-up's block filters (weight [`BLOCK_WEIGHT`]) catch every token that holds a pool user's
 //!   SID or the pool group's, enabled or deny-only (`sddl.rs`), and block every connect, loopback
-//!   and 46100-46199 included, ICMP at resource assignment, and inbound that isn't loopback;
+//!   and 46100-46399 included, ICMP at resource assignment, and inbound that isn't loopback;
 //! - one static permit per pool user (weight [`PERMIT_WEIGHT`]) opens `127.0.0.1` over TCP on
-//!   46100-46199 for that user, and nothing else. Within the range the listeners' per-launch
+//!   46100-46399 for that user, and nothing else. Within the range the listeners' per-launch
 //!   secrets are the cross-matter check (orchestrator ruling, 2026-11-07);
 //! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback and
 //!   loopback TCP outside the range, a second cap on the permits.
@@ -28,7 +28,6 @@ pub use super::rules::{
 };
 pub use super::sddl::{allowed_users, denied_users, not_pool_sddl, user_sddl};
 use crate::ports::TIER_B_PORTS;
-use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
 use crate::{Loopback, Policy};
 
@@ -55,6 +54,14 @@ pub const PROTOCOL_ICMPV6: u8 = 58;
 /// The first static permit's offset from [`Namespace::filters`]: permit `i` (the `i`th pool user,
 /// sorted) is `filter_key(PERMIT_BASE + i)`.
 pub const PERMIT_BASE: u16 = 0x100;
+
+/// How many static permit keys the key space holds: one per pool index, `0..PERMIT_SLOTS`. So
+/// the permits sit at offsets `0x100` to `0x1FF` from [`Namespace::filters`]: clear of the block
+/// keys (below [`REMOVAL_KEYS`]) and of the owner probe's stray keys (`0x7F00` and up, in
+/// `grant_probe.rs`). Set-up refuses a pool with more users ([`SpecError::TooManyUsers`]), so no
+/// index runs past its slot. Raising [`POOL_CAP`](crate::windows::pool::POOL_CAP) to this or
+/// less needs no key change, and the keys of existing indices never change.
+pub const PERMIT_SLOTS: u16 = 256;
 
 /// Where tier B's WFP objects and firewall rules live: the real ones
 /// ([`Namespace::production`]), or a test's, so a test never touches a real set-up.
@@ -121,17 +128,19 @@ impl Namespace {
     }
 
     /// Every filter key set-up has ever written here: the block keys (with room for later
-    /// ones) and a permit key per pool user the record can hold. Removal and set-up delete them,
-    /// and every other filter in our sublayer too.
+    /// ones) and a permit key for every pool index ([`PERMIT_SLOTS`]). Removal and set-up delete
+    /// them, and every other filter in our sublayer too; a key nothing wrote is not found, which
+    /// is not an error.
     pub fn removal_keys(&self) -> Vec<u128> {
         let blocks = (0..REMOVAL_KEYS).map(|n| self.filter_key(n));
-        let permits = (0..u16::from(POOL_CAP)).map(|i| self.filter_key(PERMIT_BASE + i));
+        let permits = (0..PERMIT_SLOTS).map(|i| self.filter_key(PERMIT_BASE + i));
         blocks.chain(permits).collect()
     }
 }
 
-/// How many block filter keys removal deletes: today's [`BLOCKS`] and room for later ones.
-const REMOVAL_KEYS: u16 = 32;
+/// How many block filter keys removal deletes: today's [`BLOCKS`] and room for later ones. Below
+/// [`PERMIT_BASE`], so the two never share a key.
+pub(super) const REMOVAL_KEYS: u16 = 32;
 
 /// A WFP layer a filter sits at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -284,6 +293,10 @@ pub enum SpecError {
     /// network.
     #[error("the owner, {0}, is named as a sandbox user or group")]
     OwnerInPool(Sid),
+    /// More pool users than the key space has permit slots ([`PERMIT_SLOTS`]): a user past them
+    /// would have no key of its own.
+    #[error("{0} sandbox users is more than the network filters have keys for")]
+    TooManyUsers(usize),
 }
 
 /// Set-up's network step: who gets the read grants, the pool group, and the pool users.
@@ -330,6 +343,9 @@ impl NetworkSetup {
         sorted.dedup();
         if sorted.is_empty() {
             return Err(SpecError::NoPoolUser);
+        }
+        if sorted.len() > usize::from(PERMIT_SLOTS) {
+            return Err(SpecError::TooManyUsers(sorted.len()));
         }
         for sid in sorted.iter().chain(std::iter::once(group)) {
             if !is_account(sid) {
@@ -435,7 +451,8 @@ pub fn block_filters(ns: &Namespace, group: &Sid, pool: &[Sid]) -> Vec<FilterSpe
 pub const BLOCK_COUNT: usize = BLOCKS.len();
 
 /// The static permit for `user`, the `i`th pool user (sorted): `127.0.0.1` over TCP on
-/// [`TIER_B_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent.
+/// [`TIER_B_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent. `i` is below
+/// [`PERMIT_SLOTS`] for any pool [`NetworkSetup::new`] accepts.
 pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
     FilterSpec {
         key: ns.filter_key(PERMIT_BASE + i),
@@ -452,9 +469,9 @@ pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
     }
 }
 
-/// Whether `key` is one of the static permits' keys in `ns`.
-pub fn is_permit_key(ns: &Namespace, key: u128) -> bool {
-    (0..u16::from(POOL_CAP)).any(|i| ns.filter_key(PERMIT_BASE + i) == key)
+/// The pool index whose static permit has `key` in `ns`, when `key` is a permit slot.
+pub fn permit_slot(ns: &Namespace, key: u128) -> Option<u16> {
+    (0..PERMIT_SLOTS).find(|&i| ns.filter_key(PERMIT_BASE + i) == key)
 }
 
 /// Whether `sid` is an account's or a local group's: `S-1-5-21-<a>-<b>-<c>-<rid>`, never a
