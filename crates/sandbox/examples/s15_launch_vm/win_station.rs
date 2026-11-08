@@ -14,6 +14,7 @@
 
 use std::ffi::c_void;
 
+use windows::Wdk::Foundation::{NtQueryObject, OBJECT_INFORMATION_CLASS, OBJECT_NAME_INFORMATION};
 use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_WINDOW_OBJECT,
@@ -28,16 +29,20 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW, DESKTOP_CONTROL_FLAGS,
-    GetProcessWindowStation, GetUserObjectInformationW, HDESK, HWINSTA, OpenWindowStationW,
-    SetProcessWindowStation, UOI_NAME,
+    GetProcessWindowStation, HDESK, HWINSTA, OpenWindowStationW, SetProcessWindowStation,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
 use super::win::{Owned, code_of};
 
-/// A failure: the call and its Win32 code.
+/// A failure: the call and its Win32 code (an NTSTATUS for `NtQueryObject`).
 type Failed = (&'static str, u32);
+
+/// `ObjectNameInformation`.
+const OBJECT_NAME: OBJECT_INFORMATION_CLASS = OBJECT_INFORMATION_CLASS(1);
+/// `ERROR_INVALID_DATA`: an object name that isn't a station's path.
+const INVALID_DATA: u32 = 13;
 
 /// What the maker's logon asks for on the station it makes, and what the creation DACL grants
 /// `OWNER RIGHTS` (the maker owns it then): `READ_CONTROL` alone, as the runner's.
@@ -193,28 +198,44 @@ impl Drop for Reverting {
     }
 }
 
-/// The station's name (`UOI_NAME`).
+/// The station's name: its object path's last component, from `NtQueryObject` (`UOI_NAME` needs
+/// `WINSTA_READATTRIBUTES`, which `MAKE_RIGHTS` leaves out). The same as the runner's
+/// (`src/windows/runner/desktop.rs`).
 fn name_of(station: HWINSTA) -> Result<String, Failed> {
-    let mut buffer = [0u16; 256];
-    let len = u32::try_from(size_of_val(&buffer)).unwrap_or(0);
-    // SAFETY: the handle is live; `buffer` is writable for `len` bytes.
-    unsafe {
-        GetUserObjectInformationW(
-            HANDLE(station.0),
-            UOI_NAME,
+    let call = "NtQueryObject";
+    let mut buffer = vec![0u64; 1024];
+    let len = u32::try_from(size_of_val(buffer.as_slice())).unwrap_or(0);
+    // SAFETY: the handle is live; `buffer` is writable for `len` bytes and aligned for an
+    // OBJECT_NAME_INFORMATION.
+    let status = unsafe {
+        NtQueryObject(
+            Some(HANDLE(station.0)),
+            OBJECT_NAME,
             Some(buffer.as_mut_ptr().cast::<c_void>()),
             len,
             None,
         )
+    };
+    if status.0 < 0 {
+        return Err((call, status.0.cast_unsigned()));
     }
-    .map_err(|e| ("GetUserObjectInformationW", code_of(&e)))?;
-    let end = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    Ok(String::from_utf16_lossy(
-        buffer.get(..end).unwrap_or_default(),
-    ))
+    // SAFETY: the call wrote an OBJECT_NAME_INFORMATION at the start of `buffer`; its string
+    // points into `buffer`.
+    let info = unsafe { &*buffer.as_ptr().cast::<OBJECT_NAME_INFORMATION>() };
+    let units = usize::from(info.Name.Length) / 2;
+    if units == 0 || info.Name.Buffer.is_null() {
+        return Err((call, INVALID_DATA));
+    }
+    // SAFETY: `Length` bytes of UTF-16 at `Buffer`, inside `buffer`, which is still live.
+    let wide = unsafe { std::slice::from_raw_parts(info.Name.Buffer.0, units) };
+    let path = String::from_utf16_lossy(wide);
+    let after = path
+        .rsplit_once(r"\WindowStations\")
+        .map(|(_, name)| name)
+        .filter(|name| !name.is_empty() && !name.contains('\\'));
+    after
+        .map(str::to_owned)
+        .ok_or(("NtQueryObject", INVALID_DATA))
 }
 
 /// Makes the desktop `Default` on `station` with `descriptor`, this process switched to it for

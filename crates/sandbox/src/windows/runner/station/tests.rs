@@ -296,3 +296,41 @@ fn a_runner_desktop_is_only_ever_default_on_an_unnamed_station() {
         assert_eq!(StationDesktop::of(not), None, "{not}");
     }
 }
+
+#[test]
+fn a_station_name_is_the_last_component_of_its_object_path() {
+    let path = r"\Sessions\1\Windows\WindowStations\Service-0x0-311a3$";
+    assert_eq!(station_name_of_path(path), Ok("Service-0x0-311a3$"));
+    assert_eq!(
+        station_name_of_path(r"\Windows\WindowStations\Service-0x1-ffff$"),
+        Ok("Service-0x1-ffff$")
+    );
+    let name = station_name_of_path(path).unwrap();
+    assert!(name.ends_with('$'));
+    assert!(StationDesktop::of(name).is_some());
+}
+
+#[test]
+fn a_station_name_path_without_the_window_stations_part_is_refused() {
+    for not in [
+        "",
+        "Service-0x0-311a3$",
+        r"\Sessions\1\Windows\Service-0x0-311a3$",
+        r"\Sessions\1\Windows\WindowStations",
+        r"\Sessions\1\Windows\WindowStations\\Service-0x0-311a3$",
+        r"\Sessions\1\WindowStations-old\Service-0x0-311a3$",
+    ] {
+        assert!(station_name_of_path(not).is_err(), "{not}");
+    }
+}
+
+#[test]
+fn a_station_name_path_with_no_name_or_a_deeper_one_is_refused() {
+    for not in [
+        r"\Sessions\1\Windows\WindowStations\",
+        r"\Sessions\1\Windows\WindowStations\Service-0x0-311a3$\Default",
+        r"\Sessions\1\Windows\WindowStations\Service-0x0-311a3$\",
+    ] {
+        assert!(station_name_of_path(not).is_err(), "{not}");
+    }
+}
