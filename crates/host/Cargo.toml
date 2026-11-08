@@ -70,8 +70,7 @@ rustix = { workspace = true, features = ["fs"] }
 # user database.
 nix = { workspace = true, features = ["user"] }
 
-# The denial checks' remote mount list (actor/turn/denials/network/mac.rs) and the network path
-# checks' (network_paths/mac.rs): getfsstat.
+# The network path checks' remote mount list (network_paths/mac.rs): getfsstat.
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 

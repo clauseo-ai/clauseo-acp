@@ -1,7 +1,8 @@
 //! The tool-call source (all OSes; the only one on Windows today): a tool call that ends
 //! `failed` with an access-denied message, on a path outside the jail, is read as a refusal.
-//! Informative only: the offer rules still decide, and it dedupes with an OS report of the
-//! same kind and target in the turn. A later PR swaps [`says_access_denied`] for the sandbox's
+//! Its path and its message are the agent's own words, so the offer rules' card is cut down by
+//! the ruling (`offer/ruling.rs`): another matter only when an OS report confirms it, otherwise
+//! one file the launch would deny. A later PR swaps [`says_access_denied`] for the sandbox's
 //! `Launchers::would_deny`.
 
 use clauseo_protocol::{

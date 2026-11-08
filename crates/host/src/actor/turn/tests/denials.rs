@@ -1,7 +1,8 @@
 //! Denials on the turn path with a real `fake_agent`: a failed tool call with "Access is denied"
-//! outside the jail gives one `DenialRecorded` (source `tool_call`) that a sandbox report of the
-//! same path only counts; a failure inside the jail, or for another reason, gives none; three
-//! refusals pause the turn once; the block list is left to its own path; `DismissDenial`.
+//! outside the jail gives one `DenialRecorded` (source `tool_call`), a one-file card, and a
+//! sandbox report of the same path its folder's card; a failure inside the jail, or for another
+//! reason, gives none; three refusals pause the turn once; a flood runs two checks at once and
+//! counts the rest; the block list is left to its own path; `DismissDenial`.
 
 use std::path::PathBuf;
 
@@ -14,6 +15,7 @@ use clauseo_sandbox::{Access, Denial, DenialSink, HostRefusal, PathClass};
 use super::agents::send_prompt;
 use super::rig::{Rig, kind};
 use crate::actor::turn::TurnPhase;
+use crate::actor::turn::denials::MAX_IN_FLIGHT;
 use crate::actor::turn::denials::feed::DenialFeed;
 use crate::config::SessionKey;
 
@@ -124,7 +126,7 @@ fn turn_ended(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<StopReaso
 }
 
 #[test]
-fn a_failed_tool_call_outside_the_jail_is_one_card_a_sandbox_repeat_counts() {
+fn a_failed_tool_call_outside_the_jail_is_one_file_the_sandbox_gives_its_folder() {
     let path = outside("tool-call");
     let steps = failing_call(
         &path.display().to_string(),
@@ -145,10 +147,11 @@ fn a_failed_tool_call_outside_the_jail_is_one_card_a_sandbox_repeat_counts() {
     );
     let folder = dunce::canonicalize(std::env::temp_dir()).unwrap();
     let folder = folder.join(path.parent().unwrap().file_name().unwrap());
+    // The agent's own words: one file, never its folder (the ruling on tool-call cards).
     assert_eq!(
         first.kind,
-        DenialKind::Folder {
-            path: folder.display().to_string(),
+        DenialKind::File {
+            path: folder.join("notes.docx").display().to_string(),
             other_matter: None
         }
     );
@@ -157,14 +160,24 @@ fn a_failed_tool_call_outside_the_jail_is_one_card_a_sandbox_repeat_counts() {
         (Some(turn), true, 1)
     );
 
-    // The OS reports the same file: the same card, counted.
+    // The OS reports the same file: its folder's card, offered.
     feed(&rig, thread, DenialSource::Sandbox).denied(path_denial(path, PathClass::Outside));
-    until_cards(&mut rig, thread, 1, 2);
+    until_cards(&mut rig, thread, 2, 2);
     let both = recorded(&mut rig, thread);
-    let [_, again] = both.as_slice() else {
+    let [_, os] = both.as_slice() else {
         panic!("{both:?}");
     };
-    assert_eq!((again.denial, again.count), (first.denial, 2));
+    assert_eq!(
+        (&os.kind, os.offered, &os.source),
+        (
+            &DenialKind::Folder {
+                path: folder.display().to_string(),
+                other_matter: None
+            },
+            true,
+            &DenialSource::Sandbox
+        )
+    );
 
     // Dismissed: logged with its receipt. A denial the thread does not hold is refused.
     let dismiss = HostCommand::DismissDenial {
@@ -300,6 +313,42 @@ fn three_refusals_in_a_row_pause_the_turn_once() {
         turn_ended(&mut rig, thread, turn),
         Some(StopReason::Cancelled)
     );
+    rig.finish();
+}
+
+#[test]
+fn a_flood_runs_two_checks_at_once_and_counts_the_rest() {
+    let mut rig = Rig::start("denial-flood", &waiting());
+    let thread = rig.thread();
+    let turn = send_prompt(&mut rig, 10, thread);
+    until_prompting(&mut rig, thread);
+    // Read-only refusals: not counted at the intake, so only the dropped checks count.
+    let sink = feed(&rig, thread, DenialSource::Sandbox);
+    let base = outside("flood");
+    for n in 0..8 {
+        let path = base.with_file_name(format!("f{n}")).join("x.docx");
+        sink.denied(path_denial(path, PathClass::ReadOnly));
+    }
+    let mut most = 0;
+    rig.run_until("the turn's end", |actor| {
+        most = most.max(actor.denials.in_flight(thread));
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none() && state.closing.is_none() && actor.work.commits == 0
+    });
+    assert_eq!(most, MAX_IN_FLIGHT);
+    let log = rig.log(thread);
+    let paused: Vec<_> = log
+        .iter()
+        .filter_map(|event| {
+            let DomainEvent::DenialsPaused(paused) = event else {
+                return None;
+            };
+            Some((paused.turn, paused.refused))
+        })
+        .collect();
+    assert_eq!(paused, vec![(turn, 3)]);
+    let cards = recorded(&mut rig, thread);
+    assert!(cards.len() <= MAX_IN_FLIGHT, "{cards:?}");
     rig.finish();
 }
 

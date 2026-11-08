@@ -1,5 +1,7 @@
-//! What a denial's card may offer (R18): one pure function, [`offer`], over canonical paths,
-//! run when the card is logged and again (3b) when the lawyer allows it.
+//! What a denial's card may offer (R18): one pure function, [`offer`], over canonical paths
+//! pinned by identity ([`identity::Places::pin`]: a respelling of home, a matter or `.ssh` is
+//! judged as that place), run when the card is logged and again (3b) when the lawyer allows it.
+//! A tool call's card is cut down further by [`tool_call_ruling`].
 //!
 //! - Never offered: the home folder or a folder holding it, a root (`/`, a drive), Clauseo's
 //!   data folder, a refused folder or tree (the firm's, the host's), a path with a `.git` or any
@@ -8,7 +10,7 @@
 //!   `LinkTarget`, and a site refused for anything but `NotAllowed` (`PrivateAddress` above all).
 //! - Another matter (matched against the registry): the asked path alone, read-only, never its
 //!   root and never anything under its dot folders (`.clauseo`, `.claude`, `.codex`, `.agents`,
-//!   `.git`).
+//!   `.git`: [`names::refused_in_other_matter`]).
 //! - A file whose folder is never offered (one directly in home): a card for that file alone,
 //!   unless the file itself falls under a rule above.
 //!
@@ -22,12 +24,13 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_protocol::{DenialKind, MatterId, OtherMatter};
 use clauseo_sandbox::{HostRefusal, PathClass};
 
-use unicode_normalization::UnicodeNormalization as _;
-
-use super::network::NetEnv;
-
+pub(crate) mod identity;
+pub(crate) mod names;
+mod ruling;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use ruling::{Facts, Jail, facts, tool_call_ruling};
 
 /// Folder names that hold keys and passwords where the name has no leading dot: macOS
 /// keychains, the Linux keyrings, Windows' credential, protect and vault stores. Compared
@@ -148,6 +151,7 @@ fn path_offer(rules: &OfferRules, path: &Path, is_file: bool, class: PathClass) 
         let class_ok = matches!(class, PathClass::Outside | PathClass::Hidden);
         let offered = class_ok
             && !rules.same(path, &other.root)
+            && !OfferRules::in_refused_of(path, &other.root)
             && !rules.never(path)
             && !rules.overlaps_this_matter(path);
         let kind = if is_file {
@@ -194,8 +198,21 @@ fn path_offer(rules: &OfferRules, path: &Path, is_file: bool, class: PathClass) 
 }
 
 impl OfferRules {
+    /// Whether `path` is in one of `root`'s folders never offered in another matter (`.git`,
+    /// `.clauseo`, `.claude`, `.codex`, `.agents`), by name folded.
+    fn in_refused_of(path: &Path, root: &Path) -> bool {
+        let depth = root.components().count();
+        path.components().skip(depth).any(|c| match c {
+            Component::Normal(name) => names::refused_in_other_matter(name),
+            Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir => false,
+        })
+    }
+
     /// The other matter `path` is in (the innermost, when matters nest), if any.
-    fn other_matter(&self, path: &Path) -> Option<&KnownMatter> {
+    pub(crate) fn other_matter(&self, path: &Path) -> Option<&KnownMatter> {
         self.matters
             .iter()
             .filter(|known| known.id != self.matter && self.under(path, &known.root))
@@ -221,7 +238,7 @@ impl OfferRules {
     /// The rules no path passes, whatever it is: a root, the data folder or a refused tree (at
     /// or inside), a dot-named component (`.git`, `.ssh`, another matter's `.claude`), a
     /// credential store, or the home folder itself.
-    fn never(&self, path: &Path) -> bool {
+    pub(crate) fn never(&self, path: &Path) -> bool {
         is_root(path)
             || self.overlap(path, &self.data_dir)
             || self.refused.iter().any(|r| self.under(path, r))
@@ -231,11 +248,10 @@ impl OfferRules {
                 .is_some_and(|home| self.same(path, home))
             || path.components().any(|c| match c {
                 Component::Normal(name) => {
-                    let name = fold_name(&name.to_string_lossy());
-                    name.starts_with('.')
+                    fold_name(&name.to_string_lossy()).starts_with('.')
                         || CREDENTIAL_STORES
                             .iter()
-                            .any(|store| name == fold_name(store))
+                            .any(|store| names::name_folds_to(name, store))
                 }
                 Component::Prefix(_)
                 | Component::RootDir
@@ -244,7 +260,7 @@ impl OfferRules {
             })
     }
 
-    fn overlaps_this_matter(&self, path: &Path) -> bool {
+    pub(crate) fn overlaps_this_matter(&self, path: &Path) -> bool {
         self.overlap(path, &self.matter_root)
     }
 
@@ -257,17 +273,17 @@ impl OfferRules {
         a.components().count() == b.components().count() && self.under(a, b)
     }
 
-    fn under(&self, path: &Path, prefix: &Path) -> bool {
+    pub(crate) fn under(&self, path: &Path, prefix: &Path) -> bool {
         under(path, prefix, self.fold_case)
     }
 
     /// The rules with every path made canonical (on the disk: off the actor), where it
     /// resolves, and the home folder left out of the refused list. These are the host's own
-    /// paths, not the agent's; one that names a network location (a matter on a share) is
-    /// still kept as written, so a check never signs in to a share.
-    pub(crate) fn canonical(self, net: &NetEnv) -> Self {
+    /// paths, not the agent's; one `is_network` calls a network location (a matter on a share)
+    /// is still kept as written, so a check never signs in to a share.
+    pub(crate) fn canonical(self, is_network: &dyn Fn(&Path) -> bool) -> Self {
         let fold = |p: PathBuf| {
-            if net.is_network(&p) {
+            if is_network(&p) {
                 p
             } else {
                 dunce::canonicalize(&p).unwrap_or(p)
@@ -325,23 +341,13 @@ fn is_root(path: &Path) -> bool {
     path.parent().is_none()
 }
 
-/// `name` case-folded for comparing names on a path: lower case, plus the two characters whose
-/// simple case fold is an ASCII letter though their lower case is not (APFS and NTFS's upcase
-/// table fold them too): `ſ` (U+017F) to `s` and the Kelvin sign `K` (U+212A) to `k`. So
-/// `.clauſeo` is `.clauseo` and `\u{212A}eychains` is `keychains`. Used for every refused name,
-/// on every system: it only ever matches more. Both sides go to NFD first, as APFS compares
-/// names, so a name typed composed matches one stored decomposed.
+/// `name` folded for comparing names on a path: `crate::network_paths::fold_name` (#766: stage
+/// C's table, then NFD and lower case), one fold for every name and mount compare. Used for
+/// every refused name, on every system: it only ever matches more. Host switches to
+/// `clauseo_sandbox`'s export once #735 lands.
 pub(crate) fn fold_name(name: &str) -> String {
-    let folded: String = name
-        .nfd()
-        .flat_map(|c| match c {
-            '\u{17F}' => 's'.to_lowercase(),
-            '\u{212A}' => 'k'.to_lowercase(),
-            other => other.to_lowercase(),
-        })
-        .collect();
-    folded.nfd().collect()
+    crate::network_paths::fold_name(name)
 }
 
 /// Folds the case of names on the volumes that ignore it: macOS and Windows.
-pub(crate) const FOLD_CASE: bool = cfg!(any(target_os = "macos", windows));
+pub(crate) use crate::network_paths::FOLD_CASE;

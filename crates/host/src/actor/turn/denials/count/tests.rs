@@ -6,7 +6,11 @@ use std::time::Duration;
 use clauseo_protocol::{DenialId, DenialKind, ThreadId, ToolCallId, TurnId};
 use uuid::Uuid;
 
-use super::{Admitted, DENIALS_PER_WINDOW, Denials, MAX_CARDS_PER_TURN, PAUSE_IN_TURN, Recorded};
+use super::{
+    Admitted, DENIALS_PER_WINDOW, Denials, MAX_CARDS_PER_TURN, PAUSE_IN_TURN, Rate, Record,
+    Recorded,
+};
+use crate::actor::turn::denials::offer::identity::Target;
 use crate::error::Error;
 
 fn v7(n: u64) -> Uuid {
@@ -51,27 +55,59 @@ impl Minter {
     }
 }
 
+/// Records an offered card of `kind` from the OS, its target its text.
+fn put(
+    denials: &mut Denials,
+    t: ThreadId,
+    (turn, running): (Option<TurnId>, Option<TurnId>),
+    kind: &DenialKind,
+    minter: &mut Minter,
+) -> Recorded {
+    let text = match kind {
+        DenialKind::Folder { path, .. } | DenialKind::File { path, .. } => path.clone(),
+        DenialKind::Site { .. } | DenialKind::UpstreamAuth { .. } | DenialKind::Unknown { .. } => {
+            String::new()
+        }
+    };
+    let card = Target::text(&text, false);
+    let record = Record {
+        kind,
+        offered: true,
+        card: &card,
+        asked: Some(&card),
+        os: true,
+    };
+    denials
+        .record(t, turn, running, record, minter.mint())
+        .unwrap()
+        .0
+}
+
 #[test]
 fn at_most_twenty_a_second_pass_the_intake() {
     let mut denials = Denials::default();
     let (t, now) = (thread(1), Duration::from_secs(10));
     // Not counted toward the pause, so the cap alone decides.
     let passed = (0..30)
-        .filter(|_| denials.admit(t, Some(turn(1)), now, 0, true).pass)
+        .filter(|_| denials.admit(t, Some(turn(1)), now, 0, Rate::Counted).pass)
         .count();
     assert_eq!(passed, DENIALS_PER_WINDOW as usize);
     // A second later the window starts again.
     let later = now + Duration::from_secs(1);
-    assert!(denials.admit(t, Some(turn(1)), later, 0, true).pass);
+    assert!(
+        denials
+            .admit(t, Some(turn(1)), later, 0, Rate::Counted)
+            .pass
+    );
     // Another thread has its own window.
-    assert!(denials.admit(thread(2), None, now, 0, true).pass);
+    assert!(denials.admit(thread(2), None, now, 0, Rate::Counted).pass);
 }
 
 #[test]
 fn three_counted_in_a_row_pause_once() {
     let mut denials = Denials::default();
     let t = thread(1);
-    let admit = |d: &mut Denials, counted| d.admit(t, Some(turn(1)), MS, counted, true);
+    let admit = |d: &mut Denials, counted| d.admit(t, Some(turn(1)), MS, counted, Rate::Counted);
     assert_eq!(admit(&mut denials, 1).pause, None);
     // A read-only refusal inside the matter is not counted.
     assert_eq!(admit(&mut denials, 0).pause, None);
@@ -86,7 +122,7 @@ fn three_counted_in_a_row_pause_once() {
     // Once per turn.
     assert_eq!(admit(&mut denials, 1).pause, None);
     // The next turn counts afresh.
-    let next = denials.admit(t, Some(turn(2)), MS, 1, true);
+    let next = denials.admit(t, Some(turn(2)), MS, 1, Rate::Counted);
     assert_eq!(next.pause, None);
 }
 
@@ -94,7 +130,10 @@ fn three_counted_in_a_row_pause_once() {
 fn no_turn_never_pauses() {
     let mut denials = Denials::default();
     for _ in 0..5 {
-        assert_eq!(denials.admit(thread(1), None, MS, 1, true).pause, None);
+        assert_eq!(
+            denials.admit(thread(1), None, MS, 1, Rate::Counted).pause,
+            None
+        );
     }
 }
 
@@ -102,18 +141,21 @@ fn no_turn_never_pauses() {
 fn a_clean_completed_tool_call_starts_in_a_row_again() {
     let mut denials = Denials::default();
     let (t, tu) = (thread(1), turn(1));
-    denials.admit(t, Some(tu), MS, 1, true);
-    denials.admit(t, Some(tu), MS, 1, true);
+    denials.admit(t, Some(tu), MS, 1, Rate::Counted);
+    denials.admit(t, Some(tu), MS, 1, Rate::Counted);
     // The call that saw the denials ends: it may have been theirs, so the run goes on.
     denials.tool_ended(t, tu, true);
     // A failed call closes the span without starting again.
     denials.tool_ended(t, tu, false);
     // A call completed with no denial since the last end: in a row starts again.
     denials.tool_ended(t, tu, true);
-    assert_eq!(denials.admit(t, Some(tu), MS, 1, true).pause, None);
-    assert_eq!(denials.admit(t, Some(tu), MS, 1, true).pause, None);
+    assert_eq!(denials.admit(t, Some(tu), MS, 1, Rate::Counted).pause, None);
+    assert_eq!(denials.admit(t, Some(tu), MS, 1, Rate::Counted).pause, None);
     // 5 in the turn, 3 in a row now.
-    assert_eq!(denials.admit(t, Some(tu), MS, 1, true).pause, Some((tu, 5)));
+    assert_eq!(
+        denials.admit(t, Some(tu), MS, 1, Rate::Counted).pause,
+        Some((tu, 5))
+    );
 }
 
 #[test]
@@ -122,7 +164,7 @@ fn twenty_in_a_turn_pause_even_when_not_in_a_row() {
     let (t, tu) = (thread(1), turn(1));
     let mut paused = None;
     for n in 1..=PAUSE_IN_TURN {
-        let admitted = denials.admit(t, Some(tu), MS * n, 1, true);
+        let admitted = denials.admit(t, Some(tu), MS * n, 1, Rate::Counted);
         if admitted.pause.is_some() {
             paused = Some((n, admitted.pause));
             break;
@@ -140,7 +182,7 @@ fn twenty_in_a_turn_pause_even_when_not_in_a_row() {
 fn a_dropped_count_adds_to_the_pause_and_is_not_rated() {
     let mut denials = Denials::default();
     let (t, tu) = (thread(1), turn(1));
-    let admitted = denials.admit(t, Some(tu), MS, 25, false);
+    let admitted = denials.admit(t, Some(tu), MS, 25, Rate::Unrated);
     assert_eq!(
         admitted,
         Admitted {
@@ -155,23 +197,24 @@ fn denials_past_the_cap_still_count_toward_the_pause() {
     let mut denials = Denials::default();
     let (t, tu) = (thread(1), turn(1));
     for _ in 0..DENIALS_PER_WINDOW {
-        denials.admit(t, Some(tu), MS, 0, true);
+        denials.admit(t, Some(tu), MS, 0, Rate::Counted);
     }
-    let over = denials.admit(t, Some(tu), MS, 1, true);
+    let over = denials.admit(t, Some(tu), MS, 1, Rate::Counted);
     assert!(!over.pass);
-    denials.admit(t, Some(tu), MS, 1, true);
-    assert_eq!(denials.admit(t, Some(tu), MS, 1, true).pause, Some((tu, 3)));
+    denials.admit(t, Some(tu), MS, 1, Rate::Counted);
+    assert_eq!(
+        denials.admit(t, Some(tu), MS, 1, Rate::Counted).pause,
+        Some((tu, 3))
+    );
 }
 
 #[test]
-fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
+fn a_repeat_grows_its_count_a_new_turn_gives_a_new_card_a_late_one_joins_its_turn() {
     let mut denials = Denials::default();
     let mut minter = Minter(0);
     let (t, tu) = (thread(1), turn(1));
     let deals = folder("/home/a/Deals");
-    let first = denials
-        .record(t, Some(tu), Some(tu), &deals, minter.mint())
-        .unwrap();
+    let first = put(&mut denials, t, (Some(tu), Some(tu)), &deals, &mut minter);
     assert_eq!(
         first,
         Recorded::Log {
@@ -179,9 +222,7 @@ fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
             count: 1
         }
     );
-    let again = denials
-        .record(t, Some(tu), Some(tu), &deals, minter.mint())
-        .unwrap();
+    let again = put(&mut denials, t, (Some(tu), Some(tu)), &deals, &mut minter);
     assert_eq!(
         again,
         Recorded::Log {
@@ -189,9 +230,13 @@ fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
             count: 2
         }
     );
-    let other = denials
-        .record(t, Some(tu), Some(tu), &folder("/srv"), minter.mint())
-        .unwrap();
+    let other = put(
+        &mut denials,
+        t,
+        (Some(tu), Some(tu)),
+        &folder("/srv"),
+        &mut minter,
+    );
     assert_eq!(
         other,
         Recorded::Log {
@@ -199,9 +244,13 @@ fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
             count: 1
         }
     );
-    let next = denials
-        .record(t, Some(turn(2)), Some(turn(2)), &deals, minter.mint())
-        .unwrap();
+    let next = put(
+        &mut denials,
+        t,
+        (Some(turn(2)), Some(turn(2))),
+        &deals,
+        &mut minter,
+    );
     assert_eq!(
         next,
         Recorded::Log {
@@ -209,20 +258,28 @@ fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
             count: 1
         }
     );
-    // A late check for the earlier turn gets a card of its own and changes nothing kept.
-    let late = denials
-        .record(t, Some(tu), Some(turn(2)), &deals, minter.mint())
-        .unwrap();
+    // A late check for the ended turn goes to that turn's card, deduped there.
+    let late = put(
+        &mut denials,
+        t,
+        (Some(tu), Some(turn(2))),
+        &deals,
+        &mut minter,
+    );
     assert_eq!(
         late,
         Recorded::Log {
-            denial: denial(4),
-            count: 1
+            denial: denial(1),
+            count: 3
         }
     );
-    let kept = denials
-        .record(t, Some(turn(2)), Some(turn(2)), &deals, minter.mint())
-        .unwrap();
+    let kept = put(
+        &mut denials,
+        t,
+        (Some(turn(2)), Some(turn(2))),
+        &deals,
+        &mut minter,
+    );
     assert_eq!(
         kept,
         Recorded::Log {
@@ -230,6 +287,16 @@ fn a_repeat_grows_its_count_and_a_new_turn_gives_a_new_card() {
             count: 2
         }
     );
+    // One older than the last ended turn is not recorded.
+    let _ = denials.admit(t, Some(turn(3)), MS, 0, Rate::Unrated);
+    let stale = put(
+        &mut denials,
+        t,
+        (Some(tu), Some(turn(3))),
+        &deals,
+        &mut minter,
+    );
+    assert_eq!(stale, Recorded::Stale);
 }
 
 #[test]
@@ -239,15 +306,11 @@ fn a_turn_records_at_most_its_cap_of_cards() {
     let (t, tu) = (thread(1), turn(1));
     for n in 0..MAX_CARDS_PER_TURN {
         let kind = folder(&format!("/srv/{n}"));
-        let got = denials
-            .record(t, Some(tu), Some(tu), &kind, minter.mint())
-            .unwrap();
+        let got = put(&mut denials, t, (Some(tu), Some(tu)), &kind, &mut minter);
         assert!(matches!(got, Recorded::Log { count: 1, .. }));
     }
-    let over = |d: &mut Denials, m: &mut Minter| {
-        d.record(t, Some(tu), Some(tu), &folder("/srv/over"), m.mint())
-            .unwrap()
-    };
+    let over =
+        |d: &mut Denials, m: &mut Minter| put(d, t, (Some(tu), Some(tu)), &folder("/srv/over"), m);
     assert_eq!(
         over(&mut denials, &mut minter),
         Recorded::Capped { first: true }
@@ -257,9 +320,13 @@ fn a_turn_records_at_most_its_cap_of_cards() {
         Recorded::Capped { first: false }
     );
     // A repeat of a kept card still counts.
-    let repeat = denials
-        .record(t, Some(tu), Some(tu), &folder("/srv/0"), minter.mint())
-        .unwrap();
+    let repeat = put(
+        &mut denials,
+        t,
+        (Some(tu), Some(tu)),
+        &folder("/srv/0"),
+        &mut minter,
+    );
     assert!(matches!(repeat, Recorded::Log { count: 2, .. }));
 }
 
@@ -275,3 +342,5 @@ fn watched_calls_keep_their_paths_until_unwatched() {
     denials.watch(t, tu, call(2), ["/c".to_owned()]);
     assert_eq!(denials.unwatch(t, turn(2), call(2)), Vec::<String>::new());
 }
+
+mod intake;
