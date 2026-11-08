@@ -45,7 +45,8 @@ const TITLE: &str = "Settings";
 const MENU_ID: &str = "settings";
 
 /// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
-/// and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+/// and banner open Connectors; R17: UC's first-run button opens Protection; R18: the matter
+/// menu's "Remembered answers…" opens Remembered answers). Closed, as the app
 /// asked: a value the build does not know is refused when the command's arguments decode, never
 /// ignored, and a new section is added here together with the page that shows it (ADR 0002's
 /// rule for commands, which a webview sends).
@@ -58,14 +59,19 @@ pub(crate) enum SettingsSection {
     /// The Protection section: the sandbox's state, its set-up and removal (decision record
     /// 0051). The page is the app's.
     Protection,
+    /// The Remembered answers section (R18): each matter's kept answers to the native dialogs,
+    /// with Forget. The page is the app's (`ui/app/src/settings/sections/allowances.tsx`).
+    RememberedAnswers,
 }
 
 impl SettingsSection {
-    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`.
+    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`,
+    /// `settings.html#allowances` (the section's id in the page's `sections.tsx`).
     fn fragment(self) -> &'static str {
         match self {
             Self::Connectors => "connectors",
             Self::Protection => "protection",
+            Self::RememberedAnswers => "allowances",
         }
     }
 }

@@ -7,8 +7,7 @@
 // `unprotected_auto_allowed`); the host refuses it then anyway, and a refusal's words stand on the
 // row's note line until the next press (a switch-off refused with `sandbox.required` says its own
 // line, not the start-up words). "Remembered answers…", while the matter has any (its header on
-// the matter's stream, held only while the menu is open), opens Settings at the Safe workspace: the wire's SettingsSection has no
-// Remembered answers section yet, and that section stands next to it.
+// the matter's stream, held only while the menu is open), opens Settings at Remembered answers.
 import { aw } from "@clauseo/components/lib/words-allowances.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -83,7 +82,7 @@ export function useMatterSafety(
             views={views}
             matter={matter}
             lang={lang}
-            onOpen={() => void openAt("protection").catch(() => {})}
+            onOpen={() => void openAt("remembered_answers").catch(() => {})}
           />
         )}
         {others.length > 0 && (

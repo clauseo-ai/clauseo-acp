@@ -231,7 +231,7 @@ test("a refused Forget in the note says its words", async () => {
   expect(note?.querySelectorAll('[data-testid="remembered-row"]').length).toBe(2);
 });
 
-test("Remembered answers… shows once a protected matter has any, and opens Settings at the Safe workspace", async () => {
+test("Remembered answers… shows once a protected matter has any, and opens Settings at Remembered answers", async () => {
   await mount(PROT.a, { settings: true });
   const SHOW = aw("en", "Remembered answers…");
   await openMenu();
@@ -259,9 +259,9 @@ test("Remembered answers… shows once a protected matter has any, and opens Set
   ]);
   await settle();
   await press(item(SHOW));
-  // the wire's SettingsSection has no Remembered answers yet: the Safe workspace, beside it
+  // SettingsSection::RememberedAnswers, which the window opens at its #allowances section
   expect(h!.transport.only("open_settings")).toEqual([
-    { call: "open_settings", section: "protection" },
+    { call: "open_settings", section: "remembered_answers" },
   ]);
 });
 
