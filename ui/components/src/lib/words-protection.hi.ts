@@ -58,8 +58,6 @@ export const HI = {
   // the firm (UC-50, UC-51)
   "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है। इसे एक बार तैयार करें, फिर यहाँ पूछें।",
-  "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.":
-    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और इस कंप्यूटर पर उसकी सभी जगहें उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
   "Your firm requires the Safe workspace, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. The Safe workspace comes in an update.":
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और Clauseo के इस संस्करण में यह अभी नहीं है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। सुरक्षित कार्यक्षेत्र एक अपडेट में आएगा।",
   // design B: what stops the Safe workspace (R17 PR-E's NotProtectedCause blocked { reason } and

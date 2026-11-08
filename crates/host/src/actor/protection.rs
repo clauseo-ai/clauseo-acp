@@ -20,7 +20,7 @@ use clauseo_protocol::{
     ErrorCode, HostEvent, NotProtectedCause, Protection, ProtectionTier, ProtectionView,
     UnsupportedWhy,
 };
-use clauseo_sandbox::{Detection, NoSandbox, SetupState, Tier};
+use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, SetupState, Tier};
 
 use super::Actor;
 use crate::config::Sandbox;
@@ -119,17 +119,16 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>) -> Observed {
 }
 
 /// Whether a set-up in `state` is one `RetryProtection` runs, with its administrator prompt:
-/// needed, refused, failed, blocked by a Windows policy (stage C's D-B4: trying again asks the
-/// administrator, R17 PR-E names it) or outdated. Done, or owned by another Windows user, it is
-/// not: a set-up cannot fix those.
+/// needed, refused, failed or outdated. Done, owned by another Windows user, or blocked by a
+/// setting only whoever looks after the computer can change (R17 PR-E: no "Try again", the
+/// remedy is IT's or the installer's), it is not: a set-up cannot fix those.
 pub(crate) fn asks_admin(state: &SetupState) -> bool {
     match state {
         SetupState::Needed
         | SetupState::Refused
         | SetupState::Failed(_)
-        | SetupState::Blocked(_)
         | SetupState::Outdated { .. } => true,
-        SetupState::Ready | SetupState::SetUpByOtherUser => false,
+        SetupState::Ready | SetupState::SetUpByOtherUser | SetupState::Blocked(_) => false,
     }
 }
 
@@ -158,7 +157,16 @@ pub(crate) fn protection_of(detection: &Detection) -> Protection {
         Some(NoSandbox::NeedsSetUp) => NotProtectedCause::NeedsSetUp,
         Some(NoSandbox::SetUpRefused) => NotProtectedCause::SetUpRefused,
         Some(NoSandbox::ProbeFailed(_)) => failed("probe_failed"),
+        Some(NoSandbox::SetUpFailed(why)) if why == SET_UP_BY_OTHER_USER => {
+            NotProtectedCause::OtherAccount
+        }
         Some(NoSandbox::SetUpFailed(_)) => failed("set_up_failed"),
+        Some(NoSandbox::SetUpBlocked(Blocked::OtherAccount)) => NotProtectedCause::OtherAccount,
+        // The sandbox's name, passed through: an open set the app reads (logon_right, policy,
+        // admin_copy_*, tool_missing, and any later one).
+        Some(NoSandbox::SetUpBlocked(blocked)) => NotProtectedCause::Blocked {
+            reason: blocked.name().to_owned(),
+        },
         None => failed("no_reason"),
         // `NoSandbox` is non-exhaustive: a reason this host does not know fails closed.
         Some(_) => failed("unknown"),
@@ -221,16 +229,54 @@ fn matters_changed(actor: &mut Actor) {
     actor.lists.touch_all();
 }
 
-/// `sandbox.required`'s refusal of `CreateThread` and of a turn's launch: none when the setting
-/// is off or the computer is protected; `sandbox.setup_required` when the set-up would fix it
-/// (`NeedsSetUp`, `SetUpRefused`); `sandbox.required` for every other cause.
+/// The refusal of `CreateThread` and of a turn's launch by this computer's protection: none
+/// when it is protected. A computer that has the sandbox but can't use it now refuses whatever
+/// `sandbox.required` or `sandbox.allow_unprotected_auto` say (R17 PR-E; that setting covers
+/// only a computer that can't have the sandbox): `Blocked` and `OtherAccount` with
+/// `sandbox.blocked`, `PoolFull` with `sandbox.pool_full`, `PoolOwned` with
+/// `sandbox.pool_owned`. Every other cause refuses only under `sandbox.required`:
+/// `sandbox.setup_required` when the set-up would fix it (`NeedsSetUp`, `SetUpRefused`),
+/// `sandbox.required` otherwise.
 pub(crate) fn refusal(actor: &Actor) -> Option<Error> {
-    if !actor.effective.settings().sandbox.required {
-        return None;
-    }
     let Protection::NotProtected { cause } = actor.protection.computer() else {
         return None;
     };
+    refusal_of(cause, actor.effective.settings().sandbox.required)
+}
+
+/// [`refusal`] for `cause`, under `sandbox.required` = `required`.
+fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
+    match cause {
+        NotProtectedCause::Blocked { .. } | NotProtectedCause::OtherAccount => {
+            return Some(Error::refused(
+                ErrorCode::SandboxBlocked,
+                "a setting only whoever looks after this computer can change blocks the sandbox",
+            ));
+        }
+        // TODO(stage C's slot-groups PR): the sandbox's `Error::PoolFull { why }` gives this
+        // cause at a tier-B launch, mapped one-to-one into `why`; until then no host builds it.
+        NotProtectedCause::PoolFull { .. } => {
+            return Some(Error::refused(
+                ErrorCode::SandboxPoolFull,
+                "every agent user of the sandbox's pool is held by another matter",
+            ));
+        }
+        NotProtectedCause::PoolOwned => {
+            return Some(Error::refused(
+                ErrorCode::SandboxPoolOwned,
+                "a sandbox user still owns an item in this matter's folder",
+            ));
+        }
+        NotProtectedCause::Unsupported { .. }
+        | NotProtectedCause::NeedsSetUp
+        | NotProtectedCause::SetUpRefused
+        | NotProtectedCause::SetUpFailed
+        | NotProtectedCause::SwitchedOff { .. }
+        | NotProtectedCause::Unknown { .. } => {}
+    }
+    if !required {
+        return None;
+    }
     Some(match cause {
         NotProtectedCause::NeedsSetUp | NotProtectedCause::SetUpRefused => Error::refused(
             ErrorCode::SandboxSetupRequired,
@@ -239,6 +285,9 @@ pub(crate) fn refusal(actor: &Actor) -> Option<Error> {
         NotProtectedCause::Unsupported { .. }
         | NotProtectedCause::SetUpFailed
         | NotProtectedCause::PoolFull { .. }
+        | NotProtectedCause::Blocked { .. }
+        | NotProtectedCause::OtherAccount
+        | NotProtectedCause::PoolOwned
         | NotProtectedCause::SwitchedOff { .. }
         | NotProtectedCause::Unknown { .. } => Error::refused(
             ErrorCode::SandboxRequired,

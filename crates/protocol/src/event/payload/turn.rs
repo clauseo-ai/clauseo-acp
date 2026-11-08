@@ -215,6 +215,10 @@ pub struct TurnFailed {
     /// may carry an unknown code in front, so it can be longer.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub detail: Option<String>,
+    /// The item in the matter's folder a refusal names (a tier-B `sandbox.pool_owned` or
+    /// `sandbox.cant_label`), for the app to show where; never in `detail`. Left out when none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub at: Option<MatterPath>,
 }
 
 /// `TurnFailed` as read, before its code is looked up.
@@ -225,6 +229,8 @@ struct TurnFailedWire<'a> {
     code: BorrowedStr<'a>,
     #[serde(default)]
     detail: Option<String>,
+    #[serde(default)]
+    at: Option<MatterPath>,
 }
 
 impl<'de> Deserialize<'de> for TurnFailed {
@@ -244,6 +250,7 @@ impl<'de> Deserialize<'de> for TurnFailed {
             turn: wire.turn,
             code,
             detail,
+            at: wire.at,
         })
     }
 }

@@ -82,6 +82,10 @@ export type ErrorCode =
   | "sandbox.setup_required"
   | "sandbox.required"
   | "sandbox.blocked"
+  | "sandbox.pool_full"
+  | "sandbox.pool_owned"
+  | "sandbox.cant_label"
+  | "sandbox.removing"
   | "blocklist.override_off"
   | "blocklist.notice_expired"
   | "blocklist.allow_not_saved"
@@ -191,6 +195,19 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (app track, Rohan's batch review): in design B's "Safe workspace" words
   "sandbox.blocked":
     "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
+  // provisional (stage E, app thread's words for copy review): the pool's refusal, moved from
+  // words-protection.ts
+  "sandbox.pool_full":
+    "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
+  // provisional placeholder: app thread rewrites
+  "sandbox.pool_owned":
+    "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.",
+  // provisional (stage E, app thread's words for copy review)
+  "sandbox.cant_label":
+    "The Safe workspace couldn't be given access to a folder in this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+  // provisional (stage E, app thread's words for copy review)
+  "sandbox.removing":
+    "The Safe workspace is being removed from this computer. Try again once that's finished.",
   // provisional (stage E, Rohan's batch review): "Allow this site" refused while the firm's policy forbids overriding
   // the unsafe-site list (decision record 0053)
   "blocklist.override_off":

@@ -1,10 +1,10 @@
 //! The map from a detection to the wire's protection, `retry_asks_admin`, and when the view
 //! counts as changed (the settings' hook).
 
-use clauseo_protocol::{NotProtectedCause, Protection, ProtectionTier, UnsupportedWhy};
-use clauseo_sandbox::{Detection, NoSandbox, SetupState, Tier};
+use clauseo_protocol::{ErrorCode, NotProtectedCause, Protection, ProtectionTier, UnsupportedWhy};
+use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, SetupState, Tier};
 
-use super::{Observed, ProtectionHost, asks_admin, observe, protection_of};
+use super::{Observed, ProtectionHost, asks_admin, observe, protection_of, refusal_of};
 
 fn c(reason: NoSandbox) -> Detection {
     Detection {
@@ -68,6 +68,14 @@ fn each_detection_maps_to_its_protection() {
             c(NoSandbox::SetUpRefused),
             not(NotProtectedCause::SetUpRefused),
         ),
+        (
+            c(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned())),
+            not(NotProtectedCause::OtherAccount),
+        ),
+        (
+            c(NoSandbox::SetUpBlocked(Blocked::OtherAccount)),
+            not(NotProtectedCause::OtherAccount),
+        ),
         // A tier C with no reason is a contradiction: it fails closed.
         (
             Detection {
@@ -79,6 +87,96 @@ fn each_detection_maps_to_its_protection() {
     ];
     for (detection, expected) in rows {
         assert_eq!(protection_of(&detection), expected, "{detection:?}");
+    }
+}
+
+/// Every block but another account's carries the sandbox's own name, unchanged.
+#[test]
+fn each_block_passes_its_name_through() {
+    for blocked in Blocked::ALL {
+        let expected = if blocked == Blocked::OtherAccount {
+            NotProtectedCause::OtherAccount
+        } else {
+            NotProtectedCause::Blocked {
+                reason: blocked.name().to_owned(),
+            }
+        };
+        let detection = c(NoSandbox::SetUpBlocked(blocked));
+        assert_eq!(protection_of(&detection), not(expected), "{blocked:?}");
+    }
+}
+
+/// The refusal by cause and `sandbox.required`: the four causes of a computer that has the
+/// sandbox but can't use it refuse with their codes either way; the rest only when required.
+#[test]
+fn each_cause_refuses_by_its_code_and_the_setting() {
+    let pool_full = NotProtectedCause::PoolFull {
+        size: 8,
+        open: 8,
+        held: 0,
+        owed: 0,
+        set_aside: 0,
+        needs_reset: 0,
+        why: None,
+    };
+    let blocked = NotProtectedCause::Blocked {
+        reason: "policy".to_owned(),
+    };
+    let rows = [
+        (
+            blocked,
+            Some(ErrorCode::SandboxBlocked),
+            Some(ErrorCode::SandboxBlocked),
+        ),
+        (
+            NotProtectedCause::OtherAccount,
+            Some(ErrorCode::SandboxBlocked),
+            Some(ErrorCode::SandboxBlocked),
+        ),
+        (
+            pool_full,
+            Some(ErrorCode::SandboxPoolFull),
+            Some(ErrorCode::SandboxPoolFull),
+        ),
+        (
+            NotProtectedCause::PoolOwned,
+            Some(ErrorCode::SandboxPoolOwned),
+            Some(ErrorCode::SandboxPoolOwned),
+        ),
+        (
+            NotProtectedCause::NeedsSetUp,
+            Some(ErrorCode::SandboxSetupRequired),
+            None,
+        ),
+        (
+            NotProtectedCause::SetUpRefused,
+            Some(ErrorCode::SandboxSetupRequired),
+            None,
+        ),
+        (
+            NotProtectedCause::SetUpFailed,
+            Some(ErrorCode::SandboxRequired),
+            None,
+        ),
+        (
+            NotProtectedCause::Unsupported {
+                why: UnsupportedWhy::NotBuilt,
+            },
+            Some(ErrorCode::SandboxRequired),
+            None,
+        ),
+        (
+            NotProtectedCause::SwitchedOff {
+                at: clauseo_protocol::Timestamp::ZERO,
+            },
+            Some(ErrorCode::SandboxRequired),
+            None,
+        ),
+    ];
+    for (cause, required, not_required) in rows {
+        let code = |required| refusal_of(&cause, required).map(|error| error.code());
+        assert_eq!(code(true), required, "{cause:?} required");
+        assert_eq!(code(false), not_required, "{cause:?} not required");
     }
 }
 
@@ -110,6 +208,9 @@ fn a_retry_asks_for_an_administrator_only_when_a_set_up_can_help() {
         ),
         (SetupState::Ready, false),
         (SetupState::SetUpByOtherUser, false),
+        // R17 PR-E: no "Try again" for a block; the remedy is IT's or the installer's.
+        (SetupState::Blocked(Blocked::Policy), false),
+        (SetupState::Blocked(Blocked::OtherAccount), false),
     ] {
         assert_eq!(asks_admin(&state), asks, "{state:?}");
     }

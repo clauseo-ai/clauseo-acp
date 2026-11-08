@@ -22,6 +22,18 @@ impl End {
         }
     }
 
+    /// A turn whose agent's process left the Safe workspace (the sandbox runner's Escapee exit,
+    /// `agents/ended.rs`): `LeftSafeWorkspace`, with no `TurnFailed`; its asks expire as for
+    /// an agent that exited.
+    pub(super) fn left_safe_workspace(detach: Option<DetachReason>) -> Self {
+        Self {
+            stop: StopReason::LeftSafeWorkspace,
+            failure: None,
+            expiry: ExpiryReason::AgentExited,
+            detach,
+        }
+    }
+
     /// A turn that failed with `code`.
     pub(super) fn failed(
         code: ErrorCode,

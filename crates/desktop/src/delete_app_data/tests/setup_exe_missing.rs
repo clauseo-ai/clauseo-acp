@@ -428,7 +428,7 @@ fn a_per_machine_uninstall_with_an_owner_says_so() {
 fn the_two_messages_are_the_drafts_and_name_no_path() {
     let removed = "\"Windows security removed part of Clauseo while it was installing: the \
                    program that sets up the Safe workspace. Until it's restored, Clauseo won't \
-                   start Claude or ChatGPT in the Safe workspace. Whoever looks after this \
+                   start Claude or ChatGPT on this computer. Whoever looks after this \
                    computer can restore it. Clauseo's notes for IT explain how.\"";
     let missing = "\"Clauseo couldn't remove the Safe workspace, because Windows security removed \
                    the program that sets it up. The Safe workspace's hidden Windows accounts are \

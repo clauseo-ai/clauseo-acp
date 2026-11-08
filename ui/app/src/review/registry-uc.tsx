@@ -6,6 +6,7 @@
 // so none opens by itself over a line's cell. The shipped and the design's own lines are approved
 // "by": "design"; the new ones are provisional, English only (hi: later). R18's screens are UC2's.
 import type { FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
+import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
 import type { ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
 import type { SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
@@ -23,6 +24,7 @@ import { PressInOrder } from "./press-words.tsx";
 import { RoomOver } from "./states.tsx";
 import { SettingsOver } from "./states-settings.tsx";
 import {
+  errorWords,
   firstLaunchWords,
   protectionWords,
   roomWords,
@@ -376,9 +378,7 @@ export const UC: Entry[] = [
   ),
   room(
     "UC-51",
-    pw(
-      "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-    ),
+    errorWords(ERROR_WORDS["sandbox.pool_full"] as Parameters<typeof errorWords>[0]),
     "room/protection-required",
     { protection: P.pool, computer: P.b, over: { required: true } },
   ),

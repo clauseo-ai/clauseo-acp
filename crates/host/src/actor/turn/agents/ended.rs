@@ -127,6 +127,15 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             }
         }
     };
+    let escaped = left_safe_workspace(&reason);
+    if escaped && let Some(entry) = actor.threads.get(&thread) {
+        // Ids only: no path, no user name.
+        tracing::warn!(
+            agent = %entry.row.agent,
+            matter = %entry.row.matter,
+            "an agent's process left the Safe workspace; its session was stopped"
+        );
+    }
     let (kind, code) = reason_kind(&reason);
     tracing::info!(
         target: LIFECYCLE,
@@ -144,7 +153,9 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     let phase = current(actor, thread).map(|current| (current.phase, current.cancelled));
     match (phase, detach) {
         (Some((TurnPhase::Prompting, cancelled)), detach) => {
-            let end = if cancelled {
+            let end = if escaped {
+                End::left_safe_workspace(detach)
+            } else if cancelled {
                 End::cancelled(detach)
             } else {
                 End::failed(ErrorCode::AgentExited, None, detach)
@@ -160,12 +171,15 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         (Some((TurnPhase::Ending, _)), Some(reason)) => {
             // Logged after the turn's `TurnEnded`, which is still to come.
             if let Some(current) = current(actor, thread) {
-                match &mut current.end {
-                    Some(end) => end.detach = Some(reason),
-                    None => {
-                        current.end = Some(End::failed(ErrorCode::AgentExited, None, Some(reason)));
+                current.end = Some(match current.end.take() {
+                    // The Escapee exit is the turn's stop, whatever ended it first.
+                    _ if escaped => End::left_safe_workspace(Some(reason)),
+                    Some(mut end) => {
+                        end.detach = Some(reason);
+                        end
                     }
-                }
+                    None => End::failed(ErrorCode::AgentExited, None, Some(reason)),
+                });
             }
         }
         (
@@ -186,6 +200,19 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     }
     super::super::sign_in::agent_ended(actor, thread, unresponsive);
     actor.release(StreamId::Thread(thread));
+}
+
+/// The sandbox runner's (`clauseo-sandbox-run.exe`) exit code when part of the agent ran
+/// outside the Safe workspace: `RunExit::Escapee`, stage C's #649.
+// TODO(#649): decode with `clauseo_sandbox::RunExit::from_code` once it is on main.
+const ESCAPEE_EXIT: u32 = 0xE0C1_500F;
+
+/// Whether the agent's process ended with the sandbox runner's Escapee exit, so its session
+/// ends with `StopReason::LeftSafeWorkspace`. Windows reports the runner's 32-bit exit code as
+/// `ExitStatus::code`'s `i32`; elsewhere an exit code is 0 to 255, so it never matches.
+fn left_safe_workspace(reason: &DetachReason) -> bool {
+    matches!(reason, DetachReason::Exited { code: Some(code), .. }
+        if code.cast_unsigned() == ESCAPEE_EXIT)
 }
 
 /// A detach reason as the log file may show it: its kind and exit code, never `stderr_tail`,

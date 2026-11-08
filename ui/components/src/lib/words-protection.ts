@@ -1,11 +1,11 @@
 // The words of protection (UC) the room and the settings window load with their protection parts,
 // never in a first load: the Add room and remove confirms, what stops the Safe workspace and the
 // repair (design B), the notes' bodies the shipped ones don't cover, the pool's counts and its ways
-// out, the firm's required notice, and the pool's refusal. As in words.ts the English is the key,
-// the exact string on screen. All are new, drafted in DESIGN's voice ("Safe workspace", never
-// sandbox, agent or session), provisional for Rohan's batch review; the Safe workspace lines carry
-// provisional Hindi, the rest come later. The room's line (words-toolbar.ts), the first run's
-// (words-first-launch.ts), the shipped note words (words-versions.ts) and Settings'
+// out, and the firm's required notice (the pool's refusal is words-errors.ts's). As in words.ts the
+// English is the key, the exact string on screen. All are new, drafted in DESIGN's voice ("Safe
+// workspace", never sandbox, agent or session), provisional for Rohan's batch review; the Safe
+// workspace lines carry provisional Hindi, the rest come later. The room's line (words-toolbar.ts),
+// the first run's (words-first-launch.ts), the shipped note words (words-versions.ts) and Settings'
 // (words-settings.ts) live with their screens.
 import type { Lang } from "./display.ts";
 import { wordsOf, type Slots } from "./words-core.ts";
@@ -18,7 +18,7 @@ export type ProtectionKey = keyof typeof HI;
 /** A protection string in the language, its slots filled. */
 export const pw = wordsOf("protection");
 
-/** R17 PR-E's code for a full pool under `sandbox.required`; not in ErrorCode yet, so its words live here. */
+/** R17 PR-E's code for a full pool under `sandbox.required`; its words are words-errors.ts's. */
 export const POOL_FULL_CODE = "sandbox.pool_full";
 
 /** #639's code for a Safe workspace something on this computer stops; not in ErrorCode on this
@@ -31,20 +31,15 @@ export const BLOCKED_CODE = "sandbox.blocked";
 export const INSTALLER_CLOSE: ProtectionKey =
   "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.";
 
-/** A protection command's or launch's refusal in words: the pool's and the block's codes here,
- * every other through errorWords. */
+/** A protection command's or launch's refusal in words: the block's code here, every other through
+ * errorWords (the pool's, in words-errors.ts). */
 export function protectionErrorWords(lang: Lang, code: string): string {
   if (code === BLOCKED_CODE)
     return pw(
       lang,
       "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Ask your IT team to look into it.",
     );
-  return code === POOL_FULL_CODE
-    ? pw(
-        lang,
-        "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-      )
-    : errorWords(lang, code);
+  return errorWords(lang, code);
 }
 
 /** The protection words of a language, bound. */

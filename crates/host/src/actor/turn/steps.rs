@@ -248,6 +248,7 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
             turn,
             code: super::sign_in::code_of(actor, error.code(), &error.to_string()),
             detail: Some(error.detail()),
+            at: None,
         };
         end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         return;
@@ -342,6 +343,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                at: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
             return;
@@ -352,6 +354,7 @@ pub(super) fn on_before_turn(
             turn,
             code,
             detail: Some(STORE_DETAIL.to_owned()),
+            at: None,
         };
         let checkpoint = Some((matter, checkpoint));
         end_unstarted(
@@ -400,6 +403,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                at: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         }

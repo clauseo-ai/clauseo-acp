@@ -4,7 +4,7 @@ description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/re
 expression: "Snapshot::of(&state)"
 ---
 {
-  "reducer_schema": 11,
+  "reducer_schema": 12,
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000800000000",
@@ -117,7 +117,9 @@ expression: "Snapshot::of(&state)"
         }
       },
       "failures": {
-        "01900000-0000-7000-8000-000800000002": "internal"
+        "01900000-0000-7000-8000-000800000002": {
+          "code": "internal"
+        }
       }
     }
   }

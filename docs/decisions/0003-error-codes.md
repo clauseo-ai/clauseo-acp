@@ -118,6 +118,10 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `blocklist.notice_expired` | The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. | no | host (`AllowBlockedSite` naming a `block_id` it no longer keeps, decision record 0053); not retryable because the same `block_id` stays unknown, and only a new notice can be allowed |
 | `blocklist.allow_not_saved` | The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. | no | host (`AllowBlockedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
+| `sandbox.pool_full` | Every agent user of the Windows sandbox's pool on this computer is held by another matter, so no agent was started here; the same launch works once another matter frees one. | yes | host (`CreateThread` or a turn's launch while the cause is `pool_full`, whatever the settings say, R17 PR-E) |
+| `sandbox.pool_owned` | A Windows sandbox user still owns an item in this matter's folder because handing it back failed, so no agent was started here; an administrator's reclaim, or IT, fixes it. The item is in TurnFailed's at, never in the detail. | no | host (`CreateThread` or a turn's launch while the cause is `pool_owned`, whatever the settings say, R17 PR-E) |
+| `sandbox.cant_label` | The Windows sandbox could not give a folder in this matter the label it needs (no right to change its owner), so no agent was started here; IT fixes it. The kind is in the detail, the item in TurnFailed's at. | no | host (tier B's launch, R17 PR-E part B) |
+| `sandbox.removing` | The sandbox's set-up is being removed from this computer, so no agent was started; the same launch works once the removal ends. | yes | host (a launch while `RemoveSandboxSetup` runs, R17 PR-E part B) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -138,6 +142,18 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+R17 PR-E (2026-11-08) added four sandbox codes. `sandbox.pool_full` is retryable: the pool is
+shared by the lawyer's matters, and the same launch works as soon as another matter's session
+ends and frees a user, with nothing for the lawyer or IT to change. `sandbox.removing` is too: the
+removal is a bounded job the lawyer started, and the same launch works once it ends.
+`sandbox.pool_owned` and `sandbox.cant_label` are not: an item still owned by a sandbox user, or a
+folder whose owner Clauseo has no right to change, stays so until an administrator's reclaim or
+IT acts, so trying again alone fails the same way. Both name the item in `TurnFailed.at` (a
+matter-relative path the app shows), never in `detail`, logs or messages (0047). A blocked
+sandbox, or one another Windows account owns, keeps `sandbox.blocked`, now for every launch
+whatever `sandbox.required` says, and `sandbox.required`'s meaning (which names a full pool) is
+unchanged: a full pool now refuses with `sandbox.pool_full` instead.
 
 ## Consequences
 

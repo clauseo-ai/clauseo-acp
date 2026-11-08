@@ -332,15 +332,7 @@ test.each([
     ),
     false,
   ],
-  [
-    "a full pool",
-    PROT.pool,
-    pw(
-      "en",
-      "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-    ),
-    false,
-  ],
+  ["a full pool", PROT.pool, errorWords("en", "sandbox.pool_full"), false],
 ] as const)(
   "firm requires protection, %s: its notice, send held, nothing sent",
   async (_c, p, words, button) => {

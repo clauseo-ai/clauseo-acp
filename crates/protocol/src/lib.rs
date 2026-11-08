@@ -249,7 +249,7 @@ wire_types! {
     },
     protection::{
         NotProtectedCause, Protection, ProtectionTier, ProtectionView, ProtectionWork, SiteTag,
-        UnsupportedWhy,
+        PoolFullWhy, UnsupportedWhy,
     },
     query::{
         AgentSummary, BlobRange, DefaultLocation, FolderState, FolderSupportKind, HostQuery, MatterSummary, PageLimit, PaperSummary,

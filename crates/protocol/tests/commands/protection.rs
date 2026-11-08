@@ -3,8 +3,8 @@
 
 use clauseo_protocol::{
     CommandEnvelope, HostCommand, HostEvent, HostQuery, MatterSummary, NotProtectedCause,
-    Protection, ProtectionTier, ProtectionView, ProtectionWork, QueryResult, Timestamp,
-    UnsupportedWhy,
+    PoolFullWhy, Protection, ProtectionTier, ProtectionView, ProtectionWork, QueryResult,
+    Timestamp, UnsupportedWhy,
 };
 
 use super::Validate;
@@ -26,6 +26,7 @@ fn the_query_is_a_plain_string_and_its_answer_names_each_field() {
         unprotected_auto_allowed: true,
         in_progress: None,
         retry_asks_admin: true,
+        set_up_at: None,
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
@@ -119,9 +120,26 @@ fn every_tier_and_cause_has_its_wire_form() {
                 held: 2,
                 owed: 2,
                 set_aside: 1,
+                needs_reset: 1,
+                why: Some(PoolFullWhy::MatterSessionsFull),
             },
-            r#"{"pool_full":{"size":8,"open":3,"held":2,"owed":2,"set_aside":1}}"#,
+            r#"{"pool_full":{"size":8,"open":3,"held":2,"owed":2,"set_aside":1,"needs_reset":1,"why":"matter_sessions_full"}}"#,
         ),
+        (
+            NotProtectedCause::Blocked {
+                reason: "admin_copy_missing".to_owned(),
+            },
+            r#"{"blocked":{"reason":"admin_copy_missing"}}"#,
+        ),
+        // A reason this version has no words for still passes through (an open set).
+        (
+            NotProtectedCause::Blocked {
+                reason: "wsl_deny_missing".to_owned(),
+            },
+            r#"{"blocked":{"reason":"wsl_deny_missing"}}"#,
+        ),
+        (NotProtectedCause::OtherAccount, r#""other_account""#),
+        (NotProtectedCause::PoolOwned, r#""pool_owned""#),
         (
             NotProtectedCause::SwitchedOff { at },
             r#"{"switched_off":{"at":1760000000000}}"#,

@@ -29,6 +29,7 @@ fn fail(log: &mut Log, turn: TurnId, code: ErrorCode) -> Envelope {
         turn,
         code,
         detail: Some("the agent did not start".to_owned()),
+        at: None,
     };
     log.push(failed).unwrap();
     let ended = TurnEnded {

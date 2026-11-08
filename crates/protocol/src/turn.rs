@@ -74,8 +74,8 @@ open_data_enum! {
 }
 
 open_unit_enum! {
-    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
-    /// `Failed`.
+    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit`,
+    /// `Failed` and `LeftSafeWorkspace`.
     pub enum StopReason {
         /// The agent finished. Only this ending moves the thread's queue on.
         EndTurn,
@@ -96,6 +96,11 @@ open_unit_enum! {
         AtLimit,
         /// It failed; a `TurnFailed` before it says why.
         Failed,
+        /// Part of the agent tried to run outside the Safe workspace (Windows' tier B: the
+        /// sandbox runner's Escapee exit), so the host stopped its session. No `TurnFailed`
+        /// comes with it and nothing retries it; the lawyer's next turn is a normal launch.
+        /// Every rule treats it as `Cancelled` (the queue holds).
+        LeftSafeWorkspace,
     }
     test mod stop_reason;
 }
