@@ -6,7 +6,11 @@
 // this matter's folder" is true for Claude and ChatGPT alike. Design B adds a Safe workspace
 // something on this computer stops, whose reason's line the caller gives, and the repair: its line,
 // and on a personal install "Get the installer", which opens the installed version's release page
-// (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
+// (the caller's act). Where the app can fetch the installer itself, "Download and run the installer
+// again" (the caller's act) stands beside it, disabled with its waiting line while it runs; Get the
+// installer stays as the fallback. That repair is then the dark primary, and Understood turns quiet
+// but keeps the starting focus (the repair closes Clauseo, so it can't be undone). Otherwise
+// Understood, the act, is the dark primary and takes the starting focus. A
 // set-up cause offers its retry beside it ("Set up the Safe workspace", "Try again"; a full pool's
 // "Add room" while it can grow), which leaves the note open: the waiting line stands in the
 // button's place, and a refusal's words under it. The open lock leads it, in concrete: nothing here
@@ -14,7 +18,7 @@
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
-import { useDisplay } from "../lib/display.ts";
+import { useDisplay, type Lang, type Platform } from "../lib/display.ts";
 import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { Say } from "./say.tsx";
@@ -40,20 +44,7 @@ export type NotePool = {
   set_aside: number;
 };
 
-export function NotProtectedNote({
-  open,
-  matter,
-  why,
-  pool,
-  named1385 = false,
-  addRoom = false,
-  waiting = null,
-  failed = null,
-  extra = [],
-  onClose,
-  onProtect,
-  onGetInstaller,
-}: {
+type NoteProps = {
   open: boolean;
   /** The matter's name as filed. */
   matter: string;
@@ -76,94 +67,189 @@ export function NotProtectedNote({
   onProtect?: (() => void) | undefined;
   /** Optional: opens the installer's page ("Get the installer"); without it, no such button. */
   onGetInstaller?: (() => void) | undefined;
+  /** Optional: downloads and runs the installer ("Download and run the installer again"); without
+   * it, no such button. */
+  onRepair?: (() => void) | undefined;
+  /** Optional: the repair's waiting line while it runs; the button stays, disabled and busy. */
+  repairWait?: string | null;
+  /** Optional: "Cancel" beside the busy repair button, while the download runs; without it, none. */
+  onCancel?: (() => void) | undefined;
+};
+
+/** The cause's own lines, in the page's language. */
+function causeLines(
+  w: ReturnType<typeof useVersionWords>,
+  platform: Platform,
+  { why, matter, pool, named1385 }: Pick<NoteProps, "why" | "matter" | "pool" | "named1385">,
+): string[] {
+  const p = (key: Parameters<typeof pw>[1], slots?: Parameters<typeof pw>[2]) =>
+    pw(w.lang, key, slots);
+  const refused = why === "setup" || why === "set_up_refused";
+  return why === "off"
+    ? [
+        w.v(
+          "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+          { matter },
+        ),
+      ]
+    : why === "needs_set_up"
+      ? [
+          p(
+            "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+          ),
+        ]
+      : why === "not_built"
+        ? [
+            p(
+              "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+            ),
+          ]
+        : why === "blocked"
+          ? [
+              p(
+                "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+              ),
+            ]
+          : why === "cant"
+            ? [
+                p(
+                  "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                ),
+              ]
+            : why === "pool"
+              ? [
+                  p(
+                    "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
+                    { size: pool?.size ?? 0 },
+                  ),
+                ]
+              : [
+                  p(
+                    "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                  ),
+                  ...(refused
+                    ? [
+                        platform === "windows"
+                          ? w.v("Windows didn't allow the Safe workspace on this computer.")
+                          : platform === "linux"
+                            ? w.v("Linux didn't allow the Safe workspace on this computer.")
+                            : w.v("macOS didn't allow the Safe workspace on this computer."),
+                      ]
+                    : named1385
+                      ? [
+                          p(
+                            "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+                          ),
+                        ]
+                      : []),
+                ];
+}
+
+/** The pool's counts, each with its line. */
+const poolCounts = (lang: Lang, pool: NotePool): [number, string][] => [
+  [pool.open, pw(lang, "In use by other open matters: {n}", { n: pool.open })],
+  [pool.held, pw(lang, "Kept by matters with nothing open: {n}", { n: pool.held })],
+  [pool.owed, pw(lang, "Freed the next time Clauseo starts work: {n}", { n: pool.owed })],
+  [pool.set_aside, pw(lang, "Still holding files set aside: {n}", { n: pool.set_aside })],
+];
+
+/** The retry's words for the cause, or null where the cause has no retry. */
+const retryLabel = (
+  w: ReturnType<typeof useVersionWords>,
+  why: NoteWhy,
+  addRoom: boolean,
+): string | null =>
+  why === "off" || why === "cant" || why === "not_built" || (why === "pool" && !addRoom)
+    ? null
+    : why === "needs_set_up" || why === "blocked"
+      ? pw(w.lang, "Set up the Safe workspace")
+      : why === "pool"
+        ? pw(w.lang, "Add room")
+        : w.v("Try again");
+
+/** The note's buttons: Get the installer, the in-app repair (and its Cancel while it downloads), the
+ * retry (or its waiting line), and Understood, the act, last. */
+function NoteActions({
+  w,
+  retry,
+  waiting,
+  onProtect,
+  onGetInstaller,
+  onRepair,
+  repairWait,
+  onCancel,
+}: Pick<NoteProps, "onProtect" | "onGetInstaller" | "onRepair" | "onCancel"> & {
+  w: ReturnType<typeof useVersionWords>;
+  retry: string | null;
+  waiting: string | null;
+  repairWait: string | null;
 }) {
+  return (
+    <>
+      {onGetInstaller !== undefined && (
+        <Button kind="quiet" onClick={onGetInstaller} data-testid="protection-installer">
+          <span className="deva-nudge">{pw(w.lang, "Get the installer")}</span>
+        </Button>
+      )}
+      {onRepair !== undefined && (
+        <Button
+          kind="primary"
+          onClick={onRepair}
+          disabled={repairWait !== null}
+          aria-busy={repairWait !== null}
+          data-testid="protection-repair-again"
+        >
+          <span className="deva-nudge">{pw(w.lang, "Download and run the installer again")}</span>
+        </Button>
+      )}
+      {onCancel !== undefined && (
+        <Button kind="quiet" onClick={onCancel} data-testid="protection-repair-cancel">
+          <span className="deva-nudge">{w.ui("Cancel")}</span>
+        </Button>
+      )}
+      {retry !== null &&
+        (waiting !== null ? (
+          <span className="np-note-wait" role="status" data-testid="protection-wait">
+            <Say>{waiting}</Say>
+          </span>
+        ) : (
+          <Button kind="quiet" onClick={onProtect} data-testid="protection-setup">
+            <span className="deva-nudge">{retry}</span>
+          </Button>
+        ))}
+      <AlertDialogClose render={<Button kind={onRepair === undefined ? "primary" : "quiet"} />}>
+        <span className="deva-nudge">{w.v("Understood")}</span>
+      </AlertDialogClose>
+    </>
+  );
+}
+
+export function NotProtectedNote({
+  open,
+  matter,
+  why,
+  pool,
+  named1385 = false,
+  addRoom = false,
+  waiting = null,
+  failed = null,
+  extra = [],
+  onClose,
+  onProtect,
+  onGetInstaller,
+  onRepair,
+  repairWait = null,
+  onCancel,
+}: NoteProps) {
   const w = useVersionWords();
   const { platform } = useDisplay();
   const p = (key: Parameters<typeof pw>[1], slots?: Parameters<typeof pw>[2]) =>
     pw(w.lang, key, slots);
-  const refused = why === "setup" || why === "set_up_refused";
-  const counts: [number, string][] =
-    why === "pool" && pool !== undefined
-      ? [
-          [pool.open, p("In use by other open matters: {n}", { n: pool.open })],
-          [pool.held, p("Kept by matters with nothing open: {n}", { n: pool.held })],
-          [pool.owed, p("Freed the next time Clauseo starts work: {n}", { n: pool.owed })],
-          [pool.set_aside, p("Still holding files set aside: {n}", { n: pool.set_aside })],
-        ]
-      : [];
-  const lines: string[] =
-    why === "off"
-      ? [
-          w.v(
-            "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
-            { matter },
-          ),
-        ]
-      : why === "needs_set_up"
-        ? [
-            p(
-              "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
-            ),
-          ]
-        : why === "not_built"
-          ? [
-              p(
-                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
-              ),
-            ]
-          : why === "blocked"
-            ? [
-                p(
-                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-                ),
-              ]
-            : why === "cant"
-              ? [
-                  p(
-                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-                  ),
-                ]
-              : why === "pool"
-                ? [
-                    p(
-                      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
-                      { size: pool?.size ?? 0 },
-                    ),
-                  ]
-                : [
-                    p(
-                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-                    ),
-                    ...(refused
-                      ? [
-                          platform === "windows"
-                            ? w.v("Windows didn't allow the Safe workspace on this computer.")
-                            : platform === "linux"
-                              ? w.v("Linux didn't allow the Safe workspace on this computer.")
-                              : w.v("macOS didn't allow the Safe workspace on this computer."),
-                        ]
-                      : named1385
-                        ? [
-                            p(
-                              "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
-                            ),
-                          ]
-                        : []),
-                  ];
+  const counts = why === "pool" && pool !== undefined ? poolCounts(w.lang, pool) : [];
+  const lines = causeLines(w, platform, { why, matter, pool, named1385 });
   // the line beside the installer's button: the button quits Clauseo once the page is open
   const close = onGetInstaller === undefined ? [] : [p(INSTALLER_CLOSE)];
-  const retry =
-    onProtect === undefined ||
-    why === "off" ||
-    why === "cant" ||
-    why === "not_built" ||
-    (why === "pool" && !addRoom)
-      ? null
-      : why === "needs_set_up" || why === "blocked"
-        ? p("Set up the Safe workspace")
-        : why === "pool"
-          ? p("Add room")
-          : w.v("Try again");
+  const retry = onProtect === undefined ? null : retryLabel(w, why, addRoom);
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onClose()}>
       <AlertDialogPopup
@@ -221,6 +307,11 @@ export function NotProtectedNote({
                 )}
               </Say>
             </span>
+            {repairWait !== null && (
+              <span className="np-note-wait" role="status" data-testid="protection-repair-wait">
+                <Say>{repairWait}</Say>
+              </span>
+            )}
             {failed !== null && (
               <span className="np-note-failed" role="status" data-testid="protection-failed">
                 <Say>{failed}</Say>
@@ -229,26 +320,16 @@ export function NotProtectedNote({
           </span>
         }
         actions={
-          <>
-            {onGetInstaller !== undefined && (
-              <Button kind="quiet" onClick={onGetInstaller} data-testid="protection-installer">
-                <span className="deva-nudge">{p("Get the installer")}</span>
-              </Button>
-            )}
-            {retry !== null &&
-              (waiting !== null ? (
-                <span className="np-note-wait" role="status" data-testid="protection-wait">
-                  <Say>{waiting}</Say>
-                </span>
-              ) : (
-                <Button kind="quiet" onClick={onProtect} data-testid="protection-setup">
-                  <span className="deva-nudge">{retry}</span>
-                </Button>
-              ))}
-            <AlertDialogClose render={<Button kind="primary" />}>
-              <span className="deva-nudge">{w.v("Understood")}</span>
-            </AlertDialogClose>
-          </>
+          <NoteActions
+            w={w}
+            retry={retry}
+            waiting={waiting}
+            onProtect={onProtect}
+            onGetInstaller={onGetInstaller}
+            onRepair={onRepair}
+            repairWait={repairWait}
+            onCancel={onCancel}
+          />
         }
       />
     </AlertDialog>

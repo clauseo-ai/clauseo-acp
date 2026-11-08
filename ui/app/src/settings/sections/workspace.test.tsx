@@ -551,3 +551,16 @@ test("keys: Set up the Safe workspace without a confirm puts focus on the waitin
   expect(one("protection-confirm")).toBeNull();
   expect(document.activeElement).toBe(one("protection-wait"));
 });
+
+test("the settings window never offers the in-app repair, even where display_info says it runs", async () => {
+  update = { current: "0.1.0", mode: "auto", state: "idle" };
+  const t = await mount({
+    view: () => view(PROT.missing),
+    repair: { available: true, note: "launch_failed" },
+  });
+  expect(one("protection-installer")).not.toBeNull();
+  expect(one("protection-repair-again")).toBeNull();
+  expect(text()).not.toContain(pw("en", "Download and run the installer again"));
+  expect(text()).not.toContain(errorWords("en", "repair.launch_failed"));
+  expect(t.only("repair_install")).toEqual([]);
+});

@@ -690,5 +690,49 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-97": {
+    "en": "Download and run the installer again",
+    "hi": "इंस्टॉलर डाउनलोड करके फिर से चलाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The Safe workspace card's in-app repair button, where the admin copy is missing on a per-user install that can fetch its installer (ADR 0037)"
+  },
+  "UC-98": {
+    "en": "Downloading the installer…",
+    "hi": "इंस्टॉलर डाउनलोड हो रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The repair's waiting line while the installer downloads and is checked (ADR 0037)"
+  },
+  "UC-99": {
+    "en": "Windows will ask for permission. Choose Yes.",
+    "hi": "Windows अनुमति माँगेगा। Yes चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The repair's waiting line once the installer is checked and about to start; Clauseo then closes (ADR 0037)"
+  },
+  "UC-100": {
+    "en": "The installer didn't finish setting up the Safe workspace. Try again, or choose Get the installer.",
+    "hi": "इंस्टॉलर ने सुरक्षित कार्यक्षेत्र का सेटअप पूरा नहीं किया। फिर से प्रयास करें, या इंस्टॉलर पाएँ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "installer track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "installer track (provisional; Rohan batch review)",
+    "note": "The card on the next start after a repair's installer, when the admin copy is still missing (declined, failed or aborted) (ADR 0037)"
   }
 }

@@ -95,6 +95,11 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Whether the window `label` may run `repair_install`: `main` only (`admit.rs`).
+pub(crate) fn admit_repair(label: &str) -> Result<(), HostError> {
+    admit::admit_repair(label)
+}
+
 /// A `command.invalid` failure with `message`.
 fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)

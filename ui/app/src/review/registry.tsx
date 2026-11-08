@@ -32,6 +32,7 @@ import { UD1 } from "./registry-ud1.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC } from "./registry-uc.tsx";
+import { UC_REPAIR } from "./registry-uc-repair.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -387,6 +388,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UD2,
   ...UD2_PLANS,
   ...UC,
+  ...UC_REPAIR,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

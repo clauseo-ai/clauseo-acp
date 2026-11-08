@@ -31,6 +31,13 @@ pub trait Updater: Send + Sync {
     /// someone else updates it, and [`Updater::check`] is never called.
     fn install_kind(&self) -> InstallKind;
 
+    /// Whether no install may begin now: the desktop's repair is running the installer itself,
+    /// and two installers at once is never right. Asked before each step of the machine; while
+    /// it holds, an install that would begin leaves the update `ready`. None by default.
+    fn install_held(&self) -> bool {
+        false
+    }
+
     /// Asks the release endpoint for a newer version: `Ok(None)` when there is none.
     fn check(&self) -> BoxFuture<'static, Result<Option<Offer>, UpdaterError>>;
 

@@ -17,7 +17,15 @@ import type {
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
-import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
+import {
+  protectionCommandOf,
+  quietScan,
+  FakeRepairs,
+  type FakeRepairCall,
+  repairInfoOf,
+  type FakeProtectionHost,
+} from "./fake-protection.ts";
+import type { FakeSetupHost } from "./fake-setup.ts";
 import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
@@ -48,6 +56,7 @@ import type {
   PickedFolder,
   Protection,
   QueryResult,
+  RepairStep,
   RevealTarget,
   SetupCommand,
   SetupEvent,
@@ -78,6 +87,7 @@ export type FakeCall =
   | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "quit_app" }
+  | FakeRepairCall
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -85,15 +95,6 @@ export type FakeCall =
   | { call: "next_command"; command: NextCommand }
   | { call: "setup"; command: SetupCommand }
   | { call: "count_ui"; event: UiCount };
-
-/** The setup wire, scripted (R20's `setup` and S21's `count_ui`; store/setup.ts's SetupSource). */
-export type FakeSetupHost = {
-  /** The events a new listener hears first, as the host replays SetupInfo and each agent's state; none when left
-   * out. */
-  first?: () => readonly SetupEvent[];
-  /** Answers each setup command; throwing refuses it. Its events, if any, are the test's to play (`setupEvent`). */
-  command?: (command: SetupCommand) => void | Promise<void>;
-};
 
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
@@ -180,6 +181,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   #sessions = 0;
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
+  readonly #repairs = new FakeRepairs((call) => this.calls.push(call));
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
@@ -550,6 +552,12 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.quitApp?.());
   }
 
+  async repairInstall(onStep: (step: RepairStep) => void) {
+    return this.#answer(() => this.#repairs.start(this.host.protection?.repair, onStep));
+  }
+
+  repairCancel = async (): Promise<void> => this.#repairs.cancel();
+
   async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });
     return (await this.#answer(() => this.host.openFile?.(file))) ?? { protected_view: false };
@@ -574,6 +582,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       release_date: this.host.releaseDate ?? null,
       test_build: this.host.testBuild ?? false,
       release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
+      ...repairInfoOf(this.host.protection?.repair),
     };
   }
 

@@ -26,6 +26,8 @@ export async function hostDisplayInfo(transport: HostTransport): Promise<Display
       release_date: null,
       test_build: false,
       release_mode: "release",
+      repair_available: false,
+      repair: null,
     };
   return transport.displayInfo();
 }

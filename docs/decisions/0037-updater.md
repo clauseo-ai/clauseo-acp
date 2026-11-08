@@ -349,6 +349,42 @@ install; what the brief left open was decided so:
   `updater-test.pub` in desktop's release folder (landed with PR 5). Only the `e2e` build trusts it,
   never a release build.
 
+### Running the installer again (the missing admin copy, 2026-11-08)
+
+The Safe workspace's set-up program has an admin copy in Program Files that only the installer
+can place. When it is missing, a per-user install's card offers "Download and run the installer
+again": desktop's `repair_install` (`crates/desktop/src/update/repair.rs`), a Tauri command of
+its own, not a host command, granted to `main` and admitted from `main` alone.
+
+- **Eligible:** Windows, a per-user install (`install_kind.rs`), a release or test build with its
+  updater key, a plain version, no update `scheduled` or `installing`, and updates not `managed`
+  (a firm policy). Anything else is `repair.not_eligible`, and `display_info`'s
+  `repair_available` hides the button. The updater's state is asked again just before the
+  hand-over, and while a repair runs the bridge refuses `InstallUpdate` (`command.conflict`).
+- **What:** `https://github.com/clauseo-ai/clauseo-acp/releases/download/<tag>/Clauseo_<v>_<arch>-setup.exe`
+  and its `.sig`, `<tag>` from the build's release mode compiled in (`v<v>`, or `test-v<v>` for a
+  test build), `<v>` and `<arch>` the running build's. The updater's HTTPS client.
+- **The check:** `file_binding::check_update_file` with the mode's updater key (the config's, or
+  the test key in the `e2e` build): the signature must name exactly that file and version. No
+  other version, architecture or file is ever run.
+- **The file:** `updates/<v>/repair-<uuid>/`, created with a protected DACL (the user and SYSTEM),
+  the installer created new in it and written through a handle that shares reads only. Writing
+  ends with two `ReOpenFile`s to a read handle that shares reads only (Windows won't start an
+  image a write handle holds); the check reads back through that handle, which stays open until
+  `CreateProcessW` returns (the verified path as the application name, no shell, the working
+  folder `System32`). Once sealed, the folder becomes read and execute for the user, `OWNER
+  RIGHTS` too, so nothing can be planted beside the installer. The `.sig` and the installer get
+  10 minutes together, and `repair_cancel` (the card's Cancel) stops the download.
+- **The hand-over:** a `repair-pending.json` marker in the data folder, every window destroyed
+  (the installer refuses while `ClauseoMainWindow` exists; `lib.rs` holds the exit that closing
+  the last window asks for), the installer started interactively with `/CLAUSEO_REPAIR` (none once a
+  quit has started), then the app's quit, bounded at 6 s. Stage F's installer waits for Clauseo to be gone and starts it again
+  once at its end; the single-instance guard keeps it to one. A failed start deletes the attempt
+  and the marker and builds the main window again on the main thread (`repair.launch_failed`), or
+  quits if it can't.
+- **The next start** reads and deletes the marker (fresh: this version, within 30 minutes) into
+  `display_info`'s `repair`, and sweeps `updates/*/repair-*` without following links.
+
 ### Deviations from the R23 brief
 
 - **The install order.** The brief has the host call `Updater::install`. Install moves to

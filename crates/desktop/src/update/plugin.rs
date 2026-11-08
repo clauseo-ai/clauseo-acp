@@ -188,6 +188,12 @@ impl<R: Runtime> Updater for PluginUpdater<R> {
         self.kind
     }
 
+    /// While the repair runs the installer itself (`repair.rs`), no update install begins:
+    /// `auto`'s cached install at start included, which no `InstallUpdate` asks for.
+    fn install_held(&self) -> bool {
+        super::repair::running()
+    }
+
     fn check(&self) -> BoxFuture<'static, Result<Option<Offer>, UpdaterError>> {
         let app = self.app.clone();
         let source = self.source.clone();

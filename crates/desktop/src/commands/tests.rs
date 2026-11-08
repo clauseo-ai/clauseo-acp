@@ -47,6 +47,8 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             setup,
             quit_app,
             page_marks,
+            repair_install,
+            repair_cancel,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -174,6 +176,8 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
             "release_date": null,
             "test_build": cfg!(feature = "e2e"),
             "release_mode": mode,
+            "repair_available": false,
+            "repair": null,
         })
     );
 

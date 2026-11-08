@@ -118,6 +118,10 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `blocklist.notice_expired` | The blocked-site notice an allow names is one the host no longer keeps (too old, or from before a restart), so nothing was allowed: allow the site from a new notice. | no | host (`AllowBlockedSite` naming a `block_id` it no longer keeps, decision record 0053); not retryable because the same `block_id` stays unknown, and only a new notice can be allowed |
 | `blocklist.allow_not_saved` | The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. | no | host (`AllowBlockedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
+| `repair.not_eligible` | Clauseo can't download and run its installer here: it runs only for a per-user install on Windows, in a build with a release to download from, and not while an update installs. | no | desktop (`repair_install`, the missing-admin-copy card's "Download and run the installer again"; decision record 0037) |
+| `repair.download_failed` | Clauseo couldn't download this version's installer or its signature, or couldn't save it; trying again can succeed. | yes | desktop (`repair_install`, the missing-admin-copy card's "Download and run the installer again"; decision record 0037) |
+| `repair.verify_failed` | The downloaded installer's signature didn't verify with Clauseo's updater key, or named another file or version, so it was deleted and not run. | no | desktop (`repair_install`, the missing-admin-copy card's "Download and run the installer again"; decision record 0037) |
+| `repair.launch_failed` | Clauseo couldn't start the verified installer (Windows or security software refused it), so it was deleted and Clauseo stayed open. | no | desktop (`repair_install`, the missing-admin-copy card's "Download and run the installer again"; decision record 0037) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -138,6 +142,8 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+`repair.not_eligible`, `repair.download_failed`, `repair.verify_failed` and `repair.launch_failed` were added on 2026-11-08 for the Safe workspace card's "Download and run the installer again", at the orchestrator's request.
 
 ## Consequences
 

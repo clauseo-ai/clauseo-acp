@@ -260,7 +260,7 @@ function holdOf(
   ) {
     const acts = stepActs(transport, shield.store, shield.parts);
     const { WorkspaceStep } = shield.parts;
-    const repair = repairOf(shield.state, shield.parts, lang, { releaseMode: room.releaseMode });
+    const repair = repairOf(shield, transport, lang, { releaseMode: room.releaseMode });
     const page = repair.page;
     return {
       gate: (
@@ -268,6 +268,7 @@ function holdOf(
           state={step}
           words={stepWords(lang, shield.parts.pw)}
           repair={repair.lines}
+          repairRun={repair.run}
           onGetInstaller={
             page === null ? undefined : () => void shield.parts.openInstallerPage(transport, page)
           }
@@ -417,6 +418,8 @@ export function FirstRun({
   useEffect(() => {
     if (!enter || shields === null || parts === null) return;
     shields.set({ step: "ask" });
+    // after a repair's installer, this step is where the lawyer lands; the room's note doesn't too
+    if (shields.state().repair.note !== null) parts.markLanded(shields);
     const view = shields.state().view;
     if (!parts.needsInstaller(parts.computerCause(view)) && !parts.asksAdmin(view))
       stepActs(transport, shields, parts).setUp();

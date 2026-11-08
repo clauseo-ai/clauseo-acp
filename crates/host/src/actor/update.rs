@@ -346,7 +346,10 @@ fn stepped(
     let Some(machine) = actor.update.machine.as_ref() else {
         return Err(Refusal::NotNow);
     };
-    let (next, fx) = step(machine, input, actor.now().wall)?;
+    // Whether the desktop holds installs now (its repair runs the installer), asked each step.
+    let mut machine = machine.clone();
+    machine.hold_install(actor.update.updater.install_held());
+    let (next, fx) = step(&machine, input, actor.now().wall)?;
     actor.update.machine = Some(next);
     Ok(fx)
 }

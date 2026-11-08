@@ -20,7 +20,9 @@
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
 
-use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{
+    ConnectorCommand, ErrorCode, FolderRefId, HostCommand, HostError, MatterSource,
+};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
@@ -64,6 +66,19 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
     }
 }
 
+/// Whether the window `label` may run `repair_install` (the Safe workspace card's "Download
+/// and run the installer again", 0037): `main` alone, which shows the card. The settings
+/// window never runs an installer, and no other window may; `capabilities/main.json` grants
+/// the command to `main` alone as well.
+pub(super) fn admit_repair(label: &str) -> Result<(), HostError> {
+    match label {
+        crate::MAIN_WINDOW => Ok(()),
+        _ => Err(invalid(format!(
+            "window {label} may not run the installer; only the main window may"
+        ))),
+    }
+}
+
 /// Whether `main` may send `command`: an allow-list, one arm per host command and no
 /// catch-all, so a command the host adds does not compile here until the bridge rules on it
 /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
@@ -73,6 +88,13 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// and cancelling a scan that is not running does nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
+        // Not while the repair runs its installer (update/repair.rs): two installers at once.
+        HostCommand::InstallUpdate { .. } if crate::update::repair::running() => {
+            Err(HostError::new(
+                ErrorCode::CommandConflict,
+                "the installer is being downloaded and run again; try once Clauseo restarts",
+            ))
+        }
         HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
         // Both read the folder the ref names: only one this run's picker issued.
         HostCommand::RelocateMatter { folder, .. } | HostCommand::ScanFolder { folder } => {
