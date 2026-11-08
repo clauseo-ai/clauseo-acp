@@ -209,6 +209,15 @@ impl Machine for FakeMachine {
             .count())
     }
 
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError> {
+        self.call(format!("in_group {} {}", rid(member), rid(group)))?;
+        Ok(self
+            .state
+            .accounts
+            .values()
+            .any(|a| a.sid == *member && a.groups.contains(group)))
+    }
+
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
         self.call(format!("delete_group {}", rid(group)))?;
         if self.state.group.as_ref() == Some(group) {
@@ -555,20 +564,7 @@ impl Machine for FakeMachine {
         secrets: &[(Sid, Password)],
         pool: &[Sid],
     ) -> Result<(), MachineError> {
-        let sids: Vec<Sid> = secrets.iter().map(|(sid, _)| sid.clone()).collect();
-        self.owner_call(&format!("protect_for_owner {}", rids(&sids)))?;
-        let mut file = BTreeMap::new();
-        for sid in pool {
-            let password = match secrets.iter().find(|(s, _)| s == sid) {
-                Some((_, password)) => password.to_string(),
-                None => self.state.secrets.get(sid).cloned().ok_or_else(|| {
-                    MachineError::Other(format!("secrets.bin has no blob for {sid}"))
-                })?,
-            };
-            file.insert(sid.clone(), password);
-        }
-        self.state.secrets = file;
-        Ok(())
+        self.protect(secrets, pool)
     }
 
     fn now(&mut self) -> u64 {

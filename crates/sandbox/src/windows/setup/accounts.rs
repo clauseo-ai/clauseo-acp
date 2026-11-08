@@ -255,6 +255,46 @@ pub(super) fn group_members(name: &str) -> Result<usize, MachineError> {
     usize::try_from(total).map_err(|error| MachineError::Other(error.to_string()))
 }
 
+/// The members of the local group `name`, by SID (`NetLocalGroupGetMembers` level 0).
+pub(super) fn group_member_sids(name: &str) -> Result<Vec<Sid>, MachineError> {
+    // LOCALGROUP_MEMBERS_INFO_0 is one PSID, so entry `index` is the `index`th pointer.
+    const _: () = assert!(size_of::<LOCALGROUP_MEMBERS_INFO_0>() == size_of::<PSID>());
+    checked_name(name)?;
+    let group = HSTRING::from(name);
+    let mut buffer: *mut u8 = std::ptr::null_mut();
+    let (mut read, mut total) = (0u32, 0u32);
+    // SAFETY: the name is NUL-terminated; the out-pointers are live. The buffer the call
+    // allocates is freed by `NetBuffer`.
+    let status = unsafe {
+        NetLocalGroupGetMembers(
+            PCWSTR::null(),
+            &group,
+            0,
+            &raw mut buffer,
+            MAX_PREFERRED_LENGTH,
+            &raw mut read,
+            &raw mut total,
+            None,
+        )
+    };
+    let freed = NetBuffer(buffer);
+    net("NetLocalGroupGetMembers", status)?;
+    (0..usize::try_from(read).unwrap_or(0))
+        .map(|index| {
+            // SAFETY: the call wrote `read` entries at `buffer`, which lives until `freed`
+            // drops; entry `index` starts `index` pointers in, and holds a valid SID.
+            let sid = unsafe {
+                freed
+                    .0
+                    .add(index * size_of::<PSID>())
+                    .cast::<PSID>()
+                    .read_unaligned()
+            };
+            sid_text(sid)
+        })
+        .collect()
+}
+
 /// Puts the account `member` in the local group `group` (`NetLocalGroupAddMembers` level 0,
 /// by SID). A membership already there (`ERROR_MEMBER_IN_ALIAS`) is `Ok`.
 pub(super) fn add_member(group: &str, member: &Sid) -> Result<(), MachineError> {

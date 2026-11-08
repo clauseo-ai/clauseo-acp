@@ -255,6 +255,10 @@ impl Machine for WindowsMachine {
         accounts::group_members(&self.group_name(group)?)
     }
 
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError> {
+        Ok(accounts::group_member_sids(&self.group_name(group)?)?.contains(member))
+    }
+
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
         accounts::delete_group(&self.group_name(group)?)
     }

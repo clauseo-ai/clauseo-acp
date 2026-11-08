@@ -103,6 +103,7 @@ mod lock_tests;
 #[cfg(windows)]
 pub mod logon;
 mod machine;
+mod orphans;
 mod outcome;
 #[cfg(any(windows, test))]
 pub mod owner;

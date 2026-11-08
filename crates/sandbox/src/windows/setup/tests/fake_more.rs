@@ -306,4 +306,27 @@ impl FakeMachine {
             code: 2221,
         })
     }
+
+    /// `protect_for_owner`: `secrets.bin` holds a blob for each of `pool`, the new ones from
+    /// `secrets`, the rest kept.
+    pub(super) fn protect(
+        &mut self,
+        secrets: &[(Sid, crate::windows::setup::Password)],
+        pool: &[Sid],
+    ) -> Result<(), MachineError> {
+        let sids: Vec<Sid> = secrets.iter().map(|(sid, _)| sid.clone()).collect();
+        self.owner_call(&format!("protect_for_owner {}", super::fake::rids(&sids)))?;
+        let mut file = BTreeMap::new();
+        for sid in pool {
+            let password = match secrets.iter().find(|(s, _)| s == sid) {
+                Some((_, password)) => password.to_string(),
+                None => self.state.secrets.get(sid).cloned().ok_or_else(|| {
+                    MachineError::Other(format!("secrets.bin has no blob for {sid}"))
+                })?,
+            };
+            file.insert(sid.clone(), password);
+        }
+        self.state.secrets = file;
+        Ok(())
+    }
 }

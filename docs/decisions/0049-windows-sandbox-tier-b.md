@@ -33,7 +33,12 @@ build 26100):
 
 - **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
   in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
-  needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
+  needs another admin prompt. A name an account outside the record holds is skipped, never
+  adopted, except a killed run's orphan (made and put in the group, but not yet in `PoolSids`):
+  a pool name, in the group, no recorded SID, a local non-built-in account other than the owner
+  and the user running set-up. Set-up deletes it when it reaches that name and makes the name
+  again (`setup::orphans`), so ended runs can't use up the 32 names. Each matter is assigned one
+  pool user. The runner logs on as that
   user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
   logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
   under a restricted token, not write-restricted, so reads are checked too:

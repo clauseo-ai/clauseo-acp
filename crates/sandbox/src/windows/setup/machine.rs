@@ -116,6 +116,8 @@ pub trait Machine {
     fn create_group(&mut self) -> Result<Sid, MachineError>;
     /// How many members the group `group` has.
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
+    /// Whether the account `member` is in the group `group`.
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// A new random password for a pool user (`PR4e`'s generator).

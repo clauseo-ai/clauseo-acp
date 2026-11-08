@@ -435,7 +435,8 @@ fn make_users(
     let taken: BTreeSet<&str> = plan.kept.iter().map(|user| user.name.as_str()).collect();
     let mut next = 1;
     for _ in 0..plan.make {
-        let name = free_name(machine, &taken, &mut next, &mut users.skipped)?;
+        let free = (&taken, plan.base.as_slice(), group);
+        let name = free_name(machine, free, &mut next, &mut users.skipped)?;
         let password = machine.new_password();
         let sid = machine
             .create_user(&name, &password)
@@ -469,11 +470,12 @@ fn make_users(
     Ok(())
 }
 
-/// The next pool name from `next` on that no kept user has and no account outside the record
-/// holds: such an account is never adopted, but skipped and listed (D-B5).
+/// The next pool name from `next` on that no kept user has (`taken`) and no account outside
+/// the record (`recorded`) holds: such an account is never adopted, but skipped and listed
+/// (D-B5), unless a killed run made it, which is deleted and its name used (`orphans.rs`).
 fn free_name(
     machine: &mut impl Machine,
-    taken: &BTreeSet<&str>,
+    (taken, recorded, group): (&BTreeSet<&str>, &[Sid], &Sid),
     next: &mut u8,
     skipped: &mut Vec<(String, Sid)>,
 ) -> Result<String, Failed> {
@@ -484,6 +486,9 @@ fn free_name(
         }
         match machine.account_sid(&name) {
             Ok(None) => return Ok(name),
+            Ok(Some(sid)) if super::orphans::reclaim(machine, &name, &sid, group, recorded) => {
+                return Ok(name);
+            }
             Ok(Some(sid)) => {
                 tracing::info!(%name, %sid, "an account outside the record has this name; skipped");
                 skipped.push((name, sid));
