@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::MAX_RESOLVED;
 use crate::network_paths::resolve::Disk;
-use crate::network_paths::{NetEnv, may_touch};
+use crate::network_paths::{NetEnv, touchable};
 
 /// The network rules and the matter folder a guard run checks paths against.
 pub(super) struct Reach {
@@ -26,19 +26,21 @@ impl Reach {
         }
     }
 
-    /// Whether the guard may stat, resolve or open `path` (absolute). Never one longer than
+    /// Where `path` (absolute) leads, when the guard may stat, resolve or open it: the walked
+    /// path, which the guard uses from then on and never resolves the agent's text again
+    /// ([`touchable`]). `None` for one it may not touch, and for one longer than
     /// [`MAX_RESOLVED`] bytes, which is not walked (its time grows with its length) and so is
     /// judged by its text alone.
-    pub(super) fn may_touch(&self, path: &Path) -> bool {
-        self.may_touch_on(path, &Disk::vouch(&self.net))
+    pub(super) fn walked(&self, path: &Path) -> Option<PathBuf> {
+        self.walked_on(path, &Disk::resolved(&self.net))
     }
 
-    /// [`Self::may_touch`], walking on `disk`.
-    fn may_touch_on(&self, path: &Path, disk: &Disk<'_>) -> bool {
+    /// [`Self::walked`], walking on `disk`.
+    fn walked_on(&self, path: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
         if path.as_os_str().len() > MAX_RESOLVED {
-            return false;
+            return None;
         }
-        may_touch(path, &self.matter, disk)
+        touchable(path, &self.matter, disk)
     }
 }
 
@@ -66,7 +68,7 @@ mod tests {
             real: &real,
             net: &reach.net,
         };
-        reach.may_touch_on(Path::new(path), &disk)
+        reach.walked_on(Path::new(path), &disk).is_some()
     }
 
     /// A network path, or a local link to one, is never looked at past the link; nor is a path
@@ -97,5 +99,27 @@ mod tests {
             assert!(!may(&share, path, &none), "{path}");
         }
         assert!(none.touched().is_empty(), "{:?}", none.touched());
+    }
+
+    /// The guard gets the walked path back, links followed and `..` taken, and uses it from
+    /// then on: the agent's text is never resolved again.
+    #[test]
+    fn the_guard_uses_the_walked_path() {
+        let local = reach(plain_net(false), "/home/a/matter");
+        let fs = FakeFs::with(&[
+            ("/home/a/matter/Deals/spa.docx", Fake::File),
+            ("/home/a/matter/l", Fake::Link("Deals".into())),
+        ]);
+        let real = |_: &Path| None;
+        let disk = Disk {
+            fs: &fs,
+            real: &real,
+            net: &local.net,
+        };
+        assert_eq!(
+            local.walked_on(Path::new("/home/a/matter/l/../l/spa.docx"), &disk),
+            Some(PathBuf::from("/home/a/matter/Deals/spa.docx"))
+        );
+        assert_eq!(local.walked_on(Path::new(r"\\evil\s\x"), &disk), None);
     }
 }

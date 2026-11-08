@@ -101,9 +101,12 @@ impl Check<'_> {
         let path = Path::new(target);
         self.writable(target)
             && path.is_absolute()
-            && self.reach.may_touch(path)
-            && path.is_dir()
-            && clauseo_matters::matter_path_in(self.folder, &path.join("x")).is_none()
+            && self.reach.walked(path).is_some_and(|walked| {
+                // The walked path, its links followed: not followed or resolved again.
+                std::fs::symlink_metadata(&walked).is_ok_and(|meta| meta.is_dir())
+                    && clauseo_matters::matter_path_of_resolved(self.folder, &walked.join("x"))
+                        .is_none()
+            })
     }
 
     /// Whether `target`, written to, writes no held file: a literal path naming none.

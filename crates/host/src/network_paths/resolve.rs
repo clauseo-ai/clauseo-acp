@@ -17,6 +17,8 @@ use super::NetEnv;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+mod windows_tests;
 
 /// The most links one path may pass through; past it the walk refuses (fail-closed: Windows
 /// itself follows up to 63).
@@ -37,11 +39,9 @@ pub(crate) trait Fs {
     /// The target a link at `path` names (`read_link`), which the system does not follow.
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
     /// The identity of the local file or folder at `path` (its device or volume and its file
-    /// number), never following a link at it: asked only of a path the walk vouched for. `None`
-    /// when it can't be read.
-    fn identity(&self, _path: &Path) -> Option<(u64, u128)> {
-        None
-    }
+    /// number), never following a link at it: asked only of a path the walk vouched for. An
+    /// error when it can't be read (`NotFound` when there is no such name).
+    fn identity(&self, path: &Path) -> io::Result<(u64, u128)>;
 }
 
 /// The real disk.
@@ -82,12 +82,12 @@ impl Fs for RealFs {
         std::fs::read_link(path)
     }
 
-    fn identity(&self, path: &Path) -> Option<(u64, u128)> {
+    fn identity(&self, path: &Path) -> io::Result<(u64, u128)> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt as _;
-            let meta = std::fs::symlink_metadata(path).ok()?;
-            Some((meta.dev(), u128::from(meta.ino())))
+            let meta = std::fs::symlink_metadata(path)?;
+            Ok((meta.dev(), u128::from(meta.ino())))
         }
         #[cfg(windows)]
         {
@@ -96,7 +96,7 @@ impl Fs for RealFs {
         #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
-            None
+            Err(io::ErrorKind::Unsupported.into())
         }
     }
 }
@@ -123,12 +123,19 @@ impl<'a> Disk<'a> {
         }
     }
 
-    /// The real disk under `net`, names kept as written: for a yes or no on whether a path may
-    /// be touched ([`super::may_touch`]), which needs no canonical form.
-    pub(crate) fn vouch(net: &'a NetEnv) -> Self {
+    /// The real disk under `net`, for a caller that goes on to use the walked path
+    /// ([`super::touchable`]) and compares it with the matter folder's canonical path: on
+    /// Windows each local name in its canonical form (its long name, not its 8.3 alias); as
+    /// written elsewhere, where the walk's result is already canonical but for case and Unicode
+    /// form, which the matter comparison folds as the file system does.
+    pub(crate) fn resolved(net: &'a NetEnv) -> Self {
         Self {
             fs: &RealFs,
-            real: &as_written,
+            real: if cfg!(windows) {
+                &canonical
+            } else {
+                &as_written
+            },
             net,
         }
     }
@@ -163,6 +170,12 @@ pub(crate) enum Walked {
 /// `link`); `..` taken on what is resolved so far. [`Walked::Refused`] for a network location
 /// (the path, a name on the way, a link's target), a relative path, a link that can't be read, an
 /// error other than a missing name, or more than [`MAX_HOPS`] links.
+///
+/// With Windows' rules (`net.windows`) `.` and `..` go first, by text, as Win32 drops them
+/// before anything opens the path: `C:\m\j\..\x` opens `C:\m\x` whatever `j` is, so the walk
+/// never backs up from where a junction led. A link's relative target is joined to the link's
+/// folder by text too and its `..` dropped the same way, and a drive-relative target (`\x`,
+/// `C:x`) is refused. Unix keeps the kernel's way: `..` backs up from where a link led.
 pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
     let net = disk.net;
     if net.is_network(path) {
@@ -170,6 +183,10 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
     }
     let path = net.plain(path);
     if !path.is_absolute() {
+        return Walked::Refused;
+    }
+    let path = if net.windows { lexical(&path) } else { path };
+    if net.is_network(&path) {
         return Walked::Refused;
     }
     let mut at = PathBuf::new();
@@ -199,10 +216,30 @@ pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
                         if net.is_network(&target) || net.is_network(&at.join(&target)) {
                             return Walked::Refused;
                         }
-                        if target.has_root() {
-                            at = PathBuf::new();
+                        let prefixed = target
+                            .components()
+                            .any(|part| matches!(part, Component::Prefix(_)));
+                        if !target.is_absolute() && (target.has_root() || prefixed) {
+                            // Drive-relative (`\x`, `C:x`): no folder it is taken from.
+                            return Walked::Refused;
                         }
-                        rest.extend(parts_of(&target));
+                        if net.windows {
+                            // Windows reads a link's target by its text too: joined to the
+                            // link's folder, `..` dropped, then walked whole from its root.
+                            let joined = lexical(&at.join(&target));
+                            if net.is_network(&joined) {
+                                return Walked::Refused;
+                            }
+                            at = PathBuf::new();
+                            rest.extend(parts_of(&joined));
+                        } else {
+                            // The kernel takes a relative target from the link's folder, `..`
+                            // on what is resolved: its parts go on from `at`.
+                            if target.is_absolute() {
+                                at = PathBuf::new();
+                            }
+                            rest.extend(parts_of(&target));
+                        }
                     }
                     Ok(Entry::Dir | Entry::File) => {
                         at = (disk.real)(&next).unwrap_or(next);
@@ -243,6 +280,24 @@ enum Part {
     Up,
     /// A name.
     Name(OsString),
+}
+
+/// `path` with `.` and `..` taken off by their text, as Win32 path parsing does (`..` never
+/// past the root).
+pub(crate) fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                out.push(part.as_os_str());
+            }
+        }
+    }
+    out
 }
 
 /// `path`'s parts, last first, to pop in order.

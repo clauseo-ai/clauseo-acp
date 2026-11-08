@@ -13,7 +13,7 @@ use std::thread::{self, JoinHandle};
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Limits, Matter,
     MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored, Retention,
-    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_in,
+    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
     CheckpointId, ErrorCode, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId,
@@ -29,24 +29,24 @@ use crate::network_paths::{self, NetEnv};
 use crate::sent::TurnPaths;
 
 /// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
-/// session folder by text, and each `outside` path that [`matter_path_in`] resolves into
+/// session folder by text, and each `outside` path that the network-safe walk resolves into
 /// `folder` on the disk (a spelling through a symlink, or in another case where the file system
 /// ignores case). The rest lie outside the matter, and so does a path the network-safe walk
 /// does not vouch for, or one in a matter kept on a share, which is never resolved
-/// ([`network_paths::may_touch`]).
+/// ([`network_paths::touchable`]; its walked path compared by [`matter_path_of_resolved`]).
 pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath> {
     let TurnPaths {
         mut inside,
         outside,
     } = paths;
     let net = NetEnv::current();
-    let disk = Disk::vouch(&net);
+    let disk = Disk::resolved(&net);
     for path in outside {
-        let path = Path::new(&path);
-        if !network_paths::may_touch(path, folder, &disk) {
+        // The walked path, compared as it is: the agent's text is never resolved again.
+        let Some(walked) = network_paths::touchable(Path::new(&path), folder, &disk) else {
             continue;
-        }
-        if let Some(found) = matter_path_in(folder, path) {
+        };
+        if let Some(found) = matter_path_of_resolved(folder, &walked) {
             inside.insert(found);
         }
     }
