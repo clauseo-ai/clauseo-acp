@@ -365,8 +365,10 @@ fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
     let refused = await_sweeps(&mut fake).unwrap_err();
     assert!(refused.contains("completed stop"), "{refused}");
     assert_eq!(fake.state("a1"), Some(STOP));
-    // F4 lets the logon go: the stop it would ask for has completed.
-    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    // F4 refuses the logon too, without asking for the stop, which has completed.
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert!(refused.contains("completed stop"), "{refused}");
+    assert_eq!(fake.state("a1"), Some(STOP));
     assert_eq!(fake.asked("stop"), 0);
 }
 

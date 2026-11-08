@@ -1275,7 +1275,9 @@ leaves that profile, both naming the part.
       number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
       live session per pool user, and this outer hasn't written its own): it becomes
       `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
-      and the logon is refused. One whose stop completed is re-marked. A marker of this pool
+      and the logon is refused. One whose stop completed is re-marked; one that couldn't be
+      (`SweepNext` unreadable, the write failed) refuses the logon, as it refuses a launch,
+      without requesting a stop, which has completed. A marker of this pool
       user's awaiting a sweep, re-marked now or earlier, is then waited for as a launch waits
       (the sweep requested unless the re-mark just did, `SweepSequence` read every 100 ms for up
       to 15 s): until that sweep ran, a task the escapee registered is live. One still short
