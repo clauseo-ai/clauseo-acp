@@ -195,7 +195,11 @@ fn an_excluded_range_covering_a_slots_block_refuses_that_slot_only() {
                 }
             );
             assert!(!gap.needs_setup());
-            assert!(gap.to_string().contains("excludedportrange"), "{gap}");
+            let text = gap.to_string();
+            assert!(text.contains("excludedportrange"), "{text}");
+            let account = format!("ClauseoSb{:02}", index + 1);
+            assert!(text.contains(&format!("sandbox user {account})")), "{text}");
+            assert!(!text.contains("slot"), "{text}");
         } else {
             assert_eq!(refused, Ok(()), "slot {index}");
         }

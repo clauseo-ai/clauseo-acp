@@ -17,7 +17,7 @@
 
 use std::ops::RangeInclusive;
 
-use crate::windows::pool::{POOL_CAP, pool_number};
+use crate::windows::pool::{POOL_CAP, pool_name, pool_number};
 
 /// How many ports a slot holds in each block.
 pub const SLOT_PORTS: u16 = 8;
@@ -52,6 +52,11 @@ impl Slot {
     /// Its index, 0 to `POOL_CAP - 1`.
     pub fn index(self) -> u8 {
         self.0
+    }
+
+    /// Its pool user's account name, as IT sees it (`ClauseoSb01` for slot 0).
+    pub fn account(self) -> String {
+        pool_name(self.0 + 1).unwrap_or_default()
     }
 
     /// Its 8 ports in the block starting at `base`.
@@ -98,6 +103,13 @@ mod tests {
         assert_eq!(Slot::from_account("ClauseoSb01"), Slot::new(0));
         assert_eq!(Slot::from_account("ClauseoSb17"), Slot::new(16));
         assert_eq!(Slot::from_account("ClauseoSb32"), Slot::new(31));
+        assert_eq!(
+            Slot::new(29).map(Slot::account).as_deref(),
+            Some("ClauseoSb30")
+        );
+        for slot in Slot::all() {
+            assert_eq!(Slot::from_account(&slot.account()), Some(slot));
+        }
         for name in [
             "ClauseoSb00",
             "ClauseoSb33",

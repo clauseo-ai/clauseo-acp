@@ -78,9 +78,11 @@ pub enum NetworkGap {
     /// excluded port range), or, in its host block, held by other programs' listeners. Only
     /// launches on this slot are refused.
     #[error(
-        "all 8 of this matter's {block} ports on this computer, {first}-{last} ({slot}), are \
-         reserved by Windows or held by other programs (Hyper-V, WSL and Docker reserve port \
-         ranges; see `netsh int ipv4 show excludedportrange protocol=tcp`)"
+        "all 8 of this matter's {block} ports on this computer, {first}-{last} (those of the \
+         sandbox user {account}), are reserved by Windows or held by other programs (Hyper-V, \
+         WSL and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
+         protocol=tcp`)",
+        account = .slot.account()
     )]
     SlotPortsUnusable {
         /// The slot.
