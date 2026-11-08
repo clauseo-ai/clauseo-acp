@@ -90,8 +90,9 @@ pub trait Markers {
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
 /// those of another install. An unreadable one is given the current install id, if known, for
-/// when it is written again.
-fn current(fs: &mut impl Markers) -> io::Result<Vec<UncleanSession>> {
+/// when it is written again. With them, whether the id was read: until it is, no unreadable
+/// marker is written again, so none is written id-less and then removed as another install's.
+fn current(fs: &mut impl Markers) -> io::Result<(Vec<UncleanSession>, bool)> {
     let sessions = fs.sessions()?;
     let pool = fs.pool();
     let install = fs.install_id().ok();
@@ -112,7 +113,7 @@ fn current(fs: &mut impl Markers) -> io::Result<Vec<UncleanSession>> {
         }
         kept.push(session);
     }
-    Ok(kept)
+    Ok((kept, install.is_some()))
 }
 
 /// Writes `session`'s marker as `state`, as it names its pool user and install.
@@ -172,7 +173,8 @@ fn remark(
 /// marker awaits a stop; a marker awaiting a sweep (a re-mark's, or any other) is waited for
 /// instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every session.
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String> {
-    let sessions = current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
+    let (sessions, known) =
+        current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
     let ours: Vec<UncleanSession> = sessions
         .into_iter()
         .filter(|session| {
@@ -195,7 +197,12 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
                 if stop_next.is_none() {
                     stop_next = dead_outer(fs);
                 }
-                if let Some(state) = stop_next {
+                // An unreadable one waits for the install id: written without it, it would read
+                // as another install's.
+                let rewritable = known || session.state.is_some();
+                if let Some(state) = stop_next
+                    && rewritable
+                {
                     drop(settle(fs, &session, state));
                 }
             }
@@ -288,7 +295,8 @@ fn dead_outer(fs: &mut impl Markers) -> Option<MarkerState> {
 /// A launch's check: every marker awaiting a sweep is clean, or becomes clean within
 /// [`SWEEP_WAIT`] of a sweep this asks for. `Err` says why not.
 pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
-    let sessions = current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
+    let (sessions, _) =
+        current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
     let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
     let mut done = fs.sequences().map_err(unread)?;
     let (sessions, requested) = remark(fs, sessions, done);
@@ -344,7 +352,7 @@ pub struct StartUp {
 /// when a marker still awaits a stop, the sweep task when one still awaits a sweep. It never
 /// waits.
 pub fn start_up(fs: &mut impl Markers) -> io::Result<StartUp> {
-    let mut sessions = current(fs)?;
+    let (mut sessions, known) = current(fs)?;
     let mut numbers = None;
     for session in &mut sessions {
         if session
@@ -357,7 +365,8 @@ pub fn start_up(fs: &mut impl Markers) -> io::Result<StartUp> {
             numbers = dead_outer(fs);
         }
         let Some(state) = numbers else { continue };
-        if settle(fs, session, state).is_ok() {
+        let rewritable = known || session.state.is_some();
+        if rewritable && settle(fs, session, state).is_ok() {
             session.state = Some(state);
         }
     }
