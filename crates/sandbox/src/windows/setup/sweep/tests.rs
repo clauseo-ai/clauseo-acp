@@ -10,6 +10,8 @@ use super::*;
 use crate::windows::setup::pool_steps::Pool;
 
 mod principals;
+mod record;
+mod sequence;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -54,6 +56,16 @@ struct Fake {
     jobs: Listed,
     /// Indexes of the jobs whose cancel fails.
     jobs_refuse: Vec<usize>,
+    /// The record's `REG_QWORD` values (`SweepNext`, …), how often the set-up lock is held now
+    /// (0 or 1), and whether it stays held by another.
+    values: BTreeMap<&'static str, u64>,
+    held: u8,
+    busy: bool,
+    /// The value whose write fails.
+    write_fails: Option<&'static str>,
+    /// The record's reads, and the read (0 the first) from which the key is gone.
+    pool_reads: usize,
+    gone_from: Option<usize>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -77,6 +89,12 @@ impl Fake {
             delete_refuse: Vec::new(),
             jobs: Ok(Vec::new()),
             jobs_refuse: Vec::new(),
+            values: BTreeMap::new(),
+            held: 0,
+            busy: false,
+            write_fails: None,
+            pool_reads: 0,
+            gone_from: None,
             done: Vec::new(),
             logged: Vec::new(),
         }
@@ -158,6 +176,10 @@ impl Gate for Fake {
     }
 
     fn pool(&mut self) -> Result<Option<Pool>, Failed> {
+        self.pool_reads += 1;
+        if self.gone_from.is_some_and(|from| self.pool_reads > from) {
+            return Ok(None);
+        }
         self.pool.clone()
     }
 
@@ -536,9 +558,11 @@ fn the_exit_codes_follow_the_stop_codes_and_are_never_shared() {
         SweepExit::NotPool,
         SweepExit::TasksLeft,
         SweepExit::JobsLeft,
+        SweepExit::NotReserved,
+        SweepExit::NotRecorded,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 52, 53, 54, 55, 56]);
+    assert_eq!(codes, [0, 52, 53, 54, 55, 56, 57, 58]);
     let stop = StopExit::NotReserved.as_code();
     assert_eq!(stop, 50, "the stop's last code");
     let mut by_code = BTreeMap::new();
