@@ -9,12 +9,15 @@ use std::sync::PoisonError;
 use std::time::Duration;
 
 use clauseo_process::Timer;
+use clauseo_protocol::AgentId;
 
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::download::firm::{BundleEntry, bundle_file, bundle_path, copy_from_bundle, mirror_url};
 use crate::download::{FetchJob, Fetcher, Magic, part_path};
+use crate::pins::LockedPackage;
 use crate::platform::Os;
+use crate::snapshot::NodeArchive;
 use crate::state::InstallState;
 use crate::write;
 
@@ -186,7 +189,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
         let fetch_job = FetchJob {
             url: entry.url(archive),
             expected: archive.expected().clone(),
-            dest: downloads.join(archive.name()),
+            dest: node_dest(&downloads, archive),
             magic: if archive.is_zip() {
                 Magic::Zip
             } else {
@@ -225,7 +228,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
     for package in config.snapshot.packages(&job.ticket.agent, config.platform) {
         let short = package.name.rsplit('/').next().unwrap_or(&package.name);
         let label = format!("{short}-{}.tgz", package.version);
-        let dest = downloads.join(format!("{}.tgz", package.integrity.hex()));
+        let dest = package_dest(&downloads, package);
         let item = if let Some(bundle) = &config.install.bundle {
             let in_bundle = bundle.join("npm");
             // npm cannot read a `file:` tarball on a Windows share (see `is_unc`): copied first.
@@ -346,10 +349,51 @@ impl Progress {
     }
 }
 
-/// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
-/// cache's contents. A file that will not go is left; the next install reuses or replaces it.
-pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
-    for path in &fetched.downloaded {
+/// Where Node's archive `archive` is downloaded to, in `downloads`.
+fn node_dest(downloads: &Path, archive: &NodeArchive) -> PathBuf {
+    downloads.join(archive.name())
+}
+
+/// Where the npm tarball of `package` is downloaded to, in `downloads`: named by its digest.
+fn package_dest(downloads: &Path, package: &LockedPackage) -> PathBuf {
+    downloads.join(format!("{}.tgz", package.integrity.hex()))
+}
+
+impl Fetched {
+    /// The files this try put in `downloads/`, for [`clean_up`].
+    pub(super) fn downloaded(&self) -> &[PathBuf] {
+        &self.downloaded
+    }
+}
+
+/// Every file an install of `agent` may have put in `downloads/`: each package's tarball, and
+/// Node's archive when `with_node`, for [`clean_up`] after a `Ready` that fetched nothing
+/// itself (a kept set-up renamed alone, or an install found finished), whose files an earlier
+/// try left.
+pub(super) fn install_downloads(
+    config: &AgentsConfig,
+    agent: &AgentId,
+    with_node: bool,
+) -> Vec<PathBuf> {
+    let downloads = downloads_dir(&config.data_dir);
+    let node = config
+        .snapshot
+        .node_archive(config.platform)
+        .filter(|_| with_node)
+        .map(|archive| node_dest(&downloads, archive));
+    let packages = config
+        .snapshot
+        .packages(agent, config.platform)
+        .into_iter()
+        .map(|package| package_dest(&downloads, package));
+    node.into_iter().chain(packages).collect()
+}
+
+/// After `Ready`, on every way there: removes `downloaded`, files of this install in
+/// `downloads/` (never the bundle's files), and the npm cache's contents. A file that will
+/// not go is left; the next install reuses or replaces it.
+pub(super) fn clean_up(config: &AgentsConfig, downloaded: &[PathBuf]) {
+    for path in downloaded {
         drop(write::remove_file(path));
         drop(write::remove_file(&part_path(path)));
     }
