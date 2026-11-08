@@ -20,6 +20,8 @@ const PLANTED: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200af;;;BU)
 struct Rooted {
     root: PathBuf,
     recorded: Option<String>,
+    /// The record's `GroupSid`.
+    group: Option<Sid>,
 }
 
 impl Rooted {
@@ -58,6 +60,10 @@ impl AdminCopyFs for Rooted {
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         Ok(self.recorded.clone())
+    }
+
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        Ok(self.group.clone())
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
@@ -157,43 +163,84 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
         levels.push(next);
     }
     for level in &levels {
-        lock_down(level, true).unwrap();
+        lock_down(level, true, None).unwrap();
         let bytes = os::security(level).unwrap();
         assert!(
-            locked(&bytes, true) && level_safe(&bytes),
+            locked(&bytes, true, None) && level_safe(&bytes),
             "{}",
             level.display()
         );
     }
-    lock_down(&exe, false).unwrap();
+    lock_down(&exe, false, None).unwrap();
     let back = os::security(&exe).unwrap();
     assert!(
-        locked(&back, false) && level_safe(&back),
+        locked(&back, false, None) && level_safe(&back),
         "the copy reads back locked"
     );
     let recorded = Some(os::sha256(&exe).unwrap());
-    let fs = Rooted { root, recorded };
+    let fs = Rooted {
+        root,
+        recorded,
+        group: None,
+    };
     assert!(check(&fs).is_ok_and(|path| same_path(&path, &exe)));
     // Users given write on the Sandbox folder: unsafe, and the read-back no longer `locked`.
     let sandbox = levels.last().unwrap();
     protect_with(sandbox, PLANTED).unwrap();
     let planted = os::security(sandbox).unwrap();
-    assert!(!locked(&planted, true) && !level_safe(&planted));
+    assert!(!locked(&planted, true, None) && !level_safe(&planted));
     assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
     // A stray beside the copy refuses; the lock-down deletes it and locks what stays.
     let stray = dir.file(r"pf\Clauseo\Sandbox\version.dll", "planted");
     assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
-    lock_down_tree(sandbox, &exe).unwrap();
+    lock_down_tree(sandbox, &exe, None).unwrap();
     assert_eq!(os::found(&stray).unwrap(), Found::Missing);
-    assert!(locked(&os::security(sandbox).unwrap(), true));
+    assert!(locked(&os::security(sandbox).unwrap(), true, None));
     assert!(check(&fs).is_ok());
     // A changed copy is changed.
     dir.file(
         r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe",
         "MZ another",
     );
-    lock_down(&exe, false).unwrap();
+    lock_down(&exe, false, None).unwrap();
     assert_eq!(check(&fs), Err(Blocked::AdminCopyChanged));
+}
+
+/// The lock with the pool's group denied, as Windows writes and reads it: the set-up's tree
+/// lock reads back exactly ([`locked`] with the group), the check passes with that group
+/// recorded, and a lock with no deny, read against the recorded group, is unsafe.
+#[test]
+#[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
+fn elevated_the_lock_denies_the_recorded_group_and_the_check_requires_it() {
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let group = Sid::parse("S-1-5-21-1-2-3-1100").unwrap();
+    let dir = TempDir::new("admin-copy-deny");
+    let root = dir.path().join("pf");
+    let exe = dir.file(
+        r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe",
+        "MZ stand-in",
+    );
+    let sandbox = admin_dir(&root);
+    lock_down(&root, true, None).unwrap();
+    lock_down(&root.join(ADMIN_DIR[0]), true, None).unwrap();
+    lock_down_tree(&sandbox, &exe, Some(&group)).unwrap();
+    for (path, folder) in [(&sandbox, true), (&exe, false)] {
+        let bytes = os::security(path).unwrap();
+        assert!(locked(&bytes, folder, Some(&group)), "{}", path.display());
+        assert!(!locked(&bytes, folder, None), "{}", path.display());
+        assert!(group_denied(&bytes, &group) && level_safe(&bytes));
+    }
+    let recorded = Some(os::sha256(&exe).unwrap());
+    let fs = Rooted {
+        root,
+        recorded,
+        group: Some(group),
+    };
+    assert!(check(&fs).is_ok_and(|path| same_path(&path, &exe)));
+    lock_down_tree(&sandbox, &exe, None).unwrap();
+    assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
 }
 
 /// A protected DACL no lock-down writes, so a descriptor left alone reads back as it was: the
@@ -219,7 +266,10 @@ fn elevated_the_lock_down_refuses_a_file_with_two_names_and_leaves_it() {
     protect_with(&exe, OWN_FILE).unwrap();
     let other = dir.hard_link("elsewhere.exe", &exe);
     let before = os::security(&other).unwrap();
-    for refused in [lock_tree(&sandbox, None), lock_down_tree(&sandbox, &exe)] {
+    for refused in [
+        lock_tree(&sandbox, None, None),
+        lock_down_tree(&sandbox, &exe, None),
+    ] {
         let error = refused.unwrap_err();
         assert!(error.to_string().contains("more than one name"), "{error}");
         assert_eq!(
@@ -228,7 +278,7 @@ fn elevated_the_lock_down_refuses_a_file_with_two_names_and_leaves_it() {
             "the other name's, untouched"
         );
         assert_eq!(os::security(&exe).unwrap(), before, "the copy's, untouched");
-        assert!(!locked(&os::security(&exe).unwrap(), false));
+        assert!(!locked(&os::security(&exe).unwrap(), false, None));
         assert_eq!(os::found(&exe).unwrap(), Found::File);
         assert_eq!(os::found(&other).unwrap(), Found::File);
     }
@@ -263,15 +313,15 @@ fn elevated_the_lock_down_never_follows_a_junction_in_the_admin_folder() {
     // Below the admin folder: deleted as itself, the rest locked.
     let link = sandbox.join("linked");
     junction(&link, &target).unwrap();
-    lock_tree(&sandbox, None).unwrap();
+    lock_tree(&sandbox, None, None).unwrap();
     assert_eq!(os::found(&link).unwrap(), Found::Missing);
-    assert!(locked(&os::security(&sandbox).unwrap(), true));
-    assert!(locked(&os::security(&exe).unwrap(), false));
+    assert!(locked(&os::security(&sandbox).unwrap(), true, None));
+    assert!(locked(&os::security(&exe).unwrap(), false, None));
     untouched();
     // The admin folder itself a junction: refused, and the junction stays.
     let root = dir.path().join("root-link");
     junction(&root, &target).unwrap();
-    assert!(lock_tree(&root, None).is_err());
+    assert!(lock_tree(&root, None, None).is_err());
     assert_eq!(os::found(&root).unwrap(), Found::Link);
     untouched();
 }
@@ -349,20 +399,20 @@ fn elevated_a_system_only_staging_is_taken_back_by_the_lock_down_and_the_teardow
     // --adopt (a repair after a refresh): staging goes, the rest is locked.
     let dir = TempDir::new("admin-copy-take-back-adopt");
     let (sandbox, exe, staging) = shut_staging(&dir);
-    lock_down_tree(&sandbox, &exe).unwrap();
+    lock_down_tree(&sandbox, &exe, None).unwrap();
     assert_eq!(os::found(&staging).unwrap(), Found::Missing);
-    assert!(locked(&os::security(&sandbox).unwrap(), true));
-    assert!(locked(&os::security(&exe).unwrap(), false));
+    assert!(locked(&os::security(&sandbox).unwrap(), true, None));
+    assert!(locked(&os::security(&exe).unwrap(), false, None));
     // --remove --uninstall's teardown: deleted.
     let dir = TempDir::new("admin-copy-take-back-remove");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
-    remove_taking_back(&mut NtfsLockDown, &staging).unwrap();
+    remove_taking_back(&mut NtfsLockDown::new(None), &staging).unwrap();
     assert_eq!(os::found(&staging).unwrap(), Found::Missing);
     // The take-back alone: re-secured as the locked folder, and readable again.
     let dir = TempDir::new("admin-copy-take-back-secure");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
-    NtfsLockDown.take_back(&staging).unwrap();
-    assert!(locked(&os::security(&staging).unwrap(), true));
+    NtfsLockDown::new(None).take_back(&staging).unwrap();
+    assert!(locked(&os::security(&staging).unwrap(), true, None));
     assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 1);
 }
 
@@ -381,8 +431,8 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     let dir = TempDir::new("admin-copy-take-back-file");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
     let old = staging.join("clauseo-sandbox-setup.exe.old");
-    NtfsLockDown.take_back(&old).unwrap();
-    assert!(locked(&os::security(&old).unwrap(), false));
+    NtfsLockDown::new(None).take_back(&old).unwrap();
+    assert!(locked(&os::security(&old).unwrap(), false, None));
     assert_eq!(
         os::sha256(&old).unwrap(),
         os::sha256(&dir.file("same", "MZ old")).unwrap()
@@ -392,7 +442,7 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     dir.hard_link("second.exe", &linked);
     system_only(&linked, false);
     let before = os::security(&linked).unwrap();
-    assert!(NtfsLockDown.take_back(&linked).is_err());
+    assert!(NtfsLockDown::new(None).take_back(&linked).is_err());
     assert_eq!(os::security(&linked).unwrap(), before);
     // A junction: left, and what it names untouched.
     let target = dir.dir("target");
@@ -400,9 +450,11 @@ fn elevated_a_file_is_taken_back_through_its_own_handle() {
     let target_before = os::security(&target).unwrap();
     let link = dir.path().join("link");
     junction(&link, &target).unwrap();
-    NtfsLockDown.take_back(&link).unwrap();
+    NtfsLockDown::new(None).take_back(&link).unwrap();
     assert_eq!(os::found(&link).unwrap(), Found::Link);
     assert_eq!(os::security(&target).unwrap(), target_before);
     // Nothing there: nothing to do.
-    NtfsLockDown.take_back(&dir.path().join("none")).unwrap();
+    NtfsLockDown::new(None)
+        .take_back(&dir.path().join("none"))
+        .unwrap();
 }

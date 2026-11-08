@@ -108,6 +108,22 @@ pub(crate) fn locked_dacl(folder: bool) -> Vec<u8> {
     )
 }
 
+/// The admin folder or copy as `--adopt` and the set-up lock it once the record names
+/// `group`: [`locked_dacl`]'s entries after a deny of everything for `group`.
+pub(crate) fn locked_dacl_denying(folder: bool, group: &str) -> Vec<u8> {
+    let inherit = if folder { 0x3 } else { 0 };
+    descriptor(
+        super::ADMINISTRATORS,
+        Some(&[
+            (1, inherit, FULL_ACCESS, group),
+            (0, inherit, FULL_ACCESS, super::SYSTEM),
+            (0, inherit, FULL_ACCESS, super::ADMINISTRATORS),
+            (0, inherit, READ_EXECUTE, super::USERS),
+        ]),
+        true,
+    )
+}
+
 /// The recorded hash every [`Fake::ready`] copy has.
 pub(crate) const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -121,6 +137,9 @@ pub(crate) struct Fake {
     pub(crate) another: bool,
     /// Whether the record's owners can't be read.
     pub(crate) owner_unreadable: bool,
+    /// The record's `GroupSid`, and whether it can't be read.
+    pub(crate) group: Option<Sid>,
+    pub(crate) group_unreadable: bool,
     /// This user's `SecurityBlockedAt` mark: whether it is there.
     pub(crate) security_mark: std::cell::Cell<bool>,
     /// Every path asked about, in order.
@@ -150,6 +169,8 @@ impl Fake {
             recorded: Some(HASH.to_owned()),
             another: false,
             owner_unreadable: false,
+            group: None,
+            group_unreadable: false,
             security_mark: std::cell::Cell::new(false),
             asked: RefCell::new(Vec::new()),
             events: Rc::new(RefCell::new(Vec::new())),
@@ -211,6 +232,13 @@ impl AdminCopyFs for Fake {
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         Ok(self.recorded.clone())
+    }
+
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        if self.group_unreadable {
+            return Err(io::Error::other("the record can't be read"));
+        }
+        Ok(self.group.clone())
     }
 
     fn another_owner(&self) -> io::Result<bool> {

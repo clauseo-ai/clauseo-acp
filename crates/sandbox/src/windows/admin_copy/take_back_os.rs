@@ -14,6 +14,7 @@ use super::lock_tree_os::{self, lock_tree};
 use super::os;
 use super::take_back::LockDownFs;
 use crate::windows::acl::privilege::Privileges;
+use crate::windows::sids::Sid;
 
 /// What a take-back enables.
 const TAKE_BACK: [&str; 3] = [
@@ -22,8 +23,17 @@ const TAKE_BACK: [&str; 3] = [
     "SeBackupPrivilege",
 ];
 
-/// The admin folder on NTFS.
-pub(crate) struct NtfsLockDown;
+/// The admin folder on NTFS, locked for `group` (the record's `GroupSid`; `os::lock_handle`).
+pub(crate) struct NtfsLockDown {
+    group: Option<Sid>,
+}
+
+impl NtfsLockDown {
+    /// The admin folder, whose locks deny `group` (none without one).
+    pub(crate) fn new(group: Option<Sid>) -> NtfsLockDown {
+        NtfsLockDown { group }
+    }
+}
 
 impl LockDownFs for NtfsLockDown {
     fn found(&mut self, path: &Path) -> io::Result<Found> {
@@ -52,11 +62,11 @@ impl LockDownFs for NtfsLockDown {
     }
 
     fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()> {
-        lock_tree(dir, skip)
+        lock_tree(dir, skip, self.group.as_ref())
     }
 
     fn take_back(&mut self, path: &Path) -> io::Result<()> {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
-        lock_tree_os::take_back(path)
+        lock_tree_os::take_back(path, self.group.as_ref())
     }
 }

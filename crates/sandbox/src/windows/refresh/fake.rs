@@ -47,6 +47,8 @@ pub(super) struct Fake {
     pub(super) crash: Option<&'static str>,
     pub(super) crashed: bool,
     pub(super) calls: Vec<&'static str>,
+    /// The group each `secure_staged` denied, in order.
+    pub(super) secured_for: Vec<Option<Sid>>,
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
@@ -75,6 +77,7 @@ impl Fake {
                 user_install_dir: Some(INSTALL.to_owned()),
                 admin_copy_sha256: Some(sha_hex(old)),
                 admin_copy_version: Some(OLD_VERSION.to_owned()),
+                group_sid: None,
             },
             profile: Some(PathBuf::from(PROFILE)),
             admin_only: false,
@@ -89,6 +92,7 @@ impl Fake {
             crash: None,
             crashed: false,
             calls: Vec::new(),
+            secured_for: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
         }
@@ -205,7 +209,8 @@ impl Refresher for Fake {
         self.calls.push("native");
         self.native.map_err(str::to_owned)
     }
-    fn secure_staged(&mut self) -> Result<(), Failed> {
+    fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed> {
+        self.secured_for.push(group.cloned());
         self.step("secure_staged")
     }
     fn hold_admin_folder(&mut self) -> Result<(), Failed> {

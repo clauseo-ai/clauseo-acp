@@ -211,3 +211,22 @@ fn every_run_past_the_clear_leaves_no_staging_folder() {
     assert!(fake.calls.contains(&"leave_staging"));
     assert_eq!(fake.staging, Staging::Absent);
 }
+
+#[test]
+fn the_staged_copy_denies_the_recorded_group_and_none_without_one() {
+    let key = key();
+    let group = "S-1-5-21-1-2-3-1100";
+    for recorded in [None, Some(group)] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.record.group_sid = recorded.map(str::to_owned);
+        assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done, "{recorded:?}");
+        let want = recorded.map(|sid| Sid::parse(sid).unwrap());
+        assert_eq!(fake.secured_for, [want], "{recorded:?}");
+    }
+    // A `GroupSid` that isn't a SID refuses before anything is staged.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.record.group_sid = Some("ClauseoSandboxUsers".to_owned());
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::NoRecord);
+    assert_eq!(fake.secured_for, Vec::<Option<Sid>>::new());
+    assert_eq!(fake.admin_file, Some(old()));
+}

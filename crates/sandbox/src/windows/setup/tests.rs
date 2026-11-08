@@ -11,6 +11,7 @@ use super::*;
 use crate::windows::acl_plan::Rights;
 use crate::windows::fence::{MatterFolders, RegisteredMatter};
 
+mod admin_lock;
 mod create;
 mod extend;
 mod fake;

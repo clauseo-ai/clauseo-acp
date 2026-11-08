@@ -37,11 +37,12 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
-use super::{AdminCopyFs, Found, Held, LOCKED_FILE_SDDL, LOCKED_FOLDER_SDDL, locked};
+use super::{AdminCopyFs, Found, Held, locked, locked_file_sddl, locked_folder_sddl};
 use crate::windows::record::{
-    admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_owner_sid,
+    admin_copy_owner, admin_copy_sha256, current_user_sid, sandbox_group_sid, sandbox_owner_sid,
 };
 use crate::windows::setup::record_values::MACHINE_OWNER;
+use crate::windows::sids::Sid;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
@@ -74,6 +75,10 @@ impl AdminCopyFs for WindowsAdminCopy {
         admin_copy_sha256().map_err(io::Error::other)
     }
 
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        recorded_group()
+    }
+
     fn security_blocked(&self) -> io::Result<bool> {
         super::mark_os::read()
     }
@@ -101,13 +106,23 @@ impl AdminCopyFs for WindowsAdminCopy {
     }
 }
 
+/// The record's `GroupSid` (`HKLM`, written by the elevated set-up), checked as a SID.
+pub(crate) fn recorded_group() -> io::Result<Option<Sid>> {
+    let Some(text) = sandbox_group_sid().map_err(io::Error::other)? else {
+        return Ok(None);
+    };
+    Sid::parse(&text).map(Some).map_err(io::Error::other)
+}
+
 /// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`
 /// (`take_back::lock_down_with`): `staging\` deleted, every entry but the copy and its signature
 /// deleted, a link deleted as itself and never followed, anything that shuts Administrators out
-/// taken back first; then `dir` and everything left in it given the locked owner and DACL, read
-/// back exactly ([`lock_down`]), so no older file keeps its own entries or owner.
-pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
-    super::take_back::lock_down_with(&mut super::take_back_os::NtfsLockDown, dir, exe)
+/// taken back first; then `dir` and everything left in it given the locked owner and DACL for
+/// `group` (the record's `GroupSid`), read back exactly ([`lock_down`]), so no older file keeps
+/// its own entries or owner. The set-up runs it again once it has recorded the group.
+pub(crate) fn lock_down_tree(dir: &Path, exe: &Path, group: Option<&Sid>) -> io::Result<()> {
+    let mut fs = super::take_back_os::NtfsLockDown::new(group.cloned());
+    super::take_back::lock_down_with(&mut fs, dir, exe)
 }
 
 /// [`WindowsAdminCopy`] for `UserSetup::state`, which the app asks at every tier query: the
@@ -139,6 +154,10 @@ impl AdminCopyFs for StateAdminCopy {
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         WindowsAdminCopy.recorded_sha256()
+    }
+
+    fn recorded_group(&self) -> io::Result<Option<Sid>> {
+        recorded_group()
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
@@ -282,23 +301,23 @@ fn hash_file(file: &mut File) -> io::Result<String> {
     Ok(super::hex(&hasher.finalize()))
 }
 
-/// Gives `path` (a folder when `folder`, else the admin copy) [`LOCKED_FOLDER_SDDL`]'s or
-/// [`LOCKED_FILE_SDDL`]'s owner and protected DACL, then reads it back and refuses unless it is
-/// exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
+/// Gives `path` (a folder when `folder`, else the admin copy) [`locked_folder_sddl`]'s or
+/// [`locked_file_sddl`]'s owner and protected DACL for `group`, then reads it back and refuses
+/// unless it is exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
 /// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down: the
 /// set-up's walks lock through handles of their own (`lock_tree_os`).
 #[cfg(test)]
-pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
+pub(crate) fn lock_down(path: &Path, folder: bool, group: Option<&Sid>) -> io::Result<()> {
     use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
     let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;
-    lock_handle(Handle::open(path, access)?.0, folder)
+    lock_handle(Handle::open(path, access)?.0, folder, group)
 }
 
 /// `lock_down` on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
 /// and `FILE_READ_ATTRIBUTES`). A file with more than one name (a hard link, whose other name
 /// may be anywhere on the volume and would get the same owner and DACL) is refused, never
 /// locked: the lock-down then fails, and a removal leaves the admin copy (exit 10).
-pub(super) fn lock_handle(handle: HANDLE, folder: bool) -> io::Result<()> {
+pub(super) fn lock_handle(handle: HANDLE, folder: bool, group: Option<&Sid>) -> io::Result<()> {
     if !folder {
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: the handle is open for the call; `info` is a live, writable struct.
@@ -311,11 +330,11 @@ pub(super) fn lock_handle(handle: HANDLE, folder: bool) -> io::Result<()> {
         }
     }
     let sddl = if folder {
-        LOCKED_FOLDER_SDDL
+        locked_folder_sddl(group)
     } else {
-        LOCKED_FILE_SDDL
+        locked_file_sddl(group)
     };
-    let descriptor = Descriptor::from_sddl(sddl)?;
+    let descriptor = Descriptor::from_sddl(&sddl)?;
     let (owner, dacl) = descriptor.owner_and_dacl()?;
     // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER; the owner and DACL point into
     // `descriptor`, alive for the call. A folder's inheritable entries reach what is inside.
@@ -338,7 +357,7 @@ pub(super) fn lock_handle(handle: HANDLE, folder: bool) -> io::Result<()> {
         ));
     }
     let back = security_of(handle)?;
-    if !locked(&back, folder) {
+    if !locked(&back, folder, group) {
         return Err(io::Error::other(
             "the admin folder's permissions didn't read back as set",
         ));

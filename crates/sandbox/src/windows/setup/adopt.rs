@@ -26,7 +26,9 @@
 //!    `TrustedInstaller` can change (`admin_copy::level_safe`). Else `Usage`;
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
-//!    (`admin_copy::locked`), else `Failed`;
+//!    (`admin_copy::locked`), else `Failed`. Once the record names the pool's group
+//!    (`GroupSid`), that DACL denies it everything; a first install's has no group yet, and its
+//!    set-up locks again once it records one;
 //! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
 //!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop`,
 //!    then `\Clauseo\SandboxSweep`. Any failing is `Failed` with no value written, so the
@@ -97,8 +99,8 @@ pub trait Adopter {
     /// `path`'s owner and DACL, self-relative, read from the name itself.
     fn security(&mut self, path: &Path) -> Result<Vec<u8>, Cause>;
     /// Deletes what the folder `dir` mustn't hold, then gives it, the copy `exe` and the rest
-    /// of what is in it their locked owner and DACL, read back.
-    fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), Cause>;
+    /// of what is in it their locked owner and DACL, read back, denying `group` when given.
+    fn lock_down(&mut self, dir: &Path, exe: &Path, group: Option<&Sid>) -> Result<(), Cause>;
     /// The SHA-256 of `exe`, 64 lowercase hex digits; a reparse point refused.
     fn sha256(&mut self, exe: &Path) -> Result<String, Cause>;
     /// Tries the set-up lock without waiting: `Ok(false)` while another holds it.
@@ -126,6 +128,8 @@ pub struct Records {
     pub copy_owner: Option<CopyOwner>,
     /// `AdminCopyVersion`.
     pub version: Option<String>,
+    /// `GroupSid`: the pool's group, which the lock denies.
+    pub group: Option<Sid>,
 }
 
 /// Runs `--adopt` as the module says, for `target` with the install folder `install_dir`.
@@ -188,7 +192,7 @@ fn place(
     exe: &Path,
     owner: CopyOwner,
 ) -> Result<(), SetupExit> {
-    check_records(machine, &owner)?;
+    let records = check_records(machine, &owner)?;
     let allowed = match target {
         Target::User {
             owner_sid,
@@ -214,7 +218,7 @@ fn place(
         return Err(SetupExit::Usage);
     }
     let dir = admin_copy::admin_dir(program_files);
-    if let Err(error) = machine.lock_down(&dir, exe) {
+    if let Err(error) = machine.lock_down(&dir, exe, records.group.as_ref()) {
         return Err(failed(
             machine,
             AdoptStep::LockDown,
@@ -300,8 +304,8 @@ fn check_place(
     }
 }
 
-/// Step 3: one owner, of one kind, and no downgrade.
-fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), SetupExit> {
+/// Step 3: one owner, of one kind, and no downgrade; the records read.
+fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<Records, SetupExit> {
     let records = match machine.records() {
         Ok(records) => records,
         Err(error) => return Err(failed(machine, AdoptStep::Record, "the record", error)),
@@ -324,7 +328,7 @@ fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), Set
         tracing::error!("--adopt won't replace a newer admin copy; nothing changed");
         return Err(SetupExit::Downgrade);
     }
-    Ok(())
+    Ok(records)
 }
 
 /// The lawyer's profile (`ProfileList`); otherwise the exit.

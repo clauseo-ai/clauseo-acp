@@ -220,6 +220,9 @@ pub enum Step {
     /// 3: denying the group "log on through Remote Desktop Services"
     /// (`SeDenyRemoteInteractiveLogonRight`).
     RemoteLogon,
+    /// 5a: once the record names the group, locking the admin copy's folder and file again with
+    /// the group denied (`late_steps::admin_lock`), after step 5.
+    AdminLock,
 }
 
 impl fmt::Display for Step {
@@ -250,6 +253,7 @@ impl fmt::Display for Step {
             Step::Network => "setting up the network filters",
             Step::StopTask => "registering the sandbox's stop and sweep tasks",
             Step::RemoteLogon => "denying the sandbox users Remote Desktop logon",
+            Step::AdminLock => "locking the set-up program's admin copy",
         })
     }
 }

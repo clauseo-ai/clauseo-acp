@@ -214,6 +214,9 @@ pub trait Machine {
     /// `\Clauseo\SandboxSweep` (`refresh::POOL_TASKS`) for the pool owner `owner`
     /// (`refresh::register_task`, as `--adopt` does per user), as this process.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Locks the admin copy's folder and everything in it again, as `--adopt` does
+    /// (`admin_copy::os::lock_down_tree`), denying the pool's group `group`, as this process.
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls
