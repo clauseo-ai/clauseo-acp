@@ -2353,7 +2353,7 @@ The stand-in and the restore run:
 
 - at the session's end (`end_reads`), before the allows are taken back;
 - when `narrow_reads` gets a policy without the root grant;
-- at the matter's next launch, when its plan no longer grants the root;
+- at the matter's next launch with the same pool user, when its plan no longer grants the root;
 - in `forget_matter` of the reading matter, and in `forget_matter` of the read matter, before
   its fence is removed, so no stand-in outlives the fence (one left by a failed removal only
   denies a pool user writes on a folder that is no longer a matter's);
@@ -2367,10 +2367,10 @@ registered matter's root: the sibling walk never denies a registered matter or a
 one, and the walk-down set stops at it.
 
 A crash leaves at most the mark, the stand-in and the lifted deny: this pool user can list the
-root's names, and write nothing there, until the matter's next launch, its forget, or the next
-start puts the deny back. The reuse check
-counts a marked deny as a grant (`Ledger::grants_sid`), so the pool user serves no other matter
-meanwhile.
+root's names, and write nothing there, until the reading matter's next launch with the same pool
+user puts the deny back; otherwise until `reconcile` at the next start does, or a forget. The
+reuse check counts a marked deny as a grant (`Ledger::grants_sid`), so the pool user serves no
+other matter meanwhile.
 
 Nothing fights the lift. `fence_applied` reads the ledger, where the entry is still `applied`,
 so no launch replans the fence because of it. A launch that writes the fence anyway (the other
@@ -2441,7 +2441,9 @@ inherited copies go, entries dropped (`apply/reads.rs`).
   longer holds (an entry is held when it is on or inside one of the policy's reads), puts back a
   root deny it lifted when the root grant is gone (`Narrowed::restored`), and never adds one.
   Calling it twice takes nothing the second time. A handle the agent opened before stays open
-  until the host's relaunch at the next turn boundary.
+  until the host's relaunch at the next turn boundary. A read the narrower grant holds only by
+  inheritance from a dropped entry (a file whose folder's allow for its files goes) is lost
+  until that relaunch plans the grant's own allows: narrowing fails closed.
 - **After a crash:** the matter's next launch takes back, before it records anything, each read
   entry naming its subjects that its plan doesn't list (`apply_checked`). `forget_matter` takes
   them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short

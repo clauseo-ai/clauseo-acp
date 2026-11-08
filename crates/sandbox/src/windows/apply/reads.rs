@@ -53,7 +53,10 @@ pub struct Narrowed {
 /// (the host relaunches at the next turn boundary for that). An entry is held when it is on or
 /// inside one of `policy`'s [`Policy::other_matter_reads`] (as a grant's own allows all are),
 /// so a grant narrowed to a folder inside it keeps the allows inside that folder and loses the
-/// rest. Idempotent: a second call with the same policy takes nothing. A handle the agent
+/// rest. A read the new grant holds that came by inheritance from an entry above it (a file
+/// whose folder's allow for its files is dropped, when the grant narrows to that file) goes
+/// with that entry until the relaunch plans the new grant's own allows: narrowing fails closed,
+/// never open. Idempotent: a second call with the same policy takes nothing. A handle the agent
 /// opened before stays open until the host's relaunch.
 ///
 /// An error leaves each entry it couldn't take back `removing`, for the next call.
