@@ -28,10 +28,22 @@ const MATTER_RID_MIN: u32 = 1000;
 #[serde(try_from = "String", into = "String")]
 pub struct Sid(String);
 
-/// A string that is not a SID in [`Sid`]'s form.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("not a SID: {0:?}")]
+/// A string that is not a SID in [`Sid`]'s form: the string, at most 200 characters, for a
+/// caller to compare. Neither its message nor its `Debug` shows the string, which may be a
+/// SID's text (in another form, say) and can reach the Application log, which every local user
+/// reads: both say only [`NOT_A_SID`].
+#[derive(Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{NOT_A_SID}")]
 pub struct NotASid(pub String);
+
+/// What a [`NotASid`] says, whatever the string.
+pub const NOT_A_SID: &str = "a value that should be a SID isn't one in its canonical form";
+
+impl std::fmt::Debug for NotASid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NotASid(..)")
+    }
+}
 
 impl Sid {
     /// Checks `text` against [`Sid`]'s form.
@@ -169,6 +181,15 @@ impl Reserved {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_a_sid_says_a_fixed_description_and_never_the_string() {
+        // A SID's text in a form the parser refuses: the string is kept, but not shown.
+        let refused = Sid::parse("s-1-5-21-7-8-9-1001").unwrap_err();
+        assert_eq!(refused.0, "s-1-5-21-7-8-9-1001");
+        assert_eq!(refused.to_string(), NOT_A_SID);
+        assert_eq!(format!("{refused:?}"), "NotASid(..)");
+    }
 
     #[test]
     fn the_account_domain_is_the_three_parts_after_21() {
