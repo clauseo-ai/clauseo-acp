@@ -198,6 +198,22 @@ pub(super) fn slot_wait(
     })
 }
 
+/// Whether a slot is there for the browser after a wait (without one, it is); then the block
+/// list's first load, before the proxy opens (`blocklist/first_load.rs`).
+pub(super) async fn slot_then_block_list(
+    slot_wait: Option<impl std::future::Future<Output = bool>>,
+    block_list_wait: Option<impl std::future::Future<Output = ()>>,
+) -> bool {
+    let slot = match slot_wait {
+        Some(slot_wait) => slot_wait.await,
+        None => true,
+    };
+    if let Some(block_list_wait) = block_list_wait {
+        block_list_wait.await;
+    }
+    slot
+}
+
 /// Warns, once per launch (`on_prepared`), when `run`'s prep waited for a slot
 /// ([`slot_wait`]) and every slot is still held: the launch goes on without the browser
 /// (`TooManyBrowsers`). A launch that found no slot and nothing releasing does not wait and

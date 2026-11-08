@@ -46,11 +46,13 @@ use crate::clock::Clock;
 pub(crate) mod allowed;
 mod disk;
 mod fetch;
+mod first_load;
 mod live;
 mod timing;
 mod updater;
 
 pub use allowed::AllowedSites;
+pub(crate) use first_load::FirstLoad;
 pub(crate) use live::{Fetching, Live};
 pub(crate) use updater::{Round, Updater};
 
@@ -83,6 +85,10 @@ pub struct BlockListSeams {
     pub(crate) update: BlockListUpdate,
     pub(crate) allowed: Arc<AllowedSites>,
     pub(crate) secrets: Option<Arc<dyn SecretStore>>,
+    /// The start-up load's signal, which launches wait on (`first_load.rs`).
+    pub(crate) first_load: FirstLoad,
+    /// Run on the updater's thread before its start-up load, for tests that hold it.
+    pub(crate) before_load: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl BlockListSeams {
@@ -95,7 +101,18 @@ impl BlockListSeams {
             update,
             allowed: Arc::default(),
             secrets: None,
+            first_load: FirstLoad::new(),
+            before_load: None,
         }
+    }
+
+    /// These seams with `hook` run on the updater's thread before its start-up load, so a
+    /// test can hold the first load.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn before_first_load(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.before_load = Some(Arc::new(hook));
+        self
     }
 
     /// These seams with `allowed`, the views the host publishes the lawyer's allowed sites to
