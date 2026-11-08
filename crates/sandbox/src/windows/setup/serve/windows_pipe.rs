@@ -17,8 +17,9 @@ use std::io;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_IO_PENDING, ERROR_MORE_DATA, ERROR_PIPE_BUSY,
-    ERROR_PIPE_CONNECTED, HANDLE,
+    ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_BROKEN_PIPE, ERROR_IO_PENDING,
+    ERROR_MORE_DATA, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+    ERROR_PIPE_NOT_CONNECTED, HANDLE, WIN32_ERROR,
 };
 use windows::Win32::Security::{RevertToSelf, SECURITY_ATTRIBUTES, TOKEN_QUERY};
 use windows::Win32::Storage::FileSystem::{
@@ -29,10 +30,11 @@ use windows::Win32::System::Pipes::{
     ImpersonateNamedPipeClient, PIPE_READMODE_MESSAGE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 use windows::core::HSTRING;
 
-use super::{ClientFacts, Pipe, READ_WAIT, REQUEST_CAP, Unmade};
+use super::{Attempt, ClientFacts, Pipe, READ_WAIT, REQUEST_CAP, Unmade, connect_within};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::pipe::os::Overlapped;
 use crate::windows::token::os::{LocalDescriptor, groups, integrity, restricted, user};
@@ -43,6 +45,9 @@ const INSTANCES: u32 = 4;
 const BUFFER: u32 = 64 * 1024;
 /// How long a reply's write, and the wait for the client to close after it, may each take.
 const REPLY_WAIT: Duration = Duration::from_secs(5);
+/// What `ConnectNamedPipe` or its wait answers for a client that connected and closed before
+/// the server reached it: that client is let go and the next waited for.
+const CLIENT_GONE: [WIN32_ERROR; 3] = [ERROR_NO_DATA, ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED];
 
 /// The pipe `name`'s server: the instance waiting for a client.
 pub(crate) struct WindowsPipe {
@@ -188,18 +193,53 @@ impl Pipe for WindowsPipe {
     }
 }
 
-/// Waits up to `wait` for a client on `pipe`: `false` when none came.
+/// Waits up to `wait` for a client on `pipe` that stays (`connect_within`): `false` when none
+/// came. One that closed before it was reached is disconnected and the instance armed again.
 fn connect(pipe: &Handle, wait: Duration) -> io::Result<bool> {
+    connect_within(
+        wait,
+        ticks,
+        |left| attempt(pipe, left),
+        || {
+            // SAFETY: a live server end; the client it had is already gone.
+            unsafe { DisconnectNamedPipe(pipe.0) }.map_err(|error| os_error(&error))
+        },
+    )
+}
+
+/// The time since Windows started (`GetTickCount64`): the server's monotonic clock.
+pub(super) fn ticks() -> Duration {
+    // SAFETY: GetTickCount64 only reads the tick count.
+    Duration::from_millis(unsafe { GetTickCount64() })
+}
+
+/// One `ConnectNamedPipe` on `pipe`, waited for up to `left`.
+fn attempt(pipe: &Handle, left: Duration) -> io::Result<Attempt> {
     let mut io = Overlapped::new()?;
     // SAFETY: the pipe is a live server end; `io` outlives the operation, which `within`
     // completes or cancels before `io` drops.
     match unsafe { ConnectNamedPipe(pipe.0, Some(io.as_mut_ptr())) } {
-        Ok(()) => return Ok(true),
-        Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => return Ok(true),
+        Ok(()) => return Ok(Attempt::Connected),
+        Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => {
+            return Ok(Attempt::Connected);
+        }
         Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(error) if client_gone(&os_error(&error)) => return Ok(Attempt::Gone),
         Err(error) => return Err(os_error(&error)),
     }
-    Ok(io.within(pipe, wait)?.is_some())
+    match io.within(pipe, left) {
+        Ok(Some(_)) => Ok(Attempt::Connected),
+        Ok(None) => Ok(Attempt::TimedOut),
+        Err(error) if client_gone(&error) => Ok(Attempt::Gone),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether `error` is one of [`CLIENT_GONE`].
+fn client_gone(error: &io::Error) -> bool {
+    CLIENT_GONE
+        .iter()
+        .any(|code| error.raw_os_error() == i32::try_from(code.0).ok())
 }
 
 /// The client's token, at the level it allowed (identification is enough to read it): this

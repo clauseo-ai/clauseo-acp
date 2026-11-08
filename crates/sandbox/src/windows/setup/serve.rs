@@ -255,6 +255,43 @@ pub fn run<P: Pipe>(
     }
 }
 
+/// What one wait for a client on an armed instance came to (`windows_pipe.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Attempt {
+    /// A client is connected.
+    Connected,
+    /// None came in the time given.
+    TimedOut,
+    /// One came and closed before the server reached it (`ERROR_NO_DATA` and the like).
+    Gone,
+}
+
+/// Waits up to `wait` in all, by the monotonic clock `now`, for a client that stays:
+/// `attempt(left)` arms the instance and waits up to `left`; a client that came and went
+/// (`Gone`) is let go (`rearm`, which disconnects the instance) and the wait goes on with what
+/// is left, so one client closing early never ends the server for everyone. `false` when none
+/// stayed in time.
+pub(crate) fn connect_within<E>(
+    wait: Duration,
+    mut now: impl FnMut() -> Duration,
+    mut attempt: impl FnMut(Duration) -> Result<Attempt, E>,
+    mut rearm: impl FnMut() -> Result<(), E>,
+) -> Result<bool, E> {
+    let deadline = now() + wait;
+    loop {
+        match attempt(deadline.saturating_sub(now()))? {
+            Attempt::Connected => return Ok(true),
+            Attempt::TimedOut => return Ok(false),
+            Attempt::Gone => {
+                rearm()?;
+                if now() >= deadline {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+}
+
 /// Whether this process may serve: LOCAL SYSTEM, running from the admin copy's path.
 fn allowed(host: &mut impl Host) -> Result<bool, String> {
     Ok(host.is_system()? && same_path(&host.current_exe()?, &host.admin_copy()?))

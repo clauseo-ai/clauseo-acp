@@ -358,3 +358,61 @@ fn the_app_reads_a_reply_as_it_reads_the_exes_result() {
     };
     assert!(words.contains("isn't its session's user"), "{words}");
 }
+
+#[test]
+fn a_client_that_closes_before_the_server_reaches_it_is_let_go_and_the_next_served() {
+    use std::cell::Cell;
+    // Each look at the clock is a second on.
+    let ticks = Cell::new(0u64);
+    let now = || {
+        ticks.set(ticks.get() + 1);
+        Duration::from_secs(ticks.get())
+    };
+    // ERROR_NO_DATA twice, then a client that stays: two re-arms, one connection.
+    let mut answers = VecDeque::from([Attempt::Gone, Attempt::Gone, Attempt::Connected]);
+    let (mut asked, mut rearmed) = (Vec::new(), 0);
+    let wait = Duration::from_secs(30);
+    let connected = connect_within(
+        wait,
+        now,
+        |left| {
+            asked.push(left);
+            Ok::<_, ()>(answers.pop_front().unwrap())
+        },
+        || {
+            rearmed += 1;
+            Ok(())
+        },
+    );
+    assert_eq!(connected, Ok(true));
+    assert_eq!(rearmed, 2);
+    // Each wait has only what is left of the whole.
+    assert_eq!(asked, [29, 27, 25].map(Duration::from_secs));
+    // A client coming and going for ever ends with the server's time, not before; none came.
+    ticks.set(0);
+    let mut tries = 0;
+    let gone = connect_within(
+        Duration::from_secs(10),
+        now,
+        |_| {
+            tries += 1;
+            Ok::<_, ()>(Attempt::Gone)
+        },
+        || Ok(()),
+    );
+    assert_eq!((gone, tries), (Ok(false), 5));
+    assert_eq!(
+        connect_within(wait, now, |_| Ok::<_, ()>(Attempt::TimedOut), || Ok(())),
+        Ok(false)
+    );
+    // A re-arm that fails is the wait's failure.
+    assert_eq!(
+        connect_within(
+            wait,
+            now,
+            |_| Ok(Attempt::Gone),
+            || Err("DisconnectNamedPipe")
+        ),
+        Err("DisconnectNamedPipe")
+    );
+}
