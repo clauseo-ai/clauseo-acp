@@ -6,7 +6,7 @@
 
 use super::admin_copy::{assert_run, code_of, firm_it_codes, macro_body};
 use super::safe_temp::loads_a_plug_in;
-use super::sources::{line_with, read};
+use super::sources::{hook_code, line_with, read};
 use super::template::{TEMPLATE, block_code, split_blocks};
 
 fn code() -> Vec<String> {
@@ -370,4 +370,38 @@ fn the_command_starts_once_hidden_in_sysdir_from_the_section_under_s_else_at_gui
     line_with(&code, &["Var ClauseoSelfDelete"]);
     let copy = read("windows/admin_copy.nsh");
     assert!(copy.contains(r#"!include "${__FILEDIR__}\uninstall_in_place.nsh""#));
+}
+
+#[test]
+fn the_per_machine_uninstall_deletes_the_install_folder_key_but_not_under_update() {
+    // What the template writes in Section Install, each install a reinstall's included, and what
+    // its uninstall deletes only behind the box the pre-uninstall hook clears.
+    let text = read(TEMPLATE);
+    let install = span(&text, "Section Install", "SectionEnd");
+    line_with(
+        &install,
+        &[r#"WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR"#],
+    );
+    let uninstall = span(&text, "Section Uninstall", "SectionEnd");
+    let app_data = line_with(&uninstall, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    assert!(app_data < line_with(&uninstall, &[r#"DeleteRegKey SHCTX "${MANUPRODUCTKEY}""#]));
+    // The hook: per machine, not under /UPDATE, the key in the 64-bit view it was written in,
+    // then its parent only when empty, the view put back.
+    let code = hook_code();
+    assert_eq!(
+        macro_body(&code, "NSIS_HOOK_POSTUNINSTALL")[1..],
+        [
+            r#"!if "${INSTALLMODE}" == "perMachine""#,
+            "${If} $UpdateMode <> 1",
+            "SetRegView 64",
+            r#"DeleteRegKey HKLM "${MANUPRODUCTKEY}""#,
+            r#"DeleteRegKey /ifempty HKLM "${MANUKEY}""#,
+            "SetRegView lastused",
+            "${EndIf}",
+            "!endif",
+        ]
+    );
+    // The template's defines it names.
+    assert!(text.contains(r#"!define MANUKEY "Software\${MANUFACTURER}""#));
+    assert!(text.contains(r#"!define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}""#));
 }
