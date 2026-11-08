@@ -159,8 +159,8 @@ pub(crate) struct AceSpec {
 
 impl AceSpec {
     /// The entry `grant` writes on a folder (`folder`) or a file. On a file a [`Inherit::Tree`]
-    /// entry inherits nothing (files have no children); [`Inherit::FilesInFolder`] and
-    /// [`Inherit::Below`] are for a folder only.
+    /// entry inherits nothing (files have no children); [`Inherit::FilesInFolder`],
+    /// [`Inherit::Below`] and [`Inherit::FilesBelow`] are for a folder only.
     pub(crate) fn for_grant(grant: &Grant, folder: bool) -> io::Result<AceSpec> {
         let rights = grant.rights();
         let kind = if rights.is_label() {
@@ -175,7 +175,8 @@ impl AceSpec {
             (Inherit::Tree, true) => OBJECT_INHERIT | CONTAINER_INHERIT,
             (Inherit::FilesInFolder, true) => OBJECT_INHERIT | INHERIT_ONLY | NO_PROPAGATE,
             (Inherit::Below, true) => OBJECT_INHERIT | CONTAINER_INHERIT | INHERIT_ONLY,
-            (Inherit::FilesInFolder | Inherit::Below, false) => {
+            (Inherit::FilesBelow, true) => OBJECT_INHERIT | INHERIT_ONLY,
+            (Inherit::FilesInFolder | Inherit::Below | Inherit::FilesBelow, false) => {
                 return Err(invalid("an entry for what is below a folder is on a file"));
             }
         };

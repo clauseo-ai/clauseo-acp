@@ -193,7 +193,7 @@ fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
     };
     Strict {
         watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
-        pool: sids(&|r| !r.is_label()),
+        pool: sids(&|r| r.fixed_subject().is_none()),
         assigned: Vec::new(),
     }
 }
@@ -346,7 +346,7 @@ fn wider(a: Reach, b: Reach) -> Reach {
 pub(super) fn reach_of(inherit: Inherit) -> Reach {
     match inherit {
         Inherit::FilesInFolder => Reach::FilesOnly,
-        Inherit::Tree | Inherit::Below | Inherit::ThisOnly => Reach::Tree,
+        Inherit::Tree | Inherit::Below | Inherit::FilesBelow | Inherit::ThisOnly => Reach::Tree,
     }
 }
 

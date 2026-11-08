@@ -113,6 +113,12 @@ before changing anything outside a matter's folder. To set the Safe workspace up
 Clauseo installer again. On the usual installer, Clauseo's Settings, under Safe workspace, has a
 button that opens the download page for your version; on the per-machine one, ask your IT team.
 
+<!-- Provisional: shown once Policy::native_code_deny is on (with the pinned Python runtime). -->
+The Safe workspace runs the tools Clauseo provides, not programs downloaded into a matter. Some
+things an agent might install into a matter's folder therefore won't run there: Node packages
+with native parts (esbuild, sharp, swc), a Python virtual environment (`python -m venv`), and
+Python packages with compiled parts.
+
 Check on the laptop pass: the prompt's wording.
 
 > Screenshot to come: the UAC prompt with "Publisher: Unknown" and "Yes".

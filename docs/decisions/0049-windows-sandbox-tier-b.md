@@ -810,6 +810,129 @@ on, treats any failed target as a set-up failure, and keeps what was written. Un
 the `LocalLow` denies before it deletes each profile, then the account, then `DeviceSync`'s deny
 (`shared_writes.rs`).
 
+### Native code in writable places (`native_code_deny`, off for now)
+
+Without this, an agent can download any program (a Chromium, say) into the matter, its state or
+notes folder or the session's temp folder, and run it, `--no-sandbox` if it likes, because
+`Modify` includes `FILE_EXECUTE`. macOS's profile already allows `file-map-executable` only on
+system and runtime paths.
+
+**The switch.** `Policy::native_code_deny` (`PolicyBuilder::native_code_deny`), one field for
+both OSes: the Windows plan reads it, and the macOS profile's deny of `file-map-executable` on the
+writable places reads the same field. It is **off**, and with it off the plan is byte for byte
+today's (`acl_plan/tests/guard.rs`, and `the_full_plan`'s snapshot is unchanged). It stays off
+because native code the agent installs into a matter breaks with it: python-docx's `lxml` and
+pandas, today, from a venv or `pip install` in the matter. It turns on, on both OSes at once,
+with the pinned Python runtime (stage D), whose own native modules sit on a runtime path.
+
+Only the product sets it: a constant, or the host's policy builder from a value pinned per
+release. Never a lawyer's setting, an environment variable, the launch file's parts an agent can
+reach, or anything else an agent can write. The builder method is the only way in; nothing in
+the sandbox crate reads it from anywhere else. Once a release turns it on, nothing at run time
+turns it off. The host's D2a negative goldens (stage D) pin its value per release. Windows keeps
+no record of it: the plan reads the policy at each launch, and the ledger lists the entries the
+plan wrote. Should set-up ever need it, it would write it from the product constant into a
+SYSTEM-only record and never read it back as an input.
+
+**What it writes** (`acl_plan/guard.rs`). The places come from the plan's own allows: each
+allow to the pool user that lets it add files to a folder (`Modify` down the tree, or the Claude
+store's `CreateFiles`), and each file allow that lets it write the file and run it. Today that is
+the matter, state and notes folders, the session's temp folder, the Claude store folder and the
+store's allowed files. The credential link is left out: its allow (`0x12008f`) holds no execute
+right, and the file is the lawyer's own. On each folder:
+
+- `(D;OIIO;0x20;;;<subject>)` (`DenyExecute`, `Inherit::FilesBelow`): execute denied on every file
+  below, at any depth. Folders get nothing, since the same bit is traverse for them. A deny
+  blocks an image load as well as a process start, so an `.exe`, `.dll`, `.node` or `.pyd` there
+  neither runs nor loads.
+- `(D;OICIIO;0xc0000;;;<subject>)` (`DenyPermissionChange`): no `WRITE_DAC` or `WRITE_OWNER` on
+  anything below.
+- `(A;OICIIO;0x1301bf;;;OW)` (`OwnerModify`): `OWNER RIGHTS` holds `Modify`, which has no
+  `WRITE_DAC` or `WRITE_OWNER`.
+
+Each deny names every subject the allows name (the pool user, and the matter SID when set). On
+each of the store's allowed files, an explicit `(D;;0x20;;;<subject>)`, which comes before the
+file's explicit `Modify` allow.
+
+**Why the owner entry and the permission deny.** The pool user owns what it makes, and an owner is
+granted `READ_CONTROL | WRITE_DAC` before any deny is read, so it could protect a file's DACL and
+drop the inherited deny. The plan had nothing against that: `OWNER RIGHTS` was used only on
+`LocalLow`, and the owner pass covers only the read-only trees. The Low label doesn't stop it
+either: what the Low token makes inherits the Low label, the token's own level, and no-write-up
+only binds a lower level. An inherited `OWNER RIGHTS` entry replaces the implied rights. That is
+enough under the profile, but a matter that inherits `C:\`'s `(A;OICIIO;GA;;;CO)`
+(`C:\Matters\X`) gives each item the pool makes an inherited full-control allow naming the pool
+user, `WRITE_DAC` included. The permission deny closes that: it comes from the matter's own
+entries, before anything inherited from `C:\`. It works only together with the `OWNER RIGHTS`
+entry, since without it the implied `WRITE_DAC` is granted before the deny is read. Nothing an
+agent runs needs `WRITE_DAC`: Git Bash mounts with `noacl`, and Node's and Python's `chmod` only
+flip the read-only attribute (VM rows below). `OWNER RIGHTS` also binds a lawyer who owns an item
+below: the lawyer keeps `Modify` through it, and full control through the lawyer's own inherited
+entries, and loses only the implied `WRITE_DAC`, which a lawyer whose only right is ownership
+would need. The ledger trusts an `OwnerModify` entry naming `OWNER RIGHTS` and nothing else
+(`Rights::fixed_subject`), as it trusts the label only naming the Low level. An administrator's
+removal for an absent owner takes it off too.
+
+**Reaching what is there, and removal.** The entries go through the ledger like the plan's
+others. Each folder is walked down, strictly, by the walk that carries inherited entries to
+existing children: the own folders' walk, and for the Claude store a new strict walk (its deny
+makes it one). So a pool-made child with a protected DACL in the store is repaired, and one the
+lawyer made with a protected DACL is refused. The PR's VM row checks that the store has none.
+Forgetting a matter, and `--remove`, take them off with the rest. The `OWNER RIGHTS` entry on the
+shared store is shared between matters, as the store's label is.
+
+**The runtime paths stay runnable.** Node (`<data_dir>\agents\runtime`), each agent's install
+(`<data_dir>\agents\<agent>\install`), the npm cache Clauseo installs with
+(`<data_dir>\agents\npm-cache`), Git (`%ProgramFiles%\Clauseo\Sandbox\git` or the lawyer's
+`PATH`), the runner (beside the app, set-up in `%ProgramFiles%\Clauseo\Sandbox`) and the browser
+(off on tier B; elsewhere `<app data>\browsers`) are none of them under a writable place. The
+plan's data-folder rules refuse a writable place in `<data_dir>\agents` other than the store.
+
+**Known limits.** This stops a program downloaded, unpacked or installed by ordinary tools (curl,
+npm, pip, zip tools, an installer), none of which sets a descriptor. It is not a boundary against
+an agent that sets out to get past it:
+
+- **A descriptor passed at creation.** A creator may give a new file its own DACL with no
+  `WRITE_DAC` (`CreateFile` with `SECURITY_ATTRIBUTES`, a few lines of PowerShell or Python):
+  protected, the inherited deny never lands; not protected, its explicit allow of `FILE_EXECUTE`
+  for the pool user comes before the inherited deny. The next launch's strict walk clears a
+  pool-made child's protection, but it strips explicit allows only for watched SIDs, never the
+  matter's own pool user, whose explicit allow on the credential link it must keep. So such a file
+  runs, and keeps running across launches. Owner: the orchestrator's follow-up (an image-load
+  mitigation is being weighed).
+- **FAT and exFAT drives** keep no ACLs: a program on a USB stick runs.
+- **A handle opened before the walk** keeps the rights it was opened with.
+
+**What stops working with it on** (the lawyer-facing note, provisional: "The Safe workspace runs
+the tools Clauseo provides, not programs downloaded into a matter"):
+
+- native npm packages installed in a matter: esbuild, sharp, swc, and anything with a `.node`
+  file or a downloaded binary;
+- `python -m venv` in a matter or the temp folder (it copies `python.exe` into the venv), and
+  pip wheels with native `.pyd` modules (lxml, pandas, numpy);
+- `npx` and `npm exec` packages with native parts: the npm cache the agent's own npm uses is in
+  its state folder (`LOCALAPPDATA` is `<state>\AppData\Local`), so their binaries are denied
+  too. The pool's own profile isn't writable at Low;
+- an agent's self-update into its state folder, and any tool that unpacks a helper into
+  `TEMP` and runs it (a PyInstaller one-file program, a Bun-compiled program's native addons).
+  Claude Code and Codex run from their install folders (VM row 2).
+
+**VM rows** (unelevated, a real session, the switch on unless stated):
+
+1. `chrome.exe` copied into the matter and run as the pool: runs with the switch off, refused
+   with it on.
+2. Claude Code, Codex, Git Bash, `node script.js`, `python script.py` and `npm ci` with a pure-JS
+   package still work.
+3. A native npm package in the matter (esbuild) fails, with a plain message.
+4. An agent-made file the pool re-ACLs to drop the deny (`icacls /inheritance:r`, `Set-Acl`) is
+   refused, in a matter under the profile and in one under `C:\` that inherits the `CREATOR
+   OWNER` full-control allow.
+5. The `WRITE_DAC` deny breaks nothing ordinary: `git checkout`, `npm ci`, Office saving into the
+   matter, LibreOfficeKit writing its output.
+6. With the switch off, nothing changes: `icacls` on the matter, state, notes, temp and store
+   folders shows today's entries.
+7. The Claude store's strict walk finds nothing to refuse on a signed-in machine.
+
 ### Fast later launches (PR3d)
 
 A later launch spent its time on the strict walk of the matter, state and notes trees and on the
