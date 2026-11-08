@@ -290,13 +290,14 @@ build 26100):
     folder; and `Removing` (`REG_DWORD`), set while a removal is unfinished
     (`clauseo_sandbox::windows::pool::MachineRecord`). PR4b ships the readers; PR4e's set-up
     writes the key.
-  - `HKLM\SOFTWARE\Clauseo`, the parent of those keys, is pinned by set-up to the owner
-    SYSTEM and the protected DACL `O:SYD:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)(A;OICI;KR;;;BU)`, so
-    no one else can make a subkey there. Windows gives a key it makes the parent's default
-    security, so every set-up (and every record write) secures it first: a link is refused; a
-    subkey owned by neither SYSTEM nor Administrators, or a link, is deleted through its handle,
-    children first; `Sandbox` is set back to its own SD. A failure stops set-up with
-    `MachineError::VendorKey` (`setup/vendor_key.rs`).
+  - `HKLM\SOFTWARE\Clauseo`, the parent of those keys, is taken over by set-up: owner SYSTEM and
+    the protected DACL `O:SYD:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)(A;OICI;KR;;;BU)`, so no one else
+    can make a subkey there. A link at the root is refused. Every subkey under it is taken over
+    before its own subkeys are read (owner SYSTEM, inheriting the root's DACL), so no key left by an
+    earlier run or a user keeps its old owner. Only a link is deleted. `Sandbox` keeps its own
+    SD and its values only while an administrator owns it; otherwise it is deleted with what is
+    under it and made again empty. The installer's `Clauseo\Clauseo` is taken over, never deleted.
+    A failure stops set-up with `MachineError::VendorKey` (`setup/vendor_key.rs`).
   - The local group `ClauseoSandboxUsers`, holding every pool user (PR4).
   - `<data_dir>\sandbox\matters.json`, replaced whole and atomically and refused, never
     rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's
