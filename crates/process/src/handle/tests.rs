@@ -36,8 +36,12 @@ fn an_agent_that_never_exits_is_unresponsive() {
         assert_eq!(timer.next_armed().await, KILL_GRACE);
         assert!(timer.fire());
     };
-    let (ended, ()) =
-        block_on(async { join!(ladder(exit, &timer, |step| steps.push(step)), script) });
+    let (ended, ()) = block_on(async {
+        join!(
+            ladder(exit, &timer, STDIN_GRACE, |step| steps.push(step)),
+            script
+        )
+    });
     assert!(matches!(ended, Ended::Unresponsive), "{ended:?}");
     assert_eq!(steps, every_step());
     assert_eq!(timer.armed(), timer.fired());
@@ -61,7 +65,7 @@ fn an_exit_after_the_kill_is_killed() {
         // The last wait is armed, and the exit comes before it fires.
         assert_eq!(timer.next_armed().await, KILL_GRACE);
     };
-    let (ended, ()) = block_on(async { join!(ladder(exit, &timer, act), script) });
+    let (ended, ()) = block_on(async { join!(ladder(exit, &timer, STDIN_GRACE, act), script) });
     assert!(matches!(ended, Ended::Killed(Ok(9))), "{ended:?}");
     assert_eq!(steps, every_step());
     assert_eq!(timer.fired() + 1, timer.armed());
