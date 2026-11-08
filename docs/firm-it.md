@@ -225,8 +225,11 @@ They remove what the set-up makes:
   `HKLM\SOFTWARE\Clauseo\Clauseo` stays beside it. After a per-user install, `HKLM\SOFTWARE\Clauseo`
   is left empty, and you can delete it once you have checked that it is.
 
-Clauseo makes no firewall or WFP rules yet; they come in a later version, and this page will
-name them then.
+The set-up also adds network filters (WFP) and four Windows Firewall rules for the sandbox users
+(see [section 11](#11-windows-protection-the-admin-copy-its-tasks-and-its-network-rules)), and
+`--remove` deletes them. The block below removes the firewall rules, matched by their exact names
+and description. Stock Windows has no command that deletes WFP filters, so the block only lists
+Clauseo's (after it).
 
 Collect the SIDs before deleting anything: once a user is deleted, its name no longer leads to its
 SID, and its profile can only be found by SID. The key's `PoolSids` lists the users' SIDs too, so
@@ -269,9 +272,32 @@ if ($group -and (-not $record.GroupSid -or $group.SID.Value -eq $record.GroupSid
     @(Get-LocalGroupMember -Group $group).Count -eq 0) {
     Remove-LocalGroup -SID $group.SID
 }
+# 5a. Clauseo's four firewall rules, by exact name and description: listed, then removed.
+$fw = @(Get-NetFirewallRule -PolicyStore PersistentStore -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -cmatch '^clauseo_sandbox_block_(outbound|inbound|loopback_udp|loopback_tcp)$' -and
+        $_.Description -clike 'Clauseo sandbox - *' })
+$fw | Format-Table DisplayName, Direction, Description -AutoSize
+$fw | Remove-NetFirewallRule
 # 6. The key, last.
 Remove-Item -Path $key -ErrorAction SilentlyContinue
 ```
+
+Then list any WFP filters of Clauseo's left behind (read-only: it writes an XML file and searches
+it for the provider's key, `{a5170842-1321-4b98-aa1e-e79c132f1c10}`; every Clauseo filter is
+named `Clauseo sandbox ...` and sits in the sublayer
+`{91037008-b7c9-4530-b42e-287700239f22}`):
+
+```powershell
+$wfp = Join-Path $env:TEMP 'clauseo-wfp-filters.xml'
+netsh wfp show filters file=$wfp | Out-Null
+@(Select-String -Path $wfp -SimpleMatch -Pattern 'a5170842-1321-4b98-aa1e-e79c132f1c10').Count  # 0: none left
+Remove-Item $wfp
+```
+
+A number above 0 means Clauseo's filters are still there: they block only the sandbox users, so
+they do no harm once those accounts are gone. To remove them, reinstall Clauseo, set up Safe
+workspace again (which rewrites them), then uninstall Clauseo. `--remove` alone does nothing
+once the key is gone.
 
 Then check, in the same window, that each item is gone. Every number is 0 and both other values
 are `False`. `Folders` counts the folders left in `C:\Users` under a pool user's exact name, with or without
