@@ -15,7 +15,7 @@ use windows::Win32::Foundation::HANDLE;
 
 use super::os::{inheritable, open_writer};
 use super::sink::open_feed;
-use super::{Record, denial_pipe_name, encode, read_record};
+use super::{Record, RecordReader, denial_pipe_name, encode};
 use crate::SetAsideWhat;
 use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PIPE_RIGHTS, PipeSet, Role};
@@ -66,10 +66,10 @@ fn a_record_written_to_a_lawyer_only_pipe_reads_back_whole() {
     client.write_all(&encode(&notice).unwrap()).unwrap();
     drop(client);
 
-    let mut reader = BufReader::new(&server);
-    assert_eq!(read_record(&mut reader).unwrap(), Some(record));
-    assert_eq!(read_record(&mut reader).unwrap(), Some(notice));
-    assert_eq!(read_record(&mut reader).unwrap(), None);
+    let mut reader = RecordReader::new(BufReader::new(&server));
+    assert_eq!(reader.read().unwrap(), Some(record));
+    assert_eq!(reader.read().unwrap(), Some(notice));
+    assert_eq!(reader.read().unwrap(), None);
 }
 
 /// A pipe that was never made: the launch is refused, in plain words.
