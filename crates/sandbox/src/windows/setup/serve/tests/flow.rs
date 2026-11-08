@@ -318,7 +318,7 @@ fn only_system_from_the_admin_copy_with_a_recorded_copy_makes_the_pipe() {
             ServeExit::PipeFailed
         ]
         .map(ServeExit::as_code),
-        [0, 51, 52, 53, 54]
+        [0, 63, 64, 65, 66]
     );
 }
 

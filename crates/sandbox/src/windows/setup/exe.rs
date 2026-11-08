@@ -40,7 +40,7 @@
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
 //! `--stop` (`stop.rs`), the other SYSTEM task's (`StopExit`, from 45), and `--serve-set-up`
-//! (`serve.rs`), the set-up task's (`ServeExit`, from 51), whose set-ups are [`run_set_up_in`]'s.
+//! (`serve.rs`), the set-up task's (`ServeExit`, from 63), whose set-ups are [`run_set_up_in`]'s.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

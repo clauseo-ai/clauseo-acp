@@ -1976,18 +1976,20 @@ registration gave the folder that task's descriptor, so a per-machine set-up reg
 stop task for one owner would have shut every other interactive user out of the folder. An
 elevated CI test starts the set-up task as a standard user beside another owner's stop task.
 
-**The server's run** (`--serve-set-up`; exits `ServeExit`, from 51):
+**The server's run** (`--serve-set-up`; exits `ServeExit`, from 63, after the other
+`\Clauseo` tasks' codes: the stop's to 50, the WSL deny's 51-52, the sweep's 53-59, the WSL
+upgrade's 60-62):
 
 1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, as the stop task does
-   (51);
-2. reads the record; no admin copy recorded is 53;
+   (63);
+2. reads the record; no admin copy recorded is 65;
 3. makes `\\.\pipe\ClauseoSandboxSetUp`: the first instance or nothing
    (`FILE_FLAG_FIRST_PIPE_INSTANCE`), message mode, `PIPE_REJECT_REMOTE_CLIENTS`, and a
    protected DACL built from the record: each pool group denied everything first, SYSTEM full
    control, then per user the owner and per machine `IU` with read and write less
    `FILE_CREATE_PIPE_INSTANCE` (`0x12019b`), and a Medium no-read-up, no-write-up label. A name
-   someone made first is logged and served to no one (52);
-4. waits 30 s for the first client and 5 s for each after, then exits 0. A spare instance waits
+   someone made first is logged and served to no one (64); a pipe that can't be made is 66;
+4. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66). A spare instance waits
    while one client is served, so the name is never free while the server runs. A read has
    10 s.
 

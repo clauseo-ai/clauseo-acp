@@ -87,20 +87,21 @@ pub const RERUN_AFTER: u64 = 5_000;
 /// The data folder below the user's profile: the app's `$LOCALDATA\ai.clauseo.desktop`.
 pub const DATA_SUFFIX: [&str; 3] = ["AppData", "Local", "ai.clauseo.desktop"];
 
-/// The server's exit codes. They start at 51, after `StopExit`'s 50, so the one exe never gives
-/// one number two meanings; codes are appended from here on, never renumbered. How each client
-/// fared is in its reply and the log, not here.
+/// The server's exit codes. They start at 63, after the codes the other `\Clauseo` tasks' runs
+/// of the one exe take (`StopExit` to 50, the WSL deny's 51 and 52, the sweep's 53 to 59, the
+/// WSL upgrade's 60 to 62), so no number has two meanings; codes are appended from here on, never
+/// renumbered. How each client fared is in its reply and the log, not here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServeExit {
     /// 0: every client that came was answered, and none came within the last wait.
     Done,
-    /// 51: not LOCAL SYSTEM, or not run from the admin copy's path; no pipe was made.
+    /// 63: not LOCAL SYSTEM, or not run from the admin copy's path; no pipe was made.
     NotAllowed,
-    /// 52: someone else made the pipe's name first; no one was served.
+    /// 64: someone else made the pipe's name first; no one was served.
     Squatted,
-    /// 53: the record can't be read, or holds no admin copy; no pipe was made.
+    /// 65: the record can't be read, or holds no admin copy; no pipe was made.
     NoRecord,
-    /// 54: the pipe couldn't be made, or waiting for a client failed.
+    /// 66: the pipe couldn't be made, or waiting for a client failed.
     PipeFailed,
 }
 
@@ -109,10 +110,10 @@ impl ServeExit {
     pub fn as_code(self) -> u8 {
         match self {
             ServeExit::Done => 0,
-            ServeExit::NotAllowed => 51,
-            ServeExit::Squatted => 52,
-            ServeExit::NoRecord => 53,
-            ServeExit::PipeFailed => 54,
+            ServeExit::NotAllowed => 63,
+            ServeExit::Squatted => 64,
+            ServeExit::NoRecord => 65,
+            ServeExit::PipeFailed => 66,
         }
     }
 }
