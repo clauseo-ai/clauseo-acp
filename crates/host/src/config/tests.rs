@@ -100,3 +100,51 @@ fn machine_memory_sets_the_browser_slots() {
         .into();
     assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(32 * GB)));
 }
+
+/// A reservation is refused for another matter or launch, and released (its guard dropped) when
+/// it drops; its `Debug` and an agent listener's never show the proxy's token.
+#[test]
+fn a_reservation_checks_its_launch_and_releases_on_drop() {
+    use clauseo_protocol::{MatterId, ThreadId};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counted(Arc<AtomicUsize>);
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let id = crate::pipeline::tests::support::id::<MatterId>;
+    let key = |matter: MatterId, launch| super::SessionKey {
+        matter,
+        thread: crate::pipeline::tests::support::id::<ThreadId>(9),
+        launch,
+    };
+    let released = Arc::new(AtomicUsize::new(0));
+    let reservation = super::sandbox::Reservation::fixed(vec![46_100], id(1), key(id(1), 1))
+        .with_guard(Box::new(Counted(Arc::clone(&released))));
+    assert_eq!(reservation.ports(), [46_100]);
+    assert_eq!(
+        (reservation.slot(), reservation.pool_user().is_none()),
+        (None, true)
+    );
+    assert!(reservation.check(&id(1), &key(id(1), 1)).is_ok());
+    assert!(reservation.check(&id(2), &key(id(1), 1)).is_err());
+    assert!(reservation.check(&id(1), &key(id(1), 2)).is_err());
+    assert_eq!(released.load(Ordering::SeqCst), 0);
+    drop(reservation);
+    assert_eq!(released.load(Ordering::SeqCst), 1);
+
+    let listener = super::AgentListener::new(
+        46_101,
+        vec![(
+            "HTTPS_PROXY".into(),
+            Some("http://clauseo:0123secret@127.0.0.1:46101".into()),
+        )],
+    );
+    let shown = format!("{listener:?}");
+    assert!(
+        shown.contains("HTTPS_PROXY") && !shown.contains("0123secret"),
+        "{shown}"
+    );
+}
