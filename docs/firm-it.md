@@ -51,15 +51,17 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
   running the installer again sets it up. A silent (`/S`) or passive (`/P`) per-user install
   raises no prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
   elevated, sets up the same folder on every install and update.
-- Clauseo keeps a hard-linked copy of Git for Windows for each sandbox account under
-  `C:\Program Files\Clauseo\Sandbox\git`; it takes no extra disk space. (With Git installed on
-  another drive than Program Files, Clauseo keeps one full copy there, in `git\_source`, and links
-  every account's copy to it; a Git file with several names is copied there once per name.) Safe workspace's agents need it: Git Bash, which Claude Code uses
-  on Windows, fails for a sandbox account from Git's own folder. Only a per-machine Git for
-  Windows is used (`HKLM\SOFTWARE\GitForWindows` or `C:\Program Files\Git`); with Git installed
-  for one user only, the agents have no Git Bash. A Git update never breaks a running session's
-  copy; the next set-up or `\Clauseo\SandboxRefresh` run builds a new one, and the old one goes
-  once that account's session ends. The uninstall deletes them all.
+- Clauseo keeps one copy of Git for Windows under `C:\Program Files\Clauseo\Sandbox\git\_source`
+  (about 400 MB per Git version), and a hard-linked copy of it for each sandbox account under
+  `C:\Program Files\Clauseo\Sandbox\git`, which takes no extra disk space. Safe workspace's
+  agents need it: Git Bash, which Claude Code uses on Windows, fails for a sandbox account from
+  Git's own folder. Only a per-machine Git for Windows is used (`HKLM\SOFTWARE\GitForWindows` or
+  `C:\Program Files\Git`), and only when no one but administrators can change any of its
+  files; with Git installed for one user only, the agents have no Git Bash. The sandbox never
+  holds Git's own files open, so it never blocks a Git update, and a Git update never breaks a
+  running session's copy; the next set-up or `\Clauseo\SandboxRefresh` run builds a new one,
+  and old ones go once that account's session ends. The uninstall deletes them all; a file still
+  in use goes at the next restart.
 
 **Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
 error). Only the last code set is reported, so an install that set several reports one of them.
